@@ -21,6 +21,7 @@ class _ShellApi extends NativeApi {
   _ShellApi(super.store, this.bots, this.fanOut, {this.directoryFails = false});
   final List<Map<String, Object?>> bots;
   final Completer<Object?> fanOut;
+  int unreadRequests = 0;
 
   /// Whether `/api/bots` fails, leaving the shell with no directory at all
   /// while the fan-out still answers. A test flips it to bring the read back.
@@ -49,7 +50,10 @@ class _ShellApi extends NativeApi {
     if (path == '/api/bots/lifecycles') {
       return {'schemaVersion': 1, 'lifecycles': const []};
     }
-    if (path == '/api/bots/unread') return fanOut.future;
+    if (path == '/api/bots/unread') {
+      unreadRequests++;
+      return fanOut.future;
+    }
     throw const FormatException('offline fixture');
   }
 
@@ -713,6 +717,103 @@ void main() {
       sessions.clear();
       links.dispose();
       api.close();
+    });
+
+    testWidgets('and reapplies focused suppression after native activity', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      tester.view.physicalSize = const Size(800, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final badges = <Map<Object?, Object?>>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(const MethodChannel('frockbot/push'), (
+        call,
+      ) async {
+        if (call.method == 'configure') return 'token-1';
+        if (call.method == 'focus') return true;
+        if (call.method == 'badge') {
+          badges.add(call.arguments as Map<Object?, Object?>);
+        }
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(
+          const MethodChannel('frockbot/push'),
+          null,
+        ),
+      );
+
+      final store = MemoryStore();
+      store.values['selection.test-user'] = 'beta';
+      final fanOut = Completer<Object?>();
+      final api = _ShellApi(store, [
+        registration('alpha', 'Alpha'),
+        registration('beta', 'Beta'),
+      ], fanOut);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(badges, isEmpty);
+      fanOut.complete({
+        'schemaVersion': 1,
+        'unread': [
+          view('alpha', count: 2).toJson(),
+          view('beta', count: 3).toJson(),
+        ],
+      });
+      await tester.pumpAndSettle();
+      final expected = {
+        'bots': {'alpha': 2, 'beta': 3},
+        'silenced': <String>[],
+        'suppressed': ['beta'],
+      };
+      expect(badges, [expected]);
+      final requestsBeforeDelivery = api.unreadRequests;
+
+      await messenger.handlePlatformMessage(
+        'frockbot/push',
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('activity'),
+        ),
+        (_) {},
+      );
+      await tester.pumpAndSettle();
+      expect(api.unreadRequests, requestsBeforeDelivery + 1);
+      expect(badges, [expected, expected]);
+
+      await messenger.handlePlatformMessage(
+        'frockbot/push',
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('focus', true),
+        ),
+        (_) {},
+      );
+      await tester.pumpAndSettle();
+      expect(badges, [expected, expected]);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets(

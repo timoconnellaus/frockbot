@@ -242,6 +242,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     microphone.dictationActive = () => dictation?.active == true;
     microphone.stopDictation = _stopDictation;
     activity.addListener(_repaint);
+    push.onActivity = appBadge.invalidate;
     // Focus can be reported while this state is still starting, so the
     // repaint the focus rule needs waits for a microtask.
     push.onFocus = () => scheduleMicrotask(() {
@@ -2270,6 +2271,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(macMessages.stop(widget.userId));
     unawaited(appBadge.clear());
     push.onFocus = null;
+    push.onActivity = null;
     WidgetsBinding.instance.removeObserver(this);
     widget.botLinks.removeListener(_followBotLink);
     _activityTimer?.cancel();
