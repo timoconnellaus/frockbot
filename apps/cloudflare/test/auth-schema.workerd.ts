@@ -9,7 +9,7 @@
 // the browser e2e harness, stay green.
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeAll, expect, test } from "vitest";
-import { gatewayAuth } from "../src/auth.ts";
+import { createAuth, gatewayAuth } from "../src/auth.ts";
 
 const BASE_URL = "https://bot.frockbot.com";
 
@@ -45,4 +45,40 @@ test("clicking sign in with Google hands back Google's consent URL", async () =>
   expect(body.url ?? "").toContain(
     "https://accounts.google.com/o/oauth2/v2/auth",
   );
+});
+
+test("a closed deployment refuses to create an account on first sign-in", async () => {
+  const refused: string[] = [];
+  const auth = createAuth(
+    {
+      AUTH_DB: env.AUTH_DB,
+      BETTER_AUTH_SECRET: "workerd-auth-schema-secret-0123456789abcdef",
+      BETTER_AUTH_URL: BASE_URL,
+      GOOGLE_CLIENT_ID: "auth-schema.apps.googleusercontent.com",
+      GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
+    },
+    {
+      mayCreateAccount: async (email) => {
+        refused.push(email);
+        return false;
+      },
+    },
+  );
+
+  const created = await (
+    await auth.$context
+  ).internalAdapter.createUser({
+    name: "Uninvited Visitor",
+    email: "uninvited@example.com",
+    emailVerified: true,
+  });
+  expect(created).toBeNull();
+
+  expect(refused).toEqual(["uninvited@example.com"]);
+  const { results } = await env.AUTH_DB.prepare(
+    `select "email" from "user" where "email" = ?`,
+  )
+    .bind("uninvited@example.com")
+    .all();
+  expect(results).toEqual([]);
 });

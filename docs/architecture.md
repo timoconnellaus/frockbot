@@ -945,7 +945,7 @@ Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 | `AI` (:83)                                                                | Workers AI         | Frock AI gateway transport and image generation                                                                                                                    |
 | `BOT_STATES`, `USER_CONFIGURATIONS`, `DEPLOYMENT_POLICY`, `APPLET_STATES` | Durable Objects    | §2                                                                                                                                                                 |
 
-D1 schema: `apps/cloudflare/migrations/` holds one file, `0001_better_auth.sql`, defining `user`, `session`, `account` and `verification` with their indexes. All other product state lives in Durable Objects.
+D1 schema: `apps/cloudflare/migrations/` holds `0001_better_auth.sql`, defining `user`, `session`, `account` and `verification` with their indexes, and `0002_drop_account_issuer.sql`, which removes the `account.issuer` column and its unique index — better-auth wrote that column through 1.7.2 only, and from 1.7.3 refuses every `/api/auth/*` request while a column it never writes is `not null`. All other product state lives in Durable Objects.
 
 Durable Object storage is key-value in every hand-rolled class. SQLite is used inside `UserConfiguration`, by the search and audit stores, and inside `VoiceAssistant`, by the Agents SDK's own conversation and schedule tables. Each class is declared in a `new_sqlite_classes` migration; `VoiceSession`'s v5 entry is retired by the `deleted_classes` v6 entry that follows it, and `VoiceAssistant` is a new name under v7.
 
@@ -959,7 +959,7 @@ Secrets are declared in `apps/cloudflare/src/production-secrets.ts`. Required: `
 
 ## 12. Auth
 
-better-auth 1.7.2, configured once in `apps/cloudflare/src/auth.ts`. `bearer()` is the only enabled plugin: there is no admin plugin, no organization plugin and no jwt plugin. `trustedOrigins` is left at its `baseURL` default; `account.encryptOAuthTokens` is true. Missing secrets yield a stub that returns 503 for every route (`:64-97`).
+better-auth 1.7.3, configured once in `apps/cloudflare/src/auth.ts`. `bearer()` is the only enabled plugin: there is no admin plugin, no organization plugin and no jwt plugin. `trustedOrigins` is left at its `baseURL` default; `account.encryptOAuthTokens` is true. Missing secrets yield a stub that returns 503 for every route (`:64-97`).
 
 Google is the only configured provider. The `verification` table and the `account.password` column are unused.
 
@@ -991,7 +991,7 @@ Applets are off for every account until an admin turns them on. The switch is th
 ### Test layers
 
 1. **Bun unit** — root `bun test` (`package.json`), matching `*.test.ts` and `*.spec.ts` across every workspace. No `bunfig.toml`.
-2. **Workerd, hermetic** — `apps/cloudflare/vitest.config.ts`, `test/**/*.workerd.ts`, entry `./test/computer-compatibility-worker.ts`, with Miniflare fakes for the Computer host, Frock AI and Vectorize. `fileParallelism: false`.
+2. **Workerd, hermetic** — `apps/cloudflare/vitest.config.ts`, `test/**/*.workerd.ts`, entry `./test/computer-compatibility-worker.ts`, with Miniflare fakes for the Computer host, Frock AI and Vectorize, and a D1 `AUTH_DB` the auth-schema suite migrates from `migrations/` via `readD1Migrations`. `fileParallelism: false`.
 3. **Workerd, integration** — `apps/cloudflare/vitest.integration.config.ts`, `test/integration/**/*.integration.ts`, entry `./src/index.ts`, with the real gateway, the built artifact and D1 migrations via `readD1Migrations`.
 4. **Computer host** — `apps/computer-host/vitest.config.ts` plus `bun test src container`. Opt-in live suites `test:live` and `test:live:desktop` are not run by CI.
 5. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 28 spec files.
