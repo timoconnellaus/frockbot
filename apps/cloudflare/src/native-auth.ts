@@ -380,11 +380,6 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       return error();
     return redirect(providerUrl.toString(), response.headers);
   }
-  /**
-   * Asks the access authority before anything touches the User. A refusal or
-   * an unreachable authority is a response to send as it is — never folded
-   * into "sign in again", which would discard a sign-in that is still good.
-   */
   async function admitBeforeUser(
     userId: string,
   ): Promise<AccountAdmissionDecisionV1 | "development" | Response | null> {
@@ -423,17 +418,22 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       } catch {
         return { session: null };
       }
+      let record: NativeSessionRecord | null;
+      try {
+        record = await options.session(
+          claims.userId,
+          operation(claims, "read"),
+        );
+      } catch {
+        return { session: null };
+      }
+      if (!record) return { session: null };
       const admitted = await admitBeforeUser(claims.userId);
       if (admitted instanceof Response) {
         return { session: null, refusal: admitted };
       }
       if (admitted === null) return { session: null };
       try {
-        const record = await options.session(
-          claims.userId,
-          operation(claims, "read"),
-        );
-        if (!record) return { session: null };
         // The email, not just the id: admission and the admin check read it,
         // so a native session that omitted it made a listed admin ordinary on
         // the phone while the same account was an admin in a browser.

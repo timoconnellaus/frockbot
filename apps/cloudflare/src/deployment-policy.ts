@@ -12,6 +12,7 @@ import {
   type AccountAccessV1,
   type AccountAccessViewV1,
   type AccountAdmissionDecisionV1,
+  type AdmissionIdentityV1,
   type DeploymentPolicyV1,
   type EmailInvitationV1,
 } from "@frockbot/app/admin/shared";
@@ -219,17 +220,7 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
     const identity = decodeAdmissionIdentityV1(input);
     return this.ctx.storage.transactionSync(() => {
       const access = this.access(identity.userId);
-      const evaluation = evaluateAdmissionV1({
-        mode: this.policy().admission.mode,
-        identity,
-        access,
-        // Only a verified address may claim an invitation. An unverified one
-        // is treated as having none, so the refusal it gets says nothing
-        // about whether one exists.
-        invitation: identity.emailVerified
-          ? this.invitation(identity.email)
-          : null,
-      });
+      const evaluation = this.evaluateAccount(identity, access);
       if (evaluation.activate) {
         const next: AccountAccessV1 = {
           schemaVersion: 1,
@@ -246,6 +237,28 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
       }
       return evaluation.decision;
     });
+  }
+
+  private evaluateAccount(
+    identity: AdmissionIdentityV1,
+    access: AccountAccessV1 | null,
+  ) {
+    return evaluateAdmissionV1({
+      mode: this.policy().admission.mode,
+      identity,
+      access,
+      invitation: identity.emailVerified
+        ? this.invitation(identity.email)
+        : null,
+    });
+  }
+
+  async checkAccount(input: unknown): Promise<AccountAdmissionDecisionV1> {
+    const identity = decodeAdmissionIdentityV1(input);
+    return this.ctx.storage.transactionSync(
+      () =>
+        this.evaluateAccount(identity, this.access(identity.userId)).decision,
+    );
   }
 
   async mayCreateIdentity(input: unknown): Promise<boolean> {

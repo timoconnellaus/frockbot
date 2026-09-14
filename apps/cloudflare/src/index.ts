@@ -641,6 +641,7 @@ interface DeploymentPolicyRpc {
   setAccountAccess(input: unknown): Promise<unknown>;
   inviteEmail(input: unknown): Promise<unknown>;
   admitAccount(input: unknown): Promise<unknown>;
+  checkAccount(input: unknown): Promise<unknown>;
   mayCreateIdentity(input: unknown): Promise<unknown>;
 }
 
@@ -667,10 +668,10 @@ async function admitAccount(
   );
 }
 
-async function admitStoredAccount(
+async function storedAdmissionIdentity(
   env: Env,
   userId: string,
-): Promise<AccountAdmissionDecisionV1 | null> {
+): Promise<AdmissionIdentityV1 | null> {
   const identity = await env.AUTH_DB.prepare(
     'select "id", "email", "emailVerified" from "user" where "id" = ? limit 1',
   )
@@ -678,7 +679,7 @@ async function admitStoredAccount(
     .first<{ id: string; email: string; emailVerified: number }>();
   if (!identity) return null;
   const email = accessEmailV1(identity.email);
-  return admitAccount(env, {
+  return {
     schemaVersion: 1,
     userId,
     ...(email === undefined ? {} : { email }),
@@ -687,7 +688,29 @@ async function admitStoredAccount(
       { ...identity, mode: "better-auth" },
       env.FROCKBOT_ADMIN_EMAILS,
     ),
-  });
+  };
+}
+
+async function admitStoredAccount(
+  env: Env,
+  userId: string,
+): Promise<AccountAdmissionDecisionV1 | null> {
+  const identity = await storedAdmissionIdentity(env, userId);
+  return identity ? admitAccount(env, identity) : null;
+}
+
+async function checkStoredAccount(
+  env: Env,
+  userId: string,
+): Promise<AccountAdmissionDecisionV1 | null> {
+  const identity = await storedAdmissionIdentity(env, userId);
+  if (!identity) return null;
+  if (identity.isAdmin) {
+    return { schemaVersion: 1, admitted: true, basis: "admin" };
+  }
+  return decodeAccountAdmissionDecisionV1(
+    rpcJsonSnapshot(await deploymentPolicyStub(env).checkAccount(identity)),
+  );
 }
 
 async function externalAccountRefusal(
@@ -697,7 +720,7 @@ async function externalAccountRefusal(
   if (developmentAuthAllowed(env)) return;
   let decision;
   try {
-    decision = await admitStoredAccount(env, userId);
+    decision = await checkStoredAccount(env, userId);
   } catch {
     return { status: 503, message: ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE };
   }
@@ -2474,7 +2497,7 @@ export default {
         ...(env.APPLET_VIEWER_SECRET
           ? { appletViewerSecret: env.APPLET_VIEWER_SECRET }
           : {}),
-        admitAppletViewer: (userId) => admitStoredAccount(env, userId),
+        admitAppletViewer: (userId) => checkStoredAccount(env, userId),
         appletStateFor: (userId, appletId) =>
           env.APPLET_STATES.get(
             env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),

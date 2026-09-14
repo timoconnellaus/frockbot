@@ -115,7 +115,20 @@ async function fixture() {
         .map((receipt) => receipt.fireId)
         .sort(),
     );
-  return { userId, hook, enroll, firings };
+  const rotate = () =>
+    rpc.executeRoutineCommand({
+      schemaVersion: 1,
+      userId,
+      botId,
+      command: {
+        schemaVersion: 1,
+        type: "routine/rotate-key",
+        commandId: "rotate-hook",
+        botId,
+        routineId: "brief",
+      },
+    });
+  return { userId, hook, enroll, firings, rotate };
 }
 
 function gateway(
@@ -222,3 +235,65 @@ test("development keys work without stored identities only with development auth
   expect((await app.fetch(setup.enroll())).status).toBe(200);
   expect(app.authorityReads()).toBe(0);
 });
+
+for (const mode of ["open", "invite-only"] as const) {
+  test(`a rotated webhook key cannot grant access during ${mode} admission`, async () => {
+    const setup = await fixture();
+    const rotated = await setup.rotate();
+    const authority = env.DEPLOYMENT_POLICY.getByName(
+      DEPLOYMENT_POLICY_SINGLETON_NAME,
+    );
+    await runInDurableObject(authority, async (_instance, state) => {
+      await state.storage.delete(`account:access:v1:${setup.userId}`);
+    });
+    const setMode = async (mode: "open" | "invite-only" | "closed") => {
+      const policy = await authority.readPolicy({ schemaVersion: 1 });
+      expect(
+        await authority.setAdmissionMode({
+          schemaVersion: 1,
+          command: {
+            schemaVersion: 1,
+            type: "deployment/set-admission-mode",
+            revision: policy.revision,
+            mode,
+          },
+          updatedBy: "public-access-test",
+        }),
+      ).toMatchObject({ status: "applied" });
+    };
+    await setMode(mode);
+    if (mode === "invite-only") {
+      await authority.inviteEmail({
+        schemaVersion: 1,
+        command: {
+          schemaVersion: 1,
+          type: "access/invite-email",
+          email: `${setup.userId}@native.test`,
+        },
+        invitedBy: "public-access-test",
+      });
+    }
+    const app = gateway();
+    expect((await app.fetch(setup.hook())).status).toBe(401);
+    expect(await setup.firings()).toEqual([]);
+    expect(
+      await authority.readAccountAccess({
+        schemaVersion: 1,
+        userId: setup.userId,
+      }),
+    ).toMatchObject({ access: null });
+    if (mode === "invite-only") {
+      expect(
+        await authority.mayCreateIdentity({
+          schemaVersion: 1,
+          email: `${setup.userId}@native.test`,
+          emailVerified: true,
+          isAdmin: false,
+        }),
+      ).toBe(true);
+    }
+    await setMode("closed");
+    expect((await app.fetch(setup.hook(rotated.hook.token))).status).toBe(403);
+    expect(await setup.firings()).toEqual([]);
+  });
+}

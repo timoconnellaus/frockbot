@@ -1,4 +1,7 @@
-import { decodeProtocol } from "@frockbot/core/protocol-schemas";
+import {
+  decodeProtocol,
+  MINIMUM_NATIVE_VERSION,
+} from "@frockbot/core/protocol-schemas";
 import { describe, expect, test } from "bun:test";
 import {
   createNativeAuth,
@@ -704,11 +707,6 @@ test("failed durable issuance cannot return a bearer", async () => {
 describe("beta access on the native door", () => {
   type Decision = AccountAdmissionDecisionV1 | null | "unavailable";
 
-  /**
-   * A fixture whose authority answer can change between requests and which
-   * records every User session operation, because that operation is what
-   * provisions the User.
-   */
   function gated(initial: Decision = activeDecision) {
     let decision: Decision = initial;
     const admitted: string[] = [];
@@ -806,7 +804,7 @@ describe("beta access on the native door", () => {
     expect(g.operations).toEqual([]);
   });
 
-  test("a bearer is re-admitted before its session record is read", async () => {
+  test("a valid session is read before its bearer is re-admitted", async () => {
     const g = gated();
     const headers = await signIn(g);
     expect(g.operations).toEqual(["issue"]);
@@ -831,8 +829,7 @@ describe("beta access on the native door", () => {
     expect(await refused?.refusal?.json()).toMatchObject({
       reason: "account-paused",
     });
-    // The pause stopped the read: nothing touched the User.
-    expect(g.operations).toEqual(["issue", "read"]);
+    expect(g.operations).toEqual(["issue", "read", "read"]);
 
     g.set("unavailable");
     const unavailable = await g.auth.authenticate(
@@ -840,7 +837,7 @@ describe("beta access on the native door", () => {
     );
     expect(unavailable?.session).toBeNull();
     expect(unavailable?.refusal?.status).toBe(503);
-    expect(g.operations).toEqual(["issue", "read"]);
+    expect(g.operations).toEqual(["issue", "read", "read", "read"]);
 
     // An identity that no longer exists is a sign-in problem, and only that is.
     g.set(null);
@@ -848,7 +845,7 @@ describe("beta access on the native door", () => {
       g.request("/api/identity", undefined, headers),
     );
     expect(gone).toEqual({ session: null });
-    expect(g.operations).toEqual(["issue", "read"]);
+    expect(g.operations).toEqual(["issue", "read", "read", "read", "read"]);
   });
 
   test("the gateway answers a refused or unreachable bearer as the authority did, and asks once", async () => {
@@ -858,7 +855,7 @@ describe("beta access on the native door", () => {
       "x-frockbot-client": JSON.stringify({
         schemaVersion: 1,
         protocolVersion: 1,
-        nativeVersion: "1.3.0",
+        nativeVersion: MINIMUM_NATIVE_VERSION,
         catalogs: [],
       }),
     };
@@ -895,7 +892,7 @@ describe("beta access on the native door", () => {
 
     g.set("unavailable");
     expect((await identity()).status).toBe(503);
-    expect(g.operations).toEqual(["issue", "read"]);
+    expect(g.operations).toEqual(["issue", "read", "read", "read"]);
   });
 
   test("a refused account cannot open settings but can revoke its session", async () => {
@@ -924,7 +921,7 @@ describe("beta access on the native door", () => {
     );
     // Sign-out persists revocation even though product access is paused.
     expect(signOut?.status).toBe(200);
-    expect(g.operations).toEqual(["issue", "revoke"]);
+    expect(g.operations).toEqual(["issue", "read", "revoke"]);
 
     g.set("unavailable");
     const unavailable = await g.auth.route(
@@ -940,11 +937,13 @@ describe("beta access on the native door", () => {
       ),
     );
     expect(unavailable?.status).toBe(200);
-    expect(g.operations).toEqual(["issue", "revoke", "revoke"]);
+    expect(g.operations).toEqual(["issue", "read", "revoke", "revoke"]);
     g.set(activeDecision);
+    const admissionCalls = g.admitted.length;
     expect(
       await g.auth.authenticate(g.request("/api/identity", undefined, headers)),
     ).toEqual({ session: null });
+    expect(g.admitted).toHaveLength(admissionCalls);
   });
 });
 

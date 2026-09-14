@@ -24,12 +24,6 @@ function base64url(bytes: Uint8Array): string {
     .replace(/=+$/, "");
 }
 
-/**
- * A bearer the Worker would accept, for an identity that was never admitted.
- * Issuing one through the exchange would be refused first, so this is how a
- * test holds a bearer the authority must still refuse on use — the shape a
- * session issued before a pause, or before this authority existed, has.
- */
 async function signedBearer(userId: string): Promise<Record<string, string>> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -94,7 +88,7 @@ async function setAccess(
   expect(write.status).toBe("applied");
 }
 
-test("a native bearer for an identity without access is refused before the User exists", async () => {
+test("a native bearer without a durable session cannot provision its User", async () => {
   // Real, verified identities — just not ones this deployment admitted. The
   // integration deployment's admission mode is the closed default.
   const unknown = freshUserId("native-unadmitted");
@@ -103,18 +97,11 @@ test("a native bearer for an identity without access is refused before the User 
   await seedNativeIdentity(blocked);
   await setAccess(blocked, "blocked");
 
-  for (const [userId, reason] of [
-    [unknown, "admission-closed"],
-    [blocked, "account-blocked"],
-  ] as const) {
+  for (const userId of [unknown, blocked]) {
     const response = await SELF.fetch(`${ORIGIN}/api/identity`, {
       headers: await signedBearer(userId),
     });
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({
-      code: "account-access-refused",
-      reason,
-    });
+    expect(response.status).toBe(401);
     expect(await provisioned(userId)).toBe(false);
   }
 });
@@ -171,3 +158,83 @@ test("reading or revoking a missing native session never provisions its User", a
     expect(await provisioned(userId)).toBe(false);
   }
 });
+
+for (const mode of ["open", "invite-only"] as const) {
+  test(`a revoked native bearer cannot grant access during ${mode} admission`, async () => {
+    const userId = freshUserId("native-revoked-admission");
+    const headers = await nativeHeaders(userId);
+    expect(
+      (
+        await SELF.fetch(`${ORIGIN}/api/auth/native/revoke`, {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({
+            schemaVersion: 1,
+            commandId: "sign-out-before-admission",
+            action: "sign-out",
+            sessionId: "start-fixture",
+          }),
+        })
+      ).status,
+    ).toBe(200);
+    const authority = env.DEPLOYMENT_POLICY.getByName(
+      DEPLOYMENT_POLICY_SINGLETON_NAME,
+    );
+    await runInDurableObject(authority, async (_instance, state) => {
+      await state.storage.delete(`account:access:v1:${userId}`);
+    });
+    const setMode = async (mode: "open" | "invite-only" | "closed") => {
+      const policy = await authority.readPolicy({ schemaVersion: 1 });
+      expect(
+        await authority.setAdmissionMode({
+          schemaVersion: 1,
+          command: {
+            schemaVersion: 1,
+            type: "deployment/set-admission-mode",
+            revision: policy.revision,
+            mode,
+          },
+          updatedBy: "native-access-test",
+        }),
+      ).toMatchObject({ status: "applied" });
+    };
+    await setMode(mode);
+    if (mode === "invite-only") {
+      await authority.inviteEmail({
+        schemaVersion: 1,
+        command: {
+          schemaVersion: 1,
+          type: "access/invite-email",
+          email: `${userId}@native.test`,
+        },
+        invitedBy: "native-access-test",
+      });
+    }
+    expect(
+      (await SELF.fetch(`${ORIGIN}/api/identity`, { headers })).status,
+    ).toBe(401);
+    expect(
+      await authority.readAccountAccess({ schemaVersion: 1, userId }),
+    ).toMatchObject({ access: null });
+    if (mode === "invite-only") {
+      expect(
+        await authority.mayCreateIdentity({
+          schemaVersion: 1,
+          email: `${userId}@native.test`,
+          emailVerified: true,
+          isAdmin: false,
+        }),
+      ).toBe(true);
+    }
+    await setMode("closed");
+    expect(
+      await authority.admitAccount({
+        schemaVersion: 1,
+        userId,
+        email: `${userId}@native.test`,
+        emailVerified: true,
+        isAdmin: false,
+      }),
+    ).toMatchObject({ admitted: false, reason: "admission-closed" });
+  });
+}
