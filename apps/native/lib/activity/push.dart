@@ -34,6 +34,10 @@ class PushController {
   /// Told when [focused] may have changed. Losing focus reads nothing new, but
   /// the badges drawn through the focus rule still change.
   VoidCallback? onFocus;
+
+  /// Refresh presentation only: calling syncRead here would reenter its
+  /// in-flight loop before the remaining Bots have synced their cursors.
+  VoidCallback? onNotificationsChanged;
   Timer? timer;
   Future<void> _registration = Future.value();
   Future<void> start() async {
@@ -55,7 +59,10 @@ class PushController {
           token = call.arguments as String?;
           await register();
         }
-        if (call.method == 'activity') await activity.load();
+        if (call.method == 'activity') {
+          onNotificationsChanged?.call();
+          await activity.load();
+        }
         if (call.method == 'focus') {
           focused = call.arguments == true;
           _renewWhileFocused();
@@ -163,6 +170,7 @@ class PushController {
         'cursor': cursor,
       });
       _syncedRead[botId] = cursor;
+      onNotificationsChanged?.call();
     }
   }
 

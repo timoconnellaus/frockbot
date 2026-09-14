@@ -65,41 +65,37 @@ object PushNotifications {
         if (retained.length() == 0) NotificationManagerCompat.from(context).cancel(botId, 1)
         else show(context, botId, retained, false)
     }
-    // Launchers badge from active notifications, so this reconciles the ones
-    // that exist with the cloud rather than posting any. A silenced Bot (muted
-    // or archived) loses its notification; a counted Bot's notification carries
-    // its unread count. A Bot at zero is left to the read cursor, which is the
-    // only thing that discards an alert. A notification the User swiped away is
-    // not brought back: swiping neither reads the conversation nor asks for
-    // the alert again.
-    @Synchronized fun badge(context: Context, bots: Map<String, Int>, silenced: List<String>) {
+    // Reconcile only active notifications so a badge refresh cannot restore
+    // an alert the User dismissed. Policy: docs/notifications.md#application-icon-badge.
+    @Synchronized fun badge(context: Context, bots: Map<String, Int>, silenced: List<String>, suppressed: List<String>) {
         val store = prefs(context)
         val manager = NotificationManagerCompat.from(context)
         val active = context.getSystemService(NotificationManager::class.java).activeNotifications
             .filter { it.id == 1 }.mapNotNull { it.tag }.toSet()
+        val plan = badgeReconcileV1(
+            bots,
+            silenced,
+            suppressed,
+            active,
+            storedCount = { if (store.contains("count:$it")) store.getInt("count:$it", 0) else null },
+            storedMessages = { JSONArray(store.getString("messages:$it", "[]")).length() > 0 },
+        )
         // One editor for the whole reconcile: this runs on the platform thread
         // for every badge change, and a per-Bot synchronous commit would block
         // it once per Bot in the account.
         val editor = store.edit()
-        val cancel = mutableListOf<String>()
-        for (botId in silenced) {
-            if (botId in active) cancel.add(botId)
-            else if (!store.contains("messages:$botId") && !store.contains("count:$botId")) continue
-            editor.remove("messages:$botId").remove("count:$botId")
-        }
-        val refresh = mutableListOf<String>()
-        for ((botId, count) in bots) {
-            if (count <= 0 || store.getInt("count:$botId", -1) == count) continue
-            editor.putInt("count:$botId", count)
-            if (botId in active) refresh.add(botId)
-        }
-        // Applied before any show(), which reads back the count it draws.
-        editor.apply()
-        for (botId in cancel) manager.cancel(botId, 1)
-        for (botId in refresh) {
-            val messages = JSONArray(store.getString("messages:$botId", "[]"))
-            if (messages.length() > 0) show(context, botId, messages, false)
-        }
+        executeBadgeReconcileV1(
+            plan,
+            forget = { editor.remove("messages:$it").remove("count:$it") },
+            drop = { editor.remove("count:$it") },
+            store = { botId, count -> editor.putInt("count:$botId", count) },
+            persist = editor::apply,
+            cancel = { manager.cancel(it, 1) },
+            refresh = { botId ->
+                val messages = JSONArray(store.getString("messages:$botId", "[]"))
+                if (messages.length() > 0) show(context, botId, messages, false)
+            },
+        )
     }
     @Synchronized fun receive(context: Context, data: Map<String,String>) {
         val store = prefs(context)

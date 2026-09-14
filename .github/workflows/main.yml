@@ -89,7 +89,7 @@ jobs:
   flutter:
     name: Flutter
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository
@@ -119,6 +119,50 @@ jobs:
       - name: Test Flutter client
         working-directory: apps/native
         run: flutter test --no-pub
+
+      # The Android half of this client is Kotlin, and nothing above compiles
+      # it: `flutter test` runs the Dart VM and `flutter build web` never reads
+      # `android/`. `badgeReconcileV1` — which stored unread counts a fan-out
+      # drops and which already-posted notifications it redraws — is pure
+      # Kotlin with a JVM test beside it, so the focused `testDebugUnitTest`
+      # task both compiles every Kotlin source in the module and runs that
+      # test, with no emulator and no release build.
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # `gradlew` is not committed, so Gradle comes from here rather than from
+      # the wrapper; the version is the one `gradle-wrapper.properties` names,
+      # and the action caches Gradle's own downloads between runs.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: 9.3.1
+
+      - name: Test Android badge reconcile
+        working-directory: apps/native/android
+        shell: bash
+        env:
+          # The runner holds no installed FrockBot, so the two guards the app's
+          # build script keeps for the phone's upgrade track are answered here:
+          # a throwaway debug key, and a floor of zero for the version code to
+          # clear. A unit test neither signs nor packages anything, and the
+          # runner is thrown away with it.
+          FROCKBOT_ANDROID_VERSION_FLOOR: "0"
+        run: |
+          set -euo pipefail
+          export FROCKBOT_ANDROID_KEYSTORE="$RUNNER_TEMP/ci-debug.keystore"
+          keytool -genkeypair -alias androiddebugkey -keyalg RSA -keysize 2048 \
+            -validity 30 -storepass android -keypass android \
+            -dname 'CN=Android Debug,O=Android,C=US' \
+            -keystore "$FROCKBOT_ANDROID_KEYSTORE"
+          printf 'sdk.dir=%s\nflutter.sdk=%s\n' \
+            "${ANDROID_SDK_ROOT:-$ANDROID_HOME}" \
+            "${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}" \
+            > local.properties
+          gradle --no-daemon :app:testDebugUnitTest
 
   runtime:
     name: Cloudflare runtime

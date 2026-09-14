@@ -127,6 +127,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final AppBadgeSync appBadge = AppBadgeSync(
     appBadgePresenterFor(pushReady: () => push.platformReady),
   );
+
+  /// Whether the push channel has already been seen ready, so the one focus
+  /// report that needs the badge redrawn is told apart from the rest.
+  bool _pushReadySeen = false;
   String? clearManualForBot;
   bool resumed = true;
   Timer? _activityTimer;
@@ -166,6 +170,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final ValueNotifier<int> catalogRevision = ValueNotifier(0);
   String? error;
   bool loaded = false;
+
+  /// Whether the network directory and lifecycle state have been adopted.
+  /// Unlike [loaded], a failed read does not set this: the badge must treat
+  /// an unread directory as unknown rather than an account with nothing unread.
+  bool directoryLoaded = false;
+
+  /// The read [load] is waiting on, and the single follow-up read the callers
+  /// that arrived during it share, so the retry the poll makes while the
+  /// directory is still unknown cannot stack reads on top of each other.
+  Future<void>? _directoryLoad;
+  Future<void>? _queuedDirectoryLoad;
   bool _searchOpen = false;
 
   /// On a phone the Bot list is the first screen and a conversation is a
@@ -227,13 +242,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     microphone.dictationActive = () => dictation?.active == true;
     microphone.stopDictation = _stopDictation;
     activity.addListener(_repaint);
+    push.onNotificationsChanged = () {
+      appBadge.invalidate();
+      if (mounted) setState(() {});
+    };
     // Focus can be reported while this state is still starting, so the
     // repaint the focus rule needs waits for a microtask.
     push.onFocus = () => scheduleMicrotask(() {
-      if (mounted) {
+      if (!mounted) return;
+      // Every other focus report changes the badge's own value — the focused
+      // Bot's count is suppressed — so the repaint below carries it. Only the
+      // platform becoming ready leaves an already-correct badge undrawn,
+      // because the launcher adapter dropped it while the channel was not up.
+      if (push.platformReady && !_pushReadySeen) {
+        _pushReadySeen = true;
         appBadge.invalidate();
-        setState(() {});
       }
+      setState(() {});
     });
     widget.botLinks.addListener(_followBotLink);
     // A lifecycle command nobody has an answer for is adopted here rather than
@@ -310,7 +335,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _activityTimer?.cancel();
     _activityTimer = Timer.periodic(
       const Duration(seconds: 10),
-      (_) => unawaited(activity.load()),
+      (_) => _refresh(),
     );
   }
 
@@ -328,8 +353,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       unawaited(_stopDictation());
       return;
     }
-    unawaited(activity.load());
+    _refresh();
     _startPolling();
+  }
+
+  /// The unread counts, and the directory again while its read has never
+  /// succeeded. The badge counts over the directory, so a failed first read
+  /// would otherwise leave the icon unreconciled for the rest of the session
+  /// while the sidebar's own counts kept moving.
+  void _refresh() {
+    unawaited(activity.load());
+    if (!directoryLoaded) unawaited(load());
   }
 
   /// Opens the footer and starts the call in the one gesture.
@@ -465,7 +499,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     await _readCredit();
   }
 
-  Future<void> load() async {
+  /// Reads the directory, and completes when a read the caller asked for has
+  /// finished: one that arrives mid-read waits for a fresh read behind it
+  /// rather than returning on the read already in flight.
+  Future<void> load() {
+    final inFlight = _directoryLoad;
+    if (inFlight == null) return _directoryLoad = _loadDirectory();
+    return _queuedDirectoryLoad ??= inFlight.then((_) {
+      _queuedDirectoryLoad = null;
+      return _directoryLoad = _loadDirectory();
+    });
+  }
+
+  Future<void> _loadDirectory() async {
     unawaited(_readIdentity());
     unawaited(_readCredit());
     try {
@@ -512,6 +558,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 unavailable[bot.botId.value] == 'archived')
               bot,
         ],
+        authoritative: true,
       );
       unawaited(_loadIdentities());
       unawaited(activity.load());
@@ -529,14 +576,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         });
       }
     } finally {
+      _directoryLoad = null;
       if (mounted) setState(() => loaded = true);
     }
   }
 
+  /// [authoritative] is whether [archivedIds] came from the lifecycle read
+  /// beside the directory. The cache holds `/api/bots` alone, so a Bot
+  /// archived on another device is still in it with nothing saying so; the
+  /// badge counts over archived state, and must wait for the read that has it.
   void _adopt(
     List<wire.BotRegistration> active,
     Set<String> archivedIds, {
     List<wire.BotRegistration>? readable,
+    bool authoritative = false,
   }) {
     setState(() {
       bots = active;
@@ -548,6 +601,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // The cached directory is an answer, so the skeleton goes now rather
       // than waiting on a read that only replaces it.
       loaded = true;
+      directoryLoaded = directoryLoaded || authoritative;
       selected = selected == null
           ? null
           : active
@@ -1489,13 +1543,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // Every input the badge reads — the fan-out, the directory, and focus —
     // repaints the shell, so the icon is reconciled on the same build that
     // redraws the sidebar.
-    appBadge.update(
+    appBadge.reconcile(
       appBadgeFor(
         unread: activity.unread,
         botIds: [for (final registration in bots) registration.botId.value],
         archived: archived,
         focusedBotId: _focusedBotId,
       ),
+      authoritative: activity.loaded && directoryLoaded,
     );
     final shell = ShellSlotScope(
       slots: slots,
@@ -1565,7 +1620,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
                     rightPanel: rightPanel,
-                    sidebar: appletsMode && !single && bot != null && appletCanvas != null
+                    sidebar:
+                        appletsMode &&
+                            !single &&
+                            bot != null &&
+                            appletCanvas != null
                         ? AppletList(
                             controller: appletCanvas!,
                             botName: _name(bot),
@@ -1575,38 +1634,38 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onBack: () => setState(() => appletsMode = false),
                           )
                         : ShellSidebar(
-                      bots: bots,
-                      profiles: profiles,
-                      unread: activity.unread,
-                      archived: archived,
-                      // The count for the Bot being read is suppressed
-                      // here rather than waited out: the receipt that
-                      // clears it is a round trip behind the message.
-                      focusedBotId: _focusedBotId,
-                      // A phone's list is a list of doors, not a selection: no row
-                      // is the current one once the conversation is a page.
-                      activeBotId: single ? null : bot?.botId.value,
-                      workingBotId: workingRunId == null
-                          ? null
-                          : bot?.botId.value,
-                      loaded: loaded,
-                      error: error,
-                      showHidden: showHidden,
-                      onSelect: _select,
-                      onCreateBot: () => unawaited(_createBot()),
-                      onSearch: _openSearch,
-                      onProfile: _openProfile,
-                      onMarketplace: _openMarketplace,
-                      phone: single,
-                      onVoice: () => unawaited(_startVoice()),
-                      voiceControl: voiceControlStateV1(
-                        footerOpen: footerOpen,
-                        sessionActive: voiceSession?.active == true,
-                      ),
-                      onToggleHidden: () =>
-                          setState(() => showHidden = !showHidden),
-                      onRetry: load,
-                    ),
+                            bots: bots,
+                            profiles: profiles,
+                            unread: activity.unread,
+                            archived: archived,
+                            // The count for the Bot being read is suppressed
+                            // here rather than waited out: the receipt that
+                            // clears it is a round trip behind the message.
+                            focusedBotId: _focusedBotId,
+                            // A phone's list is a list of doors, not a selection: no row
+                            // is the current one once the conversation is a page.
+                            activeBotId: single ? null : bot?.botId.value,
+                            workingBotId: workingRunId == null
+                                ? null
+                                : bot?.botId.value,
+                            loaded: loaded,
+                            error: error,
+                            showHidden: showHidden,
+                            onSelect: _select,
+                            onCreateBot: () => unawaited(_createBot()),
+                            onSearch: _openSearch,
+                            onProfile: _openProfile,
+                            onMarketplace: _openMarketplace,
+                            phone: single,
+                            onVoice: () => unawaited(_startVoice()),
+                            voiceControl: voiceControlStateV1(
+                              footerOpen: footerOpen,
+                              sessionActive: voiceSession?.active == true,
+                            ),
+                            onToggleHidden: () =>
+                                setState(() => showHidden = !showHidden),
+                            onRetry: load,
+                          ),
                     conversation: bot == null
                         ? NoConversation(
                             empty: bots.isEmpty,
@@ -2219,6 +2278,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(macMessages.stop(widget.userId));
     unawaited(appBadge.clear());
     push.onFocus = null;
+    push.onNotificationsChanged = null;
     WidgetsBinding.instance.removeObserver(this);
     widget.botLinks.removeListener(_followBotLink);
     _activityTimer?.cancel();

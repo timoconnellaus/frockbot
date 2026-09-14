@@ -1,0 +1,230 @@
+package com.frockbot.mobile
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class BadgeReconcileTest {
+    private fun reconcile(
+        bots: Map<String, Int> = emptyMap(),
+        silenced: List<String> = emptyList(),
+        suppressed: List<String> = emptyList(),
+        active: Set<String> = emptySet(),
+        counts: Map<String, Int> = emptyMap(),
+        messages: Set<String> = emptySet(),
+    ) = badgeReconcileV1(
+        bots,
+        silenced,
+        suppressed,
+        active,
+        storedCount = { counts[it] },
+        storedMessages = { it in messages },
+    )
+
+    @Test
+    fun `a zero from the cloud drops the stored count and redraws the notification`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 0),
+            active = setOf("alpha"),
+            counts = mapOf("alpha" to 5),
+            messages = setOf("alpha"),
+        )
+        assertEquals(listOf("alpha"), plan.drop)
+        assertEquals(listOf("alpha"), plan.refresh)
+        assertEquals(emptyMap<String, Int>(), plan.store)
+        assertEquals(emptyList<String>(), plan.cancel)
+    }
+
+    @Test
+    fun `a zero persists count removal before refreshing the notification`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 0),
+            active = setOf("alpha"),
+            counts = mapOf("alpha" to 5),
+            messages = setOf("alpha"),
+        )
+        val counts = mutableMapOf("alpha" to 5)
+        val pendingDrops = mutableSetOf<String>()
+        val effects = mutableListOf<String>()
+
+        executeBadgeReconcileV1(
+            plan,
+            forget = {},
+            drop = { pendingDrops.add(it) },
+            store = { botId, count -> counts[botId] = count },
+            persist = {
+                pendingDrops.forEach(counts::remove)
+                effects.add("persist")
+            },
+            cancel = {},
+            refresh = { effects.add("refresh:$it:${counts[it]}") },
+        )
+
+        assertEquals(listOf("persist", "refresh:alpha:null"), effects)
+    }
+
+    @Test
+    fun `a zero for a Bot with no notification changes nothing to draw`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 0),
+            counts = mapOf("alpha" to 5),
+        )
+        assertEquals(listOf("alpha"), plan.drop)
+        assertEquals(emptyList<String>(), plan.refresh)
+    }
+
+    @Test
+    fun `a repeated zero redraws an active notification after count removal`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 0),
+            active = setOf("alpha"),
+            messages = setOf("alpha"),
+        )
+        assertEquals(emptyList<String>(), plan.drop)
+        assertEquals(listOf("alpha"), plan.refresh)
+    }
+
+    @Test
+    fun `a repeated zero cancels an active notification after an interrupted read`() {
+        val plan = reconcile(bots = mapOf("alpha" to 0), active = setOf("alpha"))
+        assertEquals(emptyList<String>(), plan.drop)
+        assertEquals(emptyList<String>(), plan.refresh)
+        assertEquals(listOf("alpha"), plan.cancel)
+    }
+
+    @Test
+    fun `a suppressed focused Bot is cancelled without changing retained state`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 2, "beta" to 3),
+            suppressed = listOf("beta"),
+            active = setOf("beta"),
+            counts = mapOf("alpha" to 2, "beta" to 5),
+            messages = setOf("beta"),
+        )
+        val counts = mutableMapOf("alpha" to 2, "beta" to 5)
+        val messages = mutableSetOf("beta")
+        val effects = mutableListOf<String>()
+
+        executeBadgeReconcileV1(
+            plan,
+            forget = {
+                counts.remove(it)
+                messages.remove(it)
+            },
+            drop = { counts.remove(it) },
+            store = { botId, count -> counts[botId] = count },
+            persist = { effects.add("persist") },
+            cancel = { effects.add("cancel:$it") },
+            refresh = { effects.add("refresh:$it") },
+        )
+
+        assertEquals(mapOf("alpha" to 2, "beta" to 5), counts)
+        assertEquals(setOf("beta"), messages)
+        assertEquals(listOf("persist", "cancel:beta"), effects)
+        assertEquals(emptyList<String>(), plan.forget)
+        assertEquals(emptyList<String>(), plan.drop)
+        assertEquals(emptyMap<String, Int>(), plan.store)
+        assertEquals(emptyList<String>(), plan.refresh)
+    }
+
+    @Test
+    fun `a focused Bot at true cloud zero still runs zero effects`() {
+        val plan = reconcile(
+            bots = mapOf("beta" to 0),
+            active = setOf("beta"),
+            counts = mapOf("beta" to 5),
+            messages = setOf("beta"),
+        )
+        val counts = mutableMapOf("beta" to 5)
+        val effects = mutableListOf<String>()
+
+        executeBadgeReconcileV1(
+            plan,
+            forget = {},
+            drop = { counts.remove(it) },
+            store = { botId, count -> counts[botId] = count },
+            persist = { effects.add("persist") },
+            cancel = { effects.add("cancel:$it") },
+            refresh = { effects.add("refresh:$it:${counts[it]}") },
+        )
+
+        assertEquals(emptyMap<String, Int>(), counts)
+        assertEquals(listOf("persist", "refresh:beta:null"), effects)
+    }
+
+    @Test
+    fun `a changed count is stored and only redrawn where a notification exists`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 3, "beta" to 2, "gamma" to 4),
+            active = setOf("alpha", "gamma"),
+            counts = mapOf("alpha" to 2, "gamma" to 4),
+            messages = setOf("alpha", "gamma"),
+        )
+        assertEquals(mapOf("alpha" to 3, "beta" to 2), plan.store)
+        assertEquals(listOf("alpha"), plan.refresh)
+    }
+
+    @Test
+    fun `a positive count cancels an active notification with no retained messages`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 3),
+            active = setOf("alpha"),
+        )
+        assertEquals(mapOf("alpha" to 3), plan.store)
+        assertEquals(listOf("alpha"), plan.cancel)
+        assertEquals(emptyList<String>(), plan.refresh)
+    }
+
+    @Test
+    fun `a repeated positive count finishes cancellation after interruption`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 3),
+            active = setOf("alpha"),
+            counts = mapOf("alpha" to 3),
+        )
+        assertEquals(emptyMap<String, Int>(), plan.store)
+        assertEquals(listOf("alpha"), plan.cancel)
+        assertEquals(emptyList<String>(), plan.refresh)
+    }
+
+    @Test
+    fun `an unchanged count is neither stored nor redrawn`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 3),
+            active = setOf("alpha"),
+            counts = mapOf("alpha" to 3),
+        )
+        assertEquals(emptyMap<String, Int>(), plan.store)
+        assertEquals(emptyList<String>(), plan.refresh)
+    }
+
+    @Test
+    fun `a silenced Bot loses its notification and everything held for it`() {
+        val plan = reconcile(
+            silenced = listOf("muted", "archived"),
+            active = setOf("muted"),
+            counts = mapOf("muted" to 2),
+            messages = setOf("muted", "archived"),
+        )
+        assertEquals(listOf("muted"), plan.cancel)
+        assertEquals(listOf("muted", "archived"), plan.forget)
+    }
+
+    @Test
+    fun `a silenced Bot holding nothing costs no write and no cancel`() {
+        val plan = reconcile(silenced = listOf("muted", "archived"))
+        assertEquals(emptyList<String>(), plan.cancel)
+        assertEquals(emptyList<String>(), plan.forget)
+    }
+
+    @Test
+    fun `nothing is drawn for a Bot that has no notification up`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 7),
+            silenced = listOf("muted"),
+            counts = mapOf("muted" to 1),
+        )
+        assertEquals(mapOf("alpha" to 7), plan.store)
+        assertEquals(emptyList<String>(), plan.refresh)
+        assertEquals(emptyList<String>(), plan.cancel)
+    }
+}

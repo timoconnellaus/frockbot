@@ -9,6 +9,13 @@ on `main`; run them here when a change warrants it. To run a subset, use
 rerun selected categories. Plain test commands remain available but do not
 produce receipts.
 
+The separate `Flutter` job in `check.yml` and `main.yml` analyzes and tests the
+Dart client, then compiles the Android Kotlin sources and runs the JVM tests,
+including badge reconciliation and effect ordering, with `:app:testDebugUnitTest`.
+It uses no emulator or release build. The workflow owns the Java/Gradle setup
+and disposable signing configuration; these checks are not part of local Bun
+validation receipts.
+
 Receipts live in gitignored `.local-validation/<commit>/<category>.json`.
 They match the commit, category commands, validator implementation and Bun and Node
 versions/platform. Code and configuration must be committed before validation,

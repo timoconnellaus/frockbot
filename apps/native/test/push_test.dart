@@ -228,6 +228,11 @@ void main() {
         channel: channel,
       );
       await push.start();
+      var notificationChanges = 0;
+      push.onNotificationsChanged = () {
+        notificationChanges++;
+        unawaited(push.syncRead());
+      };
 
       // The activity poll repaints every few seconds; the platform hears about
       // a cursor once.
@@ -235,12 +240,14 @@ void main() {
       await push.syncRead();
       await push.syncRead();
       expect(reads, hasLength(1));
+      expect(notificationChanges, 1);
       expect(reads.single['cursor'], 'message-00000000000000000002');
 
       // And hears again the moment the person reads something newer.
       seen('message-00000000000000000005');
       await push.syncRead();
       expect(reads, hasLength(2));
+      expect(notificationChanges, 2);
       expect(reads.last['cursor'], 'message-00000000000000000005');
 
       // Signing out forgets it: the next account starts from nothing claimed.
