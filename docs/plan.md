@@ -136,7 +136,7 @@ Voice, billing, package publishing, a Plugin marketplace, avatar wearables, and 
 
 ## Billing implementation awaiting launch
 
-The US$29 account plan, US$15 included allowance, prepaid top-ups, Stripe adapter,
+The US$20 account plan, US$15 included allowance, prepaid top-ups, Stripe adapter,
 account ledger, model metering, native/web billing screens, and marketing pricing
 section are implemented locally. Launch is blocked on a verified Sprites resource
 meter and prepaid computer cutoff; adding Stripe keys alone does not make this

@@ -133,7 +133,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 12),
-            const Text('US\$29 / month · US\$15 of monthly usage credit'),
+            const Text('US\$20 / month · US\$15 of monthly usage credit'),
             if (message != null)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -167,7 +167,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
                 onPressed: available
                     ? () => _openPayment('subscription')
                     : null,
-                child: const Text('Subscribe — US\$29 / month'),
+                child: const Text('Subscribe — US\$20 / month'),
               ),
             if (subscription != null)
               OutlinedButton(

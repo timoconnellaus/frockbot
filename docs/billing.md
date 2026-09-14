@@ -1,6 +1,6 @@
 # Billing
 
-FrockBot's account plan is US$29 per month, including US$15 of usage credit per paid billing period. The monthly allowance expires at period end and is consumed before purchased credit. Top-ups are US$10, US$25 or US$50, carry forward, and require a paid subscription to spend. Billing is ordinary app code, not a runtime Plugin.
+FrockBot's account plan is US$20 per month, including US$15 of usage credit per paid billing period. The monthly allowance expires at period end and is consumed before purchased credit. Top-ups are US$10, US$25 or US$50, carry forward, and require a paid subscription to spend. Billing is ordinary app code, not a runtime Plugin.
 
 ## Implementation status
 
@@ -53,7 +53,7 @@ The user can see available monthly/purchased credit, pending reservations, usage
 The adapter pins Stripe API version `2025-02-24.acacia`. Configure the webhook destination to the same version. Secrets remain in the Worker environment and never enter the client, Bot context, Workspace or Sprite.
 
 - One Stripe customer per User, with `metadata.frockbot_user_id`.
-- One monthly recurring USD price of 2900 cents; interval `month`, quantity one.
+- One monthly recurring USD price of 2000 cents; interval `month`, quantity one.
 - Checkout creates subscriptions or one-off card top-ups using server-owned amounts.
 - Checkout/customer intents are stored before Stripe writes. Requests use stable idempotency keys. An unresolved write is not retried past Stripe's safe deduplication window; it requires reconciliation.
 - Webhook signatures use HMAC-SHA256 over the unmodified raw body, a five-minute timestamp tolerance, constant-time cryptographic verification, and a 1 MiB body limit.

@@ -56,7 +56,7 @@ describe("the billing ledger", () => {
   test("declares the paid plan, included credit, and exact top-up menu", () => {
     expect(BILLING_PLAN).toEqual({
       currency: "usd",
-      monthlyCents: 2_900,
+      monthlyCents: 2_000,
       includedMicros: 15_000_000,
       topUpCents: [1_000, 2_500, 5_000],
       pricingVersion: "2026-09-09",
