@@ -1151,11 +1151,12 @@ than a silent absence. Row 44 is the only one.
   the selected Bot's Computer thumbnail and caption followed by the durable
   Routines list and a `+` link to the Advanced editor. The panel header's only
   Bot action is the settings cog; Settings owns its own title and back action.
-  The separate Bot info surface and Clock card were retired. Identity
-  provenance, Members, and Capability Assignment summary moved under Advanced,
-  while the old Computer, Routines, Identity, Members, and Notifications deep
-  links continue to resolve at their new homes. Playwright covers the default
-  panel and settings swap at 1351px and 390px.
+  The separate Bot info surface and Clock card were retired. Members and
+  Capability Assignment summary moved under Advanced; name provenance is no
+  longer user-facing because the editable Name field is the identity control.
+  The remaining old Computer, Routines, Members, and Notifications deep links
+  continue to resolve at their new homes. Playwright covers the default panel
+  and settings swap at 1351px and 390px.
 
 - **53** — the card mechanism is landed; the policy that decides _which_
   actions need one is not. An `approval` payload on `send_to_user`

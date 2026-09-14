@@ -132,7 +132,11 @@ test("Bot settings follows the GrokBot order and keeps extras under Advanced", a
   await expect(sem(page, "bot-title")).toBeVisible();
   await expect(sem(page, "bot-hidden-from-sidebar")).toBeVisible();
   await expect(sem(page, "bot-info-members")).toContainText("Members");
-  await expect(sem(page, "bot-info-identity")).toContainText("Named by you");
+  await expect(sem(page, "bot-info-identity")).toHaveCount(0);
+  await expect(panel.getByText("Named by you", { exact: true })).toHaveCount(0);
+  await expect(
+    panel.getByText("Named by this Bot", { exact: true }),
+  ).toHaveCount(0);
   // The account owns the model unless the Package that lets a Bot differ is
   // installed, and it ships disabled — so there is no model row to press here.
   await expect(sem(page, "bot-model")).toHaveCount(0);
