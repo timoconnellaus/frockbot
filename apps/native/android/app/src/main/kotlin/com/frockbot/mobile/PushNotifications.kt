@@ -65,15 +65,8 @@ object PushNotifications {
         if (retained.length() == 0) NotificationManagerCompat.from(context).cancel(botId, 1)
         else show(context, botId, retained, false)
     }
-    // Launchers badge from active notifications, so this reconciles the ones
-    // that exist with the cloud rather than posting any. A silenced Bot (muted
-    // or archived) loses its notification; a counted Bot's notification carries
-    // its unread count. A Bot the cloud puts at zero loses the stored count and
-    // falls back to the messages its notification still holds: the cloud is
-    // authority on the number, and only a read cursor discards the alert
-    // itself. A notification the User swiped away is not brought back: swiping
-    // neither reads the conversation nor asks for the alert again. A locally
-    // suppressed Bot loses its active notification without losing stored state.
+    // Reconcile only active notifications so a badge refresh cannot restore
+    // an alert the User dismissed. Policy: docs/notifications.md#application-icon-badge.
     @Synchronized fun badge(context: Context, bots: Map<String, Int>, silenced: List<String>, suppressed: List<String>) {
         val store = prefs(context)
         val manager = NotificationManagerCompat.from(context)

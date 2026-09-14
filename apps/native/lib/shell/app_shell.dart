@@ -127,6 +127,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final AppBadgeSync appBadge = AppBadgeSync(
     appBadgePresenterFor(pushReady: () => push.platformReady),
   );
+
   /// Whether the push channel has already been seen ready, so the one focus
   /// report that needs the badge redrawn is told apart from the rest.
   bool _pushReadySeen = false;
@@ -170,10 +171,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   String? error;
   bool loaded = false;
 
-  /// Whether a directory has actually been adopted, as opposed to [loaded]'s
-  /// "the read finished, however it ended". The badge counts over the
-  /// directory, so an empty one that was never read — or whose read failed —
-  /// is unknown rather than an account with nothing unread.
+  /// Whether the network directory and lifecycle state have been adopted.
+  /// Unlike [loaded], a failed read does not set this: the badge must treat
+  /// an unread directory as unknown rather than an account with nothing unread.
   bool directoryLoaded = false;
 
   /// The read [load] is waiting on, and the single follow-up read the callers
@@ -1620,7 +1620,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
                     rightPanel: rightPanel,
-                    sidebar: appletsMode && !single && bot != null && appletCanvas != null
+                    sidebar:
+                        appletsMode &&
+                            !single &&
+                            bot != null &&
+                            appletCanvas != null
                         ? AppletList(
                             controller: appletCanvas!,
                             botName: _name(bot),
@@ -1630,38 +1634,38 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onBack: () => setState(() => appletsMode = false),
                           )
                         : ShellSidebar(
-                      bots: bots,
-                      profiles: profiles,
-                      unread: activity.unread,
-                      archived: archived,
-                      // The count for the Bot being read is suppressed
-                      // here rather than waited out: the receipt that
-                      // clears it is a round trip behind the message.
-                      focusedBotId: _focusedBotId,
-                      // A phone's list is a list of doors, not a selection: no row
-                      // is the current one once the conversation is a page.
-                      activeBotId: single ? null : bot?.botId.value,
-                      workingBotId: workingRunId == null
-                          ? null
-                          : bot?.botId.value,
-                      loaded: loaded,
-                      error: error,
-                      showHidden: showHidden,
-                      onSelect: _select,
-                      onCreateBot: () => unawaited(_createBot()),
-                      onSearch: _openSearch,
-                      onProfile: _openProfile,
-                      onMarketplace: _openMarketplace,
-                      phone: single,
-                      onVoice: () => unawaited(_startVoice()),
-                      voiceControl: voiceControlStateV1(
-                        footerOpen: footerOpen,
-                        sessionActive: voiceSession?.active == true,
-                      ),
-                      onToggleHidden: () =>
-                          setState(() => showHidden = !showHidden),
-                      onRetry: load,
-                    ),
+                            bots: bots,
+                            profiles: profiles,
+                            unread: activity.unread,
+                            archived: archived,
+                            // The count for the Bot being read is suppressed
+                            // here rather than waited out: the receipt that
+                            // clears it is a round trip behind the message.
+                            focusedBotId: _focusedBotId,
+                            // A phone's list is a list of doors, not a selection: no row
+                            // is the current one once the conversation is a page.
+                            activeBotId: single ? null : bot?.botId.value,
+                            workingBotId: workingRunId == null
+                                ? null
+                                : bot?.botId.value,
+                            loaded: loaded,
+                            error: error,
+                            showHidden: showHidden,
+                            onSelect: _select,
+                            onCreateBot: () => unawaited(_createBot()),
+                            onSearch: _openSearch,
+                            onProfile: _openProfile,
+                            onMarketplace: _openMarketplace,
+                            phone: single,
+                            onVoice: () => unawaited(_startVoice()),
+                            voiceControl: voiceControlStateV1(
+                              footerOpen: footerOpen,
+                              sessionActive: voiceSession?.active == true,
+                            ),
+                            onToggleHidden: () =>
+                                setState(() => showHidden = !showHidden),
+                            onRetry: load,
+                          ),
                     conversation: bot == null
                         ? NoConversation(
                             empty: bots.isEmpty,

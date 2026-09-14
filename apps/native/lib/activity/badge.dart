@@ -156,11 +156,7 @@ class DockBadgePresenter implements AppBadgePresenter {
 
 /// Android launchers badge from active notifications, which the platform owns.
 ///
-/// Nothing here posts a notification to force a badge: it reconciles the
-/// ones that already exist with the cloud — each one's number becomes the
-/// Bot's unread count, a silenced Bot's notification goes, and a locally
-/// suppressed Bot loses only its active notification. Swiping one away never
-/// marks the conversation read. Some launchers only draw a dot.
+/// Reconciliation policy: docs/notifications.md#application-icon-badge.
 class LauncherBadgePresenter implements AppBadgePresenter {
   final MethodChannel channel;
   final bool Function() ready;
@@ -210,9 +206,8 @@ class AppBadgeSync {
   Future<void> _queue = Future.value();
 
   /// Makes the next [update] cross the channel even when its value is equal.
-  /// Android uses this after push setup becomes ready: an earlier render may
-  /// have calculated the right badge before the account-scoped channel could
-  /// safely reconcile native notifications.
+  /// Push setup or notification changes can leave the native presentation
+  /// stale even when the cloud counts and focus have not changed.
   void invalidate() => _sent = null;
 
   /// Reconciles a value only after the cloud has supplied the account's unread

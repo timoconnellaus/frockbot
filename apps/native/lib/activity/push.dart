@@ -34,6 +34,9 @@ class PushController {
   /// Told when [focused] may have changed. Losing focus reads nothing new, but
   /// the badges drawn through the focus rule still change.
   VoidCallback? onFocus;
+
+  /// Refresh presentation only: calling syncRead here would reenter its
+  /// in-flight loop before the remaining Bots have synced their cursors.
   VoidCallback? onNotificationsChanged;
   Timer? timer;
   Future<void> _registration = Future.value();
