@@ -1342,14 +1342,60 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     botName: botName,
     archived: archived.contains(botId),
     onChanged: load,
-    // The Bot this panel is about no longer exists, so the panel closes and
-    // the shell falls back to whatever the reload leaves selected.
-    onDeleted: () => setState(() {
-      panelOpen = false;
-      conversationOpen = false;
-      selected = null;
-    }),
+    onDeleted: () => unawaited(_closeDeletedBot(botId)),
   );
+
+  /// A delete the authority applied. Everything open about that Bot closes at
+  /// every tier — the column, the drawer, the pushed page, the conversation —
+  /// but only while it is still the Bot open: a person who moved to another
+  /// Bot while the delete was out keeps the one they chose.
+  Future<void> _closeDeletedBot(String botId) async {
+    if (!mounted) return;
+    final open = selected?.botId.value;
+    if (open != null && open != botId) return;
+    if (open == botId) _closeOpenBot();
+    // A switch made after this point writes its own selection, so only a
+    // saved selection still naming the deleted Bot is cleared.
+    final key = 'selection.${widget.userId}';
+    try {
+      if (await widget.store.read(key) == botId && selected == null) {
+        await widget.store.delete(key);
+      }
+    } catch (_) {
+      // A stale selection only fails to restore: the Bot is not listed.
+    }
+  }
+
+  /// Closes the open Bot's pages, panels and controllers, leaving no Bot open.
+  void _closeOpenBot() {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    slots.remove(ShellSlot.rightPanel, 'bot-settings');
+    slots.remove(ShellSlot.rightPanel, 'routines');
+    slots.remove(ShellSlot.rightPanel, 'plugins');
+    slots.remove(ShellSlot.rightPanel, 'applet');
+    slots.remove(ShellSlot.rightPanel, 'computer');
+    botSettings?.dispose();
+    routineInbox?.dispose();
+    appletCanvas?.dispose();
+    computer?.dispose();
+    _headerChat?.removeListener(_repaintHeader);
+    botSettings = null;
+    routineInbox = null;
+    appletCanvas = null;
+    computer = null;
+    _headerChat = null;
+    _botComputerRunning = false;
+    setState(() {
+      selected = null;
+      selectedConnection = ConnectionState.initializing;
+      workingRunId = null;
+      openRun = null;
+      conversationOpen = false;
+      panelOpen = false;
+      panelCollapsed = true;
+      _setCatalog(null);
+    });
+  }
 
   /// Adding a Bot: the sheet, then the Bot, then the first thing said to it.
   ///

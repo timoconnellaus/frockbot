@@ -192,6 +192,12 @@ class _BotDangerZoneState extends State<BotDangerZone> {
 
   Future<void> _change(String type) async {
     final words = botLifecycleWordsV1[type]!;
+    // This State can be reused for another Bot while the command is out. The
+    // receipt still belongs to the surface that issued it, so keep that
+    // identity and its callbacks across every await.
+    final botId = widget.botId;
+    final onChanged = widget.onChanged;
+    final onDeleted = widget.onDeleted;
     final agreed =
         await showDialog<bool>(
           context: context,
@@ -215,10 +221,12 @@ class _BotDangerZoneState extends State<BotDangerZone> {
         ) ??
         false;
     if (!agreed) return;
-    final applied = await widget.lifecycle.change(widget.botId, type);
+    final applied = await widget.lifecycle.change(botId, type);
     if (!applied) return;
-    await widget.onChanged?.call();
-    if (type == 'bot/delete') widget.onDeleted?.call();
+    // The surface closes before the directory is read again: the reload
+    // forgets which Bot was open, and that is what decides what to close.
+    if (type == 'bot/delete') onDeleted?.call();
+    await onChanged?.call();
   }
 
   @override
