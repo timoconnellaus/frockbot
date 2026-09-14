@@ -20,7 +20,7 @@ import {
 const hello = {
   schemaVersion: 1,
   protocolVersion: 1,
-  nativeVersion: "1.3.0",
+  nativeVersion: "1.4.0",
   catalogs: [],
 };
 const verifier = "a".repeat(64);
@@ -350,7 +350,7 @@ describe("native system browser exchange", () => {
   test("a session issued to an app this deployment no longer accepts survives the update that made it supported", async () => {
     const f = fixture();
     // The phone's real case: the sign-in was issued to 1.1.0, the deployment
-    // has since raised its minimum to 1.3.0, and the app has updated itself.
+    // has since raised its minimum to 1.4.0, and the app has updated itself.
     const historical = { ...hello, nativeVersion: "1.1.0" };
     const expires = f.now() + 7 * 86400_000;
     const token = await mintSessionToken({
@@ -459,7 +459,7 @@ describe("native system browser exchange", () => {
         }),
       );
     // A newer supported version is still exactly this User's session.
-    const updated = await authenticate({ ...hello, nativeVersion: "1.3.0" });
+    const updated = await authenticate({ ...hello, nativeVersion: "1.4.0" });
     expect(updated?.refusal).toBeUndefined();
     expect(updated?.session?.user.id).toBe("user-1");
     // A different catalog set is a different client: it takes a new sign-in,
@@ -499,7 +499,7 @@ describe("native system browser exchange", () => {
         authorization: `Bearer ${pinned}`,
         "x-frockbot-client": JSON.stringify({
           ...hello,
-          nativeVersion: "1.3.0",
+          nativeVersion: "1.4.0",
           catalogs: [...catalogs].reverse(),
         }),
       }),
@@ -996,7 +996,7 @@ test("a device that signed out gives its slot back", () => {
   const hello = {
     schemaVersion: 1 as const,
     protocolVersion: 1 as const,
-    nativeVersion: "1.3.0",
+    nativeVersion: "1.4.0",
     catalogs: [],
   };
   const sign = (sessionId: string, action: "issue" | "revoke") =>

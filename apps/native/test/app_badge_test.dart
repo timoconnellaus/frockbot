@@ -77,18 +77,21 @@ void main() {
       expect(badge.label, isNull);
     });
 
-    test('nothing for the focused chat while its read receipt is in flight', () {
-      final badge = appBadgeFor(
-        unread: directory([
-          view('alpha', count: 3, capped: true),
-          view('beta', count: 1),
-        ]),
-        botIds: ['alpha', 'beta'],
-        focusedBotId: 'alpha',
-      );
-      expect(badge.label, '1');
-      expect(badge.bots['alpha']?.launcherCount, 0);
-    });
+    test(
+      'nothing for the focused chat while its read receipt is in flight',
+      () {
+        final badge = appBadgeFor(
+          unread: directory([
+            view('alpha', count: 3, capped: true),
+            view('beta', count: 1),
+          ]),
+          botIds: ['alpha', 'beta'],
+          focusedBotId: 'alpha',
+        );
+        expect(badge.label, '1');
+        expect(badge.bots['alpha']?.launcherCount, 0);
+      },
+    );
 
     test('saturates at 99+ over the sum and over any capped Bot', () {
       expect(
@@ -172,32 +175,35 @@ void main() {
       ]);
     });
 
-    test('a replaced shell does not clear the badge its successor drew', () async {
-      final calls = record('com.frockbot/badge');
-      final previous = AppBadgeSync(const DockBadgePresenter());
-      final next = AppBadgeSync(const DockBadgePresenter());
-      previous.update(
-        appBadgeFor(
-          unread: directory([view('alpha', count: 1)]),
-          botIds: ['alpha'],
-          focusedBotId: null,
-        ),
-      );
-      next.update(
-        appBadgeFor(
-          unread: directory([view('beta', count: 4)]),
-          botIds: ['beta'],
-          focusedBotId: null,
-        ),
-      );
-      await previous.clear();
-      await next.clear();
-      expect(calls.map((call) => (call.arguments as Map)['label']), [
-        '1',
-        '4',
-        null,
-      ]);
-    });
+    test(
+      'a replaced shell does not clear the badge its successor drew',
+      () async {
+        final calls = record('com.frockbot/badge');
+        final previous = AppBadgeSync(const DockBadgePresenter());
+        final next = AppBadgeSync(const DockBadgePresenter());
+        previous.update(
+          appBadgeFor(
+            unread: directory([view('alpha', count: 1)]),
+            botIds: ['alpha'],
+            focusedBotId: null,
+          ),
+        );
+        next.update(
+          appBadgeFor(
+            unread: directory([view('beta', count: 4)]),
+            botIds: ['beta'],
+            focusedBotId: null,
+          ),
+        );
+        await previous.clear();
+        await next.clear();
+        expect(calls.map((call) => (call.arguments as Map)['label']), [
+          '1',
+          '4',
+          null,
+        ]);
+      },
+    );
 
     test(
       'the launcher hears per-Bot counts and silenced Bots once push is ready',
@@ -215,13 +221,13 @@ void main() {
           focusedBotId: null,
         );
         sync.update(badge);
-        await sync.clear();
+        await Future<void>.delayed(Duration.zero);
         expect(calls, isEmpty);
 
         ready = true;
-        final again = AppBadgeSync(LauncherBadgePresenter(ready: () => ready));
-        again.update(badge);
-        await again.clear();
+        sync.invalidate();
+        sync.update(badge);
+        await sync.clear();
         expect(calls.map((call) => call.method), ['badge']);
         expect(calls.single.arguments, {
           'bots': {'alpha': 100, 'beta': 0},

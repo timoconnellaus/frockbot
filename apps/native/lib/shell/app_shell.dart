@@ -225,7 +225,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // Focus can be reported while this state is still starting, so the
     // repaint the focus rule needs waits for a microtask.
     push.onFocus = () => scheduleMicrotask(() {
-      if (mounted) setState(() {});
+      if (mounted) {
+        appBadge.invalidate();
+        setState(() {});
+      }
     });
     widget.botLinks.addListener(_followBotLink);
     // A lifecycle command nobody has an answer for is adopted here rather than

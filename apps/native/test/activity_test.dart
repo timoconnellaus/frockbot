@@ -10,6 +10,49 @@ import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
 void main() {
+  test(
+    'a refresh requested during a load runs again with the newer view',
+    () async {
+      final store = MemoryStore();
+      final firstStarted = Completer<void>();
+      final releaseFirst = Completer<void>();
+      var calls = 0;
+      final api = SettingsApi(store, (path, body) async {
+        calls += 1;
+        if (calls == 1) {
+          firstStarted.complete();
+          await releaseFirst.future;
+        }
+        return {
+          'schemaVersion': 1,
+          'unread': [
+            {
+              'schemaVersion': 1,
+              'botId': 'alpha',
+              'count': 2,
+              'capped': false,
+              'unread': true,
+              'manuallyUnread': false,
+              'notificationsEnabled': calls == 1,
+            },
+          ],
+        };
+      });
+      final controller = ActivityController(api, store, 'tim');
+
+      final first = controller.load();
+      await firstStarted.future;
+      await controller.load();
+      releaseFirst.complete();
+      await first;
+
+      expect(calls, 2);
+      expect(controller.unread['alpha']!.notificationsEnabled, isFalse);
+      controller.dispose();
+      api.close();
+    },
+  );
+
   test('read and manual unread commands carry the authoritative message boundaries', () async {
     final store = MemoryStore();
     final commands = <Map<String, dynamic>>[];

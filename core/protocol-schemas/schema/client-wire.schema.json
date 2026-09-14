@@ -4668,7 +4668,7 @@
   "x-frockbot-compatibility": {
     "protocolMin": 1,
     "protocolMax": 1,
-    "minimumNativeVersion": "1.3.0",
+    "minimumNativeVersion": "1.4.0",
     "catalogs": []
   }
 }

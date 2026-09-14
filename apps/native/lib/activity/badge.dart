@@ -183,6 +183,12 @@ class AppBadgeSync {
   bool _cleared = false;
   Future<void> _queue = Future.value();
 
+  /// Makes the next [update] cross the channel even when its value is equal.
+  /// Android uses this after push setup becomes ready: an earlier render may
+  /// have calculated the right badge before the account-scoped channel could
+  /// safely reconcile native notifications.
+  void invalidate() => _sent = null;
+
   void update(AppBadge badge) {
     final presenter = this.presenter;
     if (presenter == null || _cleared) return;
