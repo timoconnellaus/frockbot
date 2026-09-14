@@ -63,13 +63,9 @@ class AppBadge {
     return saturated ? '$appBadgeCap+' : '$total';
   }
 
-  /// The platform-channel shape, and what two badges are compared by.
-  Map<String, Object?> toJson() => {
-    'label': label,
-    'bots': {
-      for (final entry in bots.entries) entry.key: entry.value.launcherCount,
-    },
-    'silenced': silenced.toList()..sort(),
+  /// Each Bot's best launcher number, the shape the Android channel takes.
+  Map<String, int> get launcherCounts => {
+    for (final entry in bots.entries) entry.key: entry.value.launcherCount,
   };
 
   @override
@@ -163,10 +159,9 @@ class LauncherBadgePresenter implements AppBadgePresenter {
   @override
   Future<void> show(AppBadge badge) async {
     if (!ready()) return;
-    final json = badge.toJson();
     await channel.invokeMethod<void>('badge', {
-      'bots': json['bots'],
-      'silenced': json['silenced'],
+      'bots': badge.launcherCounts,
+      'silenced': badge.silenced.toList()..sort(),
     });
   }
 
