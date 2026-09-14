@@ -653,7 +653,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                 detail: state.hidden
                     ? 'Off while this Bot is hidden from the sidebar. Show it in the sidebar to turn notifications on.'
                     : 'Get notified when this Bot finishes or needs input',
-                value: state.notifications && !state.hidden,
+                value: state.notifications,
                 enabled: !state.hidden,
                 onChanged: (next) => state.notifications = next,
               ),

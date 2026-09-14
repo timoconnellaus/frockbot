@@ -500,18 +500,6 @@ export function decodeApprovalDecisionReceiptV1(
   };
 }
 
-/**
- * Who is told about a pending decision, and how loudly.
- *
- * An approval ignores `notifications.enabled` on purpose: muting a Bot silences
- * its chatter, not a question that has stopped it. The urgency says so —
- * `critical` is the one value the desktop and mobile notification Packages
- * treat as interrupting.
- */
-export function approvalNotificationIdV1(approvalId: string): string {
-  return `approval:${approvalId}`;
-}
-
 /** What the User is told a card says, bounded for a notification body. */
 export function approvalNotificationBodyV1(send: ApprovalSendV1): string {
   return `${send.risk === "high" ? "High risk. " : ""}${send.action}`.slice(
