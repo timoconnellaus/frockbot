@@ -332,11 +332,7 @@ class _AdminPageState extends State<AdminPage> {
     try {
       final answer = await widget.api.request(
         '/api/admin/users/${Uri.encodeComponent(userId)}/features',
-        body: {
-          'schemaVersion': 1,
-          'type': 'user/set-features',
-          ...fields,
-        },
+        body: {'schemaVersion': 1, 'type': 'user/set-features', ...fields},
       );
       if (mounted) {
         setState(() {

@@ -898,7 +898,7 @@ describe("beta access on the native door", () => {
     expect(g.operations).toEqual(["issue", "read"]);
   });
 
-  test("a refused account's settings handoff and sign-out never reach the User", async () => {
+  test("a refused account cannot open settings but can revoke its session", async () => {
     const g = gated();
     const headers = await signIn(g);
     g.set(paused);
@@ -922,9 +922,9 @@ describe("beta access on the native door", () => {
         headers,
       ),
     );
-    // The app finishes signing out; nothing is provisioned to record it.
+    // Sign-out persists revocation even though product access is paused.
     expect(signOut?.status).toBe(200);
-    expect(g.operations).toEqual(["issue"]);
+    expect(g.operations).toEqual(["issue", "revoke"]);
 
     g.set("unavailable");
     const unavailable = await g.auth.route(
@@ -939,8 +939,12 @@ describe("beta access on the native door", () => {
         headers,
       ),
     );
-    expect(unavailable?.status).toBe(503);
-    expect(g.operations).toEqual(["issue"]);
+    expect(unavailable?.status).toBe(200);
+    expect(g.operations).toEqual(["issue", "revoke", "revoke"]);
+    g.set(activeDecision);
+    expect(
+      await g.auth.authenticate(g.request("/api/identity", undefined, headers)),
+    ).toEqual({ session: null });
   });
 });
 

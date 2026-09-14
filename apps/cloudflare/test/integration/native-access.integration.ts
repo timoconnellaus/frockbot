@@ -132,3 +132,42 @@ test("pausing a native account refuses its live bearer on the next request, and 
   await setAccess(userId, "active");
   expect((await identity()).status).toBe(200);
 });
+
+test("sign-out while paused stays revoked after reactivation", async () => {
+  const userId = freshUserId("native-paused-signout");
+  const headers = await nativeHeaders(userId);
+  await setAccess(userId, "paused");
+  const response = await SELF.fetch(`${ORIGIN}/api/auth/native/revoke`, {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      commandId: "sign-out-paused",
+      action: "sign-out",
+      sessionId: "start-fixture",
+    }),
+  });
+  expect(response.status).toBe(200);
+  await setAccess(userId, "active");
+  expect((await SELF.fetch(`${ORIGIN}/api/identity`, { headers })).status).toBe(
+    401,
+  );
+});
+
+test("reading or revoking a missing native session never provisions its User", async () => {
+  const userId = freshUserId("native-missing-session");
+  const owner = env.USER_CONFIGURATIONS.getByName(userId);
+  for (const action of ["read", "revoke"] as const) {
+    expect(
+      await owner.nativeSession({
+        schemaVersion: 1,
+        action,
+        userId,
+        sessionId: "missing-session",
+        expiresAt: Date.now() + 60_000,
+        hello,
+      }),
+    ).toEqual({ schemaVersion: 1, status: "ok", record: null });
+    expect(await provisioned(userId)).toBe(false);
+  }
+});

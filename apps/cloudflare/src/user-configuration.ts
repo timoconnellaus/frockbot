@@ -379,7 +379,15 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   async nativeSession(input: unknown) {
     try {
       const operation = decodeNativeSessionOperation(input);
-      await this.assertUserIdentity(operation.userId);
+      if (operation.action === "issue") {
+        await this.assertUserIdentity(operation.userId);
+      } else if ((await this.addressedUser(operation.userId)) === undefined) {
+        return {
+          schemaVersion: 1 as const,
+          status: "ok" as const,
+          record: null,
+        };
+      }
       const record = this.ctx.storage.transactionSync(() =>
         nativeSessionOperation(this.ctx.storage.kv, operation, Date.now()),
       );

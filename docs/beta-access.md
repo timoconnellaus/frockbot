@@ -27,7 +27,7 @@ A provisioned User, an existing better-auth identity or a live session are not a
 
 - **Identity creation.** better-auth's `user.create.before` hook (`identityCreationHooksV1`) asks `mayCreateIdentity`. A closed deployment writes no `user` row. An invite-only deployment writes one only for an invited, verified address.
 - **Every browser request.** The gateway asks `admitAccount` after resolving the session and before anything reaches a User Durable Object. A pause takes effect on the account's next request.
-- **Every native request.** `nativeAuth.authenticate` asks before reading the session record, because that read provisions the User. The exchange asks before issuing a session, and the settings handoff asks through `authenticate`. Sign-out asks too: a refused account's bearer is answered as signed out without provisioning the User to record it. The gateway reuses the native answer rather than asking twice.
+- **Every native request.** `nativeAuth.authenticate` asks before reading the session record. The exchange asks before issuing a session, and the settings handoff asks through `authenticate`. Sign-out verifies the bearer and revokes its existing session even when access is refused or the admission authority is unavailable. Session reads and revocations never provision a User. The gateway reuses the native answer rather than asking twice.
 
 A refusal is `403` with `{ error, code: "account-access-refused", reason }`. A browser's document request instead gets a page with the same copy (`ADMISSION_REFUSAL_COPY_V1`) and a sign-out link. No copy says an invitation exists. An authority that cannot answer is `503` with `code: "account-access-unavailable"`, never `401`, so a client does not discard a good sign-in.
 

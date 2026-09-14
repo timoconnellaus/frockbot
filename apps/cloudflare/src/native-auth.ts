@@ -115,7 +115,7 @@ export interface NativeAuthOptions {
   returnUris: readonly string[];
   /**
    * The beta-access authority, asked before a User's session record is read
-   * or written — that read is what provisions the User. `null` means the
+   * or issued. Session reads never provision the User. `null` means the
    * identity no longer exists; a throw means the authority could not answer.
    * Never asked for `developmentUserId`, which only a development stack sets.
    */
@@ -698,14 +698,9 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           // A 401 lets the app discard the unusable session and finish signing out.
           if (!sameClient(hello(request), claims.hello))
             return error(401, "Please sign in again.");
-          // A refused account has no session worth revoking, and revoking would
-          // provision the User to write the revocation; every later request
-          // with this bearer is refused by the same authority anyway.
-          const admitted = await admitBeforeUser(claims.userId);
-          if (admitted instanceof Response && admitted.status !== 403)
-            return admitted;
-          if (admitted !== null && !(admitted instanceof Response))
-            await options.session(claims.userId, operation(claims, "revoke"));
+          // Signing out narrows authority even while access is paused. The
+          // session owner revokes existing records without provisioning a User.
+          await options.session(claims.userId, operation(claims, "revoke"));
           return Response.json(
             { schemaVersion: 1, status: "signed-out" },
             { headers: NO_STORE },
