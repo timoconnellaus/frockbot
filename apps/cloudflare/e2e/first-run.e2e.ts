@@ -8,7 +8,7 @@ import { test, expect, composerInput, createBot, sem } from "./fixtures.ts";
 test("a new User lands in General and can still create a Bot of their own", async ({
   page,
   userId,
-}) => {
+}, testInfo) => {
   await page.goto(`/?as_user=${userId}`);
 
   // The client booted, which means `/` served the artifact's document, the
@@ -28,6 +28,12 @@ test("a new User lands in General and can still create a Bot of their own", asyn
   await expect(sem(page, "flock-create")).toHaveCount(0);
   await expect(conversation.getByText("No model available")).toHaveCount(0);
 
+  await page.screenshot({ path: testInfo.outputPath("general-first-run.png") });
+  await testInfo.attach("general-first-run.png", {
+    path: testInfo.outputPath("general-first-run.png"),
+    contentType: "image/png",
+  });
+
   // The suggestions that need no feature are always offered, and choosing one
   // only writes the composer.
   await expect(sem(page, "starter-specialist")).toBeVisible();
@@ -36,6 +42,11 @@ test("a new User lands in General and can still create a Bot of their own", asyn
     /^Help me plan and complete \[project\]/,
     { timeout: 60_000 },
   );
+  await page.screenshot({ path: testInfo.outputPath("general-project-draft.png") });
+  await testInfo.attach("general-project-draft.png", {
+    path: testInfo.outputPath("general-project-draft.png"),
+    contentType: "image/png",
+  });
   const headers = { "x-frockbot-user-id": userId };
   const { generalBotId } = (await (
     await page.request.get("/api/bots/bootstrap", { headers })
@@ -67,4 +78,26 @@ test("a new User lands in General and can still create a Bot of their own", asyn
   ).toBeVisible();
   await expect(sem(page, "starter-suggestions")).toHaveCount(0);
   await expect(composerInput(page)).toBeEnabled({ timeout: 60_000 });
+  await page.screenshot({
+    path: testInfo.outputPath("general-and-additional-bot.png"),
+  });
+  await testInfo.attach("general-and-additional-bot.png", {
+    path: testInfo.outputPath("general-and-additional-bot.png"),
+    contentType: "image/png",
+  });
+  const selection = await page.evaluate(
+    (id) => localStorage.getItem(`frockbot.native.v1.selection.${id}`),
+    userId,
+  );
+  expect(selection).toBeTruthy();
+  expect(selection).not.toBe(generalBotId);
+  await page.reload();
+  await expect(sem(page, "shell-conversation")).toBeVisible({ timeout: 120_000 });
+  await expect(sem(page, "starter-suggestions")).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      (id) => localStorage.getItem(`frockbot.native.v1.selection.${id}`),
+      userId,
+    ),
+  ).toBe(selection);
 });
