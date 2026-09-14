@@ -12,6 +12,10 @@ _Avoid_: Account, tenant
 A persistent, configured conversational actor with its own identity, sessions, routines, and optional computer. Its extensible behavior comes from its user's shared package setup.
 _Avoid_: Agent, assistant instance
 
+**General**:
+The Bot every User starts with. The User's Durable Object provisions it, once, under the reserved id `general` the first time the account's Bot directory is read, and records that it did so: a User who already owned Bots is not given one, and deleting General does not bring it back. Its empty conversation offers starter suggestions that only fill the composer.
+_Avoid_: Default Bot, starter Bot
+
 **Agent**:
 A live execution of a bot that claims queued input, calls a model, executes tools, and records the resulting session events.
 _Avoid_: Bot, worker

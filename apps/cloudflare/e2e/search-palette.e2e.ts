@@ -6,6 +6,7 @@ import {
   field,
   openApplication,
   press,
+  revealSidebar,
   sem,
   settle,
 } from "./fixtures.ts";
@@ -61,6 +62,10 @@ test("phone search fills the screen and changes categories through the filter me
 }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openApplication(page, userId);
+  // A first sign-in on a phone opens General as a page over the list, so the
+  // list and its search are one Back away.
+  await expect(sem(page, "sidebar-toggle")).toBeVisible({ timeout: 60_000 });
+  await revealSidebar(page);
   await press(sem(page, "sidebar-search"));
   const overlay = sem(page, "search-overlay");
   await expect(overlay).toBeVisible();

@@ -125,7 +125,11 @@ describe("unread and notifications through the gateway", () => {
     const botId = "unread-private";
     await provisionThroughGateway({ userId: owner, botId });
 
-    expect(await unreadDirectory(stranger)).toEqual([]);
+    // The stranger's first read provisions their own General, and nothing of
+    // the owner's.
+    expect(
+      (await unreadDirectory(stranger)).map((entry) => entry.botId),
+    ).toEqual(["general"]);
     const refused = await postAsUser(stranger, `/api/bots/${botId}/unread`, {
       schemaVersion: 1,
       type: "bot/mark-unread",

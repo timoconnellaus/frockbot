@@ -70,6 +70,12 @@ abstract final class ShellIds {
 Widget identified(String identifier, Widget child) =>
     Semantics(identifier: identifier, child: child);
 
+/// General's first-run suggestions, which only ever fill the composer.
+abstract final class StarterIds {
+  static const list = 'starter-suggestions';
+  static String suggestion(String id) => 'starter-$id';
+}
+
 /// The sign-in door, which on the web is the first thing anyone sees.
 ///
 /// The page is public and pre-session, so it is where a browser spec starts:

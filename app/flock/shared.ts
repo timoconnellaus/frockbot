@@ -12,6 +12,15 @@ import assetManifest from "./assets/manifest.json" with { type: "json" };
 
 export const FLOCK_DIRECTORY_LIMIT = 100;
 
+/**
+ * The Bot every new account starts with. The id is reserved by convention
+ * rather than by a field: clients add a random suffix to every id they mint,
+ * so a bare `general` is only ever the one the account's authority provisioned
+ * (`FlockUserBackendContribution.provisionGeneral`), and the client keys its
+ * first-run behaviour on it without the directory's shape changing.
+ */
+export const GENERAL_BOT_ID_V1 = "general";
+
 export function isFlockIdentifier(value: unknown): value is string {
   return isPublicIdentifier(value);
 }

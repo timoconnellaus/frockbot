@@ -1787,8 +1787,20 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
 
   async listBots(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.flockContribution()).listBots();
+    return (await this.provisionedFlock(request.userId as string)).listBots();
+  }
+
+  /**
+   * The Flock, after the account has been given General. Every directory read
+   * a client makes comes through here, so the first one after admission
+   * already lists General; `provisionGeneral` is a marker read every time
+   * after that.
+   */
+  private async provisionedFlock(userId: string) {
+    await this.assertFlockIdentity(userId);
+    const flock = await this.flockContribution();
+    await flock.provisionGeneral();
+    return flock;
   }
 
   async createBot(input: unknown) {
@@ -1805,8 +1817,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
 
   async listBotLifecycles(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.flockContribution()).listBotLifecycles();
+    return (
+      await this.provisionedFlock(request.userId as string)
+    ).listBotLifecycles();
   }
 
   async executeBotLifecycle(input: unknown) {

@@ -67,6 +67,7 @@ import 'run_view.dart';
 import 'semantics.dart';
 import 'sidebar.dart';
 import 'slots.dart';
+import 'starters.dart';
 import 'transcript.dart';
 
 class AppShell extends StatefulWidget {
@@ -615,12 +616,30 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _restoreSelection() async {
     if (selected != null) return;
     final saved = await widget.store.read('selection.${widget.userId}');
-    if (!mounted || saved == null) return;
+    if (!mounted || selected != null) return;
+    if (saved == null) {
+      _openGeneral();
+      return;
+    }
     final bot = bots.where((bot) => bot.botId.value == saved).firstOrNull;
     if (bot == null) return;
     clearManualForBot = bot.botId.value;
     setState(() => selected = bot);
     _adoptBotPanels(bot.botId.value);
+  }
+
+  /// A first sign-in lands in General rather than on a list of one. Only a
+  /// device that has never chosen a Bot for this account gets this: a saved
+  /// selection, a Bot link on its way in, or a page already over the shell is
+  /// the person's place, and opening General over it would take that away.
+  void _openGeneral() {
+    if (selected != null ||
+        widget.botLinks.value != null ||
+        ModalRoute.of(context)?.isCurrent != true ||
+        !bots.any((bot) => bot.botId.value == generalBotIdV1)) {
+      return;
+    }
+    _select(generalBotIdV1);
   }
 
   /// A deployment with no identity directory leaves the sidebar one plain
@@ -1682,6 +1701,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             store: widget.store,
                             userId: widget.userId,
                             botId: bot.botId.value,
+                            general: bot.botId.value == generalBotIdV1,
                             onOpenRun: _openRun,
                             onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,

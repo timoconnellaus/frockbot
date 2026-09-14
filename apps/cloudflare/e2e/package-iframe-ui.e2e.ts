@@ -96,35 +96,41 @@ async function installPackageRoutes(
         });
         return;
       }
+      // General opens by itself before the spec's own Bot exists. Its panel
+      // mounts no page, so every document counted below is the Framed Bot's.
+      const contributions =
+        botId === "general"
+          ? []
+          : [
+              {
+                packageId: PACKAGE_ID,
+                displayName: "Sydney Weather",
+                provenance: "Bot-authored",
+                pages: [
+                  {
+                    id: PAGE_ID,
+                    artifact: {
+                      contentHash: CONTENT_HASH,
+                      size: new TextEncoder().encode(artifactHtml()).byteLength,
+                      mediaType: "text/html",
+                      bundlerVersion: "frockbot-inline-html@1",
+                    },
+                    mounts: [
+                      { slot: "frockbot.bot-settings-sections", order: 20 },
+                    ],
+                  },
+                ],
+                entries: [],
+                declaredTools: [TOOL_NAME],
+              },
+            ];
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
           schemaVersion: 1,
           botId,
           artifactOrigin,
-          contributions: [
-            {
-              packageId: PACKAGE_ID,
-              displayName: "Sydney Weather",
-              provenance: "Bot-authored",
-              pages: [
-                {
-                  id: PAGE_ID,
-                  artifact: {
-                    contentHash: CONTENT_HASH,
-                    size: new TextEncoder().encode(artifactHtml()).byteLength,
-                    mediaType: "text/html",
-                    bundlerVersion: "frockbot-inline-html@1",
-                  },
-                  mounts: [
-                    { slot: "frockbot.bot-settings-sections", order: 20 },
-                  ],
-                },
-              ],
-              entries: [],
-              declaredTools: [TOOL_NAME],
-            },
-          ],
+          contributions,
         }),
       });
     },

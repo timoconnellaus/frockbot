@@ -5,7 +5,7 @@
 // consumer of that path was a person.
 import { test, expect, composerInput, createBot, sem } from "./fixtures.ts";
 
-test("a new User creates a first Bot and finds it in the directory", async ({
+test("a new User lands in General and can still create a Bot of their own", async ({
   page,
   userId,
 }) => {
@@ -17,19 +17,50 @@ test("a new User creates a first Bot and finds it in the directory", async ({
   await expect(sem(page, "shell-sidebar")).toBeVisible({ timeout: 120_000 });
   await expect(sem(page, "sidebar-search")).toBeVisible();
 
-  // Before the first Bot exists there is no invented Bot to be broken, and
-  // nothing claims the account's model is unavailable.
+  // The account's authority provisioned General on the first directory read,
+  // and the shell opened it: no create sheet, no tour.
+  const sidebar = sem(page, "shell-sidebar");
   const conversation = sem(page, "shell-conversation");
-  await expect(conversation.getByText("No Bots yet")).toBeVisible();
+  await expect(sidebar.getByText("General")).toBeVisible({ timeout: 60_000 });
+  await expect(
+    conversation.getByText("What would you like to work on?"),
+  ).toBeVisible({ timeout: 60_000 });
+  await expect(sem(page, "flock-create")).toHaveCount(0);
   await expect(conversation.getByText("No model available")).toHaveCount(0);
-  await expect(composerInput(page)).toHaveCount(0);
 
+  // The suggestions that need no feature are always offered, and choosing one
+  // only writes the composer.
+  await expect(sem(page, "starter-specialist")).toBeVisible();
+  await sem(page, "starter-project").click();
+  await expect(composerInput(page)).toHaveValue(
+    /^Help me plan and complete \[project\]/,
+    { timeout: 60_000 },
+  );
+  const turns = await page.request.get("/api/bots/general/turns", {
+    headers: { "x-frockbot-user-id": userId },
+  });
+  expect(turns.status()).toBe(200);
+  expect((await turns.json()) as { runs: unknown[] }).toMatchObject({
+    runs: [],
+  });
+
+  // A second read is not a second General.
+  const directory = await page.request.get("/api/bots", {
+    headers: { "x-frockbot-user-id": userId },
+  });
+  expect(
+    ((await directory.json()) as { bots: { botId: string }[] }).bots.map(
+      (bot) => bot.botId,
+    ),
+  ).toEqual(["general"]);
+
+  // The ordinary create flow is still how another Bot is added.
   await createBot(page, "Shepherd");
-
-  // The directory, and the window that follows the selection.
-  await expect(sem(page, "shell-sidebar").getByText("Shepherd")).toBeVisible();
+  await expect(sidebar.getByText("Shepherd")).toBeVisible();
+  await expect(sidebar.getByText("General")).toBeVisible();
   await expect(
     conversation.getByText("What would you like to work on?"),
   ).toBeVisible();
+  await expect(sem(page, "starter-suggestions")).toHaveCount(0);
   await expect(composerInput(page)).toBeEnabled({ timeout: 60_000 });
 });
