@@ -47,7 +47,6 @@ class BotSettingsController extends ChangeNotifier {
   String pinnedAt = '';
   bool hidden = false;
   bool notifications = true;
-  String namedBy = 'user';
 
   /// The Bot's model override, as the `custom-models` Package stores it, and
   /// null when this Bot follows the account model.
@@ -84,7 +83,6 @@ class BotSettingsController extends ChangeNotifier {
       hidden = profile['hiddenFromSidebar'] == true;
       pinnedAt = profile['pinnedAt'] as String? ?? '';
       pinned = pinnedAt.isNotEmpty;
-      namedBy = profile['namedBy'] as String? ?? 'user';
       notifications =
           ((answer['notifications'] as Map?)?['enabled'] ?? true) == true;
       model =
@@ -634,25 +632,6 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                       detail: 'Keeps this Bot out of the list without archiving it.',
                       value: state.hidden,
                       onChanged: (next) => state.hidden = next,
-                    ),
-                    identified(
-                      SettingsIds.botIdentity,
-                      ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 2,
-                        ),
-                        dense: true,
-                        title: const Text('Identity'),
-                        subtitle: Text(
-                          state.name.isEmpty ? 'This Bot' : state.name,
-                        ),
-                        trailing: Text(
-                          state.namedBy == 'bot'
-                              ? 'Named by this Bot'
-                              : 'Named by you',
-                          style: type.bodySmall,
-                        ),
-                      ),
                     ),
                     identified(
                       SettingsIds.botMembers,

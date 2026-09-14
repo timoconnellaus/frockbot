@@ -116,9 +116,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Title'), findsOneWidget);
     expect(find.text('Hidden from sidebar'), findsOneWidget);
-    expect(find.text('Named by you'), findsOneWidget);
     expect(find.text('Members'), findsOneWidget);
+    // The Name field is the only place a name shows: no provenance row.
+    expect(find.text('Identity'), findsNothing);
+    expect(find.text('Named by you'), findsNothing);
+    expect(find.text('Named by this Bot'), findsNothing);
     expect(tester.takeException(), isNull);
+    state.dispose();
+  });
+
+  testWidgets('a name the Bot chose is not attributed in its settings', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final state = BotSettingsController(
+      api(store, [], bot: botSettings(namedBy: 'bot')),
+      'alpha',
+    );
+    await open(tester, state);
+    await tester.tap(find.text('Advanced'));
+    await tester.pumpAndSettle();
+    expect(find.text('Name'), findsOneWidget);
+    expect(find.text('Hidden from sidebar'), findsOneWidget);
+    expect(find.text('Named by this Bot'), findsNothing);
     state.dispose();
   });
 
