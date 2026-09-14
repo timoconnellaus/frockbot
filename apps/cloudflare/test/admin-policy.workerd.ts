@@ -5,15 +5,12 @@ import {
   type AdminGatewayHost,
 } from "@frockbot/app/admin/backend";
 import {
-  AccountAccessConflictError,
-  decodeAccountAccessV1,
   decodeAccountAccessViewV1,
   decodeAccountAdmissionDecisionV1,
   decodeAdminUserListViewV1,
   decodeDeploymentPolicyV1,
   decodeEmailInvitationV1,
   decodeUserFeaturesV1,
-  DeploymentPolicyConflictError,
   isUserFeaturesUnavailable,
   type AccountAccessStateV1,
   type AccountAccessV1,
@@ -36,6 +33,7 @@ import {
   RETIRED_SIGNUPS_POLICY_RECEIPT_KEY,
 } from "../src/deployment-policy.ts";
 import { createGateway } from "../src/gateway.ts";
+import { createDeploymentPolicyAdminHost } from "../src/deployment-policy-admin-host.ts";
 
 interface UserRpc {
   readConfiguration(input: unknown): Promise<unknown>;
@@ -70,16 +68,6 @@ async function readPolicy(): Promise<DeploymentPolicyV1> {
   );
 }
 
-function applied<T>(
-  write:
-    | { status: "applied"; value: T }
-    | { status: "conflict"; currentRevision: number },
-  conflict: (revision: number) => Error,
-): T {
-  if (write.status === "conflict") throw conflict(write.currentRevision);
-  return write.value;
-}
-
 async function readFeatures(userId: string): Promise<UserFeaturesV1> {
   return decodeUserFeaturesV1(
     await userRpc(userId).readFeatures({ schemaVersion: 1, userId }),
@@ -101,48 +89,7 @@ async function setFeatures(
   );
 }
 
-/** The production Worker's host over the real authority, minus the Worker. */
-const accessHost: Pick<
-  AdminGatewayHost,
-  | "readDeploymentPolicy"
-  | "setAdmissionMode"
-  | "readAccountAccess"
-  | "setAccountAccess"
-  | "inviteEmail"
-> = {
-  readDeploymentPolicy: readPolicy,
-  setAdmissionMode: async (command, updatedBy) =>
-    decodeDeploymentPolicyV1(
-      applied(
-        await authority().setAdmissionMode({
-          schemaVersion: 1,
-          command,
-          updatedBy,
-        }),
-        (revision) => new DeploymentPolicyConflictError(revision),
-      ),
-    ),
-  readAccountAccess: async (userId) =>
-    decodeAccountAccessViewV1(
-      await authority().readAccountAccess({ schemaVersion: 1, userId }),
-    ),
-  setAccountAccess: async (userId, command, updatedBy) =>
-    decodeAccountAccessV1(
-      applied(
-        await authority().setAccountAccess({
-          schemaVersion: 1,
-          userId,
-          command,
-          updatedBy,
-        }),
-        (revision) => new AccountAccessConflictError(revision),
-      ),
-    ),
-  inviteEmail: async (command, invitedBy) =>
-    decodeEmailInvitationV1(
-      await authority().inviteEmail({ schemaVersion: 1, command, invitedBy }),
-    ),
-};
+const accessHost = createDeploymentPolicyAdminHost(authority);
 
 /**
  * Sessions come from test headers; `x-test-verified` is the identity

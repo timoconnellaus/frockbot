@@ -757,6 +757,9 @@ export interface GatewayDependencies {
    * Worker failing to construct.
    */
   appletViewerSecret?: string;
+  admitAppletViewer?(
+    userId: string,
+  ): Promise<AccountAdmissionDecisionV1 | null>;
   /**
    * The Applet object's HTTP door, for the viewer socket: a 101 response and
    * its WebSocket only cross the stub boundary over `fetch`.

@@ -113,20 +113,10 @@ import {
   type TemplateVisibilityV1,
 } from "@frockbot/core/template";
 import {
-  AccountAccessConflictError,
   accessEmailV1,
-  decodeAccountAccessV1,
-  decodeAccountAccessViewV1,
   decodeAccountAdmissionDecisionV1,
-  decodeDeploymentPolicyV1,
-  decodeEmailInvitationV1,
-  DeploymentPolicyConflictError,
   type AccountAdmissionDecisionV1,
   type AdmissionIdentityV1,
-  type DeploymentPolicyV1,
-  type InviteEmailCommandV1,
-  type SetAccountAccessCommandV1,
-  type SetAdmissionModeCommandV1,
   decodeUserFeaturesV1,
   decodeAdminUserBillingV1,
   type AdminUserBillingV1,
@@ -189,6 +179,7 @@ import {
   DEPLOYMENT_POLICY_SINGLETON_NAME,
   DeploymentPolicy,
 } from "./deployment-policy.js";
+import { createDeploymentPolicyAdminHost } from "./deployment-policy-admin-host.js";
 
 import {
   appletStateNameV1,
@@ -655,22 +646,6 @@ function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
   ) as unknown as DeploymentPolicyRpc;
 }
 
-/** The authority's compare-and-swap answer, thrown here as the typed conflict. */
-function appliedWrite(
-  answer: unknown,
-  conflict: (currentRevision: number) => Error,
-): unknown {
-  const write = rpcJsonSnapshot(answer) as Record<string, unknown> | null;
-  if (write?.status === "applied") return write.value;
-  if (
-    write?.status === "conflict" &&
-    Number.isSafeInteger(write.currentRevision)
-  ) {
-    throw conflict(write.currentRevision as number);
-  }
-  throw new Error("access authority answered an unknown write result");
-}
-
 /**
  * The one door into the beta-access authority for browser and native alike.
  * An admin is answered here, without the authority, so a deployment whose
@@ -686,6 +661,29 @@ async function admitAccount(
   return decodeAccountAdmissionDecisionV1(
     rpcJsonSnapshot(await deploymentPolicyStub(env).admitAccount(identity)),
   );
+}
+
+async function admitStoredAccount(
+  env: Env,
+  userId: string,
+): Promise<AccountAdmissionDecisionV1 | null> {
+  const identity = await env.AUTH_DB.prepare(
+    'select "id", "email", "emailVerified" from "user" where "id" = ? limit 1',
+  )
+    .bind(userId)
+    .first<{ id: string; email: string; emailVerified: number }>();
+  if (!identity) return null;
+  const email = accessEmailV1(identity.email);
+  return admitAccount(env, {
+    schemaVersion: 1,
+    userId,
+    ...(email === undefined ? {} : { email }),
+    emailVerified: identity.emailVerified === 1,
+    isAdmin: isDeploymentAdminV1(
+      { ...identity, mode: "better-auth" },
+      env.FROCKBOT_ADMIN_EMAILS,
+    ),
+  });
 }
 
 /**
@@ -1856,61 +1854,7 @@ interface RuntimeExports {
 const createGatewayBackendContributions = (env: Env) =>
   createFoundationBackendContributions({
     backendHost: "gateway",
-    readDeploymentPolicy: async (): Promise<DeploymentPolicyV1> =>
-      decodeDeploymentPolicyV1(
-        rpcJsonSnapshot(
-          await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
-        ),
-      ),
-    setAdmissionMode: async (
-      command: SetAdmissionModeCommandV1,
-      updatedBy: string,
-    ): Promise<DeploymentPolicyV1> =>
-      decodeDeploymentPolicyV1(
-        appliedWrite(
-          await deploymentPolicyStub(env).setAdmissionMode({
-            schemaVersion: 1,
-            command,
-            updatedBy,
-          }),
-          (revision) => new DeploymentPolicyConflictError(revision),
-        ),
-      ),
-    readAccountAccess: async (userId: string) =>
-      decodeAccountAccessViewV1(
-        rpcJsonSnapshot(
-          await deploymentPolicyStub(env).readAccountAccess({
-            schemaVersion: 1,
-            userId,
-          }),
-        ),
-      ),
-    setAccountAccess: async (
-      userId: string,
-      command: SetAccountAccessCommandV1,
-      updatedBy: string,
-    ) =>
-      decodeAccountAccessV1(
-        appliedWrite(
-          await deploymentPolicyStub(env).setAccountAccess({
-            schemaVersion: 1,
-            userId,
-            command,
-            updatedBy,
-          }),
-          (revision) => new AccountAccessConflictError(revision),
-        ),
-      ),
-    inviteEmail: async (command: InviteEmailCommandV1, invitedBy: string) =>
-      decodeEmailInvitationV1(
-        rpcJsonSnapshot(
-          await deploymentPolicyStub(env).inviteEmail({
-            schemaVersion: 1,
-            command,
-            invitedBy,
-          }),
-        ),
-      ),
+    ...createDeploymentPolicyAdminHost(() => deploymentPolicyStub(env)),
     listUsers: async () =>
       (await listIdentityStoreUsers(env, 200)).map((user) => ({
         userId: user.id,
@@ -2465,27 +2409,7 @@ export default {
                   // The stored identity, not anything the bearer carries: the
                   // email an invitation binds to and the admin allowlist reads
                   // are the identity provider's.
-                  const identity = await env.AUTH_DB.prepare(
-                    'select "id", "email", "emailVerified" from "user" where "id" = ? limit 1',
-                  )
-                    .bind(userId)
-                    .first<{
-                      id: string;
-                      email: string;
-                      emailVerified: number;
-                    }>();
-                  if (!identity) return null;
-                  const email = accessEmailV1(identity.email);
-                  return admitAccount(env, {
-                    schemaVersion: 1,
-                    userId,
-                    ...(email === undefined ? {} : { email }),
-                    emailVerified: identity.emailVerified === 1,
-                    isAdmin: isDeploymentAdminV1(
-                      { ...identity, mode: "better-auth" },
-                      env.FROCKBOT_ADMIN_EMAILS,
-                    ),
-                  });
+                  return admitStoredAccount(env, userId);
                 },
                 session: async (userId, operation) => {
                   const stub = env.USER_CONFIGURATIONS.get(
@@ -2519,6 +2443,7 @@ export default {
         ...(env.APPLET_VIEWER_SECRET
           ? { appletViewerSecret: env.APPLET_VIEWER_SECRET }
           : {}),
+        admitAppletViewer: (userId) => admitStoredAccount(env, userId),
         appletStateFor: (userId, appletId) =>
           env.APPLET_STATES.get(
             env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),

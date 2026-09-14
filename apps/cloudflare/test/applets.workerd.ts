@@ -1079,6 +1079,10 @@ describe("Applet viewer tokens", () => {
         artifacts: { load: unused },
         auth: { getSession: unused, handler: unused },
         admitAccount: unused,
+        admitAppletViewer: async (userId) => {
+          expect(userId).toBe(OWNER);
+          return { schemaVersion: 1, admitted: true, basis: "active" };
+        },
         applicationHashFor: unused,
         botStateFor: unused,
         userConfigurationFor: unused,
@@ -1140,6 +1144,67 @@ describe("Applet viewer tokens", () => {
     },
   );
   const secret = env.APPLET_VIEWER_SECRET;
+
+  test.each([
+    {
+      name: "revoked account access",
+      admit: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          admitted: false as const,
+          reason: "account-paused" as const,
+        }),
+      status: 403,
+      code: "account-access-refused",
+    },
+    {
+      name: "an authority failure",
+      admit: () => Promise.reject(new Error("authority unavailable")),
+      status: 503,
+      code: "account-access-unavailable",
+    },
+  ])("$name refuses an unexpired token before User access", async (scenario) => {
+    const applet = appletId("account-access");
+    const token = await mintAppletViewerTokenV1(secret, {
+      u: OWNER,
+      b: "bot-1",
+      a: applet,
+      g: "gen-1",
+      exp: Math.floor((Date.now() + 120_000) / 1_000),
+    });
+    let userScopedReads = 0;
+    const unused = (): never => {
+      throw new Error("A viewer must not enter an app-session path");
+    };
+    const gateway = createGateway({
+      loader: { get: unused },
+      artifacts: { load: unused },
+      auth: { getSession: unused, handler: unused },
+      admitAccount: unused,
+      admitAppletViewer: scenario.admit,
+      applicationHashFor: unused,
+      botStateFor: unused,
+      userConfigurationFor: unused,
+      botConfigurationFor: unused,
+      appletViewerSecret: secret,
+      appletAccessFor: () => {
+        userScopedReads += 1;
+        return Promise.resolve(true);
+      },
+      appletStateFor: () => {
+        userScopedReads += 1;
+        return { fetch: unused };
+      },
+    });
+    const url = new URL(`https://bot.example/api/applets/${applet}/socket`);
+    url.searchParams.set("token", token);
+
+    const response = await gateway(new Request(url));
+
+    expect(response.status).toBe(scenario.status);
+    expect(await response.json()).toMatchObject({ code: scenario.code });
+    expect(userScopedReads).toBe(0);
+  });
 
   test("a scoped token verifies, and one for another Applet or User does not", async () => {
     const applet = appletId("token");
@@ -1242,8 +1307,9 @@ describe("Applet viewer tokens", () => {
       loader: { get: unused },
       artifacts: { load: unused },
       auth: { getSession: unused, handler: unused },
-      userExists: unused,
-      readDeploymentPolicy: unused,
+      admitAccount: unused,
+      admitAppletViewer: () =>
+        Promise.resolve({ schemaVersion: 1, admitted: true, basis: "active" }),
       applicationHashFor: unused,
       botStateFor: unused,
       userConfigurationFor: unused,

@@ -413,8 +413,18 @@ async function routeAppletSocket(
   if (claims.a !== appletId) {
     return jsonError(401, "Applet viewer token is invalid");
   }
-  if (!dependencies.appletAccessFor) {
+  if (!dependencies.admitAppletViewer || !dependencies.appletAccessFor) {
     return jsonError(503, "Applet viewer sessions are not configured");
+  }
+  let admission;
+  try {
+    admission = await dependencies.admitAppletViewer(claims.u);
+  } catch {
+    return admissionUnavailableResponse();
+  }
+  if (!admission) return jsonError(401, "Applet viewer token is invalid");
+  if (!admission.admitted) {
+    return admissionRefusedResponse(admission.reason, false);
   }
   let reachable: boolean;
   try {
