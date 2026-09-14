@@ -191,7 +191,7 @@ final class DesktopUpdater: NSObject, SPUUserDriver {
     let before = percent
     received += length
     // One message per visible step, not one per network read.
-    if expected == nil || percent != before { publish("downloading") }
+    if percent != before { publish("downloading") }
   }
 
   private var percent: UInt64? {
