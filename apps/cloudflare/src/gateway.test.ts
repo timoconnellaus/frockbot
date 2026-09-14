@@ -1023,6 +1023,8 @@ function createTestGateway(
           }),
         listBotLifecycles: (userId) =>
           configurationFor(userId).listBotLifecycles(),
+        readFlockBootstrap: () =>
+          Promise.resolve({ schemaVersion: 1, generalBotId: null }),
         executeBotLifecycle: (userId, command) =>
           configurationFor(userId).executeBotLifecycle({
             schemaVersion: 1,

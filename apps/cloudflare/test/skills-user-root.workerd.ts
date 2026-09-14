@@ -51,7 +51,7 @@ describe("the User-global instruction root in Workerd", () => {
     const bob = { userId, botId: `bob-${suffix}` };
     await provisionBot(alice);
     // The Flock's revision has moved on by one Bot.
-    await provisionSiblingBot(bob, 1);
+    await provisionSiblingBot(bob);
     const root = userSkillsRoot(userId);
 
     const written = await bot(alice.botId).writeWorkspaceFile({
@@ -113,7 +113,7 @@ describe("the User-global instruction root in Workerd", () => {
     const alice = { userId, botId: `alice-${suffix}` };
     const bob = { userId, botId: `bob-${suffix}` };
     await provisionBot(alice);
-    await provisionSiblingBot(bob, 1);
+    await provisionSiblingBot(bob);
     const root = userSkillsRoot(userId);
     const path = "standup/SKILL.md";
 

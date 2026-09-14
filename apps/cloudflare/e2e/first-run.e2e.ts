@@ -36,23 +36,27 @@ test("a new User lands in General and can still create a Bot of their own", asyn
     /^Help me plan and complete \[project\]/,
     { timeout: 60_000 },
   );
-  const turns = await page.request.get("/api/bots/general/turns", {
-    headers: { "x-frockbot-user-id": userId },
-  });
+  const headers = { "x-frockbot-user-id": userId };
+  const { generalBotId } = (await (
+    await page.request.get("/api/bots/bootstrap", { headers })
+  ).json()) as { generalBotId: string };
+  expect(generalBotId).toMatch(/^general-[0-9a-f]{16}$/);
+  const turns = await page.request.get(
+    `/api/bots/${encodeURIComponent(generalBotId)}/turns`,
+    { headers },
+  );
   expect(turns.status()).toBe(200);
   expect((await turns.json()) as { runs: unknown[] }).toMatchObject({
     runs: [],
   });
 
-  // A second read is not a second General.
-  const directory = await page.request.get("/api/bots", {
-    headers: { "x-frockbot-user-id": userId },
-  });
+  // Every read so far was of one General.
+  const directory = await page.request.get("/api/bots", { headers });
   expect(
     ((await directory.json()) as { bots: { botId: string }[] }).bots.map(
       (bot) => bot.botId,
     ),
-  ).toEqual(["general"]);
+  ).toEqual([generalBotId]);
 
   // The ordinary create flow is still how another Bot is added.
   await createBot(page, "Shepherd");

@@ -140,6 +140,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Map<String, SidebarProfile> profiles = {};
   Set<String> archived = {};
   wire.BotRegistration? selected;
+
+  /// The Bot the account was given as General, from the authority.
+  String? generalBotId;
   String? workingRunId;
   ConnectionState selectedConnection = ConnectionState.initializing;
   BotSettingsController? botSettings;
@@ -526,6 +529,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       final lifecycle = wire.BotLifecycleDirectory.fromJson(
         await widget.api.request('/api/bots/lifecycles'),
       );
+      final general = await readGeneralBotIdV1(widget.api);
       final unavailable = {
         for (final state in lifecycle.lifecycles)
           if (state.status != 'active') state.botId.value: state.status,
@@ -547,6 +551,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         }),
       );
       if (!mounted) return;
+      generalBotId = general;
       _adopt(
         active,
         {
@@ -633,13 +638,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// selection, a Bot link on its way in, or a page already over the shell is
   /// the person's place, and opening General over it would take that away.
   void _openGeneral() {
-    if (selected != null ||
+    final general = generalBotId;
+    if (general == null ||
+        selected != null ||
         widget.botLinks.value != null ||
         ModalRoute.of(context)?.isCurrent != true ||
-        !bots.any((bot) => bot.botId.value == generalBotIdV1)) {
+        !bots.any((bot) => bot.botId.value == general)) {
       return;
     }
-    _select(generalBotIdV1);
+    _select(general);
   }
 
   /// A deployment with no identity directory leaves the sidebar one plain
@@ -1701,7 +1708,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             store: widget.store,
                             userId: widget.userId,
                             botId: bot.botId.value,
-                            general: bot.botId.value == generalBotIdV1,
+                            general: bot.botId.value == generalBotId,
                             onOpenRun: _openRun,
                             onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,

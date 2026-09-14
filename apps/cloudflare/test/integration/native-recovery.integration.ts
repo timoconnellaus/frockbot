@@ -111,10 +111,16 @@ test("native and browser share archive, restore, deletion and redacted history a
   expect(await (await postAsUser(userId, path, deletion)).json()).toEqual(
     deleted,
   );
+  // Only the account's General is left.
+  const { generalBotId } = (await (
+    await native("/api/bots/bootstrap")
+  ).json()) as { generalBotId: string };
   expect(
-    decodeProtocol("BotDirectory", await (await native("/api/bots")).json())
-      .bots,
-  ).toEqual([]);
+    decodeProtocol(
+      "BotDirectory",
+      await (await native("/api/bots")).json(),
+    ).bots.map((bot) => bot.botId),
+  ).toEqual([generalBotId]);
   const unavailable = await native(historyPath);
   expect(unavailable.status).toBe(400);
   expect((await asUser(userId, historyPath)).status).toBe(unavailable.status);

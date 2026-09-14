@@ -20,10 +20,15 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'navigation_test.dart' show identifiedBy, registration;
 import 'widget_test.dart' show MemoryStore;
 
-/// Answers the Bot directory when the test says so, and the Bot's Plugins
-/// frame from [features]; every other read is offline.
+/// The id the authority minted for this fixture account's General.
+const generalId = 'general-0123456789abcdef';
+
+/// Answers the Bot directory when the test says so, the bootstrap from
+/// [general], and the Bot's Plugins frame from [features]; every other read is
+/// offline.
 class FirstRunApi extends NativeApi {
   final Completer<Map<String, dynamic>> directory = Completer();
+  String? general = generalId;
   Set<String>? features;
   final requests = <String>[];
   FirstRunApi(super.store);
@@ -52,11 +57,15 @@ class FirstRunApi extends NativeApi {
         ],
       };
     }
+    if (path == '/api/bots/bootstrap') {
+      await directory.future;
+      return {'schemaVersion': 1, 'generalBotId': general};
+    }
     final plugins = features;
     if (path.endsWith('/plugins') && plugins != null) {
       return {
         'schemaVersion': 1,
-        'botId': generalBotIdV1,
+        'botId': generalId,
         'revision': 0,
         'plugins': [
           for (final id in ['web', 'routines', 'image'])
@@ -129,9 +138,18 @@ void main() {
     test('the features come from the Bot’s Plugins frame', () async {
       final api = FirstRunApi(MemoryStore())..features = {'routines'};
       addTearDown(api.close);
-      expect(await readBotFeaturesV1(api, generalBotIdV1), {'routines'});
+      expect(await readBotFeaturesV1(api, generalId), {'routines'});
       api.features = null;
-      expect(await readBotFeaturesV1(api, generalBotIdV1), isNull);
+      expect(await readBotFeaturesV1(api, generalId), isNull);
+    });
+
+    test('General is whichever Bot the authority says, or none', () async {
+      final api = FirstRunApi(MemoryStore());
+      addTearDown(api.close);
+      api.directory.complete(directoryOf([]));
+      expect(await readGeneralBotIdV1(api), generalId);
+      api.general = null;
+      expect(await readGeneralBotIdV1(api), isNull);
     });
 
     test('a prefilled draft selects its first placeholder', () {
@@ -155,7 +173,7 @@ void main() {
         transport: transport,
         store: store,
         userId: 'test-user',
-        botId: generalBotIdV1,
+        botId: generalId,
       );
       controller.ready = true;
       await tester.pumpWidget(
@@ -266,11 +284,11 @@ void main() {
       final harness = await shell(tester, size: const Size(360, 800));
       harness.api.features = {'web'};
       harness.api.directory.complete(
-        directoryOf([registration(generalBotIdV1, 'General')]),
+        directoryOf([registration(generalId, 'General')]),
       );
       await tester.pumpAndSettle();
       expect(find.widgetWithText(AppBar, 'General'), findsOneWidget);
-      expect(harness.store.values['selection.test-user'], generalBotIdV1);
+      expect(harness.store.values['selection.test-user'], generalId);
       expect(identifiedBy(StarterIds.suggestion('research')), findsOneWidget);
       expect(identifiedBy(StarterIds.suggestion('recurring')), findsNothing);
       // No create sheet and no tour stands between the person and General.
@@ -289,7 +307,7 @@ void main() {
       final harness = await shell(tester, saved: 'bot-one');
       harness.api.directory.complete(
         directoryOf([
-          registration(generalBotIdV1, 'General'),
+          registration(generalId, 'General'),
           registration('bot-one', 'Rosemary'),
         ]),
       );
@@ -305,7 +323,7 @@ void main() {
       (tester) async {
         final harness = await shell(tester, saved: 'deleted-bot');
         harness.api.directory.complete(
-          directoryOf([registration(generalBotIdV1, 'General')]),
+          directoryOf([registration(generalId, 'General')]),
         );
         await tester.pumpAndSettle();
         expect(find.widgetWithText(AppBar, 'General'), findsNothing);
@@ -328,7 +346,7 @@ void main() {
         expect(profile, findsOneWidget);
 
         harness.api.directory.complete(
-          directoryOf([registration(generalBotIdV1, 'General')]),
+          directoryOf([registration(generalId, 'General')]),
         );
         await tester.pumpAndSettle();
         expect(profile, findsOneWidget);
@@ -336,6 +354,25 @@ void main() {
         await close(tester, harness);
       },
     );
+
+    testWidgets('a Bot merely named General is not treated as General', (
+      tester,
+    ) async {
+      final harness = await shell(tester);
+      harness.api.general = null;
+      harness.api.features = {'web', 'routines'};
+      harness.api.directory.complete(
+        directoryOf([registration('general', 'General')]),
+      );
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'General'), findsNothing);
+      expect(harness.store.values['selection.test-user'], isNull);
+      await tester.tap(find.byKey(const ValueKey('bot-general')));
+      await tester.pumpAndSettle();
+      expect(find.text('What would you like to work on?'), findsOneWidget);
+      expect(identifiedBy(StarterIds.list), findsNothing);
+      await close(tester, harness);
+    });
 
     testWidgets('an account without General opens nothing by itself', (
       tester,

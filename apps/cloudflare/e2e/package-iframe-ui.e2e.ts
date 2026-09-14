@@ -96,34 +96,33 @@ async function installPackageRoutes(
         });
         return;
       }
-      // General opens by itself before the spec's own Bot exists. Its panel
-      // mounts no page, so every document counted below is the Framed Bot's.
-      const contributions =
-        botId === "general"
-          ? []
-          : [
-              {
-                packageId: PACKAGE_ID,
-                displayName: "Sydney Weather",
-                provenance: "Bot-authored",
-                pages: [
-                  {
-                    id: PAGE_ID,
-                    artifact: {
-                      contentHash: CONTENT_HASH,
-                      size: new TextEncoder().encode(artifactHtml()).byteLength,
-                      mediaType: "text/html",
-                      bundlerVersion: "frockbot-inline-html@1",
-                    },
-                    mounts: [
-                      { slot: "frockbot.bot-settings-sections", order: 20 },
-                    ],
+      // General opens by itself before the spec's own Bot exists. Only the
+      // Framed Bot mounts the page, so every document counted below is its.
+      const contributions = !botId.startsWith("framed-")
+        ? []
+        : [
+            {
+              packageId: PACKAGE_ID,
+              displayName: "Sydney Weather",
+              provenance: "Bot-authored",
+              pages: [
+                {
+                  id: PAGE_ID,
+                  artifact: {
+                    contentHash: CONTENT_HASH,
+                    size: new TextEncoder().encode(artifactHtml()).byteLength,
+                    mediaType: "text/html",
+                    bundlerVersion: "frockbot-inline-html@1",
                   },
-                ],
-                entries: [],
-                declaredTools: [TOOL_NAME],
-              },
-            ];
+                  mounts: [
+                    { slot: "frockbot.bot-settings-sections", order: 20 },
+                  ],
+                },
+              ],
+              entries: [],
+              declaredTools: [TOOL_NAME],
+            },
+          ];
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({

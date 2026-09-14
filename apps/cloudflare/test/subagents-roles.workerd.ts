@@ -259,7 +259,7 @@ describe("subagent roles and the shared desktop", () => {
     const first = { userId, botId: `gui-bot-a-${suffix}` };
     const second = { userId, botId: `gui-bot-b-${suffix}` };
     await provisionBot(first);
-    await provisionSiblingBot(second, 1);
+    await provisionSiblingBot(second);
 
     const dispatched = await dispatch(first, "dispatch-gui-1", {
       description: "Drive the desktop",

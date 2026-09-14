@@ -15,9 +15,19 @@ import 'package:flutter/material.dart';
 import '../client/transport.dart';
 import 'semantics.dart';
 
-/// The Bot the account's authority provisioned. Clients suffix every id they
-/// mint, so a bare `general` is only ever that one (`GENERAL_BOT_ID_V1`).
-const generalBotIdV1 = 'general';
+/// Which Bot the account's authority provisioned as General, while it still
+/// exists. General's id is minted like any other Bot's, so this answer is the
+/// only thing that says which Bot it is. A deployment or a read that cannot
+/// say is null, and then no Bot is treated as General.
+Future<String?> readGeneralBotIdV1(NativeApi api) async {
+  try {
+    final answer = await api.request('/api/bots/bootstrap');
+    final id = (answer! as Map)['generalBotId'];
+    return id is String ? id : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 class StarterSuggestionV1 {
   final String id;

@@ -24,6 +24,7 @@ import {
   provisionThroughGateway,
   readStoredRunWithEventsV1,
   useApplicationArtifact,
+  flockRevision,
 } from "./fixtures.ts";
 
 useApplicationArtifact();
@@ -65,7 +66,7 @@ describe("a Skill in the User's shared instruction root", () => {
       schemaVersion: 1,
       type: "bot/create",
       commandId: `create-${reader}`,
-      expectedRevision: 1,
+      expectedRevision: await flockRevision(userId),
       botId: reader,
       name: "Reader",
     });

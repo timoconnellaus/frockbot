@@ -14,6 +14,7 @@ import {
   freshUserId,
   postAsUser,
   useApplicationArtifact,
+  flockRevision,
 } from "./fixtures.ts";
 
 useApplicationArtifact();
@@ -69,7 +70,7 @@ describe("legacy model account migration through the gateway", () => {
       schemaVersion: 1,
       type: "bot/create",
       commandId: "create-legacy-primary",
-      expectedRevision: 0,
+      expectedRevision: await flockRevision(userId),
       botId,
       name: "Primary",
     });

@@ -554,8 +554,27 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    */
   private identity: string | undefined;
 
+  /**
+   * Whether this instance has already given the account General, or found it
+   * given. Separate from `identity`, which an alarm restores with no request
+   * behind it.
+   */
+  private bootstrapped = false;
+
   private async assertUserIdentity(userId: string): Promise<string> {
-    if (this.identity === userId) return userId;
+    if (this.identity !== userId) await this.proveUserIdentity(userId);
+    if (!this.bootstrapped) {
+      // Every admitted request reaches its User through here, so this is where
+      // an account is given General: before the first thing it reads, and not
+      // only when a client happens to read the directory. The memo makes it
+      // once per instance, and the Flock's marker makes it once ever.
+      await (await this.flockContribution()).provisionGeneral();
+      this.bootstrapped = true;
+    }
+    return userId;
+  }
+
+  private async proveUserIdentity(userId: string): Promise<void> {
     const namespace = this.env.USER_CONFIGURATIONS;
     if (!namespace) {
       throw new Error(
@@ -577,7 +596,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       await this.ctx.storage.put(USER_IDENTITY_KEY, userId);
     }
     this.identity = userId;
-    return userId;
   }
 
   /**
@@ -1787,20 +1805,14 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
 
   async listBots(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    return (await this.provisionedFlock(request.userId as string)).listBots();
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).listBots();
   }
 
-  /**
-   * The Flock, after the account has been given General. Every directory read
-   * a client makes comes through here, so the first one after admission
-   * already lists General; `provisionGeneral` is a marker read every time
-   * after that.
-   */
-  private async provisionedFlock(userId: string) {
-    await this.assertFlockIdentity(userId);
-    const flock = await this.flockContribution();
-    await flock.provisionGeneral();
-    return flock;
+  async readFlockBootstrap(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).readBootstrap();
   }
 
   async createBot(input: unknown) {
@@ -1817,9 +1829,8 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
 
   async listBotLifecycles(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    return (
-      await this.provisionedFlock(request.userId as string)
-    ).listBotLifecycles();
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.flockContribution()).listBotLifecycles();
   }
 
   async executeBotLifecycle(input: unknown) {

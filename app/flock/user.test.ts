@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { createFlockUserBackendContribution } from "./user.js";
 import {
   FlockConflictError,
-  GENERAL_BOT_ID_V1,
   randomSheepRecipeV1,
   type BotDirectoryViewV1,
 } from "./shared.js";
@@ -666,7 +665,9 @@ describe("Flock User contribution", () => {
   });
 
   describe("General", () => {
-    test("a new account gets exactly one General, however many reads race", async () => {
+    const GENERAL_ID = /^general-[0-9a-f]{16}$/;
+
+    test("a new account gets exactly one General, however many calls race", async () => {
       const storage = new TransactionalStorage();
       const contribution = flock(storage);
       await Promise.all(
@@ -678,18 +679,23 @@ describe("Flock User contribution", () => {
         revision: 1,
         bots: [
           {
-            botId: GENERAL_BOT_ID_V1,
             initialName: "General",
             registeredAt: "2026-09-14T00:00:00.000Z",
           },
         ],
+      });
+      const generalBotId = directory.bots[0]!.botId;
+      expect(generalBotId).toMatch(GENERAL_ID);
+      expect(await contribution.readBootstrap()).toEqual({
+        schemaVersion: 1,
+        generalBotId,
       });
       expect(await contribution.listBotLifecycles()).toEqual({
         schemaVersion: 1,
         lifecycles: [
           {
             schemaVersion: 1,
-            botId: GENERAL_BOT_ID_V1,
+            botId: generalBotId,
             status: "active",
             revision: 0,
           },
@@ -697,7 +703,7 @@ describe("Flock User contribution", () => {
       });
     });
 
-    test("an interrupted provisioning leaves nothing, and the next read finishes it", async () => {
+    test("an interrupted provisioning leaves nothing, and the next call finishes it", async () => {
       const storage = new TransactionalStorage();
       const contribution = flock(storage);
       storage.failNextPut = true;
@@ -705,60 +711,83 @@ describe("Flock User contribution", () => {
         "evicted mid-transaction",
       );
       expect([...storage.values.keys()]).toEqual([]);
+      expect(await contribution.readBootstrap()).toEqual({
+        schemaVersion: 1,
+        generalBotId: null,
+      });
       await contribution.provisionGeneral();
-      expect((await contribution.listBots()).bots).toMatchObject([
-        { botId: GENERAL_BOT_ID_V1 },
-      ]);
-      expect(storage.values.has("flock:bootstrap:v1")).toBe(true);
+      const bots = (await contribution.listBots()).bots;
+      expect(bots).toHaveLength(1);
+      expect((await contribution.readBootstrap()).generalBotId).toBe(
+        bots[0]!.botId,
+      );
     });
 
-    test("an account that already owns Bots keeps them as they are", async () => {
+    test("an account that already owns Bots keeps them, and no Bot is taken for General", async () => {
       const storage = new TransactionalStorage();
       const contribution = flock(storage);
-      await contribution.createBot("user-1", command());
+      // Named General and even carrying the old fixed id: still the User's.
+      await contribution.createBot("user-1", {
+        ...command(),
+        botId: "general",
+        name: "General",
+      });
       const before = await contribution.listBots();
       await contribution.provisionGeneral();
       expect(await contribution.listBots()).toEqual(before);
+      expect(await contribution.readBootstrap()).toEqual({
+        schemaVersion: 1,
+        generalBotId: null,
+      });
       // Deleting every Bot later is not a new account.
       await contribution.executeLifecycle("user-1", {
         schemaVersion: 1,
         type: "bot/delete",
-        commandId: "delete-alpha",
-        botId: "alpha",
+        commandId: "delete-general-named",
+        botId: "general",
       });
       await contribution.provisionGeneral();
       expect((await contribution.listBots()).bots).toEqual([]);
     });
 
-    test("an existing account with no Bots is backfilled once", async () => {
+    test("an existing account with no Bots is backfilled once, under a fresh id", async () => {
       const storage = new TransactionalStorage();
-      // A directory from before General existed, emptied by its owner.
+      // A directory emptied by its owner, whose last Bot had the id `general`.
       await storage.put("flock:directory:v1", {
         schemaVersion: 1,
         revision: 4,
         bots: [],
       });
+      await storage.put("flock:deleted:general", {
+        schemaVersion: 1,
+        botId: "general",
+      });
       const contribution = flock(storage);
       await contribution.provisionGeneral();
       await contribution.provisionGeneral();
-      expect(await contribution.listBots()).toMatchObject({
-        revision: 5,
-        bots: [{ botId: GENERAL_BOT_ID_V1 }],
-      });
+      const directory = await contribution.listBots();
+      expect(directory.revision).toBe(5);
+      expect(directory.bots).toHaveLength(1);
+      expect(directory.bots[0]!.botId).toMatch(GENERAL_ID);
     });
 
     test("deleting General does not bring it back", async () => {
       const storage = new TransactionalStorage();
       const contribution = flock(storage);
       await contribution.provisionGeneral();
+      const { generalBotId } = await contribution.readBootstrap();
       await contribution.executeLifecycle("user-1", {
         schemaVersion: 1,
         type: "bot/delete",
         commandId: "delete-general",
-        botId: GENERAL_BOT_ID_V1,
+        botId: generalBotId!,
       });
       await contribution.provisionGeneral();
       expect((await contribution.listBots()).bots).toEqual([]);
+      expect(await contribution.readBootstrap()).toEqual({
+        schemaVersion: 1,
+        generalBotId: null,
+      });
       // The ordinary create still works for the next Bot.
       await expect(
         contribution.createBot("user-1", command("create-after", 2)),

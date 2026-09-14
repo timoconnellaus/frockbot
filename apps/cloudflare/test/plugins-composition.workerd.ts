@@ -633,7 +633,7 @@ describe("the User-owned Composition", () => {
     const first = { userId, botId: "bot-1" };
     const second = { userId, botId: "bot-2" };
     await provisionBot(first);
-    await provisionSiblingBot(second, 1);
+    await provisionSiblingBot(second);
 
     // The bootstrap: one generation, the same for both Bots.
     await turn(first, "run-1");
@@ -701,7 +701,7 @@ describe("the User-owned Composition", () => {
     const first = { userId, botId: "bot-1" };
     const second = { userId, botId: "bot-2" };
     await provisionBot(first);
-    await provisionSiblingBot(second, 1);
+    await provisionSiblingBot(second);
     await turn(first, "run-1");
 
     let parent = (
@@ -868,7 +868,7 @@ describe("the User-owned Composition", () => {
     ).toEqual({ status: "conflict", currentRevision: 1 });
     // The other Bot of the same User is untouched.
     const sibling = { userId, botId: "bot-2" };
-    await provisionSiblingBot(sibling, 1);
+    await provisionSiblingBot(sibling);
     expect(
       await bot(sibling).readPluginEnablement({ schemaVersion: 1, ...sibling }),
     ).toMatchObject({ revision: 0, enabled: {} });
@@ -931,7 +931,7 @@ describe("the User-owned Composition", () => {
     ).toMatchObject({ status: "rejected" });
     // The other Bot of the same User is untouched.
     const sibling = { userId, botId: "bot-2" };
-    await provisionSiblingBot(sibling, 1);
+    await provisionSiblingBot(sibling);
     expect(
       await bot(sibling).readPluginEnablement({ schemaVersion: 1, ...sibling }),
     ).toMatchObject({ revision: 0, enabled: {} });
@@ -1028,7 +1028,7 @@ describe("the User-owned Composition", () => {
     const identity = { userId, botId: "bot-1" };
     const second = { userId, botId: "bot-2" };
     await provisionBot(identity);
-    await provisionSiblingBot(second, 1);
+    await provisionSiblingBot(second);
     await turn(identity, "run-0");
     const bootstrap = (
       await user(userId).readComposition({ schemaVersion: 1, userId })
@@ -1223,7 +1223,7 @@ describe("the User-owned Composition", () => {
     const author = { userId, botId: "bot-1" };
     const sibling = { userId, botId: "bot-2" };
     await provisionBot(author);
-    await provisionSiblingBot(sibling, 1);
+    await provisionSiblingBot(sibling);
     await features(userId).setFeatures({
       schemaVersion: 1,
       userId,

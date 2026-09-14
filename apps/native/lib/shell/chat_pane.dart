@@ -411,9 +411,23 @@ class _ConversationViewState extends State<ConversationView>
     _reportConnection();
   }
 
+  @override
+  void didUpdateWidget(ConversationView old) {
+    super.didUpdateWidget(old);
+    if (old.general == widget.general) return;
+    if (widget.general) {
+      starters = startersForV1(null);
+      unawaited(_loadStarters());
+    } else {
+      starters = const [];
+    }
+  }
+
   Future<void> _loadStarters() async {
     final features = await readBotFeaturesV1(widget.api, widget.botId);
-    if (mounted) setState(() => starters = startersForV1(features));
+    if (mounted && widget.general) {
+      setState(() => starters = startersForV1(features));
+    }
   }
 
   void _reportConnection() => widget.onConnectionChanged?.call(

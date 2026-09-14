@@ -3,7 +3,6 @@ import {
   FLOCK_DIRECTORY_LIMIT,
   FlockConflictError,
   FlockDecodeError,
-  GENERAL_BOT_ID_V1,
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleViewV1,
@@ -21,6 +20,7 @@ import {
   type BotLifecycleViewV1,
   type BotRegistrationV1,
   type CreateBotCommandV1,
+  type FlockBootstrapViewV1,
   type FlockReceiptV1,
 } from "./shared.js";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
@@ -44,12 +44,17 @@ const LIFECYCLE_OPERATION_PREFIX = "flock:lifecycle-operation:";
  */
 const DELETED_PREFIX = "flock:deleted:";
 /**
- * Present once this account has been given its first Bot, or has been found
- * already owning Bots. It is written in the same transaction as General's
+ * Present once this account has been given General, or has been found already
+ * owning Bots. It is written in the same transaction as General's
  * registration, so an interrupted provisioning leaves neither, and because it
- * outlives General, deleting General never brings it back.
+ * outlives General, deleting General never brings it back. It names General's
+ * id, which is the only thing that says which Bot General is.
  */
 const BOOTSTRAP_KEY = "flock:bootstrap:v1";
+interface StoredBootstrapV1 {
+  schemaVersion: 1;
+  generalBotId?: string;
+}
 const GENERAL_DESCRIPTION =
   "A general-purpose assistant. Researches, plans and follows work through, and suggests a specialist Bot when a job deserves one of its own.";
 export interface FlockUserTransaction {
@@ -262,12 +267,17 @@ export class FlockUserBackendContribution {
   /**
    * Gives an account with no Bots its General Bot, once.
    *
-   * The application calls this before it serves the directory, so the first
-   * read a signed-in client makes already finds General, and an account that
-   * owned no Bots before this existed is backfilled by the same read. An
-   * account that already owns Bots only gets the marker: its Bots are neither
-   * renamed nor joined by a second one. Repeating the call, concurrently or
-   * after an eviction, is a read of the marker.
+   * The application calls this when the account's identity is first proven to
+   * this object, which is the first thing any admitted request does, so a new
+   * account owns General before its first directory read, and an account that
+   * owned no Bots before this existed is backfilled the same way. An account
+   * that already owns Bots only gets the marker: its Bots are neither renamed
+   * nor joined by a second one. Repeating the call, concurrently or after an
+   * eviction, is a read of the marker.
+   *
+   * General's id is minted here rather than fixed. A Bot Durable Object keeps
+   * a tombstone for ever once its Bot is deleted, so a reused id could name an
+   * object that refuses to exist again.
    */
   async provisionGeneral(): Promise<void> {
     if ((await this.host.storage.get<unknown>(BOOTSTRAP_KEY)) !== undefined)
@@ -279,20 +289,29 @@ export class FlockUserBackendContribution {
         currentValue === undefined
           ? initialDirectory()
           : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(currentValue));
-      const provisioned = current.bots.length === 0;
-      if (provisioned) {
+      const marker: StoredBootstrapV1 = { schemaVersion: 1 };
+      if (current.bots.length === 0) {
+        marker.generalBotId = `general-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
         await this.register(storage, current, {
-          botId: GENERAL_BOT_ID_V1,
+          botId: marker.generalBotId,
           name: "General",
           description: GENERAL_DESCRIPTION,
         });
       }
-      await storage.put(BOOTSTRAP_KEY, {
-        schemaVersion: 1,
-        at: (this.host.now?.() ?? new Date()).toISOString(),
-        general: provisioned,
-      });
+      await storage.put(BOOTSTRAP_KEY, marker);
     });
+  }
+
+  /** General's id while it is still registered, for the client to open it. */
+  async readBootstrap(): Promise<FlockBootstrapViewV1> {
+    const marker =
+      await this.host.storage.get<StoredBootstrapV1>(BOOTSTRAP_KEY);
+    const botId = marker?.generalBotId;
+    return {
+      schemaVersion: 1,
+      generalBotId:
+        botId !== undefined && (await this.hasBot(botId)) ? botId : null,
+    };
   }
 
   /**

@@ -21,6 +21,8 @@ import {
   type BotLifecycleCommandV1,
   decodeBotMembershipViewV1,
   decodeDirectoryViewV1,
+  decodeFlockBootstrapViewV1,
+  type FlockBootstrapViewV1,
   decodeFlockReceiptV1,
   decodeSheepIdentityViewV1,
   BotNotFoundError,
@@ -455,7 +457,12 @@ interface BotStateRpc extends BotConfigurationBinding {
  * The User Durable Object's RPC surface as this Worker uses it: the binding the
  * gateway shares, plus this adapter's own seams.
  */
-type UserConfigurationRpc = UserConfigurationBinding;
+interface UserConfigurationRpc extends UserConfigurationBinding {
+  readFlockBootstrap(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<FlockBootstrapViewV1>;
+}
 
 type RpcBoundary<T> = {
   [Key in keyof T]: T[Key] extends (...args: never[]) => infer Result
@@ -609,6 +616,7 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
   return {
     listBots: (request) => rpc.listBots(request),
     listBotLifecycles: (request) => rpc.listBotLifecycles(request),
+    readFlockBootstrap: (request) => rpc.readFlockBootstrap(request),
     executeBotLifecycle: (request) => rpc.executeBotLifecycle(request),
     createBot: (request) => rpc.createBot(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
@@ -2004,6 +2012,15 @@ const createGatewayBackendContributions = (env: Env) =>
       decodeDirectoryViewV1(
         rpcJsonSnapshot(
           await userConfigurationStub(env, userId).listBots({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    readFlockBootstrap: async (userId: string) =>
+      decodeFlockBootstrapViewV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).readFlockBootstrap({
             schemaVersion: 1,
             userId,
           }),

@@ -136,7 +136,8 @@ describe("Bot self-management through the gateway", () => {
       revision: number;
       bots: Array<{ botId: string }>;
     };
-    expect(before.bots).toHaveLength(1);
+    // The Bot provisioned here, and the account's General.
+    expect(before.bots).toHaveLength(2);
 
     const created = await turnCalling(
       userId,
@@ -156,7 +157,7 @@ describe("Bot self-management through the gateway", () => {
         createdBy?: { kind: string; botId: string };
       }>;
     };
-    expect(after.bots).toHaveLength(2);
+    expect(after.bots).toHaveLength(3);
     const budget = after.bots.find((bot) => bot.initialName === "Budget")!;
     expect(budget.initialDescription).toBe("Watches the money.");
     // "Self-modification never widens authority": the new Bot gets no model of

@@ -50,7 +50,7 @@ describe("Memory in Workerd", () => {
     const learner = { userId, botId: `memory-bot-a-${suffix}` };
     const reader = { userId, botId: `memory-bot-b-${suffix}` };
     await provisionBot(learner);
-    await provisionSiblingBot(reader, 1);
+    await provisionSiblingBot(reader);
 
     const learnerStub = bot(`memory-a-${suffix}`);
     const written = await learnerStub.memoryWrite({

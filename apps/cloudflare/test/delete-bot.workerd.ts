@@ -184,7 +184,7 @@ describe("deleting a Bot in Workerd", () => {
       botId: `keep-bot-${suffix}`,
     };
     await provisionBot(identity);
-    await provisionSiblingBot(sibling, 1);
+    await provisionSiblingBot(sibling);
     const envelope = identity;
     const stub = bot(identity.userId, identity.botId);
 
@@ -256,18 +256,30 @@ describe("deleting a Bot in Workerd", () => {
 
     // 3: the sidebar, the lifecycle list and the unread fan-out all read the
     // User's directory, and the Bot is out of it.
+    const general = (
+      await user(identity.userId).readFlockBootstrap({
+        schemaVersion: 1,
+        userId: identity.userId,
+      })
+    ).generalBotId;
+    expect(general).not.toBeNull();
     const listed = await userRpc(identity.userId).listBots({
       schemaVersion: 1,
       userId: identity.userId,
     });
-    expect(listed.bots.map((entry) => entry.botId)).toEqual([sibling.botId]);
+    // The account's General stays too; only the deleted Bot leaves.
+    expect(
+      listed.bots.map((entry) => entry.botId).filter((id) => id !== general),
+    ).toEqual([sibling.botId]);
     const lifecycles = await userRpc(identity.userId).listBotLifecycles({
       schemaVersion: 1,
       userId: identity.userId,
     });
-    expect(lifecycles.lifecycles.map((entry) => entry.botId)).toEqual([
-      sibling.botId,
-    ]);
+    expect(
+      lifecycles.lifecycles
+        .map((entry) => entry.botId)
+        .filter((id) => id !== general),
+    ).toEqual([sibling.botId]);
 
     // 4: a Turn, and the unread read the sidebar would do, are both refused.
     //

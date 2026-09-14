@@ -13,7 +13,7 @@ A persistent, configured conversational actor with its own identity, sessions, r
 _Avoid_: Agent, assistant instance
 
 **General**:
-The Bot every User starts with. The User's Durable Object provisions it, once, under the reserved id `general` the first time the account's Bot directory is read, and records that it did so: a User who already owned Bots is not given one, and deleting General does not bring it back. Its empty conversation offers starter suggestions that only fill the composer.
+The Bot every User starts with. The User's Durable Object provisions it, once, the first time an admitted request proves the account's identity, under a freshly minted id, and records that it did so. The record, not the name or the id, is what says which Bot is General: a User who already owned Bots is not given one, and deleting General does not bring it back. Its empty conversation offers starter suggestions that only fill the composer.
 _Avoid_: Default Bot, starter Bot
 
 **Agent**:

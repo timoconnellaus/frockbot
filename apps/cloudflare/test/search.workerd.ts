@@ -85,7 +85,7 @@ describe("the transcript index in Workerd", () => {
     const first = { userId, botId: `search-bot-a-${suffix}` };
     const second = { userId, botId: `search-bot-b-${suffix}` };
     await provisionBot(first);
-    await provisionSiblingBot(second, 1);
+    await provisionSiblingBot(second);
 
     await settleTurn(first, "run-1", "How is the gym build in Wollongong?");
     await settleTurn(second, "run-2", "Remind me about the Wollongong roster.");
