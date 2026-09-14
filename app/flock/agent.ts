@@ -170,11 +170,12 @@ const BOT_UPDATE_SCHEMA = {
     hidden_from_sidebar: {
       type: "boolean",
       description:
-        "Hide yourself from the default sidebar list. You stay reachable and nothing is archived or deleted.",
+        "Hide yourself from the default sidebar list. You stay reachable and nothing is archived or deleted. Hiding also turns notify_on_updates off, and showing yourself again leaves it off.",
     },
     notify_on_updates: {
       type: "boolean",
-      description: "Whether your User is notified when you have news.",
+      description:
+        "Whether your User is notified when you have news. Cannot be turned on while you are hidden from the sidebar.",
     },
   },
   additionalProperties: false,
@@ -441,6 +442,13 @@ export function createBotUpdateTool(
           decoded.profile,
           "bot",
         );
+        // Refused before anything is written, so the call is not half applied.
+        if (target.hiddenFromSidebar === true && decoded.notifyOnUpdates) {
+          return refusal(
+            "bot_update was refused: a Bot hidden from the sidebar can't have notifications on. Pass hidden_from_sidebar: false to turn them back on.",
+          );
+        }
+        const wasNotifying = settings.notifications.enabled;
         if (!sameProfile(settings.profile, target)) {
           const renamed = target.name !== settings.profile.name;
           settings = await applySelfProfileV1(host, settings, decoded.profile);
@@ -448,6 +456,10 @@ export function createBotUpdateTool(
             if (decoded.profile[patchKey] === undefined) continue;
             if (patchKey === "name" && !renamed) continue;
             changed.push(toolKey);
+          }
+          // Hiding mutes in the same write; the report says so.
+          if (wasNotifying && !settings.notifications.enabled) {
+            changed.push("notify_on_updates");
           }
         }
         if (

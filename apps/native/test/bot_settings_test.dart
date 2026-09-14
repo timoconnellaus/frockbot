@@ -16,6 +16,8 @@ Map<String, Object?> botSettings({
   String? pinnedAt,
   String namedBy = 'user',
   Object? model,
+  bool hidden = false,
+  bool notifications = true,
 }) => {
   'schemaVersion': 1,
   'botId': 'alpha',
@@ -25,8 +27,9 @@ Map<String, Object?> botSettings({
     'description': 'Reads the news',
     'namedBy': namedBy,
     'pinnedAt': ?pinnedAt,
+    if (hidden) 'hiddenFromSidebar': true,
   },
-  'notifications': {'enabled': true},
+  'notifications': {'enabled': notifications},
   'packageValues': {
     if (model != null) 'custom-models': {'model': model},
   },
@@ -490,6 +493,171 @@ void main() {
     await settle(tester);
     expect((commands.first['profile']! as Map)['name'], 'Named');
     state.dispose();
+  });
+
+  group('hiding a Bot mutes it', () {
+    SwitchListTile notificationsSwitch(WidgetTester tester) =>
+        tester.widget<SwitchListTile>(
+          find.widgetWithText(SwitchListTile, 'Notifications'),
+        );
+
+    Future<void> tapHidden(WidgetTester tester) async {
+      if (find.text('Hidden from sidebar').evaluate().isEmpty) {
+        await tester.tap(find.text('Advanced'));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('Hidden from sidebar'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Cancel leaves both settings where they were', (tester) async {
+      final store = MemoryStore();
+      final commands = <Map<String, Object?>>[];
+      final predicted = <SidebarProfile>[];
+      final state = BotSettingsController(api(store, commands), 'alpha');
+      await open(tester, state, onPredict: predicted.add);
+      await tapHidden(tester);
+      expect(byIdentifier(SettingsIds.botHideConfirm), findsOneWidget);
+      expect(
+        find.textContaining('also turns off its notifications'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(byIdentifier(SettingsIds.botHideConfirm), findsNothing);
+      expect(state.hidden, isFalse);
+      expect(state.notifications, isTrue);
+      expect(notificationsSwitch(tester).value, isTrue);
+      expect(commands, isEmpty);
+      expect(predicted, isEmpty);
+      state.dispose();
+    });
+
+    testWidgets('Confirm draws hidden and muted at once, in one command', (
+      tester,
+    ) async {
+      final store = MemoryStore();
+      final commands = <Map<String, Object?>>[];
+      final predicted = <SidebarProfile>[];
+      final gate = Completer<void>();
+      final state = BotSettingsController(
+        SettingsApi(store, (path, body) async {
+          if (body != null) {
+            commands.add(Map<String, Object?>.from(body as Map));
+            await gate.future;
+            return {
+              'schemaVersion': 1,
+              'commandId': body['commandId'],
+              'revision': 4,
+              'status': 'applied',
+            };
+          }
+          if (path.startsWith('/api/settings')) return account();
+          return botSettings();
+        }),
+        'alpha',
+      );
+      await open(tester, state, onPredict: predicted.add);
+      await tapHidden(tester);
+      await tester.tap(find.text('Hide and turn off'));
+      await tester.pump();
+      await tester.pump();
+      // Still on the wire: the sidebar and both switches already show it.
+      expect(predicted.single.hiddenFromSidebar, isTrue);
+      expect(state.hidden, isTrue);
+      expect(notificationsSwitch(tester).value, isFalse);
+      expect(notificationsSwitch(tester).onChanged, isNull);
+      expect(
+        find.textContaining('Off while this Bot is hidden'),
+        findsOneWidget,
+      );
+      gate.complete();
+      await tester.pumpAndSettle();
+      // The authority mutes in the hiding write, so nothing else is sent.
+      expect(commands.map((command) => command['type']), ['bot/set-profile']);
+      expect((commands.single['profile']! as Map)['hiddenFromSidebar'], true);
+      expect(find.text('Saved.'), findsOneWidget);
+      await state.save();
+      expect(commands, hasLength(1));
+      state.dispose();
+    });
+
+    testWidgets('a Bot already muted hides without a warning', (tester) async {
+      final store = MemoryStore();
+      final commands = <Map<String, Object?>>[];
+      final state = BotSettingsController(
+        api(store, commands, bot: botSettings(notifications: false)),
+        'alpha',
+      );
+      await open(tester, state);
+      await tapHidden(tester);
+      expect(byIdentifier(SettingsIds.botHideConfirm), findsNothing);
+      expect(commands.map((command) => command['type']), ['bot/set-profile']);
+      expect(state.hidden, isTrue);
+      state.dispose();
+    });
+
+    testWidgets('a refused hide puts both settings back', (tester) async {
+      final store = MemoryStore();
+      final predicted = <SidebarProfile>[];
+      final state = BotSettingsController(
+        SettingsApi(store, (path, body) async {
+          if (body != null) {
+            return {
+              'schemaVersion': 1,
+              'commandId': (body as Map)['commandId'],
+              'status': 'rejected',
+              'failure': 'Not yours to hide.',
+            };
+          }
+          if (path.startsWith('/api/settings')) return account();
+          return botSettings();
+        }),
+        'alpha',
+      );
+      await open(tester, state, onPredict: predicted.add);
+      await tapHidden(tester);
+      await tester.tap(find.text('Hide and turn off'));
+      await tester.pumpAndSettle();
+      expect(predicted.map((profile) => profile.hiddenFromSidebar), [
+        true,
+        false,
+      ]);
+      expect(state.hidden, isFalse);
+      expect(state.notifications, isTrue);
+      expect(notificationsSwitch(tester).value, isTrue);
+      expect(notificationsSwitch(tester).onChanged, isNotNull);
+      expect(find.text('Not yours to hide.'), findsOneWidget);
+      state.dispose();
+    });
+
+    testWidgets('showing the Bot again leaves notifications off until asked', (
+      tester,
+    ) async {
+      final store = MemoryStore();
+      final commands = <Map<String, Object?>>[];
+      final state = BotSettingsController(
+        api(
+          store,
+          commands,
+          bot: botSettings(hidden: true, notifications: false),
+        ),
+        'alpha',
+      );
+      await open(tester, state);
+      expect(notificationsSwitch(tester).onChanged, isNull);
+      await tapHidden(tester);
+      expect(byIdentifier(SettingsIds.botHideConfirm), findsNothing);
+      expect(commands.map((command) => command['type']), ['bot/set-profile']);
+      expect(state.notifications, isFalse);
+      expect(notificationsSwitch(tester).value, isFalse);
+      expect(notificationsSwitch(tester).onChanged, isNotNull);
+      await tester.tap(find.text('Notifications'));
+      await tester.pumpAndSettle();
+      expect(commands.last['type'], 'bot/update-notifications');
+      expect(commands.last['notifications'], {'enabled': true});
+      state.dispose();
+    });
   });
 
   testWidgets('without the Package there is no model row to save', (

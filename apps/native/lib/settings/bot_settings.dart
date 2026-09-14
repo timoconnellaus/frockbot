@@ -179,6 +179,22 @@ class BotSettingsController extends ChangeNotifier {
     _changed();
   }
 
+  /// Hiding a Bot mutes it: the authority turns notifications off in the same
+  /// write, so the switch is drawn off now and no second command is sent.
+  /// Showing it again leaves notifications where hiding put them.
+  void setHidden(bool next) {
+    hidden = next;
+    if (next) notifications = false;
+  }
+
+  /// A hide the authority has not accepted goes back to what it holds, rather
+  /// than leaving the switches drawn hidden and muted over a Bot still listed.
+  void _restoreUnacceptedHide() {
+    if (!hidden || _saved['hiddenFromSidebar'] == true) return;
+    hidden = false;
+    notifications = _savedNotifications;
+  }
+
   /// Up to three commands, each idempotent by its own id: the profile, the
   /// notification policy, and the Bot's model override. Only the ones whose
   /// values actually changed are sent, so flipping the pin switch is one
@@ -211,6 +227,7 @@ class BotSettingsController extends ChangeNotifier {
           'profile': profile,
         });
         _saved = profile;
+        if (profile['hiddenFromSidebar'] == true) _savedNotifications = false;
       }
       // The instant the sidebar orders by is now the one that was written, so
       // the next save keeps it rather than minting a newer one.
@@ -240,9 +257,11 @@ class BotSettingsController extends ChangeNotifier {
       return true;
     } on RequestFailure catch (failure) {
       message = failure.message;
+      _restoreUnacceptedHide();
       return false;
     } catch (_) {
       message = 'Couldn’t save these settings. Try again.';
+      _restoreUnacceptedHide();
       return false;
     } finally {
       saving = false;
@@ -470,6 +489,8 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     required String detail,
     required bool value,
     required void Function(bool) onChanged,
+    bool enabled = true,
+    Future<bool> Function(bool next)? confirm,
   }) => identified(
     id,
     Padding(
@@ -480,10 +501,44 @@ class _BotSettingsViewState extends State<BotSettingsView> {
         title: Text(title),
         subtitle: Text(detail),
         value: value,
-        onChanged: (next) => _chose(() => onChanged(next)),
+        onChanged: enabled
+            ? (next) async {
+                if (confirm != null && !await confirm(next)) return;
+                if (mounted) _chose(() => onChanged(next));
+              }
+            : null,
       ),
     ),
   );
+
+  /// Hiding a Bot that notifies turns its notifications off, so the person is
+  /// told before it happens. A Bot already muted has nothing to warn about.
+  Future<bool> _confirmHide(bool next) async {
+    if (!next || !state.notifications) return true;
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialog) => identified(
+            SettingsIds.botHideConfirm,
+            AlertDialog(
+              title: const Text('Hide this Bot?'),
+              content: const Text(
+                'Hiding this Bot from the sidebar also turns off its notifications. Its new messages still show as unread.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialog, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialog, true),
+                  child: const Text('Hide and turn off'),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -595,8 +650,11 @@ class _BotSettingsViewState extends State<BotSettingsView> {
               _switch(
                 id: SettingsIds.botNotifications,
                 title: 'Notifications',
-                detail: 'Get notified when this Bot finishes or needs input',
-                value: state.notifications,
+                detail: state.hidden
+                    ? 'Off while this Bot is hidden from the sidebar. Show it in the sidebar to turn notifications on.'
+                    : 'Get notified when this Bot finishes or needs input',
+                value: state.notifications && !state.hidden,
+                enabled: !state.hidden,
                 onChanged: (next) => state.notifications = next,
               ),
               if (state.modelAvailable) _model(context),
@@ -629,9 +687,10 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     _switch(
                       id: SettingsIds.botHidden,
                       title: 'Hidden from sidebar',
-                      detail: 'Keeps this Bot out of the list without archiving it.',
+                      detail: 'Keeps this Bot out of the list without archiving it, and turns off its notifications.',
                       value: state.hidden,
-                      onChanged: (next) => state.hidden = next,
+                      confirm: _confirmHide,
+                      onChanged: state.setHidden,
                     ),
                     identified(
                       SettingsIds.botMembers,

@@ -14,6 +14,8 @@ A Routine whose Turn broke is told the same way: the firing commits one ordinary
 
 Because only a Routine Turn that contributed a message belongs in the transcript, that fact is recorded beside the message it committed. The transcript scan filters a silent firing off its run record and that marker, without opening its journal, and reads that same marker for the message a broken firing's journal cannot carry.
 
+A Bot hidden from the sidebar is muted. The Bot's configuration transaction enforces it for every writer — the settings surface, another client, or the Bot's own `bot_update`: the write that hides a Bot turns `notifications.enabled` off with it, and turning notifications on while the Bot is hidden is refused with a stored `rejected` receipt that moves no revision. Showing the Bot again leaves notifications off until the User turns them on. Hiding changes alert eligibility only; the Bot's messages still count unread and roll into the sidebar's "Show N hidden" entry. On the native settings surface, hiding a Bot that notifies asks for confirmation first, and confirming draws both switches at once and sends a single `bot/set-profile`; while hidden, the Notifications switch is disabled and says why.
+
 A short-lived device presence record can defer a push while another device is reading. Only a durable read receipt can discard the alert. If presence becomes stale without a read, the Bot's durable outbox retries delivery. The outbox shares the Bot's alarm and also drains immediately after messages and read commands. Alarm retry can take up to roughly 30 seconds after a stale presence lease.
 
 Each User holds a bounded device registry. Tokens rotate under a stable installation ID; logout unregisters the device and clears local notification state. Read signals have a 24-hour delivery lifetime, and app resume reconciles read state again. Push messages carry stable message cursors; Android ignores duplicates and already-read messages and does not re-alert for an older out-of-order message.
@@ -28,7 +30,7 @@ The authenticated `/api/push/device` endpoint registers tokens, renews focused-v
 
 ## Release verification
 
-The one-time, repeatable `notification-state-cleanup.ts` cleanup removes disposable old Turn-based unread state and pending notification projections when each Bot is loaded. It retains conversations and settings. A release must visit the unread directory to load existing Bots and verify a fresh conversation before declaring the change ready.
+The one-time, repeatable `notification-state-cleanup.ts` cleanup removes disposable old Turn-based unread state and pending notification projections when each Bot is loaded. It retains conversations and settings. The one-time `hidden-bot-notifications-cleanup.ts` cleanup, also run as each Bot is loaded, turns notifications off for a Bot that was hidden before hiding muted it, moving its settings revision. A release must visit the unread directory to load existing Bots and verify a fresh conversation before declaring the change ready.
 
 Android native Firebase changes require a full Shorebird release through `scripts/native-update.py release`, followed by publishing and `adb install -r`; they cannot ship as a Dart-only patch. Deploy the backend before installing the message-cursor client.
 

@@ -663,7 +663,11 @@ the rows whose status the code moved:
   (`apps/native/lib/shell/sidebar.dart`). The
   durable field is `BotProfile.hiddenFromSidebar`, beside — not inside — the
   notification policy, because it describes how the Bot presents itself rather
-  than when it notifies. GrokBot's `notifyOnAgentUpdates` default is `true`;
+  than when it notifies. The two are still coupled one way, which GrokBot does
+  not do: hiding a Bot turns `notifications.enabled` off in the same
+  configuration write, a hidden Bot's notifications cannot be turned on, and
+  showing it again leaves them off (see [notifications](notifications.md)).
+  GrokBot's `notifyOnAgentUpdates` default is `true`;
   `initializeBotSettingsV1` now matches it, and the Create Bot gesture asks for
   browser notification permission without blocking or changing that durable
   intent when the browser refuses.

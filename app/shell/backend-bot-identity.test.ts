@@ -93,6 +93,152 @@ async function setProfile(
   });
 }
 
+function execute(
+  contribution: ReturnType<typeof contributionOn>,
+  command: Record<string, unknown>,
+) {
+  return executeConfiguration(contribution.state, {
+    schemaVersion: 1,
+    userId: identity.userId,
+    botId: identity.botId,
+    command: { schemaVersion: 1, botId: identity.botId, ...command },
+  });
+}
+
+async function stored(storage: MemoryStorage) {
+  return (await storage.get("bot-configuration")) as BotSettingsViewV1;
+}
+
+describe("a hidden Bot never alerts", () => {
+  test("hiding turns notifications off in the same write", async () => {
+    const storage = new MemoryStorage();
+    const contribution = contributionOn(storage);
+    await contribution.materializeSettings(identity, { name: "Housework" });
+    expect((await stored(storage)).notifications).toEqual({ enabled: true });
+
+    const receipt = await execute(contribution, {
+      type: "bot/set-profile",
+      commandId: "hide-1",
+      expectedRevision: 0,
+      profile: { hiddenFromSidebar: true },
+    });
+
+    expect(receipt).toMatchObject({ status: "applied", revision: 1 });
+    const settings = await stored(storage);
+    expect(settings.revision).toBe(1);
+    expect(settings.profile.hiddenFromSidebar).toBe(true);
+    expect(settings.notifications).toEqual({ enabled: false });
+  });
+
+  test("a full profile replacement that hides also mutes", async () => {
+    const storage = new MemoryStorage();
+    const contribution = contributionOn(storage);
+    await contribution.materializeSettings(identity, { name: "Housework" });
+
+    await execute(contribution, {
+      type: "bot/update-profile",
+      commandId: "replace-1",
+      expectedRevision: 0,
+      profile: { name: "Housework", hiddenFromSidebar: true },
+    });
+
+    expect((await stored(storage)).notifications).toEqual({ enabled: false });
+  });
+
+  test("turning notifications on while hidden is refused and moves nothing", async () => {
+    const storage = new MemoryStorage();
+    const contribution = contributionOn(storage);
+    await contribution.materializeSettings(identity, { name: "Housework" });
+    await execute(contribution, {
+      type: "bot/set-profile",
+      commandId: "hide-1",
+      expectedRevision: 0,
+      profile: { hiddenFromSidebar: true },
+    });
+    const enable = {
+      type: "bot/update-notifications",
+      commandId: "notify-1",
+      expectedRevision: 1,
+      notifications: { enabled: true },
+    };
+
+    const refused = await execute(contribution, enable);
+    expect(refused).toMatchObject({
+      status: "rejected",
+      revision: 1,
+      failure: expect.stringContaining("hidden from the sidebar"),
+    });
+    // A retry under the same key replays the refusal rather than re-deciding.
+    expect(await execute(contribution, enable)).toEqual(refused);
+    const settings = await stored(storage);
+    expect(settings.revision).toBe(1);
+    expect(settings.notifications).toEqual({ enabled: false });
+    // Muting a hidden Bot again is still an ordinary write.
+    expect(
+      await execute(contribution, {
+        type: "bot/update-notifications",
+        commandId: "mute-1",
+        expectedRevision: 1,
+        notifications: { enabled: false },
+      }),
+    ).toMatchObject({ status: "applied", revision: 2 });
+  });
+
+  test("a replayed hide is idempotent and a stale one conflicts", async () => {
+    const storage = new MemoryStorage();
+    const contribution = contributionOn(storage);
+    await contribution.materializeSettings(identity, { name: "Housework" });
+    const hide = {
+      type: "bot/set-profile",
+      commandId: "hide-1",
+      expectedRevision: 0,
+      profile: { hiddenFromSidebar: true },
+    };
+
+    const first = await execute(contribution, hide);
+    expect(await execute(contribution, hide)).toEqual(first);
+    expect((await stored(storage)).revision).toBe(1);
+    await expect(
+      execute(contribution, { ...hide, commandId: "hide-2" }),
+    ).rejects.toMatchObject({ name: "ConfigurationConflictError" });
+    await expect(
+      execute(contribution, {
+        ...hide,
+        profile: { hiddenFromSidebar: false },
+      }),
+    ).rejects.toThrow("reused for a different command");
+  });
+
+  test("showing the Bot again leaves notifications off until turned on", async () => {
+    const storage = new MemoryStorage();
+    const contribution = contributionOn(storage);
+    await contribution.materializeSettings(identity, { name: "Housework" });
+    await execute(contribution, {
+      type: "bot/set-profile",
+      commandId: "hide-1",
+      expectedRevision: 0,
+      profile: { hiddenFromSidebar: true },
+    });
+    await execute(contribution, {
+      type: "bot/set-profile",
+      commandId: "show-1",
+      expectedRevision: 1,
+      profile: { hiddenFromSidebar: false },
+    });
+    expect((await stored(storage)).notifications).toEqual({ enabled: false });
+
+    expect(
+      await execute(contribution, {
+        type: "bot/update-notifications",
+        commandId: "notify-1",
+        expectedRevision: 2,
+        notifications: { enabled: true },
+      }),
+    ).toMatchObject({ status: "applied", revision: 3 });
+    expect((await stored(storage)).notifications).toEqual({ enabled: true });
+  });
+});
+
 describe("bot/set-profile", () => {
   test("changes only the fields the command carries", async () => {
     const storage = new MemoryStorage();

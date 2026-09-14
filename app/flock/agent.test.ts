@@ -146,7 +146,15 @@ function harness(initial?: Partial<BotSettingsViewV1>): Harness {
               ...(command.writer ? { writer: command.writer } : {}),
             });
           }
-          settings = { ...settings, revision, profile };
+          // Hiding mutes in the same write, as the Bot Durable Object does.
+          settings = {
+            ...settings,
+            revision,
+            profile,
+            ...(profile.hiddenFromSidebar
+              ? { notifications: { enabled: false } }
+              : {}),
+          };
         } else if (command.type === "bot/update-notifications") {
           settings = {
             ...settings,
@@ -286,6 +294,36 @@ describe("bot_update", () => {
       "bot/set-profile",
       "bot/update-notifications",
     ]);
+  });
+
+  test("hiding reports the mute it made, in one command", async () => {
+    const test1 = harness();
+
+    const result = await createBotUpdateTool(test1.host).execute(
+      { hidden_from_sidebar: true },
+      CONTEXT,
+    );
+
+    expect(result.content).toBe(
+      "Updated hidden_from_sidebar, notify_on_updates. Everything else is unchanged.",
+    );
+    expect(test1.settings().notifications).toEqual({ enabled: false });
+    expect(test1.commands().map((command) => command.type)).toEqual([
+      "bot/set-profile",
+    ]);
+  });
+
+  test("refuses notifications for a hidden Bot before writing anything", async () => {
+    const test1 = harness({ profile: { name: "General" } });
+
+    const result = await createBotUpdateTool(test1.host).execute(
+      { hidden_from_sidebar: true, notify_on_updates: true },
+      CONTEXT,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(test1.commands()).toEqual([]);
+    expect(test1.settings().profile.hiddenFromSidebar).toBeUndefined();
   });
 
   test("re-issues the command after losing an optimistic race", async () => {
