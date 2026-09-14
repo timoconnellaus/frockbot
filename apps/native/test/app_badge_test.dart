@@ -816,7 +816,7 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
-    testWidgets('and reapplies capped focused suppression after native read completes', (
+    testWidgets('and syncs each Bot once while reapplying capped focused suppression', (
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
@@ -827,7 +827,10 @@ void main() {
       final badges = <Map<Object?, Object?>>[];
       final activeNotifications = <String, int>{'alpha': 2, 'beta': 100};
       final reads = <Map<Object?, Object?>>[];
-      final readCompleted = Completer<void>();
+      final readCompleted = {
+        for (final botId in ['alpha', 'beta', 'gamma'])
+          botId: Completer<void>(),
+      };
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(const MethodChannel('frockbot/push'), (
@@ -836,9 +839,11 @@ void main() {
         if (call.method == 'configure') return 'token-1';
         if (call.method == 'focus') return true;
         if (call.method == 'read') {
-          reads.add(call.arguments as Map<Object?, Object?>);
-          await readCompleted.future;
-          activeNotifications['beta'] = 100;
+          final payload = call.arguments as Map<Object?, Object?>;
+          reads.add(payload);
+          final botId = payload['botId'] as String;
+          await readCompleted[botId]!.future;
+          if (botId == 'beta') activeNotifications['beta'] = 100;
         }
         if (call.method == 'badge') {
           final payload = call.arguments as Map<Object?, Object?>;
@@ -862,6 +867,7 @@ void main() {
       final api = _ShellApi(store, [
         registration('alpha', 'Alpha'),
         registration('beta', 'Beta'),
+        registration('gamma', 'Gamma'),
       ], fanOut);
       final sessions = BotSessions(api: api, store: store);
       final links = ValueNotifier<String?>(null);
@@ -885,11 +891,12 @@ void main() {
         'unread': [
           view('alpha', count: 2).toJson(),
           view('beta', count: 99, capped: true).toJson(),
+          view('gamma').toJson(),
         ],
       });
       await tester.pumpAndSettle();
       final expected = {
-        'bots': {'alpha': 2, 'beta': 100},
+        'bots': {'alpha': 2, 'beta': 100, 'gamma': 0},
         'silenced': <String>[],
         'suppressed': ['beta'],
       };
@@ -900,26 +907,35 @@ void main() {
         ..complete({
           'schemaVersion': 1,
           'unread': [
-            view('alpha', count: 2).toJson(),
-            {
-              ...view('beta', count: 99, capped: true).toJson() as Map,
-              'lastSeenCursor': 'message-00000000000000000005',
-            },
+            for (final unread in [
+              view('alpha', count: 2),
+              view('beta', count: 99, capped: true),
+              view('gamma'),
+            ])
+              {
+                ...unread.toJson() as Map,
+                'lastSeenCursor': 'message-00000000000000000005',
+              },
           ],
         });
       await tester.pump(const Duration(seconds: 11));
       await tester.pumpAndSettle();
       expect(api.unreadRequests, requestsBeforeRead + 1);
-      expect(reads, [
-        {'botId': 'beta', 'cursor': 'message-00000000000000000005'},
-      ]);
+      final expectedReads = [
+        for (final botId in readCompleted.keys)
+          {'botId': botId, 'cursor': 'message-00000000000000000005'},
+      ];
+      expect(reads, expectedReads.take(1).toList());
       expect(badges, [expected]);
 
-      readCompleted.complete();
-      await tester.pumpAndSettle();
-      expect(badges, [expected, expected]);
-      expect(activeNotifications, {'alpha': 2});
-      expect(reads, hasLength(1));
+      for (var index = 0; index < expectedReads.length; index++) {
+        readCompleted[expectedReads[index]['botId']]!.complete();
+        await tester.pumpAndSettle();
+        expect(reads, expectedReads.take(index + 2).toList());
+        expect(badges, List.filled(index + 2, expected));
+        expect(activeNotifications, {'alpha': 2});
+      }
+      expect(reads, expectedReads);
       expect(api.unreadRequests, requestsBeforeRead + 1);
 
       await tester.pumpWidget(const SizedBox());

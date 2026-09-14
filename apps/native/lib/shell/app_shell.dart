@@ -244,7 +244,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     activity.addListener(_repaint);
     push.onNotificationsChanged = () {
       appBadge.invalidate();
-      _repaint();
+      if (mounted) setState(() {});
     };
     // Focus can be reported while this state is still starting, so the
     // repaint the focus rule needs waits for a microtask.
