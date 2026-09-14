@@ -180,7 +180,9 @@ class PluginsController extends ViewSurfaceController {
       '/api/settings',
       body: pluginCommandV1(command),
     );
-    return ((answer as Map?) ?? const {}).cast<String, Object?>();
+    final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
+    if (receipt['status'] == 'applied') onFeaturesChanged?.call();
+    return receipt;
   }
 
   @override
@@ -249,6 +251,7 @@ class _PluginsPageState extends State<PluginsPage> {
       // A model provider's accounts and a connector Package's are one surface
       // in this client, so both homes land on Connectors.
       'models' => SettingsPage(
+        onFeaturesChanged: widget.onFeaturesChanged,
         api: api,
         store: store,
         userId: userId,
@@ -256,6 +259,7 @@ class _PluginsPageState extends State<PluginsPage> {
       ),
       'connections' => ConnectionsPage(api: api, store: store, userId: userId),
       'user-settings' => SettingsPage(
+        onFeaturesChanged: widget.onFeaturesChanged,
         api: api,
         store: store,
         userId: userId,
