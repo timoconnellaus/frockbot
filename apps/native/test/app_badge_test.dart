@@ -17,9 +17,13 @@ import 'widget_test.dart' show MemoryStore;
 /// A two-Bot account whose unread fan-out a test holds open, so it can act
 /// inside the window the shell spends with a directory and no counts.
 class _ShellApi extends NativeApi {
-  _ShellApi(super.store, this.bots, this.fanOut);
+  _ShellApi(super.store, this.bots, this.fanOut, {this.directoryFails = false});
   final List<Map<String, Object?>> bots;
   final Completer<Object?> fanOut;
+
+  /// Whether `/api/bots` fails, leaving the shell with no directory at all
+  /// while the fan-out still answers.
+  final bool directoryFails;
   @override
   Future<Object?> request(
     String path, {
@@ -28,6 +32,7 @@ class _ShellApi extends NativeApi {
     bool authenticated = true,
   }) async {
     if (path == '/api/bots') {
+      if (directoryFails) throw const FormatException('directory unreachable');
       return {'schemaVersion': 1, 'revision': 1, 'bots': bots};
     }
     if (path == '/api/bots/lifecycles') {
@@ -376,6 +381,65 @@ void main() {
       await tester.pumpAndSettle();
       expect(calls.map((call) => call.method), ['set']);
       expect((calls.single.arguments as Map)['label'], '2');
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('and keeping it quiet while the directory is unknown', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('com.frockbot/badge'), (
+            call,
+          ) async {
+            calls.add(call);
+            return null;
+          });
+
+      final store = MemoryStore();
+      final fanOut = Completer<Object?>()
+        ..complete({
+          'schemaVersion': 1,
+          'unread': [view('alpha', count: 2).toJson()],
+        });
+      final api = _ShellApi(store, [
+        registration('alpha', 'Alpha'),
+      ], fanOut, directoryFails: true);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The directory read failed, so the shell has no Bots to count over.
+      // The poll still reaches the fan-out; an account whose directory is
+      // unknown is not an account with nothing unread, so the dock keeps
+      // whatever it was already showing.
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpAndSettle();
+      expect(calls, isEmpty);
 
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();

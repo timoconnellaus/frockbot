@@ -166,6 +166,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final ValueNotifier<int> catalogRevision = ValueNotifier(0);
   String? error;
   bool loaded = false;
+
+  /// Whether a directory has actually been adopted, as opposed to [loaded]'s
+  /// "the read finished, however it ended". The badge counts over the
+  /// directory, so an empty one that was never read — or whose read failed —
+  /// is unknown rather than an account with nothing unread.
+  bool directoryLoaded = false;
   bool _searchOpen = false;
 
   /// On a phone the Bot list is the first screen and a conversation is a
@@ -548,6 +554,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // The cached directory is an answer, so the skeleton goes now rather
       // than waiting on a read that only replaces it.
       loaded = true;
+      directoryLoaded = true;
       selected = selected == null
           ? null
           : active
@@ -1496,7 +1503,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         archived: archived,
         focusedBotId: _focusedBotId,
       ),
-      authoritative: activity.loaded,
+      authoritative: activity.loaded && directoryLoaded,
     );
     final shell = ShellSlotScope(
       slots: slots,
