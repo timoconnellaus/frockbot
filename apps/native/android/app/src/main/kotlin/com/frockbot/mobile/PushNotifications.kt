@@ -89,16 +89,18 @@ object PushNotifications {
         // for every badge change, and a per-Bot synchronous commit would block
         // it once per Bot in the account.
         val editor = store.edit()
-        for (botId in plan.forget) editor.remove("messages:$botId").remove("count:$botId")
-        for (botId in plan.drop) editor.remove("count:$botId")
-        for ((botId, count) in plan.store) editor.putInt("count:$botId", count)
-        // Applied before any show(), which reads back the count it draws.
-        editor.apply()
-        for (botId in plan.cancel) manager.cancel(botId, 1)
-        for (botId in plan.refresh) {
-            val messages = JSONArray(store.getString("messages:$botId", "[]"))
-            if (messages.length() > 0) show(context, botId, messages, false)
-        }
+        executeBadgeReconcileV1(
+            plan,
+            forget = { editor.remove("messages:$it").remove("count:$it") },
+            drop = { editor.remove("count:$it") },
+            store = { botId, count -> editor.putInt("count:$botId", count) },
+            persist = editor::apply,
+            cancel = { manager.cancel(it, 1) },
+            refresh = { botId ->
+                val messages = JSONArray(store.getString("messages:$botId", "[]"))
+                if (messages.length() > 0) show(context, botId, messages, false)
+            },
+        )
     }
     @Synchronized fun receive(context: Context, data: Map<String,String>) {
         val store = prefs(context)

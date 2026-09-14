@@ -33,6 +33,34 @@ class BadgeReconcileTest {
     }
 
     @Test
+    fun `a zero persists count removal before refreshing the notification`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 0),
+            active = setOf("alpha"),
+            counts = mapOf("alpha" to 5),
+            messages = setOf("alpha"),
+        )
+        val counts = mutableMapOf("alpha" to 5)
+        val pendingDrops = mutableSetOf<String>()
+        val effects = mutableListOf<String>()
+
+        executeBadgeReconcileV1(
+            plan,
+            forget = {},
+            drop = { pendingDrops.add(it) },
+            store = { botId, count -> counts[botId] = count },
+            persist = {
+                pendingDrops.forEach(counts::remove)
+                effects.add("persist")
+            },
+            cancel = {},
+            refresh = { effects.add("refresh:$it:${counts[it]}") },
+        )
+
+        assertEquals(listOf("persist", "refresh:alpha:null"), effects)
+    }
+
+    @Test
     fun `a zero for a Bot with no notification changes nothing to draw`() {
         val plan = reconcile(
             bots = mapOf("alpha" to 0),

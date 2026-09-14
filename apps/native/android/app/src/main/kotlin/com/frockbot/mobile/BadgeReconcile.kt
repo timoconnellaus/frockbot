@@ -58,3 +58,20 @@ fun badgeReconcileV1(
     }
     return BadgeReconcile(forget, drop, store, cancel, refresh)
 }
+
+fun executeBadgeReconcileV1(
+    plan: BadgeReconcile,
+    forget: (String) -> Unit,
+    drop: (String) -> Unit,
+    store: (String, Int) -> Unit,
+    persist: () -> Unit,
+    cancel: (String) -> Unit,
+    refresh: (String) -> Unit,
+) {
+    for (botId in plan.forget) forget(botId)
+    for (botId in plan.drop) drop(botId)
+    for ((botId, count) in plan.store) store(botId, count)
+    persist()
+    for (botId in plan.cancel) cancel(botId)
+    for (botId in plan.refresh) refresh(botId)
+}

@@ -342,7 +342,7 @@ void main() {
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      tester.view.physicalSize = const Size(320, 800);
+      tester.view.physicalSize = const Size(800, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -356,6 +356,7 @@ void main() {
           });
 
       final store = MemoryStore();
+      store.values['selection.test-user'] = 'beta';
       final fanOut = Completer<Object?>();
       final api = _ShellApi(store, [
         registration('alpha', 'Alpha'),
@@ -382,12 +383,15 @@ void main() {
       // empty local map is unknown, not an authoritative zero, so nothing may
       // cross the dock channel and take an existing badge away.
       expect(find.text('Alpha'), findsOneWidget);
-      expect(find.text('Beta'), findsOneWidget);
+      expect(find.text('Beta'), findsNWidgets(2));
       expect(calls, isEmpty);
 
       fanOut.complete({
         'schemaVersion': 1,
-        'unread': [view('alpha', count: 2).toJson(), view('beta').toJson()],
+        'unread': [
+          view('alpha', count: 2).toJson(),
+          view('beta', count: 3).toJson(),
+        ],
       });
       await tester.pumpAndSettle();
       expect(calls.map((call) => call.method), ['set']);
