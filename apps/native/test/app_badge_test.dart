@@ -20,7 +20,7 @@ import 'widget_test.dart' show MemoryStore;
 class _ShellApi extends NativeApi {
   _ShellApi(super.store, this.bots, this.fanOut, {this.directoryFails = false});
   final List<Map<String, Object?>> bots;
-  final Completer<Object?> fanOut;
+  Completer<Object?> fanOut;
   int unreadRequests = 0;
 
   /// Whether `/api/bots` fails, leaving the shell with no directory at all
@@ -807,6 +807,120 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(badges, [expected, expected]);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('and reapplies capped focused suppression after native read completes', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      tester.view.physicalSize = const Size(800, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final badges = <Map<Object?, Object?>>[];
+      final activeNotifications = <String, int>{'alpha': 2, 'beta': 100};
+      final reads = <Map<Object?, Object?>>[];
+      final readCompleted = Completer<void>();
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(const MethodChannel('frockbot/push'), (
+        call,
+      ) async {
+        if (call.method == 'configure') return 'token-1';
+        if (call.method == 'focus') return true;
+        if (call.method == 'read') {
+          reads.add(call.arguments as Map<Object?, Object?>);
+          await readCompleted.future;
+          activeNotifications['beta'] = 100;
+        }
+        if (call.method == 'badge') {
+          final payload = call.arguments as Map<Object?, Object?>;
+          badges.add(payload);
+          for (final botId in payload['suppressed'] as List) {
+            activeNotifications.remove(botId);
+          }
+        }
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(
+          const MethodChannel('frockbot/push'),
+          null,
+        ),
+      );
+
+      final store = MemoryStore();
+      store.values['selection.test-user'] = 'beta';
+      final fanOut = Completer<Object?>();
+      final api = _ShellApi(store, [
+        registration('alpha', 'Alpha'),
+        registration('beta', 'Beta'),
+      ], fanOut);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(badges, isEmpty);
+      fanOut.complete({
+        'schemaVersion': 1,
+        'unread': [
+          view('alpha', count: 2).toJson(),
+          view('beta', count: 99, capped: true).toJson(),
+        ],
+      });
+      await tester.pumpAndSettle();
+      final expected = {
+        'bots': {'alpha': 2, 'beta': 100},
+        'silenced': <String>[],
+        'suppressed': ['beta'],
+      };
+      expect(badges, [expected]);
+      expect(activeNotifications, {'alpha': 2});
+      final requestsBeforeRead = api.unreadRequests;
+      api.fanOut = Completer<Object?>()
+        ..complete({
+          'schemaVersion': 1,
+          'unread': [
+            view('alpha', count: 2).toJson(),
+            {
+              ...view('beta', count: 99, capped: true).toJson() as Map,
+              'lastSeenCursor': 'message-00000000000000000005',
+            },
+          ],
+        });
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpAndSettle();
+      expect(api.unreadRequests, requestsBeforeRead + 1);
+      expect(reads, [
+        {'botId': 'beta', 'cursor': 'message-00000000000000000005'},
+      ]);
+      expect(badges, [expected]);
+
+      readCompleted.complete();
+      await tester.pumpAndSettle();
+      expect(badges, [expected, expected]);
+      expect(activeNotifications, {'alpha': 2});
+      expect(reads, hasLength(1));
+      expect(api.unreadRequests, requestsBeforeRead + 1);
 
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();

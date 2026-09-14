@@ -34,7 +34,7 @@ class PushController {
   /// Told when [focused] may have changed. Losing focus reads nothing new, but
   /// the badges drawn through the focus rule still change.
   VoidCallback? onFocus;
-  VoidCallback? onActivity;
+  VoidCallback? onNotificationsChanged;
   Timer? timer;
   Future<void> _registration = Future.value();
   Future<void> start() async {
@@ -57,7 +57,7 @@ class PushController {
           await register();
         }
         if (call.method == 'activity') {
-          onActivity?.call();
+          onNotificationsChanged?.call();
           await activity.load();
         }
         if (call.method == 'focus') {
@@ -167,6 +167,7 @@ class PushController {
         'cursor': cursor,
       });
       _syncedRead[botId] = cursor;
+      onNotificationsChanged?.call();
     }
   }
 
