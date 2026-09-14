@@ -331,7 +331,7 @@ describe("Stripe payment boundaries", () => {
                 price: {
                   id: "price_monthly",
                   currency: "usd",
-                  unit_amount: 2900,
+                  unit_amount: 2000,
                   recurring: { interval: "month" },
                 },
               },
@@ -404,7 +404,7 @@ describe("Stripe payment boundaries", () => {
                 price: {
                   id: "price_monthly",
                   currency: "usd",
-                  unit_amount: 2900,
+                  unit_amount: 2000,
                   recurring: { interval: "month" },
                 },
               },
@@ -480,7 +480,7 @@ describe("Stripe payment boundaries", () => {
     const intent = {
       id: "subscription-done",
       kind: "subscription",
-      cents: 2900,
+      cents: 2000,
       created: NOW,
       sessionId: "cs_subscription",
     };
@@ -516,7 +516,7 @@ describe("Stripe payment boundaries", () => {
                       price: {
                         id: "price_monthly",
                         currency: "usd",
-                        unit_amount: 2900,
+                        unit_amount: 2000,
                         recurring: { interval: "month" },
                       },
                     },

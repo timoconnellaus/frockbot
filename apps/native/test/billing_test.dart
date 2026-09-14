@@ -43,7 +43,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('US\$29 / month · US\$15 of monthly usage credit'),
+        find.text('US\$20 / month · US\$15 of monthly usage credit'),
         findsOneWidget,
       );
       expect(find.text('US\$12.50'), findsOneWidget);
@@ -156,11 +156,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Payments are not available yet.'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('Subscribe — US\$29 / month'),
+      find.text('Subscribe — US\$20 / month'),
       300,
     );
     final subscribe = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Subscribe — US\$29 / month'),
+      find.widgetWithText(FilledButton, 'Subscribe — US\$20 / month'),
     );
     expect(subscribe.onPressed, isNull);
     for (final label in ['US\$10', 'US\$25', 'US\$50']) {

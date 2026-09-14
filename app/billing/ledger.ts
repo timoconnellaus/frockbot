@@ -1,6 +1,6 @@
 export const BILLING_PLAN = {
   currency: "usd",
-  monthlyCents: 2900,
+  monthlyCents: 2000,
   includedMicros: 15_000_000,
   topUpCents: [1000, 2500, 5000],
   pricingVersion: "2026-09-09",

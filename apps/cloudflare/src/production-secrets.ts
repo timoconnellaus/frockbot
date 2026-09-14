@@ -149,7 +149,7 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
     },
     {
       name: "STRIPE_MONTHLY_PRICE_ID",
-      why: "Pins the US$29 monthly Stripe price.",
+      why: "Pins the US$20 monthly Stripe price.",
       degraded: "subscription checkout answers that the plan is not configured",
     },
     {

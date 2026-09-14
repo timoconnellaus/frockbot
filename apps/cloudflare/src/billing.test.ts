@@ -62,7 +62,7 @@ describe("billing HTTP routes", () => {
   test("ships executable account-page JavaScript and the complete billing surface", () => {
     expect(() => new Function(billingScript)).not.toThrow();
     for (const text of [
-      "US$29",
+      "US$20",
       "US$15",
       "US$10",
       "US$25",
@@ -104,7 +104,7 @@ describe("billing HTTP routes", () => {
     expect(seen).toEqual(["user-one"]);
     expect(response?.headers.get("cache-control")).toBe("no-store");
     expect(await response?.json()).toMatchObject({
-      plan: { monthlyCents: 2900 },
+      plan: { monthlyCents: 2000 },
       computerRate: {
         activeUsdPerHour: 2.75,
         storageIncludedGb: 100,
