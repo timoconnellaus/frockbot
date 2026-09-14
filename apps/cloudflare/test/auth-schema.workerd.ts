@@ -67,11 +67,14 @@ test("a closed deployment refuses to create an account on first sign-in", async 
 
   const created = await (
     await auth.$context
-  ).internalAdapter.createUser({
-    name: "Uninvited Visitor",
-    email: "uninvited@example.com",
-    emailVerified: true,
-  });
+  ).internalAdapter.createUser(
+    {
+      name: "Uninvited Visitor",
+      email: "uninvited@example.com",
+      emailVerified: true,
+    },
+    { method: "oauth", oauth: { providerId: "google" } },
+  );
   expect(created).toBeNull();
 
   expect(refused).toEqual(["uninvited@example.com"]);
