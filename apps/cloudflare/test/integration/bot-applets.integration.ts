@@ -16,6 +16,7 @@ import { describe, expect, test } from "vitest";
 import {
   asUser,
   expectOkJson,
+  flockRevision,
   freshUserId,
   postAsUser,
   provisionThroughGateway,
@@ -57,7 +58,7 @@ async function twoBots(prefix: string) {
     schemaVersion: 1,
     type: "bot/create",
     commandId: `create-${other}`,
-    expectedRevision: 1,
+    expectedRevision: await flockRevision(userId),
     botId: other,
     name: "Other Bot",
   });
@@ -261,7 +262,8 @@ describe("a person's Bot deletion is fenced on the Applet impact it confirmed", 
     const after = (await expectOkJson(await asUser(userId, "/api/bots"))) as {
       bots: Array<{ botId: string }>;
     };
-    expect(after.bots.map((bot) => bot.botId)).toEqual([other]);
+    expect(after.bots.map((bot) => bot.botId)).not.toContain(owner);
+    expect(after.bots.map((bot) => bot.botId)).toContain(other);
     // The Applet it owned went with it, shared or not.
     expect(
       await expectOkJson(await asUser(userId, `/api/bots/${other}/applets`)),

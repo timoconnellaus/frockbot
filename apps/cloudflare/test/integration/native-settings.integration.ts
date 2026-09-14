@@ -32,7 +32,7 @@ test("browser and native Settings share one owner, revision, pending identity an
     expectedRevision: initial.revision,
     sectionId: "profile",
     ownerId: userId,
-    values: { name: "Tim" },
+    values: { name: "Tim", email: `${userId}@native.test` },
   });
   const browser = await read(await asUser(userId, "/api/settings/application"));
   expect(await read(await native("/api/settings/application"))).toEqual(
