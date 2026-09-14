@@ -20,6 +20,12 @@ The current vertical slice includes:
 
 See [`docs/architecture.md`](docs/architecture.md).
 
+## Getting started
+
+After sign-in, General opens automatically on a device with no saved Bot selection, provided General is active, no Bot link is pending, and no page is open over the shell. This applies to both the browser and native app. Account provisioning and deletion follow the [General bootstrap contract](app/flock/README.md#general-bootstrap).
+
+General's empty conversation offers suggestions to research a topic and recommend an action, plan and complete a project, set up a recurring check, or create a specialist Bot. Research appears when General has Web enabled; recurring checks appear when it has Routines enabled. While capabilities are unavailable or still loading, only the project and specialist suggestions appear. Choose a suggestion to fill the composer, edit the selected placeholder, and send when ready: choosing alone does not start work. You can also type your own message, or use **Add a sheep** to create another Bot.
+
 ## Requirements
 
 - [Bun](https://bun.sh) 1.3 or newer

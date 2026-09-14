@@ -109,23 +109,28 @@ export async function provisionBot(
       schemaVersion: 1,
       type: "bot/create",
       commandId: `create-${suffix}`,
-      // The Flock keeps its own revision; a new User's is zero.
-      expectedRevision: 0,
+      // The Flock keeps its own revision, and an admitted User already owns
+      // General, so it is read rather than assumed.
+      expectedRevision: await flockRevision(identity.userId),
       botId: identity.botId,
       name: "Workerd Bot",
     },
   });
 }
 
+/** The User's Flock directory revision, which every `bot/create` fences on. */
+export async function flockRevision(userId: string): Promise<number> {
+  return (await user(userId).listBots({ schemaVersion: 1, userId })).revision;
+}
+
 /**
  * A second Bot for a User whose Packages, Connection and account model
- * `provisionBot` already set up. Only `bot/create` is left, and the Flock's
- * revision has moved on by one Bot.
+ * `provisionBot` already set up. Only `bot/create` is left.
  */
-export async function provisionSiblingBot(
-  identity: { userId: string; botId: string },
-  expectedRevision: number,
-): Promise<void> {
+export async function provisionSiblingBot(identity: {
+  userId: string;
+  botId: string;
+}): Promise<void> {
   await user(identity.userId).createBot({
     schemaVersion: 1,
     userId: identity.userId,
@@ -133,7 +138,7 @@ export async function provisionSiblingBot(
       schemaVersion: 1,
       type: "bot/create",
       commandId: `create-${identity.botId}`,
-      expectedRevision,
+      expectedRevision: await flockRevision(identity.userId),
       botId: identity.botId,
       name: "Workerd Sibling",
     },

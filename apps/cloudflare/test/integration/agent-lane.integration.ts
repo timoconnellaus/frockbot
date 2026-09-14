@@ -13,6 +13,7 @@ import {
   postAsUser,
   provisionThroughGateway,
   useApplicationArtifact,
+  flockRevision,
 } from "./fixtures.ts";
 
 useApplicationArtifact();
@@ -28,7 +29,7 @@ describe("the agent lane through the gateway", () => {
       schemaVersion: 1,
       type: "bot/create",
       commandId: "create-researcher",
-      expectedRevision: 1,
+      expectedRevision: await flockRevision(userId),
       botId: targetBotId,
       name: "Researcher",
       description: "Finds primary sources.",

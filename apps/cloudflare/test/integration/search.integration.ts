@@ -14,6 +14,7 @@ import {
   postAsUser,
   provisionThroughGateway,
   useApplicationArtifact,
+  flockRevision,
 } from "./fixtures.ts";
 
 useApplicationArtifact();
@@ -79,7 +80,7 @@ describe("searching every Bot's transcript", () => {
       schemaVersion: 1,
       type: "bot/create",
       commandId: "create-scheduler",
-      expectedRevision: 1,
+      expectedRevision: await flockRevision(alice),
       botId: "scheduler",
       name: "Scheduler",
     });

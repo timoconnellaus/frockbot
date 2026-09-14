@@ -67,6 +67,7 @@ import 'run_view.dart';
 import 'semantics.dart';
 import 'sidebar.dart';
 import 'slots.dart';
+import 'starters.dart';
 import 'transcript.dart';
 
 class AppShell extends StatefulWidget {
@@ -139,6 +140,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Map<String, SidebarProfile> profiles = {};
   Set<String> archived = {};
   wire.BotRegistration? selected;
+
+  /// The Bot the account was given as General, from the authority.
+  String? generalBotId;
+  int featuresRevision = 0;
   String? workingRunId;
   ConnectionState selectedConnection = ConnectionState.initializing;
   BotSettingsController? botSettings;
@@ -517,7 +522,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     try {
       final cached = await widget.store.read('directory/${widget.userId}');
       if (cached != null && bots.isEmpty) {
-        _adopt(wire.BotDirectory.fromJson(jsonDecode(cached)).bots, const {});
+        _adopt(
+          wire.BotDirectory.fromJson(jsonDecode(cached)).bots,
+          const {},
+          fromCache: true,
+        );
       }
       final directory = wire.BotDirectory.fromJson(
         await widget.api.request('/api/bots'),
@@ -525,6 +534,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       final lifecycle = wire.BotLifecycleDirectory.fromJson(
         await widget.api.request('/api/bots/lifecycles'),
       );
+      final general = await readGeneralBotIdV1(widget.api);
       final unavailable = {
         for (final state in lifecycle.lifecycles)
           if (state.status != 'active') state.botId.value: state.status,
@@ -546,6 +556,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         }),
       );
       if (!mounted) return;
+      generalBotId = general;
       _adopt(
         active,
         {
@@ -590,6 +601,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     Set<String> archivedIds, {
     List<wire.BotRegistration>? readable,
     bool authoritative = false,
+    bool fromCache = false,
   }) {
     setState(() {
       bots = active;
@@ -609,18 +621,45 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 .firstOrNull;
       error = null;
     });
+    final pendingBotId = widget.botLinks.value;
+    if (pendingBotId != null) {
+      if (!fromCache || bots.any((bot) => bot.botId.value == pendingBotId)) {
+        _resolveBotLink();
+      }
+      return;
+    }
     unawaited(_restoreSelection());
   }
 
   Future<void> _restoreSelection() async {
-    if (selected != null) return;
+    if (selected != null || widget.botLinks.value != null) return;
     final saved = await widget.store.read('selection.${widget.userId}');
-    if (!mounted || saved == null) return;
+    if (!mounted || selected != null || widget.botLinks.value != null) return;
+    if (saved == null) {
+      _openGeneral();
+      return;
+    }
     final bot = bots.where((bot) => bot.botId.value == saved).firstOrNull;
     if (bot == null) return;
     clearManualForBot = bot.botId.value;
     setState(() => selected = bot);
     _adoptBotPanels(bot.botId.value);
+  }
+
+  /// A first sign-in lands in General rather than on a list of one. Only a
+  /// device that has never chosen a Bot for this account gets this: a saved
+  /// selection, a Bot link on its way in, or a page already over the shell is
+  /// the person's place, and opening General over it would take that away.
+  void _openGeneral() {
+    final general = generalBotId;
+    if (general == null ||
+        selected != null ||
+        widget.botLinks.value != null ||
+        ModalRoute.of(context)?.isCurrent != true ||
+        !bots.any((bot) => bot.botId.value == general)) {
+      return;
+    }
+    _select(general);
   }
 
   /// A deployment with no identity directory leaves the sidebar one plain
@@ -665,10 +704,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _followBotLink() {
     final botId = widget.botLinks.value;
     if (botId == null) return;
+    if (bots.every((bot) => bot.botId.value != botId)) {
+      unawaited(load());
+      return;
+    }
+    _resolveBotLink();
+  }
+
+  void _resolveBotLink() {
+    final botId = widget.botLinks.value;
+    if (botId == null) return;
     widget.botLinks.value = null;
     final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
     if (bot == null) {
-      unawaited(load());
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -713,6 +761,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           .write('selection.${widget.userId}', botId)
           .catchError((Object _) {}),
     );
+  }
+
+  void _featuresChanged([String? botId]) {
+    if (mounted && (botId == null || selected?.botId.value == botId)) {
+      setState(() => featuresRevision += 1);
+    }
   }
 
   /// The Bot's own settings and its Routines are features in the `right-panel`
@@ -779,6 +833,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // with, so a Bot switch must be a new page rather than a rebuilt one.
       (context) => PluginsPage(
         key: ValueKey('plugins-$botId'),
+        onFeaturesChanged: () => _featuresChanged(botId),
         api: widget.api,
         store: widget.store,
         userId: widget.userId,
@@ -1249,6 +1304,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (key == 'plugins') {
       _push(
         PluginsPage(
+          onFeaturesChanged: () => _featuresChanged(bot.botId.value),
           api: widget.api,
           store: widget.store,
           userId: widget.userId,
@@ -1682,6 +1738,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             store: widget.store,
                             userId: widget.userId,
                             botId: bot.botId.value,
+                            general: bot.botId.value == generalBotId,
+                            featuresRevision: featuresRevision,
                             onOpenRun: _openRun,
                             onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,
@@ -1831,6 +1889,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         case 'plugins':
           _push(
             PluginsPage(
+              onFeaturesChanged: _featuresChanged,
               api: widget.api,
               store: widget.store,
               userId: widget.userId,
@@ -1918,6 +1977,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ShellTier.single) {
       _push(
         ConnectionsPage(
+          onFeaturesChanged: _featuresChanged,
           api: widget.api,
           store: widget.store,
           userId: widget.userId,
@@ -1929,6 +1989,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       showDialog<void>(
         context: context,
         builder: (_) => MarketplaceDialog(
+          onFeaturesChanged: _featuresChanged,
           api: widget.api,
           store: widget.store,
           userId: widget.userId,
@@ -1938,7 +1999,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _openSettings() => _push(
-    SettingsPage(api: widget.api, store: widget.store, userId: widget.userId),
+    SettingsPage(
+      api: widget.api,
+      store: widget.store,
+      userId: widget.userId,
+      onFeaturesChanged: _featuresChanged,
+    ),
   );
 
   /// Account destinations push above Profile, so Back returns here.
@@ -2045,6 +2111,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           'Models',
                           () => _push(
                             SettingsPage(
+                              onFeaturesChanged: _featuresChanged,
                               api: widget.api,
                               store: widget.store,
                               userId: widget.userId,
@@ -2078,6 +2145,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           'Plugins',
                           () => _push(
                             PluginsPage(
+                              onFeaturesChanged: _featuresChanged,
                               api: widget.api,
                               store: widget.store,
                               userId: widget.userId,
@@ -2090,6 +2158,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           'Account features',
                           () => _push(
                             PluginsPage(
+                              onFeaturesChanged: _featuresChanged,
                               api: widget.api,
                               store: widget.store,
                               userId: widget.userId,

@@ -96,13 +96,11 @@ async function installPackageRoutes(
         });
         return;
       }
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({
-          schemaVersion: 1,
-          botId,
-          artifactOrigin,
-          contributions: [
+      // General opens by itself before the spec's own Bot exists. Only the
+      // Framed Bot mounts the page, so every document counted below is its.
+      const contributions = !botId.startsWith("framed-")
+        ? []
+        : [
             {
               packageId: PACKAGE_ID,
               displayName: "Sydney Weather",
@@ -124,7 +122,14 @@ async function installPackageRoutes(
               entries: [],
               declaredTools: [TOOL_NAME],
             },
-          ],
+          ];
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          botId,
+          artifactOrigin,
+          contributions,
         }),
       });
     },

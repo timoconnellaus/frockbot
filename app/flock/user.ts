@@ -20,6 +20,7 @@ import {
   type BotLifecycleViewV1,
   type BotRegistrationV1,
   type CreateBotCommandV1,
+  type FlockBootstrapViewV1,
   type FlockReceiptV1,
 } from "./shared.js";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
@@ -42,6 +43,20 @@ const LIFECYCLE_OPERATION_PREFIX = "flock:lifecycle-operation:";
  * gone.
  */
 const DELETED_PREFIX = "flock:deleted:";
+/**
+ * Present once this account has been given General, or has been found already
+ * owning Bots. It is written in the same transaction as General's
+ * registration, so an interrupted provisioning leaves neither, and because it
+ * outlives General, deleting General never brings it back. It names General's
+ * id, which is the only thing that says which Bot General is.
+ */
+const BOOTSTRAP_KEY = "flock:bootstrap:v1";
+interface StoredBootstrapV1 {
+  schemaVersion: 1;
+  generalBotId?: string;
+}
+const GENERAL_DESCRIPTION =
+  "A general-purpose assistant. Researches, plans and follows work through, and suggests a specialist Bot when a job deserves one of its own.";
 export interface FlockUserTransaction {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
@@ -195,38 +210,7 @@ export class FlockUserBackendContribution {
           failure: "Bot directory limit reached",
         };
       } else {
-        // A new Bot carries neither a model nor a grant. Both resolve from the
-        // User's enabled Packages and Connections at its next admitted Turn
-        // (AGENTS.md Configuration shape).
-        const registration: BotRegistrationV1 = {
-          schemaVersion: 1,
-          botId: command.botId,
-          registeredAt: (this.host.now?.() ?? new Date()).toISOString(),
-          initialName: command.name,
-          ...(command.description === undefined
-            ? {}
-            : { initialDescription: command.description }),
-          // The creator is durable history: a Bot the Flock made on another
-          // Bot's behalf says so in the registration seed itself.
-          ...(command.createdBy
-            ? { createdBy: structuredClone(command.createdBy) }
-            : {}),
-          sheep: structuredClone(
-            command.sheep ?? randomSheepRecipeV1(this.host.random),
-          ),
-        };
-        const next = {
-          ...current,
-          revision: current.revision + 1,
-          bots: [...current.bots, registration],
-        } satisfies BotDirectoryViewV1;
-        await storage.put(DIRECTORY_KEY, next);
-        await storage.put(`${LIFECYCLE_PREFIX}${command.botId}`, {
-          schemaVersion: 1,
-          botId: command.botId,
-          status: "active",
-          revision: 0,
-        } satisfies BotLifecycleViewV1);
+        const next = await this.register(storage, current, command);
         receipt = {
           schemaVersion: 1,
           commandId: command.commandId,
@@ -237,6 +221,97 @@ export class FlockUserBackendContribution {
       await storage.put(receiptKey, { fingerprint, receipt });
       return structuredClone(receipt);
     });
+  }
+
+  private async register(
+    storage: FlockUserTransaction,
+    current: BotDirectoryViewV1,
+    bot: Pick<
+      CreateBotCommandV1,
+      "botId" | "name" | "description" | "createdBy" | "sheep"
+    >,
+  ): Promise<BotDirectoryViewV1> {
+    // A new Bot carries neither a model nor a grant. Both resolve from the
+    // User's enabled Packages and Connections at its next admitted Turn
+    // (AGENTS.md Configuration shape).
+    const registration: BotRegistrationV1 = {
+      schemaVersion: 1,
+      botId: bot.botId,
+      registeredAt: (this.host.now?.() ?? new Date()).toISOString(),
+      initialName: bot.name,
+      ...(bot.description === undefined
+        ? {}
+        : { initialDescription: bot.description }),
+      // The creator is durable history: a Bot the Flock made on another
+      // Bot's behalf says so in the registration seed itself.
+      ...(bot.createdBy ? { createdBy: structuredClone(bot.createdBy) } : {}),
+      sheep: structuredClone(
+        bot.sheep ?? randomSheepRecipeV1(this.host.random),
+      ),
+    };
+    const next = {
+      ...current,
+      revision: current.revision + 1,
+      bots: [...current.bots, registration],
+    } satisfies BotDirectoryViewV1;
+    await storage.put(DIRECTORY_KEY, next);
+    await storage.put(`${LIFECYCLE_PREFIX}${bot.botId}`, {
+      schemaVersion: 1,
+      botId: bot.botId,
+      status: "active",
+      revision: 0,
+    } satisfies BotLifecycleViewV1);
+    return next;
+  }
+
+  /**
+   * Gives an account with no Bots its General Bot, once.
+   *
+   * The application calls this when the account's identity is first proven to
+   * this object, which is the first thing any admitted request does, so a new
+   * account owns General before its first directory read, and an account that
+   * owned no Bots before this existed is backfilled the same way. An account
+   * that already owns Bots only gets the marker: its Bots are neither renamed
+   * nor joined by a second one. Repeating the call, concurrently or after an
+   * eviction, is a read of the marker.
+   *
+   * General's id is minted here rather than fixed. A Bot Durable Object keeps
+   * a tombstone for ever once its Bot is deleted, so a reused id could name an
+   * object that refuses to exist again.
+   */
+  async provisionGeneral(): Promise<void> {
+    if ((await this.host.storage.get<unknown>(BOOTSTRAP_KEY)) !== undefined)
+      return;
+    await this.host.storage.transaction(async (storage) => {
+      if ((await storage.get<unknown>(BOOTSTRAP_KEY)) !== undefined) return;
+      const currentValue = await storage.get<unknown>(DIRECTORY_KEY);
+      const current =
+        currentValue === undefined
+          ? initialDirectory()
+          : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(currentValue));
+      const marker: StoredBootstrapV1 = { schemaVersion: 1 };
+      if (current.bots.length === 0) {
+        marker.generalBotId = `general-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+        await this.register(storage, current, {
+          botId: marker.generalBotId,
+          name: "General",
+          description: GENERAL_DESCRIPTION,
+        });
+      }
+      await storage.put(BOOTSTRAP_KEY, marker);
+    });
+  }
+
+  /** General's id while it is still registered, for the client to open it. */
+  async readBootstrap(): Promise<FlockBootstrapViewV1> {
+    const marker =
+      await this.host.storage.get<StoredBootstrapV1>(BOOTSTRAP_KEY);
+    const botId = marker?.generalBotId;
+    return {
+      schemaVersion: 1,
+      generalBotId:
+        botId !== undefined && (await this.hasBot(botId)) ? botId : null,
+    };
   }
 
   /**

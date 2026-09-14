@@ -92,7 +92,7 @@ async function twoBots() {
   const owner = `owner-${suffix}`;
   const other = `other-${suffix}`;
   await provisionBot({ userId, botId: owner });
-  await provisionSiblingBot({ userId, botId: other }, 1);
+  await provisionSiblingBot({ userId, botId: other });
   const rpc = user(userId);
   const envelope = { schemaVersion: 1 as const, userId };
   return {

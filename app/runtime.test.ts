@@ -254,6 +254,8 @@ describe("foundation application", () => {
         }),
       listBotLifecycles: () =>
         Promise.resolve({ schemaVersion: 1, lifecycles: [] }),
+      readFlockBootstrap: () =>
+        Promise.resolve({ schemaVersion: 1 as const, generalBotId: null }),
       executeBotLifecycle: () =>
         Promise.reject(new Error("not used while composing")),
       readSheep: () => Promise.reject(new Error("not used while composing")),

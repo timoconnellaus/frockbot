@@ -12,6 +12,7 @@ import {
   type BotLifecycleDirectoryViewV1,
   type BotLifecycleReceiptV1,
   type CreateBotCommandV1,
+  type FlockBootstrapViewV1,
   type FlockReceiptV1,
   type SheepIdentityViewV1,
   type UpdateSheepCommandV1,
@@ -33,6 +34,8 @@ export interface FlockGatewayHost {
     command: CreateBotCommandV1,
   ): Promise<FlockReceiptV1>;
   listBotLifecycles(userId: string): Promise<BotLifecycleDirectoryViewV1>;
+  /** Which Bot the account was given as General, while it still exists. */
+  readFlockBootstrap(userId: string): Promise<FlockBootstrapViewV1>;
   executeBotLifecycle(
     userId: string,
     command: BotLifecycleCommandV1,
@@ -174,6 +177,7 @@ export function createFlockBackendContribution(
       if (
         url.pathname !== "/api/bots" &&
         url.pathname !== "/api/bots/lifecycles" &&
+        url.pathname !== "/api/bots/bootstrap" &&
         url.pathname !== "/api/bots/identities" &&
         url.pathname !== "/api/bots/unread" &&
         url.pathname !== "/api/bots/notifications" &&
@@ -222,6 +226,14 @@ export function createFlockBackendContribution(
           return Response.json(
             await host.executeBotUnreadCommand(context.userId, botId, command),
           );
+        }
+        if (url.pathname === "/api/bots/bootstrap") {
+          if (request.method !== "GET")
+            return Response.json(
+              { error: "method not allowed" },
+              { status: 405 },
+            );
+          return Response.json(await host.readFlockBootstrap(context.userId));
         }
         if (url.pathname === "/api/bots/lifecycles") {
           if (request.method !== "GET")

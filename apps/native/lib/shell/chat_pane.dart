@@ -29,6 +29,7 @@ import 'run_view.dart';
 import 'semantics.dart';
 import 'send_payload.dart';
 import 'skill_menu.dart';
+import 'starters.dart';
 import 'transcript.dart';
 
 class ChatPane extends StatefulWidget {
@@ -60,6 +61,9 @@ class ChatPane extends StatefulWidget {
 
   /// The Bot's sheep background, so its avatar is the same one everywhere.
   final String? background;
+
+  /// What the empty thread offers to write into the composer.
+  final List<StarterSuggestionV1> starters;
   const ChatPane({
     super.key,
     required this.controller,
@@ -79,6 +83,7 @@ class ChatPane extends StatefulWidget {
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
+    this.starters = const [],
   });
 
   @override
@@ -145,6 +150,17 @@ class _ChatPaneState extends State<ChatPane> {
     editor.clear();
     await sending;
     if (mounted) focus.requestFocus();
+  }
+
+  /// Writes a suggestion into the composer and stops there. The draft is the
+  /// person's to edit and send; nothing here admits a Turn.
+  void _prefill(StarterSuggestionV1 starter) {
+    editor.value = TextEditingValue(
+      text: starter.draft,
+      selection: starterSelectionV1(starter.draft),
+    );
+    unawaited(controller.saveDraft(starter.draft));
+    focus.requestFocus();
   }
 
   Future<void> _retry(TranscriptLine line) => controller.retryRun(line.runId);
@@ -219,6 +235,12 @@ class _ChatPaneState extends State<ChatPane> {
         Expanded(
           child: TranscriptView(
             background: widget.background,
+            starters: widget.starters.isEmpty
+                ? null
+                : StarterSuggestions(
+                    starters: widget.starters,
+                    onSelect: _prefill,
+                  ),
             lines: [
               ...projectRuns(c.runs),
               ...projectAnnouncements(c.announcements),
@@ -318,6 +340,10 @@ class ConversationView extends StatefulWidget {
   final DictationState dictationState;
   final ValueListenable<double>? dictationLevel;
   final String? background;
+
+  /// Whether this is General, whose empty thread offers starter suggestions.
+  final bool general;
+  final int featuresRevision;
   const ConversationView({
     super.key,
     required this.sessions,
@@ -339,6 +365,8 @@ class ConversationView extends StatefulWidget {
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
+    this.general = false,
+    this.featuresRevision = 0,
   });
 
   @override
@@ -361,10 +389,14 @@ class _ConversationViewState extends State<ConversationView>
     api: widget.api,
     botId: widget.botId,
   );
+  late List<StarterSuggestionV1> starters = widget.general
+      ? startersForV1(null)
+      : const [];
 
   @override
   void initState() {
     super.initState();
+    if (widget.general) unawaited(_loadStarters());
     WidgetsBinding.instance.addObserver(this);
     session.controller.addListener(_repaint);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -379,6 +411,29 @@ class _ConversationViewState extends State<ConversationView>
     if (!mounted) return;
     setState(() {});
     _reportConnection();
+  }
+
+  @override
+  void didUpdateWidget(ConversationView old) {
+    super.didUpdateWidget(old);
+    if (old.general == widget.general &&
+        old.featuresRevision == widget.featuresRevision) {
+      return;
+    }
+    if (widget.general) {
+      starters = startersForV1(null);
+      unawaited(_loadStarters());
+    } else {
+      starters = const [];
+    }
+  }
+
+  Future<void> _loadStarters() async {
+    final revision = widget.featuresRevision;
+    final features = await readBotFeaturesV1(widget.api, widget.botId);
+    if (mounted && widget.general && revision == widget.featuresRevision) {
+      setState(() => starters = startersForV1(features));
+    }
   }
 
   void _reportConnection() => widget.onConnectionChanged?.call(
@@ -401,6 +456,7 @@ class _ConversationViewState extends State<ConversationView>
     botId: widget.botId,
     child: ChatPane(
       background: widget.background,
+      starters: starters,
       controller: session.controller,
       onReconnect: session.channel.connect,
       approvals: approvals,

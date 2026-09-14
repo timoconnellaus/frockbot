@@ -94,7 +94,7 @@ describe("the audit table in Workerd", () => {
       stdout: `audited\n${EXEC_EXIT_MARKER}0\n`,
     });
     await provisionBot(first);
-    await provisionSiblingBot(second, 1);
+    await provisionSiblingBot(second);
 
     // A credential in the command line, because that is the case that matters:
     // an audit row that carried it would be exactly the durable secret the

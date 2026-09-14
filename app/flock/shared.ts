@@ -12,6 +12,30 @@ import assetManifest from "./assets/manifest.json" with { type: "json" };
 
 export const FLOCK_DIRECTORY_LIMIT = 100;
 
+/**
+ * Which Bot the account's authority provisioned as General, while it is still
+ * registered. General's id is minted fresh like any other, so this is the only
+ * way a client knows which Bot it is; nothing is inferred from a name or id.
+ */
+export interface FlockBootstrapViewV1 {
+  schemaVersion: 1;
+  generalBotId: string | null;
+}
+
+export function decodeFlockBootstrapViewV1(
+  input: unknown,
+): FlockBootstrapViewV1 {
+  const value = record(input, "Flock bootstrap view");
+  exact(value, ["schemaVersion", "generalBotId"], []);
+  if (value.schemaVersion !== 1)
+    throw new FlockDecodeError("unsupported Flock bootstrap view");
+  return {
+    schemaVersion: 1,
+    generalBotId:
+      value.generalBotId === null ? null : botIdentifier(value.generalBotId),
+  };
+}
+
 export function isFlockIdentifier(value: unknown): value is string {
   return isPublicIdentifier(value);
 }

@@ -19,6 +19,7 @@ class PluginsController extends ViewSurfaceController {
   final String userId;
   final bool capabilities;
   final String? botId;
+  final VoidCallback? onFeaturesChanged;
 
   /// Where a row's "Set up in …" goes. Navigation is not a command, so the
   /// host answers it itself rather than sending it anywhere.
@@ -65,6 +66,7 @@ class PluginsController extends ViewSurfaceController {
     this.openHome,
     this.capabilities = false,
     this.botId,
+    this.onFeaturesChanged,
   });
 
   @override
@@ -158,6 +160,7 @@ class PluginsController extends ViewSurfaceController {
         },
       );
       final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
+      if (receipt['status'] == 'applied') onFeaturesChanged?.call();
       return {
         'commandId': command['commandId'],
         'status': receipt['status'] == 'applied' ? 'applied' : 'rejected',
@@ -177,7 +180,9 @@ class PluginsController extends ViewSurfaceController {
       '/api/settings',
       body: pluginCommandV1(command),
     );
-    return ((answer as Map?) ?? const {}).cast<String, Object?>();
+    final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
+    if (receipt['status'] == 'applied') onFeaturesChanged?.call();
+    return receipt;
   }
 
   @override
@@ -200,6 +205,7 @@ class PluginsPage extends StatefulWidget {
 
   /// The Bot whose Plugins this page shows; absent, the account's list.
   final String? botId;
+  final VoidCallback? onFeaturesChanged;
   final String? botName;
 
   /// Off inside the panel beside the conversation, which names it already.
@@ -212,6 +218,7 @@ class PluginsPage extends StatefulWidget {
     required this.userId,
     this.capabilities = false,
     this.botId,
+    this.onFeaturesChanged,
     this.botName,
     this.chrome = true,
   });
@@ -235,6 +242,7 @@ class _PluginsPageState extends State<PluginsPage> {
     userId,
     capabilities: capabilities,
     botId: botId,
+    onFeaturesChanged: () => widget.onFeaturesChanged?.call(),
     openHome: (home, packageId) => _openHome(context, home, packageId),
   );
 
@@ -243,13 +251,20 @@ class _PluginsPageState extends State<PluginsPage> {
       // A model provider's accounts and a connector Package's are one surface
       // in this client, so both homes land on Connectors.
       'models' => SettingsPage(
+        onFeaturesChanged: widget.onFeaturesChanged,
         api: api,
         store: store,
         userId: userId,
         home: 'models',
       ),
-      'connections' => ConnectionsPage(api: api, store: store, userId: userId),
+      'connections' => ConnectionsPage(
+        api: api,
+        store: store,
+        userId: userId,
+        onFeaturesChanged: widget.onFeaturesChanged,
+      ),
       'user-settings' => SettingsPage(
+        onFeaturesChanged: widget.onFeaturesChanged,
         api: api,
         store: store,
         userId: userId,

@@ -1289,7 +1289,7 @@ describe("Applet viewer tokens", () => {
     const owner = { userId: OWNER, botId: "socket-owner" };
     const guest = { userId: OWNER, botId: "socket-guest" };
     await provisionBot(owner);
-    await provisionSiblingBot(guest, 1);
+    await provisionSiblingBot(guest);
     const directory = env.USER_CONFIGURATIONS.get(
       env.USER_CONFIGURATIONS.idFromName(OWNER),
     );

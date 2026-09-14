@@ -70,7 +70,7 @@ test("browser and native share failed notices and idempotent unread/acknowledgem
   const unread = decodeProtocol(
     "UnreadDirectory",
     await (await native("/api/bots/unread")).json(),
-  ).unread[0]!;
+  ).unread.find((entry) => entry.botId === botId)!;
   expect(unread.botId).toBe(botId);
   expect(unread.count).toBe(1);
   expect(unread.lastMessageId).toBe("failed-turn:failed");

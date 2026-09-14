@@ -13,6 +13,7 @@ import {
   postAsUser,
   provisionThroughGateway,
   useApplicationArtifact,
+  flockRevision,
 } from "./fixtures.ts";
 
 useApplicationArtifact();
@@ -53,16 +54,18 @@ describe("unread and notifications through the gateway", () => {
       schemaVersion: 1,
       type: "bot/create",
       commandId: `create-${botB}`,
-      expectedRevision: 1,
+      expectedRevision: await flockRevision(userId),
       botId: botB,
       name: "Beta",
     });
     expect(createdB.status).toBe(201);
 
     const initial = await unreadDirectory(userId);
-    expect(initial.map((view) => view.unread)).toEqual([false, false]);
+    // Both new Bots and the account's General.
+    expect(initial.map((view) => view.unread)).toEqual([false, false, false]);
     // Every new Bot starts with Notifications enabled.
     expect(initial.map((view) => view.notificationsEnabled)).toEqual([
+      true,
       true,
       true,
     ]);
@@ -125,7 +128,14 @@ describe("unread and notifications through the gateway", () => {
     const botId = "unread-private";
     await provisionThroughGateway({ userId: owner, botId });
 
-    expect(await unreadDirectory(stranger)).toEqual([]);
+    // The stranger's first read provisions their own General, and nothing of
+    // the owner's.
+    const { generalBotId } = (await expectOkJson(
+      await asUser(stranger, "/api/bots/bootstrap"),
+    )) as { generalBotId: string };
+    expect(
+      (await unreadDirectory(stranger)).map((entry) => entry.botId),
+    ).toEqual([generalBotId]);
     const refused = await postAsUser(stranger, `/api/bots/${botId}/unread`, {
       schemaVersion: 1,
       type: "bot/mark-unread",

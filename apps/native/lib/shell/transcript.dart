@@ -52,6 +52,9 @@ class TranscriptView extends StatefulWidget {
 
   /// The Bot's sheep background. Every avatar in the thread is this Bot's.
   final String? background;
+
+  /// Drawn under the empty thread's greeting, and gone with the first row.
+  final Widget? starters;
   const TranscriptView({
     super.key,
     required this.lines,
@@ -72,6 +75,7 @@ class TranscriptView extends StatefulWidget {
     this.onReadLatest,
     this.focusRunId,
     this.background,
+    this.starters,
   });
 
   @override
@@ -274,7 +278,10 @@ class _TranscriptViewState extends State<TranscriptView> {
     if (rows.isEmpty) {
       return loading
           ? const FrockLoading(label: 'Loading your conversation')
-          : _EmptyThread(background: widget.background);
+          : _EmptyThread(
+              background: widget.background,
+              starters: widget.starters,
+            );
     }
     return identified(
       ShellIds.transcript,
@@ -583,7 +590,8 @@ class _Announcement extends StatelessWidget {
 
 class _EmptyThread extends StatelessWidget {
   final String? background;
-  const _EmptyThread({this.background});
+  final Widget? starters;
+  const _EmptyThread({this.background, this.starters});
 
   @override
   Widget build(BuildContext context) {
@@ -606,6 +614,7 @@ class _EmptyThread extends StatelessWidget {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            if (starters != null) ...[const SizedBox(height: 16), starters!],
           ],
         ),
       ),

@@ -56,6 +56,7 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 - Its constructor runs the receipted, disposable Applet cleanup (`applet-test-state-cleanup.ts`) under `blockConcurrencyWhile`.
 - The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to two plugin stores: transcript search FTS5 (`app/search/index-store.ts:143-177`) and audit (`app/audit/store.ts:166-175`). All other state is key-value.
 - One `alarm()` serving credential leases, publisher and template recovery, flock sagas, archived-Bot sweeps and deleted Applets' state and source cleanup.
+- Owns [General bootstrap](../app/flock/README.md#general-bootstrap); the [first-run guidance](../README.md#getting-started) describes how the shared Flutter client opens it and offers editable suggestions.
 - No `fetch()`, no WebSockets.
 
 ### `AppletState` — `apps/cloudflare/src/applet-state.ts:228`

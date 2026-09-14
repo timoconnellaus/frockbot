@@ -31,6 +31,7 @@ class SettingsPage extends StatefulWidget {
   final String home;
   final String? section;
   final String? title;
+  final VoidCallback? onFeaturesChanged;
   const SettingsPage({
     super.key,
     required this.api,
@@ -39,6 +40,7 @@ class SettingsPage extends StatefulWidget {
     this.home = 'application',
     this.section,
     this.title,
+    this.onFeaturesChanged,
   });
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -148,6 +150,7 @@ class _SettingsPageState extends State<SettingsPage>
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => ConnectionsPage(
+            onFeaturesChanged: widget.onFeaturesChanged,
             api: widget.api,
             store: widget.store,
             userId: widget.userId,
@@ -279,6 +282,8 @@ class _SettingsPageState extends State<SettingsPage>
                                           store: widget.store,
                                           userId: widget.userId,
                                           capabilities: true,
+                                          onFeaturesChanged:
+                                              widget.onFeaturesChanged,
                                         ),
                                       ),
                                     )
@@ -307,6 +312,7 @@ class _SettingsPageState extends State<SettingsPage>
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => SettingsPage(
+            onFeaturesChanged: widget.onFeaturesChanged,
             api: widget.api,
             store: widget.store,
             userId: widget.userId,

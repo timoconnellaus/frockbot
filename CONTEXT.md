@@ -12,6 +12,10 @@ _Avoid_: Account, tenant
 A persistent, configured conversational actor with its own identity, sessions, routines, and optional computer. Its extensible behavior comes from its user's shared package setup.
 _Avoid_: Agent, assistant instance
 
+**General**:
+The automatically provisioned, general-purpose Bot for a User starting without Bots; see the [bootstrap contract](app/flock/README.md#general-bootstrap).
+_Avoid_: Default Bot, starter Bot
+
 **Agent**:
 A live execution of a bot that claims queued input, calls a model, executes tools, and records the resulting session events.
 _Avoid_: Bot, worker
