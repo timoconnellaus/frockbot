@@ -12,6 +12,7 @@ import {
   type NativeAuthOptions,
 } from "./native-auth.js";
 import { createGateway } from "./gateway.js";
+import type { AccountAdmissionDecisionV1 } from "@frockbot/app/admin/shared";
 import {
   nativeSessionOperation,
   type NativeSessionStorage,
@@ -40,7 +41,7 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
   const auth = createNativeAuth({
     secret: "test-only-secret-that-is-not-a-credential",
     returnUris: [NATIVE_RETURN_ANDROID],
-    canIssueSession: async () => true,
+    admit: async () => ({ schemaVersion: 1, admitted: true, basis: "active" }),
     now: () => time,
     auth: {
       handler: async () =>
@@ -562,8 +563,7 @@ function gateway(nativeAuth?: ReturnType<typeof createNativeAuth>) {
       },
       loader: { get: unexpected },
       artifacts: { load: unexpected },
-      userExists: unexpected,
-      readDeploymentPolicy: unexpected,
+      admitAccount: unexpected,
       applicationHashFor: unexpected,
       botStateFor: unexpected,
       userConfigurationFor: unexpected,
@@ -701,42 +701,247 @@ test("failed durable issuance cannot return a bearer", async () => {
   expect(await response.text()).not.toContain("sessionToken");
 });
 
-test("closed or unavailable signup policy refuses before User provisioning", async () => {
-  for (const unavailable of [false, true]) {
-    const f = fixture({
-      canIssueSession: async () => {
-        if (unavailable) throw new Error("Policy unavailable");
-        return false;
+describe("beta access on the native door", () => {
+  type Decision = AccountAdmissionDecisionV1 | null | "unavailable";
+
+  /**
+   * A fixture whose authority answer can change between requests and which
+   * records every User session operation, because that operation is what
+   * provisions the User.
+   */
+  function gated(initial: Decision = activeDecision) {
+    let decision: Decision = initial;
+    const admitted: string[] = [];
+    const operations: string[] = [];
+    // The fixture signs the start and the browser leg; the recording door
+    // below shares its secret and storage and is the one under test.
+    const f = fixture();
+    const recording = createNativeAuth({
+      secret: SECRET,
+      returnUris: [NATIVE_RETURN_ANDROID],
+      now: f.now,
+      admit: async (userId) => {
+        admitted.push(userId);
+        if (decision === "unavailable") {
+          throw new Error("Durable Object reset while responding");
+        }
+        return decision;
+      },
+      auth: {
+        handler: async () => new Response(null, { status: 404 }),
+        getSession: async (headers) =>
+          headers.get("cookie") === "test=signed-in"
+            ? { user: { id: "user-1" } }
+            : null,
+        profile: async () => ({
+          email: "member@example.com",
+          emailVerified: true,
+        }),
+      },
+      session: async (_user, input) => {
+        operations.push(input.action);
+        return nativeSessionOperation(f.storage, input, f.now());
       },
     });
-    const response = await gateway(f.auth).fetch(
-      f.request("/api/auth/native/exchange", await f.authorize()),
-    );
-    expect(response.status).toBe(unavailable ? 400 : 403);
-    expect(f.values.size).toBe(0);
+    return {
+      ...f,
+      auth: recording,
+      admitted,
+      operations,
+      set(next: Decision) {
+        decision = next;
+      },
+    };
   }
-});
 
-test.each([
-  "http://accounts.google.com/auth",
-  "https://accounts.google.com:444/auth",
-  "https://accounts.google.com.evil.test/auth",
-  "https://user@accounts.google.com/auth",
-])("gateway refuses provider redirect %s", async (url) => {
-  const f = fixture({
-    auth: {
-      getSession: async () => null,
-      handler: async () => Response.json({ url }),
-    },
+  const activeDecision: AccountAdmissionDecisionV1 = {
+    schemaVersion: 1,
+    admitted: true,
+    basis: "active",
+  };
+  const paused: AccountAdmissionDecisionV1 = {
+    schemaVersion: 1,
+    admitted: false,
+    reason: "account-paused",
+  };
+
+  async function signIn(g: ReturnType<typeof gated>) {
+    const response = await g.auth.route(
+      g.request("/api/auth/native/exchange", await g.authorize()),
+    );
+    expect(response?.status).toBe(200);
+    const view = decodeProtocol("AuthSessionView", await response!.json());
+    return { authorization: `Bearer ${view.sessionToken}` };
+  }
+
+  test("a refused exchange names its reason and issues nothing", async () => {
+    for (const reason of [
+      "admission-closed",
+      "invitation-required",
+      "account-blocked",
+    ] as const) {
+      const g = gated({ schemaVersion: 1, admitted: false, reason });
+      const response = await gateway(g.auth).fetch(
+        g.request("/api/auth/native/exchange", await g.authorize()),
+      );
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        code: "account-access-refused",
+        reason,
+      });
+      expect(g.operations).toEqual([]);
+      expect(g.values.size).toBe(0);
+    }
   });
-  const g = gateway(f.auth);
-  const view = decodeProtocol(
-    "AuthStartView",
-    await (await g.fetch(f.request("/api/auth/native/start", f.start))).json(),
-  );
-  const response = await g.fetch(new Request(view.authorizationUrl));
-  expect(response.status).toBe(400);
-  expect(response.headers.get("location")).toBeNull();
+
+  test("an unreachable authority on exchange is a 503, not a failed sign-in", async () => {
+    const g = gated("unavailable");
+    const response = await gateway(g.auth).fetch(
+      g.request("/api/auth/native/exchange", await g.authorize()),
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: "account-access-unavailable",
+    });
+    expect(g.operations).toEqual([]);
+  });
+
+  test("a bearer is re-admitted before its session record is read", async () => {
+    const g = gated();
+    const headers = await signIn(g);
+    expect(g.operations).toEqual(["issue"]);
+
+    const admitted = await g.auth.authenticate(
+      g.request("/api/identity", undefined, headers),
+    );
+    expect(admitted?.session?.user).toEqual({
+      id: "user-1",
+      email: "member@example.com",
+      emailVerified: true,
+    });
+    expect(admitted?.admission).toEqual(activeDecision);
+    expect(g.operations).toEqual(["issue", "read"]);
+
+    g.set(paused);
+    const refused = await g.auth.authenticate(
+      g.request("/api/identity", undefined, headers),
+    );
+    expect(refused?.session).toBeNull();
+    expect(refused?.refusal?.status).toBe(403);
+    expect(await refused?.refusal?.json()).toMatchObject({
+      reason: "account-paused",
+    });
+    // The pause stopped the read: nothing touched the User.
+    expect(g.operations).toEqual(["issue", "read"]);
+
+    g.set("unavailable");
+    const unavailable = await g.auth.authenticate(
+      g.request("/api/identity", undefined, headers),
+    );
+    expect(unavailable?.session).toBeNull();
+    expect(unavailable?.refusal?.status).toBe(503);
+    expect(g.operations).toEqual(["issue", "read"]);
+
+    // An identity that no longer exists is a sign-in problem, and only that is.
+    g.set(null);
+    const gone = await g.auth.authenticate(
+      g.request("/api/identity", undefined, headers),
+    );
+    expect(gone).toEqual({ session: null });
+    expect(g.operations).toEqual(["issue", "read"]);
+  });
+
+  test("the gateway answers a refused or unreachable bearer as the authority did, and asks once", async () => {
+    const g = gated();
+    const headers = await signIn(g);
+    const hello = {
+      "x-frockbot-client": JSON.stringify({
+        schemaVersion: 1,
+        protocolVersion: 1,
+        nativeVersion: "1.3.0",
+        catalogs: [],
+      }),
+    };
+    const identity = () =>
+      createGateway({
+        nativeAuth: g.auth,
+        auth: {
+          getSession: async () => null,
+          handler: async () => new Response("browser auth"),
+        },
+        loader: { get: () => ({}) as never },
+        artifacts: { load: async () => "" },
+        admitAccount: () => {
+          throw new Error("a native bearer is admitted by nativeAuth");
+        },
+        applicationHashFor: async () => "foundation-v1",
+        botStateFor: () => ({}) as never,
+        userConfigurationFor: () => ({}) as never,
+        botConfigurationFor: () => ({}) as never,
+      })(
+        new Request(`${NATIVE_ORIGIN}/api/identity`, {
+          headers: { ...hello, ...headers },
+        }),
+      );
+    const before = g.admitted.length;
+    const ok = await identity();
+    expect(ok.status).toBe(200);
+    expect(g.admitted.length - before).toBe(1);
+
+    g.set(paused);
+    const refused = await identity();
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ reason: "account-paused" });
+
+    g.set("unavailable");
+    expect((await identity()).status).toBe(503);
+    expect(g.operations).toEqual(["issue", "read"]);
+  });
+
+  test("a refused account's settings handoff and sign-out never reach the User", async () => {
+    const g = gated();
+    const headers = await signIn(g);
+    g.set(paused);
+    const handoff = await g.auth.route(
+      g.request(
+        "/api/auth/native/settings",
+        { schemaVersion: 1, home: "models" },
+        headers,
+      ),
+    );
+    expect(handoff?.status).toBe(403);
+    const signOut = await g.auth.route(
+      g.request(
+        "/api/auth/native/revoke",
+        {
+          schemaVersion: 1,
+          commandId: "sign-out-1",
+          action: "sign-out",
+          sessionId: "sign-in-1",
+        },
+        headers,
+      ),
+    );
+    // The app finishes signing out; nothing is provisioned to record it.
+    expect(signOut?.status).toBe(200);
+    expect(g.operations).toEqual(["issue"]);
+
+    g.set("unavailable");
+    const unavailable = await g.auth.route(
+      g.request(
+        "/api/auth/native/revoke",
+        {
+          schemaVersion: 1,
+          commandId: "sign-out-2",
+          action: "sign-out",
+          sessionId: "sign-in-1",
+        },
+        headers,
+      ),
+    );
+    expect(unavailable?.status).toBe(503);
+    expect(g.operations).toEqual(["issue"]);
+  });
 });
 
 test("ambiguous browser callbacks are refused before identity resolution", async () => {

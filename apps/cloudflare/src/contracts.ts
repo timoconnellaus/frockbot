@@ -91,7 +91,10 @@ import type {
   ClientTurnV1,
 } from "@frockbot/app/shell/run-protocol";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
-import type { DeploymentPolicyV1 } from "@frockbot/app/admin/shared";
+import type {
+  AccountAdmissionDecisionV1,
+  AdmissionIdentityV1,
+} from "@frockbot/app/admin/shared";
 
 export interface BackendRouteContribution {
   packageId: string;
@@ -432,12 +435,16 @@ export interface AuthSession {
   user: {
     id: string;
     email?: string;
+    /** Whether the identity provider verified `email`; absent means no. */
+    emailVerified?: boolean;
   };
 }
 
 export interface GatewayAuth {
   /** Profile hints for the already authenticated User; no credential fields. */
-  profile?(userId: string): Promise<{ name?: string; email?: string } | null>;
+  profile?(
+    userId: string,
+  ): Promise<{ name?: string; email?: string; emailVerified?: boolean } | null>;
   handler(request: Request): Promise<Response>;
   getSession(headers: Headers): Promise<AuthSession | null>;
 }
@@ -730,8 +737,14 @@ export interface GatewayDependencies {
   /** The request's `ctx.waitUntil`, for work that may outlive the answer. */
   waitUntil?: (promise: Promise<unknown>) => void;
   auth: GatewayAuth;
-  userExists(userId: string): Promise<boolean>;
-  readDeploymentPolicy(): Promise<DeploymentPolicyV1>;
+  /**
+   * The beta-access authority, asked before any request reaches a User. It
+   * may activate the account as it answers; it throws only when it cannot
+   * answer at all.
+   */
+  admitAccount(
+    identity: AdmissionIdentityV1,
+  ): Promise<AccountAdmissionDecisionV1>;
   /** Raw deployment secret; only the derived `isAdmin` boolean reaches clients. */
   adminEmails?: string;
   applicationHashFor(userId: string): Promise<string>;

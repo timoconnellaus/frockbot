@@ -6,6 +6,25 @@ import '../client/transport.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 
+/// The deployment's admission modes, in the order an admin reads them.
+const admissionModes = [
+  (
+    mode: 'closed',
+    title: 'Closed',
+    detail: 'No new accounts. Only accounts with access can sign in.',
+  ),
+  (
+    mode: 'invite-only',
+    title: 'Invite only',
+    detail: 'Only invited accounts can start using FrockBot.',
+  ),
+  (
+    mode: 'open',
+    title: 'Open',
+    detail: 'Anyone who signs in can start using FrockBot.',
+  ),
+];
+
 /// The amounts an admin is offered. Anything else is typed.
 const creditPresetCents = [500, 1000, 2500, 5000];
 
@@ -184,7 +203,7 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   /// The accounts and what each holds. Separate from the policy read so a
-  /// list that cannot load leaves the signups switch usable.
+  /// list that cannot load leaves the admission choice usable.
   Future<void> loadAccounts() async {
     try {
       final answer = await widget.api.request('/api/admin/users');
@@ -207,7 +226,7 @@ class _AdminPageState extends State<AdminPage> {
     }
   }
 
-  Future<void> setSignups(bool open) async {
+  Future<void> setAdmissionMode(String mode) async {
     final current = policy;
     if (current == null || busy) return;
     setState(() {
@@ -219,8 +238,8 @@ class _AdminPageState extends State<AdminPage> {
         '/api/admin/policy',
         body: {
           'schemaVersion': 1,
-          'type': 'deployment/set-signups',
-          'open': open,
+          'type': 'deployment/set-admission-mode',
+          'mode': mode,
           'revision': current['revision'],
         },
       );
@@ -346,7 +365,7 @@ class _AdminPageState extends State<AdminPage> {
   @override
   Widget build(BuildContext context) {
     final current = policy;
-    final signups = ((current?['signups'] as Map?) ?? const {})['open'] == true;
+    final mode = ((current?['admission'] as Map?) ?? const {})['mode'];
     final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
@@ -385,20 +404,34 @@ class _AdminPageState extends State<AdminPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          identified(
-                            AdminIds.signups,
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('Allow new signups'),
-                              subtitle: Text(
-                                signups
-                                    ? 'Anyone with the link can create an account.'
-                                    : 'Only people who already have an account can sign in.',
-                              ),
-                              value: signups,
-                              onChanged: busy ? null : setSignups,
-                            ),
+                          Text('New accounts', style: textTheme.titleMedium),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Who can start using FrockBot. Accounts that '
+                            'already have access keep it in every mode.',
+                            style: textTheme.bodySmall,
                           ),
+                          for (final choice in admissionModes)
+                            identified(
+                              AdminIds.admissionMode(choice.mode),
+                              Semantics(
+                                inMutuallyExclusiveGroup: true,
+                                checked: mode == choice.mode,
+                                child: ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text(choice.title),
+                                  subtitle: Text(choice.detail),
+                                  selected: mode == choice.mode,
+                                  trailing: mode == choice.mode
+                                      ? const Icon(Icons.check_rounded)
+                                      : null,
+                                  enabled: !busy,
+                                  onTap: mode == choice.mode
+                                      ? null
+                                      : () => setAdmissionMode(choice.mode),
+                                ),
+                              ),
+                            ),
                           const SizedBox(height: 12),
                           Text(
                             current['updatedBy'] == 'deployment-default'

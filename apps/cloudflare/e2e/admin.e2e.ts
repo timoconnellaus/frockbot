@@ -44,17 +44,18 @@ async function openAdmin(page: Page) {
   await openProfileMenu(page);
   await settle(page);
   await tap(page, "profile-admin").click();
-  await expect(sem(page, "admin-signups")).toBeVisible({
+  await expect(admissionMode(page, "closed")).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
 }
 
-/** The switch itself, which is the child node of the named row. */
-function signups(page: Page) {
-  return sem(page, "admin-signups").locator('[role="switch"]');
+/** One admission mode's row, as the node that carries its checked state. */
+function admissionMode(page: Page, mode: string) {
+  const node = `[flt-semantics-identifier="admin-admission-${mode}"]`;
+  return page.locator(`${node}[aria-checked], ${node} [aria-checked]`).first();
 }
 
-test("an admin changes the durable signup policy", async ({ page }) => {
+test("an admin changes the durable admission mode", async ({ page }) => {
   // `development` is the one identity this deployment treats as an admin, so
   // this test does not take a fresh `userId` the way every other one does.
   await openApplication(page, "development");
@@ -62,16 +63,21 @@ test("an admin changes the durable signup policy", async ({ page }) => {
   await expect(sem(page, "profile-name")).toContainText("Local developer");
   await settle(page);
   await tap(page, "profile-admin").click();
-  await expect(sem(page, "admin-signups")).toBeVisible({
+  await expect(admissionMode(page, "closed")).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
   await settle(page);
 
-  await expect(signups(page)).toBeEnabled();
-  const initial = await signups(page).getAttribute("aria-checked");
-  const flipped = initial === "true" ? "false" : "true";
-  await signups(page).click();
-  await expect(signups(page)).toHaveAttribute("aria-checked", flipped);
+  // Between closed and invite-only, so the stack is never left open to anyone.
+  const closed =
+    (await admissionMode(page, "closed").getAttribute("aria-checked")) ===
+    "true";
+  const target = closed ? "invite-only" : "closed";
+  await tap(page, `admin-admission-${target}`).click();
+  await expect(admissionMode(page, target)).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
 
   // The policy is the deployment's, not this session's: a reload reads it back
   // from the authority rather than from anything the page was holding.
@@ -81,5 +87,8 @@ test("an admin changes the durable signup policy", async ({ page }) => {
   ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   await openAdmin(page);
   await settle(page);
-  await expect(signups(page)).toHaveAttribute("aria-checked", flipped);
+  await expect(admissionMode(page, target)).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
 });

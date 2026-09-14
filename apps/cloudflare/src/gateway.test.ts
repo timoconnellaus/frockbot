@@ -22,7 +22,10 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/core/configuration";
 import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
-import type { DeploymentPolicyV1 } from "@frockbot/app/admin/shared";
+import type {
+  AccountAdmissionDecisionV1,
+  AdmissionIdentityV1,
+} from "@frockbot/app/admin/shared";
 import { createFlockBackendContribution } from "@frockbot/app/flock/backend";
 import { foundationBaseRuntimePackagesV1 } from "@frockbot/app/runtime";
 import {
@@ -956,12 +959,10 @@ const unauthenticatedAuth: GatewayAuth = {
   getSession: () => Promise.resolve(null),
 };
 
-const closedDeploymentPolicy: DeploymentPolicyV1 = {
+const activeAccount: AccountAdmissionDecisionV1 = {
   schemaVersion: 1,
-  revision: 0,
-  signups: { open: false },
-  updatedAt: "2026-09-01T00:00:00.000Z",
-  updatedBy: "deployment-default",
+  admitted: true,
+  basis: "active",
 };
 
 function createTestGateway(
@@ -970,9 +971,8 @@ function createTestGateway(
   auth: GatewayAuth = unauthenticatedAuth,
   allowDevelopmentIdentity = true,
   allowedClientOrigins?: string[],
-  signup?: {
-    userExists?: (userId: string) => Promise<boolean>;
-    policy?: DeploymentPolicyV1;
+  access?: {
+    admitAccount?: GatewayDependencies["admitAccount"];
     adminEmails?: string;
   },
   openBotStateChannel?: NonNullable<GatewayDependencies["openBotStateChannel"]>,
@@ -993,10 +993,9 @@ function createTestGateway(
     loader,
     artifacts: { load: () => Promise.resolve("export default {}") },
     auth,
-    userExists: signup?.userExists ?? (() => Promise.resolve(true)),
-    readDeploymentPolicy: () =>
-      Promise.resolve(signup?.policy ?? closedDeploymentPolicy),
-    ...(signup?.adminEmails ? { adminEmails: signup.adminEmails } : {}),
+    admitAccount:
+      access?.admitAccount ?? (() => Promise.resolve(activeAccount)),
+    ...(access?.adminEmails ? { adminEmails: access.adminEmails } : {}),
     applicationHashFor,
     botStateFor: (userId) => {
       const state = states.get(userId) ?? new MemoryBotState();
@@ -2173,43 +2172,75 @@ describe("Cloudflare user application gateway", () => {
     expect(loader.ids).toEqual([]);
   });
 
-  test("refuses a first-time signed-in User while signups are closed", async () => {
-    const auth: GatewayAuth = {
-      handler: unauthenticatedAuth.handler,
-      getSession: () =>
-        Promise.resolve({
-          user: { id: "new-user", email: "new@example.com" },
-        }),
-    };
-    let applicationHashReads = 0;
-    const { gateway, loader } = createTestGateway(
-      () => {
-        applicationHashReads += 1;
-        return Promise.resolve("foundation-v1");
-      },
-      auth,
-      false,
-      undefined,
-      { userExists: () => Promise.resolve(false) },
-    );
+  test("every refusal reason reaches the client truthfully, before the User is touched", async () => {
+    const reasons = [
+      ["admission-closed", "FrockBot isn't admitting new accounts right now."],
+      ["invitation-required", "FrockBot is invite-only right now."],
+      ["account-paused", "Your FrockBot access is paused."],
+      ["account-ended", "Your FrockBot beta access has ended."],
+      ["account-blocked", "This account can't use FrockBot."],
+    ] as const;
+    for (const [reason, title] of reasons) {
+      const auth: GatewayAuth = {
+        handler: unauthenticatedAuth.handler,
+        getSession: () =>
+          Promise.resolve({
+            user: { id: "held-user", email: "held@example.com" },
+          }),
+      };
+      let applicationHashReads = 0;
+      const { gateway, loader, configurationRoutes } = createTestGateway(
+        () => {
+          applicationHashReads += 1;
+          return Promise.resolve("foundation-v1");
+        },
+        auth,
+        false,
+        undefined,
+        {
+          admitAccount: () =>
+            Promise.resolve({ schemaVersion: 1, admitted: false, reason }),
+        },
+      );
 
-    const response = await gateway(new Request("https://frockbot.test/"));
+      const page = await gateway(new Request("https://frockbot.test/"));
+      expect(page.status).toBe(403);
+      expect(page.headers.get("cache-control")).toBe("no-store");
+      const html = await page.text();
+      expect(html).toContain(title);
+      expect(html).toContain(`data-reason="${reason}"`);
 
-    expect(response.status).toBe(403);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.text()).toContain(
-      "FrockBot isn't taking new signups right now.",
-    );
-    expect(applicationHashReads).toBe(0);
-    expect(loader.ids).toEqual([]);
+      for (const path of ["/api/identity", "/api/bots", "/api/push/device"]) {
+        const api = await gateway(
+          new Request(`https://frockbot.test${path}`, {
+            method: path === "/api/push/device" ? "POST" : "GET",
+            body: path === "/api/push/device" ? "{}" : undefined,
+          }),
+        );
+        expect(api.status).toBe(403);
+        expect(await api.json<unknown>()).toEqual({
+          error: title,
+          code: "account-access-refused",
+          reason,
+        });
+      }
+      expect(applicationHashReads).toBe(0);
+      expect(loader.ids).toEqual([]);
+      expect(configurationRoutes).toEqual([]);
+    }
   });
 
-  test("admits a first-time signed-in User while signups are open", async () => {
+  test("asks the authority with the session's verified identity", async () => {
+    const asked: AdmissionIdentityV1[] = [];
     const auth: GatewayAuth = {
       handler: unauthenticatedAuth.handler,
       getSession: () =>
         Promise.resolve({
-          user: { id: "new-user", email: "new@example.com" },
+          user: {
+            id: "new-user",
+            email: "New@Example.com",
+            emailVerified: true,
+          },
         }),
     };
     const { gateway, loader } = createTestGateway(
@@ -2218,12 +2249,15 @@ describe("Cloudflare user application gateway", () => {
       false,
       undefined,
       {
-        userExists: () => Promise.resolve(false),
-        policy: {
-          ...closedDeploymentPolicy,
-          revision: 1,
-          signups: { open: true },
+        admitAccount: (identity) => {
+          asked.push(identity);
+          return Promise.resolve({
+            schemaVersion: 1,
+            admitted: true,
+            basis: "open",
+          });
         },
+        adminEmails: "owner@example.com",
       },
     );
 
@@ -2231,53 +2265,144 @@ describe("Cloudflare user application gateway", () => {
 
     expect(response.status).toBe(200);
     expect(loader.ids).toEqual(["new-user:foundation-v1"]);
+    expect(asked).toEqual([
+      {
+        schemaVersion: 1,
+        userId: "new-user",
+        email: "new@example.com",
+        emailVerified: true,
+        isAdmin: false,
+      },
+    ]);
   });
 
-  test("admits existing Users and configured admins while signups are closed", async () => {
-    const users = [
-      { id: "existing-user", email: "member@example.com", exists: true },
-      { id: "owner-user", email: "OWNER@example.com", exists: false },
-    ];
-    for (const user of users) {
-      const auth: GatewayAuth = {
-        handler: unauthenticatedAuth.handler,
-        getSession: () => Promise.resolve({ user }),
-      };
-      let existenceChecks = 0;
-      const { gateway, loader } = createTestGateway(
+  test("an unverified or absent email is presented as unverified", async () => {
+    const asked: AdmissionIdentityV1[] = [];
+    for (const user of [
+      { id: "u1", email: "u1@example.com" },
+      { id: "u2" },
+      { id: "u3", email: "not an address", emailVerified: true },
+    ]) {
+      const { gateway } = createTestGateway(
         undefined,
-        auth,
+        {
+          handler: unauthenticatedAuth.handler,
+          getSession: () => Promise.resolve({ user }),
+        },
         false,
         undefined,
         {
-          userExists: () => {
-            existenceChecks += 1;
-            return Promise.resolve(user.exists);
+          admitAccount: (identity) => {
+            asked.push(identity);
+            return Promise.resolve(activeAccount);
           },
-          adminEmails: "owner@example.com",
         },
       );
-
-      const response = await gateway(new Request("https://frockbot.test/"));
-
-      expect(response.status).toBe(200);
-      expect(loader.ids).toEqual([`${user.id}:foundation-v1`]);
-      expect(existenceChecks).toBe(user.exists ? 1 : 0);
+      await gateway(new Request("https://frockbot.test/api/identity"));
     }
+    expect(asked).toEqual([
+      {
+        schemaVersion: 1,
+        userId: "u1",
+        email: "u1@example.com",
+        emailVerified: false,
+        isAdmin: false,
+      },
+      { schemaVersion: 1, userId: "u2", emailVerified: false, isAdmin: false },
+      { schemaVersion: 1, userId: "u3", emailVerified: true, isAdmin: false },
+    ]);
   });
 
-  test("admits development identities regardless of signup policy", async () => {
-    let existenceChecks = 0;
+  test("an unreachable authority is a 503 that loads nothing", async () => {
+    const auth: GatewayAuth = {
+      handler: unauthenticatedAuth.handler,
+      getSession: () =>
+        Promise.resolve({ user: { id: "member", email: "m@example.com" } }),
+    };
+    const { gateway, loader, configurationRoutes } = createTestGateway(
+      undefined,
+      auth,
+      false,
+      undefined,
+      {
+        admitAccount: () =>
+          Promise.reject(new Error("Durable Object reset while responding")),
+      },
+    );
+    for (const path of ["/", "/api/identity"]) {
+      const response = await gateway(
+        new Request(`https://frockbot.test${path}`),
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        code: "account-access-unavailable",
+      });
+    }
+    expect(loader.ids).toEqual([]);
+    expect(configurationRoutes).toEqual([]);
+  });
+
+  test("rechecks on every request, so a pause lands on an open session", async () => {
+    let decision: AccountAdmissionDecisionV1 = activeAccount;
+    let asked = 0;
+    const auth: GatewayAuth = {
+      handler: unauthenticatedAuth.handler,
+      getSession: () => Promise.resolve({ user: { id: "member" } }),
+    };
+    const { gateway } = createTestGateway(undefined, auth, false, undefined, {
+      admitAccount: () => {
+        asked += 1;
+        return Promise.resolve(decision);
+      },
+    });
+    const identity = () =>
+      gateway(new Request("https://frockbot.test/api/identity"));
+
+    expect((await identity()).status).toBe(200);
+    decision = { schemaVersion: 1, admitted: false, reason: "account-paused" };
+    expect((await identity()).status).toBe(403);
+    decision = activeAccount;
+    expect((await identity()).status).toBe(200);
+    expect(asked).toBe(3);
+  });
+
+  test("admits configured admins without asking the authority", async () => {
+    const auth: GatewayAuth = {
+      handler: unauthenticatedAuth.handler,
+      getSession: () =>
+        Promise.resolve({
+          user: { id: "owner-user", email: "OWNER@example.com" },
+        }),
+    };
+    const { gateway, loader } = createTestGateway(
+      undefined,
+      auth,
+      false,
+      undefined,
+      {
+        admitAccount: () =>
+          Promise.reject(
+            new Error("an admin must not depend on the authority"),
+          ),
+        adminEmails: "owner@example.com",
+      },
+    );
+
+    const response = await gateway(new Request("https://frockbot.test/"));
+
+    expect(response.status).toBe(200);
+    expect(loader.ids).toEqual(["owner-user:foundation-v1"]);
+  });
+
+  test("admits development identities without asking the authority", async () => {
     const { gateway, loader } = createTestGateway(
       undefined,
       unauthenticatedAuth,
       true,
       undefined,
       {
-        userExists: () => {
-          existenceChecks += 1;
-          return Promise.resolve(false);
-        },
+        admitAccount: () =>
+          Promise.reject(new Error("development must not ask the authority")),
         adminEmails: "owner@example.com",
       },
     );
@@ -2288,10 +2413,9 @@ describe("Cloudflare user application gateway", () => {
 
     expect(response.status).toBe(200);
     expect(loader.ids).toEqual(["developer:foundation-v1"]);
-    expect(existenceChecks).toBe(0);
   });
 
-  test("turns the closed-signup page link into a Better Auth sign-out", async () => {
+  test("turns the refusal page link into a Better Auth sign-out", async () => {
     const requests: Array<{ method: string; pathname: string }> = [];
     const auth: GatewayAuth = {
       handler: (request) => {
@@ -2310,7 +2434,12 @@ describe("Cloudflare user application gateway", () => {
         }),
     };
     const { gateway } = createTestGateway(undefined, auth, false, undefined, {
-      userExists: () => Promise.resolve(false),
+      admitAccount: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          admitted: false,
+          reason: "admission-closed",
+        }),
     });
 
     const response = await gateway(

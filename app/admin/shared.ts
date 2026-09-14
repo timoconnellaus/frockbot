@@ -1,23 +1,178 @@
+// --- Beta access --------------------------------------------------------------
+//
+// Who may use this deployment. The deployment's admission mode decides only
+// whether an account with no access record may be *given* one; an account's
+// own record decides everything else. Signing in proves an identity, and a
+// provisioned User proves nothing: neither is access.
+
+/**
+ * `closed` admits no account that is not already active; `invite-only`
+ * activates an invited account; `open` activates any account that has no
+ * record. None of them changes an account whose record says otherwise.
+ */
+export type AdmissionModeV1 = "closed" | "invite-only" | "open";
+
+export const ADMISSION_MODES_V1: readonly AdmissionModeV1[] = [
+  "closed",
+  "invite-only",
+  "open",
+];
+
 export interface DeploymentPolicyV1 {
   schemaVersion: 1;
   revision: number;
-  signups: { open: boolean };
+  admission: { mode: AdmissionModeV1 };
   updatedAt: string;
   updatedBy: string;
 }
 
-export interface SetSignupsCommandV1 {
+export interface SetAdmissionModeCommandV1 {
   schemaVersion: 1;
-  type: "deployment/set-signups";
-  open: boolean;
+  type: "deployment/set-admission-mode";
+  mode: AdmissionModeV1;
   revision: number;
 }
 
-export interface SetSignupsRequestV1 {
+export interface SetAdmissionModeRequestV1 {
   schemaVersion: 1;
-  command: SetSignupsCommandV1;
+  command: SetAdmissionModeCommandV1;
   updatedBy: string;
 }
+
+/**
+ * `invited` may become `active` on its next sign-in unless admission is
+ * closed. `paused`, `ended` and `blocked` are only ever set by an admin and
+ * only ever left by an admin: admission never moves an account out of them.
+ */
+export type AccountAccessStateV1 =
+  "invited" | "active" | "paused" | "ended" | "blocked";
+
+export const ACCOUNT_ACCESS_STATES_V1: readonly AccountAccessStateV1[] = [
+  "invited",
+  "active",
+  "paused",
+  "ended",
+  "blocked",
+];
+
+export interface AccountAccessV1 {
+  schemaVersion: 1;
+  userId: string;
+  state: AccountAccessStateV1;
+  /** Compare-and-swap counter; an account with no record is revision 0. */
+  revision: number;
+  updatedAt: string;
+  /** An admin's User id, or `admission` when sign-in activated the account. */
+  updatedBy: string;
+}
+
+export interface AccountAccessViewV1 {
+  schemaVersion: 1;
+  userId: string;
+  access: AccountAccessV1 | null;
+}
+
+export interface SetAccountAccessCommandV1 {
+  schemaVersion: 1;
+  type: "account/set-access";
+  state: AccountAccessStateV1;
+  /** The record revision the admin read; 0 when the account had none. */
+  revision: number;
+}
+
+export interface SetAccountAccessRequestV1 {
+  schemaVersion: 1;
+  userId: string;
+  command: SetAccountAccessCommandV1;
+  updatedBy: string;
+}
+
+/**
+ * An invitation for an identity that may not exist yet. It is redeemed only
+ * by a sign-in whose identity provider verified this exact address, so typing
+ * someone else's email into a sign-up form grants nothing.
+ */
+export interface EmailInvitationV1 {
+  schemaVersion: 1;
+  email: string;
+  invitedAt: string;
+  invitedBy: string;
+}
+
+export interface InviteEmailCommandV1 {
+  schemaVersion: 1;
+  type: "access/invite-email";
+  email: string;
+}
+
+export interface InviteEmailRequestV1 {
+  schemaVersion: 1;
+  command: InviteEmailCommandV1;
+  invitedBy: string;
+}
+
+/** The identity a sign-in presents, as the gateway resolved it. */
+export interface AdmissionIdentityV1 {
+  schemaVersion: 1;
+  userId: string;
+  email?: string;
+  emailVerified: boolean;
+  /** Derived from the deployment's admin allowlist, never from the client. */
+  isAdmin: boolean;
+}
+
+/** An identity about to be written by the identity provider, before it has an id. */
+export interface IdentityCreationRequestV1 {
+  schemaVersion: 1;
+  email: string;
+  emailVerified: boolean;
+  isAdmin: boolean;
+}
+
+export type AdmissionRefusalReasonV1 =
+  | "admission-closed"
+  | "invitation-required"
+  | "account-paused"
+  | "account-ended"
+  | "account-blocked";
+
+export type AccountAdmissionDecisionV1 =
+  | {
+      schemaVersion: 1;
+      admitted: true;
+      basis: "admin" | "active" | "invitation" | "open";
+    }
+  | { schemaVersion: 1; admitted: false; reason: AdmissionRefusalReasonV1 };
+
+/**
+ * What a refused person is told. Each line is true of the reason it names and
+ * of nothing else: an unknown account is never told it was invited, and a
+ * paused one is never told the deployment is closed.
+ */
+export const ADMISSION_REFUSAL_COPY_V1: Readonly<
+  Record<AdmissionRefusalReasonV1, { title: string; detail: string }>
+> = {
+  "admission-closed": {
+    title: "FrockBot isn't admitting new accounts right now.",
+    detail: "You're signed in, but this account doesn't have beta access.",
+  },
+  "invitation-required": {
+    title: "FrockBot is invite-only right now.",
+    detail: "You're signed in, but this account doesn't have beta access.",
+  },
+  "account-paused": {
+    title: "Your FrockBot access is paused.",
+    detail: "Your account and Bots are kept while access is paused.",
+  },
+  "account-ended": {
+    title: "Your FrockBot beta access has ended.",
+    detail: "Thanks for trying FrockBot.",
+  },
+  "account-blocked": {
+    title: "This account can't use FrockBot.",
+    detail: "Sign in with a different account to continue.",
+  },
+};
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -70,25 +225,66 @@ function isoTimestamp(value: unknown, label: string): string {
   return timestamp;
 }
 
+function admissionMode(value: unknown, label: string): AdmissionModeV1 {
+  if (!ADMISSION_MODES_V1.includes(value as AdmissionModeV1)) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value as AdmissionModeV1;
+}
+
+function accessState(value: unknown, label: string): AccountAccessStateV1 {
+  if (!ACCOUNT_ACCESS_STATES_V1.includes(value as AccountAccessStateV1)) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value as AccountAccessStateV1;
+}
+
+function envelope(input: unknown, label: string, keys: readonly string[]) {
+  const value = record(input, label);
+  exactKeys(value, ["schemaVersion", ...keys], label);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is invalid`);
+  }
+  return value;
+}
+
+/**
+ * The one spelling of an email this authority compares. Identity providers
+ * treat the local part case-insensitively in practice, and an invitation that
+ * missed on case would refuse the person it was written for.
+ */
+export function normalizeAccessEmailV1(value: unknown, label: string): string {
+  const email = boundedString(value, label, 320).trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error(`${label} is invalid`);
+  }
+  return email;
+}
+
+/** A usable address, or none: an identity whose email is malformed claims nothing. */
+export function accessEmailV1(value: unknown): string | undefined {
+  try {
+    return normalizeAccessEmailV1(value, "email");
+  } catch {
+    return undefined;
+  }
+}
+
 export function decodeDeploymentPolicyV1(input: unknown): DeploymentPolicyV1 {
-  const policy = record(input, "deployment policy");
-  exactKeys(
-    policy,
-    ["schemaVersion", "revision", "signups", "updatedAt", "updatedBy"],
-    "deployment policy",
-  );
-  if (policy.schemaVersion !== 1) {
-    throw new Error("deployment policy.schemaVersion is invalid");
-  }
-  const signups = record(policy.signups, "deployment policy.signups");
-  exactKeys(signups, ["open"], "deployment policy.signups");
-  if (typeof signups.open !== "boolean") {
-    throw new Error("deployment policy.signups.open is invalid");
-  }
+  const policy = envelope(input, "deployment policy", [
+    "revision",
+    "admission",
+    "updatedAt",
+    "updatedBy",
+  ]);
+  const admission = record(policy.admission, "deployment policy.admission");
+  exactKeys(admission, ["mode"], "deployment policy.admission");
   return {
     schemaVersion: 1,
     revision: revision(policy.revision, "deployment policy.revision"),
-    signups: { open: signups.open },
+    admission: {
+      mode: admissionMode(admission.mode, "deployment policy.admission.mode"),
+    },
     updatedAt: isoTimestamp(policy.updatedAt, "deployment policy.updatedAt"),
     updatedBy: boundedString(
       policy.updatedBy,
@@ -98,25 +294,267 @@ export function decodeDeploymentPolicyV1(input: unknown): DeploymentPolicyV1 {
   };
 }
 
-export function decodeSetSignupsCommandV1(input: unknown): SetSignupsCommandV1 {
-  const command = record(input, "deployment signup command");
-  exactKeys(
-    command,
-    ["schemaVersion", "type", "open", "revision"],
-    "deployment signup command",
-  );
-  if (
-    command.schemaVersion !== 1 ||
-    command.type !== "deployment/set-signups" ||
-    typeof command.open !== "boolean"
-  ) {
-    throw new Error("deployment signup command is invalid");
+export function decodeSetAdmissionModeCommandV1(
+  input: unknown,
+): SetAdmissionModeCommandV1 {
+  const command = envelope(input, "admission mode command", [
+    "type",
+    "mode",
+    "revision",
+  ]);
+  if (command.type !== "deployment/set-admission-mode") {
+    throw new Error("admission mode command.type is invalid");
   }
   return {
     schemaVersion: 1,
-    type: "deployment/set-signups",
-    open: command.open,
-    revision: revision(command.revision, "deployment signup command.revision"),
+    type: "deployment/set-admission-mode",
+    mode: admissionMode(command.mode, "admission mode command.mode"),
+    revision: revision(command.revision, "admission mode command.revision"),
+  };
+}
+
+export function decodeAccountAccessV1(input: unknown): AccountAccessV1 {
+  const access = envelope(input, "account access", [
+    "userId",
+    "state",
+    "revision",
+    "updatedAt",
+    "updatedBy",
+  ]);
+  const accessRevision = revision(access.revision, "account access.revision");
+  if (accessRevision < 1) throw new Error("account access.revision is invalid");
+  return {
+    schemaVersion: 1,
+    userId: boundedString(access.userId, "account access.userId", 512),
+    state: accessState(access.state, "account access.state"),
+    revision: accessRevision,
+    updatedAt: isoTimestamp(access.updatedAt, "account access.updatedAt"),
+    updatedBy: boundedString(access.updatedBy, "account access.updatedBy", 512),
+  };
+}
+
+export function decodeAccountAccessViewV1(input: unknown): AccountAccessViewV1 {
+  const view = envelope(input, "account access view", ["userId", "access"]);
+  const userId = boundedString(view.userId, "account access view.userId", 512);
+  const access =
+    view.access === null ? null : decodeAccountAccessV1(view.access);
+  if (access && access.userId !== userId) {
+    throw new Error("account access view.access names another account");
+  }
+  return { schemaVersion: 1, userId, access };
+}
+
+export function decodeSetAccountAccessCommandV1(
+  input: unknown,
+): SetAccountAccessCommandV1 {
+  const command = envelope(input, "account access command", [
+    "type",
+    "state",
+    "revision",
+  ]);
+  if (command.type !== "account/set-access") {
+    throw new Error("account access command.type is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    type: "account/set-access",
+    state: accessState(command.state, "account access command.state"),
+    revision: revision(command.revision, "account access command.revision"),
+  };
+}
+
+export function decodeSetAccountAccessRequestV1(
+  input: unknown,
+): SetAccountAccessRequestV1 {
+  const request = envelope(input, "account access request", [
+    "userId",
+    "command",
+    "updatedBy",
+  ]);
+  return {
+    schemaVersion: 1,
+    userId: boundedString(request.userId, "account access request.userId", 512),
+    command: decodeSetAccountAccessCommandV1(request.command),
+    updatedBy: boundedString(
+      request.updatedBy,
+      "account access request.updatedBy",
+      512,
+    ),
+  };
+}
+
+export function decodeAccountAccessReadRequestV1(input: unknown): {
+  schemaVersion: 1;
+  userId: string;
+} {
+  const request = envelope(input, "account access read request", ["userId"]);
+  return {
+    schemaVersion: 1,
+    userId: boundedString(
+      request.userId,
+      "account access read request.userId",
+      512,
+    ),
+  };
+}
+
+export function decodeEmailInvitationV1(input: unknown): EmailInvitationV1 {
+  const invitation = envelope(input, "email invitation", [
+    "email",
+    "invitedAt",
+    "invitedBy",
+  ]);
+  return {
+    schemaVersion: 1,
+    email: normalizeAccessEmailV1(invitation.email, "email invitation.email"),
+    invitedAt: isoTimestamp(invitation.invitedAt, "email invitation.invitedAt"),
+    invitedBy: boundedString(
+      invitation.invitedBy,
+      "email invitation.invitedBy",
+      512,
+    ),
+  };
+}
+
+export function decodeInviteEmailCommandV1(
+  input: unknown,
+): InviteEmailCommandV1 {
+  const command = envelope(input, "email invitation command", [
+    "type",
+    "email",
+  ]);
+  if (command.type !== "access/invite-email") {
+    throw new Error("email invitation command.type is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    type: "access/invite-email",
+    email: normalizeAccessEmailV1(
+      command.email,
+      "email invitation command.email",
+    ),
+  };
+}
+
+export function decodeInviteEmailRequestV1(
+  input: unknown,
+): InviteEmailRequestV1 {
+  const request = envelope(input, "email invitation request", [
+    "command",
+    "invitedBy",
+  ]);
+  return {
+    schemaVersion: 1,
+    command: decodeInviteEmailCommandV1(request.command),
+    invitedBy: boundedString(
+      request.invitedBy,
+      "email invitation request.invitedBy",
+      512,
+    ),
+  };
+}
+
+export function decodeAdmissionIdentityV1(input: unknown): AdmissionIdentityV1 {
+  const identity = record(input, "admission identity");
+  exactKeys(
+    identity,
+    ["schemaVersion", "userId", "emailVerified", "isAdmin"],
+    "admission identity",
+    ["email"],
+  );
+  if (
+    identity.schemaVersion !== 1 ||
+    typeof identity.emailVerified !== "boolean" ||
+    typeof identity.isAdmin !== "boolean"
+  ) {
+    throw new Error("admission identity is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    userId: boundedString(identity.userId, "admission identity.userId", 512),
+    ...(identity.email === undefined
+      ? {}
+      : {
+          email: normalizeAccessEmailV1(
+            identity.email,
+            "admission identity.email",
+          ),
+        }),
+    emailVerified: identity.emailVerified,
+    isAdmin: identity.isAdmin,
+  };
+}
+
+export function decodeIdentityCreationRequestV1(
+  input: unknown,
+): IdentityCreationRequestV1 {
+  const request = envelope(input, "identity creation request", [
+    "email",
+    "emailVerified",
+    "isAdmin",
+  ]);
+  if (
+    typeof request.emailVerified !== "boolean" ||
+    typeof request.isAdmin !== "boolean"
+  ) {
+    throw new Error("identity creation request is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    email: normalizeAccessEmailV1(
+      request.email,
+      "identity creation request.email",
+    ),
+    emailVerified: request.emailVerified,
+    isAdmin: request.isAdmin,
+  };
+}
+
+const REFUSAL_REASONS = Object.keys(
+  ADMISSION_REFUSAL_COPY_V1,
+) as AdmissionRefusalReasonV1[];
+
+export function decodeAccountAdmissionDecisionV1(
+  input: unknown,
+): AccountAdmissionDecisionV1 {
+  const decision = record(input, "admission decision");
+  if (decision.schemaVersion !== 1) {
+    throw new Error("admission decision.schemaVersion is invalid");
+  }
+  if (decision.admitted === true) {
+    exactKeys(
+      decision,
+      ["schemaVersion", "admitted", "basis"],
+      "admission decision",
+    );
+    if (
+      !["admin", "active", "invitation", "open"].includes(
+        decision.basis as string,
+      )
+    ) {
+      throw new Error("admission decision.basis is invalid");
+    }
+    return {
+      schemaVersion: 1,
+      admitted: true,
+      basis: decision.basis as "admin" | "active" | "invitation" | "open",
+    };
+  }
+  exactKeys(
+    decision,
+    ["schemaVersion", "admitted", "reason"],
+    "admission decision",
+  );
+  if (
+    decision.admitted !== false ||
+    !REFUSAL_REASONS.includes(decision.reason as AdmissionRefusalReasonV1)
+  ) {
+    throw new Error("admission decision is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    admitted: false,
+    reason: decision.reason as AdmissionRefusalReasonV1,
   };
 }
 
@@ -131,33 +569,44 @@ export function decodeDeploymentPolicyReadRequestV1(input: unknown): {
   return { schemaVersion: 1 };
 }
 
-export function decodeSetSignupsRequestV1(input: unknown): SetSignupsRequestV1 {
-  const request = record(input, "deployment signup request");
-  exactKeys(
-    request,
-    ["schemaVersion", "command", "updatedBy"],
-    "deployment signup request",
-  );
-  if (request.schemaVersion !== 1) {
-    throw new Error("deployment signup request.schemaVersion is invalid");
-  }
+export function decodeSetAdmissionModeRequestV1(
+  input: unknown,
+): SetAdmissionModeRequestV1 {
+  const request = envelope(input, "admission mode request", [
+    "command",
+    "updatedBy",
+  ]);
   return {
     schemaVersion: 1,
-    command: decodeSetSignupsCommandV1(request.command),
+    command: decodeSetAdmissionModeCommandV1(request.command),
     updatedBy: boundedString(
       request.updatedBy,
-      "deployment signup request.updatedBy",
+      "admission mode request.updatedBy",
       512,
     ),
   };
 }
 
+/**
+ * A compare-and-swap that lost. The name crosses the Durable Object RPC
+ * boundary where the class does not, so callers match on it.
+ */
 export class DeploymentPolicyConflictError extends Error {
   readonly currentRevision: number;
 
   constructor(currentRevision: number) {
     super(`deployment policy revision is ${currentRevision}`);
     this.name = "DeploymentPolicyConflictError";
+    this.currentRevision = currentRevision;
+  }
+}
+
+export class AccountAccessConflictError extends Error {
+  readonly currentRevision: number;
+
+  constructor(currentRevision: number) {
+    super(`account access revision is ${currentRevision}`);
+    this.name = "AccountAccessConflictError";
     this.currentRevision = currentRevision;
   }
 }

@@ -200,12 +200,17 @@ describe("foundation application", () => {
         Promise.resolve({
           schemaVersion: 1 as const,
           revision: 0,
-          signups: { open: false },
+          admission: { mode: "closed" as const },
           updatedAt: "2026-09-01T00:00:00.000Z",
           updatedBy: "deployment-default",
         }),
-      setDeploymentSignups: () =>
+      setAdmissionMode: () =>
         Promise.reject(new Error("not used while composing")),
+      readAccountAccess: () =>
+        Promise.reject(new Error("not used while composing")),
+      setAccountAccess: () =>
+        Promise.reject(new Error("not used while composing")),
+      inviteEmail: () => Promise.reject(new Error("not used while composing")),
       listUsers: () => Promise.resolve([]),
       readUserFeatures: () =>
         Promise.resolve({

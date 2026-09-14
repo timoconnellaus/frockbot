@@ -113,9 +113,20 @@ import {
   type TemplateVisibilityV1,
 } from "@frockbot/core/template";
 import {
+  AccountAccessConflictError,
+  accessEmailV1,
+  decodeAccountAccessV1,
+  decodeAccountAccessViewV1,
+  decodeAccountAdmissionDecisionV1,
   decodeDeploymentPolicyV1,
+  decodeEmailInvitationV1,
+  DeploymentPolicyConflictError,
+  type AccountAdmissionDecisionV1,
+  type AdmissionIdentityV1,
   type DeploymentPolicyV1,
-  type SetSignupsCommandV1,
+  type InviteEmailCommandV1,
+  type SetAccountAccessCommandV1,
+  type SetAdmissionModeCommandV1,
   decodeUserFeaturesV1,
   decodeAdminUserBillingV1,
   type AdminUserBillingV1,
@@ -123,13 +134,12 @@ import {
   type SetUserFeaturesCommandV1,
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
-import { gatewayAuth } from "./auth.js";
+import { gatewayAuth, type IdentityCandidateV1 } from "./auth.js";
 import {
   createNativeAuth,
   NATIVE_RETURN_DEVELOPMENT,
   nativeReturnUris,
 } from "./native-auth.js";
-import { accountIsAdmitted } from "./account-admission.js";
 import {
   DEVELOPMENT_USER_ID,
   isDeploymentAdminV1,
@@ -450,13 +460,7 @@ interface BotStateRpc extends BotConfigurationBinding {
  * The User Durable Object's RPC surface as this Worker uses it: the binding the
  * gateway shares, plus this adapter's own seams.
  */
-interface UserConfigurationRpc extends UserConfigurationBinding {
-  /** Read-only signup-gate probe; unlike configuration reads, it pins nothing. */
-  isProvisioned(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<boolean>;
-}
+type UserConfigurationRpc = UserConfigurationBinding;
 
 type RpcBoundary<T> = {
   [Key in keyof T]: T[Key] extends (...args: never[]) => infer Result
@@ -608,7 +612,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     id,
   ) as unknown as RpcBoundary<UserConfigurationRpc>;
   return {
-    isProvisioned: (request) => rpc.isProvisioned(request),
     listBots: (request) => rpc.listBots(request),
     listBotLifecycles: (request) => rpc.listBotLifecycles(request),
     executeBotLifecycle: (request) => rpc.executeBotLifecycle(request),
@@ -638,7 +641,12 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
 
 interface DeploymentPolicyRpc {
   readPolicy(input: unknown): Promise<unknown>;
-  setSignups(input: unknown): Promise<unknown>;
+  setAdmissionMode(input: unknown): Promise<unknown>;
+  readAccountAccess(input: unknown): Promise<unknown>;
+  setAccountAccess(input: unknown): Promise<unknown>;
+  inviteEmail(input: unknown): Promise<unknown>;
+  admitAccount(input: unknown): Promise<unknown>;
+  mayCreateIdentity(input: unknown): Promise<unknown>;
 }
 
 function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
@@ -647,11 +655,68 @@ function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
   ) as unknown as DeploymentPolicyRpc;
 }
 
+/** The authority's compare-and-swap answer, thrown here as the typed conflict. */
+function appliedWrite(
+  answer: unknown,
+  conflict: (currentRevision: number) => Error,
+): unknown {
+  const write = rpcJsonSnapshot(answer) as Record<string, unknown> | null;
+  if (write?.status === "applied") return write.value;
+  if (
+    write?.status === "conflict" &&
+    Number.isSafeInteger(write.currentRevision)
+  ) {
+    throw conflict(write.currentRevision as number);
+  }
+  throw new Error("access authority answered an unknown write result");
+}
+
 /**
- * Refuses account creation while signups are closed, so a closed deployment
- * writes no `user` row. An existing account still signs in: better-auth only
- * consults this when it is about to create one.
+ * The one door into the beta-access authority for browser and native alike.
+ * An admin is answered here, without the authority, so a deployment whose
+ * authority is unreachable still lets its admins in to see why.
  */
+async function admitAccount(
+  env: Env,
+  identity: AdmissionIdentityV1,
+): Promise<AccountAdmissionDecisionV1> {
+  if (identity.isAdmin) {
+    return { schemaVersion: 1, admitted: true, basis: "admin" };
+  }
+  return decodeAccountAdmissionDecisionV1(
+    rpcJsonSnapshot(await deploymentPolicyStub(env).admitAccount(identity)),
+  );
+}
+
+/**
+ * Whether better-auth may write a new identity. The same authority as
+ * admission, asked earlier: a closed deployment writes no `user` row, and an
+ * invite-only one writes one only for an invited, verified address.
+ */
+async function mayCreateIdentity(
+  env: Env,
+  candidate: IdentityCandidateV1,
+): Promise<boolean> {
+  const email = accessEmailV1(candidate.email);
+  if (email === undefined) return false;
+  if (
+    isDeploymentAdminV1(
+      { id: email, email, mode: "better-auth" },
+      env.FROCKBOT_ADMIN_EMAILS,
+    )
+  ) {
+    return true;
+  }
+  return (
+    (await deploymentPolicyStub(env).mayCreateIdentity({
+      schemaVersion: 1,
+      email,
+      emailVerified: candidate.emailVerified,
+      isAdmin: false,
+    })) === true
+  );
+}
+
 function developmentAuthAllowed(env: Env): boolean {
   return env.ALLOW_DEVELOPMENT_AUTH === "true";
 }
@@ -666,23 +731,6 @@ function nativeReturnUrisFor(env: Env): readonly string[] {
     ...nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
     ...(developmentAuthAllowed(env) ? [NATIVE_RETURN_DEVELOPMENT] : []),
   ];
-}
-
-async function mayCreateAccount(env: Env, email: string): Promise<boolean> {
-  if (
-    isDeploymentAdminV1(
-      { id: email, email, mode: "better-auth" },
-      env.FROCKBOT_ADMIN_EMAILS,
-    )
-  ) {
-    return true;
-  }
-  const policy = decodeDeploymentPolicyV1(
-    rpcJsonSnapshot(
-      await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
-    ),
-  );
-  return policy.signups.open;
 }
 
 /**
@@ -1814,16 +1862,52 @@ const createGatewayBackendContributions = (env: Env) =>
           await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
         ),
       ),
-    setDeploymentSignups: async (
-      command: SetSignupsCommandV1,
+    setAdmissionMode: async (
+      command: SetAdmissionModeCommandV1,
       updatedBy: string,
     ): Promise<DeploymentPolicyV1> =>
       decodeDeploymentPolicyV1(
-        rpcJsonSnapshot(
-          await deploymentPolicyStub(env).setSignups({
+        appliedWrite(
+          await deploymentPolicyStub(env).setAdmissionMode({
             schemaVersion: 1,
             command,
             updatedBy,
+          }),
+          (revision) => new DeploymentPolicyConflictError(revision),
+        ),
+      ),
+    readAccountAccess: async (userId: string) =>
+      decodeAccountAccessViewV1(
+        rpcJsonSnapshot(
+          await deploymentPolicyStub(env).readAccountAccess({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    setAccountAccess: async (
+      userId: string,
+      command: SetAccountAccessCommandV1,
+      updatedBy: string,
+    ) =>
+      decodeAccountAccessV1(
+        appliedWrite(
+          await deploymentPolicyStub(env).setAccountAccess({
+            schemaVersion: 1,
+            userId,
+            command,
+            updatedBy,
+          }),
+          (revision) => new AccountAccessConflictError(revision),
+        ),
+      ),
+    inviteEmail: async (command: InviteEmailCommandV1, invitedBy: string) =>
+      decodeEmailInvitationV1(
+        rpcJsonSnapshot(
+          await deploymentPolicyStub(env).inviteEmail({
+            schemaVersion: 1,
+            command,
+            invitedBy,
           }),
         ),
       ),
@@ -2354,14 +2438,15 @@ export default {
             env.USER_CONFIGURATIONS.idFromName(userId),
           ).registerPush({ userId, registration }),
         auth: gatewayAuth(env, {
-          mayCreateAccount: (email) => mayCreateAccount(env, email),
+          mayCreateIdentity: (candidate) => mayCreateIdentity(env, candidate),
         }),
         ...(nativeReturnUrisFor(env).length > 0 && env.BETTER_AUTH_SECRET
           ? {
               nativeAuth: createNativeAuth({
                 secret: env.BETTER_AUTH_SECRET,
                 auth: gatewayAuth(env, {
-                  mayCreateAccount: (email) => mayCreateAccount(env, email),
+                  mayCreateIdentity: (candidate) =>
+                    mayCreateIdentity(env, candidate),
                 }),
                 returnUris: nativeReturnUrisFor(env),
                 // A development stack answers on whatever `BETTER_AUTH_URL`
@@ -2376,40 +2461,31 @@ export default {
                       developmentUserId: DEVELOPMENT_USER_ID,
                     }
                   : {}),
-                canIssueSession: async (userId) => {
-                  if (
-                    developmentAuthAllowed(env) &&
-                    userId === DEVELOPMENT_USER_ID
-                  )
-                    return true;
+                admit: async (userId) => {
+                  // The stored identity, not anything the bearer carries: the
+                  // email an invitation binds to and the admin allowlist reads
+                  // are the identity provider's.
                   const identity = await env.AUTH_DB.prepare(
-                    'select "id", "email" from "user" where "id" = ? limit 1',
+                    'select "id", "email", "emailVerified" from "user" where "id" = ? limit 1',
                   )
                     .bind(userId)
-                    .first<{ id: string; email: string }>();
-                  if (!identity) return false;
-                  return accountIsAdmitted(
+                    .first<{
+                      id: string;
+                      email: string;
+                      emailVerified: number;
+                    }>();
+                  if (!identity) return null;
+                  const email = accessEmailV1(identity.email);
+                  return admitAccount(env, {
+                    schemaVersion: 1,
                     userId,
-                    isDeploymentAdminV1(
+                    ...(email === undefined ? {} : { email }),
+                    emailVerified: identity.emailVerified === 1,
+                    isAdmin: isDeploymentAdminV1(
                       { ...identity, mode: "better-auth" },
                       env.FROCKBOT_ADMIN_EMAILS,
                     ),
-                    {
-                      userExists: (id) =>
-                        userConfigurationStub(env, id).isProvisioned({
-                          schemaVersion: 1,
-                          userId: id,
-                        }),
-                      readDeploymentPolicy: async () =>
-                        decodeDeploymentPolicyV1(
-                          rpcJsonSnapshot(
-                            await deploymentPolicyStub(env).readPolicy({
-                              schemaVersion: 1,
-                            }),
-                          ),
-                        ),
-                    },
-                  );
+                  });
                 },
                 session: async (userId, operation) => {
                   const stub = env.USER_CONFIGURATIONS.get(
@@ -2428,17 +2504,7 @@ export default {
               }),
             }
           : {}),
-        userExists: (userId) =>
-          userConfigurationStub(env, userId).isProvisioned({
-            schemaVersion: 1,
-            userId,
-          }),
-        readDeploymentPolicy: async () =>
-          decodeDeploymentPolicyV1(
-            rpcJsonSnapshot(
-              await deploymentPolicyStub(env).readPolicy({ schemaVersion: 1 }),
-            ),
-          ),
+        admitAccount: (identity) => admitAccount(env, identity),
         ...(env.FROCKBOT_ADMIN_EMAILS
           ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
           : {}),

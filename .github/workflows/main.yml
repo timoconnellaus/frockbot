@@ -456,7 +456,7 @@ jobs:
         run: |
           missing=()
           # FROCKBOT_ADMIN_EMAILS is required here, unlike production. Staging
-          # signups are closed and stay closed, so the admin allowlist is the
+          # admission is closed and stays closed, so the admin allowlist is the
           # only way any identity reaches the deployment: without it, nobody
           # can sign in and nobody can open Admin to change that.
           for name in \

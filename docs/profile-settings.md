@@ -61,7 +61,7 @@ Templates starts at Use a template when no Bot is selected. Sharing offers a
 Bot chooser. Add Bot also offers the template route. Import keeps its preview
 and explicit apply step. Your computers distinguishes paired personal devices
 from the hosted Computer and preserves per-action approval. Site
-administration labels the actual setting as Allow new signups, and below it
+administration offers the deployment's admission mode as New accounts — Closed, Invite only or Open — and below it
 lists every account with an Applets switch: Applets are off for an account
 until an administrator turns them on there. An account whose setting could
 not be read shows a disabled switch, says so, and offers Try again; it is

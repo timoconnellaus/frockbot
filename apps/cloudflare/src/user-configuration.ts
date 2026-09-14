@@ -622,19 +622,6 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   }
 
   /**
-   * Cheap, read-only signup-gate probe.
-   *
-   * Addressing this object is not User materialization: only
-   * `assertUserIdentity` writes the durable identity pin. A closed deployment
-   * can therefore ask whether the User already exists without creating one.
-   */
-  async isProvisioned(input: unknown): Promise<boolean> {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    const userId = request.userId as string;
-    return (await this.addressedUser(userId)) === userId;
-  }
-
-  /**
    * Checks that this object is the one `userId` names, without provisioning
    * it: the durable pin is read and compared, never written. What comes back
    * is the pin, so a caller can tell an unprovisioned User from a provisioned
@@ -660,8 +647,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
   //
   // What an administrator turned on for this User. Neither RPC pins the
   // identity: an admin reads and sets features for accounts that have signed
-  // up but never been admitted, and doing so must not admit them — the pin is
-  // what `isProvisioned` and the signup gate read.
+  // up but never been admitted, and doing so must not provision them.
 
   async readFeatures(input: unknown): Promise<UserFeaturesV1> {
     const request = decodeUserFeaturesReadRequestV1(input);
