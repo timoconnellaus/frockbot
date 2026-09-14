@@ -95,9 +95,33 @@ class BadgeReconcileTest {
             bots = mapOf("alpha" to 3, "beta" to 2, "gamma" to 4),
             active = setOf("alpha", "gamma"),
             counts = mapOf("alpha" to 2, "gamma" to 4),
+            messages = setOf("alpha", "gamma"),
         )
         assertEquals(mapOf("alpha" to 3, "beta" to 2), plan.store)
         assertEquals(listOf("alpha"), plan.refresh)
+    }
+
+    @Test
+    fun `a positive count cancels an active notification with no retained messages`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 3),
+            active = setOf("alpha"),
+        )
+        assertEquals(mapOf("alpha" to 3), plan.store)
+        assertEquals(listOf("alpha"), plan.cancel)
+        assertEquals(emptyList<String>(), plan.refresh)
+    }
+
+    @Test
+    fun `a repeated positive count finishes cancellation after interruption`() {
+        val plan = reconcile(
+            bots = mapOf("alpha" to 3),
+            active = setOf("alpha"),
+            counts = mapOf("alpha" to 3),
+        )
+        assertEquals(emptyMap<String, Int>(), plan.store)
+        assertEquals(listOf("alpha"), plan.cancel)
+        assertEquals(emptyList<String>(), plan.refresh)
     }
 
     @Test

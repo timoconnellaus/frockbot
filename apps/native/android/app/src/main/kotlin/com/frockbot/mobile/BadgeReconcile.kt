@@ -50,11 +50,15 @@ fun badgeReconcileV1(
                 else cancel.add(botId)
             }
             continue
-        } else {
-            if (storedCount(botId) == count) continue
+        }
+        val unchanged = storedCount(botId) == count
+        if (!unchanged) {
             store[botId] = count
         }
-        if (botId in active) refresh.add(botId)
+        if (botId in active) {
+            if (!storedMessages(botId)) cancel.add(botId)
+            else if (!unchanged) refresh.add(botId)
+        }
     }
     return BadgeReconcile(forget, drop, store, cancel, refresh)
 }
