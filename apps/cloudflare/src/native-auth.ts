@@ -114,9 +114,10 @@ export interface NativeAuthOptions {
   // Only associated, signed targets belong here. No request can add an entry.
   returnUris: readonly string[];
   /**
-   * The beta-access authority, asked before a User's session record is read
-   * or issued. Session reads never provision the User. `null` means the
-   * identity no longer exists; a throw means the authority could not answer.
+   * The beta-access authority, asked after a bearer passes its read-only
+   * session check, or before a session is issued. Reads never provision a User.
+   * `null` means the identity no longer exists; a throw means the authority
+   * could not answer.
    * Never asked for `developmentUserId`, which only a development stack sets.
    */
   admit(userId: string): Promise<AccountAdmissionDecisionV1 | null>;

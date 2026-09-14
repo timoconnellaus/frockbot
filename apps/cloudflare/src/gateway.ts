@@ -724,7 +724,7 @@ export function createGateway(dependencies: GatewayDependencies) {
       !isAdmin
     ) {
       // A native bearer was already admitted by `nativeAuth`, which had to
-      // ask before reading the User's session record.
+      // ask after verifying its existing session without provisioning a User.
       let admission = nativeIdentity?.admission;
       if (!admission) {
         const email = accessEmailV1(session?.user.email);

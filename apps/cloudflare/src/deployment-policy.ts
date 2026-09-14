@@ -212,7 +212,7 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
   }
 
   /**
-   * The gate every authenticated request passes before a User is touched.
+   * Commits browser/native admission before a User can be provisioned.
    * Deciding and activating are one transaction, and an invitation is spent
    * in the same one, so it binds to exactly one account.
    */

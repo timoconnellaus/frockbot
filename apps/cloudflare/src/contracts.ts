@@ -738,9 +738,9 @@ export interface GatewayDependencies {
   waitUntil?: (promise: Promise<unknown>) => void;
   auth: GatewayAuth;
   /**
-   * The beta-access authority, asked before any request reaches a User. It
-   * may activate the account as it answers; it throws only when it cannot
-   * answer at all.
+   * The beta-access authority, asked before browser requests reach a User;
+   * native requests reuse their admission answer. It may activate the account
+   * and throws only when it cannot answer at all.
    */
   admitAccount(
     identity: AdmissionIdentityV1,

@@ -45,9 +45,7 @@ export function createDeploymentPolicyAdminHost(
   return {
     readDeploymentPolicy: async () =>
       decodeDeploymentPolicyV1(
-        rpcJsonSnapshotV1(
-          await authority().readPolicy({ schemaVersion: 1 }),
-        ),
+        rpcJsonSnapshotV1(await authority().readPolicy({ schemaVersion: 1 })),
       ),
     setAdmissionMode: async (command, updatedBy) =>
       decodeDeploymentPolicyV1(

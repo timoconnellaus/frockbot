@@ -7,8 +7,8 @@ Signing in proves who someone is. It does not give them FrockBot. Access is deci
 The deployment has one **admission mode**:
 
 - `closed`: no new accounts. The default.
-- `invite-only`: invited accounts become active on their next sign-in.
-- `open`: any account without a record becomes active on its next sign-in.
+- `invite-only`: invited accounts become active on their next authenticated request.
+- `open`: any account without a record becomes active on its next authenticated request.
 
 Each account may have an **access record** keyed by its User id, in one of five states: `invited`, `active`, `paused`, `ended` or `blocked`.
 
@@ -19,17 +19,20 @@ The authority applies these checks in order:
 3. An account with no record is admitted if an email invitation matches its **verified** email. The invitation is spent in the same transaction, unless the mode is `closed`, which keeps it for later.
 4. Otherwise the mode decides. `open` activates the account. `invite-only` refuses it as `invitation-required`, and `closed` refuses it as `admission-closed`.
 
-Admission itself only ever writes `active` over no record or over `invited`. It never lifts a pause, end or block. Every decision and every write happens inside one synchronous storage transaction in the one object, so a sign-in and an admin change cannot interleave. Admin writes are compare-and-swap on the record's revision, and admission advances that revision too. An admin who acts on a stale read gets a `409`; nothing is silently overwritten.
+Admission itself only ever writes `active` over no record or over `invited`. It never lifts a pause, end or block. Every account admission decision and write happens inside one synchronous storage transaction in the one object, so a sign-in and an admin change cannot interleave. Admin mode and account writes are compare-and-swap on the record's revision, and admission advances that revision too. An admin who acts on a stale read gets a `409`; nothing is silently overwritten.
 
 A provisioned User, an existing better-auth identity or a live session are not access. An account with none of the above is refused however long it has existed.
 
 ## Where it is asked
 
-- **Identity creation.** better-auth's `user.create.before` hook (`identityCreationHooksV1`) asks `mayCreateIdentity`. A closed deployment writes no `user` row. An invite-only deployment writes one only for an invited, verified address.
-- **Every browser request.** The gateway asks `admitAccount` after resolving the session and before anything reaches a User Durable Object. A pause takes effect on the account's next request.
-- **Every native request.** `nativeAuth.authenticate` asks before reading the session record. The exchange asks before issuing a session, and the settings handoff asks through `authenticate`. Sign-out verifies the bearer and revokes its existing session even when access is refused or the admission authority is unavailable. Session reads and revocations never provision a User. The gateway reuses the native answer rather than asking twice.
+- **Identity creation.** better-auth's `user.create.before` hook (`identityCreationHooksV1`) asks `mayCreateIdentity`. Admins may create an identity in every mode. For everyone else, a closed deployment writes no `user` row; an invite-only deployment writes one only for an invited, verified address.
+- **Authenticated browser requests.** The gateway asks `admitAccount` after resolving the session and before anything reaches a User Durable Object. A pause takes effect on the account's next request.
+- **Authenticated native requests.** `nativeAuth.authenticate` first verifies the bearer and reads its existing durable session without provisioning a User, then asks the authority. Missing or revoked sessions cannot activate access or spend an invitation. The exchange checks issuance eligibility without provisioning, then asks before issuing a session, and the settings handoff asks through `authenticate`. Sign-out verifies the bearer and revokes its existing session even when access is refused or the admission authority is unavailable. Session reads and revocations never provision a User. The gateway reuses the native answer rather than asking twice.
+- **Signed public requests.** Applet viewer sockets, Routine webhook deliveries and machine enrollments verify their token, then use the authority's read-only `checkAccount` through the stored identity before User or Bot access. These checks apply the same rule without activating an account or spending an invitation. Existing admitted work is not cancelled; machine polling and result delivery remain available to finish it. Regression coverage is in `apps/cloudflare/test/public-account-access.workerd.ts` and `apps/cloudflare/test/applets.workerd.ts`.
 
-A refusal is `403` with `{ error, code: "account-access-refused", reason }`. A browser's document request instead gets a page with the same copy (`ADMISSION_REFUSAL_COPY_V1`) and a sign-out link. No copy says an invitation exists. An authority that cannot answer is `503` with `code: "account-access-unavailable"`, never `401`, so a client does not discard a good sign-in.
+`ALLOW_DEVELOPMENT_AUTH` retains the development admission exception, including Applet viewers and signed public requests. Production uses the stored identity's email and verification status for those token paths.
+
+Browser, native and Applet viewer admission refusal is `403` with `{ error, code: "account-access-refused", reason }`. A browser's `GET /` document request instead gets a page with the same copy (`ADMISSION_REFUSAL_COPY_V1`) and a sign-out link. No copy says an invitation exists. An authority that cannot answer is `503` with `code: "account-access-unavailable"`, never `401`, so a client does not discard a good sign-in. Routine webhooks and machine enrollments retain their `{ error }` response shape with the same refusal or unavailability copy and `403` or `503` status; a token whose stored identity is missing receives `401`.
 
 ## Admin seams
 
@@ -46,7 +49,7 @@ Waitlists, invitation email, redemption UI, trial credit and onboarding are not 
 The authority replaced `deployment:policy:v1`, which held `signups: { open }`. Nothing decodes that record any more.
 
 - **Cleanup runs by itself.** `cleanRetiredDeploymentPolicyV1` runs whenever the `DeploymentPolicy` object starts. The first request after the deploy starts it. It deletes that one key and writes the receipt `maintenance:retired-signups-policy:2026-09-14`. It is scoped to that key and repeatable: a second start finds the receipt and does nothing. The old switch's value is not carried forward, so the deployment starts in `closed`.
-- **Existing Users lose access until granted.** No non-admin account has a record after the release, so every non-admin User, including test accounts that used to sign in, is refused until an admin gives it one. Admins are unaffected.
+- **Existing Users lose access until granted.** On the initial release, existing non-admin accounts have no access records and the deployment starts closed. They need an explicit grant to sign in while it stays closed, including test accounts that previously signed in. Admins are unaffected.
 
 After the deploy, the person releasing does the following:
 

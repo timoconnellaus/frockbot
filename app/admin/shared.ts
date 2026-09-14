@@ -588,8 +588,8 @@ export function decodeSetAdmissionModeRequestV1(
 }
 
 /**
- * A compare-and-swap that lost. The name crosses the Durable Object RPC
- * boundary where the class does not, so callers match on it.
+ * A compare-and-swap that lost. The Worker adapter translates the RPC
+ * conflict result to this error; admin routes match its name and revision.
  */
 export class DeploymentPolicyConflictError extends Error {
   readonly currentRevision: number;

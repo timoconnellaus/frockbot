@@ -29,10 +29,8 @@ function refused(reason: AdmissionRefusalReasonV1): AdmissionEvaluationV1 {
  * The beta-access rule, with no I/O so every row of it is testable.
  *
  * `invitation` is the invitation for this identity's *verified* email, or
- * null; the caller never passes one for an unverified address. The order is
- * the policy: an admin is always admitted, an account's explicit record beats
- * the deployment mode, and the mode only decides what happens to an account
- * that has no record.
+ * null; the caller never passes one for an unverified address. The admission
+ * contract is documented in `docs/beta-access.md`.
  */
 export function evaluateAdmissionV1(input: {
   mode: AdmissionModeV1;

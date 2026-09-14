@@ -736,8 +736,8 @@ async function externalAccountRefusal(
 
 /**
  * Whether better-auth may write a new identity. The same authority as
- * admission, asked earlier: a closed deployment writes no `user` row, and an
- * invite-only one writes one only for an invited, verified address.
+ * admission, asked earlier; admins bypass it, and all other candidates must
+ * satisfy the identity-creation rule in `account-admission.ts`.
  */
 async function mayCreateIdentity(
   env: Env,

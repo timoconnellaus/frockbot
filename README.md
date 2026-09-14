@@ -192,7 +192,7 @@ Staging isolates everything that holds state or identity — its own D1 database
 
 Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the two R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
 
-**Staging admits exactly one identity.** Signups default to closed and nothing in the deploy opens them, so the only way in is the admin allowlist: `FROCKBOT_ADMIN_EMAILS` is a **required** staging secret, and the deploy fails without it rather than publishing a deployment nobody can sign in to. Anyone else who completes Google sign-in is refused at the gateway — the signup gate turns on whether a User has been provisioned, not on whether Better Auth has a row — so no Durable Object is ever created for them.
+**Staging requires an admin allowlist.** `FROCKBOT_ADMIN_EMAILS` is a required staging secret; the deploy fails without it so an administrator can always sign in and manage access. Staging uses the same [beta-access authority](docs/beta-access.md) as production.
 
 Configure these GitHub `staging` environment values. They are the production set minus `CLOUDFLARE_D1_DATABASE_ID`, which staging resolves for itself:
 
