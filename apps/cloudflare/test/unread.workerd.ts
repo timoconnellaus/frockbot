@@ -85,14 +85,13 @@ describe("per-Bot unread in Workerd", () => {
     }
 
     const settled = await unreadRpc(name).readUnread(identity);
-    // A muted Bot: `notifications.enabled` is false on every new Bot, and the
-    // badge advanced anyway. The view says so, so the application icon leaves
-    // it out.
+    // A new Bot alerts: `notifications.enabled` is true the moment the Bot is
+    // materialized, so the view tells the application icon to count it.
     expect(settled).toMatchObject({
       count: 2,
       capped: false,
       unread: true,
-      notificationsEnabled: false,
+      notificationsEnabled: true,
     });
     expect(settled.lastActivityCursor).toMatch(/^message-[0-9]{20}$/);
     expect(settled.lastMessage).toMatchObject({
@@ -121,7 +120,7 @@ describe("per-Bot unread in Workerd", () => {
     });
     expect(receipt).toMatchObject({
       status: "applied",
-      unread: { count: 0, unread: false, notificationsEnabled: false },
+      unread: { count: 0, unread: false, notificationsEnabled: true },
     });
 
     await evictDurableObject(stub);

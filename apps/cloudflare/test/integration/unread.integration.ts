@@ -61,10 +61,10 @@ describe("unread and notifications through the gateway", () => {
 
     const initial = await unreadDirectory(userId);
     expect(initial.map((view) => view.unread)).toEqual([false, false]);
-    // Every new Bot starts muted.
+    // Every new Bot starts with Notifications enabled.
     expect(initial.map((view) => view.notificationsEnabled)).toEqual([
-      false,
-      false,
+      true,
+      true,
     ]);
 
     // A Turn on A while the User is "viewing" B — the client sends no read
@@ -143,8 +143,8 @@ describe("unread and notifications through the gateway", () => {
     const botId = "unread-notify-bot";
     await provisionThroughGateway({ userId, botId });
 
-    // Notifications are off on a new Bot: the mute gates the intent, never the
-    // cursor, so this turns them on before the Turn that should raise one.
+    // The mute gates the intent, never the cursor, so save the setting the
+    // fan-out reads before the Turn that should raise a notification.
     const settings = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/settings`),
     )) as { revision: number };
