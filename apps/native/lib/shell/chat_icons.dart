@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 
 enum ChatIconKind {
@@ -14,15 +15,42 @@ enum ChatIconKind {
 }
 
 /// Shared sizing keeps custom and Material icons consistent across clients.
+/// This is the phone's size: big enough to read and hit with a thumb.
 const chatIconSizeV1 = 24.0;
+
+/// The same glyphs at a desk, where a pointer is precise and 24 points of
+/// line art reads as oversized beside 14-point text.
+const chatIconSizeDesktop = 19.0;
+
+/// Whether the chat chrome is drawn at desktop proportions: a native macOS,
+/// Windows or Linux build. Web and phones keep the touch sizes.
+bool get chatDesktopChrome =>
+    !kIsWeb &&
+    switch (defaultTargetPlatform) {
+      TargetPlatform.macOS ||
+      TargetPlatform.windows ||
+      TargetPlatform.linux => true,
+      _ => false,
+    };
+
+/// The glyph size for this platform's chat chrome.
+double get chatIconSize =>
+    chatDesktopChrome ? chatIconSizeDesktop : chatIconSizeV1;
+
+/// The square a quiet chat control occupies: a 44-point touch target on a
+/// phone, a compact 36 at a desk.
+double get chatControlExtent => chatDesktopChrome ? 36 : 44;
 
 class ChatIcon extends StatelessWidget {
   final ChatIconKind kind;
-  final double size;
-  const ChatIcon(this.kind, {super.key, this.size = chatIconSizeV1});
+
+  /// Defaults to [chatIconSize] for the running platform.
+  final double? size;
+  const ChatIcon(this.kind, {super.key, this.size});
 
   @override
   Widget build(BuildContext context) {
+    final size = this.size ?? chatIconSize;
     final theme = IconTheme.of(context);
     final base = theme.color ?? Theme.of(context).colorScheme.onSurface;
     final color = base.withValues(alpha: base.a * (theme.opacity ?? 1));

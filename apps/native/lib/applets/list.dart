@@ -210,10 +210,7 @@ class _AppletListState extends State<AppletList> {
                 style: IconButton.styleFrom(
                   foregroundColor: theme.colorScheme.onSurfaceVariant,
                 ),
-                icon: const Icon(
-                  Icons.arrow_back_rounded,
-                  size: chatIconSizeV1,
-                ),
+                icon: Icon(Icons.arrow_back_rounded, size: chatIconSize),
               ),
             ),
             const SizedBox(width: 4),
@@ -300,7 +297,7 @@ class _AppletListState extends State<AppletList> {
                       children: [
                         Icon(
                           Icons.widgets_outlined,
-                          size: chatIconSizeV1,
+                          size: chatIconSize,
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 11),

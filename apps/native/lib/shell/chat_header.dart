@@ -125,10 +125,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               IconButton(
                 tooltip: 'Your Bots',
                 onPressed: onBack,
-                icon: const Icon(
-                  Icons.arrow_back_rounded,
-                  size: chatIconSizeV1,
-                ),
+                icon: Icon(Icons.arrow_back_rounded, size: chatIconSize),
               ),
             ),
       // With no back arrow the avatar is the first thing in the bar, and it
@@ -213,19 +210,23 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     VoidCallback? open, {
     Color? color,
   }) => Builder(
-    builder: (context) => IconButton(
-      tooltip: label,
-      color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
-      onPressed: open,
-      icon: ChatIcon(icon),
-      style: IconButton.styleFrom(
-        minimumSize: const Size(44, 46),
-        maximumSize: const Size(44, 46),
-        iconSize: chatIconSizeV1,
-        padding: EdgeInsets.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-    ),
+    builder: (context) {
+      // A phone keeps 44-point targets; a desk packs the doors closer.
+      final target = chatDesktopChrome ? const Size(36, 40) : const Size(44, 46);
+      return IconButton(
+        tooltip: label,
+        color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
+        onPressed: open,
+        icon: ChatIcon(icon),
+        style: IconButton.styleFrom(
+          minimumSize: target,
+          maximumSize: target,
+          iconSize: chatIconSize,
+          padding: EdgeInsets.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      );
+    },
   );
 }
 

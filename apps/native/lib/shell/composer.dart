@@ -310,8 +310,8 @@ class _ComposerState extends State<Composer> {
                     : widget.onStopDictation,
                 style: IconButton.styleFrom(
                   shape: const CircleBorder(),
-                  minimumSize: const Size(44, 44),
-                  fixedSize: const Size(44, 44),
+                  minimumSize: Size.square(chatControlExtent),
+                  fixedSize: Size.square(chatControlExtent),
                   padding: EdgeInsets.zero,
                 ),
                 icon: voiceIconTransition(
@@ -328,10 +328,10 @@ class _ComposerState extends State<Composer> {
                                 : null,
                           ),
                         )
-                      : const Icon(
+                      : Icon(
                           Icons.stop_rounded,
-                          key: ValueKey('recording'),
-                          size: 24,
+                          key: const ValueKey('recording'),
+                          size: chatIconSize,
                         ),
                 ),
               ),
@@ -344,10 +344,10 @@ class _ComposerState extends State<Composer> {
                 tooltip: 'Dictate message',
                 onPressed: widget.onDictate,
                 style: IconButton.styleFrom(
-                  minimumSize: const Size(44, 44),
-                  fixedSize: const Size(44, 44),
+                  minimumSize: Size.square(chatControlExtent),
+                  fixedSize: Size.square(chatControlExtent),
                   padding: EdgeInsets.zero,
-                  iconSize: chatIconSizeV1,
+                  iconSize: chatIconSize,
                   backgroundColor: theme.colorScheme.onSurface.withValues(
                     alpha: 0.08,
                   ),
@@ -364,10 +364,10 @@ class _ComposerState extends State<Composer> {
                 tooltip: 'Send',
                 onPressed: canSend ? _send : null,
                 style: IconButton.styleFrom(
-                  minimumSize: const Size(44, 44),
-                  fixedSize: const Size(44, 44),
+                  minimumSize: Size.square(chatControlExtent),
+                  fixedSize: Size.square(chatControlExtent),
                   padding: EdgeInsets.zero,
-                  iconSize: chatIconSizeV1,
+                  iconSize: chatIconSize,
                   shape: const CircleBorder(),
                   disabledBackgroundColor: theme.colorScheme.onSurface
                       .withValues(alpha: 0.06),
