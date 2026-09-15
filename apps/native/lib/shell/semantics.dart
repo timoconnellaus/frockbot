@@ -60,13 +60,6 @@ abstract final class ShellIds {
   static String slot(String name) => 'shell-slot-$name';
 }
 
-/// Names a widget for the browser specs without changing how it is drawn, or
-/// what it says.
-///
-/// Deliberately not a semantics container: a container node carries the
-/// identifier and nothing else, and the label the widget already had — a
-/// button's tooltip, a field's hint — stops reaching the accessibility tree.
-/// Annotating merges the identifier onto the node that has the label instead.
 /// The quick actions on one Bot in the list.
 abstract final class BotActionIds {
   /// The control a desktop row grows on hover and focus.
@@ -82,6 +75,13 @@ abstract final class BotActionIds {
       'bot-label-choice-${label.toLowerCase()}';
 }
 
+/// Names a widget for the browser specs without changing how it is drawn, or
+/// what it says.
+///
+/// Deliberately not a semantics container: a container node carries the
+/// identifier and nothing else, and the label the widget already had — a
+/// button's tooltip, a field's hint — stops reaching the accessibility tree.
+/// Annotating merges the identifier onto the node that has the label instead.
 Widget identified(String identifier, Widget child) =>
     Semantics(identifier: identifier, child: child);
 

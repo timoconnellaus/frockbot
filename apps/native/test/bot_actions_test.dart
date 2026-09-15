@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart' show RequestFailure;
+import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/settings/bot_quick_writes.dart';
 import 'package:frockbot_native/shell/bot_actions.dart';
 import 'package:frockbot_native/shell/semantics.dart';
@@ -119,17 +120,33 @@ void main() {
       void Function(String)? onSwipeRead,
       void Function(String)? onSwipeHide,
       Map<String, SidebarProfile> profiles = const {},
+      bool hasActivity = true,
+      bool showHidden = false,
     }) => host(
       ShellSidebar(
         bots: [bot('scout', 'Scout')],
         profiles: profiles,
-        unread: {'scout': unread(botId: 'scout', count: 2, isUnread: true)},
+        unread: {
+          'scout': hasActivity
+              ? wire.UnreadView.fromJson({
+                  'schemaVersion': 1,
+                  'botId': 'scout',
+                  'count': 2,
+                  'capped': false,
+                  'unread': true,
+                  'manuallyUnread': false,
+                  'notificationsEnabled': true,
+                  'working': false,
+                  'lastActivityCursor': 'message-00000000000000000002',
+                })
+              : unread(botId: 'scout'),
+        },
         archived: const {},
         activeBotId: null,
         focusedBotId: null,
         workingBotId: null,
         loaded: true,
-        showHidden: false,
+        showHidden: showHidden,
         onSelect: (_) {},
         onCreateBot: () {},
         onSearch: () {},
@@ -184,11 +201,11 @@ void main() {
     testWidgets('a desktop row grows its control under the pointer', (
       tester,
     ) async {
-      final asked = <String>[];
+      final asked = <(String, Offset?)>[];
       await tester.pumpWidget(
         sidebar(
           phone: false,
-          onActions: (botId, {position}) => asked.add(botId),
+          onActions: (botId, {position}) => asked.add((botId, position)),
         ),
       );
       expect(byIdentifier(BotActionIds.menu('scout')), findsNothing);
@@ -202,7 +219,10 @@ void main() {
       expect(byIdentifier(BotActionIds.menu('scout')), findsOneWidget);
       await tester.tap(byIdentifier(BotActionIds.menu('scout')));
       await tester.pumpAndSettle();
-      expect(asked, ['scout']);
+      // A position, so the list opens as a menu at the control, not a sheet.
+      expect(asked, hasLength(1));
+      expect(asked.single.$1, 'scout');
+      expect(asked.single.$2, isNotNull);
     });
 
     testWidgets('a phone row has no control and no menu on hover', (
@@ -279,6 +299,40 @@ void main() {
         expect(tester.getTopLeft(row), before);
       },
     );
+
+    testWidgets('a hidden row reveals no Hide', (tester) async {
+      await tester.pumpWidget(
+        sidebar(
+          phone: true,
+          showHidden: true,
+          profiles: const {'scout': SidebarProfile(hiddenFromSidebar: true)},
+          onSwipeRead: (_) => fail('wrong way'),
+          onSwipeHide: (_) => fail('already hidden'),
+        ),
+      );
+      final row = byIdentifier(ShellIds.sidebarBot('scout'));
+      final before = tester.getTopLeft(row);
+      await tester.drag(row, const Offset(-120, 0));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(row), before);
+      expect(byIdentifier(BotActionIds.swipeHide('scout')), findsNothing);
+    });
+
+    testWidgets('a Bot nothing has been said about does not swipe to mark', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        sidebar(
+          phone: true,
+          hasActivity: false,
+          onSwipeRead: (_) => fail('nothing to mark'),
+          onSwipeHide: (_) => fail('wrong way'),
+        ),
+      );
+      final row = byIdentifier(ShellIds.sidebarBot('scout'));
+      await tester.drag(row, Offset(tester.getSize(row).width / 2, 0));
+      await tester.pumpAndSettle();
+    });
 
     testWidgets('a desktop row does not swipe', (tester) async {
       await tester.pumpWidget(

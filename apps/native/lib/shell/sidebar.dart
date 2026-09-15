@@ -535,7 +535,7 @@ class ShellSidebar extends StatelessWidget {
         control: !phone && actions != null
             ? identified(
                 BotActionIds.menu(botId),
-                _RowControl(onPressed: () => actions()),
+                _RowControl(onPressed: (at) => actions(position: at)),
               )
             : null,
         avatar: SheepAvatar(
@@ -585,15 +585,20 @@ class ShellSidebar extends StatelessWidget {
       ),
     );
     // An archived Bot has stopped: nothing to read, nothing worth hiding.
-    if (!phone || isArchived || onSwipeRead == null || onSwipeHide == null) {
-      return row;
-    }
+    if (!phone || isArchived) return row;
+    final read = onSwipeRead;
+    final hide = onSwipeHide;
+    final onRead = read == null || view?.lastActivityCursor == null
+        ? null
+        : () => read(botId);
+    final onHide = hide == null || _hidden(bot) ? null : () => hide(botId);
+    if (onRead == null && onHide == null) return row;
     return _SwipeRow(
       key: ValueKey('swipe-$botId'),
       botId: botId,
       unread: isUnread,
-      onRead: () => onSwipeRead!(botId),
-      onHide: () => onSwipeHide!(botId),
+      onRead: onRead,
+      onHide: onHide,
       child: row,
     );
   }
@@ -603,7 +608,7 @@ class ShellSidebar extends StatelessWidget {
 /// glyph where the time was, because a row that carried a button on every
 /// line would read as a toolbar.
 class _RowControl extends StatelessWidget {
-  final VoidCallback onPressed;
+  final void Function(Offset at) onPressed;
   const _RowControl({required this.onPressed});
 
   @override
@@ -613,7 +618,10 @@ class _RowControl extends StatelessWidget {
       width: 24,
       height: 20,
       child: IconButton(
-        onPressed: onPressed,
+        onPressed: () {
+          final box = context.findRenderObject()! as RenderBox;
+          onPressed(box.localToGlobal(box.size.bottomLeft(Offset.zero)));
+        },
         tooltip: 'Bot actions',
         padding: EdgeInsets.zero,
         iconSize: 18,
@@ -658,15 +666,15 @@ SidebarSwipeOutcome sidebarSwipeOutcomeV1(double dx, double width) {
 class _SwipeRow extends StatefulWidget {
   final String botId;
   final bool unread;
-  final VoidCallback onRead;
-  final VoidCallback onHide;
+  final VoidCallback? onRead;
+  final VoidCallback? onHide;
   final Widget child;
   const _SwipeRow({
     super.key,
     required this.botId,
     required this.unread,
-    required this.onRead,
-    required this.onHide,
+    this.onRead,
+    this.onHide,
     required this.child,
   });
 
@@ -694,9 +702,11 @@ class _SwipeRowState extends State<_SwipeRow>
   }
 
   void _drag(DragUpdateDetails details) {
-    final limit = _width * sidebarSwipeReadFraction + 24;
+    final limit = widget.onRead == null
+        ? 0.0
+        : _width * sidebarSwipeReadFraction + 24;
     _slide.value = (_slide.value + details.delta.dx).clamp(
-      -sidebarSwipeRevealWidth,
+      widget.onHide == null ? 0.0 : -sidebarSwipeRevealWidth,
       limit,
     );
   }
@@ -704,7 +714,7 @@ class _SwipeRowState extends State<_SwipeRow>
   void _release(DragEndDetails _) {
     switch (sidebarSwipeOutcomeV1(_slide.value, _width)) {
       case SidebarSwipeOutcome.read:
-        widget.onRead();
+        widget.onRead?.call();
         _slide.animateTo(0, curve: Curves.easeOut);
       case SidebarSwipeOutcome.reveal:
         _slide.animateTo(-sidebarSwipeRevealWidth, curve: Curves.easeOut);
@@ -773,7 +783,7 @@ class _SwipeRowState extends State<_SwipeRow>
                               borderRadius: BorderRadius.circular(10),
                               onTap: () {
                                 _close();
-                                widget.onHide();
+                                widget.onHide?.call();
                               },
                               child: SizedBox(
                                 width: sidebarSwipeRevealWidth - 8,
