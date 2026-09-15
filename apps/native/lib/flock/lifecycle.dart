@@ -248,6 +248,54 @@ class BotLifecycleCommands extends ChangeNotifier {
   }
 }
 
+/// Asks about a lifecycle change in the authority's words and issues it.
+///
+/// One dialog for every surface that archives, restores or deletes a Bot —
+/// the danger zone on its page and the quick actions on its row — so the
+/// Applets it names and the verb it offers never differ by where it was
+/// asked. Returns whether the change was applied.
+Future<bool> confirmBotLifecycleChange({
+  required BuildContext context,
+  required BotLifecycleCommands lifecycle,
+  required String botId,
+  required String botName,
+  required String type,
+  String? Function(String botId)? nameOf,
+}) {
+  final words = botLifecycleWordsV1[type]!;
+  return lifecycle.confirmChange(
+    botId,
+    type,
+    nameOf: nameOf,
+    confirm: (applets) async {
+      if (!context.mounted) return false;
+      return await showDialog<bool>(
+            context: context,
+            builder: (dialog) => identified(
+              FlockIds.lifecycleConfirm,
+              AlertDialog(
+                title: Text('${words.title} $botName?'),
+                content: SingleChildScrollView(
+                  child: Text([words.body, ?applets].join('\n\n')),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialog, false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialog, true),
+                    child: Text(words.verb),
+                  ),
+                ],
+              ),
+            ),
+          ) ??
+          false;
+    },
+  );
+}
+
 /// The danger zone, as Bot settings' Advanced shows it: what this Bot's status
 /// is, and the one or two changes that status allows.
 ///
@@ -292,46 +340,18 @@ class _BotDangerZoneState extends State<BotDangerZone> {
   }
 
   Future<void> _change(String type) async {
-    final words = botLifecycleWordsV1[type]!;
     // This State can be reused for another Bot while impact is read and the
     // command settles. Everything after this point still belongs to the Bot
     // whose danger-zone control was pressed.
-    final lifecycle = widget.lifecycle;
-    final botId = widget.botId;
-    final botName = widget.botName;
-    final nameOf = widget.nameOf;
     final onChanged = widget.onChanged;
     final onDeleted = widget.onDeleted;
-    final applied = await lifecycle.confirmChange(
-      botId,
-      type,
-      nameOf: nameOf,
-      confirm: (applets) async {
-        if (!mounted) return false;
-        return await showDialog<bool>(
-              context: context,
-              builder: (dialog) => identified(
-                FlockIds.lifecycleConfirm,
-                AlertDialog(
-                  title: Text('${words.title} $botName?'),
-                  content: SingleChildScrollView(
-                    child: Text([words.body, ?applets].join('\n\n')),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(dialog, false),
-                      child: const Text('Cancel'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(dialog, true),
-                      child: Text(words.verb),
-                    ),
-                  ],
-                ),
-              ),
-            ) ??
-            false;
-      },
+    final applied = await confirmBotLifecycleChange(
+      context: context,
+      lifecycle: widget.lifecycle,
+      botId: widget.botId,
+      botName: widget.botName,
+      type: type,
+      nameOf: widget.nameOf,
     );
     if (!applied) return;
     // The surface closes before the directory is read again: the reload

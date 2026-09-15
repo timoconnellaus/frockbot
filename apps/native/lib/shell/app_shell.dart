@@ -40,6 +40,7 @@ import '../search/archived_conversation.dart';
 import '../search/overlay.dart';
 import '../settings/billing.dart';
 import '../settings/credit.dart';
+import '../settings/bot_quick_writes.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../templates/page.dart';
@@ -57,6 +58,7 @@ import '../voice/player.dart';
 import '../voice/protocol.dart' show voiceUnavailableMessage;
 import '../voice/socket.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import 'bot_actions.dart';
 import 'chat_pane.dart';
 import 'chat_header.dart';
 import 'desktop_layout.dart';
@@ -64,6 +66,7 @@ import 'lifecycle.dart';
 import 'message_actions.dart';
 import 'run_view.dart';
 import 'semantics.dart';
+import 'focus.dart' show sidebarUnreadFor;
 import 'sidebar.dart';
 import 'slots.dart';
 import 'starters.dart';
@@ -116,6 +119,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.store,
     widget.userId,
   );
+
+  /// One field of a Bot's settings at a time, from its row in the list.
+  late final BotQuickWrites quickWrites = BotQuickWrites(widget.api);
   late final PushController push = PushController(
     widget.api,
     widget.store,
@@ -1228,6 +1234,148 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  /// What the row knows about its Bot, read through the same focus rule as
+  /// its badge so the sheet never offers to mark read a Bot the row shows
+  /// as read.
+  BotActionState _botActionState(String botId) {
+    final view = activity.unread[botId];
+    final profile = profiles[botId];
+    return BotActionState(
+      unread: sidebarUnreadFor(view, focused: botId == _focusedBotId).unread,
+      pinned: (profile?.pinnedAt ?? '').trim().isNotEmpty,
+      muted: view?.notificationsEnabled == false,
+      hidden: profile?.hiddenFromSidebar == true,
+      archived: archived.contains(botId),
+      hasActivity: view?.lastActivityCursor != null,
+    );
+  }
+
+  Future<void> _botActions(String botId, {Offset? position}) async {
+    final action = await showBotActions(
+      context: context,
+      botName: _botNameOf(botId) ?? botId,
+      actions: botActionsFor(_botActionState(botId)),
+      position: position,
+    );
+    if (action == null || !mounted) return;
+    await _runBotAction(botId, action);
+  }
+
+  /// One action on one Bot, from its row. Profile changes are drawn first
+  /// and taken back if refused; the rest report through the surface that
+  /// owns them.
+  Future<void> _runBotAction(String botId, BotAction action) async {
+    final name = _botNameOf(botId) ?? botId;
+    switch (action) {
+      case BotAction.markRead:
+      case BotAction.markUnread:
+        await activity.mark(botId, read: action == BotAction.markRead);
+        if (mounted && activity.error != null) _say(activity.error!);
+      case BotAction.pin:
+        await _patchProfile(botId, {
+          'pinnedAt': DateTime.now().toUtc().toIso8601String(),
+        });
+      case BotAction.unpin:
+        await _patchProfile(botId, {'pinnedAt': ''});
+      case BotAction.hide:
+        // Hiding mutes, by the authority's own coupling; undoing the hide
+        // puts the notifications back too, or "Undo" would leave the Bot
+        // silent in a way the person never asked for.
+        final notifying = activity.unread[botId]?.notificationsEnabled != false;
+        if (!await _patchProfile(botId, {'hiddenFromSidebar': true})) return;
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$name hidden'),
+            action: SnackBarAction(
+              label: 'Undo',
+              onPressed: () => unawaited(() async {
+                if (!await _patchProfile(botId, {'hiddenFromSidebar': false})) {
+                  return;
+                }
+                if (notifying) await _setNotifications(botId, enabled: true);
+              }()),
+            ),
+          ),
+        );
+      case BotAction.show:
+        await _patchProfile(botId, {'hiddenFromSidebar': false});
+      case BotAction.label:
+        final label = await showBotLabelPicker(
+          context: context,
+          botName: name,
+          current: profiles[botId]?.label?.trim() ?? '',
+          existing: [for (final profile in profiles.values) ?profile.label],
+        );
+        if (label == null || !mounted) return;
+        await _patchProfile(botId, {'label': label});
+      case BotAction.mute:
+        await _setNotifications(botId, enabled: false);
+      case BotAction.unmute:
+        await _setNotifications(botId, enabled: true);
+      case BotAction.archive:
+      case BotAction.restore:
+        final applied = await confirmBotLifecycleChange(
+          context: context,
+          lifecycle: lifecycle,
+          botId: botId,
+          botName: name,
+          type: action == BotAction.archive ? 'bot/archive' : 'bot/restore',
+          nameOf: _botNameOf,
+        );
+        if (!mounted) return;
+        if (lifecycle.error ?? lifecycle.message case final String notice) {
+          _say(notice);
+        }
+        if (applied) await load();
+    }
+  }
+
+  /// Writes one profile field, drawn before the round trip and put back on a
+  /// refusal. The open Bot's settings page holds its own copy of the profile
+  /// and saves the whole of it, so that copy is read again rather than left
+  /// to overwrite this change with what it remembers.
+  Future<bool> _patchProfile(String botId, Map<String, Object?> patch) async {
+    final before = profiles[botId] ?? const SidebarProfile();
+    predictProfile(
+      botId,
+      SidebarProfile(
+        name: before.name,
+        title: before.title,
+        label: patch.containsKey('label')
+            ? patch['label'] as String?
+            : before.label,
+        pinnedAt: patch.containsKey('pinnedAt')
+            ? patch['pinnedAt'] as String?
+            : before.pinnedAt,
+        hiddenFromSidebar: patch.containsKey('hiddenFromSidebar')
+            ? patch['hiddenFromSidebar'] == true
+            : before.hiddenFromSidebar,
+      ),
+    );
+    final failure = await quickWrites.setProfile(botId, patch);
+    if (!mounted) return false;
+    if (failure != null) {
+      predictProfile(botId, before);
+      _say(failure);
+      return false;
+    }
+    await _readBackBotSettings();
+    if (selected?.botId.value == botId) await botSettings?.load();
+    return true;
+  }
+
+  Future<void> _setNotifications(String botId, {required bool enabled}) async {
+    final failure = await quickWrites.setNotifications(botId, enabled: enabled);
+    if (!mounted) return;
+    if (failure != null) {
+      _say(failure);
+      return;
+    }
+    await activity.load();
+    if (selected?.botId.value == botId) await botSettings?.load();
+  }
+
   String? _botNameOf(String botId) =>
       bots.where((bot) => bot.botId.value == botId).map(_name).firstOrNull;
 
@@ -1703,6 +1851,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onToggleHidden: () =>
                                 setState(() => showHidden = !showHidden),
                             onRetry: load,
+                            onActions: (botId, {position}) => unawaited(
+                              _botActions(botId, position: position),
+                            ),
+                            onSwipeRead: (botId) => unawaited(
+                              _runBotAction(
+                                botId,
+                                _botActionState(botId).unread
+                                    ? BotAction.markRead
+                                    : BotAction.markUnread,
+                              ),
+                            ),
+                            onSwipeHide: (botId) =>
+                                unawaited(_runBotAction(botId, BotAction.hide)),
                           ),
                     conversation: bot == null
                         ? NoConversation(
