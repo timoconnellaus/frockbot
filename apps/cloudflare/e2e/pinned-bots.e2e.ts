@@ -12,18 +12,11 @@ function tiles(page: Page): Locator {
   );
 }
 
-/**
- * The row for one Bot, found by the name it shows. A hovered or focused row
- * on a desktop holds its actions control as a child, and the engine then
- * carries the row's own text as `aria-label` rather than as element text.
- */
+/** The row for one Bot, found by the name it shows. */
 function row(page: Page, name: string): Locator {
-  const rows = sem(page, "shell-sidebar").locator(
-    '[flt-semantics-identifier^="sidebar-bot-"]',
-  );
-  return rows
-    .filter({ hasText: name })
-    .or(rows.and(page.locator(`[aria-label^="${name}"]`)));
+  return sem(page, "shell-sidebar")
+    .locator('[flt-semantics-identifier^="sidebar-bot-"]')
+    .filter({ hasText: name });
 }
 
 // Tall enough that the Bot panel's own Save is on screen. The panel is a

@@ -522,67 +522,65 @@ class ShellSidebar extends StatelessWidget {
     final actions = onActions == null
         ? null
         : ({Offset? position}) => onActions!(botId, position: position);
-    final row = identified(
-      ShellIds.sidebarBot(botId),
-      _BotRow(
-        key: ValueKey('bot-$botId'),
-        selected: selected,
-        enabled: !isArchived,
-        onTap: isArchived ? null : () => onSelect(botId),
-        onActions: actions,
-        // A phone reaches the actions by pressing the row, and so may any
-        // touch screen; a pointer has the control and the secondary click.
-        control: !phone && actions != null
-            ? identified(
-                BotActionIds.menu(botId),
-                _RowControl(onPressed: (at) => actions(position: at)),
-              )
-            : null,
-        avatar: SheepAvatar(
-          size: 36,
-          background: bot.sheep.background,
-          working: _working(bot),
-        ),
-        name: _name(bot),
-        nameStyle: theme.textTheme.bodyMedium?.copyWith(
-          fontSize: 14,
-          fontWeight: isUnread ? FontWeight.w600 : FontWeight.w500,
-          letterSpacing: -0.1,
-          color: isArchived
-              ? theme.colorScheme.onSurfaceVariant
-              : theme.colorScheme.onSurface,
-        ),
-        time: at == null ? null : formatSidebarMessageTime(at),
-        preview: preview ?? profiles[botId]?.title ?? 'No messages yet',
-        previewStyle: theme.textTheme.bodySmall?.copyWith(
-          fontSize: 12.5,
-          color: isUnread
-              ? theme.colorScheme.onSurface.withValues(alpha: 0.78)
-              : theme.colorScheme.onSurfaceVariant,
-        ),
-        // One slot, one meaning. The row's own selected state already says
-        // which Bot is open, so the slot carries unread and archived — the two
-        // things a row can say that its appearance does not.
-        trailing: badge == null && !isArchived
-            ? null
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (isArchived)
-                    Text(
-                      'Archived',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                  if (badge != null) ...[
-                    if (isArchived) const SizedBox(width: 6),
-                    Badge(label: Text(badge)),
-                  ],
-                ],
-              ),
+    final row = _BotRow(
+      key: ValueKey('bot-$botId'),
+      identifier: ShellIds.sidebarBot(botId),
+      selected: selected,
+      enabled: !isArchived,
+      onTap: isArchived ? null : () => onSelect(botId),
+      onActions: actions,
+      // A phone reaches the actions by pressing the row, and so may any
+      // touch screen; a pointer has the control and the secondary click.
+      control: !phone && actions != null
+          ? identified(
+              BotActionIds.menu(botId),
+              _RowControl(onPressed: (at) => actions(position: at)),
+            )
+          : null,
+      avatar: SheepAvatar(
+        size: 36,
+        background: bot.sheep.background,
+        working: _working(bot),
       ),
+      name: _name(bot),
+      nameStyle: theme.textTheme.bodyMedium?.copyWith(
+        fontSize: 14,
+        fontWeight: isUnread ? FontWeight.w600 : FontWeight.w500,
+        letterSpacing: -0.1,
+        color: isArchived
+            ? theme.colorScheme.onSurfaceVariant
+            : theme.colorScheme.onSurface,
+      ),
+      time: at == null ? null : formatSidebarMessageTime(at),
+      preview: preview ?? profiles[botId]?.title ?? 'No messages yet',
+      previewStyle: theme.textTheme.bodySmall?.copyWith(
+        fontSize: 12.5,
+        color: isUnread
+            ? theme.colorScheme.onSurface.withValues(alpha: 0.78)
+            : theme.colorScheme.onSurfaceVariant,
+      ),
+      // One slot, one meaning. The row's own selected state already says
+      // which Bot is open, so the slot carries unread and archived — the two
+      // things a row can say that its appearance does not.
+      trailing: badge == null && !isArchived
+          ? null
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isArchived)
+                  Text(
+                    'Archived',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                if (badge != null) ...[
+                  if (isArchived) const SizedBox(width: 6),
+                  Badge(label: Text(badge)),
+                ],
+              ],
+            ),
     );
     // An archived Bot has stopped: nothing to read, nothing worth hiding.
     if (!phone || isArchived) return row;
@@ -839,6 +837,10 @@ class _SwipeRowState extends State<_SwipeRow>
 /// no taller than it has to be. The selected tint is inset from the column's
 /// edges so the list reads as a list and not as a table.
 class _BotRow extends StatefulWidget {
+  /// The row's own identifier, on its button node alone: were the control a
+  /// child of that node, the engine would carry the row's text as a label
+  /// rather than as text.
+  final String identifier;
   final bool selected;
   final bool enabled;
   final VoidCallback? onTap;
@@ -859,6 +861,7 @@ class _BotRow extends StatefulWidget {
   final Widget? control;
   const _BotRow({
     super.key,
+    required this.identifier,
     required this.selected,
     required this.enabled,
     required this.onTap,
@@ -890,90 +893,109 @@ class _BotRowState extends State<_BotRow> {
     final time = widget.time;
     final trailing = widget.trailing;
     final showControl = widget.control != null && (_hovered || _focused);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Semantics(
-        selected: selected,
-        button: enabled,
-        child: Material(
-          color: selected
-              ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
-              : Colors.transparent,
+    final row = Semantics(
+      container: true,
+      identifier: widget.identifier,
+      selected: selected,
+      button: enabled,
+      child: Material(
+        color: selected
+            ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: widget.onTap,
+          onLongPress: onActions == null ? null : () => onActions(),
+          onSecondaryTapUp: onActions == null
+              ? null
+              : (details) => onActions(position: details.globalPosition),
           borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            onTap: widget.onTap,
-            onLongPress: onActions == null ? null : () => onActions(),
-            onSecondaryTapUp: onActions == null
-                ? null
-                : (details) => onActions(position: details.globalPosition),
-            onHover: (over) => setState(() => _hovered = over),
-            onFocusChange: (has) => setState(() => _focused = has),
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
-              child: Opacity(
-                opacity: enabled ? 1 : 0.6,
-                child: Row(
-                  children: [
-                    widget.avatar,
-                    const SizedBox(width: 11),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  widget.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: widget.nameStyle,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
+            child: Opacity(
+              opacity: enabled ? 1 : 0.6,
+              child: Row(
+                children: [
+                  widget.avatar,
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: widget.nameStyle,
+                              ),
+                            ),
+                            // The control itself sits over this space,
+                            // beside the row's node rather than inside it.
+                            if (showControl)
+                              const SizedBox(width: 8 + 24)
+                            else if (time case final String stamp) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                stamp,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontSize: 11.5,
+                                  color: theme.colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.9),
                                 ),
                               ),
-                              if (showControl) ...[
-                                const SizedBox(width: 8),
-                                widget.control!,
-                              ] else if (time case final String stamp) ...[
-                                const SizedBox(width: 8),
-                                Text(
-                                  stamp,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontSize: 11.5,
-                                    color: theme.colorScheme.onSurfaceVariant
-                                        .withValues(alpha: 0.9),
-                                  ),
-                                ),
-                              ],
                             ],
-                          ),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  widget.preview,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: widget.previewStyle,
-                                ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.preview,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: widget.previewStyle,
                               ),
-                              if (trailing case final Widget end) ...[
-                                const SizedBox(width: 8),
-                                end,
-                              ],
+                            ),
+                            if (trailing case final Widget end) ...[
+                              const SizedBox(width: 8),
+                              end,
                             ],
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      // Hover and focus are the row's and its control's together, so moving
+      // onto the control or tabbing to it keeps it on screen.
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onFocusChange: (has) => setState(() => _focused = has),
+          child: Stack(
+            children: [
+              row,
+              if (showControl)
+                Positioned(top: 8, right: 12, child: widget.control!),
+            ],
           ),
         ),
       ),
