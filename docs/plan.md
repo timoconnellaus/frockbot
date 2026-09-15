@@ -130,6 +130,10 @@ The flip served the Flutter web build at `/` and took the Vue client out in the 
 
 - _Step 8, done._ Plugin triggers. `RoutineTriggerV1` gains `{ kind: "plugin", pluginId, trigger }` beside the webhook kind (`app/routines/records.ts`), and both enter through the same signed webhook door — the same key, digest and replay guard — so every triggered Routine is keyed at creation. `RoutineStore.deliverHook` makes the door's checks in one transaction, hands the delivery to the Plugin through a seam outside any transaction, then re-reads those checks and either enqueues the firing with the text the Plugin answered or writes a receipt recording the drop and its reason, which a replay answers with; two copies of one delivery in flight at once join rather than ask the Plugin twice. The delivery carries the sender's headers, lower-cased, bounded and never the door's own credential (`routineHookHeadersV1`). `deliverPluginTriggerV1` (`app/plugins/triggers-bot.ts`) mounts the User's Plugin worker for that delivery alone under a synthetic Turn identity named `trigger:<routineId>`, calls `receiveTrigger` and disposes; a Plugin that is not in the Composition, is off for this Bot, declares no such trigger or does not mount is a drop with that reason, never a throw. `routine_manage` takes a `pluginTrigger`, the Routines page editor gains the Plugin timing and its two fields with the native document mapping them back, and a template carries a Plugin-triggered Routine as a webhook one — it lands disabled and unkeyed either way.
 
+## Next: the simple deployment
+
+A second deployment profile anyone installs into their own Cloudflare account with `bun run setup`: Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. The hosted deployment is unchanged. The decisions and the staged plan are [ADR 0028](adr/0028-open-deployment.md).
+
 ## Not now
 
 Voice, billing, package publishing, a Plugin marketplace, avatar wearables, and Applet sharing between Users. Each is an addition to the target, not a change to it.
