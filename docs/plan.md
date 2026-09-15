@@ -24,7 +24,7 @@ Settled, and not to be relitigated without a reason that is new:
 - **Bot-authored packages stay.** Self-modification is the product, so the loader, generations and grants survive — scoped to untrusted code rather than applied to everything.
 - **A tenant is a User.** One Plugin worker per account. A Bot authoring a Plugin installs it for that User; which Bots run it is the Bot's own enable map ([ADR 0026](adr/0026-plugins.md)).
 - **The base has no DI container.** Ordinary imports. This is what stops the collapse from quietly undoing itself.
-- **The Computer stays, as a Package.** One provider-neutral `ComputerHost` interface with Fly behind it, so another host can be substituted. It leaves the Applet authoring path entirely.
+- **The Computer stays, as a Package.** One provider-neutral `ComputerHost` interface with Fly behind it, so another host can be substituted. It leaves the Applet authoring path entirely. The chosen next host is the five-User DigitalOcean Kubernetes pilot in [`kubernetes-computer-host-plan.md`](kubernetes-computer-host-plan.md), with a gated Hetzner expansion path.
 - **Applets follow cloudflare-os.** Source in object storage, built by a cloud service, mounted from an immutable artifact into a Durable Object facet. The runtime is already correct; only authoring moves.
 - **Providers go through the AI SDK.** Request translation, streaming, tool-call accumulation and usage reporting are bought, not written, behind one narrow `ModelProvider` interface.
 - **At-most-once by idempotency key.** Forensic reconciliation of dispatched effects is removed.
