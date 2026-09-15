@@ -13,12 +13,18 @@ import type {
   AuthIdentityCandidateV1,
   AuthPackageBuildV1,
   AuthPackageDependenciesV1,
+  AuthPackageIdentityStoreV1,
   AuthPackageV1,
 } from "@frockbot/core/contracts";
 import { signInFailedV1, signInRedirectV1 } from "../shared.js";
 
 export interface BetterAuthEnvironmentV1 {
-  AUTH_DB: D1Database;
+  /**
+   * Where the identities live. Optional because the other auth Package stores
+   * nothing and its deployment binds no database, so the Worker's `env` cannot
+   * promise one; without it this Package signs nobody in.
+   */
+  AUTH_DB?: D1Database;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
   GOOGLE_CLIENT_ID?: string;
@@ -26,8 +32,7 @@ export interface BetterAuthEnvironmentV1 {
 }
 
 /** The environment with every setting this Package needs actually present. */
-type ConfiguredEnvironmentV1 = BetterAuthEnvironmentV1 &
-  Required<Omit<BetterAuthEnvironmentV1, "AUTH_DB">>;
+type ConfiguredEnvironmentV1 = Required<BetterAuthEnvironmentV1>;
 
 /**
  * Refuses the identity creation better-auth is about to perform.
@@ -94,12 +99,69 @@ function configuredEnvironment(
     environment.GOOGLE_CLIENT_ID,
     environment.GOOGLE_CLIENT_SECRET,
   ];
-  return values.every((value) => value?.trim())
+  return environment.AUTH_DB && values.every((value) => value?.trim())
     ? (environment as ConfiguredEnvironmentV1)
     : null;
 }
 
-function unconfigured(): AuthPackageV1 {
+const STORED_IDENTITY_COLUMNS =
+  '"id", "email", "name", "emailVerified", "createdAt"';
+
+interface StoredIdentityRowV1 {
+  id: string;
+  email: string;
+  name: string;
+  emailVerified: number;
+  createdAt: string;
+}
+
+function storedIdentityOfV1(row: StoredIdentityRowV1) {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    emailVerified: row.emailVerified === 1,
+    createdAt: row.createdAt,
+  };
+}
+
+/**
+ * The stored-identity half of the Package: the `user` table, queried directly.
+ *
+ * Raw D1 rather than better-auth's adapter because admission reads this on
+ * every native and machine request, and constructing a better-auth instance to
+ * answer a one-row lookup is work the query does not need. It also answers
+ * while sign-in itself is unconfigured: a deployment missing a Google secret
+ * still has identities, and admission still has to decide about them.
+ */
+function identityStoreV1(
+  environment: BetterAuthEnvironmentV1,
+): AuthPackageIdentityStoreV1 {
+  const database = environment.AUTH_DB;
+  if (!database) return {};
+  return {
+    storedIdentity: async (userId) => {
+      const row = await database
+        .prepare(
+          `select ${STORED_IDENTITY_COLUMNS} from "user" where "id" = ? limit 1`,
+        )
+        .bind(userId)
+        .first<StoredIdentityRowV1>();
+      return row ? storedIdentityOfV1(row) : null;
+    },
+    listStoredIdentities: async (limit) => {
+      const result = await database
+        .prepare(
+          `select ${STORED_IDENTITY_COLUMNS} from "user" order by "createdAt" desc limit ?`,
+        )
+        .bind(limit)
+        .all<StoredIdentityRowV1>();
+      return (result.results ?? []).map(storedIdentityOfV1);
+    },
+  };
+}
+
+function unconfigured(environment: BetterAuthEnvironmentV1): AuthPackageV1 {
   const refuse = () =>
     Promise.resolve(
       Response.json(
@@ -108,6 +170,7 @@ function unconfigured(): AuthPackageV1 {
       ),
     );
   return {
+    ...identityStoreV1(environment),
     handler: refuse,
     getSession: () => Promise.resolve(null),
     signOut: refuse,
@@ -123,7 +186,7 @@ function betterAuthPackage(
   dependencies: AuthPackageDependenciesV1 = {},
 ): AuthPackageV1 {
   const configured = configuredEnvironment(environment);
-  if (!configured) return unconfigured();
+  if (!configured) return unconfigured(environment);
 
   // Public native-start requests need no identity lookup. Starting async auth
   // initialization there leaves work unfinished when the request ends.
@@ -131,6 +194,7 @@ function betterAuthPackage(
   const getAuth = () => (auth ??= createAuth(configured, dependencies));
   const origin = configured.BETTER_AUTH_URL;
   return {
+    ...identityStoreV1(configured),
     profile: async (userId) => {
       const user = await (
         await getAuth().$context
@@ -231,5 +295,13 @@ export const BETTER_AUTH_PACKAGE_V1: AuthPackageBuildV1<BetterAuthEnvironmentV1>
       },
     ],
     admission: "authority",
+    // The live hosted key. Renaming what the native door signs with would
+    // invalidate every code and bearer already issued, which is every signed-in
+    // phone and Mac.
+    nativeTokenSecret: {
+      name: "BETTER_AUTH_SECRET",
+      why: "Also signs the native sign-in codes and bearer tokens this deployment has already issued.",
+      read: (environment) => environment.BETTER_AUTH_SECRET,
+    },
     create: betterAuthPackage,
   };

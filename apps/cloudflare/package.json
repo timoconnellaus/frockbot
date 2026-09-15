@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "imports": {
+    "#auth-package": "./src/auth-package.ts"
+  },
   "scripts": {
     "client:build": "bun run build-flutter-web.ts",
     "artifact:build": "bun run client:build && bun run build-artifact.ts",
@@ -12,7 +15,7 @@
     "test:workerd": "vitest run --config vitest.config.ts",
     "test:integration": "bun run artifact:build && vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.access.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json"
   },
   "dependencies": {
     "@cloudflare/voice": "0.5.0",

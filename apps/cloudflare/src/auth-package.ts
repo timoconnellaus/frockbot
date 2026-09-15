@@ -1,39 +1,36 @@
 /**
- * The one place this deployment chooses how people sign in.
+ * How the hosted deployment signs people in: better-auth with Google.
  *
  * `AuthPackageV1` is the interface the gateway speaks to sign-in
- * (`core/contracts/auth-package.ts`); better-auth with Google is one
- * implementation and Cloudflare Access is another. Which one this Worker
- * builds is a deployment decision, not an application one, so it is made here,
- * beside the bindings the choice depends on — and it is exactly one import
- * line, so that flipping it is a one-line diff and a `grep` finds it.
+ * (`core/contracts/auth-package.ts`); this file and `auth-package.access.ts`
+ * are the two builds of it, and each is exactly one value import, so that a
+ * build is a one-line file and a `grep` finds it.
  *
- * Stage 3 of ADR 0028 owns the flip: the deployment config generator writes
- * this file's import for the profile it is generating. The hosted profile
- * names better-auth, which is what is written below; the simple profile names
- * Access:
- *
- *     import { ACCESS_AUTH_PACKAGE_V1 as CHOSEN_AUTH_PACKAGE_V1 } from "@frockbot/app/auth/access";
+ * This is the one the tracked source resolves: `wrangler dev`, every suite and
+ * the hosted deploy all reach it through `#auth-package`, which
+ * `apps/cloudflare/package.json` maps here. A profile whose `authPackage` is
+ * `access` gets a generated wrangler config carrying
+ * `alias: { "#auth-package": "<path to auth-package.access.ts>" }`, so the
+ * Access build resolves that specifier to the other file and this one is not in
+ * its bundle at all.
  *
  * `scripts/check-auth-package-imports.ts` keeps the `better-auth` dependency
- * inside `app/auth/better-auth/**` and this file, so the Access build carries
- * none of it. Nothing else in the Worker may name an implementation.
+ * inside `app/auth/better-auth/**` and this file. Nothing else in the Worker may
+ * name an implementation.
  */
 import type { AuthPackageBuildV1 } from "@frockbot/core/contracts";
-import { BETTER_AUTH_PACKAGE_V1 as CHOSEN_AUTH_PACKAGE_V1 } from "@frockbot/app/auth/better-auth";
-import type { AccessEnvironmentV1 } from "@frockbot/app/auth/access";
+import { BETTER_AUTH_PACKAGE_V1 } from "@frockbot/app/auth/better-auth";
 import type { BetterAuthEnvironmentV1 } from "@frockbot/app/auth/better-auth";
 
 /**
- * What a Worker must hand whichever Package it built.
+ * What a Worker must hand the Package this build deploys.
  *
- * Both implementations' settings, so the Worker's `env` satisfies either one
- * and flipping the import above is provably a one-line change rather than a
- * rewiring. A Package reads only its own names and answers 503 without them.
+ * One Package's settings, not both: the Worker's `env` declares every name
+ * either build reads, and the build that is not here reads none of it. Each
+ * chooser exports this name, so `index.ts` is the same file on both builds.
  */
-export type AuthPackageEnvironmentV1 = BetterAuthEnvironmentV1 &
-  AccessEnvironmentV1;
+export type AuthPackageEnvironmentV1 = BetterAuthEnvironmentV1;
 
 /** The sign-in Package this build deploys. */
 export const AUTH_PACKAGE_V1: AuthPackageBuildV1<AuthPackageEnvironmentV1> =
-  CHOSEN_AUTH_PACKAGE_V1;
+  BETTER_AUTH_PACKAGE_V1;

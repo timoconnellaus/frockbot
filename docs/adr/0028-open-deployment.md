@@ -1,7 +1,8 @@
 # ADR 0028: The simple deployment
 
-Status: proposed, 2026-09-15. Decisions are Tim's from the 2026-09-15
-discussion; the plan is the proposed order of work.
+Status: accepted, 2026-09-15; stage 6's external deploy outstanding. Decisions
+are Tim's from the 2026-09-15 discussion. Each stage below carries a **Built**
+note where what was built differs from what was proposed.
 
 ## Decision
 
@@ -50,7 +51,7 @@ Within that frame:
    the app over a service binding. The `/api/admin/*` routes and the client's
    Site administration page are deleted. The simple deployment has no admin
    UI at all: the Access policy is who gets in, and the admin emails secret
-   is who may bypass admission and open the debug surface.
+   names the deployment's admins, who bypass admission.
 
 ## Why
 
@@ -80,8 +81,12 @@ Within that frame:
 
 ## What a simple deployment needs
 
-One Cloudflare account on the Workers Paid plan, a Fly Sprites token, Bun,
-and a Zero Trust team (free). Optional keys extend reach and never repair a
+One Cloudflare account on the Workers Paid plan with **one domain on it**, a
+Fly Sprites token, Bun, and a Zero Trust team (free). The domain is needed
+because the artifact origin must be `ui.<the app's hostname>`: the app
+derives the pairing from that prefix in the gateway and the Applet preview
+path, and a `workers.dev` name cannot carry a dot, so a second Worker on
+`workers.dev` cannot serve it. Optional keys extend reach and never repair a
 default: OpenAI and ElevenLabs for voice, FCM for Android push, Composio for
 connected apps, an AI Gateway for the hosted model route.
 
@@ -139,6 +144,23 @@ each other; 4 depends on 1 and 3; 5 and 6 follow 4.
   build, `ACCESS_*` by the simple one, and the manifest test checks the
   build it is in.
 
+**Built.** The choosing file is reached through a subpath import rather than by
+path: `apps/cloudflare/package.json` maps `#auth-package` to
+`src/auth-package.ts`, better-auth, which is what `wrangler dev`, every suite and
+the hosted deploy resolve, and a profile whose `authPackage` is `access` gets a
+generated `alias` pointing the same specifier at `src/auth-package.access.ts`. A
+bare specifier because esbuild, which wrangler's `alias` reaches, refuses to
+alias a relative import. `apps/cloudflare/tsconfig.access.json` type-checks the
+whole Worker against the other chooser, so an `env` name only one build has
+cannot reach the other unnoticed, and `scripts/check-auth-package-imports.ts` is
+the import rule. The Access build has no better-auth secret to sign the native
+door with, so it mints `NATIVE_TOKEN_SECRET` instead — and native sign-in is
+closed on the simple profile even so: the `assetlinks.json` and
+`apple-app-site-association` the Worker serves name the hosted app's package and
+signing fingerprint, so a client a deployer builds and signs has no verified
+return path on their own hostname. The simple profile names no native targets,
+and the web client is its client until that association is per-deployment.
+
 ### 2. Administration out of the app
 
 - The app Worker exports an `AdminEntrypoint` WorkerEntrypoint whose RPCs are
@@ -157,6 +179,15 @@ each other; 4 depends on 1 and 3; 5 and 6 follow 4.
   and opens the debug surface stays where it is.
 - The simple build has no portal and nothing to hide: with Access deciding
   admission there is no admin operation left for it.
+
+**Built.** `AdminEntrypoint` is `apps/cloudflare/src/admin-entrypoint.ts` over
+`app/admin/operations.ts`, and the portal is deployed by `release.yml`'s
+`deploy-marketing` job, which carries both hosted-only sites; its step skips when
+the `production` environment names no Access application, so the portal admits
+nobody rather than everybody while it is unconfigured. An account's features are
+also writable from the operator surface, `POST
+/api/debug/users/<userId>/features` under the deployment's `DEBUG_TOKEN`, which
+is how a deployment with no portal turns Applets or Plugin authoring on.
 
 ### 3. Deployment identity out of the wrangler files
 
@@ -184,16 +215,39 @@ each other; 4 depends on 1 and 3; 5 and 6 follow 4.
   hosted release job so its builds are byte-for-byte what they are today.
   `apps/marketing` keeps its hosts; it is hosted-only.
 - **Artifact origin.** `UI_ARTIFACT_HOSTS` needs a second origin for CSP
-  isolation. On `workers.dev` a Worker has one hostname, so the simple
-  deployment needs either a zone or a second Worker. Proposed: the same
-  script deployed under a second name (`<prefix>-ui`) through a wrangler
-  environment whose Durable Object bindings point at the app Worker by
-  `script_name` and whose R2 binding is the same bucket. Verify against the
-  Applet viewer socket path before committing; the fallback is to require a
-  zone. The hosted profile keeps `ui.bot.frockbot.com` either way.
-- Model default: with no Gateway vars the provider already uses the `AI`
-  binding. Confirm `@frock/auto` resolves to a concrete `@cf/...` model on
-  that path and pin one; the `dynamic/` route stays the hosted default.
+  isolation, and the pairing is derived from the hostname: the app answers
+  for `ui.<its own host>` (`packageUiGatewayOriginV1`,
+  `isPackageUiArtifactOriginFor` in `gateway.ts`, `appletUiArtifactOriginV1`
+  in `applets/preview.ts`). A `workers.dev` name cannot contain a dot, so a
+  second Worker there cannot be the artifact origin, and the generator
+  requires an `artifactHostname` of the form `ui.<app hostname>` on a zone.
+  The origin needs only R2, no Durable Objects; making the pairing explicit
+  configuration so it could live on a second `workers.dev` Worker is a
+  change to the Applet path, and is out of this ADR.
+- Model default without a Gateway: the host already took the `AI` binding,
+  but Auto still resolved to `dynamic/<route>`, which the binding rejects
+  (cloudflare/ai#617), so Auto failed outright on any deployment without a
+  Gateway. On the binding path Auto now resolves to a pinned concrete
+  Workers AI chat model (`FROCK_AI_BINDING_AUTO_MODEL` in the Frock AI
+  catalog); the `dynamic/` route stays the hosted default through the
+  profile.
+
+**Built.** Five deployables, not three: the marketing site and the admin portal
+have profiles too, and a profile generates exactly the Workers it names. Some
+fields keep a placeholder rather than nothing, because wrangler's validator
+refuses a `services` entry with no target and a `vectorize` entry with no index
+even in a config it never deploys, so those say `named-by-deployment-config` in
+the tracked files. The equivalence gate is
+`scripts/deployment-config.test.ts` against the fixtures in
+`scripts/deployment-config/fixtures/hosted/`; it runs under `bun test`, so
+`Check` and `main.yml` enforce it, and `release.yml` runs it again before
+`deploy-backend` deploys. The staging D1 identifier is resolved from
+`wrangler d1 list` in the deploying job and passed with `--d1-database-id`, which
+is what replaced the regex; the one in-place rewrite left is the application
+artifact's digest over the generated config's `DEFAULT_APPLICATION_HASH`
+placeholder. And the artifact origin is a second custom domain on the app Worker
+rather than a Worker of its own: `routesForV1` appends `artifactHostname` to the
+app's routes, and the schema requires the `ui.` form.
 
 ### 4. The installer
 
@@ -203,14 +257,15 @@ upgrade works (check out the next tag, run it again). Steps, each printing
 what it did:
 
 1. `wrangler whoami`; pick the account; confirm Workers Paid.
-2. Write `deployments/simple.json` from a few prompts (name prefix, region,
-   admin email), then run the generator with the Access Package.
+2. Write `deployments/simple.json` from a few prompts (name prefix, the
+   zone and app hostname, region, admin email), then run the generator with
+   the Access Package. The artifact hostname is derived, `ui.<app hostname>`.
 3. Create the two R2 buckets and the Vectorize index if absent.
 4. Mint the six internal secrets if absent and set them on the right Workers.
 5. Ask for the Fly Sprites token; offer the optional keys and skip cleanly.
-6. Create the Access application and policy for the app Worker's hostname
-   when the API token has Zero Trust scope; otherwise print the dashboard
-   steps and wait for the audience tag.
+6. Create the Access application and policy for the app's hostname when the
+   API token has Zero Trust scope; otherwise print the dashboard steps and
+   wait for the audience tag.
 7. Deploy `computer-host`, `applet-build`, the app Worker and the artifact
    origin, pulling the published container images. Print the URL and run the
    existing debug liveness check against it.
@@ -218,17 +273,66 @@ what it did:
 Until a throwaway-account job exists in CI, a dry-run mode that prints every
 command is the gate, plus one real run against a fresh account (step 6).
 
+**Built.** Eight steps, not seven: fetching the web client and the application
+artifact from the release is its own step before the deploy. Seven internal
+secrets, not six — `NATIVE_TOKEN_SECRET` joins them, because the Access build has
+no better-auth secret to sign the native door with — recorded in
+`.deployment/simple/secrets.env` at mode 0600, since `wrangler secret list` says
+a name is set and never what it is set to, so a lost record could only be
+re-minted and would invalidate every credential, webhook key, paired machine and
+open Applet page it protects. **Two Access applications, not one**, because Access
+matches by path prefix and there is no way to say "the document and nothing under
+it": Allow on the app's own hostname — the document, the client, sign-out and the
+native flow, and the policy that is the deployment's allowlist — and Bypass on
+`/api`, which reaches the Worker, which authenticates every one of those requests
+itself from the Access cookie or the bearer. `ui.<app hostname>` is in neither: an
+Applet's page is anonymous by design. Secrets go in with `wrangler deploy
+--secrets-file` rather than `wrangler secret put`, which addresses a Worker that
+does not exist yet on a first install, and the file is removed even on a failed
+deploy. `--dry-run`, `--yes`, `--profile`, `--account` and
+`--allow-hosted-account` are the flags; the last exists because the installer
+refuses the account `deployments/hosted.json` names.
+
+What it leaves by hand: the zone, which must already be active on the account and
+covered by the deploying credential, with Cloudflare creating both proxied DNS
+records itself because the hostnames are custom domains; the two Access
+applications, when `CLOUDFLARE_API_TOKEN` is absent or lacks `Zero Trust: Access
+Apps and Policies Write`, for which it prints the dashboard steps and waits; the
+audience tag, which until it is real leaves the Worker refusing every token; and
+an APK, if the deployer wants the phone app.
+
 ### 5. Release publishes what the installer pulls
 
 - `release.yml` gains a job that builds the two container images and pushes
-  them to a registry tagged with the version, before `deploy-backend`. The
-  hosted deploy may keep building from the Dockerfile or switch to pulling;
-  switching is preferred because it proves the images on every release, and
-  it is its own tag with the previous tag as the rollback, since staging
-  shares the production Computer host.
-- The web client build and a plain APK built with the simple defaults are
-  attached to the GitHub release; the installer's step 7 fetches the client
-  for its tag rather than requiring Flutter locally.
+  them to Docker Hub (`docker.io/timoconnellaus/frockbot-computer-host` and
+  `frockbot-applet-build`, tagged with the version and `latest`). Docker Hub
+  rather than GHCR because Cloudflare Containers pull only from its managed
+  registry, Docker Hub, ECR and Google Artifact Registry, and a public Docker
+  Hub image needs no registry configuration in the pulling account. Until
+  the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets exist
+  the job skips with a warning and production does not wait on it; once the
+  simple profile is announced it becomes required. The hosted deploy keeps
+  building from the Dockerfiles in this PR; switching it to pull the
+  published images is its own later tag, with the previous tag as the
+  rollback, since staging shares the production Computer host.
+- The web client build and the application artifact are attached to the
+  GitHub release; the installer fetches both for its tag rather than
+  requiring Flutter locally. An APK cannot be prebuilt for the simple
+  profile because the origin is baked in at build time, so the simple
+  profile ships the web client and a deployer builds an APK themselves.
+
+**Built.** The job is `publish-images`, pushing
+`docker.io/timoconnellaus/frockbot-computer-host` and
+`docker.io/timoconnellaus/frockbot-applet-build` from the repository root context
+for `linux/amd64`. `timoconnellaus` is that Docker Hub account's own username; no
+organisation was created. `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are still
+unset, so the job skips with a warning on every tag and `deploy-backend` does not
+name it in `needs` — adding it there is what makes a tag production runs always a
+tag an installer can install. The assets are built by `release-assets` and
+attached by `github-release`:
+`frockbot-web-client-<version>.zip` and
+`frockbot-application-artifact-<version>.mjs`, the second as bytes rather than an
+archive because the R2 key the Worker loads it under is that file's own sha256.
 
 ### 6. Documentation and the first external deploy
 

@@ -11,6 +11,7 @@ import {
   type AppletBuildViewV1,
   type AppletSourceViewV1,
   type AuthIdentityCandidateV1,
+  type AuthPackageIdentityStoreV1,
   type PackageIframeCompositionV1,
 } from "@frockbot/core/contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
@@ -124,7 +125,7 @@ import {
   type AdmissionIdentityV1,
   decodeUserFeaturesV1,
 } from "@frockbot/app/admin/shared";
-import { AUTH_PACKAGE_V1 } from "./auth-package.js";
+import { AUTH_PACKAGE_V1 } from "#auth-package";
 import {
   createNativeAuth,
   NATIVE_RETURN_DEVELOPMENT,
@@ -278,7 +279,12 @@ interface Env {
   APPLET_BUILD: Fetcher;
   /** Shared secret presented on every Applet build call. */
   APPLET_BUILD_TOKEN?: string;
-  AUTH_DB: D1Database;
+  /**
+   * The identity store, on a build whose auth Package has one. The Access
+   * Package stores nothing and its deployment binds no database, which is why
+   * this is optional — and why nothing outside the Package reads it.
+   */
+  AUTH_DB?: D1Database;
   DEFAULT_APPLICATION_HASH: string;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
@@ -288,6 +294,8 @@ interface Env {
   ACCESS_TEAM_DOMAIN?: string;
   /** The Access application's audience tag. */
   ACCESS_AUD?: string;
+  /** The native door's signing key on the Access build; see `AUTH_PACKAGE_V1`. */
+  NATIVE_TOKEN_SECRET?: string;
   CREDENTIAL_KEYRING?: string;
   /** Signs every Routine webhook key. Absent closes the webhook door. */
   ROUTINE_HOOK_SECRET?: string;
@@ -330,19 +338,17 @@ function appletsOf(listed: unknown): AppletSummaryV1[] {
   );
 }
 
-/** The accounts Better Auth holds, newest first. */
-async function listIdentityStoreUsers(
-  env: Env,
-  limit: number,
-): Promise<
-  Array<{ id: string; email: string; name: string; createdAt: string }>
-> {
-  const result = await env.AUTH_DB.prepare(
-    'select "id", "email", "name", "createdAt" from "user" order by "createdAt" desc limit ?',
-  )
-    .bind(limit)
-    .all<{ id: string; email: string; name: string; createdAt: string }>();
-  return result.results ?? [];
+/**
+ * The identity store of the sign-in Package this build deploys.
+ *
+ * Admission and the operator surface read the durable identity rather than the
+ * User id a caller presented, and which store that is belongs to the Package —
+ * the better-auth build's D1 `user` table, or, on the Access build, none at
+ * all. Constructed per lookup because both reads are a single query and neither
+ * needs sign-in itself to be configured.
+ */
+function authIdentitiesV1(env: Env): AuthPackageIdentityStoreV1 {
+  return AUTH_PACKAGE_V1.create(env);
 }
 
 /** The User Durable Object's account features, addressed by User. */
@@ -369,23 +375,26 @@ function userFeaturesStub(
 function debugSurface(env: Env): DebugGatewaySurface {
   return {
     ...(env.DEBUG_TOKEN ? { token: env.DEBUG_TOKEN } : {}),
-    listUsers: () => listIdentityStoreUsers(env, 50),
+    // A build whose auth Package stores no identity lists none: there is no
+    // roll of accounts to read, because Access re-establishes who a person is
+    // on every request. Every other route still answers for a User id the
+    // operator already has.
+    listUsers: async () =>
+      (await authIdentitiesV1(env).listStoredIdentities?.(50)) ?? [],
     listBots: (userId) =>
       userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
     snapshot: (userId, botId, query) =>
       botStateStub(env, userId, botId).debugSnapshot(query),
     isAdminUser: async (userId) => {
-      // Better Auth is the durable identity source for production Users. The
-      // path's User id is never trusted on its own: it must resolve to a stored
-      // email, and that identity is evaluated by the same allowlist policy as
-      // the signed-in gateway and the admin Package.
-      const identity = await env.AUTH_DB.prepare(
-        'select "id", "email" from "user" where "id" = ? limit 1',
-      )
-        .bind(userId)
-        .first<{ id: string; email: string }>();
+      // The auth Package's store is the durable identity source. The path's
+      // User id is never trusted on its own: it must resolve to a stored email,
+      // and that identity is evaluated by the same allowlist policy as the
+      // signed-in gateway. A Package that stores nothing resolves nothing, so
+      // the one write on this surface is refused rather than granted on the
+      // strength of a User id somebody typed.
+      const identity = await authIdentitiesV1(env).storedIdentity?.(userId);
       return (
-        identity !== null &&
+        identity != null &&
         isDeploymentAdminV1(
           { id: identity.id, email: identity.email, mode: "better-auth" },
           env.FROCKBOT_ADMIN_EMAILS,
@@ -696,20 +705,16 @@ async function storedAdmissionIdentity(
   env: Env,
   userId: string,
 ): Promise<AdmissionIdentityV1 | null> {
-  const identity = await env.AUTH_DB.prepare(
-    'select "id", "email", "emailVerified" from "user" where "id" = ? limit 1',
-  )
-    .bind(userId)
-    .first<{ id: string; email: string; emailVerified: number }>();
+  const identity = await authIdentitiesV1(env).storedIdentity?.(userId);
   if (!identity) return null;
   const email = accessEmailV1(identity.email);
   return {
     schemaVersion: 1,
     userId,
     ...(email === undefined ? {} : { email }),
-    emailVerified: identity.emailVerified === 1,
+    emailVerified: identity.emailVerified,
     isAdmin: isDeploymentAdminV1(
-      { ...identity, mode: "better-auth" },
+      { id: identity.id, email: identity.email, mode: "better-auth" },
       env.FROCKBOT_ADMIN_EMAILS,
     ),
   };
@@ -2404,6 +2409,10 @@ export default {
       // workers-types cannot infer the generated local RPC stubs.
       const runtimeExports = ctx.exports as unknown as RuntimeExports;
       mountedBackend = await createGatewayBackendContributions(env);
+      // Which `env` secret the native door signs with belongs to the auth
+      // Package: the hosted build keeps signing with the live
+      // `BETTER_AUTH_SECRET`, and a build without better-auth has its own key.
+      const nativeTokenSecret = AUTH_PACKAGE_V1.nativeTokenSecret.read(env);
       const gateway = createGateway({
         loader: env.USER_APPLICATIONS,
         artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
@@ -2424,10 +2433,10 @@ export default {
         // deployment that names none offers no native sign-in.
         ...(env.BETTER_AUTH_URL &&
         nativeReturnUrisFor(env, env.BETTER_AUTH_URL).length > 0 &&
-        env.BETTER_AUTH_SECRET
+        nativeTokenSecret
           ? {
               nativeAuth: createNativeAuth({
-                secret: env.BETTER_AUTH_SECRET,
+                secret: nativeTokenSecret,
                 auth: AUTH_PACKAGE_V1.create(env, {
                   mayCreateIdentity: (candidate) =>
                     mayCreateIdentity(env, candidate),

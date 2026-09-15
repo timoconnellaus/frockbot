@@ -6,6 +6,7 @@ import {
   verifyAccessTokenV1,
 } from "./token.ts";
 import {
+  ACCESS_AUTH_PACKAGE_V1,
   accessTokenOfV1,
   accessUserIdV1,
   createAccessPackageV1,
@@ -255,5 +256,39 @@ describe("the Access auth Package", () => {
     expect(
       (await stub.handler(new Request("https://bot.example/"))).status,
     ).toBe(503);
+  });
+});
+
+describe("the Access build", () => {
+  const build = ACCESS_AUTH_PACKAGE_V1.create({
+    ACCESS_TEAM_DOMAIN: TEAM_DOMAIN,
+    ACCESS_AUD: AUDIENCE,
+  });
+
+  test("stores no identity, so there is none to look up or list", () => {
+    // Which is why the operator surface lists no accounts on this build and
+    // refuses its one write: there is no stored email to check an admin against.
+    expect(build.storedIdentity).toBeUndefined();
+    expect(build.listStoredIdentities).toBeUndefined();
+  });
+
+  test("signs the native door with a key of its own", () => {
+    expect(ACCESS_AUTH_PACKAGE_V1.nativeTokenSecret.name).toBe(
+      "NATIVE_TOKEN_SECRET",
+    );
+    expect(
+      ACCESS_AUTH_PACKAGE_V1.nativeTokenSecret.read({
+        NATIVE_TOKEN_SECRET: "minted",
+      }),
+    ).toBe("minted");
+    // Never the hosted key: this build has none, and rotating that one would
+    // revoke every native session on frockbot.com.
+    expect(
+      ACCESS_AUTH_PACKAGE_V1.required.map((setting) => setting.name),
+    ).not.toContain("BETTER_AUTH_SECRET");
+  });
+
+  test("the policy is the allowlist, so there is no authority to ask", () => {
+    expect(ACCESS_AUTH_PACKAGE_V1.admission).toBe("package");
   });
 });

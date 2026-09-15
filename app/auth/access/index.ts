@@ -27,6 +27,11 @@ export interface AccessEnvironmentV1 {
   ACCESS_TEAM_DOMAIN?: string;
   /** The Access application's audience tag. */
   ACCESS_AUD?: string;
+  /**
+   * What the native sign-in door signs its codes and bearers with. This build
+   * has no `BETTER_AUTH_SECRET`, and the installer mints this instead.
+   */
+  NATIVE_TOKEN_SECRET?: string;
 }
 
 const TOKEN_HEADER = "cf-access-jwt-assertion";
@@ -154,6 +159,18 @@ export function createAccessPackageV1(
   };
 }
 
+/**
+ * The native door's signing key, written once.
+ *
+ * It is both an `env` string this deployment must be given and the key the door
+ * signs with, and two copies of one operator-facing sentence are two chances for
+ * one of them to go stale.
+ */
+const NATIVE_TOKEN_SECRET_V1 = {
+  name: "NATIVE_TOKEN_SECRET",
+  why: "Signs the native sign-in codes and bearer tokens. Absent, the phone and Mac cannot sign in.",
+} as const;
+
 export const ACCESS_AUTH_PACKAGE_V1: AuthPackageBuildV1<AccessEnvironmentV1> = {
   id: "access",
   required: [
@@ -165,7 +182,14 @@ export const ACCESS_AUTH_PACKAGE_V1: AuthPackageBuildV1<AccessEnvironmentV1> = {
       name: "ACCESS_AUD",
       why: "The Access application's audience tag. Absent, a token minted for another application would be accepted.",
     },
+    NATIVE_TOKEN_SECRET_V1,
   ],
   admission: "package",
+  nativeTokenSecret: {
+    ...NATIVE_TOKEN_SECRET_V1,
+    read: (environment) => environment.NATIVE_TOKEN_SECRET,
+  },
+  // Nothing is stored, so there is no identity to look up by User id and
+  // nothing to list: Access re-establishes who a person is on every request.
   create: (environment) => createAccessPackageV1(environment),
 };

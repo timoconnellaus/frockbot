@@ -8,10 +8,11 @@
  * User id and never how it was established.
  *
  * Two implementations exist: `app/auth/better-auth` (Google, D1, a session
- * cookie) and `app/auth/access` (a Cloudflare Access token, no storage). Which
- * one a deployment builds is chosen in one file beside the bindings,
- * `apps/cloudflare/src/auth-package.ts`, the way the Computer host is chosen
- * (ADR 0028).
+ * cookie) and `app/auth/access` (a Cloudflare Access token, no storage). Each
+ * has one chooser beside the bindings — `apps/cloudflare/src/auth-package.ts`
+ * and `auth-package.access.ts` — and a deployment's generated wrangler config
+ * decides which one `#auth-package` resolves to, the way the Computer host is
+ * chosen (ADR 0028).
  */
 
 /** Who a request is, once sign-in has identified them. */
@@ -31,10 +32,31 @@ export interface AuthProfileV1 {
   emailVerified?: boolean;
 }
 
+/** One identity an auth Package has stored, as it stored it. */
+export interface AuthStoredIdentityV1 {
+  id: string;
+  email: string;
+  name: string;
+  emailVerified: boolean;
+  createdAt: string;
+}
+
 /** One auth Package, over one request. */
 export interface AuthPackageV1 {
   /** Profile hints for the already authenticated User; no credential fields. */
   profile?(userId: string): Promise<AuthProfileV1 | null>;
+  /**
+   * The identity this Package stored under a User id, or nothing.
+   *
+   * The durable answer admission and the operator surface read, rather than
+   * the User id a caller presented: an invitation binds to an email and the
+   * admin allowlist reads one, and neither may be taken from a path segment.
+   * A Package that stores nothing declares neither this nor the list below,
+   * and the surfaces that need a stored email close instead of guessing.
+   */
+  storedIdentity?(userId: string): Promise<AuthStoredIdentityV1 | null>;
+  /** The identities this Package has stored, newest first. */
+  listStoredIdentities?(limit: number): Promise<AuthStoredIdentityV1[]>;
   /** `/api/auth/*`: whatever sign-in routes this Package serves there. */
   handler(request: Request): Promise<Response>;
   /** The identity these request headers carry, or nobody. */
@@ -61,6 +83,15 @@ export interface AuthPackageV1 {
 export type AuthPackageIdentityV1 = Pick<
   AuthPackageV1,
   "getSession" | "profile" | "startSignIn"
+>;
+
+/**
+ * The half of an auth Package that answers who a stored User is. Admission and
+ * the operator debug surface hold only this, because neither signs anybody in.
+ */
+export type AuthPackageIdentityStoreV1 = Pick<
+  AuthPackageV1,
+  "storedIdentity" | "listStoredIdentities"
 >;
 
 /** What an auth Package is about to write, as the access authority reads it. */
@@ -90,6 +121,23 @@ export interface AuthPackageSettingV1 {
 }
 
 /**
+ * The secret the native sign-in door signs its codes and bearers with.
+ *
+ * The door is the Worker's, not the Package's — it mints its own codes and
+ * sessions — but the key it signs with is per-deployment, and a deployment is
+ * the Package it built. Naming it here is what lets the hosted build keep
+ * signing with the live `BETTER_AUTH_SECRET`, which nothing may rotate without
+ * revoking every native session, while a build with no better-auth signs with a
+ * key of its own.
+ */
+export interface AuthPackageNativeSecretV1<
+  EnvironmentV1,
+> extends AuthPackageSettingV1 {
+  /** That secret's value in this Worker's environment, if it has one. */
+  read(environment: EnvironmentV1): string | undefined;
+}
+
+/**
  * Who decides whether an identity may use the deployment.
  *
  * `authority` asks the `DeploymentPolicy` object, which holds the admission
@@ -105,9 +153,15 @@ export type AuthPackageIdV1 = "better-auth" | "access";
 /** One implementation of sign-in, as a deployment's choosing file names it. */
 export interface AuthPackageBuildV1<EnvironmentV1> {
   readonly id: AuthPackageIdV1;
-  /** Every `env` string without which this Package can sign nobody in. */
+  /**
+   * Every `env` string a deployment that built this Package must be given.
+   * Mostly what sign-in itself cannot work without; also the native door's
+   * signing key, which is the deployment's rather than the route's.
+   */
   readonly required: readonly AuthPackageSettingV1[];
   readonly admission: AuthPackageAdmissionV1;
+  /** Which `env` secret the native sign-in door signs with on this build. */
+  readonly nativeTokenSecret: AuthPackageNativeSecretV1<EnvironmentV1>;
   /**
    * The Package over this Worker's bindings. Given an environment it is not
    * configured for it answers 503 to every route rather than failing to

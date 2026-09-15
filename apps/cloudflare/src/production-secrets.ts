@@ -35,7 +35,7 @@
  * required, checked and deployed.
  */
 import type { AuthPackageIdV1 } from "@frockbot/core/contracts";
-import { AUTH_PACKAGE_V1 } from "./auth-package.js";
+import { AUTH_PACKAGE_V1 } from "#auth-package";
 
 /** One setting the deploy hands the Worker. */
 export interface ProductionSecretV1 {
@@ -124,6 +124,15 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
     name: "ACCESS_AUD",
     why: "The Access application's audience tag. Absent, a token minted for another application would be accepted.",
+    authPackage: "access",
+  },
+  {
+    // The hosted build signs the native door with `BETTER_AUTH_SECRET` above,
+    // which it has always signed with and which nothing may rotate without
+    // revoking every signed-in phone and Mac. A build with no better-auth has
+    // no such key, so the installer mints this one.
+    name: "NATIVE_TOKEN_SECRET",
+    why: "Signs the native sign-in codes and bearer tokens. Absent, the phone and Mac cannot sign in.",
     authPackage: "access",
   },
   {

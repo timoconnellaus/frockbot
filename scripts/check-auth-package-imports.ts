@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 // Four rules:
 //
 // 1. `better-auth` is one implementation of `AuthPackageV1` and lives entirely
-//    in `app/auth/better-auth/**`. Only it and the one deployment chooser may
+//    in `app/auth/better-auth/**`. Only it and the better-auth chooser may
 //    name the dependency; everything else depends on the interface in
 //    `core/contracts/auth-package.ts`. A simple deployment builds the Access
 //    Package, and better-auth must not be in that bundle at all.
@@ -17,15 +17,22 @@ import { resolve } from "node:path";
 // 2. `app/auth/access/**` imports the contract and its own files. It is the
 //    second implementation of the same interface, not a second front for the
 //    first, so it reaches neither better-auth nor the code above sign-in.
-// 3. Exactly one implementation reaches the choosing file as a value: the
-//    Package a deployment builds is the one it imports, and importing both
-//    would put both in every bundle.
+// 3. Each chooser names exactly one implementation as a value, and never the
+//    other chooser. There is one chooser per build, the Worker reaches whichever
+//    one `#auth-package` resolves to, and a chooser that imported two Packages —
+//    or its twin — would put both in one bundle.
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const dependency = "better-auth";
 const betterAuthRoot = "app/auth/better-auth/";
 const accessRoot = "app/auth/access/";
-const chooser = "apps/cloudflare/src/auth-package.ts";
+/** One per build; the first is the tracked default `#auth-package` resolves to. */
+const choosers = [
+  "apps/cloudflare/src/auth-package.ts",
+  "apps/cloudflare/src/auth-package.access.ts",
+];
+/** The chooser allowed to name `better-auth`, which is the build that uses it. */
+const betterAuthChooser = choosers[0]!;
 
 const failures: string[] = [];
 
@@ -92,7 +99,7 @@ const sources = scan(
 
 let filesChecked = 0;
 for (const path of sources) {
-  if (path.startsWith(betterAuthRoot) || path === chooser) continue;
+  if (path.startsWith(betterAuthRoot) || path === betterAuthChooser) continue;
   // This file states the rule, so it has to be able to write the name down.
   if (path === "scripts/check-auth-package-imports.ts") continue;
   filesChecked += 1;
@@ -101,7 +108,7 @@ for (const path of sources) {
   for (const { specifier, line } of specifiersOf(source)) {
     if (!isDependency(specifier)) continue;
     failures.push(
-      `${path}:${line}: imports "${specifier}"; better-auth is one implementation of AuthPackageV1 and is importable only from ${betterAuthRoot}** and the deployment chooser (${chooser}) — depend on @frockbot/core/contracts instead (ADR 0028)`,
+      `${path}:${line}: imports "${specifier}"; better-auth is one implementation of AuthPackageV1 and is importable only from ${betterAuthRoot}** and its own chooser (${betterAuthChooser}) — depend on @frockbot/core/contracts instead (ADR 0028)`,
     );
   }
 }
@@ -153,17 +160,32 @@ for (const path of scan("**/package.json")) {
   }
 }
 
-// Rule 3: the choosing file names exactly one implementation as a value. Both
-// types are imported there on purpose, so that either Package's `env` shape is
-// proved against this Worker's; only the runtime import decides the build.
-const chosen = specifiersOf(readFileSync(resolve(repoRoot, chooser), "utf8"))
-  .filter(({ typeOnly }) => !typeOnly)
-  .map(({ specifier }) => specifier)
-  .filter((specifier) => specifier.startsWith("@frockbot/app/auth/"));
-if (chosen.length !== 1) {
-  failures.push(
-    `${chooser}: imports ${chosen.length} auth Packages (${chosen.join(", ") || "none"}); a deployment builds exactly one, and the build is this one import line (ADR 0028)`,
+// Rule 3: each chooser names exactly one implementation as a value, and neither
+// reaches the other. `#auth-package` resolves to one of them, and a generated
+// config's `alias` decides which — so what is in the bundle is exactly what the
+// resolved chooser imports.
+const builds: string[] = [];
+for (const chooser of choosers) {
+  const specifiers = specifiersOf(
+    readFileSync(resolve(repoRoot, chooser), "utf8"),
+  )
+    .filter(({ typeOnly }) => !typeOnly)
+    .map(({ specifier }) => specifier);
+  const chosen = specifiers.filter((specifier) =>
+    specifier.startsWith("@frockbot/app/auth/"),
   );
+  if (chosen.length !== 1) {
+    failures.push(
+      `${chooser}: imports ${chosen.length} auth Packages (${chosen.join(", ") || "none"}); a build names exactly one, and the build is this one import line (ADR 0028)`,
+    );
+  }
+  for (const specifier of specifiers) {
+    if (!specifier.includes("auth-package")) continue;
+    failures.push(
+      `${chooser}: imports "${specifier}"; the choosers are alternatives, and one that reached the other would put both Packages in one bundle (ADR 0028)`,
+    );
+  }
+  builds.push(`${chooser.replace(/^.*\//, "")} → ${chosen[0] ?? "none"}`);
 }
 
 if (failures.length > 0) {
@@ -172,5 +194,5 @@ if (failures.length > 0) {
 }
 
 process.stdout.write(
-  `Auth Package contract passed (${filesChecked} files, ${manifestsChecked} manifests checked, build: ${chosen[0] ?? "none"})\n`,
+  `Auth Package contract passed (${filesChecked} files, ${manifestsChecked} manifests checked; ${builds.join(", ")})\n`,
 );
