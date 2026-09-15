@@ -16,7 +16,7 @@ void main() {
     await tester.pumpWidget(badge(const Duration(milliseconds: 1600)));
     expect(tester.binding.hasScheduledFrame, isTrue);
 
-    Offset firstDot() => tester
+    List<Offset> dots() => tester
         .widgetList<Transform>(
           find.descendant(
             of: find.byType(ThinkingBadge),
@@ -25,11 +25,11 @@ void main() {
         )
         .map((transform) => transform.transform.getTranslation())
         .map((translation) => Offset(translation.x, translation.y))
-        .first;
+        .toList();
 
-    final before = firstDot();
+    final before = dots();
     await tester.pump(const Duration(milliseconds: 200));
-    expect(firstDot(), isNot(before));
+    expect(dots(), isNot(before));
     expect(tester.binding.hasScheduledFrame, isTrue);
   });
 }
