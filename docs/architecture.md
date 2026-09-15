@@ -649,7 +649,7 @@ the Package catalog the shell holds (`ChatHeader.packageEntries`): they belong
 to one Bot, so they are never drawn over the list of every Bot. A phone's bar
 stays GrokBot's three things and those doors are rows on the Bot's page instead.
 Bot messages have no avatar or tool-count row; the in-chat avatar is reserved
-for the working indicator and its comet trails. Message long-press opens work
+for the working indicator and its typing badge. Message long-press opens work
 details or records “Mark unread from here”. That boundary names a validated
 chat message in the Bot-owned unread record, is included in the command
 fingerprint and receipt, and is projected to the native transcript after

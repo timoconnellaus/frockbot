@@ -1,11 +1,10 @@
-/// What a Turn actually did, and the trail that says it is still doing it.
+/// What a Turn actually did, and the badge that says it is still doing it.
 ///
-/// Two things live here because they are the same fact drawn twice. The trail
-/// is the wordless one: particles stream off the working Bot's avatar and
-/// their density is the Turn's own pace — text arriving quickly is a dense
-/// stream, a tool call starting or settling throws a burst, a Turn waiting on
-/// the model still breathes so the app never reads as dead. It never names
-/// what happened, because the thread stays a conversation.
+/// Two things live here because they are the same fact drawn twice. The badge
+/// is the wordless one: the typing dots on the working Bot's avatar, whose
+/// tempo is the Turn's own pace — text arriving quickly is a quick bounce, a
+/// Turn waiting on the model still ticks over so the app never reads as dead.
+/// It never names what happened, because the thread stays a conversation.
 ///
 /// The run view is where the naming happens. Tool receipts are not chat: the
 /// thread is the Bot's words, and what it called to produce them belongs on a
@@ -13,9 +12,8 @@
 /// at wide widths it is the right panel.
 library;
 
+import 'dart:async' show Timer;
 import 'dart:math' as math;
-
-import 'package:flutter/scheduler.dart' show Ticker;
 
 import 'package:flutter/material.dart';
 
@@ -23,40 +21,42 @@ import '../flock/sheep.dart';
 import 'semantics.dart';
 import 'transcript_model.dart';
 
-// ------------------------------------------------------------- the trail
+// ------------------------------------------------------------- the pace
 
-/// The most particles a second the trail will ever ask for.
-const double activityTrailMaxRate = 40;
+/// The fastest the pace will ever read, in particles a second: the scale the
+/// badge's tempo is drawn against.
+const double workingPaceMaxRate = 40;
 
 /// The floor while a Turn is open. A Turn waiting on a model that has not sent
-/// a token yet is still working, and a trail that stops reads as a crash.
-const double activityTrailTrickleRate = 6;
+/// a token yet is still working, and a badge that stops reads as a crash.
+const double workingPaceTrickleRate = 6;
 
 /// Silence longer than this is a wait, not a pause between chunks.
-const Duration activityTrailQuietAfter = Duration(milliseconds: 1500);
+const Duration workingPaceQuietAfter = Duration(milliseconds: 1500);
 
 /// How far back the chunk-rate average looks.
-const Duration activityTrailRateWindow = Duration(milliseconds: 1200);
+const Duration workingPaceRateWindow = Duration(milliseconds: 1200);
 
-/// Characters of streamed text one particle stands for.
-const int activityTrailCharactersPerParticle = 6;
+/// Characters of streamed text one unit of pace stands for.
+const int workingPaceCharactersPerParticle = 6;
 
-/// A tool call starting, or its result settling.
-const int activityTrailToolBurst = 15;
+/// How often the working row re-reads its Turn. The pace only has to notice a
+/// stream going quiet, so a few readings a second is plenty.
+const Duration workingPaceReadEvery = Duration(milliseconds: 250);
 
-/// A payload reaching the person.
-const int activityTrailSendBurst = 14;
+/// The badge's bounce period while a Turn waits on the model.
+const Duration workingBadgeWaitingPeriod = Duration(milliseconds: 1600);
 
-/// The most burst events one step will honour, so a reconnect replaying a
-/// whole Turn does not fire two hundred bursts into the same frame.
-const int activityTrailMaxBurstsPerStep = 4;
+/// The badge's bounce period at the pace floor and at the pace cap.
+const Duration workingBadgeSlowPeriod = Duration(milliseconds: 1200);
+const Duration workingBadgeFastPeriod = Duration(milliseconds: 600);
 
 /// `running` is work arriving now, `waiting` is an open Turn gone quiet, and
-/// `ended` is a settled Turn: nothing new is emitted and the field drains.
-enum ActivityTrailState { running, waiting, ended }
+/// `ended` is a settled Turn: the badge has nothing left to say.
+enum WorkingPaceState { running, waiting, ended }
 
 /// One reading of the open Turn, as the client's projection has it.
-class ActivityTrailSample {
+class WorkingPaceSample {
   final int characters;
   final int toolStarts;
   final int toolSettles;
@@ -64,9 +64,9 @@ class ActivityTrailSample {
 
   /// The whole status string rather than a union: only `streaming` means the
   /// Turn is still going, so a status this file has never heard of ends the
-  /// trail rather than leaving it emitting forever.
+  /// pace rather than leaving it running forever.
   final String status;
-  const ActivityTrailSample({
+  const WorkingPaceSample({
     required this.characters,
     required this.toolStarts,
     required this.toolSettles,
@@ -75,53 +75,40 @@ class ActivityTrailSample {
   });
 
   /// A sample read off the transcript's own vocabulary.
-  factory ActivityTrailSample.fromLine(TranscriptLine line) =>
-      ActivityTrailSample(
-        characters: line.text.length,
-        toolStarts: line.tools.length,
-        toolSettles: line.tools
-            .where((tool) => tool.status != 'running')
-            .length,
-        sends: line.sends.length,
-        status: line.status == LineStatus.streaming ? 'streaming' : 'ended',
-      );
+  factory WorkingPaceSample.fromLine(TranscriptLine line) => WorkingPaceSample(
+    characters: line.text.length,
+    toolStarts: line.tools.length,
+    toolSettles: line.tools.where((tool) => tool.status != 'running').length,
+    sends: line.sends.length,
+    status: line.status == LineStatus.streaming ? 'streaming' : 'ended',
+  );
 }
 
-class ActivityTrailBurst {
-  final int count;
-  final double speed;
-  final double brightness;
-  const ActivityTrailBurst(this.count, this.speed, this.brightness);
-}
-
-class ActivityTrailPlan {
+class WorkingPacePlan {
   final bool active;
-  final ActivityTrailState state;
+  final WorkingPaceState state;
   final double rate;
-  final List<ActivityTrailBurst> bursts;
-  const ActivityTrailPlan(this.active, this.state, this.rate, this.bursts);
+  const WorkingPacePlan(this.active, this.state, this.rate);
 }
 
 /// What the mapping remembers between two samples.
-class ActivityTrailMemory {
-  final ActivityTrailSample sample;
+class WorkingPaceMemory {
+  final WorkingPaceSample sample;
   final Duration lastEventAt;
   final List<({Duration at, int characters})> window;
-  const ActivityTrailMemory(this.sample, this.lastEventAt, this.window);
+  const WorkingPaceMemory(this.sample, this.lastEventAt, this.window);
 }
 
-ActivityTrailMemory activityTrailBegin(
-  ActivityTrailSample sample,
-  Duration now,
-) => ActivityTrailMemory(sample, now, const []);
+WorkingPaceMemory workingPaceBegin(WorkingPaceSample sample, Duration now) =>
+    WorkingPaceMemory(sample, now, const []);
 
 /// The plan for the moment between the remembered sample and this one.
 ///
 /// Deltas are floored at zero: a projection that replaces a Turn's text with a
 /// shorter final version is not a negative amount of work, it is no work.
-({ActivityTrailMemory memory, ActivityTrailPlan plan}) activityTrailStep(
-  ActivityTrailMemory memory,
-  ActivityTrailSample sample,
+({WorkingPaceMemory memory, WorkingPacePlan plan}) workingPaceStep(
+  WorkingPaceMemory memory,
+  WorkingPaceSample sample,
   Duration now,
 ) {
   final characters = math.max(0, sample.characters - memory.sample.characters);
@@ -137,49 +124,63 @@ ActivityTrailMemory activityTrailBegin(
 
   if (sample.status != 'streaming') {
     return (
-      memory: ActivityTrailMemory(sample, memory.lastEventAt, const []),
-      plan: const ActivityTrailPlan(false, ActivityTrailState.ended, 0, []),
+      memory: WorkingPaceMemory(sample, memory.lastEventAt, const []),
+      plan: const WorkingPacePlan(false, WorkingPaceState.ended, 0),
     );
   }
 
   final window = [
     ...memory.window,
     (at: now, characters: characters),
-  ].where((entry) => now - entry.at <= activityTrailRateWindow).toList();
+  ].where((entry) => now - entry.at <= workingPaceRateWindow).toList();
   final streamed = window.fold(0, (total, entry) => total + entry.characters);
   final streamRate =
       streamed /
-      (activityTrailRateWindow.inMilliseconds / 1000) /
-      activityTrailCharactersPerParticle;
+      (workingPaceRateWindow.inMilliseconds / 1000) /
+      workingPaceCharactersPerParticle;
 
   final moved =
       characters > 0 || startedTools > 0 || settledTools > 0 || delivered > 0;
   final lastEventAt = moved ? now : memory.lastEventAt;
-  final quiet = now - lastEventAt > activityTrailQuietAfter;
-
-  final bursts = <ActivityTrailBurst>[
-    for (var index = 0; index < startedTools + settledTools; index++)
-      const ActivityTrailBurst(activityTrailToolBurst, 1.8, 1.15),
-    for (var index = 0; index < delivered; index++)
-      const ActivityTrailBurst(activityTrailSendBurst, 1.2, 1.9),
-  ];
+  final quiet = now - lastEventAt > workingPaceQuietAfter;
 
   return (
-    memory: ActivityTrailMemory(sample, lastEventAt, window),
-    plan: ActivityTrailPlan(
+    memory: WorkingPaceMemory(sample, lastEventAt, window),
+    plan: WorkingPacePlan(
       true,
-      quiet ? ActivityTrailState.waiting : ActivityTrailState.running,
+      quiet ? WorkingPaceState.waiting : WorkingPaceState.running,
       math.min(
-        activityTrailMaxRate,
-        math.max(streamRate, activityTrailTrickleRate),
+        workingPaceMaxRate,
+        math.max(streamRate, workingPaceTrickleRate),
       ),
-      bursts.take(activityTrailMaxBurstsPerStep).toList(),
     ),
   );
 }
 
-/// The working row: the Bot's avatar with the trail streaming off it, and the
-/// only words it ever says — the ones a supersede drain needs.
+/// The badge's bounce period for a plan: a long, patient bounce while the Turn
+/// waits, quickening with the stream once text is arriving.
+Duration workingBadgePeriod(WorkingPacePlan plan) {
+  switch (plan.state) {
+    case WorkingPaceState.ended:
+      return workingBadgeSlowPeriod;
+    case WorkingPaceState.waiting:
+      return workingBadgeWaitingPeriod;
+    case WorkingPaceState.running:
+      final span = workingPaceMaxRate - workingPaceTrickleRate;
+      final t = ((plan.rate - workingPaceTrickleRate) / span).clamp(0.0, 1.0);
+      return Duration(
+        milliseconds:
+            (workingBadgeSlowPeriod.inMilliseconds +
+                    (workingBadgeFastPeriod.inMilliseconds -
+                            workingBadgeSlowPeriod.inMilliseconds) *
+                        t)
+                .round(),
+      );
+  }
+}
+
+/// The working row: the Bot's avatar wearing the typing badge, and the only
+/// words it ever says — the ones a supersede drain needs.
 class WorkingIndicator extends StatefulWidget {
   static const double avatarSize = 28;
 
@@ -200,88 +201,62 @@ class WorkingIndicator extends StatefulWidget {
   State<WorkingIndicator> createState() => _WorkingIndicatorState();
 }
 
-class _WorkingIndicatorState extends State<WorkingIndicator>
-    with SingleTickerProviderStateMixin {
-  late final Ticker _ticker = createTicker(_tick);
-  final _particles = <_Particle>[];
-  final _random = math.Random(7);
-  late ActivityTrailMemory _memory = activityTrailBegin(
-    ActivityTrailSample.fromLine(widget.line),
+class _WorkingIndicatorState extends State<WorkingIndicator> {
+  final Stopwatch _clock = Stopwatch()..start();
+  Timer? _timer;
+  late WorkingPaceMemory _memory = workingPaceBegin(
+    WorkingPaceSample.fromLine(widget.line),
     Duration.zero,
   );
-  ActivityTrailPlan _plan = const ActivityTrailPlan(
+  WorkingPacePlan _plan = const WorkingPacePlan(
     true,
-    ActivityTrailState.running,
-    activityTrailTrickleRate,
-    [],
+    WorkingPaceState.running,
+    workingPaceTrickleRate,
   );
-  Duration _last = Duration.zero;
-  double _owed = 0;
 
-  /// The trail is motion and nothing else, so a person who asked for less of
-  /// it gets none: the ticker does not run at all rather than running into a
-  /// hidden canvas.
+  /// The tempo is motion and nothing else, so a person who asked for less of
+  /// it gets none: the clock does not run at all rather than running into a
+  /// badge that holds still.
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final still = MediaQuery.disableAnimationsOf(context);
-    if (still && _ticker.isActive) {
-      _ticker.stop();
-    } else if (!still && !_ticker.isActive) {
-      _ticker.start();
-    }
-  }
-
-  void _tick(Duration elapsed) {
-    final seconds = ((elapsed - _last).inMicroseconds / 1e6).clamp(0.0, 0.05);
-    _last = elapsed;
-    final stepped = activityTrailStep(
-      _memory,
-      ActivityTrailSample.fromLine(widget.line),
-      elapsed,
-    );
-    _memory = stepped.memory;
-    _plan = stepped.plan;
-    if (_plan.active) {
-      _owed += _plan.rate * seconds;
-      while (_owed >= 1) {
-        _owed -= 1;
-        _spawn(1, 1);
-      }
-      for (final burst in _plan.bursts) {
-        _spawn(burst.count, burst.speed, brightness: burst.brightness);
-      }
-    }
-    for (final particle in _particles) {
-      particle.advance(seconds);
-    }
-    _particles.removeWhere((particle) => particle.life <= 0);
-    if (mounted) setState(() {});
-  }
-
-  void _spawn(int count, double speed, {double brightness = 1}) {
-    for (var index = 0; index < count && _particles.length < 220; index++) {
-      _particles.add(
-        _Particle(
-          dy: (_random.nextDouble() - 0.5) * 10,
-          speed: (26 + _random.nextDouble() * 46) * speed,
-          drift: (_random.nextDouble() - 0.5) * 24,
-          brightness: brightness,
-        ),
-      );
+    if (still) {
+      _timer?.cancel();
+      _timer = null;
+    } else {
+      _timer ??= Timer.periodic(workingPaceReadEvery, (_) => _read());
     }
   }
 
   @override
+  void didUpdateWidget(WorkingIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_timer != null && !identical(oldWidget.line, widget.line)) _read();
+  }
+
+  void _read() {
+    final stepped = workingPaceStep(
+      _memory,
+      WorkingPaceSample.fromLine(widget.line),
+      _clock.elapsed,
+    );
+    _memory = stepped.memory;
+    final period = workingBadgePeriod(stepped.plan);
+    final changed = period != workingBadgePeriod(_plan);
+    _plan = stepped.plan;
+    if (changed && mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
-    _ticker.dispose();
+    _timer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final still = MediaQuery.disableAnimationsOf(context);
     return identified(
       ShellIds.workingIndicator,
       Semantics(
@@ -292,19 +267,10 @@ class _WorkingIndicatorState extends State<WorkingIndicator>
             SheepAvatar(
               size: WorkingIndicator.avatarSize,
               background: widget.background,
+              working: true,
+              tempo: workingBadgePeriod(_plan),
             ),
-            SizedBox(
-              width: 96,
-              height: WorkingIndicator.avatarSize,
-              child: still
-                  ? const SizedBox.shrink()
-                  : CustomPaint(
-                      painter: _TrailPainter(
-                        _particles,
-                        theme.colorScheme.primary,
-                      ),
-                    ),
-            ),
+            const SizedBox(width: 14),
             if (widget.label != null)
               Flexible(
                 child: Text(
@@ -319,55 +285,6 @@ class _WorkingIndicatorState extends State<WorkingIndicator>
       ),
     );
   }
-}
-
-class _Particle {
-  double x = 0;
-  final double dy;
-  final double speed;
-  final double drift;
-  final double brightness;
-  double life = 1;
-  _Particle({
-    required this.dy,
-    required this.speed,
-    required this.drift,
-    required this.brightness,
-  });
-
-  void advance(double seconds) {
-    x += speed * seconds;
-    life -= seconds * 1.1;
-  }
-}
-
-class _TrailPainter extends CustomPainter {
-  final List<_Particle> particles;
-  final Color colour;
-  const _TrailPainter(this.particles, this.colour);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final centre = size.height / 2;
-    for (final particle in particles) {
-      if (particle.x > size.width) continue;
-      final paint = Paint()
-        ..color = colour.withValues(
-          alpha: (particle.life * 0.7 * particle.brightness).clamp(0.0, 1.0),
-        );
-      canvas.drawCircle(
-        Offset(
-          particle.x,
-          centre + particle.dy + particle.drift * (1 - particle.life),
-        ),
-        1.6,
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_TrailPainter oldDelegate) => true;
 }
 
 // ----------------------------------------------------------- the run view
