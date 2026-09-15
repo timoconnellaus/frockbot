@@ -58,6 +58,12 @@ These hold regardless of how the code is organised.
 ## Working here
 
 - Pre-commit formats staged files. Pre-push runs the fast tier (`format`, `typecheck`, `unit`) and reuses passes only for the exact commit with a clean code checkout; the slow tier runs on `main` after the merge. Run `bun run validate` in full when a change touches the runtime, the integration seams or the browser client, and `bun run validate:<category>` to record individual passes. See [`docs/local-validation.md`](docs/local-validation.md) for cache and GitHub operation.
+- Skip no-mistakes steps that cannot find anything in the diff, with `no-mistakes axi run --skip <steps>`:
+  - Documentation-only (see the exception below): skip the gate and push directly.
+  - Tests only, or config with no runtime effect such as `.github/` or `.no-mistakes.yaml`: `--skip test,document`.
+  - A one-file fix under about 20 changed lines: `--skip document`.
+  - Dependabot bumps: `--skip review,document`; the tests and `Check` decide.
+  - Everything else, including anything that touches the runtime, a durable shape, auth, billing or Markdown used as a prompt: run every step.
 - Once no-mistakes finishes, go directly to push and PR. Do not rerun the full local test suites after the gate; the PR's `Check` and, after the merge, `main.yml`'s slow tier are the next validation layers. Rerun locally only when code changes after the gate or when the gate skipped or failed a required suite.
 - A branch need not be rebased when `main` moves: `main.yml` checks the merge commit itself once it lands. Rebase only to resolve a conflict, and then inspect the rebased diff rather than rerunning no-mistakes because the commits moved.
 - There is no auto-merge, and never arm `gh pr merge --auto`. A green PR is merged by whoever opened it: Tim, or a Claude session Tim has asked to build and merge in stages. Before merging a change that touches the runtime, the integration seams or the browser client, run the browser suite locally — `Check` on the pull request does not — and after the merge watch `main.yml` to green. Every stage must leave production Bots able to reply: a change to a durable shape ships its own cleanup and is verified with a fresh conversation.
