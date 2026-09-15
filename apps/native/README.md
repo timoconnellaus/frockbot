@@ -33,7 +33,11 @@ Use `scripts/native-acceptance.sh inventory` to record the installed version and
 The client also checks for a patch on cold start and whenever it returns from
 the background. A patch staged on disk for the next engine — downloaded by this
 launch or already waiting from an earlier one — is offered in the blue update
-header; restart first checkpoints the local document and then asks `restart_app`
+header. Shorebird's own `auto_update` may already be fetching the same patch at
+launch, so when a check's download comes back empty — or fails — the app keeps
+reading the disk — a local read every two seconds, for up to two minutes — and
+shows the header as soon as the patch lands, rather than waiting for the next
+resume. The restart itself checkpoints the local document and then asks `restart_app`
 for an Android process restart or an iOS Flutter-engine replacement. Introducing
 that native plugin requires a full Shorebird release before this flow can be
 delivered; later Dart-only changes to the flow may be patches against that
