@@ -636,6 +636,20 @@ export async function configureAccessV1(
     if (found) {
       context.runner.say(`  ${application.name} already exists`);
       if (application.decision === "allow" && found.aud) audience = found.aud;
+      const repaired = await ensureAccessPolicyV1(
+        context,
+        profile.accountId,
+        token,
+        application,
+        found.id,
+        profile.adminEmails ?? [],
+      );
+      if (!repaired.ok) {
+        return finishAccessV1(context, profile, audience, [
+          `Add the ${application.decision} policy to the Access application "${application.name}" by hand: ${repaired.why}. ` +
+            "A token that can do it holds Zero Trust: Access Apps and Policies Write.",
+        ]);
+      }
       continue;
     }
     const created = await createAccessApplicationV1(
@@ -697,7 +711,7 @@ async function findAccessApplicationV1(
   accountId: string,
   token: string,
   application: AccessApplicationSpecV1,
-): Promise<{ aud?: string } | undefined> {
+): Promise<{ id?: string; aud?: string } | undefined> {
   const listed = await context.runner.request({
     method: "GET",
     url: `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/apps`,
@@ -711,8 +725,77 @@ async function findAccessApplicationV1(
       typeof entry === "object" &&
       entry !== null &&
       (entry as { name?: unknown }).name === application.name,
-  ) as { aud?: string } | undefined;
+  ) as { id?: string; aud?: string } | undefined;
   return match;
+}
+
+/**
+ * Give an existing Access application its policy when it has none, so a re-run
+ * repairs an application whose policy failed on the run that created it.
+ */
+async function ensureAccessPolicyV1(
+  context: SetupContextV1,
+  accountId: string,
+  token: string,
+  application: AccessApplicationSpecV1,
+  applicationId: string | undefined,
+  adminEmails: readonly string[],
+): Promise<{ ok: true } | { ok: false; why: string }> {
+  if (!applicationId) {
+    return { ok: false, why: "the API listed the application without an id" };
+  }
+  const listed = await context.runner.request({
+    method: "GET",
+    url: `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/apps/${applicationId}/policies`,
+    token,
+  });
+  const result = (listed.body as { result?: unknown } | undefined)?.result;
+  if (listed.status !== 200 || !Array.isArray(result)) {
+    return {
+      ok: false,
+      why: `the API answered ${listed.status} to listing its policies`,
+    };
+  }
+  if (result.length > 0) return { ok: true };
+  const created = await createAccessPolicyV1(
+    context,
+    accountId,
+    token,
+    application,
+    applicationId,
+    adminEmails,
+  );
+  if (!created) {
+    return { ok: false, why: "the API refused to create its policy" };
+  }
+  context.runner.say(
+    `  ${application.name} policy added (${application.decision})`,
+  );
+  return { ok: true };
+}
+
+async function createAccessPolicyV1(
+  context: SetupContextV1,
+  accountId: string,
+  token: string,
+  application: AccessApplicationSpecV1,
+  applicationId: string,
+  adminEmails: readonly string[],
+): Promise<boolean> {
+  const policy = await context.runner.request({
+    method: "POST",
+    url: `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/apps/${applicationId}/policies`,
+    token,
+    body: {
+      name: `${application.name} policy`,
+      decision: application.decision,
+      include:
+        application.decision === "allow"
+          ? adminEmails.map((email) => ({ email: { email } }))
+          : [{ everyone: {} }],
+    },
+  });
+  return policy.status < 300;
 }
 
 /**
@@ -748,24 +831,19 @@ async function createAccessApplicationV1(
       why: `the API answered ${created.status} to creating the application`,
     };
   }
-  const policy = await context.runner.request({
-    method: "POST",
-    url: `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/apps/${result.id}/policies`,
+  const policyCreated = await createAccessPolicyV1(
+    context,
+    accountId,
     token,
-    body: {
-      name: `${application.name} policy`,
-      decision: application.decision,
-      include:
-        application.decision === "allow"
-          ? adminEmails.map((email) => ({ email: { email } }))
-          : [{ everyone: {} }],
-    },
-  });
-  if (policy.status >= 300) {
+    application,
+    result.id,
+    adminEmails,
+  );
+  if (!policyCreated) {
     return {
       ok: false,
       why:
-        `the application was created but the API answered ${policy.status} to its policy, ` +
+        "the application was created but the API refused its policy, " +
         "so it currently admits nobody — add the policy rather than the application",
     };
   }

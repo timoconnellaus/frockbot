@@ -549,6 +549,12 @@ describe("native system browser exchange", () => {
   });
 });
 
+test("a trailing slash on the deployment origin names the same return URIs", () => {
+  expect(nativeReturnUris("android,macos", `${NATIVE_ORIGIN}/`)).toEqual(
+    nativeReturnUris("android,macos", NATIVE_ORIGIN),
+  );
+});
+
 test("deployment targets are an exact fail-closed switch", () => {
   expect(nativeReturnUris("android", NATIVE_ORIGIN)).toEqual([
     NATIVE_RETURN_ANDROID,

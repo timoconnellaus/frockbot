@@ -37,7 +37,7 @@ export function nativeReturnUriV1(
   origin: string,
   platform: "android" | "macos" | "macos-dev",
 ): string {
-  return `${origin}/native/return/${platform}`;
+  return `${new URL(origin).origin}/native/return/${platform}`;
 }
 /**
  * Where a development build of the app receives its sign-in. A custom scheme,
