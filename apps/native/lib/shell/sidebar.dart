@@ -723,75 +723,81 @@ class _SwipeRowState extends State<_SwipeRow>
       builder: (context, child) {
         final dx = _slide.value;
         final open = _open;
+        // The slid row stops at its own edge rather than painting over the
+        // list's margin.
         return GestureDetector(
           onHorizontalDragUpdate: _drag,
           onHorizontalDragEnd: _release,
-          child: Stack(
-            children: [
-              if (dx > 0)
-                Positioned.fill(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: scheme.primary.withValues(alpha: 0.16),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Align(
-                        alignment: AlignmentDirectional.centerStart,
-                        child: Padding(
-                          padding: const EdgeInsetsDirectional.only(start: 22),
-                          child: Icon(
-                            widget.unread
-                                ? Icons.mark_chat_read_outlined
-                                : Icons.mark_chat_unread_outlined,
-                            color: scheme.primary,
-                            size: 22,
+          child: ClipRect(
+            child: Stack(
+              children: [
+                if (dx > 0)
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: scheme.primary.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: Padding(
+                            padding: const EdgeInsetsDirectional.only(
+                              start: 22,
+                            ),
+                            child: Icon(
+                              widget.unread
+                                  ? Icons.mark_chat_read_outlined
+                                  : Icons.mark_chat_unread_outlined,
+                              color: scheme.primary,
+                              size: 22,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              if (dx < 0)
-                Positioned.fill(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Align(
-                      alignment: AlignmentDirectional.centerEnd,
-                      child: identified(
-                        BotActionIds.swipeHide(widget.botId),
-                        Material(
-                          color: scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(10),
-                          child: InkWell(
+                if (dx < 0)
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: identified(
+                          BotActionIds.swipeHide(widget.botId),
+                          Material(
+                            color: scheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(10),
-                            onTap: () {
-                              _close();
-                              widget.onHide();
-                            },
-                            child: SizedBox(
-                              width: sidebarSwipeRevealWidth - 8,
-                              height: double.infinity,
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.visibility_off_outlined,
-                                    size: 20,
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    'Hide',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: scheme.onSurfaceVariant,
-                                        ),
-                                  ),
-                                ],
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(10),
+                              onTap: () {
+                                _close();
+                                widget.onHide();
+                              },
+                              child: SizedBox(
+                                width: sidebarSwipeRevealWidth - 8,
+                                height: double.infinity,
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.visibility_off_outlined,
+                                      size: 20,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      'Hide',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: scheme.onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -799,18 +805,18 @@ class _SwipeRowState extends State<_SwipeRow>
                       ),
                     ),
                   ),
+                Transform.translate(
+                  offset: Offset(dx, 0),
+                  child: open
+                      ? GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _close,
+                          child: AbsorbPointer(child: child),
+                        )
+                      : child,
                 ),
-              Transform.translate(
-                offset: Offset(dx, 0),
-                child: open
-                    ? GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _close,
-                        child: AbsorbPointer(child: child),
-                      )
-                    : child,
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
