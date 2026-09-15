@@ -163,10 +163,8 @@ class _ThinkingBadgeState extends State<ThinkingBadge>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.tempo != widget.tempo) {
       // Keep the phase so a tempo change does not make the dots jump.
-      final phase = _beat.value;
       _beat.duration = widget.tempo;
       if (_beat.isAnimating) _beat.repeat(period: widget.tempo);
-      _beat.value = phase;
     }
   }
 
