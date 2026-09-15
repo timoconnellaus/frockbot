@@ -1,0 +1,22 @@
+# no-mistakes reads this file from `main`, not from the pushed branch, so a
+# change here takes effect on the first run after it merges.
+commands:
+  prepare: bun install --frozen-lockfile
+  format: bun run format
+  lint: bun run format:check && bun run typecheck
+  test: bun test
+
+# One rereview after the first fix round. A finding still open after that
+# reaches the approval gate instead of starting another review cycle.
+auto_fix:
+  review: 2
+
+test:
+  instructions: |
+    `bun test` has already run as the baseline and covers the fast tier that
+    the PR's `Check` runs. Do not rerun the whole suite. Add targeted runs only
+    for what the diff touches:
+    - Worker or Durable Object runtime: `bun run --filter @frockbot/<package> test:workerd`
+    - Dart under apps/native: `flutter analyze --no-pub` and `flutter test --no-pub` there
+    - Browser client or integration seams: the relevant `bun run validate:<category>`
+    Skip anything slow that the diff cannot affect.
