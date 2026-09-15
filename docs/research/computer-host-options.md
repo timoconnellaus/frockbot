@@ -1,5 +1,7 @@
 # FrockBot computer host — cited companion report
 
+> **Superseded 14 September 2026.** The chosen implementation direction is now the five-User DigitalOcean Kubernetes pilot in [`../kubernetes-computer-host-plan.md`](../kubernetes-computer-host-plan.md). This report remains as research history and source material.
+
 **Decision: run a small Cloudflare Containers versus GKE Agent Sandbox prototype before implementing a fixed Fly tariff. Cloudflare leads; Daytona remains the managed fallback.**
 
 Companion to the standalone brief at [`computer-host-options.html`](./computer-host-options.html). This document exists to attach primary sources to that brief's claims and to separate three things the brief mixes by design:
