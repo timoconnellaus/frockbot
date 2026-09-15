@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createDebugRoute, type DebugGatewaySurface } from "./debug.js";
+import {
+  defaultUserFeaturesV1,
+  type SetUserFeaturesCommandV1,
+} from "@frockbot/app/admin/shared";
 
 const TOKEN = "debug-token-value";
 
@@ -8,15 +12,19 @@ function surface(
 ): DebugGatewaySurface & {
   snapshots: Array<{ userId: string; botId: string; query: unknown }>;
   submissions: Array<{ userId: string; botId: string; text: string }>;
+  features: Array<{ userId: string; command: SetUserFeaturesCommandV1 }>;
 } {
   const snapshots: Array<{ userId: string; botId: string; query: unknown }> =
     [];
   const submissions: Array<{ userId: string; botId: string; text: string }> =
     [];
+  const features: Array<{ userId: string; command: SetUserFeaturesCommandV1 }> =
+    [];
   return {
     token: TOKEN,
     snapshots,
     submissions,
+    features,
     listUsers: () =>
       Promise.resolve([
         {
@@ -32,6 +40,16 @@ function surface(
       return Promise.resolve({ schemaVersion: 1, botId });
     },
     isAdminUser: () => Promise.resolve(true),
+    setAccountFeatures: (userId, command) => {
+      features.push({ userId, command });
+      return Promise.resolve({
+        ...defaultUserFeaturesV1(),
+        applets: command.applets,
+        pluginAuthoring: command.pluginAuthoring ?? false,
+        plugins: command.plugins ?? [],
+        updatedBy: "operator",
+      });
+    },
     ...overrides,
   };
 }
@@ -246,5 +264,76 @@ describe("debug route", () => {
     expect(await response?.json()).toMatchObject({
       error: "bot storage is unreadable",
     });
+  });
+
+  test("turns an account's features on for an operator holding the token", async () => {
+    const target = surface();
+    const route = createDebugRoute(target);
+    const request = new Request(
+      "https://bot.frockbot.com/api/debug/users/guest/features",
+      {
+        method: "POST",
+        headers: { ...authorized, "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          type: "user/set-features",
+          applets: true,
+          pluginAuthoring: true,
+        }),
+      },
+    );
+
+    const response = await route(request, new URL(request.url));
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      applets: true,
+      pluginAuthoring: true,
+      updatedBy: "operator",
+    });
+    expect(target.features).toEqual([
+      {
+        userId: "guest",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-features",
+          applets: true,
+          pluginAuthoring: true,
+        },
+      },
+    ]);
+  });
+
+  test("refuses a features write with no token, a wrong command, or the wrong method", async () => {
+    const target = surface();
+    const route = createDebugRoute(target);
+    const path = "https://bot.frockbot.com/api/debug/users/guest/features";
+    const post = (headers: Record<string, string>, body: unknown) =>
+      new Request(path, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const command = {
+      schemaVersion: 1,
+      type: "user/set-features",
+      applets: true,
+    };
+    const unauthorized = post({}, command);
+    expect((await route(unauthorized, new URL(unauthorized.url)))?.status).toBe(
+      401,
+    );
+
+    const malformed = post(authorized, {
+      schemaVersion: 1,
+      type: "user/set-features",
+    });
+    expect((await route(malformed, new URL(malformed.url)))?.status).toBe(400);
+
+    const read = get("/api/debug/users/guest/features", authorized);
+    expect((await route(read, new URL(read.url)))?.status).toBe(405);
+
+    expect(target.features).toEqual([]);
   });
 });

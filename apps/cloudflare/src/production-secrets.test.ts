@@ -102,15 +102,16 @@ describe("the production secrets manifest", () => {
   });
 
   test("is checked before the Worker is deployed", () => {
-    const step = releaseWorkflow.slice(
-      releaseWorkflow.indexOf("Deploy Worker"),
+    // Scoped to the app Worker's own job: other Workers this workflow deploys
+    // write secrets files of their own, and this manifest is not theirs.
+    const job = releaseWorkflow.slice(
+      releaseWorkflow.indexOf("  deploy-backend:"),
     );
-    expect(releaseWorkflow).toContain(
-      "bun scripts/check-production-secrets.ts check",
+    const step = job.slice(job.indexOf("Deploy Worker"));
+    expect(job).toContain("bun scripts/check-production-secrets.ts check");
+    expect(job.indexOf("check-production-secrets.ts check")).toBeLessThan(
+      job.indexOf("wrangler deploy --secrets-file"),
     );
-    expect(
-      releaseWorkflow.indexOf("check-production-secrets.ts check"),
-    ).toBeLessThan(releaseWorkflow.indexOf("wrangler deploy --secrets-file"));
     expect(step).toContain("write-secrets-file");
   });
 });

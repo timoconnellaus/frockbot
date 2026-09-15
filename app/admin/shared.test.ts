@@ -17,6 +17,7 @@ import {
   decodeSetUserFeaturesCommandV1,
   decodeUserFeaturesV1,
   defaultUserFeaturesV1,
+  isAccountAccessUnavailable,
   isUserFeaturesUnavailable,
 } from "./shared.js";
 
@@ -254,6 +255,9 @@ describe("account feature codecs", () => {
     suspended: false,
   } as const;
 
+  /** An account the authority holds no access record for. */
+  const noAccess = { schemaVersion: 1, userId: "u1", access: null } as const;
+
   test("decode the exact features and command shapes", () => {
     expect(decodeUserFeaturesV1(features)).toEqual(features);
     expect(
@@ -266,14 +270,16 @@ describe("account feature codecs", () => {
     expect(
       decodeAdminUserListViewV1({
         schemaVersion: 1,
+        gatedPlugins: [{ pluginId: "gated", displayName: "Gated" }],
         users: [
-          { userId: "development", features, billing },
+          { userId: "development", features, billing, access: noAccess },
           {
             userId: "u1",
             email: "u1@example.com",
             name: "One",
             features,
             billing,
+            access: noAccess,
           },
         ],
       }).users.map((user) => user.userId),
@@ -283,14 +289,30 @@ describe("account feature codecs", () => {
   test("an identity store row with blank identifiers keeps its account", () => {
     const [account] = decodeAdminUserListViewV1({
       schemaVersion: 1,
-      users: [{ userId: "u1", email: "", name: "", features, billing }],
+      gatedPlugins: [],
+      users: [
+        {
+          userId: "u1",
+          email: "",
+          name: "",
+          features,
+          billing,
+          access: noAccess,
+        },
+      ],
     }).users;
-    expect(account).toEqual({ userId: "u1", features, billing });
+    expect(account).toEqual({
+      userId: "u1",
+      features,
+      billing,
+      access: noAccess,
+    });
   });
 
   test("an over-long display name is clamped, not refused", () => {
     const [account] = decodeAdminUserListViewV1({
       schemaVersion: 1,
+      gatedPlugins: [],
       users: [
         {
           userId: "u1",
@@ -298,6 +320,7 @@ describe("account feature codecs", () => {
           name: "x".repeat(600),
           features,
           billing,
+          access: noAccess,
         },
       ],
     }).users;
@@ -307,22 +330,27 @@ describe("account feature codecs", () => {
       name: "x".repeat(512),
       features,
       billing,
+      access: noAccess,
     });
   });
 
   test("an account whose features could not be read is carried, not defaulted", () => {
     const [readable, unreadable] = decodeAdminUserListViewV1({
       schemaVersion: 1,
+      gatedPlugins: [],
       users: [
-        { userId: "u1", features, billing },
+        { userId: "u1", features, billing, access: noAccess },
         {
           userId: "u2",
           features: { unavailable: true },
           billing: { unavailable: true },
+          access: { unavailable: true },
         },
       ],
     }).users;
     expect(readable?.features).toEqual(features);
+    expect(isAccountAccessUnavailable(unreadable!.access)).toBe(true);
+    expect(isAccountAccessUnavailable(readable!.access)).toBe(false);
     expect(unreadable?.features).toEqual({ unavailable: true });
     expect(isUserFeaturesUnavailable(unreadable!.features)).toBe(true);
     expect(isUserFeaturesUnavailable(readable!.features)).toBe(false);
@@ -345,6 +373,7 @@ describe("account feature codecs", () => {
     expect(() =>
       decodeAdminUserListViewV1({
         schemaVersion: 1,
+        gatedPlugins: [],
         users: [{ userId: "u1", features: { unavailable: "yes" } }],
       }),
     ).toThrow("invalid");
@@ -365,6 +394,7 @@ describe("account feature codecs", () => {
     expect(() =>
       decodeAdminUserListViewV1({
         schemaVersion: 1,
+        gatedPlugins: [],
         users: [{ userId: "u1", features, role: "admin" }],
       }),
     ).toThrow("unknown fields");

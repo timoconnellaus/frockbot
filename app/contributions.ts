@@ -18,10 +18,6 @@ import type {
 import type { RuntimeCleanupV1 } from "@frockbot/core/contracts";
 
 import {
-  backendContribution as adminGatewayContribution,
-  type AdminGatewayHost,
-} from "@frockbot/app/admin/backend";
-import {
   backendContribution as auditGatewayContribution,
   type AuditGatewayHost,
 } from "@frockbot/app/audit/backend";
@@ -117,7 +113,6 @@ import {
 } from "@frockbot/computer/bot";
 
 export {
-  adminGatewayContribution,
   auditGatewayContribution,
   botTemplateGatewayContribution,
   computerGatewayContribution,
@@ -203,8 +198,7 @@ export interface MountedFoundationBackend<T> {
  */
 export type FoundationGatewayHost = {
   backendHost: "gateway";
-} & AdminGatewayHost &
-  BotTemplateGatewayHostV1 &
+} & BotTemplateGatewayHostV1 &
   ComputerGatewayHost &
   ConnectGatewayHost &
   FlockGatewayHost &
@@ -276,7 +270,6 @@ export function createFoundationMountedContributionsV1(): FoundationMountedContr
 
 /** Every backend Contribution this application composes, in mount order. */
 export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
-  adminGatewayContribution,
   auditGatewayContribution,
   botTemplateGatewayContribution,
   computerGatewayContribution,

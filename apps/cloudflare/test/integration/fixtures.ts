@@ -345,6 +345,35 @@ export async function enableCustomModels(
   return seeded.revision + 1;
 }
 
+/**
+ * Turn an account's features on, as an administrator does.
+ *
+ * There is no route for this: administration left the app for the admin portal
+ * (ADR 0028), which reaches the same User Durable Object record over the app
+ * Worker's `AdminEntrypoint`. The record is the account's own, and writing it
+ * neither provisions nor admits the account.
+ */
+export async function setAccountFeaturesV1(
+  userId: string,
+  command: {
+    schemaVersion: 1;
+    type: "user/set-features";
+    applets: boolean;
+    pluginAuthoring?: boolean;
+    plugins?: string[];
+  },
+): Promise<void> {
+  const stub = env.USER_CONFIGURATIONS.getByName(userId) as unknown as {
+    setFeatures(input: unknown): Promise<unknown>;
+  };
+  await stub.setFeatures({
+    schemaVersion: 1,
+    userId,
+    command,
+    updatedBy: "integration-admin",
+  });
+}
+
 export async function provisionThroughGateway(options: {
   userId: string;
   botId: string;

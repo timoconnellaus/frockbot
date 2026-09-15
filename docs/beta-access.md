@@ -36,13 +36,19 @@ Browser, native and Applet viewer admission refusal is `403` with `{ error, code
 
 ## Admin seams
 
-These are JSON routes on the admin Contribution (`app/admin/backend.ts`). They have no UI beyond the mode choice on Site administration.
+Administration is not in the app. The operations are `app/admin/operations.ts`, mounted by the app Worker's `AdminEntrypoint` (`apps/cloudflare/src/admin-entrypoint.ts`), which is reachable only over a service binding: no HTTP route answers for it, and the client has no administrative surface ([ADR 0028](adr/0028-open-deployment.md)). The one caller is the admin portal, `apps/admin-portal`, a Worker at `admin.frockbot.com` behind its own Cloudflare Access application that checks the Access email against `FROCKBOT_ADMIN_EMAILS` itself.
 
-- `GET` or `POST /api/admin/policy`: the mode, `{ schemaVersion: 1, type: "deployment/set-admission-mode", mode, revision }`.
-- `GET` or `POST /api/admin/users/:userId/access`: one account's record, `{ schemaVersion: 1, type: "account/set-access", state, revision }`. `revision` is `0` for an account with no record.
-- `POST /api/admin/invitations`: `{ schemaVersion: 1, type: "access/invite-email", email }`. This is idempotent, and the address is compared trimmed and lower-cased.
+- `readPolicy` and `setAdmissionMode`: the mode, under `{ schemaVersion: 1, type: "deployment/set-admission-mode", mode, revision }`.
+- `listAccounts`: every account with its access record, what it holds, and what it can spend, plus the catalog's admin-gated Plugins. One unreadable account is marked unreadable rather than defaulted, and hides no other.
+- `readAccountAccess` and `setAccountAccess`: one account's record, under `{ schemaVersion: 1, type: "account/set-access", state, revision }`. `revision` is `0` for an account with no record.
+- `inviteEmail`: `{ schemaVersion: 1, type: "access/invite-email", email }`. This is idempotent, and the address is compared trimmed and lower-cased.
+- `setAccountFeatures` and `grantCredit`: what an account holds — Applets, Plugin authoring, the admin-gated Plugins opened for it — and complimentary credit, by the grant's own idempotency id.
 
-Waitlists, invitation email, redemption UI, trial credit and onboarding are not built. They build on these RPCs rather than beside them.
+Both compare-and-swaps answer `{ status: "applied", value }` or `{ status: "conflict", currentRevision }` rather than throwing, because the caller is another Worker; the portal renders a conflict as "changed underneath you" and writes nothing.
+
+An account's features are also writable from the operator surface, `POST /api/debug/users/:userId/features` under the deployment's `DEBUG_TOKEN`: a deployment with no portal still has to be able to turn Applets or Plugin authoring on.
+
+Waitlists, invitation email, redemption UI, trial credit and onboarding are not built. They build on these operations rather than beside them.
 
 ## Release: retiring the signups switch
 
@@ -53,22 +59,8 @@ The authority replaced `deployment:policy:v1`, which held `signups: { open }`. N
 
 After the deploy, the person releasing does the following:
 
-1. Sign in as an admin at bot.frockbot.com. Open **Site administration** and confirm it loads with **Closed** chosen. This also proves the cleanup ran, because the page reads the authority.
-2. For each non-admin test account that should keep access, look up its id in the account list on the same page. Then, from the signed-in admin browser's console, run:
-
-   ```js
-   await fetch(`/api/admin/users/${encodeURIComponent(userId)}/access`, {
-     method: "POST",
-     headers: { "content-type": "application/json" },
-     body: JSON.stringify({
-       schemaVersion: 1,
-       type: "account/set-access",
-       state: "active",
-       revision: 0,
-     }),
-   }).then((r) => r.json());
-   ```
-
+1. Open admin.frockbot.com as an administrator and confirm the page loads with **Closed** chosen. This also proves the cleanup ran, because the page reads the authority.
+2. For each non-admin test account that should keep access, set its access to **Active** in the account list on that page.
 3. Choose the mode the beta should run in.
 4. Verify a fresh conversation: as the admin, create a new Bot, send it a message and see it reply. If a test account was granted access, sign in as it and see it reach the app rather than the refusal page.
 

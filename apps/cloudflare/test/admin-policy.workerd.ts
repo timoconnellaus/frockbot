@@ -1,16 +1,16 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import {
-  createAdminBackendContribution,
-  type AdminGatewayHost,
-} from "@frockbot/app/admin/backend";
+  createAdminOperationsV1,
+  type AdminOperationsHostV1,
+  type AdminOperationsV1,
+} from "@frockbot/app/admin/operations";
 import {
   decodeAccountAccessViewV1,
   decodeAccountAdmissionDecisionV1,
-  decodeAdminUserListViewV1,
   decodeDeploymentPolicyV1,
-  decodeEmailInvitationV1,
   decodeUserFeaturesV1,
+  isAccountAccessUnavailable,
   isUserFeaturesUnavailable,
   type AccountAccessStateV1,
   type AccountAccessV1,
@@ -92,6 +92,39 @@ async function setFeatures(
 const accessHost = createDeploymentPolicyAdminHost(authority);
 
 /**
+ * Administration over the real authority and real User Durable Objects — what
+ * the admin portal reaches through the app Worker's `AdminEntrypoint`. The
+ * portal's own Access check is not in this test; the authority's behaviour is.
+ */
+function operations(
+  listed: Array<{ userId: string; email: string; name: string }> = [],
+  /** Accounts whose User Durable Object read fails, as an outage would. */
+  unreadable: ReadonlySet<string> = new Set(),
+): AdminOperationsV1 {
+  const host: AdminOperationsHostV1 = {
+    ...accessHost,
+    listUsers: () => Promise.resolve(listed),
+    readUserFeatures: (userId) =>
+      unreadable.has(userId)
+        ? Promise.reject(new Error("Durable Object reset while responding"))
+        : readFeatures(userId),
+    setUserFeatures: setFeatures,
+    readUserBilling: () =>
+      Promise.resolve({
+        includedMicros: 0,
+        purchasedMicros: 0,
+        complimentaryMicros: 0,
+        reservedMicros: 0,
+        subscribed: false,
+        canSpend: false,
+        suspended: false,
+      }),
+    grantUserCredit: () => Promise.reject(new Error("not under test")),
+  };
+  return createAdminOperationsV1(host);
+}
+
+/**
  * Sessions come from test headers; `x-test-verified` is the identity
  * provider's verification, which a real Google sign-in always carries.
  */
@@ -137,39 +170,12 @@ function signedInRequest(
   return new Request(`https://frockbot.test${path}`, { ...init, headers });
 }
 
-function postJson(path: string, identity: Identity, body: unknown): Request {
-  return signedInRequest(path, identity, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-function testGateway(
-  listed: Array<{ userId: string; email: string; name: string }> = [],
-  /** Accounts whose User Durable Object read fails, as an outage would. */
-  unreadable: ReadonlySet<string> = new Set(),
-) {
-  const host: AdminGatewayHost = {
-    ...accessHost,
-    listUsers: () => Promise.resolve(listed),
-    readUserFeatures: (userId) =>
-      unreadable.has(userId)
-        ? Promise.reject(new Error("Durable Object reset while responding"))
-        : readFeatures(userId),
-    setUserFeatures: setFeatures,
-    readUserBilling: () =>
-      Promise.resolve({
-        includedMicros: 0,
-        purchasedMicros: 0,
-        complimentaryMicros: 0,
-        reservedMicros: 0,
-        subscribed: false,
-        canSpend: false,
-        suspended: false,
-      }),
-    grantUserCredit: () => Promise.reject(new Error("not under test")),
-  };
+/**
+ * The product Worker, with no administrative route of its own: administration
+ * left the app, so a signed-in account — admin or not — reaches nothing here
+ * but the product (ADR 0028).
+ */
+function testGateway() {
   return createGateway({
     loader,
     artifacts: { load: () => Promise.resolve("export default {}") },
@@ -187,12 +193,12 @@ function testGateway(
     botStateFor: () => ({}) as UserBotStateBinding,
     userConfigurationFor: () => ({}) as UserConfigurationBinding,
     botConfigurationFor: () => ({}) as BotConfigurationBinding,
-    backendContributions: [createAdminBackendContribution(host)],
+    backendContributions: [],
     allowDevelopmentIdentity: false,
   });
 }
 
-const owner: Identity = { id: "owner", email: "owner@example.com" };
+const owner = "owner@example.com";
 
 function fresh(prefix: string, overrides: Partial<Identity> = {}): Identity {
   const id = `${prefix}-${crypto.randomUUID()}`;
@@ -200,41 +206,43 @@ function fresh(prefix: string, overrides: Partial<Identity> = {}): Identity {
 }
 
 async function setMode(
-  gateway: ReturnType<typeof testGateway>,
+  admin: AdminOperationsV1,
   mode: AdmissionModeV1,
 ): Promise<DeploymentPolicyV1> {
-  const current = await readPolicy();
-  const response = await gateway(
-    postJson("/api/admin/policy", owner, {
+  const current = await admin.readPolicy();
+  const written = await admin.setAdmissionMode({
+    schemaVersion: 1,
+    command: {
       schemaVersion: 1,
       type: "deployment/set-admission-mode",
       mode,
       revision: current.revision,
-    }),
-  );
-  expect(response.status).toBe(200);
-  return decodeDeploymentPolicyV1(await response.json());
+    },
+    updatedBy: owner,
+  });
+  expect(written.status).toBe("applied");
+  if (written.status !== "applied") throw new Error("unreachable");
+  return written.value;
 }
 
 async function setAccess(
-  gateway: ReturnType<typeof testGateway>,
+  admin: AdminOperationsV1,
   userId: string,
   state: AccountAccessStateV1,
   revision?: number,
-): Promise<Response> {
-  const read = decodeAccountAccessViewV1(
-    await (
-      await gateway(signedInRequest(`/api/admin/users/${userId}/access`, owner))
-    ).json(),
-  );
-  return gateway(
-    postJson(`/api/admin/users/${userId}/access`, owner, {
+) {
+  const read = await admin.readAccountAccess({ schemaVersion: 1, userId });
+  return admin.setAccountAccess({
+    schemaVersion: 1,
+    userId,
+    command: {
       schemaVersion: 1,
       type: "account/set-access",
       state,
       revision: revision ?? read.access?.revision ?? 0,
-    }),
-  );
+    },
+    updatedBy: owner,
+  });
 }
 
 async function expectRefused(
@@ -251,15 +259,12 @@ async function expectRefused(
 describe("beta access authority in workerd", () => {
   test("defaults closed; a signed-in identity is refused and never provisioned", async () => {
     const gateway = testGateway();
+    const admin = operations();
     const newcomer = fresh("new");
 
-    const initial = await readPolicy();
+    const initial = await admin.readPolicy();
     expect(initial.admission.mode).toBe("closed");
     expect(initial.revision).toBe(0);
-
-    expect(
-      (await gateway(signedInRequest("/api/admin/policy", newcomer))).status,
-    ).toBe(403);
 
     const page = await gateway(signedInRequest("/", newcomer));
     expect(page.status).toBe(403);
@@ -273,48 +278,49 @@ describe("beta access authority in workerd", () => {
     expect(await provisioned(newcomer.id)).toBe(false);
 
     // An admin is admitted in the same closed deployment, with no record.
-    const admitted = await gateway(signedInRequest("/", owner));
+    const admitted = await gateway(
+      signedInRequest("/", { id: "owner", email: owner }),
+    );
     expect(await admitted.text()).toBe("admitted");
   });
 
   test("an already provisioned User without access is refused", async () => {
     const gateway = testGateway();
+    const admin = operations();
     const legacy = fresh("legacy");
     await userRpc(legacy.id).readConfiguration({
       schemaVersion: 1,
       userId: legacy.id,
     });
     expect(await provisioned(legacy.id)).toBe(true);
-    await setMode(gateway, "invite-only");
+    await setMode(admin, "invite-only");
     await expectRefused(
       await gateway(signedInRequest("/api/identity", legacy)),
       "invitation-required",
     );
-    await setMode(gateway, "closed");
+    await setMode(admin, "closed");
   });
 
   test("open admission activates, and closing it keeps the accounts it admitted", async () => {
     const gateway = testGateway();
+    const admin = operations();
     const early = fresh("early");
     const late = fresh("late");
-    await setMode(gateway, "open");
+    await setMode(admin, "open");
 
     const admitted = await gateway(signedInRequest("/", early));
     expect(await admitted.text()).toBe("admitted");
     expect(await provisioned(early.id)).toBe(true);
-    const access = decodeAccountAccessViewV1(
-      await (
-        await gateway(
-          signedInRequest(`/api/admin/users/${early.id}/access`, owner),
-        )
-      ).json(),
-    );
+    const access = await admin.readAccountAccess({
+      schemaVersion: 1,
+      userId: early.id,
+    });
     expect(access.access).toMatchObject({
       state: "active",
       updatedBy: "admission",
     });
 
-    const closed = await setMode(gateway, "closed");
+    const closed = await setMode(admin, "closed");
     expect(closed.admission.mode).toBe("closed");
     expect(await (await gateway(signedInRequest("/", early))).text()).toBe(
       "admitted",
@@ -328,7 +334,8 @@ describe("beta access authority in workerd", () => {
 
   test("pausing, ending and blocking land on the next request and beat open mode", async () => {
     const gateway = testGateway();
-    await setMode(gateway, "open");
+    const admin = operations();
+    await setMode(admin, "open");
     const member = fresh("member");
     expect(
       (await gateway(signedInRequest("/api/identity", member))).status,
@@ -338,7 +345,7 @@ describe("beta access authority in workerd", () => {
       ["ended", "account-ended"],
       ["blocked", "account-blocked"],
     ] as const) {
-      expect((await setAccess(gateway, member.id, state)).status).toBe(200);
+      expect((await setAccess(admin, member.id, state)).status).toBe("applied");
       await expectRefused(
         await gateway(signedInRequest("/api/identity", member)),
         reason,
@@ -349,48 +356,40 @@ describe("beta access authority in workerd", () => {
         reason,
       );
     }
-    expect((await setAccess(gateway, member.id, "active")).status).toBe(200);
+    expect((await setAccess(admin, member.id, "active")).status).toBe(
+      "applied",
+    );
     expect(
       (await gateway(signedInRequest("/api/identity", member))).status,
     ).toBe(200);
 
     // Blocked before ever signing in: never provisioned, even in open mode.
     const stranger = fresh("stranger");
-    expect((await setAccess(gateway, stranger.id, "blocked")).status).toBe(200);
+    expect((await setAccess(admin, stranger.id, "blocked")).status).toBe(
+      "applied",
+    );
     const page = await gateway(signedInRequest("/", stranger));
     expect(page.status).toBe(403);
     expect(await page.text()).toContain('data-reason="account-blocked"');
     expect(await provisioned(stranger.id)).toBe(false);
-    await setMode(gateway, "closed");
+    await setMode(admin, "closed");
   });
 
   test("an email invitation binds to one verified identity and no other", async () => {
     const gateway = testGateway();
-    await setMode(gateway, "invite-only");
+    const admin = operations();
+    await setMode(admin, "invite-only");
     const email = `friend-${crypto.randomUUID()}@example.com`;
-    const invited = await gateway(
-      postJson("/api/admin/invitations", owner, {
+    const invited = await admin.inviteEmail({
+      schemaVersion: 1,
+      command: {
         schemaVersion: 1,
         type: "access/invite-email",
         email: email.toUpperCase(),
-      }),
-    );
-    expect(invited.status).toBe(200);
-    expect(decodeEmailInvitationV1(await invited.json()).email).toBe(email);
-
-    // Nobody can invite themselves.
-    const self = fresh("self");
-    expect(
-      (
-        await gateway(
-          postJson("/api/admin/invitations", self, {
-            schemaVersion: 1,
-            type: "access/invite-email",
-            email: self.email,
-          }),
-        )
-      ).status,
-    ).toBe(403);
+      },
+      invitedBy: owner,
+    });
+    expect(invited.email).toBe(email);
 
     const unverified = fresh("unverified", { email, verified: false });
     await expectRefused(
@@ -410,23 +409,27 @@ describe("beta access authority in workerd", () => {
       "invitation-required",
     );
     expect(await provisioned(second.id)).toBe(false);
-    await setMode(gateway, "closed");
+    await setMode(admin, "closed");
   });
 
   test("concurrent sign-ins and admin writes serialize, and a stale admin write conflicts", async () => {
     const gateway = testGateway();
-    await setMode(gateway, "open");
+    const admin = operations();
+    await setMode(admin, "open");
     const racer = fresh("racer");
     const [signIn, block, again] = await Promise.all([
       gateway(signedInRequest("/api/identity", racer)),
-      gateway(
-        postJson(`/api/admin/users/${racer.id}/access`, owner, {
+      admin.setAccountAccess({
+        schemaVersion: 1,
+        userId: racer.id,
+        command: {
           schemaVersion: 1,
           type: "account/set-access",
           state: "blocked",
           revision: 0,
-        }),
-      ),
+        },
+        updatedBy: owner,
+      }),
       gateway(signedInRequest("/api/identity", racer)),
     ]);
     const final = decodeAccountAccessViewV1(
@@ -435,23 +438,26 @@ describe("beta access authority in workerd", () => {
         userId: racer.id,
       }),
     ).access as AccountAccessV1;
-    if (block.status === 200) {
+    if (block.status === "applied") {
       // The block won revision 1; no sign-in after it activated the account.
       expect(final).toMatchObject({ state: "blocked", revision: 1 });
       expect([signIn.status, again.status]).toContain(403);
     } else {
-      expect(block.status).toBe(409);
+      expect(block).toMatchObject({ status: "conflict", currentRevision: 1 });
       expect(signIn.status).toBe(200);
       expect(final).toMatchObject({ state: "active", revision: 1 });
     }
 
     // Two admins racing on the same revision: exactly one lands.
     const [first, secondWrite] = await Promise.all([
-      setAccess(gateway, racer.id, "paused", final.revision),
-      setAccess(gateway, racer.id, "ended", final.revision),
+      setAccess(admin, racer.id, "paused", final.revision),
+      setAccess(admin, racer.id, "ended", final.revision),
     ]);
-    expect([first.status, secondWrite.status].sort()).toEqual([200, 409]);
-    await setMode(gateway, "closed");
+    expect([first.status, secondWrite.status].toSorted()).toEqual([
+      "applied",
+      "conflict",
+    ]);
+    await setMode(admin, "closed");
   });
 
   test("the retired signups record is cleaned up on real storage, repeatably", async () => {
@@ -481,34 +487,33 @@ describe("beta access authority in workerd", () => {
     );
   });
 
-  test("the retired signups command is refused at the admin route", async () => {
-    const gateway = testGateway();
-    const before = await readPolicy();
-    const response = await gateway(
-      postJson("/api/admin/policy", owner, {
+  test("the retired signups command is refused, not translated", async () => {
+    const admin = operations();
+    const before = await admin.readPolicy();
+    await expect(
+      admin.setAdmissionMode({
         schemaVersion: 1,
-        type: "deployment/set-signups",
-        open: true,
-        revision: before.revision,
+        command: {
+          schemaVersion: 1,
+          type: "deployment/set-signups",
+          open: true,
+          revision: before.revision,
+        },
+        updatedBy: owner,
       }),
-    );
-    expect(response.status).toBe(400);
-    expect(await readPolicy()).toEqual(before);
+    ).rejects.toThrow();
+    expect(await admin.readPolicy()).toEqual(before);
   });
 
   test("an admin turns Applets on for an account without provisioning or admitting it", async () => {
     const guest = {
-      id: `guest-${crypto.randomUUID()}`,
+      userId: `guest-${crypto.randomUUID()}`,
       email: "guest@example.com",
       name: "Guest",
     };
-    const gateway = testGateway([
-      { userId: guest.id, email: guest.email, name: guest.name },
-    ]);
+    const admin = operations([guest]);
 
-    const listed = await gateway(signedInRequest("/api/admin/users", owner));
-    expect(listed.status).toBe(200);
-    const before = decodeAdminUserListViewV1(await listed.json());
+    const before = await admin.listAccounts();
     expect(
       before.users.map((user) => [
         user.userId,
@@ -516,66 +521,45 @@ describe("beta access authority in workerd", () => {
           ? "unavailable"
           : user.features.applets,
       ]),
-    ).toEqual([
-      ["owner", false],
-      [guest.id, false],
-    ]);
+    ).toEqual([[guest.userId, false]]);
+    // No access record and no sign-in: the list says so rather than guessing.
+    const [listedGuest] = before.users;
+    expect(
+      isAccountAccessUnavailable(listedGuest!.access)
+        ? "unavailable"
+        : listedGuest!.access.access,
+    ).toBeNull();
 
-    const enabled = await gateway(
-      postJson(`/api/admin/users/${guest.id}/features`, owner, {
-        schemaVersion: 1,
-        type: "user/set-features",
-        applets: true,
-      }),
-    );
-    expect(enabled.status).toBe(200);
-    expect(decodeUserFeaturesV1(await enabled.json())).toMatchObject({
-      applets: true,
-      updatedBy: "owner",
+    const enabled = await admin.setAccountFeatures({
+      schemaVersion: 1,
+      userId: guest.userId,
+      command: { schemaVersion: 1, type: "user/set-features", applets: true },
+      updatedBy: owner,
     });
-    expect((await readFeatures(guest.id)).applets).toBe(true);
-    expect(await provisioned(guest.id)).toBe(false);
-
-    await expectRefused(
-      await gateway(
-        postJson(`/api/admin/users/${guest.id}/features`, guest, {
-          schemaVersion: 1,
-          type: "user/set-features",
-          applets: false,
-        }),
-      ),
-      "admission-closed",
-    );
-    expect((await readFeatures(guest.id)).applets).toBe(true);
+    expect(enabled).toMatchObject({ applets: true, updatedBy: owner });
+    expect((await readFeatures(guest.userId)).applets).toBe(true);
+    expect(await provisioned(guest.userId)).toBe(false);
   });
 
   test("one account whose features cannot be read hides no other account's switch", async () => {
     const wedged = {
-      id: `wedged-${crypto.randomUUID()}`,
+      userId: `wedged-${crypto.randomUUID()}`,
       email: "wedged@example.com",
       name: "Wedged",
     };
     const guest = {
-      id: `guest-${crypto.randomUUID()}`,
+      userId: `guest-${crypto.randomUUID()}`,
       email: "guest@example.com",
       name: "Guest",
     };
     await setFeatures(
-      guest.id,
+      guest.userId,
       { schemaVersion: 1, type: "user/set-features", applets: true },
-      owner.id,
+      owner,
     );
-    const gateway = testGateway(
-      [
-        { userId: wedged.id, email: wedged.email, name: wedged.name },
-        { userId: guest.id, email: guest.email, name: guest.name },
-      ],
-      new Set([wedged.id]),
-    );
+    const admin = operations([wedged, guest], new Set([wedged.userId]));
 
-    const listed = await gateway(signedInRequest("/api/admin/users", owner));
-    expect(listed.status).toBe(200);
-    const { users } = decodeAdminUserListViewV1(await listed.json());
+    const { users } = await admin.listAccounts();
     expect(
       users.map((user) => [
         user.userId,
@@ -584,9 +568,8 @@ describe("beta access authority in workerd", () => {
           : user.features.applets,
       ]),
     ).toEqual([
-      ["owner", false],
-      [wedged.id, "unavailable"],
-      [guest.id, true],
+      [wedged.userId, "unavailable"],
+      [guest.userId, true],
     ]);
   });
 });

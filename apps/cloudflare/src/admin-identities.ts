@@ -1,3 +1,7 @@
+import { adminEmailsV1 } from "@frockbot/app/admin/shared";
+
+export { adminEmailsV1 };
+
 /** The one identity a development stack signs in as; an admin there. */
 export const DEVELOPMENT_USER_ID = "development";
 
@@ -5,15 +9,6 @@ export interface GatewayIdentityV1 {
   id: string;
   email?: string;
   mode: "better-auth" | "development";
-}
-
-export function adminEmailsV1(value: string | undefined): ReadonlySet<string> {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((email) => email.trim().toLowerCase())
-      .filter((email) => email.length > 0),
-  );
 }
 
 export function isDeploymentAdminV1(

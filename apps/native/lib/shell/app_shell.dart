@@ -15,7 +15,6 @@ import 'package:flutter/services.dart';
 import '../activity/badge.dart';
 import '../activity/controller.dart';
 import '../activity/push.dart';
-import '../admin/page.dart';
 import '../applets/canvas.dart';
 import '../applets/list.dart';
 import '../audit/page.dart';
@@ -228,7 +227,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool footerOpen = false;
   bool footerExiting = false;
   bool showHidden = false;
-  bool isAdmin = false;
   TranscriptLine? openRun;
 
   /// What the account can spend, from `/api/billing`. Null until read, and
@@ -467,21 +465,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
 
-  /// Whether this account administers the deployment. The gateway is the
-  /// authority; this only decides whether the door is offered at all.
-  Future<void> _readIdentity() async {
-    try {
-      final identity = wire.AuthIdentity.fromJson(
-        await widget.api.request('/api/identity'),
-      );
-      if (mounted && identity.isAdmin != isAdmin) {
-        setState(() => isAdmin = identity.isAdmin);
-      }
-    } catch (_) {
-      // Nothing is lost but the Admin entry.
-    }
-  }
-
   /// The balance, read beside the identity and again whenever Billing may
   /// have changed it: a resume, a return from the Billing page. A read that
   /// fails keeps the last answer rather than flashing "no credit".
@@ -517,7 +500,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _loadDirectory() async {
-    unawaited(_readIdentity());
     unawaited(_readCredit());
     try {
       final cached = await widget.store.read('directory/${widget.userId}');
@@ -2208,32 +2190,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           ),
                         ),
                       ]),
-                      // Admin belongs to the deployment, not to the account,
-                      // so the entry is here only for someone the gateway
-                      // already answers it for. A development build can look
-                      // at the ViewNode renderer before a plugin produces a
-                      // document; the shipped app has no such door.
-                      if (isAdmin || developmentAuth)
+                      // A development build can look at the ViewNode renderer
+                      // before a plugin produces a document; the shipped app
+                      // has no such door.
+                      if (developmentAuth)
                         _profileGroup('This site', [
-                          if (isAdmin)
-                            _profileRow(
-                              AdminIds.profileEntry,
-                              Icons.shield_outlined,
-                              'Site administration',
-                              () => _push(AdminPage(api: widget.api)),
-                            ),
-                          if (developmentAuth)
-                            _profileRow(
-                              'profile-view-sample',
-                              Icons.dashboard_customize_outlined,
-                              'View sample',
-                              () => _push(
-                                ViewSamplePage(
-                                  store: widget.store,
-                                  userId: widget.userId,
-                                ),
+                          _profileRow(
+                            'profile-view-sample',
+                            Icons.dashboard_customize_outlined,
+                            'View sample',
+                            () => _push(
+                              ViewSamplePage(
+                                store: widget.store,
+                                userId: widget.userId,
                               ),
                             ),
+                          ),
                         ]),
                       if (!localDevelopment)
                         _profileGroup(null, [

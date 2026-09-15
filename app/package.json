@@ -5,8 +5,8 @@
   "type": "module",
   "exports": {
     "./admin": "./admin/index.ts",
-    "./admin/backend": "./admin/backend.ts",
     "./admin/definition": "./admin/definition.ts",
+    "./admin/operations": "./admin/operations.ts",
     "./admin/shared": "./admin/shared.ts",
     "./agent-runtime": "./agent-runtime.ts",
     "./applets-host/bot": "./applets-host/bot.ts",

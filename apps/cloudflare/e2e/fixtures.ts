@@ -33,6 +33,7 @@ import {
 } from "@playwright/test";
 import {
   e2eOllamaEndpointV1,
+  E2E_DEBUG_TOKEN,
   E2E_OLLAMA_GOOD_API_KEY,
   type FakeOllamaChatMode,
 } from "./harness.ts";
@@ -533,48 +534,44 @@ export async function openApplication(
 }
 
 /**
- * Turn Applets on for this test's account, as an admin would from Site
- * administration.
+ * Turn an account's features on, as an administrator does.
  *
- * The feature is off for every account until an admin turns it on, and the
- * fresh `?as_user=` identity a spec runs as is not one: the e2e stack names an
- * admin email nobody signs in with. The gateway's own development identity is
- * an admin unconditionally, and the header form of it is honoured per request
- * and sets no cookie — so this call speaks as that admin without moving the
- * page's session off the account under test.
+ * There is no product route for this any more: administration left the app
+ * (ADR 0028), and the hosted deployment's portal is a separate Worker behind
+ * Cloudflare Access that no browser test signs in to. What is left in the app
+ * is the operator surface, `/api/debug`, authorized by the deployment's debug
+ * token — the same door a self-hosted deployment uses — so this write is an
+ * operator's, and it moves no session.
  */
-export async function enableApplets(page: Page, userId: string): Promise<void> {
+async function setAccountFeatures(
+  page: Page,
+  userId: string,
+  features: { applets: boolean; pluginAuthoring?: boolean },
+): Promise<void> {
   const response = await page.request.post(
-    `/api/admin/users/${encodeURIComponent(userId)}/features`,
+    `/api/debug/users/${encodeURIComponent(userId)}/features`,
     {
-      headers: { "x-frockbot-user-id": "development" },
-      data: { schemaVersion: 1, type: "user/set-features", applets: true },
+      headers: { authorization: `Bearer ${E2E_DEBUG_TOKEN}` },
+      data: { schemaVersion: 1, type: "user/set-features", ...features },
     },
   );
   expect(response.status(), await response.text()).toBe(200);
 }
 
-/**
- * Turn Plugin authoring on for one account, as the admin does (ADR 0026's
- * master toggle). The command carries `applets` as well; it is left off.
- */
-export async function enablePluginAuthoring(
+/** Applets are off for every account until an administrator turns them on. */
+export function enableApplets(page: Page, userId: string): Promise<void> {
+  return setAccountFeatures(page, userId, { applets: true });
+}
+
+/** Plugin authoring, ADR 0026's master toggle. Applets stay off. */
+export function enablePluginAuthoring(
   page: Page,
   userId: string,
 ): Promise<void> {
-  const response = await page.request.post(
-    `/api/admin/users/${encodeURIComponent(userId)}/features`,
-    {
-      headers: { "x-frockbot-user-id": "development" },
-      data: {
-        schemaVersion: 1,
-        type: "user/set-features",
-        applets: false,
-        pluginAuthoring: true,
-      },
-    },
-  );
-  expect(response.status(), await response.text()).toBe(200);
+  return setAccountFeatures(page, userId, {
+    applets: false,
+    pluginAuthoring: true,
+  });
 }
 
 /**

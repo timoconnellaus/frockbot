@@ -262,7 +262,7 @@ Configure these GitHub `production` environment values:
 | Secret   | `MACHINE_TOKEN_SECRET`      | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
 | Secret   | `FCM_SERVICE_ACCOUNT`       | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
 
-Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities are always admitted, can open **Admin** from the profile menu, and choose whether the deployment is closed, invite-only or open. The allowlist stays in the gateway and only an `isAdmin` boolean reaches the client. Every other account needs access from the beta-access authority, and having signed in before is not access; see [`docs/beta-access.md`](docs/beta-access.md), including the release step that retired the signups switch.
+Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities are always admitted and may open the operator surface. Administration itself is not in the app: it is the [admin portal](#the-admin-portal) at `admin.frockbot.com`, and the same list says who may use it. Every other account needs access from the beta-access authority, and having signed in before is not access; see [`docs/beta-access.md`](docs/beta-access.md), including the release step that retired the signups switch.
 
 `ROUTINE_HOOK_SECRET` is generated too, once, with `openssl rand -hex 32` — `./scripts/setup-production.sh` does it if the secret is absent and preserves it if it is not. Every Routine webhook key is `HMAC-SHA256` over its own claims under this secret, and the gateway verifies that signature before any Durable Object is addressed. Rotating it invalidates every webhook key already handed out, which each Routine's owner then has to re-mint; without it set, the delivery route answers `503` and a webhook Routine is recorded without a key rather than given one nothing could verify.
 
@@ -272,13 +272,36 @@ Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma
 
 Run `./scripts/setup-production.sh` to create the scoped Cloudflare token, configure the Google OAuth web client, and save the generated platform secrets. Then add `FROCKBOT_ADMIN_EMAILS` to the GitHub `production` environment and verify the completed configuration.
 
+### The admin portal
+
+The app has no administrative surface. `apps/admin-portal` is a Worker of its
+own at `admin.frockbot.com`, deployed by `release.yml` beside the marketing
+site, and it is the whole of administration: the admission mode, each account's
+access, email invitations, what an account holds, and complimentary credit
+([ADR 0028](docs/adr/0028-open-deployment.md)). It holds no state and reaches
+the app only through a service binding to the app Worker's `AdminEntrypoint`,
+which no route answers for.
+
+Two things guard it, and the portal checks both itself:
+
+- A Cloudflare Access application over `admin.frockbot.com`. Its team domain and
+  audience tag are the `production` environment's `ACCESS_TEAM_DOMAIN` and
+  `ACCESS_AUD`; until both are set, the deploy step skips and the portal admits
+  nobody.
+- `FROCKBOT_ADMIN_EMAILS`, the same secret the app reads. Access says who may
+  open the page; this says who may administer.
+
+A deployment without a portal — a self-hosted one — still turns an account's
+features on from the operator surface: `POST /api/debug/users/<userId>/features`
+with the deployment's `DEBUG_TOKEN`.
+
 Register `https://bot.frockbot.com/api/auth/callback/google` as an authorized Google redirect URI. The deploy token must include Workers Scripts and Workers Routes edit access, and the `frockbot.com` zone must be active in the same Cloudflare account. Production deployment intentionally does not create or delete D1, R2, or Vectorize resources.
 
 ## Structure
 
 ```text
 app/              The product: `runtime.ts`, the Contribution tables, and one directory per feature
-  admin/          Deployment policy administration surface
+  admin/          The deployment's administrative operations, mounted by `AdminEntrypoint`
   applets-host/   The app's side of Applets: the capability host, records, and the Bot's focus
   approvals/      Recording one approval decision inside the Bot Durable Object
   audit/          Audited-effect projection and the User's rebuildable audit table

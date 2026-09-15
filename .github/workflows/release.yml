@@ -1070,7 +1070,7 @@ jobs:
           fi
 
   deploy-marketing:
-    name: Deploy marketing site
+    name: Deploy marketing site and admin portal
     # Production follows the tag, not the branch: merging to main integrates
     # code, and a version tag is what ships it. Both deploys wait on the
     # verify gate, so the riskiest step of a release still runs only against
@@ -1122,6 +1122,58 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: bunx wrangler deploy
+
+      - name: Deploy admin.frockbot.com
+        # The deployment's whole administrative surface (ADR 0028). It reaches
+        # the app over a service binding, so it is deployed beside marketing
+        # rather than with the backend: the binding names the app Worker, which
+        # already exists, and a portal deployed against the previous version
+        # administers it exactly as well.
+        #
+        # Access is what guards it, and the portal verifies the assertion
+        # itself, so the audience tag and team domain are configuration it
+        # cannot do without: until the environment names them, there is no
+        # Access application in front of the hostname and deploying the Worker
+        # would publish an administrative surface nothing guards.
+        working-directory: apps/admin-portal
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
+          ACCESS_AUD: ${{ vars.ACCESS_AUD }}
+          FROCKBOT_ADMIN_EMAILS: ${{ secrets.FROCKBOT_ADMIN_EMAILS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$ACCESS_TEAM_DOMAIN" && -z "$ACCESS_AUD" ]]; then
+            echo "ACCESS_TEAM_DOMAIN and ACCESS_AUD are unset: skipping the admin portal."
+            echo "Create the Cloudflare Access application for admin.frockbot.com and set both in the production environment to deploy it."
+            exit 0
+          fi
+
+          missing=()
+          for name in ACCESS_TEAM_DOMAIN ACCESS_AUD FROCKBOT_ADMIN_EMAILS; do
+            if [[ -z "${!name}" ]]; then missing+=("$name"); fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing admin portal configuration: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+          secrets_file="$RUNNER_TEMP/frockbot-admin-portal.env"
+          trap 'rm -f "$secrets_file"' EXIT
+
+          node <<'NODE' > "$secrets_file"
+          const names = ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'FROCKBOT_ADMIN_EMAILS'];
+          console.log(
+            JSON.stringify(
+              Object.fromEntries(names.map((name) => [name, process.env[name]])),
+            ),
+          );
+          NODE
+
+          bunx wrangler deploy --secrets-file "$secrets_file"
 
   deploy-backend:
     name: Deploy FrockBot app

@@ -122,11 +122,6 @@ import {
   type AccountAdmissionDecisionV1,
   type AdmissionIdentityV1,
   decodeUserFeaturesV1,
-  decodeAdminUserBillingV1,
-  type AdminUserBillingV1,
-  type GrantUserCreditCommandV1,
-  type SetUserFeaturesCommandV1,
-  type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
 import { gatewayAuth, type IdentityCandidateV1 } from "./auth.js";
 import {
@@ -183,7 +178,6 @@ import {
   DEPLOYMENT_POLICY_SINGLETON_NAME,
   DeploymentPolicy,
 } from "./deployment-policy.js";
-import { createDeploymentPolicyAdminHost } from "./deployment-policy-admin-host.js";
 import { ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE } from "./account-admission.js";
 import { RoutineHookError } from "@frockbot/app/routines/hook";
 
@@ -205,6 +199,9 @@ export { PluginEgress } from "./plugin-egress.js";
 // and the loopback `CAPABILITIES` entrypoint its facet is handed.
 export { AppletCapabilities, AppletState } from "./applet-state.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
+// Administration, reached only by the admin portal over a service binding
+// (ADR 0028). No route in this Worker answers for it.
+export { AdminEntrypoint } from "./admin-entrypoint.js";
 // The account-wide voice session (docs/voice.md): the one Agents SDK object.
 export { VoiceAssistant };
 
@@ -343,22 +340,6 @@ async function listIdentityStoreUsers(
   return result.results ?? [];
 }
 
-/** The User Durable Object's credit ledger, addressed by User, as the admin sees it. */
-function userBillingStub(
-  env: Env,
-  userId: string,
-): {
-  readBillingBalance(input: unknown): Promise<unknown>;
-  grantComplimentaryCredit(input: unknown): Promise<unknown>;
-} {
-  const id = env.USER_CONFIGURATIONS.idFromName(userId);
-  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its billing RPC surface.
-  return env.USER_CONFIGURATIONS.get(id) as unknown as {
-    readBillingBalance(input: unknown): Promise<unknown>;
-    grantComplimentaryCredit(input: unknown): Promise<unknown>;
-  };
-}
-
 /** The User Durable Object's account features, addressed by User. */
 function userFeaturesStub(
   env: Env,
@@ -406,6 +387,17 @@ function debugSurface(env: Env): DebugGatewaySurface {
         )
       );
     },
+    setAccountFeatures: async (userId, command) =>
+      decodeUserFeaturesV1(
+        rpcJsonSnapshot(
+          await userFeaturesStub(env, userId).setFeatures({
+            schemaVersion: 1,
+            userId,
+            command,
+            updatedBy: "operator",
+          }),
+        ),
+      ),
   };
 }
 
@@ -1910,61 +1902,6 @@ interface RuntimeExports {
 const createGatewayBackendContributions = (env: Env) =>
   createFoundationBackendContributions({
     backendHost: "gateway",
-    ...createDeploymentPolicyAdminHost(() => deploymentPolicyStub(env)),
-    listUsers: async () =>
-      (await listIdentityStoreUsers(env, 200)).map((user) => ({
-        userId: user.id,
-        email: user.email,
-        name: user.name,
-      })),
-    readUserFeatures: async (userId: string): Promise<UserFeaturesV1> =>
-      decodeUserFeaturesV1(
-        rpcJsonSnapshot(
-          await userFeaturesStub(env, userId).readFeatures({
-            schemaVersion: 1,
-            userId,
-          }),
-        ),
-      ),
-    setUserFeatures: async (
-      userId: string,
-      command: SetUserFeaturesCommandV1,
-      updatedBy: string,
-    ): Promise<UserFeaturesV1> =>
-      decodeUserFeaturesV1(
-        rpcJsonSnapshot(
-          await userFeaturesStub(env, userId).setFeatures({
-            schemaVersion: 1,
-            userId,
-            command,
-            updatedBy,
-          }),
-        ),
-      ),
-    readUserBilling: async (userId: string): Promise<AdminUserBillingV1> =>
-      decodeAdminUserBillingV1(
-        rpcJsonSnapshot(
-          await userBillingStub(env, userId).readBillingBalance({ userId }),
-        ),
-      ),
-    grantUserCredit: async (
-      userId: string,
-      command: GrantUserCreditCommandV1,
-      grantedBy: string,
-    ): Promise<AdminUserBillingV1> =>
-      decodeAdminUserBillingV1(
-        rpcJsonSnapshot(
-          await userBillingStub(env, userId).grantComplimentaryCredit({
-            userId,
-            command: {
-              id: command.id,
-              micros: command.cents * 10_000,
-              grantedBy,
-              reason: command.reason,
-            },
-          }),
-        ),
-      ),
     listTemplateShares: async (userId: string) =>
       decodeTemplateShareListViewV1(
         rpcJsonSnapshot(

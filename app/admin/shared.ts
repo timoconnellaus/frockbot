@@ -72,6 +72,18 @@ export interface AccountAccessViewV1 {
   access: AccountAccessV1 | null;
 }
 
+/**
+ * What an administrative write answers.
+ *
+ * A compare-and-swap that lost is an answer, not a failure: someone wrote
+ * first, and the revision the next attempt must carry comes back with it. The
+ * caller is the admin portal, across a service binding, where an exception is
+ * a message and nothing more.
+ */
+export type AdminWriteResultV1<T> =
+  | { status: "applied"; value: T }
+  | { status: "conflict"; currentRevision: number };
+
 export interface SetAccountAccessCommandV1 {
   schemaVersion: 1;
   type: "account/set-access";
@@ -246,6 +258,21 @@ function envelope(input: unknown, label: string, keys: readonly string[]) {
     throw new Error(`${label}.schemaVersion is invalid`);
   }
   return value;
+}
+
+/**
+ * The deployment's administrators, as `FROCKBOT_ADMIN_EMAILS` spells them: a
+ * comma-separated list, compared trimmed and lower-cased. Both the app (who
+ * bypasses admission, who opens the debug surface) and the admin portal (who
+ * may administer at all) read the same secret through this one parse.
+ */
+export function adminEmailsV1(value: string | undefined): ReadonlySet<string> {
+  return new Set(
+    (value ?? "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter((email) => email.length > 0),
+  );
 }
 
 /**
@@ -700,6 +727,24 @@ export interface GrantUserCreditRequestV1 {
 /** The most one hand-grant may be: a guard against a slipped digit. */
 export const GRANT_USER_CREDIT_MAXIMUM_CENTS = 100_000;
 
+/**
+ * An account whose access record could not be read when the list was built.
+ * Like unreadable features, it is not "no access": no record is a value the
+ * authority holds, and the authority could not be reached.
+ */
+export interface AdminAccountAccessUnavailableV1 {
+  unavailable: true;
+}
+
+export type AdminAccountAccessViewV1 =
+  AccountAccessViewV1 | AdminAccountAccessUnavailableV1;
+
+/** One admin-gated seeded Plugin, as an administrator is offered it. */
+export interface AdminGatedPluginV1 {
+  pluginId: string;
+  displayName: string;
+}
+
 /** One account as the admin list shows it: identity, and what it holds. */
 export interface AdminUserViewV1 {
   userId: string;
@@ -707,11 +752,14 @@ export interface AdminUserViewV1 {
   name?: string;
   features: AdminUserFeaturesV1;
   billing: AdminUserBillingViewV1;
+  access: AdminAccountAccessViewV1;
 }
 
 export interface AdminUserListViewV1 {
   schemaVersion: 1;
   users: AdminUserViewV1[];
+  /** The catalog's admin-gated Plugins, which is what may be opened at all. */
+  gatedPlugins: AdminGatedPluginV1[];
 }
 
 export const USER_FEATURES_DEFAULT_UPDATED_BY = "deployment-default";
@@ -1011,10 +1059,44 @@ function optionalDisplayString(
   return value.slice(0, maximum);
 }
 
+export function isAccountAccessUnavailable(
+  access: AdminAccountAccessViewV1,
+): access is AdminAccountAccessUnavailableV1 {
+  return "unavailable" in access;
+}
+
+/** The exact unavailable marker, or one account's whole access view. */
+export function decodeAdminAccountAccessViewV1(
+  input: unknown,
+): AdminAccountAccessViewV1 {
+  const access = record(input, "admin account access");
+  if ("unavailable" in access) {
+    exactKeys(access, ["unavailable"], "admin account access");
+    if (access.unavailable !== true) {
+      throw new Error("admin account access.unavailable is invalid");
+    }
+    return { unavailable: true };
+  }
+  return decodeAccountAccessViewV1(access);
+}
+
+export function decodeAdminGatedPluginV1(input: unknown): AdminGatedPluginV1 {
+  const plugin = record(input, "admin gated plugin");
+  exactKeys(plugin, ["pluginId", "displayName"], "admin gated plugin");
+  return {
+    pluginId: boundedString(plugin.pluginId, "admin gated plugin.pluginId", 64),
+    displayName: boundedString(
+      plugin.displayName,
+      "admin gated plugin.displayName",
+      128,
+    ),
+  };
+}
+
 export function decodeAdminUserViewV1(input: unknown): AdminUserViewV1 {
   const user = record(input, "admin user");
   const keys = Object.keys(user);
-  const allowed = ["userId", "email", "name", "features", "billing"];
+  const allowed = ["userId", "email", "name", "features", "billing", "access"];
   if (!keys.every((key) => allowed.includes(key))) {
     throw new Error("admin user has unknown fields");
   }
@@ -1026,20 +1108,31 @@ export function decodeAdminUserViewV1(input: unknown): AdminUserViewV1 {
     ...(name === undefined ? {} : { name }),
     features: decodeAdminUserFeaturesV1(user.features),
     billing: decodeAdminUserBillingViewV1(user.billing),
+    access: decodeAdminAccountAccessViewV1(user.access),
   };
 }
 
 export function decodeAdminUserListViewV1(input: unknown): AdminUserListViewV1 {
   const view = record(input, "admin user list");
-  exactKeys(view, ["schemaVersion", "users"], "admin user list");
+  exactKeys(
+    view,
+    ["schemaVersion", "users", "gatedPlugins"],
+    "admin user list",
+  );
   if (view.schemaVersion !== 1) {
     throw new Error("admin user list.schemaVersion is invalid");
   }
-  if (!Array.isArray(view.users)) {
+  if (!Array.isArray(view.users) || view.users.length > 1_000) {
     throw new Error("admin user list.users is invalid");
+  }
+  if (!Array.isArray(view.gatedPlugins) || view.gatedPlugins.length > 64) {
+    throw new Error("admin user list.gatedPlugins is invalid");
   }
   return {
     schemaVersion: 1,
     users: view.users.map((user) => decodeAdminUserViewV1(user)),
+    gatedPlugins: view.gatedPlugins.map((plugin) =>
+      decodeAdminGatedPluginV1(plugin),
+    ),
   };
 }

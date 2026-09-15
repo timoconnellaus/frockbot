@@ -151,7 +151,7 @@ What archiving or deleting a Bot does to Applets: the Applets it owns and the Bo
 _Avoid_: Preview, dependents, blast radius
 
 **Account feature**:
-A capability an administrator turns on for one account from Site administration; Applets is the first, Plugin authoring the second. Off is silence on every surface — no tools, no Composition members, no canvas, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
+A capability an administrator turns on for one account from the admin portal; Applets is the first, Plugin authoring the second. Off is silence on every surface — no tools, no Composition members, no canvas, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
 _Avoid_: Feature flag, beta, entitlement, plan
 
 **Instance Contribution**:

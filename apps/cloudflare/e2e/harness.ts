@@ -909,10 +909,9 @@ export async function startHarness(
       persistDirectory,
     ]);
     // The Better Auth tables, in the same fresh state directory. Development
-    // sign-in never reads them, but Site administration lists the accounts
+    // sign-in never reads them, but the operator surface resolves an identity
     // from the `user` table, and without the migration that read answers
-    // `D1_ERROR: no such table: user` — which a spec that opens Admin sees as
-    // a 500 no test allowed.
+    // `D1_ERROR: no such table: user` — a 500 no spec allowed.
     await run("bunx", [
       "wrangler",
       "--env",

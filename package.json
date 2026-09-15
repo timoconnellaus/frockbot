@@ -20,6 +20,7 @@
   "scripts": {
     "build:cloudflare": "bun scripts/build-applets-assets.ts && bun run --filter @frockbot/cloudflare build",
     "build:marketing": "bun run --filter @frockbot/marketing build",
+    "build:admin-portal": "bun run --filter @frockbot/admin-portal build",
     "bootstrap:npm-trust": "./scripts/bootstrap-npm-trust.sh",
     "dev:phone": "./scripts/phone-dev.sh",
     "dogfood:dev": "./scripts/dogfood/dev-stack.sh",
@@ -34,7 +35,7 @@
     "dogfood:stop": "./scripts/dogfood/dev-stack.sh stop",
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev": "bun run dev:cloudflare",
-    "build": "bun run build:cloudflare && bun run build:marketing",
+    "build": "bun run build:cloudflare && bun run build:marketing && bun run build:admin-portal",
     "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/check-layer-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/typecheck.ts",
     "lint:layer-imports": "bun scripts/check-layer-imports.ts",
     "lint:computer-host-imports": "bun scripts/check-computer-host-imports.ts",
