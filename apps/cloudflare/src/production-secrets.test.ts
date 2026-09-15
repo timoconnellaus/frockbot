@@ -8,7 +8,11 @@ import {
   liveSecretPlanV1,
   missingRequiredSecretsV1,
   productionSecretsReportV1,
+  requiredSecretsV1,
 } from "./production-secrets.js";
+import { AUTH_PACKAGE_V1 } from "#auth-package";
+import { ACCESS_AUTH_PACKAGE_V1 } from "@frockbot/app/auth/access";
+import { BETTER_AUTH_PACKAGE_V1 } from "@frockbot/app/auth/better-auth";
 
 const workerSource = readFileSync(`${import.meta.dir}/index.ts`, "utf8");
 const releaseWorkflow = readFileSync(
@@ -83,6 +87,38 @@ describe("the production secrets manifest", () => {
     expect(required).toContain("ELEVENLABS_API_KEY");
   });
 
+  test("gives each auth Package exactly the secrets it declares", () => {
+    // The Package declares what it reads off `env`; this file says whether
+    // production may run without it. Neither list is allowed to be the only
+    // one that knows about a name (ADR 0028).
+    for (const build of [BETTER_AUTH_PACKAGE_V1, ACCESS_AUTH_PACKAGE_V1]) {
+      expect(
+        REQUIRED_PRODUCTION_SECRETS_V1.filter(
+          (secret) => secret.authPackage === build.id,
+        ).map(({ name, why }) => ({ name, why })),
+        // The reason too: two copies of the sentence an operator reads on a
+        // failed deploy are two chances for one of them to go stale.
+      ).toEqual(build.required.map(({ name, why }) => ({ name, why })));
+    }
+  });
+
+  test("carries only the built auth Package's secrets", () => {
+    // The hosted build deploys better-auth's four and has never heard of
+    // ACCESS_*; the simple build is the other way round. A deploy that carried
+    // both would demand secrets its Worker cannot use.
+    expect(AUTH_PACKAGE_V1.id).toBe("better-auth");
+    const carried = new Set(deployedSecretNamesV1());
+    for (const setting of BETTER_AUTH_PACKAGE_V1.required) {
+      expect(carried.has(setting.name)).toBe(true);
+    }
+    for (const setting of ACCESS_AUTH_PACKAGE_V1.required) {
+      expect(carried.has(setting.name)).toBe(false);
+    }
+    expect(
+      requiredSecretsV1().filter((secret) => secret.authPackage === "access"),
+    ).toEqual([]);
+  });
+
   test("requires the Applet viewer secret", () => {
     // The regression this manifest was written for: absent, every published
     // Applet answered 503 in production for weeks.
@@ -109,8 +145,10 @@ describe("the production secrets manifest", () => {
     );
     const step = job.slice(job.indexOf("Deploy Worker"));
     expect(job).toContain("bun scripts/check-production-secrets.ts check");
+    // The deploy names the generated config it reads, so the flag that writes
+    // the secrets is what locates it rather than one whole command line.
     expect(job.indexOf("check-production-secrets.ts check")).toBeLessThan(
-      job.indexOf("wrangler deploy --secrets-file"),
+      job.indexOf('--secrets-file "$secrets_file"'),
     );
     expect(step).toContain("write-secrets-file");
   });

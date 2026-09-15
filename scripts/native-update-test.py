@@ -21,6 +21,9 @@ spec.loader.exec_module(updates)
 
 # The release name is the app's, so the expectations follow the pubspec bump.
 BUILD_NAME = updates.build_name()
+# The origin is the deployment profile's, so a release and its patches name the
+# same server and neither spells it here.
+ORIGIN_DEFINE = updates.origin_define()
 
 
 class UpdatesTest(unittest.TestCase):
@@ -257,7 +260,8 @@ class ReleaseTest(ShorebirdHarness):
         self.assertEqual(args, [
             str(self.cli), "release", "android", "--flutter-version=3.47.0", "--artifact=apk",
             "--target-platform=android-arm64", f"--build-name={BUILD_NAME}", f"--build-number={NOW}",
-            f"--public-key-path={self.public}", "--", f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}"])
+            f"--public-key-path={self.public}", "--", ORIGIN_DEFINE,
+            f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}"])
         self.assertEqual(kwargs["cwd"], updates.NATIVE)
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], "0")
         self.assertTrue(kwargs["check"])
@@ -517,7 +521,7 @@ class PatchTest(ShorebirdHarness):
         self.assertEqual(args, [
             str(self.cli), "patch", "android", f"--release-version={BUILD_NAME}+{NOW}", f"--build-name={BUILD_NAME}",
             f"--build-number={NOW}", "--track=staging", f"--private-key-path={self.key}",
-            f"--public-key-path={self.public}", "--", "--target-platform=android-arm64",
+            f"--public-key-path={self.public}", "--", "--target-platform=android-arm64", ORIGIN_DEFINE,
             f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}"])
         self.assertEqual(kwargs["cwd"], updates.NATIVE)
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], str(NOW - 1))
@@ -648,7 +652,7 @@ class PipelinePatchTest(ShorebirdHarness):
         self.assertEqual(args, [
             str(self.cli), "patch", "android", f"--release-version={BUILD_NAME}+{NOW + 9}", f"--build-name={BUILD_NAME}",
             f"--build-number={NOW + 9}", "--track=staging", f"--private-key-path={self.key}",
-            f"--public-key-path={self.public}", "--", "--target-platform=android-arm64",
+            f"--public-key-path={self.public}", "--", "--target-platform=android-arm64", ORIGIN_DEFINE,
             f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW + 9}"])
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], str(NOW + 8))
         self.assertEqual(record["number"], 2)

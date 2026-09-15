@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "name": "hosted",
+  "accountId": "374784ce2915a597adcecf9bcb2c5ee6",
+  "prefix": "frockbot",
+  "authPackage": "better-auth",
+  "workers": {
+    "app": {
+      "name": "frockbot-cloudflare",
+      "hostnames": ["bot.frockbot.com"]
+    },
+    "computerHost": {},
+    "appletBuild": {},
+    "marketing": {
+      "hostnames": ["frockbot.com", "www.frockbot.com"]
+    },
+    "adminPortal": {
+      "name": "frockbot-admin-portal",
+      "hostnames": ["admin.frockbot.com"]
+    }
+  },
+  "artifactHostname": "ui.bot.frockbot.com",
+  "d1DatabaseId": "f83c21a4-e5a0-4cc2-b0e1-636027b8c65e",
+  "aiGateway": {
+    "accountId": "374784ce2915a597adcecf9bcb2c5ee6",
+    "id": "flock",
+    "autoRoute": "flock-auto"
+  },
+  "nativeAuth": "android,macos"
+}

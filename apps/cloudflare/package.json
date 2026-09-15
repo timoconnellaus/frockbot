@@ -6,7 +6,7 @@
   "scripts": {
     "client:build": "bun run build-flutter-web.ts",
     "artifact:build": "bun run client:build && bun run build-artifact.ts",
-    "build": "bun run artifact:build && wrangler deploy --dry-run --env=\"\" --outdir dist/gateway",
+    "build": "bun run artifact:build && bun ../../scripts/deployment-config.ts hosted && wrangler deploy --dry-run -c ../../.deployment/hosted/app/wrangler.jsonc --outdir dist/gateway",
     "dev": "bun run dev.ts",
     "test": "bun test src && bun run test:workerd",
     "test:workerd": "vitest run --config vitest.config.ts",

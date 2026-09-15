@@ -249,7 +249,6 @@ describe("production setup", () => {
       ...process.env,
       CLOUDFLARE_API_TOKEN: "cloudflare-token",
       CLOUDFLARE_ACCOUNT_ID: "cloudflare-account",
-      CLOUDFLARE_D1_DATABASE_ID: "cloudflare-database",
       BETTER_AUTH_URL: "https://bot.frockbot.com",
       BETTER_AUTH_SECRET:
         "a87ad4f95378b32a7954573d8f0933e07bc99a6d3c58ae2b61d85fd43ac424eb",

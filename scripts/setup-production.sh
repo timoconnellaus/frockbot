@@ -380,7 +380,8 @@ fi
 unset PRODUCTION_SECRETS
 
 stage "GitHub: verify production configuration"
-say "The repository already has the account ID, auth secret, app URL, and D1 ID."
+say "The repository already has the account ID, auth secret and app URL."
+say "The D1 database is named by deployments/hosted.json, not a repository variable."
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   step "Checking environment secrets in ${GITHUB_REPOSITORY}…"
   gh secret list --repo "$GITHUB_REPOSITORY" --env "$GITHUB_ENVIRONMENT"

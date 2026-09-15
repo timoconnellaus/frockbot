@@ -8,29 +8,37 @@ import {
   CLIENT_HELLO_HEADER,
 } from "./client-compatibility.js";
 import { returnPageV1 } from "@frockbot/app/return-page";
+import {
+  AUTH_NO_STORE_HEADERS_V1,
+  signInFailedV1 as error,
+  signInRedirectV1 as redirect,
+} from "@frockbot/app/auth/shared";
 import type { AccountAdmissionDecisionV1 } from "@frockbot/app/admin/shared";
 import {
   admissionRefusedResponse,
   admissionUnavailableResponse,
 } from "./account-admission.js";
-import type { AuthSession, GatewayAuth } from "./contracts.js";
+import type {
+  AuthIdentityV1,
+  AuthPackageIdentityV1,
+} from "@frockbot/core/contracts";
 import type {
   NativeSessionOperation,
   NativeSessionRecord,
 } from "./native-sessions.js";
 
-export const NATIVE_ORIGIN = "https://bot.frockbot.com";
-export const NATIVE_RETURN_ANDROID = `${NATIVE_ORIGIN}/native/return/android`;
-export const NATIVE_RETURN_MACOS = `${NATIVE_ORIGIN}/native/return/macos`;
 /**
- * The local "FrockBot Dev" Mac build's return (`bun run update:desktop`). It
- * is a separate app beside the released one, with its own bundle identifier
- * and scheme, so its sign-in must come back through its own page: handed to
- * `frockbot://`, the released app would take the code, or macOS would open
- * the wrong copy. Not in the Apple association, so Safari never offers it to
- * the released app as a Universal Link either.
+ * Where a signed app receives its sign-in: a path on the deployment's own
+ * origin. No deployment is named here — the origin is the one the Worker was
+ * given, so a second deployment's App Links are its own
+ * ([ADR 0028](../../../docs/adr/0028-open-deployment.md)).
  */
-export const NATIVE_RETURN_MACOS_DEV = `${NATIVE_ORIGIN}/native/return/macos-dev`;
+export function nativeReturnUriV1(
+  origin: string,
+  platform: "android" | "macos" | "macos-dev",
+): string {
+  return `${origin}/native/return/${platform}`;
+}
 /**
  * Where a development build of the app receives its sign-in. A custom scheme,
  * because a plain-HTTP loopback origin can never be an App Link; only a Worker
@@ -45,24 +53,32 @@ export const NATIVE_RETURN_DEVELOPMENT = "frockbot-dev://native/return/android";
  * code is useless without the PKCE verifier the app never shares.
  */
 export const NATIVE_MACOS_SCHEME = "frockbot";
-/** The local FrockBot Dev Mac build's scheme; see `NATIVE_RETURN_MACOS_DEV`. */
+/**
+ * The local "FrockBot Dev" Mac build's scheme (`bun run update:desktop`). It
+ * is a separate app beside the released one, with its own bundle identifier,
+ * so its sign-in comes back through its own `/native/return/macos-dev` page:
+ * handed to `frockbot://`, the released app would take the code, or macOS
+ * would open the wrong copy. Not in the Apple association, so Safari never
+ * offers it to the released app as a Universal Link either.
+ */
 export const NATIVE_MACOS_DEV_SCHEME = "frockbot-dev";
 const PREFIX = "frockbot-native.";
 const encoder = new TextEncoder();
-const NO_STORE = {
-  "cache-control": "no-store",
-  "referrer-policy": "no-referrer",
-};
+const NO_STORE = AUTH_NO_STORE_HEADERS_V1;
 
 /** Deployment policy, never a client-selected target or a per-Bot grant. */
-export function nativeReturnUris(flag: string | undefined): readonly string[] {
-  if (flag === "android") return [NATIVE_RETURN_ANDROID];
-  if (flag === "android,macos")
+export function nativeReturnUris(
+  flag: string | undefined,
+  origin: string,
+): readonly string[] {
+  if (flag === "android") return [nativeReturnUriV1(origin, "android")];
+  if (flag === "android,macos") {
     return [
-      NATIVE_RETURN_ANDROID,
-      NATIVE_RETURN_MACOS,
-      NATIVE_RETURN_MACOS_DEV,
+      nativeReturnUriV1(origin, "android"),
+      nativeReturnUriV1(origin, "macos"),
+      nativeReturnUriV1(origin, "macos-dev"),
     ];
+  }
   return [];
 }
 
@@ -125,7 +141,7 @@ type Claims = StartClaims | ExchangeClaims | SessionClaims | SettingsClaims;
 
 export interface NativeAuthOptions {
   secret: string;
-  auth: GatewayAuth;
+  auth: AuthPackageIdentityV1;
   // Only associated, signed targets belong here. No request can add an entry.
   returnUris: readonly string[];
   /**
@@ -141,8 +157,13 @@ export interface NativeAuthOptions {
     operation: NativeSessionOperation,
   ): Promise<NativeSessionRecord | null>;
   now?: () => number;
-  /** The origin the app talks to. Production's unless a development stack. */
-  origin?: string;
+  /**
+   * The deployment's own origin — every sign-in redirect, return URI and the
+   * origin check on `/native/*` is built from it. The Worker reads it from
+   * `BETTER_AUTH_URL`, which is what a development stack already points at its
+   * own host.
+   */
+  origin: string;
   /**
    * The development sign-in door: with this set, `/native/authorize` issues
    * the code for this User when the browser holds no session, in place of
@@ -159,7 +180,7 @@ export interface NativeAuth {
    */
   authenticate(request: Request): Promise<
     | {
-        session: AuthSession | null;
+        session: AuthIdentityV1 | null;
         refusal?: Response;
         admission?: AccountAdmissionDecisionV1;
       }
@@ -178,19 +199,6 @@ function unbase64(text: string): Uint8Array<ArrayBuffer> {
     atob(text.replaceAll("-", "+").replaceAll("_", "/")),
     (c) => c.charCodeAt(0),
   );
-}
-function error(
-  status = 400,
-  message = "Couldn't finish signing in. Please try again.",
-): Response {
-  return Response.json({ error: message }, { status, headers: NO_STORE });
-}
-function redirect(url: string, extra?: Headers): Response {
-  const headers = new Headers(NO_STORE);
-  headers.set("location", url);
-  for (const cookie of extra?.getSetCookie() ?? [])
-    headers.append("set-cookie", cookie);
-  return new Response(null, { status: 302, headers });
 }
 export async function readNativeJsonBody(
   request: Request,
@@ -234,7 +242,9 @@ export async function readNativeJsonBody(
 }
 
 export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
-  const origin = options.origin ?? NATIVE_ORIGIN;
+  // Normalised, so a configured origin with a trailing slash or a default port
+  // still matches the request origin the `/native/*` check compares it against.
+  const origin = new URL(options.origin).origin;
   const now = options.now ?? Date.now;
   const key = () =>
     crypto.subtle.importKey(
@@ -340,7 +350,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
   }
   async function browserIdentity(
     request: Request,
-  ): Promise<AuthSession | null> {
+  ): Promise<AuthIdentityV1 | null> {
     // Browser cookies only: this endpoint cannot be used to launder another bearer.
     const headers = new Headers();
     const cookie = request.headers.get("cookie");
@@ -359,42 +369,6 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       expiresAt: claims.expires,
       action,
     };
-  }
-  async function browserSignIn(
-    request: Request,
-    callbackURL: string,
-  ): Promise<Response> {
-    const response = await options.auth.handler(
-      new Request(`${origin}/api/auth/sign-in/social`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          origin: origin,
-          cookie: request.headers.get("cookie") ?? "",
-        },
-        body: JSON.stringify({
-          provider: "google",
-          callbackURL: callbackURL,
-        }),
-      }),
-    );
-    if (!response.ok) return error(401);
-    const result: unknown = await response.json();
-    if (
-      !result ||
-      typeof result !== "object" ||
-      !("url" in result) ||
-      typeof result.url !== "string"
-    )
-      return error();
-    const providerUrl = new URL(result.url);
-    if (
-      providerUrl.origin !== "https://accounts.google.com" ||
-      providerUrl.username ||
-      providerUrl.password
-    )
-      return error();
-    return redirect(providerUrl.toString(), response.headers);
   }
   async function admitBeforeUser(
     userId: string,
@@ -560,7 +534,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           if (claims.kind !== "settings") return error();
           const session = await browserIdentity(request);
           if (!session)
-            return browserSignIn(
+            return options.auth.startSignIn(
               request,
               `${origin}/native/settings?request=${token}`,
             );
@@ -619,7 +593,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           const userId = session?.user.id ?? options.developmentUserId;
           if (!userId) {
             if (url.pathname === "/native/complete") return error(401);
-            return browserSignIn(
+            return options.auth.startSignIn(
               request,
               `${origin}/native/complete?request=${token}`,
             );
@@ -732,11 +706,12 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
         ) {
           const page = url.origin + url.pathname;
           return nativeReturnPage(
-            page === NATIVE_RETURN_MACOS
+            page === nativeReturnUriV1(origin, "macos")
               ? "macos"
-              : page === NATIVE_RETURN_MACOS_DEV
+              : page === nativeReturnUriV1(origin, "macos-dev")
                 ? "macos-dev"
                 : "android",
+            origin,
           );
         }
         return error(404);
@@ -756,15 +731,16 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
  */
 function nativeReturnPage(
   platform: "macos" | "macos-dev" | "android",
+  origin: string,
 ): Response {
   const macos = platform !== "android";
-  const hosted = new URL(
-    platform === "macos-dev" ? NATIVE_RETURN_MACOS_DEV : NATIVE_RETURN_MACOS,
+  const returnUri = new URL(
+    nativeReturnUriV1(origin, platform === "macos-dev" ? "macos-dev" : "macos"),
   );
   const scheme =
     platform === "macos-dev" ? NATIVE_MACOS_DEV_SCHEME : NATIVE_MACOS_SCHEME;
   const target = macos
-    ? `${scheme}://${hosted.host}${hosted.pathname}`
+    ? `${scheme}://${returnUri.host}${returnUri.pathname}`
     : undefined;
   return returnPageV1({
     title: "Return to FrockBot",

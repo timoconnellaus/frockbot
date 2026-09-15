@@ -6,7 +6,13 @@ import {
 } from "@frockbot/core/protocol-schemas";
 import { createAuth } from "../../src/auth.ts";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "../../src/deployment-policy.ts";
-import { NATIVE_RETURN_ANDROID } from "../../src/native-auth.ts";
+import { nativeReturnUriV1 } from "../../src/native-auth.ts";
+
+/** The origin `vitest.integration.config.ts` gives the Worker. */
+const NATIVE_RETURN_ANDROID = nativeReturnUriV1(
+  "https://bot.frockbot.com",
+  "android",
+);
 import { ORIGIN, useApplicationArtifact } from "./fixtures.ts";
 
 useApplicationArtifact();

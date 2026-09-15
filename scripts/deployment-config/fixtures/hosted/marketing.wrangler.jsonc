@@ -1,13 +1,20 @@
-// The hosted marketing site. No deployment identity: the account, the Worker
-// name and the hostnames belong to `deployments/<profile>.json`, and
-// `scripts/deployment-config.ts` joins the two into the config
-// `wrangler deploy -c` takes (ADR 0028).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "frockbot-marketing",
+  "account_id": "374784ce2915a597adcecf9bcb2c5ee6",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-27",
   "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "frockbot.com",
+      "custom_domain": true,
+    },
+    {
+      "pattern": "www.frockbot.com",
+      "custom_domain": true,
+    },
+  ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

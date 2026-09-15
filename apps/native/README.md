@@ -9,7 +9,8 @@ export PATH="/Users/tim/repos/flutter/bin:$PATH"
 cd apps/native
 flutter pub get --enforce-lockfile
 flutter analyze --no-pub
-flutter test --no-pub
+# The client names no deployment of its own; the suite passes one that reaches nothing.
+flutter test --no-pub --dart-define=FROCKBOT_ORIGIN=https://tests.invalid
 ```
 
 On this task's restricted Mac, the SDK cache could not be written. An APFS clone of that exact SDK lives under ignored `.native-build/flutter`; `XDG_CONFIG_HOME` and `PUB_CACHE` also point under `.native-build`. It changes no SDK pin or other worktree.
@@ -170,5 +171,7 @@ scripts/native-acceptance.sh measure
 Google's system-browser consent is a supervised User step. The runner does not enter passwords. Flow selectors and the real device path are unverified until the Pixel is available. Raw output stays in `.native-build/native-acceptance/`. Activity launch time and Android gfxinfo are labelled as such; they do not satisfy first-editable-frame, Flutter raster or physical IME input-to-paint budgets.
 
 `--dart-define=FROCKBOT_APP_VERSION=<name>+<code>` is what the foot of the Profile page shows as the running version, with the booted Shorebird patch number beside it on Android. The release, patch, macOS and web builds all pass it from `pubspec.yaml`; a plain `flutter run` carries none and shows "Development build".
+
+`--dart-define=FROCKBOT_ORIGIN=<origin>` names the deployment this build talks to. The client carries no host of its own: `scripts/native-update.py`, `scripts/native-desktop-update.py`, `scripts/native-acceptance.py` and `release.yml`'s macOS build all read it from `deployments/hosted.json`, so a release and the patches that follow it cannot disagree about which server they reach ([ADR 0028](../../docs/adr/0028-open-deployment.md)). Android's App Link host and the notification tap target are the same value, read by `android/app/build.gradle.kts`. A build that passes neither this nor `FROCKBOT_LOCAL_DEV=true` claims no App Link and refuses its first request rather than guessing an origin; the web build needs none, since the browser serves it from the origin it talks to.
 
 `--dart-define=NATIVE_ACCEPTANCE=true` enables bounded frame/input telemetry containing no text or identifiers. Normal builds create no telemetry timer or output. `appInputToFrameMs` excludes hardware/compositor latency. The advisory CI workflow runs analysis/tests only when the exact SDK is already installed, and visibly reports a skip otherwise.

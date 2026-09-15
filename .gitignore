@@ -17,6 +17,9 @@ blob-report/
 .playwright/
 wrangler-logs/
 
+# Generated deployable wrangler configs (`bun run deployment:config`)
+.deployment/
+
 # Agent worktrees
 .claude/worktrees/
 .dogfood/

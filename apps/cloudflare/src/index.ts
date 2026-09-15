@@ -768,13 +768,13 @@ function developmentAuthAllowed(env: Env): boolean {
 }
 
 /**
- * Where the app may be sent back after sign-in. Production's App Links, plus
- * the development scheme on a stack that allows development auth — the flag
+ * Where the app may be sent back after sign-in: this deployment's App Links,
+ * plus the development scheme on a stack that allows development auth — the flag
  * production's secret gate refuses.
  */
-function nativeReturnUrisFor(env: Env): readonly string[] {
+function nativeReturnUrisFor(env: Env, origin: string): readonly string[] {
   return [
-    ...nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
+    ...nativeReturnUris(env.NATIVE_SLICE_2_AUTH, origin),
     ...(developmentAuthAllowed(env) ? [NATIVE_RETURN_DEVELOPMENT] : []),
   ];
 }
@@ -2392,7 +2392,13 @@ export default {
         auth: gatewayAuth(env, {
           mayCreateIdentity: (candidate) => mayCreateIdentity(env, candidate),
         }),
-        ...(nativeReturnUrisFor(env).length > 0 && env.BETTER_AUTH_SECRET
+        // The deployment's own origin, which is what `BETTER_AUTH_URL` is: a
+        // development stack points it at its own host — the emulator reaches
+        // this machine as 10.0.2.2, never as the hosted origin — and a
+        // deployment that names none offers no native sign-in.
+        ...(env.BETTER_AUTH_URL &&
+        nativeReturnUrisFor(env, env.BETTER_AUTH_URL).length > 0 &&
+        env.BETTER_AUTH_SECRET
           ? {
               nativeAuth: createNativeAuth({
                 secret: env.BETTER_AUTH_SECRET,
@@ -2400,18 +2406,12 @@ export default {
                   mayCreateIdentity: (candidate) =>
                     mayCreateIdentity(env, candidate),
                 }),
-                returnUris: nativeReturnUrisFor(env),
-                // A development stack answers on whatever `BETTER_AUTH_URL`
-                // names — the emulator reaches the host as 10.0.2.2, never
-                // as the production origin — and signs the app in as the
-                // development identity in place of Google.
+                returnUris: nativeReturnUrisFor(env, env.BETTER_AUTH_URL),
+                origin: env.BETTER_AUTH_URL,
+                // The development door signs the app in as the development
+                // identity in place of Google.
                 ...(developmentAuthAllowed(env)
-                  ? {
-                      ...(env.BETTER_AUTH_URL
-                        ? { origin: env.BETTER_AUTH_URL }
-                        : {}),
-                      developmentUserId: DEVELOPMENT_USER_ID,
-                    }
+                  ? { developmentUserId: DEVELOPMENT_USER_ID }
                   : {}),
                 admit: async (userId) => {
                   // The stored identity, not anything the bearer carries: the

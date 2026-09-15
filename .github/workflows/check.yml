@@ -109,7 +109,9 @@ jobs:
 
       - name: Test Flutter client
         working-directory: apps/native
-        run: flutter test --no-pub
+        # The client names no deployment of its own, so the suite passes an
+        # origin that reaches nothing (ADR 0028).
+        run: flutter test --no-pub --dart-define=FROCKBOT_ORIGIN=https://tests.invalid
 
       # The Android half of this client is Kotlin, and nothing above compiles
       # it: `flutter test` runs the Dart VM and `flutter build web` never reads

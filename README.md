@@ -196,11 +196,11 @@ Staging deploys from `main` only when the repository variable `DEPLOY_STAGING` i
 
 Staging isolates everything that holds state or identity — its own D1 database `frockbot-auth-staging`, its own R2 buckets, its own Vectorize index, its own secrets, and its own Durable Object namespaces, which come free because a namespace belongs to the Worker that declares it. It shares the stateless `frockbot-computer-host` Worker, which owns only the Sprites credential, so staging exercises the same host production does instead of paying for a second container deployment. The consequence is production's ordering constraint — a change to the host's contract ships with a tag, so staging sees it only once that tag lands.
 
-Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the two R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and written into the staging `database_id`, so no variable records it.
+Unlike production, the staging deploy provisions its own resources. Each step is create-if-absent, so the first deploy creates the D1 database, the two R2 buckets, and the Vectorize index, and every later deploy finds them and moves on. The D1 identifier is resolved at deploy time and handed to `bun run deployment:config staging --d1-database-id`, so no variable records it.
 
 **Staging requires an admin allowlist.** `FROCKBOT_ADMIN_EMAILS` is a required staging secret; the deploy fails without it so an administrator can always sign in and manage access. Staging uses the same [beta-access authority](docs/beta-access.md) as production.
 
-Configure these GitHub `staging` environment values. They are the production set minus `CLOUDFLARE_D1_DATABASE_ID`, which staging resolves for itself:
+Configure these GitHub `staging` environment values. They are the same set production uses:
 
 | Type     | Name                    | Purpose                                                                         |
 | -------- | ----------------------- | ------------------------------------------------------------------------------- |
@@ -233,34 +233,35 @@ After a version tag's packages are published, `release.yml` deploys four Cloudfl
 
 The Computer host and the Applet build service both run Containers, which require the **Workers Paid plan**; each deploy step builds and pushes its container image, so the runner needs Docker (`ubuntu-latest` has it).
 
-The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Both Wrangler configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
+The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, sets `DEFAULT_APPLICATION_HASH` to that digest, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Both deployments' generated configurations declare their custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
 
-Create the resources named in `apps/cloudflare/wrangler.jsonc` before the first app deployment:
+What each Worker is called, which account it belongs to, which hostnames it answers on and which buckets, index and database it binds is in `deployments/hosted.json`, not in a tracked `wrangler.jsonc`. `bun run deployment:config hosted` writes the configs the deploy reads, and `scripts/deployment-config.test.ts` proves they are still what production runs; see [`scripts/deployment-config/README.md`](scripts/deployment-config/README.md).
+
+Create the resources `deployments/hosted.json` names before the first app deployment:
 
 - D1 database `frockbot-auth`;
 - R2 buckets `frockbot-application-artifacts` and `frockbot-memory-files`;
 - Vectorize index `frockbot-memory` with 768 cosine dimensions (`bunx wrangler vectorize create frockbot-memory --preset @cf/baai/bge-base-en-v1.5`).
 
-The same Wrangler file declares Cloudflare's `AI` binding for production and development. `generate_image` uses its native image inference, and the Cloudflare account must have billing for the configured Gateway routes and native models. Frock AI reaches the Gateway over HTTP rather than through the binding: the binding's `gateway(...).run()` targets the _universal_ endpoint, whose request-shape translation rejects a `dynamic/<route>` model before inference runs ([cloudflare/ai#617](https://github.com/cloudflare/ai/issues/617)), so Auto is only accepted on the Gateway's `compat/chat/completions` endpoint. Reaching it needs the `FROCK_AI_ACCOUNT_ID` var and the `FROCK_AI_GATEWAY_TOKEN` secret, which is the `cf-aig-authorization` bearer for an authenticated Gateway. Both absent, Frock AI falls back to the binding, which still serves manual `@frock/...` ids but fails Auto. The browser e2e environment binds `AI` to a local RPC fake and sets no token, so CI takes that fallback, neither authenticating to Cloudflare nor incurring model usage.
+The same Wrangler file declares Cloudflare's `AI` binding for production and development. `generate_image` uses its native image inference, and the Cloudflare account must have billing for the configured Gateway routes and native models. Frock AI reaches the Gateway over HTTP rather than through the binding: the binding's `gateway(...).run()` targets the _universal_ endpoint, whose request-shape translation rejects a `dynamic/<route>` model before inference runs ([cloudflare/ai#617](https://github.com/cloudflare/ai/issues/617)), so Auto is only accepted on the Gateway's `compat/chat/completions` endpoint. Reaching it needs the `FROCK_AI_ACCOUNT_ID` var and the `FROCK_AI_GATEWAY_TOKEN` secret, which is the `cf-aig-authorization` bearer for an authenticated Gateway. Both absent, Frock AI falls back to the binding, which serves manual `@frock/...` ids and resolves Auto to the concrete Workers AI chat model `FROCK_AI_BINDING_AUTO_MODEL` names — so a deployment with no Gateway still picks a model for a User who chose none. The browser e2e environment binds `AI` to a local RPC fake and sets no token, so CI takes that fallback, neither authenticating to Cloudflare nor incurring model usage.
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                        | Purpose                                                                                                               |
-| -------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`      | Cloudflare token permitted to edit Workers, D1, and R2 for the target account                                         |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID`     | Cloudflare account containing the production resources                                                                |
-| Variable | `CLOUDFLARE_D1_DATABASE_ID` | Immutable ID of `frockbot-auth`                                                                                       |
-| Variable | `BETTER_AUTH_URL`           | Set to `https://bot.frockbot.com`                                                                                     |
-| Secret   | `BETTER_AUTH_SECRET`        | Better Auth secret with at least 32 random characters                                                                 |
-| Secret   | `GOOGLE_CLIENT_ID`          | Google Web application OAuth client ID                                                                                |
-| Secret   | `GOOGLE_CLIENT_SECRET`      | Google Web application OAuth client secret                                                                            |
-| Secret   | `FROCKBOT_ADMIN_EMAILS`     | Comma-separated owner emails allowed to administer deployment policy (optional; warns)                                |
-| Secret   | `SPRITES_TOKEN`             | Fly Sprites token used only by the backend Computer provider                                                          |
-| Secret   | `COMPUTER_HOST_TOKEN`       | Shared secret the app Worker presents to the Computer host; generate it                                               |
-| Secret   | `CREDENTIAL_KEYRING`        | Versioned AES-GCM keyring for per-User Connection credentials                                                         |
-| Secret   | `ROUTINE_HOOK_SECRET`       | HMAC secret every Routine webhook key is signed with; generate it                                                     |
-| Secret   | `MACHINE_TOKEN_SECRET`      | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
-| Secret   | `FCM_SERVICE_ACCOUNT`       | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
+| Type     | Name                    | Purpose                                                                                                               |
+| -------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`  | Cloudflare token permitted to edit Workers, D1, and R2 for the target account                                         |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account containing the production resources                                                                |
+| Variable | `BETTER_AUTH_URL`       | Set to `https://bot.frockbot.com`                                                                                     |
+| Secret   | `BETTER_AUTH_SECRET`    | Better Auth secret with at least 32 random characters                                                                 |
+| Secret   | `GOOGLE_CLIENT_ID`      | Google Web application OAuth client ID                                                                                |
+| Secret   | `GOOGLE_CLIENT_SECRET`  | Google Web application OAuth client secret                                                                            |
+| Secret   | `FROCKBOT_ADMIN_EMAILS` | Comma-separated owner emails allowed to administer deployment policy (optional; warns)                                |
+| Secret   | `SPRITES_TOKEN`         | Fly Sprites token used only by the backend Computer provider                                                          |
+| Secret   | `COMPUTER_HOST_TOKEN`   | Shared secret the app Worker presents to the Computer host; generate it                                               |
+| Secret   | `CREDENTIAL_KEYRING`    | Versioned AES-GCM keyring for per-User Connection credentials                                                         |
+| Secret   | `ROUTINE_HOOK_SECRET`   | HMAC secret every Routine webhook key is signed with; generate it                                                     |
+| Secret   | `MACHINE_TOKEN_SECRET`  | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
+| Secret   | `FCM_SERVICE_ACCOUNT`   | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
 
 Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities are always admitted and may open the operator surface. Administration itself is not in the app: it is the [admin portal](#the-admin-portal) at `admin.frockbot.com`, and the same list says who may use it. Every other account needs access from the beta-access authority, and having signed in before is not access; see [`docs/beta-access.md`](docs/beta-access.md), including the release step that retired the signups switch.
 

@@ -1,0 +1,138 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://frockbot.com/schemas/deployment-profile-v1.json",
+  "title": "FrockBot deployment profile",
+  "description": "Who a deployment is: the Cloudflare account, the Worker names, the hostnames, the auth Package and the resources that carry identity. `scripts/deployment-config.ts` reads one of these and writes the deployable wrangler configs from the tracked ones, which hold bindings and migrations and no identity at all.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "accountId", "prefix", "authPackage"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "name": {
+      "description": "The profile's own name. Must match the file name, and names the directory under `.deployment/`.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "accountId": {
+      "description": "The Cloudflare account every Worker in this deployment belongs to.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "region": {
+      "description": "Where a fresh deployment's R2 buckets and Vectorize index are created. The installer passes it; no wrangler config carries it, so changing it never moves an existing resource.",
+      "type": "string",
+      "enum": ["wnam", "enam", "weur", "eeur", "apac", "oc"]
+    },
+    "prefix": {
+      "description": "What every unnamed Worker and resource below is named from.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "workers": {
+      "description": "One entry per deployable. An entry that is absent is not generated and not deployed, which is how a profile leaves out the hosted-only marketing site and admin portal.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "app": { "$ref": "#/$defs/worker" },
+        "computerHost": { "$ref": "#/$defs/worker" },
+        "appletBuild": { "$ref": "#/$defs/worker" },
+        "marketing": { "$ref": "#/$defs/worker" },
+        "adminPortal": { "$ref": "#/$defs/worker" }
+      }
+    },
+    "artifactHostname": {
+      "description": "The anonymous origin an Applet's page is served from. It must be `ui.<the app's hostname>`: the gateway derives the pairing from that prefix, so a hostname of any other shape serves pages whose socket the gateway refuses (see the README).",
+      "type": "string",
+      "pattern": "^ui\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+    },
+    "authPackage": {
+      "description": "Which sign-in Package this deployment builds. The value `apps/cloudflare/src/auth-package.ts` carries.",
+      "enum": ["better-auth", "access"]
+    },
+    "access": {
+      "description": "The Cloudflare Access application the `access` Package verifies against. Written as the `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` vars.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["teamDomain", "aud"],
+      "properties": {
+        "teamDomain": { "$ref": "#/$defs/hostname" },
+        "aud": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "adminEmails": {
+      "description": "Who may bypass admission and open the debug surface. The installer sets it as the Worker secret `FROCKBOT_ADMIN_EMAILS`; no generated config carries it, which is why the hosted profile leaves it to the repository secret it already has.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/email" }
+    },
+    "d1DatabaseId": {
+      "description": "The `AUTH_DB` database. Required by the `better-auth` Package unless the deploy supplies it with `--d1-database-id`, which is how a disposable stage names a database it creates in the same job.",
+      "type": "string",
+      "pattern": "^[0-9a-fA-F-]{36}$"
+    },
+    "aiGateway": {
+      "description": "The AI Gateway that serves the platform model. Absent, the Worker takes the `AI` binding and Auto resolves to a concrete Workers AI model.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountId"],
+      "properties": {
+        "accountId": {
+          "description": "The account owning the Gateway. Present with the `FROCK_AI_GATEWAY_TOKEN` secret, requests take the compat HTTP transport — the only one that accepts a dynamic route.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9-]+$" },
+        "autoRoute": { "type": "string", "pattern": "^[A-Za-z0-9-]+$" }
+      }
+    },
+    "nativeAuth": {
+      "description": "Which signed clients may receive a sign-in. Absent, the deployment offers no native sign-in at all.",
+      "enum": ["android", "android,macos"]
+    },
+    "resources": {
+      "description": "Names that carry identity. Each is derived from `prefix` when absent.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "applicationArtifactsBucket": { "$ref": "#/$defs/resourceName" },
+        "memoryFilesBucket": { "$ref": "#/$defs/resourceName" },
+        "memoryIndex": { "$ref": "#/$defs/resourceName" },
+        "authDatabaseName": { "$ref": "#/$defs/resourceName" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "authPackage": { "const": "access" } },
+        "required": ["authPackage"]
+      },
+      "then": { "properties": { "access": true }, "required": ["access"] }
+    }
+  ],
+  "$defs": {
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/resourceName" },
+        "hostnames": {
+          "description": "Custom domains this Worker answers on. Absent, the Worker takes its `workers.dev` hostname, which is what a deployment with no zone has.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/hostname" }
+        }
+      }
+    },
+    "hostname": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+    },
+    "email": { "type": "string", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" },
+    "resourceName": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "maxLength": 63
+    }
+  }
+}

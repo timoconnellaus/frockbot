@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "name": "staging",
+  "accountId": "374784ce2915a597adcecf9bcb2c5ee6",
+  "prefix": "frockbot",
+  "authPackage": "better-auth",
+  "workers": {
+    "app": {
+      "name": "frockbot-cloudflare-staging",
+      "hostnames": ["staging-bot.frockbot.com"]
+    },
+    "computerHost": {},
+    "appletBuild": {}
+  },
+  "artifactHostname": "ui.staging-bot.frockbot.com",
+  "resources": {
+    "applicationArtifactsBucket": "frockbot-application-artifacts-staging",
+    "memoryFilesBucket": "frockbot-memory-files-staging",
+    "memoryIndex": "frockbot-memory-staging",
+    "authDatabaseName": "frockbot-auth-staging"
+  },
+  "aiGateway": {
+    "accountId": "374784ce2915a597adcecf9bcb2c5ee6"
+  }
+}

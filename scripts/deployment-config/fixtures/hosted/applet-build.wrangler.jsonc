@@ -1,10 +1,7 @@
-// Bindings, migrations and the container application. No deployment
-// identity: the account and the Worker name belong to
-// `deployments/<profile>.json`, and `scripts/deployment-config.ts` joins the
-// two into the config `wrangler deploy -c` takes (ADR 0028).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "frockbot-applet-build",
+  "account_id": "374784ce2915a597adcecf9bcb2c5ee6",
   "workers_dev": false,
   "main": "src/index.ts",
   "compatibility_date": "2026-08-27",

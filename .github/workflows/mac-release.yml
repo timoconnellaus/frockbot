@@ -46,7 +46,9 @@ jobs:
       # where the lockfile has no entry to satisfy.
       - run: flutter pub get
         working-directory: apps/native
-      - run: flutter test --no-pub test/mac_messages_test.dart test/desktop_update_test.dart
+      # The client names no deployment of its own, so the suite passes an origin
+      # that reaches nothing (ADR 0028).
+      - run: flutter test --no-pub --dart-define=FROCKBOT_ORIGIN=https://tests.invalid test/mac_messages_test.dart test/desktop_update_test.dart
         working-directory: apps/native
       - run: python3 scripts/mac-release.py 0.0.0
 

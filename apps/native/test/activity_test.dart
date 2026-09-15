@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/activity/controller.dart';
+import 'package:frockbot_native/client/transport.dart' show hostedOrigin;
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/shell/focus.dart' show sidebarUnreadFor;
 
@@ -359,17 +360,18 @@ void main() {
     });
   });
 
-  test('only exact hosted Bot links become navigation intent', () {
-    expect(botLink(Uri.parse('https://bot.frockbot.com/?bot=alpha')), 'alpha');
+  test('only exact links to this deployment become navigation intent', () {
+    final hosted = Uri.parse(hostedOrigin);
+    expect(botLink(hosted.replace(path: '/', query: 'bot=alpha')), 'alpha');
     for (final url in [
-      'https://evil.test/?bot=alpha',
-      'https://bot.frockbot.com/?bot=alpha&bot=beta',
-      'https://name@bot.frockbot.com/?bot=alpha',
-      'https://bot.frockbot.com/native/settings?bot=alpha',
-      'https://bot.frockbot.com/?bot=../alpha',
-      'https://bot.frockbot.com/?bot=alpha#other',
+      Uri.parse('https://evil.test/?bot=alpha'),
+      hosted.replace(path: '/', query: 'bot=alpha&bot=beta'),
+      hosted.replace(path: '/', userInfo: 'name', query: 'bot=alpha'),
+      hosted.replace(path: '/native/settings', query: 'bot=alpha'),
+      hosted.replace(path: '/', query: 'bot=../alpha'),
+      hosted.replace(path: '/', query: 'bot=alpha', fragment: 'other'),
     ]) {
-      expect(botLink(Uri.parse(url)), isNull, reason: url);
+      expect(botLink(url), isNull, reason: url.toString());
     }
   });
 }

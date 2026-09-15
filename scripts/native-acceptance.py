@@ -112,8 +112,10 @@ def install():
     environment["ANDROID_USER_HOME"] = str(ROOT / ".native-build/android-user")
     flutter = os.environ.get("NATIVE_FLUTTER", "/Users/tim/repos/flutter/bin/flutter")
     build_name = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$", (ROOT / "apps/native/pubspec.yaml").read_text(), re.M)[1]
+    origin = json.loads((ROOT / "deployments/hosted.json").read_text())["workers"]["app"]["hostnames"][0]
     subprocess.run([flutter, "build", "apk", "--release", f"--build-name={build_name}",
-                    f"--build-number={version + 1}", "--dart-define=NATIVE_ACCEPTANCE=true"],
+                    f"--build-number={version + 1}", f"--dart-define=FROCKBOT_ORIGIN=https://{origin}",
+                    "--dart-define=NATIVE_ACCEPTANCE=true"],
                    cwd=ROOT / "apps/native", env=environment, check=True)
     apk = ROOT / "apps/native/build/app/outputs/flutter-apk/app-release.apk"
     signer = cert(apk, "candidate-certificate.txt")

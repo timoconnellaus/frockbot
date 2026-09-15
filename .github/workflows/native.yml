@@ -48,7 +48,9 @@ jobs:
         run: flutter analyze --no-pub
       - name: Test shared fixtures and native state machines
         working-directory: apps/native
-        run: flutter test --no-pub
+        # The client names no deployment of its own, so the suite passes an
+        # origin that reaches nothing (ADR 0028).
+        run: flutter test --no-pub --dart-define=FROCKBOT_ORIGIN=https://tests.invalid
       - name: Build the web target
         working-directory: apps/native
         run: flutter build web --release --no-pub
