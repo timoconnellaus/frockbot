@@ -43,7 +43,7 @@ A user message sent mid-turn taking the place of the running turn: the running t
 _Avoid_: Steer, interrupt, barge-in, queue
 
 **Package**:
-A swappable implementation chosen at build time, behind an interface: the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
+A swappable implementation chosen at build time, behind an interface: sign-in, the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
 _Avoid_: Plugin, extension
 
 **Connection Type**:

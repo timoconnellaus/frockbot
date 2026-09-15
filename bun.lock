@@ -113,7 +113,6 @@
         "@frockbot/providers": "workspace:*",
         "agents": "0.23.0",
         "ai": "^7.0.0",
-        "better-auth": "1.7.3",
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "^1.1.4",

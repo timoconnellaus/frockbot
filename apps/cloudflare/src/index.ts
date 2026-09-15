@@ -10,6 +10,7 @@ import {
   decodePackageIframeToolCommandV1,
   type AppletBuildViewV1,
   type AppletSourceViewV1,
+  type AuthIdentityCandidateV1,
   type PackageIframeCompositionV1,
 } from "@frockbot/core/contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
@@ -123,7 +124,7 @@ import {
   type AdmissionIdentityV1,
   decodeUserFeaturesV1,
 } from "@frockbot/app/admin/shared";
-import { gatewayAuth, type IdentityCandidateV1 } from "./auth.js";
+import { AUTH_PACKAGE_V1 } from "./auth-package.js";
 import {
   createNativeAuth,
   NATIVE_RETURN_DEVELOPMENT,
@@ -283,6 +284,10 @@ interface Env {
   BETTER_AUTH_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** The Zero Trust team whose keys sign every Cloudflare Access token. */
+  ACCESS_TEAM_DOMAIN?: string;
+  /** The Access application's audience tag. */
+  ACCESS_AUD?: string;
   CREDENTIAL_KEYRING?: string;
   /** Signs every Routine webhook key. Absent closes the webhook door. */
   ROUTINE_HOOK_SECRET?: string;
@@ -652,6 +657,24 @@ function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
 }
 
 /**
+ * Every identity this build's sign-in Package produced is admitted.
+ *
+ * Cloudflare Access admits nobody the deployment's own policy did not, so on
+ * that build the policy *is* the allowlist: there is no authority to ask, no
+ * access record to read and no admission UI to show (ADR 0028). The hosted
+ * build's Package answers `authority` and nothing here applies to it.
+ */
+const AUTH_PACKAGE_DECIDES_ADMISSION_V1 =
+  AUTH_PACKAGE_V1.admission === "package";
+const ADMITTED_BY_AUTH_PACKAGE_V1: AccountAdmissionDecisionV1 = {
+  schemaVersion: 1,
+  admitted: true,
+  // The deployment is open to everyone its sign-in policy let through, which
+  // is what `open` says. No account is activated, because none is recorded.
+  basis: "open",
+};
+
+/**
  * The one door into the beta-access authority for browser and native alike.
  * An admin is answered here, without the authority, so a deployment whose
  * authority is unreachable still lets its admins in to see why.
@@ -663,6 +686,7 @@ async function admitAccount(
   if (identity.isAdmin) {
     return { schemaVersion: 1, admitted: true, basis: "admin" };
   }
+  if (AUTH_PACKAGE_DECIDES_ADMISSION_V1) return ADMITTED_BY_AUTH_PACKAGE_V1;
   return decodeAccountAdmissionDecisionV1(
     rpcJsonSnapshot(await deploymentPolicyStub(env).admitAccount(identity)),
   );
@@ -695,6 +719,7 @@ async function admitStoredAccount(
   env: Env,
   userId: string,
 ): Promise<AccountAdmissionDecisionV1 | null> {
+  if (AUTH_PACKAGE_DECIDES_ADMISSION_V1) return ADMITTED_BY_AUTH_PACKAGE_V1;
   const identity = await storedAdmissionIdentity(env, userId);
   return identity ? admitAccount(env, identity) : null;
 }
@@ -703,6 +728,7 @@ async function checkStoredAccount(
   env: Env,
   userId: string,
 ): Promise<AccountAdmissionDecisionV1 | null> {
+  if (AUTH_PACKAGE_DECIDES_ADMISSION_V1) return ADMITTED_BY_AUTH_PACKAGE_V1;
   const identity = await storedAdmissionIdentity(env, userId);
   if (!identity) return null;
   if (identity.isAdmin) {
@@ -741,7 +767,7 @@ async function externalAccountRefusal(
  */
 async function mayCreateIdentity(
   env: Env,
-  candidate: IdentityCandidateV1,
+  candidate: AuthIdentityCandidateV1,
 ): Promise<boolean> {
   const email = accessEmailV1(candidate.email);
   if (email === undefined) return false;
@@ -2389,7 +2415,7 @@ export default {
           env.USER_CONFIGURATIONS.get(
             env.USER_CONFIGURATIONS.idFromName(userId),
           ).registerPush({ userId, registration }),
-        auth: gatewayAuth(env, {
+        auth: AUTH_PACKAGE_V1.create(env, {
           mayCreateIdentity: (candidate) => mayCreateIdentity(env, candidate),
         }),
         // The deployment's own origin, which is what `BETTER_AUTH_URL` is: a
@@ -2402,7 +2428,7 @@ export default {
           ? {
               nativeAuth: createNativeAuth({
                 secret: env.BETTER_AUTH_SECRET,
-                auth: gatewayAuth(env, {
+                auth: AUTH_PACKAGE_V1.create(env, {
                   mayCreateIdentity: (candidate) =>
                     mayCreateIdentity(env, candidate),
                 }),

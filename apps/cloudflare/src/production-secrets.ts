@@ -28,7 +28,14 @@
  * flag replaced the set, and why a door that must never be open in
  * production (`ALLOW_DEVELOPMENT_AUTH`) fails the gate when the live Worker
  * holds it: no deploy is going to close it.
+ *
+ * One list here is not the same for every deployment: a required secret may
+ * belong to one auth Package (ADR 0028). Both Packages' names are classified,
+ * because the Worker's `Env` declares both, and only the built Package's are
+ * required, checked and deployed.
  */
+import type { AuthPackageIdV1 } from "@frockbot/core/contracts";
+import { AUTH_PACKAGE_V1 } from "./auth-package.js";
 
 /** One setting the deploy hands the Worker. */
 export interface ProductionSecretV1 {
@@ -42,6 +49,26 @@ export interface ProductionSecretV1 {
    * manifest's "names nothing the Worker does not read" rule skips it.
    */
   readonly hostOnly?: boolean;
+  /**
+   * Required by one auth Package only. A build that chose the other Package
+   * neither reads it nor deploys it, so it is required nowhere until that
+   * build is the one being released.
+   */
+  readonly authPackage?: AuthPackageIdV1;
+}
+
+/**
+ * Whether this build carries the secret at all.
+ *
+ * The one asymmetry in this module: every other name is required or optional
+ * for every deployment, and these are required for one and unknown to the
+ * other.
+ */
+function belongsToThisBuildV1(secret: ProductionSecretV1): boolean {
+  return (
+    secret.authPackage === undefined ||
+    secret.authPackage === AUTH_PACKAGE_V1.id
+  );
 }
 
 /** One setting the deploy may omit, and what the product loses when it does. */
@@ -72,18 +99,32 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
     name: "BETTER_AUTH_URL",
     why: "The deployment's own origin; every sign-in redirect is built from it.",
+    authPackage: "better-auth",
   },
   {
     name: "BETTER_AUTH_SECRET",
     why: "Signs every session cookie. Absent, nobody can sign in.",
+    authPackage: "better-auth",
   },
   {
     name: "GOOGLE_CLIENT_ID",
-    why: "The only sign-in method production offers.",
+    why: "The only sign-in method the hosted deployment offers.",
+    authPackage: "better-auth",
   },
   {
     name: "GOOGLE_CLIENT_SECRET",
-    why: "The only sign-in method production offers.",
+    why: "The only sign-in method the hosted deployment offers.",
+    authPackage: "better-auth",
+  },
+  {
+    name: "ACCESS_TEAM_DOMAIN",
+    why: "The Zero Trust team whose public keys sign every Access token, and whose logout ends a session.",
+    authPackage: "access",
+  },
+  {
+    name: "ACCESS_AUD",
+    why: "The Access application's audience tag. Absent, a token minted for another application would be accepted.",
+    authPackage: "access",
   },
   {
     name: "SPRITES_TOKEN",
@@ -249,10 +290,15 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
     },
   ];
 
+/** What this build must be given, the other auth Package's names aside. */
+export function requiredSecretsV1(): ProductionSecretV1[] {
+  return REQUIRED_PRODUCTION_SECRETS_V1.filter(belongsToThisBuildV1);
+}
+
 /** Every name the deploy's secrets file may carry, required first. */
 export function deployedSecretNamesV1(): string[] {
   return [
-    ...REQUIRED_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
+    ...requiredSecretsV1().map((secret) => secret.name),
     ...OPTIONAL_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
   ];
 }
@@ -261,7 +307,7 @@ export function deployedSecretNamesV1(): string[] {
 export function missingRequiredSecretsV1(
   present: Readonly<Record<string, string | undefined>>,
 ): ProductionSecretV1[] {
-  return REQUIRED_PRODUCTION_SECRETS_V1.filter(
+  return requiredSecretsV1().filter(
     (secret) => (present[secret.name] ?? "").trim() === "",
   );
 }

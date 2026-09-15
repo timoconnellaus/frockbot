@@ -7,7 +7,10 @@ import type {
   ApprovalListViewV1,
 } from "@frockbot/app/shell/approvals";
 import { describe, expect, test } from "bun:test";
-import { type SessionEvent } from "@frockbot/core/contracts";
+import {
+  type AuthPackageV1,
+  type SessionEvent,
+} from "@frockbot/core/contracts";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/core/connection";
 import { createSettingsBackendContribution } from "@frockbot/app/settings/backend";
 import { applyBotProfilePatchV1 } from "@frockbot/core/configuration";
@@ -58,7 +61,6 @@ import type {
   BotTurnCommand,
   BotTurnResult,
   ConnectionBinding,
-  GatewayAuth,
   GatewayDependencies,
   LoadedWorker,
   UserBotStateBinding,
@@ -954,10 +956,29 @@ class DirectWorkerLoader implements WorkerLoader {
   }
 }
 
-const unauthenticatedAuth: GatewayAuth = {
+/**
+ * An auth Package for a gateway test.
+ *
+ * Only the members the test under it exercises are given: a route that reaches
+ * one it did not is a bug in the test, not a path to stub out.
+ */
+function testAuthPackage(parts: Partial<AuthPackageV1>): AuthPackageV1 {
+  const unreached = (member: string) => (): never => {
+    throw new Error(`the gateway must not reach auth.${member}`);
+  };
+  return {
+    handler: unreached("handler"),
+    getSession: unreached("getSession"),
+    signOut: unreached("signOut"),
+    startSignIn: unreached("startSignIn"),
+    ...parts,
+  };
+}
+
+const unauthenticatedAuth = testAuthPackage({
   handler: () => Promise.resolve(new Response("auth handler")),
   getSession: () => Promise.resolve(null),
-};
+});
 
 const activeAccount: AccountAdmissionDecisionV1 = {
   schemaVersion: 1,
@@ -968,7 +989,7 @@ const activeAccount: AccountAdmissionDecisionV1 = {
 function createTestGateway(
   applicationHashFor: (userId: string) => Promise<string> = () =>
     Promise.resolve("foundation-v1"),
-  auth: GatewayAuth = unauthenticatedAuth,
+  auth: AuthPackageV1 = unauthenticatedAuth,
   allowDevelopmentIdentity = true,
   allowedClientOrigins?: string[],
   access?: {
@@ -2105,7 +2126,7 @@ describe("Cloudflare user application gateway", () => {
 
   test("routes hosted sign-out only through Better Auth", async () => {
     const requests: Array<{ method: string; pathname: string }> = [];
-    const auth: GatewayAuth = {
+    const auth = testAuthPackage({
       handler: (request) => {
         const url = new URL(request.url);
         requests.push({ method: request.method, pathname: url.pathname });
@@ -2117,7 +2138,7 @@ describe("Cloudflare user application gateway", () => {
         );
       },
       getSession: () => Promise.resolve({ user: { id: "signed-in-user" } }),
-    };
+    });
     const { gateway, loader } = createTestGateway(undefined, auth);
 
     const response = await gateway(
@@ -2136,10 +2157,10 @@ describe("Cloudflare user application gateway", () => {
   });
 
   test("derives the application identity from the Better Auth session", async () => {
-    const auth: GatewayAuth = {
+    const auth = testAuthPackage({
       handler: unauthenticatedAuth.handler,
       getSession: () => Promise.resolve({ user: { id: "signed-in-user" } }),
-    };
+    });
     const { gateway, loader } = createTestGateway(undefined, auth);
     const response = await gateway(
       new Request("https://frockbot.test/", {
@@ -2154,10 +2175,10 @@ describe("Cloudflare user application gateway", () => {
   });
 
   test("projects authenticated identity through the hosted transport seam", async () => {
-    const auth: GatewayAuth = {
+    const auth = testAuthPackage({
       handler: unauthenticatedAuth.handler,
       getSession: () => Promise.resolve({ user: { id: "signed-in-user" } }),
-    };
+    });
     const { gateway, loader } = createTestGateway(undefined, auth);
 
     const response = await gateway(
@@ -2183,13 +2204,13 @@ describe("Cloudflare user application gateway", () => {
       ["account-blocked", "This account can't use FrockBot."],
     ] as const;
     for (const [reason, title] of reasons) {
-      const auth: GatewayAuth = {
+      const auth = testAuthPackage({
         handler: unauthenticatedAuth.handler,
         getSession: () =>
           Promise.resolve({
             user: { id: "held-user", email: "held@example.com" },
           }),
-      };
+      });
       let applicationHashReads = 0;
       const { gateway, loader, configurationRoutes } = createTestGateway(
         () => {
@@ -2234,7 +2255,7 @@ describe("Cloudflare user application gateway", () => {
 
   test("asks the authority with the session's verified identity", async () => {
     const asked: AdmissionIdentityV1[] = [];
-    const auth: GatewayAuth = {
+    const auth = testAuthPackage({
       handler: unauthenticatedAuth.handler,
       getSession: () =>
         Promise.resolve({
@@ -2244,7 +2265,7 @@ describe("Cloudflare user application gateway", () => {
             emailVerified: true,
           },
         }),
-    };
+    });
     const { gateway, loader } = createTestGateway(
       undefined,
       auth,
@@ -2287,10 +2308,10 @@ describe("Cloudflare user application gateway", () => {
     ]) {
       const { gateway } = createTestGateway(
         undefined,
-        {
+        testAuthPackage({
           handler: unauthenticatedAuth.handler,
           getSession: () => Promise.resolve({ user }),
-        },
+        }),
         false,
         undefined,
         {
@@ -2316,11 +2337,11 @@ describe("Cloudflare user application gateway", () => {
   });
 
   test("an unreachable authority is a 503 that loads nothing", async () => {
-    const auth: GatewayAuth = {
+    const auth = testAuthPackage({
       handler: unauthenticatedAuth.handler,
       getSession: () =>
         Promise.resolve({ user: { id: "member", email: "m@example.com" } }),
-    };
+    });
     const { gateway, loader, configurationRoutes } = createTestGateway(
       undefined,
       auth,
@@ -2347,10 +2368,10 @@ describe("Cloudflare user application gateway", () => {
   test("rechecks on every request, so a pause lands on an open session", async () => {
     let decision: AccountAdmissionDecisionV1 = activeAccount;
     let asked = 0;
-    const auth: GatewayAuth = {
+    const auth = testAuthPackage({
       handler: unauthenticatedAuth.handler,
       getSession: () => Promise.resolve({ user: { id: "member" } }),
-    };
+    });
     const { gateway } = createTestGateway(undefined, auth, false, undefined, {
       admitAccount: () => {
         asked += 1;
@@ -2369,13 +2390,13 @@ describe("Cloudflare user application gateway", () => {
   });
 
   test("admits configured admins without asking the authority", async () => {
-    const auth: GatewayAuth = {
+    const auth = testAuthPackage({
       handler: unauthenticatedAuth.handler,
       getSession: () =>
         Promise.resolve({
           user: { id: "owner-user", email: "OWNER@example.com" },
         }),
-    };
+    });
     const { gateway, loader } = createTestGateway(
       undefined,
       auth,
@@ -2417,24 +2438,27 @@ describe("Cloudflare user application gateway", () => {
     expect(loader.ids).toEqual(["developer:foundation-v1"]);
   });
 
-  test("turns the refusal page link into a Better Auth sign-out", async () => {
-    const requests: Array<{ method: string; pathname: string }> = [];
-    const auth: GatewayAuth = {
-      handler: (request) => {
-        const url = new URL(request.url);
-        requests.push({ method: request.method, pathname: url.pathname });
+  test("turns the refusal page link into the auth Package's sign-out", async () => {
+    // What signing out *means* is the Package's: better-auth clears its cookie
+    // and Cloudflare Access leaves the team. The gateway's part is that a
+    // refused account can still reach the route, and that the Package's answer
+    // reaches the browser whole, cookies included.
+    const signedOut: Array<{ method: string; pathname: string }> = [];
+    const auth = testAuthPackage({
+      signOut: (request, url) => {
+        signedOut.push({ method: request.method, pathname: url.pathname });
         return Promise.resolve(
-          Response.json(
-            { success: true },
-            { headers: { "set-cookie": "session=; Max-Age=0" } },
-          ),
+          new Response(null, {
+            status: 303,
+            headers: { location: "/", "set-cookie": "session=; Max-Age=0" },
+          }),
         );
       },
       getSession: () =>
         Promise.resolve({
           user: { id: "new-user", email: "new@example.com" },
         }),
-    };
+    });
     const { gateway } = createTestGateway(undefined, auth, false, undefined, {
       admitAccount: () =>
         Promise.resolve({
@@ -2451,18 +2475,16 @@ describe("Cloudflare user application gateway", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/");
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
-    expect(requests).toEqual([
-      { method: "POST", pathname: "/api/auth/sign-out" },
-    ]);
+    expect(signedOut).toEqual([{ method: "GET", pathname: "/sign-out" }]);
   });
 });
 
 const CLIENT_ORIGIN = "https://client.frockbot.test";
 
-const rejectingAuth: GatewayAuth = {
+const rejectingAuth = testAuthPackage({
   handler: () => Promise.reject(new Error("auth handler was invoked")),
   getSession: () => Promise.reject(new Error("session was resolved")),
-};
+});
 
 describe("Bot-state WebSocket gateway", () => {
   const channelPath = "/api/bots/scout/state-channel?version=1";
@@ -2593,7 +2615,7 @@ describe("Bot-state WebSocket gateway", () => {
   });
 });
 
-const bearerAuth: GatewayAuth = {
+const bearerAuth = testAuthPackage({
   handler: () =>
     Promise.resolve(
       new Response("auth handler", {
@@ -2606,7 +2628,7 @@ const bearerAuth: GatewayAuth = {
         ? { user: { id: "mobile-user" } }
         : null,
     ),
-};
+});
 
 function clientOriginRequest(path: string, init?: RequestInit): Request {
   const headers = new Headers(init?.headers);

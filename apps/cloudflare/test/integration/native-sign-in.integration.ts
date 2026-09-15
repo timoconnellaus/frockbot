@@ -4,7 +4,7 @@ import {
   decodeProtocol,
   MINIMUM_NATIVE_VERSION,
 } from "@frockbot/core/protocol-schemas";
-import { createAuth } from "../../src/auth.ts";
+import { createAuth } from "@frockbot/app/auth/better-auth";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "../../src/deployment-policy.ts";
 import { nativeReturnUriV1 } from "../../src/native-auth.ts";
 

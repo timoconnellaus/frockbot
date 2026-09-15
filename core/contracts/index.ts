@@ -1,4 +1,5 @@
 export * from "./applets.js";
+export * from "./auth-package.js";
 export * from "./canonical-json.js";
 export * from "./contributions.js";
 export * from "./iframe-ui.js";

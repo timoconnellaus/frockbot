@@ -2,6 +2,8 @@
 
 Signing in proves who someone is. It does not give them FrockBot. Access is decided by one authority, the singleton `DeploymentPolicy` Durable Object (`apps/cloudflare/src/deployment-policy.ts`), and the rule it applies is `evaluateAdmissionV1` (`apps/cloudflare/src/account-admission.ts`).
 
+This is the hosted deployment's rule, and it holds wherever the built [auth Package](architecture.md#12-auth) answers `admission: "authority"`. A deployment that builds Cloudflare Access has no authority to ask: its Access policy is the allowlist, so the seam in `index.ts` admits every identity the Package produced and none of what follows applies ([ADR 0028](adr/0028-open-deployment.md)).
+
 ## The rule
 
 The deployment has one **admission mode**:
@@ -25,7 +27,7 @@ A provisioned User, an existing better-auth identity or a live session are not a
 
 ## Where it is asked
 
-- **Identity creation.** better-auth's `user.create.before` hook (`identityCreationHooksV1`) asks `mayCreateIdentity`. Admins may create an identity in every mode. For everyone else, a closed deployment writes no `user` row; an invite-only deployment writes one only for an invited, verified address.
+- **Identity creation.** better-auth's `user.create.before` hook (`identityCreationHooksV1`, `app/auth/better-auth/index.ts`) asks `mayCreateIdentity`. Admins may create an identity in every mode. For everyone else, a closed deployment writes no `user` row; an invite-only deployment writes one only for an invited, verified address.
 - **Authenticated browser requests.** The gateway asks `admitAccount` after resolving the session and before anything reaches a User Durable Object. A pause takes effect on the account's next request.
 - **Authenticated native requests.** `nativeAuth.authenticate` first verifies the bearer and reads its existing durable session without provisioning a User, then asks the authority. Missing or revoked sessions cannot activate access or spend an invitation. The exchange checks issuance eligibility without provisioning, then asks before issuing a session, and the settings handoff asks through `authenticate`. Sign-out verifies the bearer and revokes its existing session even when access is refused or the admission authority is unavailable. Session reads and revocations never provision a User. The gateway reuses the native answer rather than asking twice.
 - **Signed public requests.** Applet viewer sockets, Routine webhook deliveries and machine enrollments verify their token, then use the authority's read-only `checkAccount` through the stored identity before User or Bot access. These checks apply the same rule without activating an account or spending an invitation. Existing admitted work is not cancelled; machine polling and result delivery remain available to finish it. Regression coverage is in `apps/cloudflare/test/public-account-access.workerd.ts` and `apps/cloudflare/test/applets.workerd.ts`.

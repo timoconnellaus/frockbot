@@ -66,11 +66,8 @@ export async function nativeHeaders(userId: string) {
     origin: NATIVE_ORIGIN,
     returnUris: [NATIVE_RETURN_ANDROID],
     auth: {
-      getSession: async () => ({
-        user: { id: userId },
-        session: { id: "browser-test" },
-      }),
-      handler: async () => new Response(null, { status: 404 }),
+      getSession: async () => ({ user: { id: userId } }),
+      startSignIn: async () => new Response(null, { status: 404 }),
     },
     admit: async () =>
       decodeAccountAdmissionDecisionV1(

@@ -16,7 +16,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 6. **Two deploy paths rewrite `wrangler.jsonc` by regex** (`main.yml`'s "Configure staging D1 database" and "Configure application artifact", `release.yml`'s production counterparts). The checked-in placeholder `database_id` `00000000-0000-0000-0000-000000000000` and the string `foundation-v1` are load-bearing; reformatting the file breaks deployment.
 
-7. ~~**Closed admission does not prevent account creation.**~~ **Fixed.** Identity creation now consults the [beta-access authority](beta-access.md#where-it-is-asked), through `identityCreationHooksV1` (`apps/cloudflare/src/auth.ts`).
+7. ~~**Closed admission does not prevent account creation.**~~ **Fixed.** Identity creation now consults the [beta-access authority](beta-access.md#where-it-is-asked), through `identityCreationHooksV1` (`app/auth/better-auth/index.ts`).
 
 8. ~~**Admin is unreachable from the native app.**~~ **Fixed.** `gateway.ts` derives `isAdmin` from `session.user.email`, and `native-auth.ts` built a native session as `{user: {id}}` with no email, so a listed admin was ordinary on the phone while the same account was an admin in a browser. The native session now carries the email, looked up through the `profile` seam the same object already exposed — the lookup native admission was already doing for the same user.
 

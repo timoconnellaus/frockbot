@@ -21,11 +21,11 @@ import {
 } from "@frockbot/app/admin/shared";
 import type {
   BotConfigurationBinding,
-  GatewayAuth,
   UserBotStateBinding,
   UserConfigurationBinding,
   WorkerLoader,
 } from "../src/contracts.ts";
+import type { AuthPackageV1 } from "@frockbot/core/contracts";
 import {
   cleanRetiredDeploymentPolicyV1,
   DEPLOYMENT_POLICY_SINGLETON_NAME,
@@ -128,8 +128,10 @@ function operations(
  * Sessions come from test headers; `x-test-verified` is the identity
  * provider's verification, which a real Google sign-in always carries.
  */
-const auth: GatewayAuth = {
+const auth: AuthPackageV1 = {
   handler: () => Promise.resolve(Response.json({ success: true })),
+  signOut: () => Promise.resolve(new Response(null, { status: 303 })),
+  startSignIn: () => Promise.resolve(new Response(null, { status: 302 })),
   getSession: (headers) => {
     const id = headers.get("x-test-user");
     if (!id) return Promise.resolve(null);

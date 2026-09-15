@@ -22,6 +22,8 @@
     "./audit/store": "./audit/store.ts",
     "./audit/testing": "./audit/testing.ts",
     "./audit/user": "./audit/user.ts",
+    "./auth/access": "./auth/access/index.ts",
+    "./auth/better-auth": "./auth/better-auth/index.ts",
     "./auth/definition": "./auth/definition.ts",
     "./auth/shared": "./auth/shared.ts",
     "./billing/computer": "./billing/computer.ts",

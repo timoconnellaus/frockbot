@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { identityCreationHooksV1, type IdentityCandidateV1 } from "./auth.ts";
+import { identityCreationHooksV1 } from "./index.ts";
+import type { AuthIdentityCandidateV1 } from "@frockbot/core/contracts";
 
 test("the identity provider's write waits on the access authority's answer", async () => {
-  const asked: IdentityCandidateV1[] = [];
+  const asked: AuthIdentityCandidateV1[] = [];
   const hooks = identityCreationHooksV1(async (candidate) => {
     asked.push(candidate);
     return candidate.email === "invited@example.com" && candidate.emailVerified;

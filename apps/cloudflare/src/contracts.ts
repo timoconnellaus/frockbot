@@ -12,6 +12,7 @@ import type {
   SettingsChangeCommand,
 } from "@frockbot/core/protocol-schemas";
 import {
+  type AuthPackageV1,
   type BotIsolateEnv,
   type PluginWorkerEntrypoint,
   type SessionEvent,
@@ -431,24 +432,6 @@ export interface PackageArtifactStore {
   loadPackageArtifact(contentHash: string): Promise<string>;
 }
 
-export interface AuthSession {
-  user: {
-    id: string;
-    email?: string;
-    /** Whether the identity provider verified `email`; absent means no. */
-    emailVerified?: boolean;
-  };
-}
-
-export interface GatewayAuth {
-  /** Profile hints for the already authenticated User; no credential fields. */
-  profile?(
-    userId: string,
-  ): Promise<{ name?: string; email?: string; emailVerified?: boolean } | null>;
-  handler(request: Request): Promise<Response>;
-  getSession(headers: Headers): Promise<AuthSession | null>;
-}
-
 export interface ConnectionBinding {
   start(input: {
     commandId: string;
@@ -736,7 +719,7 @@ export interface GatewayDependencies {
   uiArtifactHosts?: readonly string[];
   /** The request's `ctx.waitUntil`, for work that may outlive the answer. */
   waitUntil?: (promise: Promise<unknown>) => void;
-  auth: GatewayAuth;
+  auth: AuthPackageV1;
   /**
    * The beta-access authority, asked before browser requests reach a User;
    * native requests reuse their admission answer. It may activate the account
