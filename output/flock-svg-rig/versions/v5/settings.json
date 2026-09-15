@@ -1,0 +1,8 @@
+{
+  "version": "v5",
+  "precision": 7,
+  "difference": 8,
+  "speckle": 6,
+  "mode": "spline",
+  "scale": 3
+}

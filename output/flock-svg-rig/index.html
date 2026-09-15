@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Flock · SVG likeness lab</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f6f4ee;
+        color: #202224;
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1600px;
+        margin: auto;
+        padding: 30px;
+      }
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.19em;
+        text-transform: uppercase;
+        color: #7e6174;
+      }
+      h1 {
+        font-size: 34px;
+        letter-spacing: -0.045em;
+        margin: 5px 0;
+      }
+      p {
+        margin: 3px 0;
+        color: #686969;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      .badge {
+        padding: 8px 14px;
+        border-radius: 25px;
+        background: #e8e3dc;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      .badge.pass {
+        background: #dceadb;
+        color: #256438;
+      }
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 25px 0 18px;
+      }
+      button,
+      select,
+      a.download {
+        background: white;
+        border: 1px solid #d9d7d0;
+        border-radius: 9px;
+        color: inherit;
+        font: inherit;
+        padding: 8px 12px;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      button[aria-pressed="true"] {
+        background: #272a29;
+        color: white;
+        border-color: #272a29;
+      }
+      button:focus-visible,
+      select:focus-visible,
+      input:focus-visible,
+      a:focus-visible {
+        outline: 3px solid #c46d99;
+        outline-offset: 3px;
+      }
+      .divider {
+        width: 1px;
+        height: 24px;
+        background: #d5d3cc;
+        margin: 0 5px;
+      }
+      .slider {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+      .slider input {
+        width: 125px;
+        accent-color: #a34477;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+      .card {
+        background: white;
+        border: 1px solid #ddded6;
+        border-radius: 15px;
+        overflow: hidden;
+      }
+      .card-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 18px;
+      }
+      .card h2 {
+        font-size: 19px;
+        margin: 0;
+      }
+      .score {
+        font-size: 22px;
+        font-weight: 650;
+        letter-spacing: -0.04em;
+      }
+      .score.pass {
+        color: #337143;
+      }
+      .comparison {
+        padding: 0 12px 12px;
+      }
+      .views {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .view {
+        position: relative;
+        min-width: 0;
+      }
+      .label {
+        display: block;
+        text-align: center;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #787b76;
+        margin-bottom: 5px;
+      }
+      .stage {
+        position: relative;
+        aspect-ratio: 527/615;
+        background: #fff9ef;
+        border-radius: 8px;
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+      }
+      .stage img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        position: absolute;
+        inset: 0;
+      }
+      .stage .svg {
+        opacity: 1;
+      }
+      .stage .abs {
+        position: absolute;
+        inset: 0;
+      }
+      .single {
+        display: none;
+      }
+      .zoom .stage {
+        aspect-ratio: 1;
+        overflow: auto;
+      }
+      .zoom .stage img {
+        width: 200%;
+        height: 200%;
+        max-width: none;
+        left: -50%;
+        top: -40%;
+      }
+      .checker .stage {
+        background: repeating-conic-gradient(#fff 0% 25%, #e4e8e7 0% 50%)
+          50%/16px 16px;
+      }
+      .metrics {
+        padding: 13px 18px;
+        border-top: 1px solid #ecece6;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 4px;
+        font-size: 12px;
+      }
+      .metrics b {
+        font-variant-numeric: tabular-nums;
+      }
+      .card-foot {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px 18px 15px;
+        font-size: 12px;
+        color: #787b76;
+      }
+      .card-foot a {
+        color: #8b416b;
+      }
+      .notes {
+        display: grid;
+        grid-template-columns: 1.2fr 1fr;
+        gap: 40px;
+        margin: 26px 0;
+      }
+      .notes h3 {
+        font-size: 14px;
+        margin: 0 0 6px;
+      }
+      .notes p {
+        font-size: 12px;
+        line-height: 1.7;
+      }
+      .history {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        margin-top: 15px;
+      }
+      .history td,
+      .history th {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid #deded8;
+        font-variant-numeric: tabular-nums;
+      }
+      footer {
+        border-top: 1px solid #ddded6;
+        padding-top: 14px;
+        font-size: 11px;
+        color: #7e807b;
+        display: flex;
+        justify-content: space-between;
+      }
+      #status {
+        margin-bottom: 12px;
+        font-size: 12px;
+      }
+      body[data-mode="overlay"] .views,
+      body[data-mode="difference"] .views {
+        display: none;
+      }
+      body[data-mode="overlay"] .single,
+      body[data-mode="difference"] .single {
+        display: block;
+      }
+      body[data-mode="overlay"] .diff,
+      body[data-mode="difference"] .overlay-image {
+        display: none;
+      }
+      body[data-mode="overlay"] .single .svg {
+        opacity: var(--mix, 0.5);
+      }
+      body[data-mode="difference"] .single {
+        background: #10131b;
+      }
+      .blink .single .svg {
+        animation: blink 1.4s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      @media (max-width: 1000px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .views {
+          max-width: 700px;
+          margin: auto;
+        }
+        .single {
+          max-width: 527px;
+          margin: auto;
+        }
+        .notes {
+          grid-template-columns: 1fr;
+        }
+        header {
+          align-items: start;
+        }
+        .slider {
+          margin-left: 0;
+        }
+      }
+    </style>
+  </head>
+  <body data-mode="side">
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">FrockBot / Bold sticker / SVG conversion</div>
+          <h1>The likeness lab.</h1>
+          <p>
+            The locked concept beside real vector paths. Same crop. Same scale.
+          </p>
+        </div>
+        <span class="badge" id="overall">Target &gt; 95% on every sheep</span>
+      </header>
+      <div class="controls">
+        <button data-mode="side" aria-pressed="true">Side by side</button
+        ><button data-mode="overlay" aria-pressed="false">Overlay</button
+        ><button data-mode="difference" aria-pressed="false">
+          Difference map</button
+        ><span class="divider"></span
+        ><button id="zoom" aria-pressed="false">Detail zoom</button
+        ><button id="checker" aria-pressed="false">Check transparency</button
+        ><select id="version" aria-label="SVG revision">
+          <option value="latest">Latest revision</option></select
+        ><label class="slider"
+          >Overlay
+          <input
+            type="range"
+            id="mix"
+            min="0"
+            max="100"
+            value="50"
+            aria-label="SVG overlay opacity"
+          /><output id="mix-value">50%</output></label
+        >
+      </div>
+      <p id="status" role="status">
+        Preparing reference crops and first SVG pass…
+      </p>
+      <section class="grid" id="cards"></section>
+      <section class="notes">
+        <div>
+          <h3>What “95%” means here</h3>
+          <p>
+            The score is the <strong>lowest</strong> of foreground RGB
+            agreement, masked local structural similarity (SSIM), and
+            coloured-edge F1 within one source pixel. Every measure must exceed
+            95%. The reference mask and crop are fixed before tracing. Empty
+            card background and headings do not contribute to the score. This is
+            a reproducible image-comparison target, not a claim that perception
+            can be reduced to one number.
+          </p>
+        </div>
+        <div>
+          <h3>Inspect the differences</h3>
+          <p>
+            Overlay reveals alignment. Difference maps amplify RGB differences
+            ×6: black is agreement, brighter pixels differ. Detail zoom shows
+            the same fixed area of both images. SVGs must contain vector paths
+            only—no embedded PNGs or image elements. The original source and all
+            revisions remain available.
+          </p>
+        </div>
+      </section>
+      <h3>Revision history</h3>
+      <table class="history">
+        <thead>
+          <tr>
+            <th>Revision</th>
+            <th>Guardian</th>
+            <th>Pixel</th>
+            <th>Sunny</th>
+          </tr>
+        </thead>
+        <tbody id="history"></tbody>
+      </table>
+      <p style="margin: 24px 0">
+        <a class="download" href="flock-bold-sticker-svgs.zip" download
+          >Download all three SVGs</a
+        >
+      </p>
+      <footer>
+        <span id="provenance">Fixed reference: bold-sticker concept card</span
+        ><a href="assets/concept-card.png" target="_blank"
+          >Original concept card ↗</a
+        >
+      </footer>
+    </main>
+    <script src="lab.js"></script>
+  </body>
+</html>

@@ -1,0 +1,45 @@
+{
+  "id": "v2",
+  "label": "02 \u00b7 Refined trace / 40 colours",
+  "characters": [
+    {
+      "name": "guardian",
+      "color": 97.77158981153717,
+      "ssim": 85.02526911806657,
+      "edge": 93.72996094116469,
+      "silhouette": 99.85711333770054,
+      "score": 85.02526911806657,
+      "paths": 31,
+      "bytes": 753234,
+      "svg": "versions/v2/guardian.svg",
+      "diff": "versions/v2/guardian-diff.png",
+      "sha256": "d307de8f9fc2943df94ccdeb57aca8e8b6016fbc2c79594f883773bbaa2ed307"
+    },
+    {
+      "name": "pixel",
+      "color": 96.0319957338993,
+      "ssim": 76.52180190585675,
+      "edge": 82.52663995607567,
+      "silhouette": 99.81323372465314,
+      "score": 76.52180190585675,
+      "paths": 29,
+      "bytes": 754576,
+      "svg": "versions/v2/pixel.svg",
+      "diff": "versions/v2/pixel-diff.png",
+      "sha256": "960eb26ca93b5c7e635fb6baa41eba6d309d80af6d63f94fbda4523024076c02"
+    },
+    {
+      "name": "sunny",
+      "color": 96.9569468160487,
+      "ssim": 78.85440501783226,
+      "edge": 86.32428618965702,
+      "silhouette": 99.8373143679993,
+      "score": 78.85440501783226,
+      "paths": 24,
+      "bytes": 724146,
+      "svg": "versions/v2/sunny.svg",
+      "diff": "versions/v2/sunny-diff.png",
+      "sha256": "fabf4416870d8cf6f72c85a9387a6ed318540864349ec0e430a5a4e2a0b91757"
+    }
+  ]
+}
