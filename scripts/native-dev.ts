@@ -990,10 +990,10 @@ function status(
     `  Web:   open ${hostOrigin}/?as_user=${DEVELOPMENT_USER} — the same Flutter client, served by this Worker`,
   );
   console.log(
-    `  Hot reload: adb reverse tcp:${workerPort} tcp:${workerPort} && cd apps/native && flutter run -d ${emulatorSerial() ?? "<emulator>"} \\`,
+    `  Hot reload: adb reverse tcp:${workerPort} tcp:${workerPort} && cd apps/native && FROCKBOT_ANDROID_RELEASE_IDENTITY=true \\`,
   );
   console.log(
-    `      --dart-define=FROCKBOT_ORIGIN=${emulatorOrigin} --dart-define=FROCKBOT_DEV_AUTH=true`,
+    `      flutter run -d ${emulatorSerial() ?? "<emulator>"} --dart-define=FROCKBOT_ORIGIN=${emulatorOrigin} --dart-define=FROCKBOT_DEV_AUTH=true`,
   );
   console.log(`  Stop:  bun scripts/native-dev.ts down`);
   console.log();
