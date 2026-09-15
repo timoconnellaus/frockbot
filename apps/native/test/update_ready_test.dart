@@ -21,6 +21,7 @@ class FakeUpdateService implements MobileUpdateService {
   Completer<void>? checkGate;
   bool restartSucceeds;
   bool downloadStages;
+  Object? downloadFailure;
 
   /// What successive local reads of the staged patch report; the last entry
   /// repeats once they run out.
@@ -55,6 +56,7 @@ class FakeUpdateService implements MobileUpdateService {
   @override
   Future<bool> download() async {
     downloads++;
+    if (downloadFailure != null) throw downloadFailure!;
     return downloadStages;
   }
 
@@ -171,6 +173,24 @@ void main() {
     await controller.check();
 
     expect(service.stagedChecks, 2);
+    expect(controller.restartRequired, isTrue);
+  });
+
+  test('a download that throws still watches for the patch', () async {
+    final service = FakeUpdateService(
+      statuses: const [MobileUpdateStatus.outdated],
+      stagedReads: const [true],
+    )..downloadFailure = StateError('patch state is being rewritten');
+    final controller = MobileUpdateController(
+      service: service,
+      stagedPollInterval: Duration.zero,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.check();
+
+    expect(service.downloads, 1);
+    expect(service.stagedChecks, 1);
     expect(controller.restartRequired, isTrue);
   });
 

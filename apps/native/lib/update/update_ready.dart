@@ -140,7 +140,7 @@ class MobileUpdateController extends ChangeNotifier {
       final ready = switch (status) {
         MobileUpdateStatus.restartRequired => true,
         MobileUpdateStatus.outdated =>
-          await service.download() || await _awaitStaged(),
+          await _download() || await _awaitStaged(),
         MobileUpdateStatus.upToDate || MobileUpdateStatus.unavailable => false,
       };
       if (ready && !_disposed) {
@@ -150,6 +150,16 @@ class MobileUpdateController extends ChangeNotifier {
     } catch (_) {
       // Update discovery is opportunistic. The next resume is the retry, and
       // the running app remains fully usable in the meantime.
+    }
+  }
+
+  /// A download that throws, including its closing staged read, still hands
+  /// over to the watch below rather than ending the check.
+  Future<bool> _download() async {
+    try {
+      return await service.download();
+    } catch (_) {
+      return false;
     }
   }
 
