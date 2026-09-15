@@ -27,7 +27,10 @@ APP_NAME = "FrockBot Dev"
 BUNDLE_ID = "com.frockbot.mobile.dev"
 URL_SCHEME = "frockbot-dev"
 RELEASE_BUNDLE_ID = "com.frockbot.mobile"
-DERIVED_DATA = NATIVE / "build/macos"
+# Its own derived data, never flutter's build/macos: Xcode reuses the asset
+# catalog's intermediate output, so a dev build beside a release build would
+# leave the compiled AppIconDev.icns behind for the release bundle to copy in.
+DERIVED_DATA = NATIVE / "build/macos-dev"
 BUILD_APP = DERIVED_DATA / f"Build/Products/Release/{APP_NAME}.app"
 INSTALL_APP = Path(f"/Users/tim/Applications/{APP_NAME}.app")
 # Earlier local builds installed here under the released identity.

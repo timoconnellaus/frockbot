@@ -44,6 +44,15 @@ class DesktopUpdateTest(unittest.TestCase):
         self.assertNotIn(Path("/Applications/FrockBot.app"), (desktop.INSTALL_APP, desktop.BUILD_APP))
         self.assertEqual(desktop.BUILD_APP.name, "FrockBot Dev.app")
 
+    def test_the_dev_build_keeps_its_own_derived_data(self):
+        # flutter builds the released identity in apps/native/build/macos. Xcode
+        # reuses the asset catalog's intermediate output, so a dev build in that
+        # same tree would leave AppIconDev.icns for the release bundle to copy in.
+        self.assertNotEqual(desktop.DERIVED_DATA,
+                            ROOT / "apps/native" / "build/macos")
+        self.assertEqual(desktop.BUILD_APP,
+                         desktop.DERIVED_DATA / "Build/Products/Release/FrockBot Dev.app")
+
     def test_build_switches_on_the_dev_identity_in_both_dart_and_xcode(self):
         flutter, xcodebuild = desktop.build_commands("1.4.0", "2")
         self.assertIn("--config-only", flutter)
