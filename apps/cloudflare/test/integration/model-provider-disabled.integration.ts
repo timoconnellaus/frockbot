@@ -9,6 +9,7 @@
 // answered rather than being handed an error.
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { FROCK_AI_BINDING_AUTO_MODEL } from "@frockbot/providers/frock-ai/catalog";
 import {
   asUser,
   expectOkJson,
@@ -52,11 +53,14 @@ async function disablePackage(
 }
 
 /**
- * The wire name `@frock/auto` takes on the AI Gateway. Asserting it is what
- * proves the Turn ran on the platform default rather than merely producing a
- * reply from somewhere.
+ * The model the platform default reaches in this harness. The suite binds the
+ * fake `AI` service and no Gateway account or token, so the Frock AI host takes
+ * the binding transport, where Auto is the pinned concrete model rather than
+ * the Gateway's `dynamic/<route>` (`FROCK_AI_BINDING_AUTO_MODEL`). Seeing it in
+ * the fake's call log proves the Turn ran on the platform default rather than
+ * merely producing a reply from somewhere.
  */
-const FROCK_AUTO_GATEWAY_MODEL = "dynamic/flock-auto";
+const FROCK_AUTO_PLATFORM_MODEL = FROCK_AI_BINDING_AUTO_MODEL;
 
 /** The account's platform bootstrap, as the settings surface reports it. */
 async function platformModel(
@@ -100,7 +104,7 @@ describe("a Bot whose model's provider is switched off", () => {
     expect(JSON.stringify(await turn.json())).toContain("Frock AI reply");
     expect(
       (await frockModelCalls()).slice(before).map((call) => call.model),
-    ).toContain(FROCK_AUTO_GATEWAY_MODEL);
+    ).toContain(FROCK_AUTO_PLATFORM_MODEL);
     expect((await platformModel(userId))?.providerModelId).toBe("@frock/auto");
   });
 
@@ -125,7 +129,7 @@ describe("a Bot whose model's provider is switched off", () => {
     expect(JSON.stringify(await turn.json())).toContain("Ollama reply");
     expect(
       (await frockModelCalls()).slice(before).map((call) => call.model),
-    ).not.toContain(FROCK_AUTO_GATEWAY_MODEL);
+    ).not.toContain(FROCK_AUTO_PLATFORM_MODEL);
     expect((await platformModel(userId))?.providerModelId).toBe("@frock/auto");
   });
 });

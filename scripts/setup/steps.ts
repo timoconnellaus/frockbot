@@ -222,7 +222,7 @@ export async function writeProfileV1(
   );
   const adminEmails = (
     await context.asker.ask(
-      "Admin email(s), comma-separated — who may bypass admission and open the debug surface?",
+      "Admin email(s), comma-separated — the deployment's admins, who bypass admission?",
       ...(existing?.adminEmails?.length
         ? [{ default: existing.adminEmails.join(",") }]
         : []),
