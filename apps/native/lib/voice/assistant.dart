@@ -38,8 +38,10 @@ import 'package:flutter/foundation.dart';
 import 'capture.dart';
 import 'player.dart';
 import 'protocol.dart';
+import 'route.dart';
 import 'socket.dart';
 import 'speech_gate.dart';
+import 'waveform.dart' show VoiceMeterMode;
 
 enum VoiceSessionPhase { idle, connecting, live, ending, ended, error }
 
@@ -47,6 +49,7 @@ class AssistantSessionController extends ChangeNotifier {
   final VoiceSocketOpener openSocket;
   final VoiceCapture capture;
   final VoicePlayer player;
+  final VoiceAudioRoute route;
   final SpeechGateConfig gateConfig;
   final Duration startTimeout;
   final Duration sleepAfter;
@@ -56,11 +59,12 @@ class AssistantSessionController extends ChangeNotifier {
     required this.openSocket,
     required this.capture,
     required this.player,
+    VoiceAudioRoute? route,
     this.gateConfig = const SpeechGateConfig(),
     this.startTimeout = voiceAssistantStartTimeoutV1,
     this.sleepAfter = voiceAssistantSleepAfterV1,
     this.connectRetryWindow = voiceAssistantConnectRetryWindowV1,
-  });
+  }) : route = route ?? NoVoiceAudioRoute();
 
   VoiceSessionPhase _phase = VoiceSessionPhase.idle;
   VoiceStatusV1 _status = VoiceStatusV1.idle;
@@ -77,6 +81,10 @@ class AssistantSessionController extends ChangeNotifier {
   bool _microphoneHeld = false;
   bool _asleep = false;
   bool _started = false;
+
+  /// The server has said `welcome`; the handshake goes out once the
+  /// microphone is open too.
+  bool _welcomed = false;
   bool _barged = false;
   bool _disposed = false;
   double _micLevel = 0;
@@ -93,6 +101,7 @@ class AssistantSessionController extends ChangeNotifier {
 
   late SpeechGate _gate = SpeechGate(config: gateConfig);
   VoiceSocket? _socket;
+  StreamSubscription<VoiceFocusChange>? _focus;
   StreamSubscription<AudioFrame>? _frames;
   StreamSubscription<Object?>? _inbound;
   Timer? _startTimer;
@@ -131,13 +140,33 @@ class AssistantSessionController extends ChangeNotifier {
   bool get asleep => _asleep;
   double get micLevel => _micLevel;
   double get playbackLevel => player.level;
+
+  /// What the meter shows when no sound decides it, in the order that
+  /// matters: a call that is not live has no state to show, a held or muted
+  /// microphone is stillness whatever the server is doing, and the reply
+  /// being heard outranks the status that announced it.
+  VoiceMeterMode get meterMode {
+    if (_phase == VoiceSessionPhase.connecting) {
+      return VoiceMeterMode.connecting;
+    }
+    if (_phase != VoiceSessionPhase.live) return VoiceMeterMode.resting;
+    if (muted) return VoiceMeterMode.muted;
+    if (_playing) return VoiceMeterMode.speaking;
+    if (_status == VoiceStatusV1.thinking) return VoiceMeterMode.thinking;
+    if (_asleep) return VoiceMeterMode.asleep;
+    return VoiceMeterMode.listening;
+  }
+
   bool get active =>
       _phase == VoiceSessionPhase.connecting ||
       _phase == VoiceSessionPhase.live ||
       _phase == VoiceSessionPhase.ending;
 
-  /// Opens the call: capture first so the opening words are already recorded,
-  /// then the socket, then the handshake.
+  /// Opens the call: the microphone and the socket at the same time, so the
+  /// slow part of each — the permission prompt, the upgrade round trip — is
+  /// paid once rather than twice over. The handshake itself waits for both:
+  /// `start_call` wakes a metered upstream, and it is not sent while the
+  /// person is still answering the permission prompt.
   Future<void> start() async {
     if (active) return;
     final generation = ++_generation;
@@ -146,6 +175,7 @@ class AssistantSessionController extends ChangeNotifier {
     _microphoneHeld = false;
     _asleep = false;
     _started = false;
+    _welcomed = false;
     _barged = false;
     _status = VoiceStatusV1.idle;
     _upstream = VoiceUpstreamStateV1.starting;
@@ -156,24 +186,65 @@ class AssistantSessionController extends ChangeNotifier {
     _clearNotice();
     _set(VoiceSessionPhase.connecting);
     player.addListener(_onPlayback);
-    if (!await _openCapture(generation)) return;
-    final socket = await _connect(generation);
+    final connecting = _connect(generation);
+    // The session before the devices: the mode decides how the microphone
+    // and the speaker are opened, so it is set before either is.
+    await _settled(route.begin);
+    if (generation != _generation || _disposed) {
+      unawaited(connecting.then(_abandon));
+      return;
+    }
+    _focus ??= route.focus.listen(_onFocus);
+    final captured = await _openCapture(generation);
+    if (!captured) {
+      // The connect that is still in flight answers to the generation check
+      // below when it lands, and a socket that arrives then is abandoned.
+      unawaited(connecting.then(_abandon));
+      return;
+    }
+    _beginCall();
+    final socket = await connecting;
     if (socket == null) return;
     if (generation != _generation || _disposed || !active) {
-      await socket.close(
-        code: voiceCloseAbandonedV1,
-        reason: 'abandoned-connect',
-      );
+      await _abandon(socket);
       await _closeCapture();
       return;
     }
+    _attach(socket);
+  }
+
+  Future<void> _abandon(VoiceSocket? socket) async {
+    if (socket == null) return;
+    await socket.close(
+      code: voiceCloseAbandonedV1,
+      reason: 'abandoned-connect',
+    );
+  }
+
+  /// One retry, inside the retry window. Then it is an error, not a loop.
+  ///
+  /// The socket is attached the moment it arrives — the `welcome` may land
+  /// while the microphone is still opening — and [start] finishes the rest.
+  Future<VoiceSocket?> _connect(int generation) async {
+    final socket = await _connectOnce(generation);
+    if (socket == null) return null;
+    if (generation != _generation || _disposed || !active) {
+      await _abandon(socket);
+      return null;
+    }
+    _attach(socket);
+    return socket;
+  }
+
+  void _attach(VoiceSocket socket) {
+    if (identical(_socket, socket)) return;
     _socket = socket;
     _inbound = socket.messages.listen(
       _onMessage,
       onError: (Object _) => unawaited(_fail('Voice stopped. Try again.')),
       onDone: () => unawaited(_ended()),
     );
-    _startTimer = Timer(startTimeout, () {
+    _startTimer ??= Timer(startTimeout, () {
       if (_status != VoiceStatusV1.listening) {
         unawaited(_fail('Voice didn’t start. Try again.'));
       }
@@ -181,7 +252,7 @@ class AssistantSessionController extends ChangeNotifier {
   }
 
   /// One retry, inside the retry window. Then it is an error, not a loop.
-  Future<VoiceSocket?> _connect(int generation) async {
+  Future<VoiceSocket?> _connectOnce(int generation) async {
     final began = DateTime.now();
     for (var attempt = 0; attempt < 2; attempt++) {
       final pending = openSocket();
@@ -218,6 +289,7 @@ class AssistantSessionController extends ChangeNotifier {
       final frames = await capture.start(
         sampleRate: voiceAssistantInputSampleRateV1,
         frame: voiceAssistantFrame,
+        profile: VoiceCaptureProfile.call,
       );
       if (generation != _generation || _disposed) {
         await capture.stop();
@@ -351,15 +423,8 @@ class AssistantSessionController extends ChangeNotifier {
           unawaited(_finishAnswer(answer, _generation));
         }
       case AssistantWelcomeV1():
-        final socket = _socket;
-        if (socket == null || _started) return;
-        socket.sendText(encodeAssistantHelloV1());
-        socket.sendText(encodeAssistantStartCallV1());
-        _started = true;
-        while (_opening.isNotEmpty) {
-          socket.sendBinary(_opening.removeFirst());
-        }
-        _openingBytes = 0;
+        _welcomed = true;
+        _beginCall();
       case AssistantStatusV1(:final status):
         _status = status;
         if (status != VoiceStatusV1.speaking) {
@@ -404,6 +469,43 @@ class AssistantSessionController extends ChangeNotifier {
         // The footer shows no transcript and no diagnostics.
         break;
     }
+  }
+
+  /// Another app's claim on the audio. A transient one — a ringtone, a
+  /// navigation prompt — lends the microphone out the way dictation does and
+  /// stops the reply, so the call comes back as the person left it. One for
+  /// good — a phone call answered — ends this call with a sentence.
+  void _onFocus(VoiceFocusChange change) {
+    if (!active || _phase == VoiceSessionPhase.ending) return;
+    switch (change) {
+      case VoiceFocusChange.paused:
+        _answer = null;
+        unawaited(player.interrupt());
+        if (_playing) _socket?.sendText(encodeAssistantInterruptV1());
+        unawaited(holdMicrophone(true));
+      case VoiceFocusChange.regained:
+        unawaited(holdMicrophone(false));
+      case VoiceFocusChange.lost:
+        unawaited(
+          _fail(
+            'Another app took the audio. Start voice again when you’re ready.',
+          ),
+        );
+    }
+  }
+
+  /// `hello` and `start_call`, once the server has welcomed and the
+  /// microphone is open: the opening audio goes up behind them in order.
+  void _beginCall() {
+    final socket = _socket;
+    if (socket == null || !_welcomed || _started || _frames == null) return;
+    socket.sendText(encodeAssistantHelloV1());
+    socket.sendText(encodeAssistantStartCallV1());
+    _started = true;
+    while (_opening.isNotEmpty) {
+      socket.sendBinary(_opening.removeFirst());
+    }
+    _openingBytes = 0;
   }
 
   void _onPlayback() {
@@ -553,11 +655,17 @@ class AssistantSessionController extends ChangeNotifier {
     _socket = null;
     await _settled(player.close);
     player.removeListener(_onPlayback);
+    final focus = _focus;
+    _focus = null;
+    await _settled(() async => focus?.cancel());
+    // The devices are closed; now the session they were opened in.
+    await _settled(route.end);
     await _settled(() async => socket?.close(code: code, reason: reason));
     _micLevel = 0;
     _opening.clear();
     _openingBytes = 0;
     _started = false;
+    _welcomed = false;
   }
 
   /// A recorder, a speaker or a socket that fails to close — or to carry the

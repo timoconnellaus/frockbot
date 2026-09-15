@@ -33,7 +33,13 @@ class PcmVoicePlayer extends VoicePlayer {
   static const retryAfter = Duration(seconds: 2);
   static const _feedFrames = 30;
   static const _heldSeconds = 5;
-  static const _ahead = 6;
+
+  /// Chunks fed but not yet reported played. A receipt follows the playback
+  /// head, so everything inside the device's own buffer is still in flight;
+  /// the window has to be wider than that buffer by a margin the network
+  /// can be late by, or the speaker pads a sentence with silence. Fifteen
+  /// chunks is half a second.
+  static const _ahead = 15;
 
   final ListQueue<Uint8List> _chunks = ListQueue<Uint8List>();
   final Map<int, double> _sent = {};
@@ -49,6 +55,7 @@ class PcmVoicePlayer extends VoicePlayer {
   bool _configured = false;
   bool _closed = false;
   bool _rebuilding = false;
+
   /// The epoch the shared native speaker was last asked to own, so that a
   /// delayed release cannot tear down a newer owner's device.
   int? _deviceEpoch;

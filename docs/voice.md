@@ -252,11 +252,18 @@ what they wait through, so the turn does as little as it can in that gap.
 The Bot activity look-ups behind the system prompt and `list_bots` go to
 every Bot's object together, not one after another; a Bot lookup for
 `bot_status`, `ask_bot` and `cancel_bot` is one directory read. When the
-model goes to a tool without having said anything, the session speaks
-`"One second."` before running it (`VOICE_TURN_BRIDGE_V1`). The same
-acknowledgment starts after one second if the first output is still pending,
-including while initial context loads or the model connects. It is emitted
-at most once per turn; a quick answer goes straight to speech. The prompt
+turn has said nothing after 2.5 seconds (`VOICE_TURN_ACK_DELAY_MS_V1`) the
+session speaks a bridge (`VOICE_TURN_BRIDGES_V1`: "One second.", "Let me
+check.", "Just a moment." and three more, never the same one twice running
+within a call, `pickVoiceBridgeV1`) — whether the
+silence is initial context loading, the model connecting, or a first step
+that went to a tool and a second step still composing. It is emitted at most
+once per turn, and never for a turn that answers inside the delay: a tool
+that comes back quickly gets the answer spoken, not a filler and then the
+answer. The footer shows the Bot thinking from the moment the transcript
+lands, and that motion carries an ordinary turn — a model step, a quick
+tool, a second step — so the filler is for the stall past it (changed
+2026-09-15; before that a tool step was always bridged, at one second). The prompt
 also asks the model to acknowledge checks and delegations briefly. The
 bridge is spoken, not answered, so a turn that ends in the bridge alone still
 settles as `no_output`. `VOICE_ASSISTANT_MODEL` pins a
@@ -791,6 +798,74 @@ entitlement. `AppShell`'s lifecycle observer ends capture and playback when
 the app leaves the foreground; navigation inside the app leaves the footer
 alone.
 
+**The call's audio session (Android).** A realtime call is a call to the
+operating system — communication mode is where Android attaches its echo
+canceller and how a Bluetooth microphone gets used — but not to the person,
+who is not holding the phone to their ear. `VoiceAudioRoute`
+(`apps/native/lib/voice/route.dart`, `com.frockbot/audio-route`, Kotlin
+`VoiceAudioRoute.kt`) therefore holds the session the way a VoIP app does,
+for exactly the length of the call: transient audio focus with
+voice-communication attributes, `MODE_IN_COMMUNICATION`, and the output route
+chosen in this order — Bluetooth LE or SCO headset, wired or USB headset,
+loudspeaker. The earpiece is never chosen on its own. On API 31+ that is
+`setCommunicationDevice`; below it, `startBluetoothSco` and the speakerphone
+flag. Devices that connect or disconnect mid-call re-run the choice, and the
+route in use is reported to Dart. The speaker's `AudioTrack` plays with
+`USAGE_VOICE_COMMUNICATION`: in communication mode a media track is routed
+like the call but metered like music — the earpiece at music volume, which is
+what the footer sounded like before — while a voice-communication track
+follows the communication device, rides the call volume the hardware keys
+adjust, and is the reference the echo canceller listens for. For the call the
+`record` plugin is told to leave the session alone (`modeNormal`,
+`manageBluetooth: false`, no focus request) and to read the smallest buffer
+the platform allows (`AudioRecord.getMinBufferSize`, never below one 40 ms
+frame), because the plugin reads a whole buffer at a time and that buffer is
+the meter's latency. Dictation keeps the plugin's own session handling. The speaker is fed the
+way a VoIP stack feeds one: from `setup` until `release` a pump thread writes
+a 20 ms period every period, silence when nothing is queued. A track written
+only when a reply is playing underruns while the Bot thinks; on the VoIP
+output path Android then drops it from the mixer's active list, a writer
+blocked on it never returns, the playback head stays at zero and no receipt
+is ever sent — and a client that believes it is still playing sends silence
+upstream, so nothing said after the first reply is heard. Receipts still
+follow the playback head and only audio earns them. Because a receipt means
+played, everything inside the device buffer is still in flight, so the Dart
+player keeps fifteen chunks (half a second) outstanding against a 100 ms
+device buffer; a narrower window lets the pump pad a sentence with silence
+whenever a chunk is late. A
+transient focus loss — a ringtone, a navigation prompt — holds the call's
+microphone the way dictation borrows it and stops the reply; a permanent loss
+ends the call with a sentence. macOS routes on its own and gets the no-op
+route. An A2DP-only Bluetooth speaker (no hands-free profile) cannot be a
+communication device on Android, so during a call the loudspeaker is used
+instead; an output picker over the reported route is the next step if that
+matters.
+
+**A Bot answering a voice request.** The Turn is admitted with a `voice`
+origin and gets `reply_to_request`, which is the one answer the call is owed:
+it goes back to the voice object, mints no message and wakes no device. The
+prompt says to say the answer once and not to write it, or a version of it,
+into the conversation as well; `send_to_user` on such a Turn is for a brief
+progress note on work longer than a minute and for material that cannot be
+spoken (a link, a table, code). A send the Bot makes anyway still lands in
+the thread and counts as unread, but carries `notify: false`
+(`app/notifications/messages.ts`): the person asked out loud and is on the
+call, and a buzz for what they are being told aloud is noise.
+
+**Starting.** The footer is on screen in the frame of the press, and the
+sidebar control takes its active colour on pointer-down, before the tap
+resolves; the same control ends the call while the footer is up. Every
+AudioManager call runs on the route's own thread — choosing the
+communication device is a synchronous call into the audio server of several
+hundred milliseconds, and on the platform main thread it held every frame of
+the footer's entrance. Measured on a Pixel 9a: the
+capability probe is read once at sign-in rather than on the press, the
+controller is created and shown before anything is awaited, and the socket
+upgrade runs concurrently with the audio session and the microphone (the
+permission prompt is the slow part). `hello`/`start_call` — which wake a
+metered upstream — wait for both the server's `welcome` and an open
+microphone, so a person still answering the permission prompt is not billed.
+
 ### Voice controls and motion
 
 Dictation replaces the message field with a text-free dock spanning the chat
@@ -809,13 +884,26 @@ transfer back to the conversation without a final layout jump. While that
 teardown finishes, the sidebar's start control says the session is ending and
 cannot be pressed, because a start in that window would be dropped.
 
-Both meters use the same continuous ribbons, driven only by audio levels.
-A time-based envelope uses a 65 ms attack and 220 ms release; microphone and
-playback levels ease separately so the speaker tint does not flicker.
-The painter repaints on display frames without rebuilding controls, stops its
-ticker in silence, and follows Flutter's ticker lifecycle. Reduced motion
-shows a static level shape and makes transitions immediate. Controls keep
-48-point touch targets in both themes.
+Both meters are the same five pills (`apps/native/lib/voice/waveform.dart`):
+one object whose motion source changes with the call, the way the shipped
+assistants do it (Gemini's bars, ChatGPT's orb, Alexa's ring). Sound from the
+person raises the pills in white; sound from the Bot raises them in the deep
+rose; and every state with no sound to show is told by how the pills move
+rather than by a label — a slow breath together while the call connects, a
+regular chase while the Bot thinks, still dots while it listens and hears
+nothing, dim dots asleep or muted. Regular motion is the machine's own;
+irregular motion is somebody's voice. A time-based envelope per pill (about
+20 ms attack, 200 ms release, the middle pill fastest) is fed by the
+microphone RMS every 40 ms frame and the playback RMS per fed chunk;
+the person/Bot tint and the dimming ease on their own envelopes so nothing
+flickers. Audio events only set targets; a `Ticker` integrates them once per
+display frame and the painter repaints through its `repaint` listenable —
+no build, no layout, no `setState` on the audio path, a `RepaintBoundary`
+around the meter, five `drawRRect` calls on one reused `Paint`, no path
+built and nothing allocated per frame. The ticker stops once every pill is at
+rest and follows Flutter's ticker lifecycle. Reduced motion snaps to the
+level and state without the machine's own motion. Controls keep 48-point
+touch targets in both themes.
 
 ### SDK frames a client must ignore
 

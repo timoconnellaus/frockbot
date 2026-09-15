@@ -1,3 +1,21 @@
+/// The voice meter: five pills that say who is being heard.
+///
+/// One object, whose motion source changes with the call. Sound from the
+/// person raises the pills in white, sound from the Bot raises them in the
+/// deep rose, and every state that has no sound to show is told by *how* the
+/// pills move rather than by a label: a slow breath together while the call
+/// connects, a regular chase while the Bot thinks, stillness while nothing is
+/// being heard. Regular motion is the machine's own; irregular motion is
+/// somebody's voice.
+///
+/// How it is drawn is what keeps it smooth. Audio arrives as targets; a
+/// [Ticker] integrates every pill toward its target each display frame and
+/// the painter repaints through its `repaint` listenable — no build, no
+/// layout, no `setState` anywhere on the audio path, and a `RepaintBoundary`
+/// keeps the footer's layer to itself. A frame is five `drawRRect` calls on
+/// one reused [Paint]: nothing is allocated per frame and no path is built.
+library;
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,21 +24,41 @@ import 'package:flutter/scheduler.dart';
 import '../theme/frock_theme.dart';
 
 const double voiceLevelEpsilon = 0.012;
-const voiceLobeTintsPerson = [
-  Colors.white,
-  Color(0xffffd6e3),
-  FrockTheme.accentSoft,
-];
-const voiceLobeTintsBot = [
-  FrockTheme.accentDeep,
-  Color(0xffc2295b),
-  Color(0xff7a0f38),
-];
+const voiceLobeTintsPerson = [Colors.white];
+const voiceLobeTintsBot = [FrockTheme.accentDeep];
 
-/// A time-based envelope: identical timing at 60 Hz and 120 Hz. Fast attack
-/// follows the start of a word; a gentler release bridges gaps in PCM frames.
+/// What the meter is showing when no sound decides it.
+enum VoiceMeterMode {
+  /// Nothing to show: the pills rest as dots.
+  resting,
+
+  /// The call is opening: one slow breath, all pills together.
+  connecting,
+
+  /// Ready and hearing nothing: dots, still.
+  listening,
+
+  /// The Bot is composing: a regular chase along the row.
+  thinking,
+
+  /// The reply is playing: the pills follow it in the Bot's colour.
+  speaking,
+
+  /// Quiet long enough that the upstream sleeps: dim dots.
+  asleep,
+
+  /// The microphone is off: dim dots.
+  muted,
+}
+
+/// A time-based envelope: identical timing at 60 Hz and 120 Hz. A fast
+/// attack follows the start of a word within a couple of frames; the release
+/// is slower so the gaps between syllables read as one sound.
 class VoiceEnvelope {
   double value = 0;
+  final double attack;
+  final double release;
+  VoiceEnvelope({this.attack = 0.022, this.release = 0.2});
 
   static double target(double level) {
     if (!level.isFinite || level <= voiceLevelEpsilon) return 0;
@@ -28,31 +66,99 @@ class VoiceEnvelope {
   }
 
   void advance(double target, double seconds) {
-    final tau = target > value ? 0.065 : 0.22;
+    final tau = target > value ? attack : release;
     value += (target - value) * (1 - math.exp(-seconds / tau));
     if (target == 0 && value < 0.002) value = 0;
   }
 }
 
-class _WaveFrame extends ChangeNotifier {
-  final person = VoiceEnvelope();
-  final bot = VoiceEnvelope();
+const int voiceMeterBars = 5;
+
+/// Everything the painter reads, advanced once per display frame.
+class _MeterFrame extends ChangeNotifier {
+  /// One envelope per pill, the middle fastest, so a word lands as a spread
+  /// rather than as five identical jumps.
+  final bars = [
+    for (var i = 0; i < voiceMeterBars; i++)
+      VoiceEnvelope(
+        attack: 0.02 + 0.012 * (i - 2).abs(),
+        release: 0.18 + 0.03 * (i - 2).abs(),
+      ),
+  ];
+
+  /// Who the pills are coloured for: 0 the person, 1 the Bot.
+  final bot = VoiceEnvelope(attack: 0.12, release: 0.3);
+
+  /// How present the row is: 1 in a live call, lower asleep or muted.
+  final presence = VoiceEnvelope(attack: 0.25, release: 0.25)..value = 1;
+
   double personTarget = 0;
   double botTarget = 0;
+  VoiceMeterMode mode = VoiceMeterMode.resting;
   double time = 0;
 
-  bool get resting => person.value == 0 && bot.value == 0;
+  bool get selfDriven =>
+      mode == VoiceMeterMode.connecting || mode == VoiceMeterMode.thinking;
+
+  double get presenceTarget => switch (mode) {
+    VoiceMeterMode.asleep || VoiceMeterMode.muted => 0.45,
+    _ => 1,
+  };
+
+  double get botMixTarget => switch (mode) {
+    VoiceMeterMode.speaking || VoiceMeterMode.thinking => 1,
+    _ =>
+      personTarget + botTarget == 0
+          ? bot.value
+          : botTarget / (personTarget + botTarget),
+  };
+
+  /// The pill targets this frame: a voice, or the mode's own motion.
+  double targetFor(int index) {
+    final level = math.max(personTarget, botTarget);
+    switch (mode) {
+      case VoiceMeterMode.connecting:
+        return 0.12 + 0.1 * (0.5 + 0.5 * math.sin(time * 2.6));
+      case VoiceMeterMode.thinking:
+        if (level > 0) break;
+        return 0.14 + 0.2 * (0.5 + 0.5 * math.sin(time * 5.2 - index * 1.1));
+      default:
+        break;
+    }
+    if (level == 0) return 0;
+    // A slow drift per pill so five pills at one level are not one bar.
+    final drift =
+        0.62 +
+        0.38 * (0.5 + 0.5 * math.sin(time * (3.1 + index * 0.7) + index));
+    return math.min(1, level * drift * (index == 2 ? 1.15 : 1));
+  }
+
+  bool get resting {
+    if (selfDriven) return false;
+    if (personTarget > 0 || botTarget > 0) return false;
+    for (final bar in bars) {
+      if (bar.value != 0) return false;
+    }
+    return (bot.value - botMixTarget).abs() < 0.002 &&
+        (presence.value - presenceTarget).abs() < 0.002;
+  }
 
   void advance(double seconds) {
-    person.advance(personTarget, seconds);
-    bot.advance(botTarget, seconds);
     time += seconds;
+    for (var i = 0; i < bars.length; i++) {
+      bars[i].advance(targetFor(i), seconds);
+    }
+    bot.advance(botMixTarget, seconds);
+    presence.advance(presenceTarget, seconds);
     notifyListeners();
   }
 
   void snap() {
-    person.value = personTarget;
-    bot.value = botTarget;
+    for (var i = 0; i < bars.length; i++) {
+      bars[i].value = targetFor(i);
+    }
+    bot.value = botMixTarget;
+    presence.value = presenceTarget;
     notifyListeners();
   }
 }
@@ -63,6 +169,7 @@ class VoiceWaveform extends StatefulWidget {
   final Listenable source;
   final double Function() microphone;
   final double Function()? playback;
+  final VoiceMeterMode Function()? mode;
   final bool enabled;
   final bool onAccent;
   const VoiceWaveform({
@@ -70,6 +177,7 @@ class VoiceWaveform extends StatefulWidget {
     required this.source,
     required this.microphone,
     this.playback,
+    this.mode,
     this.enabled = true,
     this.onAccent = false,
   });
@@ -81,7 +189,7 @@ class VoiceWaveform extends StatefulWidget {
 class _VoiceWaveformState extends State<VoiceWaveform>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_tick);
-  final _frame = _WaveFrame();
+  final _frame = _MeterFrame();
   Duration _last = Duration.zero;
   bool _reducedMotion = false;
 
@@ -115,31 +223,34 @@ class _VoiceWaveformState extends State<VoiceWaveform>
     _frame.botTarget = widget.enabled
         ? VoiceEnvelope.target(widget.playback?.call() ?? 0)
         : 0;
+    _frame.mode = widget.enabled
+        ? widget.mode?.call() ?? VoiceMeterMode.listening
+        : VoiceMeterMode.resting;
     if (_reducedMotion) {
       _ticker.stop();
+      // Reduced motion shows the level and the state; it does not run the
+      // machine's own motion, which would be a ticker for nothing.
+      if (_frame.selfDriven) _frame.mode = VoiceMeterMode.listening;
       _frame.snap();
-    } else if (!_ticker.isActive &&
-        (!_frame.resting || _frame.personTarget > 0 || _frame.botTarget > 0)) {
+    } else if (!_ticker.isActive && !_frame.resting) {
       _last = Duration.zero;
       _ticker.start();
     }
   }
 
   void _tick(Duration elapsed) {
-    // A backgrounded tab must not jump the wave ahead by minutes on resume.
+    // A backgrounded tab must not jump the meter ahead by minutes on resume.
     final seconds = ((elapsed - _last).inMicroseconds / 1e6).clamp(0.0, 0.05);
     _last = elapsed;
     _frame.advance(seconds);
-    if (_frame.resting && _frame.personTarget == 0 && _frame.botTarget == 0) {
-      _ticker.stop();
-    }
+    if (_frame.resting) _ticker.stop();
   }
 
   @override
   Widget build(BuildContext context) => RepaintBoundary(
     child: ExcludeSemantics(
       child: CustomPaint(
-        painter: _WavePainter(
+        painter: _MeterPainter(
           frame: _frame,
           accent: Theme.of(context).colorScheme.primary,
           onAccent: widget.onAccent,
@@ -158,64 +269,48 @@ class _VoiceWaveformState extends State<VoiceWaveform>
   }
 }
 
-class _WavePainter extends CustomPainter {
-  final _WaveFrame frame;
+class _MeterPainter extends CustomPainter {
+  final _MeterFrame frame;
   final Color accent;
   final bool onAccent;
-  _WavePainter({
+  final Paint _paint = Paint();
+  _MeterPainter({
     required this.frame,
     required this.accent,
     required this.onAccent,
   }) : super(repaint: frame);
 
+  static const double _width = 10;
+  static const double _gap = 8;
+
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final middle = size.height / 2;
-    final person = frame.person.value;
-    final bot = frame.bot.value;
-    final level = math.max(person, bot);
-    final botMix = person + bot == 0 ? 0.0 : bot / (person + bot);
-    final base = onAccent ? Colors.white : accent;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, middle - 1, size.width, 2),
-        const Radius.circular(1),
-      ),
-      Paint()..color = base.withValues(alpha: onAccent ? 0.35 : 0.22),
-    );
-    if (level == 0) return;
-    // Fixed, overlapping ribbons evolve continuously. No random respawns or
-    // per-frame speaker switches can pop the shape or its colour.
-    for (var layer = 2; layer >= 0; layer--) {
-      final path = Path()..moveTo(0, middle);
-      for (final sign in [1.0, -1.0]) {
-        for (var step = 0; step <= 80; step++) {
-          final x = sign > 0 ? step / 80 : 1 - step / 80;
-          final envelope = math.pow(math.sin(x * math.pi), 2).toDouble();
-          final ripple =
-              0.62 +
-              0.25 *
-                  math.sin(x * math.pi * 3 + frame.time * 2.2 + layer * 1.6) +
-              0.13 * math.sin(x * math.pi * 5 - frame.time * 1.4 + layer);
-          final height = level * size.height * 0.44 * envelope * ripple;
-          path.lineTo(x * size.width, middle + sign * height);
-        }
-      }
-      path.close();
-      final tint = onAccent
-          ? Color.lerp(
-              voiceLobeTintsPerson[layer],
-              voiceLobeTintsBot[layer],
-              botMix,
-            )!
-          : Color.lerp(accent, FrockTheme.accentSoft, layer / 3)!;
-      canvas.drawPath(path, Paint()..color = tint.withValues(alpha: 0.5));
+    final rowWidth = voiceMeterBars * _width + (voiceMeterBars - 1) * _gap;
+    final left = (size.width - rowWidth) / 2;
+    final reach = size.height * 0.78 - _width;
+    final person = onAccent ? Colors.white : accent;
+    final botTint = onAccent
+        ? FrockTheme.accentDeep
+        : Color.lerp(accent, FrockTheme.accentDeep, 0.6)!;
+    final tint = Color.lerp(person, botTint, frame.bot.value)!;
+    _paint.color = tint.withValues(alpha: frame.presence.value);
+    for (var i = 0; i < voiceMeterBars; i++) {
+      final height = _width + reach * frame.bars[i].value;
+      final x = left + i * (_width + _gap);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, middle - height / 2, _width, height),
+          const Radius.circular(_width / 2),
+        ),
+        _paint,
+      );
     }
   }
 
   @override
-  bool shouldRepaint(_WavePainter oldDelegate) =>
+  bool shouldRepaint(_MeterPainter oldDelegate) =>
       oldDelegate.frame != frame ||
       oldDelegate.accent != accent ||
       oldDelegate.onAccent != onAccent;

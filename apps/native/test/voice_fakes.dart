@@ -6,10 +6,12 @@
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:frockbot_native/voice/capture.dart';
 import 'package:frockbot_native/voice/player.dart';
+import 'package:frockbot_native/voice/route.dart';
 import 'package:frockbot_native/voice/socket.dart';
 
 /// Lets the pending microtasks run, which is how a fake stream delivers.
@@ -79,11 +81,15 @@ class FakeVoiceCapture implements VoiceCapture {
   @override
   bool get active => _active;
 
+  VoiceCaptureProfile? profile;
+
   @override
   Future<Stream<AudioFrame>> start({
     required int sampleRate,
     required Duration frame,
+    VoiceCaptureProfile profile = VoiceCaptureProfile.dictation,
   }) async {
+    this.profile = profile;
     starts++;
     await permission?.future;
     final failed = failure;
@@ -195,4 +201,41 @@ Uint8List pcmFrame(double level, {int samples = 640, int mark = 0}) {
   }
   bytes[0] = mark;
   return bytes;
+}
+
+/// The audio session, recorded rather than held: what was begun, what was
+/// ended, and in what order relative to the devices.
+class FakeVoiceAudioRoute implements VoiceAudioRoute {
+  final List<String> log;
+  final ValueNotifier<VoiceRouteKind?> _route = ValueNotifier(null);
+  final StreamController<VoiceFocusChange> _focus =
+      StreamController<VoiceFocusChange>.broadcast();
+  int begins = 0;
+  int ends = 0;
+  FakeVoiceAudioRoute({List<String>? log}) : log = log ?? [];
+
+  @override
+  Future<void> begin() async {
+    begins++;
+    log.add('route.begin');
+    _route.value = VoiceRouteKind.speaker;
+  }
+
+  @override
+  Future<void> end() async {
+    ends++;
+    log.add('route.end');
+    _route.value = null;
+  }
+
+  @override
+  ValueListenable<VoiceRouteKind?> get route => _route;
+
+  @override
+  Stream<VoiceFocusChange> get focus => _focus.stream;
+
+  void change(VoiceFocusChange change) => _focus.add(change);
+
+  @override
+  Future<int?> minimumCaptureBuffer(int sampleRate) async => null;
 }

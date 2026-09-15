@@ -215,7 +215,8 @@ void main() {
       final slow = VoiceEnvelope();
       final fast = VoiceEnvelope();
       slow.advance(1, 1 / 60);
-      expect(slow.value, inExclusiveRange(0, 0.3));
+      // A word lands within a couple of frames: past halfway on the first.
+      expect(slow.value, inExclusiveRange(0.4, 0.8));
       for (var i = 1; i < 30; i++) {
         slow.advance(1, 1 / 60);
       }

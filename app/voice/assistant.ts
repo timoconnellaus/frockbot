@@ -87,11 +87,46 @@ export const VOICE_ANSWER_MAX_CHARS_V1 = 1_200;
  * emitted at most once per turn however both paths race.
  */
 export const VOICE_TURN_BRIDGE_V1 = "One second.";
+
 /**
- * How long the turn may stay silent before the bridge fills it. Short enough
- * that a stall is covered, long enough that a quick answer streams unbroken.
+ * The things the bridge may say. One phrase every time is a recording; a
+ * small set, never the same one twice running, is a person. Each is a beat
+ * long and promises nothing about what follows.
  */
-export const VOICE_TURN_ACK_DELAY_MS_V1 = 1_000;
+export const VOICE_TURN_BRIDGES_V1: readonly string[] = [
+  VOICE_TURN_BRIDGE_V1,
+  "Let me check.",
+  "Just a moment.",
+  "Hang on.",
+  "Looking now.",
+  "One moment.",
+];
+
+/**
+ * The next bridge for a call: any phrase but the one said last, chosen by
+ * [random] in [0, 1). A call's turns pass the previous choice back in, so
+ * across a conversation the filler keeps changing.
+ */
+export function pickVoiceBridgeV1(
+  previous: string | undefined,
+  random: number = Math.random(),
+): string {
+  const choices = VOICE_TURN_BRIDGES_V1.filter((phrase) => phrase !== previous);
+  const index = Math.min(
+    choices.length - 1,
+    Math.max(0, Math.floor(random * choices.length)),
+  );
+  return choices[index]!;
+}
+/**
+ * How long the turn may stay silent before the bridge fills it. The footer
+ * shows the Bot thinking from the moment the transcript lands, so an ordinary
+ * turn — a model step, a quick tool, a second step, about two seconds — is
+ * carried by that motion and not by a filler; only a stall past it, a slow
+ * tool or a delegation, is spoken over. A filler on every turn is worse than
+ * silence on the rare one.
+ */
+export const VOICE_TURN_ACK_DELAY_MS_V1 = 2_500;
 
 /**
  * One thing to say. `bridge` is the turn's own filler, `text` is the model's
@@ -625,8 +660,10 @@ export interface VoiceTurnResultV1 {
  *
  * Text is yielded as it streams so the caller can start synthesising at
  * once; a step that ends in tool calls runs the tools before the next step,
- * and if nothing has been said yet in the turn it yields the bridge first so
- * the wait is not silent. Tool results are appended to the messages the caller
+ * and if nothing has been said within [VOICE_TURN_ACK_DELAY_MS_V1] — the
+ * first step, its tools and the second step together — the bridge fills the
+ * silence; a turn that answers within the delay, tools or not, is not
+ * interrupted by a filler. Tool results are appended to the messages the caller
  * owns, so the next turn sees them through the SDK's own history only as the
  * final spoken answer — tool chatter never enters the durable history.
  */
@@ -637,12 +674,13 @@ export async function* runVoiceTurnV1(
     history: readonly { role: "user" | "assistant"; content: string }[];
     transcript: string;
     signal: AbortSignal;
+    /** What the bridge says this turn; the default is the first phrase. */
+    bridge?: string;
   },
   onResult: (result: VoiceTurnResultV1) => void,
 ): AsyncGenerator<VoiceTurnChunkV1> {
   const turn = voiceTurnChunks(host, input, onResult);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let bridged = false;
   try {
     const first = turn.next();
     const delayed = Symbol("delayed");
@@ -654,15 +692,14 @@ export async function* runVoiceTurnV1(
     ]);
     clearTimeout(timer);
     if (ready === delayed && !input.signal.aborted) {
-      bridged = true;
-      yield { kind: "bridge", text: `${VOICE_TURN_BRIDGE_V1} ` };
+      yield {
+        kind: "bridge",
+        text: `${input.bridge ?? VOICE_TURN_BRIDGE_V1} `,
+      };
     }
     let next = ready === delayed ? await first : ready;
     while (!next.done) {
-      if (!input.signal.aborted && !(bridged && next.value.kind === "bridge")) {
-        if (next.value.kind === "bridge") bridged = true;
-        yield next.value;
-      }
+      if (!input.signal.aborted) yield next.value;
       next = await turn.next();
     }
   } finally {
@@ -690,7 +727,6 @@ async function* voiceTurnChunks(
   ];
   let delegations = 0;
   let spoken = "";
-  let bridged = false;
   for (let step = 0; step < VOICE_TURN_MAX_STEPS_V1; step += 1) {
     if (input.signal.aborted) {
       onResult({ answer: spoken, delegations, outcome: "aborted" });
@@ -734,10 +770,10 @@ async function* voiceTurnChunks(
       });
       return;
     }
-    if (!spoken.trim() && !bridged) {
-      bridged = true;
-      yield { kind: "bridge", text: `${VOICE_TURN_BRIDGE_V1} ` };
-    }
+    // No bridge here: a tool that answers inside the acknowledgment delay
+    // deserves an answer, not a filler. Nothing has been yielded yet, so
+    // the caller's own timer is still running across the tool step and the
+    // next model step, and it speaks the bridge only if they stay silent.
     messages.push({
       role: "assistant",
       content: text,

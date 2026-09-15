@@ -712,6 +712,21 @@ class _Header extends StatelessWidget {
         scheme.primary.withValues(alpha: 0.14),
       ),
     );
+    // The voice control answers the finger, not the tap: it takes the active
+    // colour the moment it is touched, so the press reads as instant however
+    // long the call takes to open behind it.
+    final armed = quiet.copyWith(
+      foregroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.pressed)
+            ? scheme.primary
+            : scheme.onSurfaceVariant,
+      ),
+      backgroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.pressed)
+            ? scheme.primary.withValues(alpha: 0.14)
+            : null,
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 10, 6),
       child: Row(
@@ -770,12 +785,12 @@ class _Header extends StatelessWidget {
             VoiceIds.sidebarStart,
             IconButton(
               tooltip: switch (voiceControl) {
-                VoiceControlState.active => 'Voice session active',
+                VoiceControlState.active => 'End voice session',
                 VoiceControlState.ending => 'Ending voice session…',
                 VoiceControlState.idle => 'Start voice session',
               },
               isSelected: voiceControl == VoiceControlState.active,
-              style: voiceControl == VoiceControlState.active ? active : quiet,
+              style: voiceControl == VoiceControlState.active ? active : armed,
               onPressed: voiceControl == VoiceControlState.ending
                   ? null
                   : onVoice,
