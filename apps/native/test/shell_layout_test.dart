@@ -804,14 +804,14 @@ void main() {
     });
   });
 
-  group('the trail says how hard a Turn is working', () {
-    ActivityTrailSample sample({
+  group('the badge says how hard a Turn is working', () {
+    WorkingPaceSample sample({
       int characters = 0,
       int toolStarts = 0,
       int toolSettles = 0,
       int sends = 0,
       String status = 'streaming',
-    }) => ActivityTrailSample(
+    }) => WorkingPaceSample(
       characters: characters,
       toolStarts: toolStarts,
       toolSettles: toolSettles,
@@ -820,59 +820,70 @@ void main() {
     );
 
     test('a settled Turn emits nothing at all', () {
-      final stepped = activityTrailStep(
-        activityTrailBegin(sample(), Duration.zero),
+      final stepped = workingPaceStep(
+        workingPaceBegin(sample(), Duration.zero),
         sample(status: 'completed'),
         const Duration(seconds: 1),
       );
 
       expect(stepped.plan.active, isFalse);
-      expect(stepped.plan.state, ActivityTrailState.ended);
+      expect(stepped.plan.state, WorkingPaceState.ended);
       expect(stepped.plan.rate, 0);
     });
 
     test('an open Turn with nothing arriving still trickles', () {
-      final stepped = activityTrailStep(
-        activityTrailBegin(sample(), Duration.zero),
+      final stepped = workingPaceStep(
+        workingPaceBegin(sample(), Duration.zero),
         sample(),
         const Duration(seconds: 3),
       );
 
-      expect(stepped.plan.state, ActivityTrailState.waiting);
-      expect(stepped.plan.rate, activityTrailTrickleRate);
+      expect(stepped.plan.state, WorkingPaceState.waiting);
+      expect(stepped.plan.rate, workingPaceTrickleRate);
     });
 
     test('the rate is capped however fast the text arrives', () {
-      final stepped = activityTrailStep(
-        activityTrailBegin(sample(), Duration.zero),
+      final stepped = workingPaceStep(
+        workingPaceBegin(sample(), Duration.zero),
         sample(characters: 100000),
         const Duration(milliseconds: 100),
       );
 
-      expect(stepped.plan.rate, activityTrailMaxRate);
-      expect(stepped.plan.state, ActivityTrailState.running);
+      expect(stepped.plan.rate, workingPaceMaxRate);
+      expect(stepped.plan.state, WorkingPaceState.running);
     });
 
-    // A reconnect replaying a whole Turn must not fire two hundred bursts.
-    test('bursts are bounded per step', () {
-      final stepped = activityTrailStep(
-        activityTrailBegin(sample(), Duration.zero),
-        sample(toolStarts: 50, toolSettles: 50, sends: 50),
+    test('the badge quickens with the stream and waits patiently', () {
+      final waiting = workingPaceStep(
+        workingPaceBegin(sample(), Duration.zero),
+        sample(),
+        const Duration(seconds: 3),
+      ).plan;
+      final fast = workingPaceStep(
+        workingPaceBegin(sample(), Duration.zero),
+        sample(characters: 100000),
         const Duration(milliseconds: 100),
-      );
+      ).plan;
+      final slow = workingPaceStep(
+        workingPaceBegin(sample(), Duration.zero),
+        sample(characters: 1),
+        const Duration(milliseconds: 100),
+      ).plan;
 
-      expect(stepped.plan.bursts.length, activityTrailMaxBurstsPerStep);
+      expect(workingBadgePeriod(waiting), workingBadgeWaitingPeriod);
+      expect(workingBadgePeriod(fast), workingBadgeFastPeriod);
+      expect(workingBadgePeriod(slow), workingBadgeSlowPeriod);
     });
 
     // A send superseding the model's own draft is not negative work.
     test('a shorter projection is no work rather than negative work', () {
-      final stepped = activityTrailStep(
-        activityTrailBegin(sample(characters: 500), Duration.zero),
+      final stepped = workingPaceStep(
+        workingPaceBegin(sample(characters: 500), Duration.zero),
         sample(characters: 10),
         const Duration(milliseconds: 100),
       );
 
-      expect(stepped.plan.rate, activityTrailTrickleRate);
+      expect(stepped.plan.rate, workingPaceTrickleRate);
     });
   });
 

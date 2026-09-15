@@ -12,6 +12,8 @@
 /// a Bot a full wardrobe can still dress later.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// The backgrounds the create sheet offers, in its order. Ids are the recipe
@@ -54,14 +56,20 @@ class SheepAvatar extends StatelessWidget {
   /// rather than drawing a hole where a Bot's face should be.
   final String? background;
 
-  /// A working Bot wears a ring. It is the only thing an avatar ever says
-  /// about a Turn: what the Turn is doing belongs on the Work view.
+  /// A working Bot wears the typing badge on its corner. It is the only thing
+  /// an avatar ever says about a Turn: what the Turn is doing belongs on the
+  /// Work view.
   final bool working;
+
+  /// One bounce of the badge's dots. The thread's working row sets it from the
+  /// Turn's pace; everywhere else the badge keeps the default beat.
+  final Duration tempo;
   const SheepAvatar({
     super.key,
     this.size = 40,
     this.background,
     this.working = false,
+    this.tempo = thinkingBadgeDefaultTempo,
   });
 
   String get _background => sheepBackgroundsV1.containsKey(background)
@@ -93,16 +101,134 @@ class SheepAvatar extends StatelessWidget {
       ),
     );
     if (!working) return avatar;
+    final badge = ThinkingBadge(
+      height: (size * 0.38).clamp(10.0, 14.0),
+      tempo: tempo,
+    );
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        avatar,
+        Positioned(
+          right: -badge.height * 0.55,
+          bottom: -badge.height * 0.55,
+          child: badge,
+        ),
+      ],
+    );
+  }
+}
+
+/// The default beat of the typing badge.
+const Duration thinkingBadgeDefaultTempo = Duration(milliseconds: 1200);
+
+/// The typing badge: three dots in a pill, each rising in turn. The pill is
+/// cut out of the avatar by a ring of the page's own colour, so it reads as
+/// sitting on the corner rather than painted over it.
+class ThinkingBadge extends StatefulWidget {
+  final double height;
+  final Duration tempo;
+  const ThinkingBadge({
+    super.key,
+    required this.height,
+    this.tempo = thinkingBadgeDefaultTempo,
+  });
+
+  @override
+  State<ThinkingBadge> createState() => _ThinkingBadgeState();
+}
+
+class _ThinkingBadgeState extends State<ThinkingBadge>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _beat = AnimationController(
+    vsync: this,
+    duration: widget.tempo,
+  );
+
+  /// A person who asked for less motion gets three still dots: the controller
+  /// never starts rather than animating something they cannot see.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final still = MediaQuery.disableAnimationsOf(context);
+    if (still && _beat.isAnimating) {
+      _beat.stop();
+    } else if (!still && !_beat.isAnimating) {
+      _beat.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(ThinkingBadge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tempo != widget.tempo) {
+      // Keep the phase so a tempo change does not make the dots jump.
+      final phase = _beat.value;
+      _beat.duration = widget.tempo;
+      if (_beat.isAnimating) _beat.repeat(period: widget.tempo);
+      _beat.value = phase;
+    }
+  }
+
+  @override
+  void dispose() {
+    _beat.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final height = widget.height;
+    final dot = height * 0.24;
+    final lift = height * 0.16;
+    final cutout = Theme.of(context).scaffoldBackgroundColor;
     return Container(
-      padding: const EdgeInsets.all(2),
+      height: height + 3,
+      padding: const EdgeInsets.all(1.5),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.34),
-        border: Border.all(
-          color: Theme.of(context).colorScheme.primary,
-          width: 2,
+        color: cutout,
+        borderRadius: BorderRadius.circular(height / 2 + 1.5),
+      ),
+      child: Container(
+        height: height,
+        padding: EdgeInsets.symmetric(horizontal: height * 0.32),
+        decoration: BoxDecoration(
+          color: scheme.primary,
+          borderRadius: BorderRadius.circular(height / 2),
+        ),
+        child: AnimatedBuilder(
+          animation: _beat,
+          builder: (context, _) => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var index = 0; index < 3; index++) ...[
+                if (index > 0) SizedBox(width: dot * 0.7),
+                Transform.translate(
+                  offset: Offset(0, -lift * _rise(_beat.value, index)),
+                  child: Container(
+                    width: dot,
+                    height: dot,
+                    decoration: BoxDecoration(
+                      color: scheme.onPrimary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
-      child: avatar,
     );
+  }
+
+  /// How far dot [index] has risen at [t] in the beat: each dot owns a quarter
+  /// of the cycle and the last quarter is rest, so the wave reads left to
+  /// right with a breath between.
+  static double _rise(double t, int index) {
+    final local = t * 4 - index;
+    if (local < 0 || local > 1) return 0;
+    return math.sin(local * math.pi);
   }
 }
