@@ -10,6 +10,8 @@ import {
   NATIVE_RETURN_ANDROID,
   NATIVE_RETURN_DEVELOPMENT,
   NATIVE_RETURN_MACOS,
+  NATIVE_RETURN_MACOS_DEV,
+  NATIVE_MACOS_DEV_SCHEME,
   NATIVE_MACOS_SCHEME,
   nativeReturnUris,
   type NativeAuthOptions,
@@ -547,6 +549,7 @@ test("deployment targets are an exact fail-closed switch", () => {
   expect(nativeReturnUris("android,macos")).toEqual([
     NATIVE_RETURN_ANDROID,
     NATIVE_RETURN_MACOS,
+    NATIVE_RETURN_MACOS_DEV,
   ]);
   for (const value of [
     undefined,
@@ -602,7 +605,11 @@ test("gateway serves public associations and exact returns without loading the a
     await (await disabled.fetch(f.request("/api/auth/get-session"))).text(),
   ).toBe("browser auth");
   const mac = fixture({
-    returnUris: [NATIVE_RETURN_ANDROID, NATIVE_RETURN_MACOS],
+    returnUris: [
+      NATIVE_RETURN_ANDROID,
+      NATIVE_RETURN_MACOS,
+      NATIVE_RETURN_MACOS_DEV,
+    ],
   });
   const macReturn = await gateway(mac.auth).fetch(
     mac.request("/native/return/macos?code=code-9f3a&state=state-7c1d"),
@@ -623,6 +630,20 @@ test("gateway serves public associations and exact returns without loading the a
   );
   expect(page).not.toContain("code-9f3a");
   expect(page).not.toContain("state-7c1d");
+  // The local FrockBot Dev build is a separate app with its own scheme: its
+  // page must never hand the code to the released app's scheme, nor the
+  // released app's page to the dev build's.
+  expect(page).not.toContain(`${NATIVE_MACOS_DEV_SCHEME}://`);
+  const devReturn = await gateway(mac.auth).fetch(
+    mac.request("/native/return/macos-dev?code=code-9f3a&state=state-7c1d"),
+  );
+  expect(devReturn.status).toBe(200);
+  const devPage = await devReturn.text();
+  expect(devPage).toContain(
+    `${NATIVE_MACOS_DEV_SCHEME}://bot.frockbot.com/native/return/macos-dev`,
+  );
+  expect(devPage).not.toContain(`${NATIVE_MACOS_SCHEME}://`);
+  expect(devPage).not.toContain("code-9f3a");
   // Android's verified App Link already opened the app; the page it leaves
   // behind is the same branded page, carrying no script and no scheme link.
   const androidReturn = await gateway(mac.auth).fetch(
@@ -642,6 +663,7 @@ test("gateway serves public associations and exact returns without loading the a
   expect(androidPage).not.toContain("state-7c1d");
   for (const target of [
     NATIVE_RETURN_MACOS,
+    NATIVE_RETURN_MACOS_DEV,
     `${NATIVE_RETURN_ANDROID}/extra`,
     `${NATIVE_RETURN_ANDROID}?next=evil`,
     `${NATIVE_RETURN_ANDROID}#fragment`,

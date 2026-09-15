@@ -390,6 +390,9 @@ void main() {
         // Each client's page only on the scheme that page hands over on.
         'frockbot://bot.frockbot.com/api/connect/callback/android',
         'https://bot.frockbot.com/api/connect/callback/macos',
+        // The local FrockBot Dev Mac build's page belongs to that app alone.
+        'frockbot-dev://bot.frockbot.com/api/connect/callback/macos-dev',
+        'frockbot://bot.frockbot.com/api/connect/callback/macos-dev',
         // Anything else under the callback path.
         'https://bot.frockbot.com/api/connect/callback/ios',
         'https://bot.frockbot.com/api/connect/callback/android/extra',

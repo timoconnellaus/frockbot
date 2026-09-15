@@ -23,6 +23,15 @@ export const NATIVE_ORIGIN = "https://bot.frockbot.com";
 export const NATIVE_RETURN_ANDROID = `${NATIVE_ORIGIN}/native/return/android`;
 export const NATIVE_RETURN_MACOS = `${NATIVE_ORIGIN}/native/return/macos`;
 /**
+ * The local "FrockBot Dev" Mac build's return (`bun run update:desktop`). It
+ * is a separate app beside the released one, with its own bundle identifier
+ * and scheme, so its sign-in must come back through its own page: handed to
+ * `frockbot://`, the released app would take the code, or macOS would open
+ * the wrong copy. Not in the Apple association, so Safari never offers it to
+ * the released app as a Universal Link either.
+ */
+export const NATIVE_RETURN_MACOS_DEV = `${NATIVE_ORIGIN}/native/return/macos-dev`;
+/**
  * Where a development build of the app receives its sign-in. A custom scheme,
  * because a plain-HTTP loopback origin can never be an App Link; only a Worker
  * running with `ALLOW_DEVELOPMENT_AUTH` ever lists it.
@@ -36,6 +45,8 @@ export const NATIVE_RETURN_DEVELOPMENT = "frockbot-dev://native/return/android";
  * code is useless without the PKCE verifier the app never shares.
  */
 export const NATIVE_MACOS_SCHEME = "frockbot";
+/** The local FrockBot Dev Mac build's scheme; see `NATIVE_RETURN_MACOS_DEV`. */
+export const NATIVE_MACOS_DEV_SCHEME = "frockbot-dev";
 const PREFIX = "frockbot-native.";
 const encoder = new TextEncoder();
 const NO_STORE = {
@@ -47,7 +58,11 @@ const NO_STORE = {
 export function nativeReturnUris(flag: string | undefined): readonly string[] {
   if (flag === "android") return [NATIVE_RETURN_ANDROID];
   if (flag === "android,macos")
-    return [NATIVE_RETURN_ANDROID, NATIVE_RETURN_MACOS];
+    return [
+      NATIVE_RETURN_ANDROID,
+      NATIVE_RETURN_MACOS,
+      NATIVE_RETURN_MACOS_DEV,
+    ];
   return [];
 }
 
@@ -715,10 +730,13 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           options.returnUris.includes(url.origin + url.pathname) &&
           request.method === "GET"
         ) {
+          const page = url.origin + url.pathname;
           return nativeReturnPage(
-            url.origin + url.pathname === NATIVE_RETURN_MACOS
+            page === NATIVE_RETURN_MACOS
               ? "macos"
-              : "android",
+              : page === NATIVE_RETURN_MACOS_DEV
+                ? "macos-dev"
+                : "android",
           );
         }
         return error(404);
@@ -736,10 +754,17 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
  * markup. On Android the verified App Link has already opened the app; this
  * page is what remains in the browser, and what a user sees if it did not.
  */
-function nativeReturnPage(platform: "macos" | "android"): Response {
-  const macos = platform === "macos";
+function nativeReturnPage(
+  platform: "macos" | "macos-dev" | "android",
+): Response {
+  const macos = platform !== "android";
+  const hosted = new URL(
+    platform === "macos-dev" ? NATIVE_RETURN_MACOS_DEV : NATIVE_RETURN_MACOS,
+  );
+  const scheme =
+    platform === "macos-dev" ? NATIVE_MACOS_DEV_SCHEME : NATIVE_MACOS_SCHEME;
   const target = macos
-    ? `${NATIVE_MACOS_SCHEME}://${new URL(NATIVE_RETURN_MACOS).host}${new URL(NATIVE_RETURN_MACOS).pathname}`
+    ? `${scheme}://${hosted.host}${hosted.pathname}`
     : undefined;
   return returnPageV1({
     title: "Return to FrockBot",

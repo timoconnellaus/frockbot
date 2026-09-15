@@ -60,8 +60,15 @@ function jsonError(status: number, error: string): Response {
   return Response.json({ error }, { status });
 }
 
-/** The Mac app's custom scheme; the same one its sign-in return uses. */
-const MACOS_SCHEME = "frockbot";
+/**
+ * The Mac app's custom schemes; the same ones its sign-in return uses. The
+ * local FrockBot Dev build is a separate app with its own, so a Connect it
+ * started never opens the released app.
+ */
+const MACOS_SCHEMES = {
+  macos: "frockbot",
+  "macos-dev": "frockbot-dev",
+} as const;
 
 /**
  * The page a person lands on after the app's sign-in. No session, no state:
@@ -80,8 +87,8 @@ export function connectCallbackPageV1(
   const heading = "Back to FrockBot";
   const footnote =
     "FrockBot shows whether the app connected. If it did not, connect it again from the Marketplace.";
-  if (client === "macos") {
-    const target = `${MACOS_SCHEME}://${new URL(origin).host}${connectCallbackPathV1("macos")}`;
+  if (client === "macos" || client === "macos-dev") {
+    const target = `${MACOS_SCHEMES[client]}://${new URL(origin).host}${connectCallbackPathV1(client)}`;
     return returnPageV1({
       title: "Back to FrockBot",
       heading,

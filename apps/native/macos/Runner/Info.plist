@@ -20,10 +20,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.frockbot.mobile.return</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).return</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>frockbot</string>
+				<string>$(FROCKBOT_URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
