@@ -10,6 +10,16 @@ export interface DeploymentWorkerV1 {
   hostnames?: readonly string[];
 }
 
+/**
+ * Where the container Workers get their image. Building from the Dockerfile
+ * needs Docker on the deploying machine; pulling a published one does not,
+ * which is the whole reason `bun run setup` can deploy into an account that has
+ * never built an image (ADR 0028 steps 4 and 5).
+ */
+export type DeploymentImagesV1 =
+  | { source: "dockerfile" }
+  | { source: "registry"; registry: string; tag: string };
+
 export interface DeploymentProfileV1 {
   schemaVersion: 1;
   name: string;
@@ -25,6 +35,7 @@ export interface DeploymentProfileV1 {
     adminPortal?: DeploymentWorkerV1;
   };
   artifactHostname?: string;
+  images?: DeploymentImagesV1;
   access?: { teamDomain: string; aud: string };
   adminEmails?: readonly string[];
   d1DatabaseId?: string;

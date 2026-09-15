@@ -8,6 +8,7 @@ environments and their comments, and nothing that names a deployment.
 ```
 bun run deployment:config hosted
 bun run deployment:config staging --d1-database-id <uuid>
+bun run deployment:config simple --application-hash <sha256>
 ```
 
 writes `.deployment/<profile>/<worker>/wrangler.jsonc`, which is what every
@@ -18,11 +19,52 @@ put -c` in `release.yml` and `main.yml` takes. `.deployment/` is git-ignored.
 does not meet it, so a missing account or a malformed hostname fails before a
 config is written rather than during a deploy.
 
+Two values are flags rather than profile fields, because whoever deploys resolves
+them in the same run: `--d1-database-id` for a disposable stage that creates its
+database, and `--application-hash` for the sha256 of the application artifact the
+deployer just uploaded, which is the R2 key the Worker loads it from. Without the
+second, the config keeps the tracked placeholder `foundation-v1`, which is no
+object in anybody's bucket.
+
+## Simple deployment
+
+Nobody writes `deployments/simple.json` by hand. `bun run setup`
+(`scripts/setup.ts`) does: it picks the account, asks for the hostname, the admin
+emails and the Zero Trust team, writes the profile, runs this generator, creates
+the buckets and the index, mints the internal secrets, asks for the Fly token the
+Computer host needs, sets up the two Access applications — Allow on the app's
+hostname, Bypass on `/api` — downloads the client and the application
+artifact for the checked-out tag, and deploys the three Workers.
+`bun run setup --dry-run` asks the same questions and then prints every command
+and every value it would write, running no wrangler command and reaching no
+network; add `--yes` to take the defaults instead of answering, which is how it
+runs in a check. `scripts/setup-production.sh` is a different thing: it is the
+hosted deployment's wizard, and it sets GitHub environment secrets for
+`release.yml` rather than creating anything in Cloudflare.
+
+The simple profile is the one that builds the Access auth Package, which the
+generator writes as one `alias` entry:
+
+```json
+"alias": { "#auth-package": "../../../apps/cloudflare/src/auth-package.access.ts" }
+```
+
+`apps/cloudflare/package.json` maps `#auth-package` to
+`src/auth-package.ts` — better-auth, the tracked default that `wrangler dev`, the
+suites and the hosted deploy resolve — and that alias is what makes the deployed
+bundle resolve the Access chooser instead. A bare specifier rather than a relative
+path because esbuild, which is what wrangler's `alias` reaches, refuses to alias a
+relative import. Nothing is written for a `better-auth` profile: the tracked
+source already resolves to it, so the hosted and staging configs stay byte-for-byte
+what production runs. `apps/cloudflare/tsconfig.access.json` type-checks the whole
+Worker against the other chooser, so an `env` name only the hosted build has
+cannot reach the Access build unnoticed.
+
 Five deployables: the app Worker, the Computer host, the Applet build service,
 the marketing site and the admin portal. A profile generates exactly the ones it
-names, which is how `staging.json` has neither the marketing site nor the portal
-— and how the simple profile will have neither, since with Access deciding
-admission there is no admin operation left to administer.
+names, which is how `staging.json` has neither the marketing site nor the portal,
+and how `simple.json` has neither either: with Access deciding admission there is
+no admin operation left to administer.
 
 ## What a generated config is
 
@@ -35,6 +77,7 @@ The tracked file, with identity applied:
 | bindings with no bucket, index or db name | the profile's resource names, derived from `prefix`                                                       |
 | `services` with no target                 | the profile's own Worker names: the Computer host, the build service, and the app Worker the portal binds |
 | `vars` without identity                   | plus the identity vars below                                                                              |
+| `containers[].image` a Dockerfile path    | the published image, when the profile's `images.source` is `registry`                                     |
 | `env.development`, `env.e2e`              | dropped — a named environment in a deployed config is a second Worker                                     |
 
 The identity vars the app Worker gains: `NATIVE_SLICE_2_AUTH`,
@@ -89,6 +132,82 @@ Two things the fixtures make explicit:
   creates the database if absent and resolves its identifier from
   `wrangler d1 list` in the same job, then passes it with `--d1-database-id`.
   That replaced the regex that used to rewrite the tracked file in place.
+
+## What a release publishes, and what an installer pulls
+
+A deployer runs `wrangler deploy -c` in their own account with no Docker and no
+Flutter, so everything those two would have produced is published by
+`release.yml` for the tag and fetched from it (ADR 0028 step 5).
+
+**The container images**, by the `publish-images` job, built once from the
+repository root context for `linux/amd64` and pushed under two tags each:
+
+| Image                                             | Built from                      |
+| ------------------------------------------------- | ------------------------------- |
+| `docker.io/timoconnellaus/frockbot-computer-host` | `apps/computer-host/Dockerfile` |
+| `docker.io/timoconnellaus/frockbot-applet-build`  | `apps/applet-build/Dockerfile`  |
+
+`:<version>` is the release, `:latest` is the newest release. A profile names
+them by setting `images`:
+
+```json
+"images": { "source": "registry", "registry": "docker.io/timoconnellaus", "tag": "0.7.20" }
+```
+
+and the generator writes `"image": "<registry>/frockbot-<worker>:<tag>"` with no
+`image_build_context`. `"source": "dockerfile"`, which is also what an absent
+`images` means, keeps today's behaviour — wrangler builds the image locally,
+which is what the hosted profile still does. `CONTAINER_IMAGE_REPOSITORIES_V1`
+and `PUBLISHED_IMAGE_REGISTRY_V1` in `generate.ts` are the one spelling of these
+names, and `deployment-config.test.ts` proves `release.yml` pushes the same ones.
+
+**What a deployer's account needs for the pull: nothing.** Cloudflare Containers
+pull from [four registries][image-management] — the Cloudflare managed registry,
+Docker Hub, Amazon ECR and Google Artifact Registry — and of those Docker Hub is
+the only one where a public image needs no credentials: "Public Docker Hub images
+do not require registry configuration." So the installer sets no registry
+credentials and runs no `wrangler containers registries configure`. Two
+consequences worth knowing:
+
+- **GHCR is not one of the four.** `ghcr.io` images cannot be pulled by the
+  platform at all; the documented way to use an image from any other registry is
+  to pull it locally and `wrangler containers push` it, which needs the Docker
+  the installer is avoiding.
+- Cloudflare does not cache Docker Hub pulls, so a deployment is subject to
+  Docker Hub's anonymous pull limits. A deployer who hits them configures their
+  own read-only Docker Hub token once, with
+  `wrangler containers registries configure docker.io --dockerhub-username=<user>`;
+  the images themselves stay public.
+
+Publishing needs the repository secrets `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` (a Docker Hub personal access token with write access to the
+`timoconnellaus` namespace, which is that account's username; no organisation
+is needed). While they are unset, `publish-images` skips with a warning and
+`deploy-backend` does not wait on it, so the hosted deployment keeps shipping.
+Once the simple profile is announced, `deploy-backend` gains `publish-images`
+in its `needs`, so a tag production is running is always a tag an installer can
+install.
+
+**The release assets**, by `release-assets` and attached by `github-release`:
+
+| Asset                                         | What it is                                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `frockbot-web-client-<version>.zip`           | `apps/cloudflare/dist/web` — unpack into it, and the generated config's `assets.directory` is the app Worker's payload   |
+| `frockbot-application-artifact-<version>.mjs` | `dist/artifacts/foundation-v1.mjs` — put in the `APPLICATION_ARTIFACTS` bucket under `applications/<its own sha256>.mjs` |
+
+The artifact's key is its own sha256, and a generated config carries the
+placeholder `"DEFAULT_APPLICATION_HASH": "foundation-v1"` from the tracked file
+unless `--application-hash` names the real one. `bun run setup` passes it once it
+has computed the digest of the artifact it downloaded; `deploy-backend` rewrites
+the written file in place instead, in its `Configure application artifact` step. A
+Worker whose var still says `foundation-v1` looks for an object that is not there.
+
+No APK is attached: a plain `flutter build apk` bakes `FROCKBOT_ORIGIN` in, so a
+deployer's APK can only be built against their own origin. The simple profile
+ships the web client, and a deployer who wants the phone app builds it themselves
+(`docs/app-updates.md`).
+
+[image-management]: https://developers.cloudflare.com/containers/image-management/
 
 ## The artifact origin needs a zone
 

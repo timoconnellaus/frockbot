@@ -12,17 +12,24 @@
  * in the same commit. That is the point: the change is seen.
  */
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
+  AUTH_PACKAGE_CHOOSERS_V1,
+  CONTAINER_IMAGE_REPOSITORIES_V1,
   DEPLOYABLE_WORKERS_V1,
   generateProfileConfigsV1,
   generateWorkerConfigV1,
   profileWorkersV1,
+  PUBLISHED_IMAGE_REGISTRY_V1,
   type DeployableWorkerV1,
 } from "./deployment-config/generate.ts";
 import { parseJsoncV1 } from "./deployment-config/jsonc.ts";
-import { loadProfileV1, REPO_ROOT_V1 } from "./deployment-config/profile.ts";
+import {
+  loadProfileV1,
+  REPO_ROOT_V1,
+  validateProfileV1,
+} from "./deployment-config/profile.ts";
 
 const FIXTURE_DIRECTORY = join(
   import.meta.dirname,
@@ -262,6 +269,57 @@ describe("the generator", () => {
     expect((app.config.vars as Config).UI_ARTIFACT_HOSTS).toBeUndefined();
   });
 
+  test("builds the container images from the Dockerfile by default", () => {
+    // What the hosted profile still does, and what the equivalence gate above
+    // depends on: production's deploy builds its own images.
+    for (const worker of ["computerHost", "appletBuild"] as const) {
+      const generated = generateWorkerConfigV1(worker, {
+        profile: loadProfileV1("hosted"),
+      });
+      const container = (generated.config.containers as Config[])[0]!;
+      expect(String(container.image)).toEndWith("Dockerfile");
+      expect(container.image_build_context).toBeDefined();
+    }
+  });
+
+  test("pulls the published images when the profile names a registry", () => {
+    const profile = {
+      ...loadProfileV1("hosted"),
+      name: "simple",
+      images: {
+        source: "registry" as const,
+        registry: PUBLISHED_IMAGE_REGISTRY_V1,
+        tag: "1.2.3",
+      },
+    };
+    for (const worker of ["computerHost", "appletBuild"] as const) {
+      const generated = generateWorkerConfigV1(worker, { profile });
+      const container = (generated.config.containers as Config[])[0]!;
+      expect(container.image).toBe(
+        `${PUBLISHED_IMAGE_REGISTRY_V1}/${CONTAINER_IMAGE_REPOSITORIES_V1[worker]}:1.2.3`,
+      );
+      // A pulled image has nothing to build, and wrangler refuses the pair.
+      expect(container).not.toHaveProperty("image_build_context");
+    }
+  });
+
+  test("refuses a pulled image with no tag", () => {
+    // The tag is the release the deployment is running; without it wrangler
+    // would be handed a reference with nothing to resolve.
+    expect(() =>
+      validateProfileV1(
+        {
+          ...loadProfileV1("hosted"),
+          images: {
+            source: "registry",
+            registry: PUBLISHED_IMAGE_REGISTRY_V1,
+          },
+        },
+        "a profile",
+      ),
+    ).toThrow(/tag/);
+  });
+
   test("the Access Package binds no database", () => {
     const profile = {
       ...loadProfileV1("hosted"),
@@ -278,6 +336,95 @@ describe("the generator", () => {
       "example.cloudflareaccess.com",
     );
   });
+
+  test("aliases the sign-in Package the profile builds", () => {
+    // The whole of how a deployment chooses its auth Package: the tracked source
+    // resolves `#auth-package` to the better-auth chooser, and this alias is what
+    // makes the Access build's bundle carry the other one instead — and no
+    // better-auth at all.
+    const app = generateWorkerConfigV1("app", {
+      profile: {
+        ...loadProfileV1("hosted"),
+        name: "simple",
+        authPackage: "access" as const,
+        access: {
+          teamDomain: "example.cloudflareaccess.com",
+          aud: "a".repeat(64),
+        },
+      },
+    });
+    const alias = app.config.alias as Config;
+    expect(resolve(dirname(app.file), String(alias["#auth-package"]))).toBe(
+      join(REPO_ROOT_V1, "apps", "cloudflare", "src", "auth-package.access.ts"),
+    );
+  });
+
+  test("every chooser it can alias to is a file that is there", () => {
+    // A renamed chooser would be aliased to a path wrangler cannot resolve, and
+    // the only place that shows up is a failed deploy.
+    for (const chooser of Object.values(AUTH_PACKAGE_CHOOSERS_V1)) {
+      expect(
+        existsSync(join(REPO_ROOT_V1, "apps", "cloudflare", chooser)),
+      ).toBe(true);
+    }
+  });
+
+  test("writes no alias for the build the tracked source already resolves", () => {
+    // Which is what keeps the hosted and staging configs byte-for-byte what
+    // production runs, so the equivalence gate above has nothing new to approve.
+    for (const name of ["hosted", "staging"]) {
+      const app = generateWorkerConfigV1("app", {
+        profile: loadProfileV1(name),
+        d1DatabaseId: STAGING_D1_PLACEHOLDER,
+      });
+      expect(app.config.alias).toBeUndefined();
+    }
+  });
+
+  test("names the artifact the deployment uploaded, not the placeholder", () => {
+    // A Worker whose `DEFAULT_APPLICATION_HASH` still says `foundation-v1` looks
+    // in R2 for an object nobody put there.
+    const hash = "b".repeat(64);
+    const app = generateWorkerConfigV1("app", {
+      profile: loadProfileV1("hosted"),
+      applicationHash: hash,
+    });
+    expect((app.config.vars as Config).DEFAULT_APPLICATION_HASH).toBe(hash);
+    const untouched = generateWorkerConfigV1("app", {
+      profile: loadProfileV1("hosted"),
+    });
+    expect((untouched.config.vars as Config).DEFAULT_APPLICATION_HASH).toBe(
+      "foundation-v1",
+    );
+  });
+});
+
+/**
+ * A profile that pulls names the image `release.yml` pushed. If the two spellings
+ * ever drift, every installer written against a tag deploys a Worker whose
+ * container image does not exist, and the failure appears only when a Bot first
+ * asks for a Computer.
+ */
+describe("the published container images", () => {
+  const workflow = readFileSync(
+    join(REPO_ROOT_V1, ".github", "workflows", "release.yml"),
+    "utf8",
+  );
+
+  test(`release.yml pushes to ${PUBLISHED_IMAGE_REGISTRY_V1}`, () => {
+    expect(workflow).toContain(PUBLISHED_IMAGE_REGISTRY_V1);
+  });
+
+  for (const [worker, repository] of Object.entries(
+    CONTAINER_IMAGE_REPOSITORIES_V1,
+  )) {
+    test(`release.yml publishes ${repository}`, () => {
+      expect(workflow).toContain(repository);
+      expect(workflow).toContain(
+        `${DEPLOYABLE_WORKERS_V1[worker as DeployableWorkerV1].directory}/Dockerfile`,
+      );
+    });
+  }
 });
 
 /**

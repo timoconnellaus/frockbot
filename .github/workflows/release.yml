@@ -97,6 +97,161 @@ jobs:
       - name: Build
         run: bun run build
 
+  publish-images:
+    name: Publish container images
+    # What a deployment with no Docker pulls. `bun run setup` deploys
+    # `computer-host` and `applet-build` into an account that has never built an
+    # image, so the images have to already exist somewhere Cloudflare will pull
+    # them from — published under this tag, and before production moves, so a tag
+    # either ships everything or ships nothing (ADR 0028 step 5).
+    #
+    # Docker Hub, not GHCR: Cloudflare Containers pull only from the Cloudflare
+    # managed registry, Docker Hub, Amazon ECR and Google Artifact Registry, and
+    # of those Docker Hub is the one where a *public* image needs no credentials
+    # configured in the pulling account
+    # (https://developers.cloudflare.com/containers/image-management/).
+    #
+    # Skips loudly while the Docker Hub secrets are unset, and production does
+    # not wait on it: the hosted deployment still builds its images from the
+    # Dockerfiles, so a missing publish costs the simple profile a tag, not
+    # frockbot.com a release. Once the simple profile is announced, make this
+    # job required by adding it to `deploy-backend`'s `needs`.
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to Docker Hub
+        id: login
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in DOCKERHUB_USERNAME DOCKERHUB_TOKEN; do
+            if [[ -z "${!name}" ]]; then
+              printf '::warning::%s is unset: this tag publishes no container images, so an installer cannot pull it.\n' "$name"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          printf '%s' "$DOCKERHUB_TOKEN" |
+            docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push the container images
+        if: steps.login.outputs.publish == 'true'
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The build context is the repository root for both images: each copies
+          # workspace packages from outside its own directory, and the root
+          # `.dockerignore` is what keeps the rest out. `linux/amd64` is what
+          # Cloudflare Containers run, and `latest` is what a deployer who names
+          # no tag gets.
+          publish() {
+            local dockerfile="$1" repository="$2"
+            local image="docker.io/timoconnellaus/$repository"
+            docker build \
+              --platform linux/amd64 \
+              -f "$dockerfile" \
+              -t "$image:$VERSION" \
+              -t "$image:latest" \
+              .
+            docker push "$image:$VERSION"
+            docker push "$image:latest"
+          }
+
+          publish apps/computer-host/Dockerfile frockbot-computer-host
+          publish apps/applet-build/Dockerfile frockbot-applet-build
+
+      - name: Log out of Docker Hub
+        if: always() && steps.login.outputs.publish == 'true'
+        run: docker logout docker.io
+
+  release-assets:
+    name: Build the installer's release assets
+    # The two things an installer cannot build for itself: the Flutter web client
+    # (the app Worker's `assets` payload) and the application artifact the Worker
+    # loads from R2. A deployer has neither Flutter nor this repository's build,
+    # so both are attached to the Release for the tag they were built from.
+    #
+    # There is no prebuilt APK: a plain `flutter build apk` bakes
+    # `FROCKBOT_ORIGIN` in, and a deployer's origin is not known here.
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun # zizmor: ignore[cache-poisoning] tag-only release job
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # `artifact:build` chains `client:build`, which is `flutter build web` in
+      # `apps/native`. Same pin as `native.yml`; no cache in a privileged
+      # tag-only job.
+      - name: Set up Flutter # zizmor: ignore[cache-poisoning] tag-only release job
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+
+      - name: Build the web client and the application artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun scripts/build-applets-assets.ts
+          bun run --filter @frockbot/cloudflare artifact:build
+
+      - name: Package the release assets
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets="$RUNNER_TEMP/release-assets"
+          mkdir -p "$assets"
+
+          # Zipped from inside `dist/web` so it unpacks straight into the
+          # `assets.directory` a generated config points at: `_headers` and the
+          # content-addressed `_flutter/<buildHash>/` payload, nothing above them.
+          (cd apps/cloudflare/dist/web && zip -qr "$assets/frockbot-web-client-$VERSION.zip" .)
+
+          # Attached as the bytes themselves rather than an archive, because the
+          # R2 key the Worker loads it under is this file's own sha256.
+          cp apps/cloudflare/dist/artifacts/foundation-v1.mjs \
+            "$assets/frockbot-application-artifact-$VERSION.mjs"
+
+      - name: Upload the release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frockbot-release-assets
+          path: ${{ runner.temp }}/release-assets
+          if-no-files-found: error
+          retention-days: 7
+
   patch-android:
     name: Cut Android patch
     # The phone app's half of the release. A full Android release — a new APK
@@ -791,7 +946,8 @@ jobs:
     # surface, so it is created once production has actually moved — not before
     # the approval, not behind npm publishing (first-publish trust, OIDC), and
     # not before Apple has accepted the Mac app and the ticket has been stapled.
-    needs: [verify, deploy-marketing, deploy-backend, macos-release]
+    needs:
+      [verify, deploy-marketing, deploy-backend, macos-release, release-assets]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -803,25 +959,42 @@ jobs:
           name: frockbot-macos-release
           path: .release-assets
 
-      - name: Create GitHub release and attach disk image
-        # This asset is the per-tag provenance record: one immutable copy of
-        # exactly what shipped under this tag. It is not what the website
-        # hands out — `publish-download` writes that to R2 — so nothing here
-        # depends on which Release GitHub considers `latest`.
+      - name: Download the installer's release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: frockbot-release-assets
+          path: .release-assets
+
+      - name: Create GitHub release and attach its assets
+        # The disk image is the per-tag provenance record: one immutable copy of
+        # exactly what shipped under this tag. It is not what the website hands
+        # out — `publish-download` writes that to R2 — so nothing here depends on
+        # which Release GitHub considers `latest`.
+        #
+        # The other two are what an installer downloads for a tag, beside the
+        # container images `publish-images` pushed: the web client it unpacks as
+        # the app Worker's `assets` payload, and the application artifact it puts
+        # in its own R2 bucket under that file's sha256. Neither can be built
+        # without Flutter, which is the point of attaching them.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          asset=".release-assets/FrockBot-macos.dmg"
-          test -f "$asset"
+          assets=(
+            ".release-assets/FrockBot-macos.dmg"
+            ".release-assets/frockbot-web-client-$VERSION.zip"
+            ".release-assets/frockbot-application-artifact-$VERSION.mjs"
+          )
+          for asset in "${assets[@]}"; do test -f "$asset"; done
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists"
-            gh release upload "$GITHUB_REF_NAME" "$asset" --clobber
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
           else
             gh release create "$GITHUB_REF_NAME" \
-              "$asset" \
+              "${assets[@]}" \
               --generate-notes \
               --verify-tag
           fi
@@ -1193,60 +1366,13 @@ jobs:
             -c ../../.deployment/hosted/admin-portal/wrangler.jsonc \
             --secrets-file "$secrets_file"
 
-      - name: Deploy admin.frockbot.com
-        # The deployment's whole administrative surface (ADR 0028). It reaches
-        # the app over a service binding, so it is deployed beside marketing
-        # rather than with the backend: the binding names the app Worker, which
-        # already exists, and a portal deployed against the previous version
-        # administers it exactly as well.
-        #
-        # Access is what guards it, and the portal verifies the assertion
-        # itself, so the audience tag and team domain are configuration it
-        # cannot do without: until the environment names them, there is no
-        # Access application in front of the hostname and deploying the Worker
-        # would publish an administrative surface nothing guards.
-        working-directory: apps/admin-portal
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
-          ACCESS_AUD: ${{ vars.ACCESS_AUD }}
-          FROCKBOT_ADMIN_EMAILS: ${{ secrets.FROCKBOT_ADMIN_EMAILS }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$ACCESS_TEAM_DOMAIN" && -z "$ACCESS_AUD" ]]; then
-            echo "ACCESS_TEAM_DOMAIN and ACCESS_AUD are unset: skipping the admin portal."
-            echo "Create the Cloudflare Access application for admin.frockbot.com and set both in the production environment to deploy it."
-            exit 0
-          fi
-
-          missing=()
-          for name in ACCESS_TEAM_DOMAIN ACCESS_AUD FROCKBOT_ADMIN_EMAILS; do
-            if [[ -z "${!name}" ]]; then missing+=("$name"); fi
-          done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Missing admin portal configuration: %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
-
-          secrets_file="$RUNNER_TEMP/frockbot-admin-portal.env"
-          trap 'rm -f "$secrets_file"' EXIT
-
-          node <<'NODE' > "$secrets_file"
-          const names = ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'FROCKBOT_ADMIN_EMAILS'];
-          console.log(
-            JSON.stringify(
-              Object.fromEntries(names.map((name) => [name, process.env[name]])),
-            ),
-          );
-          NODE
-
-          bunx wrangler deploy --secrets-file "$secrets_file"
-
   deploy-backend:
     name: Deploy FrockBot app
+    # Does not wait on `publish-images` yet: the hosted deploy builds its own
+    # images from the Dockerfiles, and a tag must keep shipping frockbot.com
+    # while the Docker Hub secrets are unset. Once the simple profile is
+    # announced, add `publish-images` here so a tag production runs is always a
+    # tag an installer can install (ADR 0028 step 5).
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 20

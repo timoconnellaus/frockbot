@@ -45,6 +45,37 @@
       "type": "string",
       "pattern": "^ui\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
     },
+    "images": {
+      "description": "Where the two container Workers get their image. Absent is `dockerfile`: wrangler builds it on the deploying machine, which needs Docker. `registry` pulls the image `release.yml` published for one tag, which is what an installer with no Docker deploys.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": { "enum": ["dockerfile", "registry"] },
+        "registry": {
+          "description": "The registry and namespace the images were published under, without the image name. It must be one Cloudflare Containers pull from: the managed registry, Docker Hub, Amazon ECR or Google Artifact Registry (see the README).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*(:[0-9]+)?(/[a-z0-9][a-z0-9._-]*)*$"
+        },
+        "tag": {
+          "description": "The image tag, which is the release version the deployment is running.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "source": { "const": "registry" } },
+            "required": ["source"]
+          },
+          "then": {
+            "properties": { "registry": true, "tag": true },
+            "required": ["registry", "tag"]
+          }
+        }
+      ]
+    },
     "authPackage": {
       "description": "Which sign-in Package this deployment builds. The value `apps/cloudflare/src/auth-package.ts` carries.",
       "enum": ["better-auth", "access"]
@@ -60,7 +91,7 @@
       }
     },
     "adminEmails": {
-      "description": "Who may bypass admission and open the debug surface. The installer sets it as the Worker secret `FROCKBOT_ADMIN_EMAILS`; no generated config carries it, which is why the hosted profile leaves it to the repository secret it already has.",
+      "description": "The deployment's admins: they bypass admission, and a debug Turn may act as one of them. The debug surface itself is gated on `DEBUG_TOKEN`. The installer sets it as the Worker secret `FROCKBOT_ADMIN_EMAILS`; no generated config carries it, which is why the hosted profile leaves it to the repository secret it already has.",
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/email" }

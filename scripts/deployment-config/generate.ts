@@ -29,6 +29,51 @@ export const WORKER_OUTPUT_DIRECTORIES_V1: Record<DeployableWorkerV1, string> =
   };
 
 /**
+ * The image `release.yml` publishes for each container Worker. One name per
+ * image rather than per deployment: every deployment that pulls rather than
+ * builds pulls the same bytes for a given tag.
+ */
+export const CONTAINER_IMAGE_REPOSITORIES_V1: Partial<
+  Record<DeployableWorkerV1, string>
+> = {
+  computerHost: "frockbot-computer-host",
+  appletBuild: "frockbot-applet-build",
+};
+
+/**
+ * Where `release.yml` pushes them, and so the default an installer writes into
+ * a profile. Docker Hub because Cloudflare pulls a *public* image from it with
+ * no credentials configured in the pulling account, which is the only registry
+ * of the four it supports where that is true (see the README).
+ */
+export const PUBLISHED_IMAGE_REGISTRY_V1 = "docker.io/timoconnellaus";
+
+/**
+ * The specifier the Worker imports its sign-in Package through.
+ *
+ * `apps/cloudflare/package.json` maps it to the better-auth chooser, which is
+ * what `wrangler dev`, every suite and the hosted deploy resolve. An `access`
+ * profile's generated config aliases it to the other chooser, so the build a
+ * deployment ships is decided by its own config and neither bundle carries the
+ * Package it did not choose. A bare specifier rather than a relative path
+ * because esbuild — which is what wrangler's `alias` reaches — refuses to alias
+ * a relative import.
+ */
+const AUTH_PACKAGE_ALIAS_V1 = "#auth-package";
+
+/** The build the tracked source already resolves to, so no alias is written. */
+const TRACKED_AUTH_PACKAGE_V1 = "better-auth";
+
+/** The chooser each auth Package's build resolves that specifier to. */
+export const AUTH_PACKAGE_CHOOSERS_V1: Record<
+  DeploymentProfileV1["authPackage"],
+  string
+> = {
+  "better-auth": "./src/auth-package.ts",
+  access: "./src/auth-package.access.ts",
+};
+
+/**
  * Config values that name a file or directory. `wrangler -c <path>` resolves
  * each one against the config's own directory, so a generated config that
  * copied them verbatim would look for `src/index.ts` inside `.deployment/`.
@@ -37,6 +82,9 @@ const PATH_FIELDS_V1 = [
   ["$schema"],
   ["main"],
   ["assets", "directory"],
+  // Written below as the app template's own relative path, then rewritten with
+  // every other path so wrangler resolves it from `.deployment/` too.
+  ["alias", AUTH_PACKAGE_ALIAS_V1],
 ] as const;
 
 export interface GenerateOptionsV1 {
@@ -46,6 +94,13 @@ export interface GenerateOptionsV1 {
    * disposable stage creates its database in the same job that deploys it.
    */
   d1DatabaseId?: string;
+  /**
+   * The sha256 of the application artifact this deployment uploaded, which is
+   * the R2 key it is stored under. Resolved by whoever uploads it — the release
+   * job, or the installer for the tag it downloaded — so it is a flag rather
+   * than a profile field, the way `d1DatabaseId` is.
+   */
+  applicationHash?: string;
   /** Where `.deployment/<name>/` is rooted. The repository, except in tests. */
   outputRoot?: string;
   repoRoot?: string;
@@ -78,7 +133,13 @@ function derivedWorkerNameV1(
   }
 }
 
-function resourceNamesV1(profile: DeploymentProfileV1) {
+/**
+ * The bucket, index and database names this profile binds.
+ *
+ * Exported because the installer creates and writes to exactly these, and a
+ * second derivation of the same names is a bucket nothing opens.
+ */
+export function resourceNamesV1(profile: DeploymentProfileV1) {
   const named = profile.resources ?? {};
   return {
     applicationArtifactsBucket:
@@ -157,6 +218,33 @@ function rewritePathsV1(
       const next = rewrite(container[key]);
       if (next !== undefined) container[key] = next;
     }
+  }
+}
+
+/**
+ * Point the container entries at the published image instead of the Dockerfile.
+ *
+ * Runs after the path rewrite, because a registry reference is not a path and
+ * resolving it against a directory would mangle it.
+ */
+function applyPublishedImagesV1(
+  worker: DeployableWorkerV1,
+  config: Record<string, unknown>,
+  profile: DeploymentProfileV1,
+): void {
+  const images = profile.images;
+  if (!images || images.source === "dockerfile") return;
+  const containers = asArray(config.containers);
+  if (containers.length === 0) return;
+  const repository = CONTAINER_IMAGE_REPOSITORIES_V1[worker];
+  if (!repository) {
+    throw new Error(`${worker} fronts a container but publishes no image`);
+  }
+  for (const container of containers) {
+    container.image = `${images.registry}/${repository}:${images.tag}`;
+    // Nothing is built, so there is no context to build it in; wrangler refuses
+    // the pair.
+    delete container.image_build_context;
   }
 }
 
@@ -293,11 +381,32 @@ export function generateWorkerConfigV1(
     }
   }
 
+  if (worker === "app" && profile.authPackage !== TRACKED_AUTH_PACKAGE_V1) {
+    // Only when the profile builds the other Package: the tracked source
+    // already resolves `#auth-package` to the default chooser, so the hosted
+    // and staging configs stay byte-for-byte what production runs and the
+    // equivalence gate has nothing new to approve.
+    config.alias = {
+      ...((config.alias as Record<string, unknown>) ?? {}),
+      [AUTH_PACKAGE_ALIAS_V1]: AUTH_PACKAGE_CHOOSERS_V1[profile.authPackage],
+    };
+  }
+
   const identity = identityVarsV1(worker, profile);
   if (Object.keys(identity).length > 0) {
     config.vars = {
       ...((config.vars as Record<string, unknown>) ?? {}),
       ...identity,
+    };
+  }
+
+  if (worker === "app" && options.applicationHash) {
+    // The Worker loads its application from R2 under that file's own sha256, so
+    // the var has to name the artifact this deployment actually uploaded. The
+    // tracked placeholder `foundation-v1` is no object in anybody's bucket.
+    config.vars = {
+      ...((config.vars as Record<string, unknown>) ?? {}),
+      DEFAULT_APPLICATION_HASH: options.applicationHash,
     };
   }
 
@@ -308,6 +417,7 @@ export function generateWorkerConfigV1(
     "wrangler.jsonc",
   );
   rewritePathsV1(config, template.directory, dirname(file));
+  applyPublishedImagesV1(worker, config, profile);
   return { worker, file, config };
 }
 
