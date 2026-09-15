@@ -659,6 +659,14 @@ class _VoiceExchangeCard extends StatelessWidget {
         child: Theme(
           data: theme.copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
+            // A storage slot of its own. PageStorage names an entry by the
+            // PageStorageKeys above it, and the only one here is the
+            // transcript list's — the slot its scroll position already writes
+            // a double into. Sharing it made the tile read that offset back as
+            // its expanded flag and throw on mount, which a release build
+            // paints as a grey box over the thread. Per-card also keeps one
+            // card's collapse from driving every other card in the thread.
+            key: PageStorageKey('voice-exchange:${line.runId}'),
             initiallyExpanded: true,
             leading: Icon(Icons.graphic_eq_rounded, color: blue),
             iconColor: blue,
