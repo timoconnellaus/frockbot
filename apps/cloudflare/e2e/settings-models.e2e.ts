@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import {
+  answerInputs,
   chooseDefaultModel,
   chooseOllamaProvider,
   connectOllama,
@@ -144,8 +145,9 @@ test("an uncertain profile save survives reload and checks the original command"
   await openSettings(page);
 
   const name = field(sem(page, "settings-document"), "view-field-f0.name");
-  await name.click();
-  await name.fill("Saved through interruption");
+  // Through the editing session, not straight into the DOM input: a save
+  // pressed before Flutter took the text sends the name the field had before.
+  await answerInputs([[name, "Saved through interruption"]]);
 
   let firstId: string | undefined;
   await page.route(

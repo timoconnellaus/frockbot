@@ -60,6 +60,21 @@ abstract final class ShellIds {
   static String slot(String name) => 'shell-slot-$name';
 }
 
+/// The quick actions on one Bot in the list.
+abstract final class BotActionIds {
+  /// The control a desktop row grows on hover and focus.
+  static String menu(String botId) => 'bot-actions-$botId';
+
+  /// The button a phone row reveals when swiped towards the leading edge.
+  static String swipeHide(String botId) => 'bot-swipe-hide-$botId';
+  static String item(Object action) =>
+      'bot-action-${action.toString().split('.').last}';
+  static const labelPicker = 'bot-label-picker';
+  static const labelClear = 'bot-label-clear';
+  static String labelChoice(String label) =>
+      'bot-label-choice-${label.toLowerCase()}';
+}
+
 /// Names a widget for the browser specs without changing how it is drawn, or
 /// what it says.
 ///
@@ -387,4 +402,3 @@ abstract final class PackageIds {
   static String page(String packageId, String pageId) =>
       'package-page-$packageId-$pageId';
 }
-

@@ -1,5 +1,12 @@
 /// The Bot list: pinned tiles, label groups, unread, and the way out of it.
 ///
+/// Every row also offers its Bot's quick actions — the list of them is
+/// `bot_actions.dart`'s — reached the way each tier reaches a row: a phone
+/// long-presses it, or swipes it (towards the trailing edge to mark it read
+/// or unread, towards the leading edge to reveal Hide); a desktop
+/// secondary-clicks it, or presses the control the row grows under the
+/// pointer and on focus.
+///
 /// A pinned Bot is a tile above the list instead of a row inside it, never
 /// both — the tile *is* the row, moved — so grouping runs over what is left.
 /// Hidden and archived are different states: archiving stops a Bot
@@ -220,6 +227,17 @@ class ShellSidebar extends StatelessWidget {
   final VoiceControlState voiceControl;
   final VoidCallback onToggleHidden;
   final Future<void> Function() onRetry;
+
+  /// Opens the Bot's quick actions; [position] is where a secondary click
+  /// landed, and null when a press or the row's control asked instead.
+  final void Function(String botId, {Offset? position})? onActions;
+
+  /// A phone's swipe towards the trailing edge: mark read, or unread when
+  /// there is nothing unread.
+  final void Function(String botId)? onSwipeRead;
+
+  /// A phone's swipe towards the leading edge, then the button it reveals.
+  final void Function(String botId)? onSwipeHide;
   const ShellSidebar({
     super.key,
     required this.bots,
@@ -240,6 +258,9 @@ class ShellSidebar extends StatelessWidget {
     required this.voiceControl,
     required this.onToggleHidden,
     required this.onRetry,
+    this.onActions,
+    this.onSwipeRead,
+    this.onSwipeHide,
     this.phone = false,
     this.error,
   });
@@ -393,6 +414,12 @@ class ShellSidebar extends StatelessWidget {
                               unread: _unread(_id(bot)).unread,
                               working: _working(bot),
                               onTap: () => onSelect(_id(bot)),
+                              onActions: onActions == null
+                                  ? null
+                                  : ({Offset? position}) => onActions!(
+                                      _id(bot),
+                                      position: position,
+                                    ),
                             ),
                           ),
                       ],
@@ -492,58 +519,316 @@ class ShellSidebar extends StatelessWidget {
     final isArchived = archived.contains(botId);
     final isUnread = shown.unread;
     final selected = botId == activeBotId;
-    return identified(
-      ShellIds.sidebarBot(botId),
-      _BotRow(
-        key: ValueKey('bot-$botId'),
-        selected: selected,
-        enabled: !isArchived,
-        onTap: isArchived ? null : () => onSelect(botId),
-        avatar: SheepAvatar(
-          size: 36,
-          background: bot.sheep.background,
-          working: _working(bot),
+    final actions = onActions == null
+        ? null
+        : ({Offset? position}) => onActions!(botId, position: position);
+    final row = _BotRow(
+      key: ValueKey('bot-$botId'),
+      identifier: ShellIds.sidebarBot(botId),
+      selected: selected,
+      enabled: !isArchived,
+      onTap: isArchived ? null : () => onSelect(botId),
+      onActions: actions,
+      // A phone reaches the actions by pressing the row, and so may any
+      // touch screen; a pointer has the control and the secondary click.
+      control: !phone && actions != null
+          ? identified(
+              BotActionIds.menu(botId),
+              _RowControl(onPressed: (at) => actions(position: at)),
+            )
+          : null,
+      avatar: SheepAvatar(
+        size: 36,
+        background: bot.sheep.background,
+        working: _working(bot),
+      ),
+      name: _name(bot),
+      nameStyle: theme.textTheme.bodyMedium?.copyWith(
+        fontSize: 14,
+        fontWeight: isUnread ? FontWeight.w600 : FontWeight.w500,
+        letterSpacing: -0.1,
+        color: isArchived
+            ? theme.colorScheme.onSurfaceVariant
+            : theme.colorScheme.onSurface,
+      ),
+      time: at == null ? null : formatSidebarMessageTime(at),
+      preview: preview ?? profiles[botId]?.title ?? 'No messages yet',
+      previewStyle: theme.textTheme.bodySmall?.copyWith(
+        fontSize: 12.5,
+        color: isUnread
+            ? theme.colorScheme.onSurface.withValues(alpha: 0.78)
+            : theme.colorScheme.onSurfaceVariant,
+      ),
+      // One slot, one meaning. The row's own selected state already says
+      // which Bot is open, so the slot carries unread and archived — the two
+      // things a row can say that its appearance does not.
+      trailing: badge == null && !isArchived
+          ? null
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isArchived)
+                  Text(
+                    'Archived',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                if (badge != null) ...[
+                  if (isArchived) const SizedBox(width: 6),
+                  Badge(label: Text(badge)),
+                ],
+              ],
+            ),
+    );
+    // An archived Bot has stopped: nothing to read, nothing worth hiding.
+    if (!phone || isArchived) return row;
+    final read = onSwipeRead;
+    final hide = onSwipeHide;
+    final onRead = read == null || view?.lastActivityCursor == null
+        ? null
+        : () => read(botId);
+    final onHide = hide == null || _hidden(bot) ? null : () => hide(botId);
+    if (onRead == null && onHide == null) return row;
+    return _SwipeRow(
+      key: ValueKey('swipe-$botId'),
+      botId: botId,
+      unread: isUnread,
+      onRead: onRead,
+      onHide: onHide,
+      child: row,
+    );
+  }
+}
+
+/// The control a desktop row grows under the pointer and on focus: one quiet
+/// glyph where the time was, because a row that carried a button on every
+/// line would read as a toolbar.
+class _RowControl extends StatelessWidget {
+  final void Function(Offset at) onPressed;
+  const _RowControl({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: 24,
+      height: 20,
+      child: IconButton(
+        onPressed: () {
+          final box = context.findRenderObject()! as RenderBox;
+          onPressed(box.localToGlobal(box.size.bottomLeft(Offset.zero)));
+        },
+        tooltip: 'Bot actions',
+        padding: EdgeInsets.zero,
+        iconSize: 18,
+        constraints: const BoxConstraints(),
+        style: IconButton.styleFrom(
+          foregroundColor: scheme.onSurfaceVariant,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
-        name: _name(bot),
-        nameStyle: theme.textTheme.bodyMedium?.copyWith(
-          fontSize: 14,
-          fontWeight: isUnread ? FontWeight.w600 : FontWeight.w500,
-          letterSpacing: -0.1,
-          color: isArchived
-              ? theme.colorScheme.onSurfaceVariant
-              : theme.colorScheme.onSurface,
-        ),
-        time: at == null ? null : formatSidebarMessageTime(at),
-        preview: preview ?? profiles[botId]?.title ?? 'No messages yet',
-        previewStyle: theme.textTheme.bodySmall?.copyWith(
-          fontSize: 12.5,
-          color: isUnread
-              ? theme.colorScheme.onSurface.withValues(alpha: 0.78)
-              : theme.colorScheme.onSurfaceVariant,
-        ),
-        // One slot, one meaning. The row's own selected state already says
-        // which Bot is open, so the slot carries unread and archived — the two
-        // things a row can say that its appearance does not.
-        trailing: badge == null && !isArchived
-            ? null
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (isArchived)
-                    Text(
-                      'Archived',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        letterSpacing: 0.2,
+        icon: const Icon(Icons.more_horiz_rounded),
+      ),
+    );
+  }
+}
+
+/// How far, as a share of the row's width, a swipe towards the trailing edge
+/// travels before letting go marks the Bot read. Far enough that a scroll that
+/// wandered sideways never fires it; near enough that a deliberate swipe
+/// need not cross the screen.
+const sidebarSwipeReadFraction = 0.34;
+
+/// The width of the Hide button a swipe towards the leading edge reveals.
+const sidebarSwipeRevealWidth = 88.0;
+
+/// What letting go of a swipe at [dx] does, for a row [width] wide. Positive
+/// [dx] is towards the trailing edge.
+enum SidebarSwipeOutcome { read, reveal, close }
+
+SidebarSwipeOutcome sidebarSwipeOutcomeV1(double dx, double width) {
+  if (dx >= width * sidebarSwipeReadFraction) return SidebarSwipeOutcome.read;
+  if (dx <= -sidebarSwipeRevealWidth / 2) return SidebarSwipeOutcome.reveal;
+  return SidebarSwipeOutcome.close;
+}
+
+/// A phone's row, and the two things a thumb can do to it without opening it.
+///
+/// Towards the trailing edge, the row slides over a read mark and letting go
+/// past the threshold marks it; the row always comes back, because marking
+/// read removes nothing. Towards the leading edge, the row slides over a Hide
+/// button and stays there: hiding is a second, deliberate tap, not the swipe
+/// itself, since a hidden Bot leaves the list. A tap on the slid row closes
+/// it rather than opening the Bot.
+class _SwipeRow extends StatefulWidget {
+  final String botId;
+  final bool unread;
+  final VoidCallback? onRead;
+  final VoidCallback? onHide;
+  final Widget child;
+  const _SwipeRow({
+    super.key,
+    required this.botId,
+    required this.unread,
+    this.onRead,
+    this.onHide,
+    required this.child,
+  });
+
+  @override
+  State<_SwipeRow> createState() => _SwipeRowState();
+}
+
+class _SwipeRowState extends State<_SwipeRow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _slide = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+    lowerBound: -sidebarSwipeRevealWidth,
+    upperBound: 480,
+    value: 0,
+  );
+  bool get _open => _slide.value <= -sidebarSwipeRevealWidth + 0.5;
+
+  double get _width => context.size?.width ?? 360;
+
+  @override
+  void dispose() {
+    _slide.dispose();
+    super.dispose();
+  }
+
+  void _drag(DragUpdateDetails details) {
+    final limit = widget.onRead == null
+        ? 0.0
+        : _width * sidebarSwipeReadFraction + 24;
+    _slide.value = (_slide.value + details.delta.dx).clamp(
+      widget.onHide == null ? 0.0 : -sidebarSwipeRevealWidth,
+      limit,
+    );
+  }
+
+  void _release(DragEndDetails _) {
+    switch (sidebarSwipeOutcomeV1(_slide.value, _width)) {
+      case SidebarSwipeOutcome.read:
+        widget.onRead?.call();
+        _slide.animateTo(0, curve: Curves.easeOut);
+      case SidebarSwipeOutcome.reveal:
+        _slide.animateTo(-sidebarSwipeRevealWidth, curve: Curves.easeOut);
+      case SidebarSwipeOutcome.close:
+        _slide.animateTo(0, curve: Curves.easeOut);
+    }
+  }
+
+  void _close() => _slide.animateTo(0, curve: Curves.easeOut);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: _slide,
+      builder: (context, child) {
+        final dx = _slide.value;
+        final open = _open;
+        // The slid row stops at its own edge rather than painting over the
+        // list's margin.
+        return GestureDetector(
+          onHorizontalDragUpdate: _drag,
+          onHorizontalDragEnd: _release,
+          child: ClipRect(
+            child: Stack(
+              children: [
+                if (dx > 0)
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: scheme.primary.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: Padding(
+                            padding: const EdgeInsetsDirectional.only(
+                              start: 22,
+                            ),
+                            child: Icon(
+                              widget.unread
+                                  ? Icons.mark_chat_read_outlined
+                                  : Icons.mark_chat_unread_outlined,
+                              color: scheme.primary,
+                              size: 22,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  if (badge != null) ...[
-                    if (isArchived) const SizedBox(width: 6),
-                    Badge(label: Text(badge)),
-                  ],
-                ],
-              ),
-      ),
+                  ),
+                if (dx < 0)
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: identified(
+                          BotActionIds.swipeHide(widget.botId),
+                          Material(
+                            color: scheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(10),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(10),
+                              onTap: () {
+                                _close();
+                                widget.onHide?.call();
+                              },
+                              child: SizedBox(
+                                width: sidebarSwipeRevealWidth - 8,
+                                height: double.infinity,
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.visibility_off_outlined,
+                                      size: 20,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      'Hide',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: scheme.onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                Transform.translate(
+                  offset: Offset(dx, 0),
+                  child: open
+                      ? GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _close,
+                          child: AbsorbPointer(child: child),
+                        )
+                      : child,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+      child: widget.child,
     );
   }
 }
@@ -551,7 +836,11 @@ class ShellSidebar extends StatelessWidget {
 /// One Bot in the list: the face, the name and the last thing said, in a row
 /// no taller than it has to be. The selected tint is inset from the column's
 /// edges so the list reads as a list and not as a table.
-class _BotRow extends StatelessWidget {
+class _BotRow extends StatefulWidget {
+  /// The row's own identifier, on its button node alone: were the control a
+  /// child of that node, the engine would carry the row's text as a label
+  /// rather than as text.
+  final String identifier;
   final bool selected;
   final bool enabled;
   final VoidCallback? onTap;
@@ -562,8 +851,17 @@ class _BotRow extends StatelessWidget {
   final String preview;
   final TextStyle? previewStyle;
   final Widget? trailing;
+
+  /// The quick actions, by a long press anywhere and a secondary click at
+  /// the pointer.
+  final void Function({Offset? position})? onActions;
+
+  /// A control that takes the time's place while the pointer is over the row
+  /// or the row has focus; null where a press is how the actions are reached.
+  final Widget? control;
   const _BotRow({
     super.key,
+    required this.identifier,
     required this.selected,
     required this.enabled,
     required this.onTap,
@@ -574,86 +872,130 @@ class _BotRow extends StatelessWidget {
     required this.preview,
     required this.previewStyle,
     required this.trailing,
+    this.onActions,
+    this.control,
   });
+
+  @override
+  State<_BotRow> createState() => _BotRowState();
+}
+
+class _BotRowState extends State<_BotRow> {
+  bool _hovered = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Semantics(
-        selected: selected,
-        button: enabled,
-        child: Material(
-          color: selected
-              ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
-              : Colors.transparent,
+    final selected = widget.selected;
+    final enabled = widget.enabled;
+    final onActions = widget.onActions;
+    final time = widget.time;
+    final trailing = widget.trailing;
+    final showControl = widget.control != null && (_hovered || _focused);
+    final row = Semantics(
+      container: true,
+      identifier: widget.identifier,
+      selected: selected,
+      button: enabled,
+      child: Material(
+        color: selected
+            ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: widget.onTap,
+          onLongPress: onActions == null ? null : () => onActions(),
+          onSecondaryTapUp: onActions == null
+              ? null
+              : (details) => onActions(position: details.globalPosition),
           borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
-              child: Opacity(
-                opacity: enabled ? 1 : 0.6,
-                child: Row(
-                  children: [
-                    avatar,
-                    const SizedBox(width: 11),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: nameStyle,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
+            child: Opacity(
+              opacity: enabled ? 1 : 0.6,
+              child: Row(
+                children: [
+                  widget.avatar,
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: widget.nameStyle,
+                              ),
+                            ),
+                            // The control itself sits over this space,
+                            // beside the row's node rather than inside it.
+                            if (showControl)
+                              const SizedBox(width: 8 + 24)
+                            else if (time case final String stamp) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                stamp,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontSize: 11.5,
+                                  color: theme.colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.9),
                                 ),
                               ),
-                              if (time case final String stamp) ...[
-                                const SizedBox(width: 8),
-                                Text(
-                                  stamp,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontSize: 11.5,
-                                    color: theme.colorScheme.onSurfaceVariant
-                                        .withValues(alpha: 0.9),
-                                  ),
-                                ),
-                              ],
                             ],
-                          ),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  preview,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: previewStyle,
-                                ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.preview,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: widget.previewStyle,
                               ),
-                              if (trailing case final Widget end) ...[
-                                const SizedBox(width: 8),
-                                end,
-                              ],
+                            ),
+                            if (trailing case final Widget end) ...[
+                              const SizedBox(width: 8),
+                              end,
                             ],
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      // Hover and focus are the row's and its control's together, so moving
+      // onto the control or tabbing to it keeps it on screen.
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onFocusChange: (has) => setState(() => _focused = has),
+          child: Stack(
+            children: [
+              row,
+              if (showControl)
+                Positioned(top: 8, right: 12, child: widget.control!),
+            ],
           ),
         ),
       ),
@@ -878,6 +1220,7 @@ class _PinnedTile extends StatelessWidget {
   final bool unread;
   final bool working;
   final VoidCallback onTap;
+  final void Function({Offset? position})? onActions;
   const _PinnedTile({
     required this.name,
     required this.background,
@@ -885,6 +1228,7 @@ class _PinnedTile extends StatelessWidget {
     required this.unread,
     required this.working,
     required this.onTap,
+    this.onActions,
   });
 
   @override
@@ -897,6 +1241,10 @@ class _PinnedTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onActions == null ? null : () => onActions!(),
+        onSecondaryTapUp: onActions == null
+            ? null
+            : (details) => onActions!(position: details.globalPosition),
         borderRadius: BorderRadius.circular(10),
         child: Container(
           width: 66,
