@@ -89,11 +89,11 @@ No DigitalOcean load balancer is required for the single-node pilot. `cloudflare
 
 Each Computer begins with:
 
-| Resource | Request | Limit |
-| --- | ---: | ---: |
-| CPU | 150 millicores | 2 vCPU |
-| Memory | 768 MiB | 2.5 GiB |
-| Persistent workspace | 20 GiB | 20 GiB initially |
+| Resource             |        Request |            Limit |
+| -------------------- | -------------: | ---------------: |
+| CPU                  | 150 millicores |           2 vCPU |
+| Memory               |        768 MiB |          2.5 GiB |
+| Persistent workspace |         20 GiB | 20 GiB initially |
 
 Five Computers therefore reserve 0.75 vCPU and 3.75 GiB RAM while retaining burst access to the node. The remaining memory is for k3s, the Agent Sandbox controller, the host gateway, `cloudflared`, `tailscaled`, gVisor overhead, filesystem cache and bursts.
 
@@ -109,15 +109,15 @@ Resize to the US$96 16 GiB node before admitting another User if any of these oc
 
 ### Monthly starting cost
 
-| Item | Cost |
-| --- | ---: |
-| DigitalOcean Basic 4 vCPU / 8 GiB / 160 GiB Droplet | US$48 |
-| Five 20 GiB DigitalOcean volumes at $0.10/GiB-month | US$10 |
-| DigitalOcean load balancer | $0 |
-| Tailscale Standard, one operator seat | US$8 if not already paid |
-| R2 backup storage and operations | usage-based; expected to be small initially |
-| **Infrastructure subtotal** | **US$58/month plus R2** |
-| **Subtotal including one new Tailscale Standard seat** | **US$66/month plus R2** |
+| Item                                                   |                                        Cost |
+| ------------------------------------------------------ | ------------------------------------------: |
+| DigitalOcean Basic 4 vCPU / 8 GiB / 160 GiB Droplet    |                                       US$48 |
+| Five 20 GiB DigitalOcean volumes at $0.10/GiB-month    |                                       US$10 |
+| DigitalOcean load balancer                             |                                          $0 |
+| Tailscale Standard, one operator seat                  |                    US$8 if not already paid |
+| R2 backup storage and operations                       | usage-based; expected to be small initially |
+| **Infrastructure subtotal**                            |                     **US$58/month plus R2** |
+| **Subtotal including one new Tailscale Standard seat** |                     **US$66/month plus R2** |
 
 At all five User slots occupied, the fixed subtotal is **US$11.60 per provisioned User per month**, or **US$13.20** including a new Tailscale seat. This excludes model calls, taxes, backup growth and outbound bandwidth beyond included allowances.
 
