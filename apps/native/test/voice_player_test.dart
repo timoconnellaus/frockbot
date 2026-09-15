@@ -83,7 +83,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     bool? drained;
     final pending = player.drain().then((value) => drained = value);
-    expect(fed, hasLength(6));
+    expect(fed, hasLength(10));
     for (var i = 0; i < 9; i++) {
       await receipt(fed[i]);
       expect(drained, isNull);
@@ -118,26 +118,29 @@ void main() {
     },
   );
 
-  test('a device failure while an interrupt rebuild is pending still plays', () async {
-    final player = PcmVoicePlayer();
-    await player.configure(24000);
-    player.write(Uint8List(1600));
-    await Future<void>.delayed(Duration.zero);
-    expect(fed, hasLength(1));
-    failDuringSetup = true;
-    await player.interrupt();
-    fed.clear();
-    player.write(Uint8List(1600));
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
-    expect(fed, isNotEmpty);
-    bool? played;
-    final pending = player.drain().then((value) => played = value);
-    await receipt(fed.last);
-    await pending;
-    expect(played, isTrue);
-    await player.close();
-  });
+  test(
+    'a device failure while an interrupt rebuild is pending still plays',
+    () async {
+      final player = PcmVoicePlayer();
+      await player.configure(24000);
+      player.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      expect(fed, hasLength(1));
+      failDuringSetup = true;
+      await player.interrupt();
+      fed.clear();
+      player.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(fed, isNotEmpty);
+      bool? played;
+      final pending = player.drain().then((value) => played = value);
+      await receipt(fed.last);
+      await pending;
+      expect(played, isTrue);
+      await player.close();
+    },
+  );
 
   test(
     'failed feeds and dropped held samples invalidate the delivery',

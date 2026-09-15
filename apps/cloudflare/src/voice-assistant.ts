@@ -32,6 +32,7 @@ import {
   parseChatCompletionStreamV1,
   renderVoiceDelegationReadOutV1,
   renderVoiceSystemPromptV1,
+  pickVoiceBridgeV1,
   runVoiceTurnV1,
   VOICE_PROMPT_HISTORY_MESSAGES_V1,
   type VoiceAssistantHostV1,
@@ -296,6 +297,8 @@ interface LiveCall {
   reservedSeconds: number;
   renewTimer?: ReturnType<typeof setTimeout>;
   muted: boolean;
+  /** The last filler this call spoke, so the next one is a different one. */
+  lastBridge?: string;
   /** The day's transcription allowance ran out; the upstream stays shut. */
   exhausted: boolean;
   turnId?: string;
@@ -1682,6 +1685,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       };
       let firstText = true;
       try {
+        const bridge = pickVoiceBridgeV1(call.lastBridge);
         for await (const chunk of runVoiceTurnV1(
           host,
           {
@@ -1689,6 +1693,7 @@ export class VoiceAssistant extends VoiceAgentBase<
             history,
             transcript,
             signal: context.signal,
+            bridge,
           },
           (result) => {
             const spoke =
@@ -1706,6 +1711,7 @@ export class VoiceAssistant extends VoiceAgentBase<
           },
         )) {
           if (chunk.kind === "bridge") {
+            call.lastBridge = bridge;
             // The filler, not the model: timed on its own line so the
             // model's own first word stays one measurement.
             self.trace(connection, "turn-bridge", {

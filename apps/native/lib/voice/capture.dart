@@ -12,6 +12,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:record/record.dart';
@@ -40,12 +41,26 @@ class MicrophoneDenied implements Exception {
   String toString() => message;
 }
 
+/// Whose session the microphone is opened in.
+enum VoiceCaptureProfile {
+  /// A short, capture-only act. The recorder plugin manages the audio
+  /// session itself, as it always has.
+  dictation,
+
+  /// A call. The session — mode, focus, route — is already held by a
+  /// [VoiceAudioRoute], so the recorder must leave it alone; it opens the
+  /// device with the smallest buffer the platform allows, because how fast
+  /// the meter follows a word is how fast the audio reaches it.
+  call,
+}
+
 abstract interface class VoiceCapture {
   /// Starts capture and answers the frame stream. Requests the microphone
   /// permission on the first call and throws [MicrophoneDenied] if refused.
   Future<Stream<AudioFrame>> start({
     required int sampleRate,
     required Duration frame,
+    VoiceCaptureProfile profile = VoiceCaptureProfile.dictation,
   });
   Future<void> stop();
   bool get active;
@@ -95,6 +110,11 @@ int pcmFrameBytes(int sampleRate, Duration frame) =>
 /// phone, and without cancellation the assistant barges in on itself.
 class RecordVoiceCapture implements VoiceCapture {
   final AudioRecorder _recorder = AudioRecorder();
+
+  /// The platform's floor on a capture buffer, for [VoiceCaptureProfile.call].
+  final Future<int?> Function(int sampleRate) minimumBuffer;
+  RecordVoiceCapture({Future<int?> Function(int sampleRate)? minimumBuffer})
+    : minimumBuffer = minimumBuffer ?? ((_) async => null);
   StreamSubscription<Uint8List>? _subscription;
   StreamController<AudioFrame>? _frames;
   final Stopwatch _clock = Stopwatch();
@@ -107,29 +127,52 @@ class RecordVoiceCapture implements VoiceCapture {
   Future<Stream<AudioFrame>> start({
     required int sampleRate,
     required Duration frame,
+    VoiceCaptureProfile profile = VoiceCaptureProfile.dictation,
   }) async {
     await stop();
     if (!await _recorder.hasPermission()) throw const MicrophoneDenied();
-    final chunker = PcmFrameChunker(pcmFrameBytes(sampleRate, frame));
+    final frameBytes = pcmFrameBytes(sampleRate, frame);
+    final chunker = PcmFrameChunker(frameBytes);
     final frames = StreamController<AudioFrame>.broadcast();
     _frames = frames;
     final Stream<Uint8List> source;
     try {
-      source = await _recorder.startStream(
-        RecordConfig(
+      final config = switch (profile) {
+        VoiceCaptureProfile.dictation => const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
-          sampleRate: sampleRate,
           numChannels: 1,
           echoCancel: true,
           noiseSuppress: true,
           autoGain: true,
-          androidConfig: const AndroidRecordConfig(
+          androidConfig: AndroidRecordConfig(
             // The communication source is the one Android attaches its own
             // echo canceller and noise suppressor to.
             audioSource: AndroidAudioSource.voiceCommunication,
             audioManagerMode: AudioManagerMode.modeInCommunication,
           ),
         ),
+        VoiceCaptureProfile.call => RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          numChannels: 1,
+          echoCancel: true,
+          noiseSuppress: true,
+          autoGain: true,
+          // The call already holds the session: the plugin must not set a
+          // mode, start Bluetooth on its own, or ask for a second, media-
+          // shaped focus that would fight the call's.
+          androidConfig: const AndroidRecordConfig(
+            audioSource: AndroidAudioSource.voiceCommunication,
+            audioManagerMode: AudioManagerMode.modeNormal,
+            manageBluetooth: false,
+          ),
+          audioInterruption: AudioInterruptionMode.none,
+          // One frame per read where the platform allows it. The plugin
+          // reads a whole buffer at a time, so the buffer is the latency.
+          streamBufferSize: await _callBuffer(sampleRate, frameBytes),
+        ),
+      };
+      source = await _recorder.startStream(
+        config.copyWith(sampleRate: sampleRate),
       );
     } on Object {
       await frames.close();
@@ -154,6 +197,12 @@ class RecordVoiceCapture implements VoiceCapture {
       cancelOnError: false,
     );
     return frames.stream;
+  }
+
+  Future<int?> _callBuffer(int sampleRate, int frameBytes) async {
+    final minimum = await minimumBuffer(sampleRate);
+    if (minimum == null) return null;
+    return math.max(minimum, frameBytes);
   }
 
   @override

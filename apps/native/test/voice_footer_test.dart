@@ -15,8 +15,10 @@ import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/footer.dart';
 import 'package:frockbot_native/voice/waveform.dart';
 import 'package:frockbot_native/voice/socket.dart';
+import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
+import 'shell_layout_test.dart' show byIdentifier;
 import 'voice_fakes.dart';
 import 'voice_shell_harness.dart';
 
@@ -97,7 +99,12 @@ void main() {
         expect(tester.getRect(footer).height, 96 + safeBottom);
         final dockComposerBottom = tester.getBottomLeft(composer).dy;
         expect(dockComposerBottom, restingBottom - 96);
-        await tester.tap(find.byTooltip('End voice session'));
+        await tester.tap(
+          find.descendant(
+            of: footer,
+            matching: find.byTooltip('End voice session'),
+          ),
+        );
         await tester.runAsync(() => settle());
         await tester.pump();
         for (var frame = 0; frame < 14; frame++) {
@@ -216,6 +223,8 @@ void main() {
     socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await tester.pump();
     socket.deliver(jsonEncode({'type': 'error', 'message': 'no audio'}));
+    // One pump delivers the frame, the next paints what it changed.
+    await tester.pump();
     await tester.pump();
 
     expect(controller.error, isNull);
@@ -362,5 +371,30 @@ void main() {
     // An idle, error-free footer carries no text at all. Everything it means
     // is in the slab, the meter and the two controls.
     expect(find.byType(Text), findsNothing);
+  });
+
+  testWidgets('the control that opened the call also ends it', (tester) async {
+    final harness = VoiceShellHarness();
+    await harness.mount(tester, width: 1280, brightness: Brightness.dark);
+    await harness.call.start();
+    harness.showCall();
+    await tester.pump();
+    expect(find.byType(VoiceFooter), findsOneWidget);
+    // The same control, now saying the other thing.
+    final control = find.descendant(
+      of: byIdentifier(VoiceIds.sidebarStart),
+      matching: find.byTooltip('End voice session'),
+    );
+    expect(control, findsOneWidget);
+    await tester.tap(control);
+    await tester.runAsync(() => settle());
+    await tester.pump();
+    for (var frame = 0; frame < 20; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(find.byType(VoiceFooter), findsNothing);
+    expect(harness.shell.voiceSession, isNull);
+    expect(harness.callSocket.closeReason, 'sidebar-button');
+    await harness.dispose(tester);
   });
 }

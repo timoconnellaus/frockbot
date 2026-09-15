@@ -76,6 +76,13 @@ export interface VisibleMessageDraftV1 {
   /** Whether the run this message belongs to was admitted as an automation. */
   automation?: boolean;
   /**
+   * Whether the run was asked by the account's voice session. Its answer goes
+   * back by its own route; a send it makes on the side still lands in the
+   * conversation and counts as unread, but wakes no device — the person is on
+   * the call, and a buzz for the thing they are being told aloud is noise.
+   */
+  voice?: boolean;
+  /**
    * The ordinal of a message whose run could not journal a send of its own,
    * because the run had already ended when the message was minted. The
    * transcript projects the run with this send appended at that ordinal, so
@@ -113,7 +120,7 @@ export async function visibleMessageRecordsV1(input: {
       createdAt: message.createdAt,
       title: input.settings.profile.name,
       body: message.body,
-      notify: input.settings.notifications.enabled,
+      notify: input.settings.notifications.enabled && !message.voice,
     };
     records[`${MESSAGE_PREFIX}${cursor}`] = notice;
     records[`${PUSH_OUTBOX_PREFIX}${cursor}`] = notice;
@@ -179,6 +186,7 @@ export async function messageRecords(input: {
     (event) => event.type === "send/to-user",
   );
   const automation = input.run.admission?.turnType === "automation";
+  const voice = input.run.admission?.origin?.kind === "voice";
   return visibleMessageRecordsV1({
     settings,
     read: input.read,
@@ -191,6 +199,7 @@ export async function messageRecords(input: {
       createdAt: event.timestamp,
       body: messagePreview(event.payload as unknown as Record<string, unknown>),
       ...(automation ? { automation: true } : {}),
+      ...(voice ? { voice: true } : {}),
     })),
   });
 }

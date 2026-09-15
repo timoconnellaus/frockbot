@@ -14,7 +14,7 @@ import {
   type VoiceMeterV1,
 } from "@frockbot/app/voice/ledger";
 import { provisionBot } from "./provision-bot.ts";
-import { VOICE_TURN_BRIDGE_V1 } from "@frockbot/app/voice/assistant";
+import { VOICE_TURN_BRIDGES_V1 } from "@frockbot/app/voice/assistant";
 import {
   VoiceMemoryLedgerV1,
   VOICE_MEMORY_CHUNK_TURNS_V1,
@@ -421,7 +421,12 @@ describe("the voice session object", () => {
     try {
       await eventually(
         () => stub.probeSynthesized(),
-        (sentences) => sentences.includes(VOICE_TURN_BRIDGE_V1),
+        // The call picks one of the bridge phrases; any of them is the
+        // acknowledgment.
+        (sentences) =>
+          sentences.some((sentence) =>
+            VOICE_TURN_BRIDGES_V1.includes(sentence),
+          ),
         "acknowledgment before the model answers",
       );
       await eventually(
@@ -442,8 +447,8 @@ describe("the voice session object", () => {
     }[];
     expect(turns[0]?.answer).toBe("You said: what emails do I have today.");
     expect(
-      (await stub.probeSynthesized()).filter(
-        (sentence) => sentence === VOICE_TURN_BRIDGE_V1,
+      (await stub.probeSynthesized()).filter((sentence) =>
+        VOICE_TURN_BRIDGES_V1.includes(sentence),
       ),
     ).toHaveLength(1);
   });

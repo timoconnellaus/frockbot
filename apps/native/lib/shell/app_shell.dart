@@ -55,6 +55,7 @@ import '../voice/footer.dart';
 import '../voice/motion.dart';
 import '../voice/mic_ownership.dart';
 import '../voice/player.dart';
+import '../voice/route.dart';
 import '../voice/protocol.dart' show voiceUnavailableMessage;
 import '../voice/socket.dart';
 import '../protocol/client_wire.generated.dart' as wire;
@@ -229,6 +230,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// which [microphone] enforces, so there is one device object.
   RecordVoiceCapture? voiceCapture;
   AssistantSessionController? voiceSession;
+
+  /// The call's audio session on this platform, held from before the
+  /// microphone opens until after the speaker closes.
+  late final VoiceAudioRoute audioRoute = VoiceAudioRoute.forPlatform();
   DictationController? dictation;
   bool footerOpen = false;
   bool footerExiting = false;
@@ -251,6 +256,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     microphone.dictationActive = () => dictation?.active == true;
     microphone.stopDictation = _stopDictation;
     activity.addListener(_repaint);
+    // Read once, now, so the first press on a voice control answers at once.
+    unawaited(voiceProbe.load());
     push.onNotificationsChanged = () {
       appBadge.invalidate();
       if (mounted) setState(() {});
@@ -375,28 +382,42 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!directoryLoaded) unawaited(load());
   }
 
+  /// The one control does both: it opens the call, and while the footer is
+  /// up it ends it, so the way in is also the way out.
+  Future<void> _toggleVoice() =>
+      footerOpen ? _endVoice(reason: 'sidebar-button') : _startVoice();
+
   /// Opens the footer and starts the call in the one gesture.
+  ///
+  /// The footer is on screen in the same frame as the press. The capability
+  /// probe was read at sign-in, so a deployment without voice is refused
+  /// here without a round trip; a probe that never answered does not hold
+  /// the press, and the socket speaks for itself.
   Future<void> _startVoice() async {
-    await voiceProbe.load();
-    if (!mounted) return;
-    if (!voiceProbe.assistantAvailable) {
+    if (voiceProbe.known && !voiceProbe.assistantAvailable) {
       _say(voiceUnavailableMessage);
       return;
     }
     if (voiceSession?.active == true) return;
-    await microphone.acquireForAssistant();
-    if (!mounted) return;
+    final borrowed = microphone.acquireForAssistant();
     voiceSession?.dispose();
     final session = AssistantSessionController(
       openSocket: assistantSocketOpenerV1(widget.api),
-      capture: voiceCapture ??= RecordVoiceCapture(),
+      capture: voiceCapture ??= RecordVoiceCapture(
+        minimumBuffer: audioRoute.minimumCaptureBuffer,
+      ),
       player: PcmVoicePlayer(),
+      route: audioRoute,
     );
     setState(() {
       voiceSession = session;
       footerOpen = true;
       footerExiting = false;
     });
+    // A dictation in progress is stopped and its draft flushed before the
+    // call takes the device; that is the one thing the press waits for.
+    await borrowed;
+    if (!mounted || !identical(voiceSession, session)) return;
     await session.start();
   }
 
@@ -425,9 +446,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _dictate() async {
     final bot = selected;
     if (bot == null) return;
-    await voiceProbe.load();
     if (!mounted) return;
-    if (!voiceProbe.dictationAvailable) {
+    if (voiceProbe.known && !voiceProbe.dictationAvailable) {
       _say(voiceUnavailableMessage);
       return;
     }
@@ -436,7 +456,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!mounted) return;
     final controller = dictation ??= DictationController(
       openSocket: dictationSocketOpenerV1(widget.api),
-      capture: voiceCapture ??= RecordVoiceCapture(),
+      capture: voiceCapture ??= RecordVoiceCapture(
+        minimumBuffer: audioRoute.minimumCaptureBuffer,
+      ),
       onDraft: _writeDictatedDraft,
       readDraft: _readDictatedDraft,
       onFinished: microphone.releaseDictation,
@@ -1843,7 +1865,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onProfile: _openProfile,
                             onMarketplace: _openMarketplace,
                             phone: single,
-                            onVoice: () => unawaited(_startVoice()),
+                            onVoice: () => unawaited(_toggleVoice()),
                             voiceControl: voiceControlStateV1(
                               footerOpen: footerOpen,
                               sessionActive: voiceSession?.active == true,

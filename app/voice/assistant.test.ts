@@ -6,6 +6,8 @@ import {
   VOICE_ANSWER_MAX_CHARS_V1,
   VOICE_PROMPT_MAX_LOG_FACTS_V1,
   VOICE_TURN_BRIDGE_V1,
+  VOICE_TURN_BRIDGES_V1,
+  pickVoiceBridgeV1,
   VOICE_TURN_MAX_STEPS_V1,
   type VoiceAssistantHostV1,
   type VoiceAssistantPromptInputV1,
@@ -171,6 +173,40 @@ const baseInput = (transcript: string) => ({
   signal: new AbortController().signal,
 });
 
+describe("the bridge phrase", () => {
+  test("never repeats the one before, and every phrase is reachable", () => {
+    for (const previous of VOICE_TURN_BRIDGES_V1) {
+      const seen = new Set<string>();
+      for (let i = 0; i < 40; i++) {
+        const pick = pickVoiceBridgeV1(previous, i / 40);
+        expect(pick).not.toBe(previous);
+        seen.add(pick);
+      }
+      expect(seen.size).toBe(VOICE_TURN_BRIDGES_V1.length - 1);
+    }
+    expect(pickVoiceBridgeV1(undefined, 0)).toBe(VOICE_TURN_BRIDGE_V1);
+    expect(pickVoiceBridgeV1("never said", 0.999)).toBe(
+      VOICE_TURN_BRIDGES_V1[VOICE_TURN_BRIDGES_V1.length - 1]!,
+    );
+  });
+
+  test("a turn says the bridge it was given", async () => {
+    const pending = Promise.withResolvers<ReadableStream<Uint8Array>>();
+    const h = host([], { chat: () => pending.promise });
+    const turn = runVoiceTurnV1(
+      h,
+      { ...baseInput("slow"), bridge: "Hang on." },
+      () => {},
+    );
+    expect((await turn.next()).value).toEqual({
+      kind: "bridge",
+      text: "Hang on. ",
+    });
+    pending.resolve(sse([text("Done.")]));
+    await collect(turn);
+  });
+});
+
 describe("one voice turn", () => {
   test("acknowledges a request while its first model response is still pending", async () => {
     const pending = Promise.withResolvers<ReadableStream<Uint8Array>>();
@@ -189,7 +225,7 @@ describe("one voice turn", () => {
       const chunk = await Promise.race([
         first,
         new Promise((resolve) => {
-          timer = setTimeout(() => resolve("silent"), 2_000);
+          timer = setTimeout(() => resolve("silent"), 4_000);
         }),
       ]);
       expect(chunk).toEqual({
@@ -246,11 +282,9 @@ describe("one voice turn", () => {
         result = r;
       }),
     );
-    // The tool step is bridged aloud; the bridge is spoken, not answered,
-    // and it is labelled as filler so a caller timing the model does not
-    // read it as the model's first word.
+    // A tool that answers inside the acknowledgment delay is not bridged:
+    // the person hears the answer, not a filler and then the answer.
     expect(chunks).toEqual([
-      { kind: "bridge", text: `${VOICE_TURN_BRIDGE_V1} ` },
       { kind: "text", text: "I've asked Remy to plan your week." },
     ]);
     expect(result?.answer).toBe("I've asked Remy to plan your week.");
@@ -427,10 +461,7 @@ describe("one voice turn", () => {
       },
     );
     const chunks = await said(runVoiceTurnV1(h, baseInput("x"), () => {}));
-    expect(chunks).toEqual([
-      `${VOICE_TURN_BRIDGE_V1} `,
-      "I couldn't find that Bot.",
-    ]);
+    expect(chunks).toEqual(["I couldn't find that Bot."]);
     const second = h.bodies[1]!.messages as { content: string }[];
     expect(second.at(-1)?.content).toBe("That failed: no such Bot");
   });
@@ -445,8 +476,8 @@ describe("one voice turn", () => {
     );
     expect(h.bodies).toHaveLength(VOICE_TURN_MAX_STEPS_V1);
     expect(h.bodies.at(-1)!.tools).toBeUndefined();
-    // The bridge was said once, and on its own it is not an answer.
-    expect(chunks).toEqual([`${VOICE_TURN_BRIDGE_V1} `]);
+    // Instant tool steps never earn a bridge, and no answer is no answer.
+    expect(chunks).toEqual([]);
     expect(result?.outcome).toBe("no_output");
     expect(result?.answer).toBe("");
   });
@@ -465,16 +496,8 @@ describe("one voice turn", () => {
 
   test("an interruption after the acknowledgment prevents delegation", async () => {
     const controller = new AbortController();
-    const h = host([
-      () => [
-        toolCall(
-          0,
-          "c1",
-          "ask_bot",
-          '{"bot_id":"remy","message":"check emails"}',
-        ),
-      ],
-    ]);
+    const pending = Promise.withResolvers<ReadableStream<Uint8Array>>();
+    const h = host([], { chat: () => pending.promise });
     let result: VoiceTurnResultV1 | undefined;
     const turn = runVoiceTurnV1(
       h,
@@ -483,8 +506,19 @@ describe("one voice turn", () => {
         result = r;
       },
     );
+    // The model is slow, so the bridge is spoken; the person interrupts it.
     expect((await turn.next()).value?.kind).toBe("bridge");
     controller.abort();
+    pending.resolve(
+      sse([
+        toolCall(
+          0,
+          "c1",
+          "ask_bot",
+          '{"bot_id":"remy","message":"check emails"}',
+        ),
+      ]),
+    );
     expect(await collect(turn)).toEqual([]);
     expect(h.asked).toEqual([]);
     expect(result?.outcome).toBe("aborted");

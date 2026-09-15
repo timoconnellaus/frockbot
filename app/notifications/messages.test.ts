@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import type { StoredRunV1 } from "@frockbot/core/durable";
-import { messageRecords, visibleMessageRecordsV1 } from "./messages.js";
+import {
+  messageRecords,
+  visibleMessageRecordsV1,
+  type MessageNotice,
+} from "./messages.js";
 import {
   optionalProjectedSendV1,
   PUSH_OUTBOX_PREFIX,
@@ -152,6 +156,35 @@ describe("message-time unread and notification records", () => {
     ).toHaveLength(1);
     expect(enabled["notification:message-00000000000000000001"]).toMatchObject({
       body: "Approve deletion",
+    });
+  });
+
+  test("a send from a Turn the voice session asked counts unread but wakes no device", async () => {
+    const event = send(1, "Here is the longer version.");
+    const voiced = {
+      ...run([event]),
+      admission: {
+        schemaVersion: 1 as const,
+        turnType: "agent" as const,
+        origin: {
+          kind: "voice" as const,
+          callId: "call-1",
+          voiceTurnId: "turn_1",
+          requestId: "voice-00000000000000000000000000000001",
+        },
+      },
+    };
+    const records = await messageRecords({
+      run: voiced,
+      events: [event],
+      read: reader(),
+    });
+    const notice = records[
+      `${PUSH_OUTBOX_PREFIX}message-${"1".padStart(20, "0")}`
+    ] as MessageNotice;
+    expect(notice.notify).toBe(false);
+    expect(records[UNREAD_STATE_KEY]).toMatchObject({
+      lastMessageId: notice.messageId,
     });
   });
 

@@ -206,6 +206,7 @@ class _VoiceFooterState extends State<VoiceFooter> {
                 microphone: () =>
                     widget.session.muted ? 0 : widget.session.micLevel,
                 playback: () => widget.session.playbackLevel,
+                mode: () => widget.session.meterMode,
                 enabled: widget.session.active,
                 onAccent: true,
               ),
