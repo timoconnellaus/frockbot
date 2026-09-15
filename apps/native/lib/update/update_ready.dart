@@ -161,7 +161,12 @@ class MobileUpdateController extends ChangeNotifier {
     for (var attempt = 0; attempt < stagedPollAttempts; attempt++) {
       await Future<void>.delayed(stagedPollInterval);
       if (_disposed) return false;
-      if (await service.staged()) return true;
+      try {
+        if (await service.staged()) return true;
+      } catch (_) {
+        // The updater may be rewriting its patch state as we read it; the
+        // next attempt looks again.
+      }
     }
     return false;
   }

@@ -25,6 +25,9 @@ class FakeUpdateService implements MobileUpdateService {
   /// What successive local reads of the staged patch report; the last entry
   /// repeats once they run out.
   List<bool> stagedReads;
+
+  /// A staged read, by 1-based position, that throws instead of answering.
+  int? stagedReadThatThrows;
   int stagedChecks = 0;
   int? patch;
   Object? patchFailure;
@@ -58,6 +61,9 @@ class FakeUpdateService implements MobileUpdateService {
   @override
   Future<bool> staged() async {
     stagedChecks++;
+    if (stagedChecks == stagedReadThatThrows) {
+      throw StateError('patch state is being rewritten');
+    }
     return stagedReads[(stagedChecks - 1).clamp(0, stagedReads.length - 1)];
   }
 
@@ -149,6 +155,24 @@ void main() {
       expect(controller.restartRequired, isTrue);
     },
   );
+
+  test('a staged read that fails does not end the watch', () async {
+    final service = FakeUpdateService(
+      statuses: const [MobileUpdateStatus.outdated],
+      downloadStages: false,
+      stagedReads: const [false, true],
+    )..stagedReadThatThrows = 1;
+    final controller = MobileUpdateController(
+      service: service,
+      stagedPollInterval: Duration.zero,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.check();
+
+    expect(service.stagedChecks, 2);
+    expect(controller.restartRequired, isTrue);
+  });
 
   test('a disposed controller stops watching for the patch', () async {
     final service = FakeUpdateService(
