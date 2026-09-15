@@ -5,6 +5,7 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:frockbot_native/shell/transcript.dart';
+import 'package:frockbot_native/theme/frock_theme.dart';
 
 /// How the thread reads, one line per row, in the order it is drawn.
 List<String> thread(List<TranscriptLine> lines) => [
@@ -120,6 +121,73 @@ void main() {
       expect(reports.last, isNull);
     },
   );
+
+  group('the bubbles a thread is drawn in', () {
+    /// The fill of the bubble whose content is announced as [speaker].
+    Color fill(WidgetTester tester, String speaker) {
+      final bubble = tester.widget<Container>(
+        find
+            .ancestor(
+              of: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Semantics && widget.properties.label == speaker,
+              ),
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Container && widget.constraints?.maxWidth == 720,
+              ),
+            )
+            .first,
+      );
+      return (bubble.decoration! as BoxDecoration).color!;
+    }
+
+    for (final brightness in Brightness.values) {
+      testWidgets('gives the Bot a neutral slab distinct from the person\'s '
+          '(${brightness.name})', (tester) async {
+        final theme = FrockTheme.theme(brightness);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: theme,
+            home: Scaffold(
+              body: TranscriptView(
+                lines: [
+                  line(
+                    runId: 'run-a',
+                    role: LineRole.user,
+                    text: 'Hello',
+                    at: '2026-09-05T12:19:00.000Z',
+                  ),
+                  TranscriptLine(
+                    id: 'run-a:send:0',
+                    runId: 'run-a',
+                    role: LineRole.assistant,
+                    text: 'Hi there',
+                    at: '2026-09-05T12:19:01.000Z',
+                    status: LineStatus.completed,
+                  ),
+                ],
+                loading: false,
+                hasEarlier: false,
+                onRefresh: ({older = false}) async {},
+                onOpenRun: (_) {},
+                storageKey: 'bubble-test-${brightness.name}',
+              ),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(seconds: 1));
+
+        final mine = fill(tester, 'You');
+        final bot = fill(tester, 'Bot');
+        expect(mine.a, greaterThan(0));
+        expect(bot.a, greaterThan(0));
+        expect(bot, theme.colorScheme.surfaceContainerHighest);
+        expect(bot, isNot(theme.colorScheme.surface));
+        expect(mine, isNot(bot));
+      });
+    }
+  });
 
   test('names each send by the ordinal the cloud minted, not its position', () {
     // A Turn that outgrew the wire budget arrives with its earliest sends
