@@ -52,6 +52,9 @@ custom user driver that shows nothing itself and reports to Flutter over
   run number, which only grows. `sparkle:shortVersionString` is the tag.
 - **Development installs.** `scripts/native-desktop-update.py` builds without
   a feed URL or key, so Sparkle never starts and never replaces a local build.
+  That build is a separate app, FrockBot Dev (`com.frockbot.mobile.dev`,
+  scheme `frockbot-dev`), so Launch Services never opens it in place of the
+  released app, which would then never see an update.
 - **Limits.** Sparkle cannot downgrade. Download progress is real; the brief
   install between quit and relaunch is not observable from inside the app.
 

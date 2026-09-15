@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 import 'auth.dart';
+import 'desktop_build.dart';
 import 'transport.dart';
 
 class NativeSignIn implements SignIn {
@@ -19,7 +20,7 @@ class NativeSignIn implements SignIn {
   /// origin is plain HTTP on a private address, which no App Link can name.
   String get returnUri => developmentAuth
       ? 'frockbot-dev://native/return/android'
-      : '$hostedOrigin/native/return/${Platform.isAndroid ? 'android' : 'macos'}';
+      : '$hostedOrigin/native/return/${Platform.isAndroid ? 'android' : macosReturnSegmentV1}';
   @override
   Future<void> start() async {
     final verifier = '${randomId()}${randomId()}';
@@ -69,8 +70,9 @@ class NativeSignIn implements SignIn {
 
   /// The Mac app's custom scheme. Safari alone dispatches a Universal Link, and
   /// only on the user's own click; the return page hands the same code and
-  /// state to this scheme so every browser reaches the app.
-  static const macosScheme = 'frockbot';
+  /// state to this scheme so every browser reaches the app. The local
+  /// FrockBot Dev build has its own, so the released app never answers it.
+  static const macosScheme = macosSchemeV1;
 
   /// The return as the app would have received it on its verified link.
   ///

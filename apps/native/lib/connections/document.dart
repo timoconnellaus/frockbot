@@ -18,6 +18,8 @@ library;
 
 import 'package:flutter/foundation.dart' show ValueNotifier;
 
+import '../client/desktop_build.dart';
+
 /// The action kinds a Connectors press can mean.
 const connectionActionKindsV1 = <String>{
   'connect-api-key',
@@ -153,8 +155,8 @@ ConnectionRequestV1 connectionRequestV1(Map<String, Object?> command) {
 /// The `connection/start` command that opens a provider's hosted door.
 ///
 /// `returnClient` names which return page this app can come back through
-/// once the door closes: `android` for the verified link, `macos` for the
-/// app's scheme. A browser tab names none and is told to return by hand.
+/// once the door closes: `android` for the verified link, `macos` (or
+/// `macos-dev` from the local FrockBot Dev build) for the app's scheme. A browser tab names none and is told to return by hand.
 ConnectionRequestV1 startConnectionRequestV1(Map<String, Object?> command) {
   final input = _input(command);
   final packageId = _string(input, 'packageId');
@@ -182,7 +184,7 @@ const connectReturnPathV1 = '/api/connect/callback';
 /// settles the Connection.
 bool isConnectReturnV1(Uri uri) => switch (uri.scheme) {
   'https' => uri.path == '$connectReturnPathV1/android',
-  'frockbot' => uri.path == '$connectReturnPathV1/macos',
+  macosSchemeV1 => uri.path == '$connectReturnPathV1/$macosReturnSegmentV1',
   _ => false,
 };
 

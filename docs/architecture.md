@@ -536,11 +536,11 @@ the row's `kind`. The requests a press becomes live in
 `lib/connections/document.dart`: a Connection command goes to
 `/api/connections`, a revocation to the Package's own route, and a hosted grant
 is a `connection/start` whose answer is a URL the app opens after checking it.
-That start names the app's own `returnClient` — `android` or `macos`, and
+That start names the app's own `returnClient` — `android`, `macos`, or `macos-dev` from the local FrockBot Dev Mac build, and
 nothing from a browser tab or any other platform — so the door sends the person
 back through the page that reopens the app: the verified App Link the manifest
 claims at `/api/connect/callback/android`, or the same page handed to the
-`frockbot://` scheme on a Mac. `main.dart` recognises exactly those two links
+`frockbot://` scheme on a Mac (`frockbot-dev://` and `/macos-dev` for FrockBot Dev). `main.dart` recognises exactly this build's two links
 (`isConnectReturnV1`) and bumps `connectReturns`, which the page reads its
 frame again on rather than waiting for a lifecycle resume; nothing on the link
 is read, since the next settings read is what settles the Connection. While a
@@ -993,7 +993,7 @@ Session storage is D1 `AUTH_DB`. There is no `cookieCache` and no `secondaryStor
 
 1. `POST /api/auth/native/start` (unauthenticated) mints an HMAC-signed 5-minute claim; `returnUri` is checked against a deployment-fixed allowlist (`apps/cloudflare/src/native-auth.ts:27-32`).
 2. The app opens `/native/authorize` in the external browser. That route checks for a cookie session and otherwise runs Google sign-in with `callbackURL=/native/complete`.
-3. Completion 302s to the Android App Link `bot.frockbot.com/native/return/android?code=&state=`, or on the Mac to `bot.frockbot.com/native/return/macos`. That page hands the same `code` and `state` to the app's `frockbot://` scheme (`nativeReturnPage`, drawn by the shared `app/return-page.ts` template under a per-response script nonce), because only Safari dispatches a Universal Link and only on the user's own click; the app checks the host and path of a scheme return exactly as it checks the verified link (`NativeSignIn.canonical`), and the exchange still names the https return URI.
+3. Completion 302s to the Android App Link `bot.frockbot.com/native/return/android?code=&state=`, or on the Mac to `bot.frockbot.com/native/return/macos` (`/native/return/macos-dev` for the local FrockBot Dev build, which hands over on `frockbot-dev://` so the released app never takes its code). That page hands the same `code` and `state` to the app's `frockbot://` scheme (`nativeReturnPage`, drawn by the shared `app/return-page.ts` template under a per-response script nonce), because only Safari dispatches a Universal Link and only on the user's own click; the app checks the host and path of a scheme return exactly as it checks the verified link (`NativeSignIn.canonical`), and the exchange still names the https return URI.
 4. `POST /api/auth/native/exchange` verifies `SHA-256(verifier)`, the state, the return URI and a byte-exact ClientHello, asks the beta-access authority, commits in the User Durable Object, and returns `Bearer frockbot-native.<claims>.<sig>` with a 7-day lifetime.
 
 The token is stored in the platform keystore through `flutter_secure_storage` (`apps/native/lib/client/store.dart:38`).

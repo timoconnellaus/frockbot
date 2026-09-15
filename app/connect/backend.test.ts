@@ -206,6 +206,16 @@ describe("the Connected apps gateway routes", () => {
     expect(macPage).toContain(
       "frockbot://bot.frockbot.com/api/connect/callback/macos",
     );
+    const dev = await backend.publicRoute!(
+      new Request("https://bot.frockbot.com/api/connect/callback/macos-dev"),
+      new URL("https://bot.frockbot.com/api/connect/callback/macos-dev"),
+      {},
+    );
+    const devPage = await dev!.text();
+    expect(devPage).toContain(
+      "frockbot-dev://bot.frockbot.com/api/connect/callback/macos-dev",
+    );
+    expect(devPage).not.toContain("frockbot://");
     expect(macPage).not.toContain("ca_1");
     expect(mac!.headers.get("content-security-policy")).toMatch(
       /script-src 'nonce-[0-9a-f-]{36}'/,

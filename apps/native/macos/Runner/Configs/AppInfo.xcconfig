@@ -4,11 +4,31 @@
 // future. If not, the values below would default to using the project name when this becomes a
 // 'flutter create' template.
 
+// One app, two identities. Every build is the released FrockBot unless
+// `FROCKBOT_DESKTOP_DEV=YES` is passed to xcodebuild, which only
+// `scripts/native-desktop-update.py` does: that local build is "FrockBot Dev",
+// `com.frockbot.mobile.dev`, with its own `frockbot-dev` sign-in scheme and a
+// DEV-ribboned icon, so macOS never mistakes it for the released app that
+// updates itself. Each identity is looked up by the switch's value; an unset
+// switch selects the empty-suffixed release entries.
+FROCKBOT_PRODUCT_NAME_ = FrockBot
+FROCKBOT_PRODUCT_NAME_YES = FrockBot Dev
+FROCKBOT_BUNDLE_SUFFIX_YES = .dev
+FROCKBOT_SCHEME_SUFFIX_YES = -dev
+FROCKBOT_APP_ICON_ = AppIcon
+FROCKBOT_APP_ICON_YES = AppIconDev
+
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = FrockBot
+PRODUCT_NAME = $(FROCKBOT_PRODUCT_NAME_$(FROCKBOT_DESKTOP_DEV))
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.frockbot.mobile
+PRODUCT_BUNDLE_IDENTIFIER = com.frockbot.mobile$(FROCKBOT_BUNDLE_SUFFIX_$(FROCKBOT_DESKTOP_DEV))
+
+// The custom scheme the browser's sign-in and Connect returns hand over on (Info.plist).
+FROCKBOT_URL_SCHEME = frockbot$(FROCKBOT_SCHEME_SUFFIX_$(FROCKBOT_DESKTOP_DEV))
+
+// The asset catalog app icon (selected in the Runner target's build settings).
+FROCKBOT_APP_ICON = $(FROCKBOT_APP_ICON_$(FROCKBOT_DESKTOP_DEV))
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.frockbot. All rights reserved.

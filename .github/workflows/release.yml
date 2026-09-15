@@ -644,6 +644,10 @@ jobs:
           embedded_profile="$RUNNER_TEMP/frockbot-embedded-profile.plist"
           test -f "$app/Contents/embedded.provisionprofile"
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" == com.frockbot.mobile ]]
+          # The identity is build-setting driven (`FROCKBOT_DESKTOP_DEV` selects
+          # the local FrockBot Dev build); the release must be the released app.
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$app/Contents/Info.plist")" == FrockBot ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$app/Contents/Info.plist")" == frockbot ]]
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "${VERSION%%-*}" ]]
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" == "$GITHUB_RUN_NUMBER" ]]
           # The feed's build numbers are this run number; an app that cannot

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../client/desktop_build.dart';
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../settings/page.dart';
@@ -210,7 +211,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     if (kIsWeb) return null;
     return switch (defaultTargetPlatform) {
       TargetPlatform.android => 'android',
-      TargetPlatform.macOS => 'macos',
+      TargetPlatform.macOS => macosReturnSegmentV1,
       _ => null,
     };
   }
