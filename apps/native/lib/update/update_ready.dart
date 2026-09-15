@@ -30,6 +30,11 @@ abstract interface class MobileUpdateService {
   /// that a patch is waiting.
   Future<bool> download();
 
+  /// Whether a patch other than the running one is staged on disk. A local
+  /// read with no network request, cheap enough to repeat while another
+  /// download finishes.
+  Future<bool> staged();
+
   Future<bool> restart();
 
   /// The number of the patch this engine booted, or null when it runs the
@@ -62,6 +67,12 @@ class ShorebirdMobileUpdateService implements MobileUpdateService {
   @override
   Future<bool> download() async {
     await updater.update();
+    return staged();
+  }
+
+  @override
+  Future<bool> staged() async {
+    if (!_mobile || !updater.isAvailable) return false;
     final (current, next) = await (
       updater.readCurrentPatch(),
       updater.readNextPatch(),
@@ -88,6 +99,11 @@ class ShorebirdMobileUpdateService implements MobileUpdateService {
 class MobileUpdateController extends ChangeNotifier {
   final MobileUpdateService service;
   final Future<void> Function() beforeRestart;
+
+  /// How often, and for how long, a download that found the automatic
+  /// updater already running keeps looking for the patch it is fetching.
+  final Duration stagedPollInterval;
+  final int stagedPollAttempts;
   Future<void>? _checking;
   bool _disposed = false;
   bool restartRequired = false;
@@ -97,6 +113,8 @@ class MobileUpdateController extends ChangeNotifier {
   MobileUpdateController({
     required this.service,
     Future<void> Function()? beforeRestart,
+    this.stagedPollInterval = const Duration(seconds: 2),
+    this.stagedPollAttempts = 60,
   }) : beforeRestart = beforeRestart ?? _nothing;
 
   static Future<void> _nothing() async {}
@@ -121,7 +139,8 @@ class MobileUpdateController extends ChangeNotifier {
       final status = await service.check();
       final ready = switch (status) {
         MobileUpdateStatus.restartRequired => true,
-        MobileUpdateStatus.outdated => await service.download(),
+        MobileUpdateStatus.outdated =>
+          await _download() || await _awaitStaged(),
         MobileUpdateStatus.upToDate || MobileUpdateStatus.unavailable => false,
       };
       if (ready && !_disposed) {
@@ -132,6 +151,34 @@ class MobileUpdateController extends ChangeNotifier {
       // Update discovery is opportunistic. The next resume is the retry, and
       // the running app remains fully usable in the meantime.
     }
+  }
+
+  /// A download that throws, including its closing staged read, still hands
+  /// over to the watch below rather than ending the check.
+  Future<bool> _download() async {
+    try {
+      return await service.download();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Shorebird's automatic updater starts fetching the same patch at launch,
+  /// and a download asked for meanwhile returns at once without saying the
+  /// patch is still on its way. Watch the disk until it lands, so the header
+  /// appears in this session rather than after the next resume.
+  Future<bool> _awaitStaged() async {
+    for (var attempt = 0; attempt < stagedPollAttempts; attempt++) {
+      await Future<void>.delayed(stagedPollInterval);
+      if (_disposed) return false;
+      try {
+        if (await service.staged()) return true;
+      } catch (_) {
+        // The updater may be rewriting its patch state as we read it; the
+        // next attempt looks again.
+      }
+    }
+    return false;
   }
 
   /// The version and patch this program is running, for the Profile page.

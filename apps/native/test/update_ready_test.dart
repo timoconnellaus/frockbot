@@ -21,6 +21,15 @@ class FakeUpdateService implements MobileUpdateService {
   Completer<void>? checkGate;
   bool restartSucceeds;
   bool downloadStages;
+  Object? downloadFailure;
+
+  /// What successive local reads of the staged patch report; the last entry
+  /// repeats once they run out.
+  List<bool> stagedReads;
+
+  /// A staged read, by 1-based position, that throws instead of answering.
+  int? stagedReadThatThrows;
+  int stagedChecks = 0;
   int? patch;
   Object? patchFailure;
   int checks = 0;
@@ -32,6 +41,7 @@ class FakeUpdateService implements MobileUpdateService {
     this.events = const [],
     this.restartSucceeds = true,
     this.downloadStages = true,
+    this.stagedReads = const [false],
     this.patch,
     this.patchFailure,
   });
@@ -46,7 +56,17 @@ class FakeUpdateService implements MobileUpdateService {
   @override
   Future<bool> download() async {
     downloads++;
+    if (downloadFailure != null) throw downloadFailure!;
     return downloadStages;
+  }
+
+  @override
+  Future<bool> staged() async {
+    stagedChecks++;
+    if (stagedChecks == stagedReadThatThrows) {
+      throw StateError('patch state is being rewritten');
+    }
+    return stagedReads[(stagedChecks - 1).clamp(0, stagedReads.length - 1)];
   }
 
   @override
@@ -98,12 +118,100 @@ void main() {
       statuses: const [MobileUpdateStatus.outdated],
       downloadStages: false,
     );
-    final controller = MobileUpdateController(service: service);
+    final controller = MobileUpdateController(
+      service: service,
+      stagedPollInterval: Duration.zero,
+      stagedPollAttempts: 3,
+    );
     addTearDown(controller.dispose);
 
     await controller.check();
 
     expect(service.downloads, 1);
+    expect(service.stagedChecks, 3);
+    expect(controller.restartRequired, isFalse);
+  });
+
+  test(
+    'a patch the automatic updater was still fetching shows once it lands',
+    () async {
+      // Shorebird's launch-time updater is mid-download, so the requested
+      // download returns at once with nothing staged; the patch reaches disk
+      // a few reads later.
+      final service = FakeUpdateService(
+        statuses: const [MobileUpdateStatus.outdated],
+        downloadStages: false,
+        stagedReads: const [false, false, true],
+      );
+      final controller = MobileUpdateController(
+        service: service,
+        stagedPollInterval: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.check();
+
+      expect(service.downloads, 1);
+      expect(service.stagedChecks, 3);
+      expect(service.checks, 1);
+      expect(controller.restartRequired, isTrue);
+    },
+  );
+
+  test('a staged read that fails does not end the watch', () async {
+    final service = FakeUpdateService(
+      statuses: const [MobileUpdateStatus.outdated],
+      downloadStages: false,
+      stagedReads: const [false, true],
+    )..stagedReadThatThrows = 1;
+    final controller = MobileUpdateController(
+      service: service,
+      stagedPollInterval: Duration.zero,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.check();
+
+    expect(service.stagedChecks, 2);
+    expect(controller.restartRequired, isTrue);
+  });
+
+  test('a download that throws still watches for the patch', () async {
+    final service = FakeUpdateService(
+      statuses: const [MobileUpdateStatus.outdated],
+      stagedReads: const [true],
+    )..downloadFailure = StateError('patch state is being rewritten');
+    final controller = MobileUpdateController(
+      service: service,
+      stagedPollInterval: Duration.zero,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.check();
+
+    expect(service.downloads, 1);
+    expect(service.stagedChecks, 1);
+    expect(controller.restartRequired, isTrue);
+  });
+
+  test('a disposed controller stops watching for the patch', () async {
+    final service = FakeUpdateService(
+      statuses: const [MobileUpdateStatus.outdated],
+      downloadStages: false,
+    );
+    final controller = MobileUpdateController(
+      service: service,
+      stagedPollInterval: const Duration(milliseconds: 1),
+    );
+
+    final checking = controller.check();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    controller.dispose();
+    await checking;
+    final seen = service.stagedChecks;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(service.stagedChecks, seen);
     expect(controller.restartRequired, isFalse);
   });
 
