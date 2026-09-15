@@ -30,6 +30,26 @@ Map<String, dynamic> voiceRun({
   ],
 };
 
+Map<String, dynamic> chatRun(int index) => {
+  'runId': 'chat-$index',
+  'input': 'Question number $index about the morning report',
+  'status': 'completed',
+  'admittedAt': '2026-09-13T12:${index.toString().padLeft(2, '0')}:00.000Z',
+  'events': <Object?>[
+    {
+      'type': 'send/to-user',
+      'ordinal': 0,
+      'payload': {
+        'type': 'text',
+        'text':
+            'Answer number $index. It runs long enough to push the voice card '
+            'well above the first screen of the thread, so the card is mounted '
+            'for the first time only once the list has been scrolled.',
+      },
+    },
+  ],
+};
+
 void main() {
   setUpAll(() async {
     final inter = FontLoader('Inter');
@@ -155,4 +175,51 @@ void main() {
       });
     }
   }
+
+  testWidgets('a voice card keeps its expanded flag out of the scroll slot', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    // The exchange sits above a long tail of chat, so its card mounts for the
+    // first time only after a scroll — the point at which the list has already
+    // saved its offset. Both used to name the same page storage entry, so the
+    // tile read that double back as its expanded flag and threw on mount,
+    // which a release build paints as a grey box over the whole thread.
+    final lines = projectRuns([
+      voiceRun(),
+      for (var index = 1; index <= 14; index++) chatRun(index),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: TranscriptView(
+            lines: lines,
+            loading: false,
+            hasEarlier: false,
+            onRefresh: ({older = false}) async {},
+            onOpenRun: (_) {},
+            onReadLatest: (_) {},
+            storageKey: 'voice-storage',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Voice session'), findsNothing);
+
+    await tester.dragUntilVisible(
+      find.text('Voice session'),
+      find.byType(ListView),
+      const Offset(0, 300),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Voice session'), findsOneWidget);
+    expect(find.text('Reply to voice'), findsOneWidget);
+  });
 }
