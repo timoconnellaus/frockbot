@@ -290,7 +290,7 @@ sentence with no audio throws rather than returns (`app/voice/tts-guard.ts`);
 without that the turn settles as answered and the silence has no record.
 
 The one turn that produces no answer and yet carries no error frame is the
-bridge-only turn: once `"One second."` has been spoken the SDK has seen text,
+bridge-only turn: once a bridge phrase has been spoken the SDK has seen text,
 so it treats the turn as a success even though the ledger settles it as
 `no_output`. The person hears the bridge and then nothing, and the call goes
 back to listening with no footer message; only the `turn` trace line records
@@ -403,8 +403,8 @@ SDK started listening with no call record, so nothing was booked), `utterance`
 never given to the model — the reason says which), `model-first-text` (the
 model's first word, with `ms` since the turn began: everything before it is
 what the person waited through in silence), `turn-bridge` (the turn said
-`"One second."` before a tool step or while the first output was still
-pending, with `ms` since the turn began — filler, not the model's own
+a bridge phrase because nothing had been said within the acknowledgment
+delay, with `ms` since the turn began — filler, not the model's own
 words), `turn-settled` (the outcome, the
 delegation count and the answer's length, or a failure classification — never
 a provider's error sentence — and `ms`, the turn's whole model time),
