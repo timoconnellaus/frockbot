@@ -118,7 +118,9 @@ jobs:
 
       - name: Test Flutter client
         working-directory: apps/native
-        run: flutter test --no-pub
+        # The client names no deployment of its own, so the suite passes an
+        # origin that reaches nothing (ADR 0028).
+        run: flutter test --no-pub --dart-define=FROCKBOT_ORIGIN=https://tests.invalid
 
       # The Android half of this client is Kotlin, and nothing above compiles
       # it: `flutter test` runs the Dart VM and `flutter build web` never reads
@@ -593,22 +595,18 @@ jobs:
           fi
           echo "database_id=$database_id" >> "$GITHUB_OUTPUT"
 
-      - name: Configure staging D1 database
-        working-directory: apps/cloudflare
+      # `deployments/staging.json` holds every other piece of staging's
+      # identity; the database is the one thing resolved in this job, because
+      # the step above creates it when the account has none.
+      - name: Write staging deployment configuration
         env:
           STAGING_D1_DATABASE_ID: ${{ steps.resources.outputs.database_id }}
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const file = 'wrangler.jsonc';
-          const databaseId = process.env.STAGING_D1_DATABASE_ID;
-          const staging = /("database_name":\s*"frockbot-auth-staging",\s*"database_id":\s*")[^"]*(")/;
-          const source = fs.readFileSync(file, 'utf8');
-          if (!staging.test(source)) {
-            throw new Error(`${file} no longer contains a staging frockbot-auth-staging database_id`);
-          }
-          fs.writeFileSync(file, source.replace(staging, `$1${databaseId}$2`));
-          NODE
+        run: >-
+          bun run deployment:config staging
+          --d1-database-id "$STAGING_D1_DATABASE_ID"
+
+      - name: Prove the generated configs are what staging runs
+        run: bun test scripts/deployment-config.test.ts
 
       # `artifact:build` chains `client:build`, which is `flutter build web`,
       # so the staging Worker's `assets` payload is built here — before the
@@ -625,6 +623,9 @@ jobs:
         working-directory: apps/cloudflare
         run: bun run artifact:build
 
+      # The hash is a build output, not deployment identity, so the placeholder
+      # stays in the tracked file and is replaced in the generated config the
+      # deploy below actually reads.
       - name: Configure application artifact
         id: artifact
         working-directory: apps/cloudflare
@@ -633,7 +634,7 @@ jobs:
           echo "hash=$artifact_hash" >> "$GITHUB_OUTPUT"
           ARTIFACT_HASH="$artifact_hash" node <<'NODE'
           const fs = require('node:fs');
-          const file = 'wrangler.jsonc';
+          const file = '../../.deployment/staging/app/wrangler.jsonc';
           const placeholder = 'foundation-v1';
           const source = fs.readFileSync(file, 'utf8');
           if (!source.includes(placeholder)) {
@@ -649,7 +650,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: >-
           bunx wrangler d1 migrations apply frockbot-auth-staging
-          --env staging --remote
+          -c ../../.deployment/staging/app/wrangler.jsonc --remote
 
       - name: Upload application artifact
         working-directory: apps/cloudflare
@@ -660,6 +661,7 @@ jobs:
           bunx wrangler r2 object put
           frockbot-application-artifacts-staging/applications/${{ steps.artifact.outputs.hash }}.mjs
           --file dist/artifacts/foundation-v1.mjs
+          -c ../../.deployment/staging/app/wrangler.jsonc
           --remote
 
       - name: Deploy Worker
@@ -727,7 +729,9 @@ jobs:
           );
           NODE
 
-          bunx wrangler deploy --env staging --secrets-file "$secrets_file"
+          bunx wrangler deploy \
+            -c ../../.deployment/staging/app/wrangler.jsonc \
+            --secrets-file "$secrets_file"
 
   release:
     name: Cut release tag

@@ -2,6 +2,8 @@
 
 Signing in proves who someone is. It does not give them FrockBot. Access is decided by one authority, the singleton `DeploymentPolicy` Durable Object (`apps/cloudflare/src/deployment-policy.ts`), and the rule it applies is `evaluateAdmissionV1` (`apps/cloudflare/src/account-admission.ts`).
 
+This is the hosted deployment's rule, and it holds wherever the built [auth Package](architecture.md#12-auth) answers `admission: "authority"`. A deployment that builds Cloudflare Access has no authority to ask: its Access policy is the allowlist, so the seam in `index.ts` admits every identity the Package produced and none of what follows applies ([ADR 0028](adr/0028-open-deployment.md)).
+
 ## The rule
 
 The deployment has one **admission mode**:
@@ -25,7 +27,7 @@ A provisioned User, an existing better-auth identity or a live session are not a
 
 ## Where it is asked
 
-- **Identity creation.** better-auth's `user.create.before` hook (`identityCreationHooksV1`) asks `mayCreateIdentity`. Admins may create an identity in every mode. For everyone else, a closed deployment writes no `user` row; an invite-only deployment writes one only for an invited, verified address.
+- **Identity creation.** better-auth's `user.create.before` hook (`identityCreationHooksV1`, `app/auth/better-auth/index.ts`) asks `mayCreateIdentity`. Admins may create an identity in every mode. For everyone else, a closed deployment writes no `user` row; an invite-only deployment writes one only for an invited, verified address.
 - **Authenticated browser requests.** The gateway asks `admitAccount` after resolving the session and before anything reaches a User Durable Object. A pause takes effect on the account's next request.
 - **Authenticated native requests.** `nativeAuth.authenticate` first verifies the bearer and reads its existing durable session without provisioning a User, then asks the authority. Missing or revoked sessions cannot activate access or spend an invitation. The exchange checks issuance eligibility without provisioning, then asks before issuing a session, and the settings handoff asks through `authenticate`. Sign-out verifies the bearer and revokes its existing session even when access is refused or the admission authority is unavailable. Session reads and revocations never provision a User. The gateway reuses the native answer rather than asking twice.
 - **Signed public requests.** Applet viewer sockets, Routine webhook deliveries and machine enrollments verify their token, then use the authority's read-only `checkAccount` through the stored identity before User or Bot access. These checks apply the same rule without activating an account or spending an invitation. Existing admitted work is not cancelled; machine polling and result delivery remain available to finish it. Regression coverage is in `apps/cloudflare/test/public-account-access.workerd.ts` and `apps/cloudflare/test/applets.workerd.ts`.
@@ -36,13 +38,19 @@ Browser, native and Applet viewer admission refusal is `403` with `{ error, code
 
 ## Admin seams
 
-These are JSON routes on the admin Contribution (`app/admin/backend.ts`). They have no UI beyond the mode choice on Site administration.
+Administration is not in the app. The operations are `app/admin/operations.ts`, mounted by the app Worker's `AdminEntrypoint` (`apps/cloudflare/src/admin-entrypoint.ts`), which is reachable only over a service binding: no HTTP route answers for it, and the client has no administrative surface ([ADR 0028](adr/0028-open-deployment.md)). The one caller is the admin portal, `apps/admin-portal`, a Worker at `admin.frockbot.com` behind its own Cloudflare Access application that checks the Access email against `FROCKBOT_ADMIN_EMAILS` itself.
 
-- `GET` or `POST /api/admin/policy`: the mode, `{ schemaVersion: 1, type: "deployment/set-admission-mode", mode, revision }`.
-- `GET` or `POST /api/admin/users/:userId/access`: one account's record, `{ schemaVersion: 1, type: "account/set-access", state, revision }`. `revision` is `0` for an account with no record.
-- `POST /api/admin/invitations`: `{ schemaVersion: 1, type: "access/invite-email", email }`. This is idempotent, and the address is compared trimmed and lower-cased.
+- `readPolicy` and `setAdmissionMode`: the mode, under `{ schemaVersion: 1, type: "deployment/set-admission-mode", mode, revision }`.
+- `listAccounts`: every account with its access record, what it holds, and what it can spend, plus the catalog's admin-gated Plugins. One unreadable account is marked unreadable rather than defaulted, and hides no other.
+- `readAccountAccess` and `setAccountAccess`: one account's record, under `{ schemaVersion: 1, type: "account/set-access", state, revision }`. `revision` is `0` for an account with no record.
+- `inviteEmail`: `{ schemaVersion: 1, type: "access/invite-email", email }`. This is idempotent, and the address is compared trimmed and lower-cased.
+- `setAccountFeatures` and `grantCredit`: what an account holds — Applets, Plugin authoring, the admin-gated Plugins opened for it — and complimentary credit, by the grant's own idempotency id.
 
-Waitlists, invitation email, redemption UI, trial credit and onboarding are not built. They build on these RPCs rather than beside them.
+Both compare-and-swaps answer `{ status: "applied", value }` or `{ status: "conflict", currentRevision }` rather than throwing, because the caller is another Worker; the portal renders a conflict as "changed underneath you" and writes nothing.
+
+An account's features are also writable from the operator surface, `POST /api/debug/users/:userId/features` under the deployment's `DEBUG_TOKEN`: a deployment with no portal still has to be able to turn Applets or Plugin authoring on.
+
+Waitlists, invitation email, redemption UI, trial credit and onboarding are not built. They build on these operations rather than beside them.
 
 ## Release: retiring the signups switch
 
@@ -53,22 +61,8 @@ The authority replaced `deployment:policy:v1`, which held `signups: { open }`. N
 
 After the deploy, the person releasing does the following:
 
-1. Sign in as an admin at bot.frockbot.com. Open **Site administration** and confirm it loads with **Closed** chosen. This also proves the cleanup ran, because the page reads the authority.
-2. For each non-admin test account that should keep access, look up its id in the account list on the same page. Then, from the signed-in admin browser's console, run:
-
-   ```js
-   await fetch(`/api/admin/users/${encodeURIComponent(userId)}/access`, {
-     method: "POST",
-     headers: { "content-type": "application/json" },
-     body: JSON.stringify({
-       schemaVersion: 1,
-       type: "account/set-access",
-       state: "active",
-       revision: 0,
-     }),
-   }).then((r) => r.json());
-   ```
-
+1. Open admin.frockbot.com as an administrator and confirm the page loads with **Closed** chosen. This also proves the cleanup ran, because the page reads the authority.
+2. For each non-admin test account that should keep access, set its access to **Active** in the account list on that page.
 3. Choose the mode the beta should run in.
 4. Verify a fresh conversation: as the admin, create a new Bot, send it a message and see it reply. If a test account was granted access, sign in as it and see it reach the app rather than the refusal page.
 

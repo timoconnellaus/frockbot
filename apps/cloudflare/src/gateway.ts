@@ -235,30 +235,6 @@ function answerArtifact(
     : response;
 }
 
-async function routeSignOut(
-  request: Request,
-  url: URL,
-  dependencies: GatewayDependencies,
-): Promise<Response> {
-  if (request.method !== "GET") return jsonError(405, "method not allowed");
-  const headers = new Headers(request.headers);
-  headers.set("content-type", "application/json");
-  const response = await dependencies.auth.handler(
-    new Request(new URL("/api/auth/sign-out", url), {
-      method: "POST",
-      headers,
-      body: "{}",
-    }),
-  );
-  if (!response.ok) return response;
-  const redirect = new Response(null, {
-    status: 303,
-    headers: response.headers,
-  });
-  redirect.headers.set("location", "/");
-  return redirect;
-}
-
 function decodeBotPathSegment(value: string): string {
   let botId: string;
   try {
@@ -659,7 +635,8 @@ export function createGateway(dependencies: GatewayDependencies) {
       return routeAppletSocket(request, url, dependencies);
     }
     if (url.pathname === "/sign-out") {
-      return routeSignOut(request, url, dependencies);
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      return dependencies.auth.signOut(request, url);
     }
 
     // Ahead of authentication: the operator surface is authorized by its own

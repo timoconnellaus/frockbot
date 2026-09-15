@@ -1,0 +1,15 @@
+{
+  // The same Worker source, type-checked as the Access build sees it.
+  //
+  // `#auth-package` resolves through `package.json`'s `imports` to the
+  // better-auth chooser, which is what `wrangler dev`, the suites and the hosted
+  // deploy get. A generated config for an `access` profile aliases that
+  // specifier to the other chooser, and nothing would have type-checked that
+  // build: an `env` name only better-auth has, or a Package method only it
+  // implements, would compile here and fail there. `paths` is how tsc is pointed
+  // at the same substitution wrangler's `alias` makes.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": { "#auth-package": ["./src/auth-package.access.ts"] }
+  }
+}

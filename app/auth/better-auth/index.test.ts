@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { identityCreationHooksV1, type IdentityCandidateV1 } from "./auth.ts";
+import { BETTER_AUTH_PACKAGE_V1, identityCreationHooksV1 } from "./index.ts";
+import type { AuthIdentityCandidateV1 } from "@frockbot/core/contracts";
 
 test("the identity provider's write waits on the access authority's answer", async () => {
-  const asked: IdentityCandidateV1[] = [];
+  const asked: AuthIdentityCandidateV1[] = [];
   const hooks = identityCreationHooksV1(async (candidate) => {
     asked.push(candidate);
     return candidate.email === "invited@example.com" && candidate.emailVerified;
@@ -34,4 +35,31 @@ test("the identity provider's write waits on the access authority's answer", asy
     { email: "stranger@example.com", emailVerified: true },
     { email: "", emailVerified: false },
   ]);
+});
+
+test("the native door signs with the live hosted key, under any other name", () => {
+  // Renaming what the native door signs with would invalidate every code and
+  // bearer already issued, which is every signed-in phone and Mac.
+  expect(BETTER_AUTH_PACKAGE_V1.nativeTokenSecret.name).toBe(
+    "BETTER_AUTH_SECRET",
+  );
+  expect(
+    BETTER_AUTH_PACKAGE_V1.nativeTokenSecret.read({
+      BETTER_AUTH_SECRET: "live",
+    }),
+  ).toBe("live");
+});
+
+test("stores no identity, and signs nobody in, without a database", async () => {
+  const stub = BETTER_AUTH_PACKAGE_V1.create({
+    BETTER_AUTH_SECRET: "x".repeat(32),
+    BETTER_AUTH_URL: "https://bot.example",
+    GOOGLE_CLIENT_ID: "id",
+    GOOGLE_CLIENT_SECRET: "secret",
+  });
+  expect(stub.storedIdentity).toBeUndefined();
+  expect(stub.listStoredIdentities).toBeUndefined();
+  expect(
+    (await stub.handler(new Request("https://bot.example/api/auth/x"))).status,
+  ).toBe(503);
 });

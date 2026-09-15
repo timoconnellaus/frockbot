@@ -56,7 +56,8 @@ export interface BotStateEnv {
   AI?: NativeAiBindingV1;
   /** The Frock AI Gateway adapter constructed by the Cloudflare host. */
   FROCK_AI?: {
-    autoRoute: string;
+    /** `null` on the `AI` binding path, which carries no dynamic route. */
+    autoRoute: string | null;
     runChatCompletion(
       gatewayModel: string,
       body: Record<string, unknown>,

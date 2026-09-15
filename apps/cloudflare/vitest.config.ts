@@ -25,7 +25,7 @@ import {
 const computerHost = createComputerHostFake();
 
 // better-auth's D1 schema, so `auth-schema.workerd.ts` can boot the real
-// `gatewayAuth()` against the migrations a deployment actually applies. A
+// better-auth Package against the migrations a deployment actually applies. A
 // column better-auth refuses is a live sign-in outage no other check sees.
 const authMigrations = await readD1Migrations(
   resolve(import.meta.dirname, "migrations"),

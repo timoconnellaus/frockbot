@@ -1,0 +1,29 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "frockbot-admin-portal",
+  "account_id": "374784ce2915a597adcecf9bcb2c5ee6",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  // One hostname, covered by one Cloudflare Access application. A
+  // `workers.dev` address would be a second door into the same Worker that
+  // the Access application does not cover.
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "admin.frockbot.com",
+      "custom_domain": true,
+    },
+  ],
+  // Administration is RPC into the app Worker's `AdminEntrypoint`, which no
+  // route of its own answers for (ADR 0028). The portal is its one caller.
+  "services": [
+    {
+      "binding": "APP",
+      "service": "frockbot-cloudflare",
+      "entrypoint": "AdminEntrypoint",
+    },
+  ],
+  "observability": {
+    "enabled": true,
+  },
+}

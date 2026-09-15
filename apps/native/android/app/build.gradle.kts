@@ -1,3 +1,4 @@
+import java.net.URI
 import java.util.Base64
 
 plugins {
@@ -7,10 +8,22 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Flutter passes every `--dart-define` as one comma-separated list of base64
+// `NAME=value` pairs, so the Dart program and the manifest read the same switches.
+fun dartDefine(name: String): String? = (project.findProperty("dart-defines") as? String)
+    .orEmpty()
+    .split(",")
+    .mapNotNull { runCatching { String(Base64.getDecoder().decode(it)) }.getOrNull() }
+    .firstOrNull { it.startsWith("$name=") }
+    ?.substringAfter("=")
+
 // One build switch controls both Dart transport and the separate Android identity.
-val localDevelopment = (project.findProperty("dart-defines") as? String).orEmpty().split(",").any {
-    runCatching { String(Base64.getDecoder().decode(it)) == "FROCKBOT_LOCAL_DEV=true" }.getOrDefault(false)
-}
+val localDevelopment = dartDefine("FROCKBOT_LOCAL_DEV") == "true"
+
+// The App Link host is the deployment's own, never a host written into this file:
+// `scripts/native-update.py` takes it from `deployments/hosted.json` and the local
+// stacks pass their own (ADR 0028).
+val deploymentHost = dartDefine("FROCKBOT_ORIGIN")?.let { URI(it).host }
 
 // The isolated development package has no production Firebase registration.
 tasks.matching { it.name.endsWith("GoogleServices") }.configureEach {
@@ -41,7 +54,14 @@ android {
         applicationId = if (localDevelopment) "com.frockbot.mobile.dev" else "com.frockbot.mobile"
         manifestPlaceholders["appLabel"] = if (localDevelopment) "FrockBot (Dev)" else "FrockBot"
         manifestPlaceholders["cleartext"] = localDevelopment.toString()
-        manifestPlaceholders["linkHost"] = if (localDevelopment) "localhost" else "bot.frockbot.com"
+        // A build that names no deployment claims no App Link. `.invalid` never
+        // resolves, so a forgotten define cannot claim another deployment's links;
+        // the Dart client refuses such a build outright at its first request.
+        manifestPlaceholders["linkHost"] = when {
+            localDevelopment -> "localhost"
+            deploymentHost != null -> deploymentHost
+            else -> "unnamed.invalid"
+        }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24
@@ -52,10 +72,15 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        val acceptance = (project.findProperty("dart-defines") as? String).orEmpty().split(",").any {
-            runCatching { String(Base64.getDecoder().decode(it)) == "NATIVE_ACCEPTANCE=true" }.getOrDefault(false)
-        }
+        val acceptance = dartDefine("NATIVE_ACCEPTANCE") == "true"
         buildConfigField("boolean", "NATIVE_ACCEPTANCE", acceptance.toString())
+        // The notification tap target opens this deployment's own document, so
+        // Kotlin reads the same host the App Link filter was built with.
+        buildConfigField(
+            "String",
+            "LINK_HOST",
+            "\"" + manifestPlaceholders["linkHost"] + "\"",
+        )
     }
 
     signingConfigs.getByName("debug") {

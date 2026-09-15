@@ -1,7 +1,7 @@
 // The gateway's auth seam against the D1 schema a deployment actually applies.
 //
-// `gatewayAuth()` degrades to an unconfigured stub without the Google and
-// better-auth secrets, so every other suite here talks to a hole rather than to
+// The better-auth Package degrades to an unconfigured stub without the Google
+// and better-auth secrets, so every other suite here talks to a hole rather than to
 // better-auth. This one configures it and drives `/api/auth/*` against a D1
 // migrated from `migrations/`, because better-auth validates that schema at
 // first use: a column it never writes but the migration declares `not null`
@@ -9,14 +9,18 @@
 // the browser e2e harness, stay green.
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeAll, expect, test } from "vitest";
-import { createAuth, gatewayAuth } from "../src/auth.ts";
+import {
+  BETTER_AUTH_PACKAGE_V1,
+  createAuth,
+} from "@frockbot/app/auth/better-auth";
 
 const BASE_URL = "https://bot.frockbot.com";
+const SECRET = "workerd-auth-schema-secret-0123456789abcdef";
 
 function configuredAuth() {
-  return gatewayAuth({
+  return BETTER_AUTH_PACKAGE_V1.create({
     AUTH_DB: env.AUTH_DB,
-    BETTER_AUTH_SECRET: "workerd-auth-schema-secret-0123456789abcdef",
+    BETTER_AUTH_SECRET: SECRET,
     BETTER_AUTH_URL: BASE_URL,
     GOOGLE_CLIENT_ID: "auth-schema.apps.googleusercontent.com",
     GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
@@ -52,7 +56,7 @@ test("a closed deployment refuses to create an account on first sign-in", async 
   const auth = createAuth(
     {
       AUTH_DB: env.AUTH_DB,
-      BETTER_AUTH_SECRET: "workerd-auth-schema-secret-0123456789abcdef",
+      BETTER_AUTH_SECRET: SECRET,
       BETTER_AUTH_URL: BASE_URL,
       GOOGLE_CLIENT_ID: "auth-schema.apps.googleusercontent.com",
       GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
@@ -84,4 +88,63 @@ test("a closed deployment refuses to create an account on first sign-in", async 
     .bind("uninvited@example.com")
     .all();
   expect(results).toEqual([]);
+});
+
+test("signing out clears the session cookie and sends the browser home", async () => {
+  // The whole of what `/sign-out` means on this build: better-auth's own route,
+  // reached over its own handler, and a 303 back to the document. The gateway
+  // knows only that it hands the route to the Package.
+  const auth = createAuth({
+    AUTH_DB: env.AUTH_DB,
+    BETTER_AUTH_SECRET: SECRET,
+    BETTER_AUTH_URL: BASE_URL,
+    GOOGLE_CLIENT_ID: "auth-schema.apps.googleusercontent.com",
+    GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
+  });
+  const adapter = (await auth.$context).internalAdapter;
+  const user = await adapter.createUser(
+    {
+      name: "Signing out",
+      email: `sign-out-${crypto.randomUUID()}@test.invalid`,
+      emailVerified: true,
+    },
+    { method: "oauth", oauth: { providerId: "google" } },
+  );
+  const session = await adapter.createSession(user.id);
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = btoa(
+    String.fromCharCode(
+      ...new Uint8Array(
+        await crypto.subtle.sign("HMAC", key, encoder.encode(session.token)),
+      ),
+    ),
+  );
+  const cookie = `__Secure-better-auth.session_token=${encodeURIComponent(`${session.token}.${signature}`)}`;
+  // What a browser sends when the refusal page's link is clicked: the session
+  // cookie, and a same-origin `referer`, which is what better-auth's CSRF check
+  // reads. The gateway forwards the request's own headers for exactly this
+  // reason — a sign-out request stripped of them is refused.
+  const request = new Request(`${BASE_URL}/sign-out`, {
+    headers: { cookie, referer: `${BASE_URL}/` },
+  });
+  expect(
+    await configuredAuth().getSession(new Headers({ cookie })),
+  ).toMatchObject({ user: { id: user.id } });
+
+  const response = await configuredAuth().signOut(
+    request,
+    new URL(request.url),
+  );
+
+  expect(response.status).toBe(303);
+  expect(response.headers.get("location")).toBe("/");
+  expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  expect(await configuredAuth().getSession(new Headers({ cookie }))).toBeNull();
 });

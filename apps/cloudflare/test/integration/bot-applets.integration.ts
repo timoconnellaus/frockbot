@@ -20,6 +20,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
+  setAccountFeaturesV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -40,13 +41,11 @@ function userRpc(userId: string): UserAppletRpc {
 
 /** What an admin does before an account's Bots see the Applets surfaces. */
 async function setApplets(userId: string): Promise<void> {
-  await expectOkJson(
-    await postAsUser("development", `/api/admin/users/${userId}/features`, {
-      schemaVersion: 1,
-      type: "user/set-features",
-      applets: true,
-    }),
-  );
+  await setAccountFeaturesV1(userId, {
+    schemaVersion: 1,
+    type: "user/set-features",
+    applets: true,
+  });
 }
 
 async function twoBots(prefix: string) {

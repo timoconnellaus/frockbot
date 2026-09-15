@@ -1083,7 +1083,12 @@ describe("Applet viewer tokens", () => {
       const gateway = createGateway({
         loader: { get: unused },
         artifacts: { load: unused },
-        auth: { getSession: unused, handler: unused },
+        auth: {
+          getSession: unused,
+          handler: unused,
+          signOut: unused,
+          startSignIn: unused,
+        },
         admitAccount: unused,
         admitAppletViewer: async (userId) => {
           admissionChecks += 1;
@@ -1197,7 +1202,12 @@ describe("Applet viewer tokens", () => {
       const gateway = createGateway({
         loader: { get: unused },
         artifacts: { load: unused },
-        auth: { getSession: unused, handler: unused },
+        auth: {
+          getSession: unused,
+          handler: unused,
+          signOut: unused,
+          startSignIn: unused,
+        },
         admitAccount: unused,
         admitAppletViewer: scenario.admit,
         allowDevelopmentIdentity: false,
@@ -1328,7 +1338,12 @@ describe("Applet viewer tokens", () => {
     const gateway = createGateway({
       loader: { get: unused },
       artifacts: { load: unused },
-      auth: { getSession: unused, handler: unused },
+      auth: {
+        getSession: unused,
+        handler: unused,
+        signOut: unused,
+        startSignIn: unused,
+      },
       admitAccount: unused,
       admitAppletViewer: () =>
         Promise.resolve({ schemaVersion: 1, admitted: true, basis: "active" }),

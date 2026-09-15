@@ -6,14 +6,11 @@ import { describe, expect, test } from "bun:test";
 import {
   createNativeAuth,
   readNativeJsonBody,
-  NATIVE_ORIGIN,
-  NATIVE_RETURN_ANDROID,
   NATIVE_RETURN_DEVELOPMENT,
-  NATIVE_RETURN_MACOS,
-  NATIVE_RETURN_MACOS_DEV,
   NATIVE_MACOS_DEV_SCHEME,
   NATIVE_MACOS_SCHEME,
   nativeReturnUris,
+  nativeReturnUriV1,
   type NativeAuthOptions,
 } from "./native-auth.js";
 import { createGateway } from "./gateway.js";
@@ -40,6 +37,12 @@ const state = "b".repeat(64);
 const challenge = Buffer.from(
   await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
 ).toString("base64url");
+/** One deployment's origin. The Worker takes it from `BETTER_AUTH_URL`. */
+const NATIVE_ORIGIN = "https://bot.frockbot.com";
+const NATIVE_RETURN_ANDROID = nativeReturnUriV1(NATIVE_ORIGIN, "android");
+const NATIVE_RETURN_MACOS = nativeReturnUriV1(NATIVE_ORIGIN, "macos");
+const NATIVE_RETURN_MACOS_DEV = nativeReturnUriV1(NATIVE_ORIGIN, "macos-dev");
+
 function fixture(overrides: Partial<NativeAuthOptions> = {}) {
   let time = Date.parse("2026-09-05T01:00:00Z");
   const values = new Map<string, unknown>();
@@ -51,17 +54,19 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
   };
   const auth = createNativeAuth({
     secret: "test-only-secret-that-is-not-a-credential",
+    origin: NATIVE_ORIGIN,
     returnUris: [NATIVE_RETURN_ANDROID],
     admit: async () => ({ schemaVersion: 1, admitted: true, basis: "active" }),
     now: () => time,
     auth: {
-      handler: async () =>
-        Response.json(
-          { url: "https://accounts.google.com/o/oauth2/v2/auth?test=true" },
-          {
-            headers: { "set-cookie": "test-state=synthetic; Secure; HttpOnly" },
+      startSignIn: async () =>
+        new Response(null, {
+          status: 302,
+          headers: {
+            location: "https://accounts.google.com/o/oauth2/v2/auth?test=true",
+            "set-cookie": "test-state=synthetic; Secure; HttpOnly",
           },
-        ),
+        }),
       getSession: async (headers) =>
         headers.get("cookie") === "test=signed-in"
           ? { user: { id: "user-1" } }
@@ -303,10 +308,10 @@ describe("native system browser exchange", () => {
       decodeProtocol("AuthSessionView", await exchanged!.json()).userId,
     ).toBe("development");
     // Production never lists the development scheme.
-    expect(nativeReturnUris("android")).not.toContain(
+    expect(nativeReturnUris("android", NATIVE_ORIGIN)).not.toContain(
       NATIVE_RETURN_DEVELOPMENT,
     );
-    expect(nativeReturnUris("android,macos")).not.toContain(
+    expect(nativeReturnUris("android,macos", NATIVE_ORIGIN)).not.toContain(
       NATIVE_RETURN_DEVELOPMENT,
     );
   });
@@ -544,9 +549,17 @@ describe("native system browser exchange", () => {
   });
 });
 
+test("a trailing slash on the deployment origin names the same return URIs", () => {
+  expect(nativeReturnUris("android,macos", `${NATIVE_ORIGIN}/`)).toEqual(
+    nativeReturnUris("android,macos", NATIVE_ORIGIN),
+  );
+});
+
 test("deployment targets are an exact fail-closed switch", () => {
-  expect(nativeReturnUris("android")).toEqual([NATIVE_RETURN_ANDROID]);
-  expect(nativeReturnUris("android,macos")).toEqual([
+  expect(nativeReturnUris("android", NATIVE_ORIGIN)).toEqual([
+    NATIVE_RETURN_ANDROID,
+  ]);
+  expect(nativeReturnUris("android,macos", NATIVE_ORIGIN)).toEqual([
     NATIVE_RETURN_ANDROID,
     NATIVE_RETURN_MACOS,
     NATIVE_RETURN_MACOS_DEV,
@@ -559,7 +572,7 @@ test("deployment targets are an exact fail-closed switch", () => {
     "android, macos",
     "android,ios",
   ])
-    expect(nativeReturnUris(value)).toEqual([]);
+    expect(nativeReturnUris(value, NATIVE_ORIGIN)).toEqual([]);
 });
 
 function gateway(nativeAuth?: ReturnType<typeof createNativeAuth>) {
@@ -572,6 +585,8 @@ function gateway(nativeAuth?: ReturnType<typeof createNativeAuth>) {
       auth: {
         getSession: async () => null,
         handler: async () => new Response("browser auth"),
+        signOut: unexpected,
+        startSignIn: unexpected,
       },
       loader: { get: unexpected },
       artifacts: { load: unexpected },
@@ -744,6 +759,7 @@ describe("beta access on the native door", () => {
     const f = fixture();
     const recording = createNativeAuth({
       secret: SECRET,
+      origin: NATIVE_ORIGIN,
       returnUris: [NATIVE_RETURN_ANDROID],
       now: f.now,
       admit: async (userId) => {
@@ -754,7 +770,7 @@ describe("beta access on the native door", () => {
         return decision;
       },
       auth: {
-        handler: async () => new Response(null, { status: 404 }),
+        startSignIn: async () => new Response(null, { status: 404 }),
         getSession: async (headers) =>
           headers.get("cookie") === "test=signed-in"
             ? { user: { id: "user-1" } }
@@ -1032,6 +1048,8 @@ describe("beta access on the native door", () => {
         auth: {
           getSession: async () => null,
           handler: async () => new Response("browser auth"),
+          signOut: async () => new Response(null, { status: 303 }),
+          startSignIn: async () => new Response(null, { status: 302 }),
         },
         loader: { get: () => ({}) as never },
         artifacts: { load: async () => "" },
@@ -1253,11 +1271,14 @@ describe("native provider setup navigation", () => {
       auth: {
         getSession: async (headers) =>
           headers.has("cookie") ? { user: { id: browserUser } } : null,
-        handler: async (request) => {
-          const body = (await request.json()) as { callbackURL: string };
-          returns.push(body.callbackURL);
-          return Response.json({
-            url: "https://accounts.google.com/o/oauth2/v2/auth?synthetic=1",
+        startSignIn: async (_request, returnTo) => {
+          returns.push(returnTo);
+          return new Response(null, {
+            status: 302,
+            headers: {
+              location:
+                "https://accounts.google.com/o/oauth2/v2/auth?synthetic=1",
+            },
           });
         },
       },

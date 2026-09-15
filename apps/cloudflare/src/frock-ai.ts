@@ -5,7 +5,8 @@ import { FrockAiTransportErrorV1 } from "@frockbot/providers/frock-ai/runtime";
 export const DEFAULT_FROCK_AI_GATEWAY_ID_V1 = "flock";
 
 export interface FrockAiGatewayHostV1 {
-  autoRoute: string;
+  /** `null` when this host took the `AI` binding, which carries no dynamic route. */
+  autoRoute: string | null;
   runChatCompletion(
     gatewayModel: string,
     body: Record<string, unknown>,
@@ -122,7 +123,6 @@ export function createFrockAiGatewayHostV1(
   config: FrockAiGatewayConfigV1,
 ): FrockAiGatewayHostV1 {
   const gatewayId = config.gatewayId || DEFAULT_FROCK_AI_GATEWAY_ID_V1;
-  const autoRoute = config.autoRoute || FROCK_AI_DEFAULT_AUTO_ROUTE;
   const { accountId, token } = config;
   // The `AI` binding's `gateway(...).run()` reaches the Gateway's *universal*
   // endpoint, whose request-shape translation rejects a `dynamic/<route>` model
@@ -131,6 +131,11 @@ export function createFrockAiGatewayHostV1(
   // no Gateway credentials are configured, which is every local and CI
   // environment that binds a stand-in for `AI`.
   const useCompat = Boolean(accountId && token);
+  // Only the compat transport can carry Auto as a route, so on the binding path
+  // this host has none and Auto resolves to a concrete model instead.
+  const autoRoute = useCompat
+    ? config.autoRoute || FROCK_AI_DEFAULT_AUTO_ROUTE
+    : null;
   const timeoutMs = config.timeoutMs ?? FROCK_AI_GATEWAY_TIMEOUT_MS_V1;
   const doFetch = config.fetch ?? fetch;
   return {

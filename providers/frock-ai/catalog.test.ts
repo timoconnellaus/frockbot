@@ -6,6 +6,7 @@ import {
   frockModelIdForCloudflareIdV1,
   gatewayModelForFrockIdV1,
   gatewayModelForFrockRequestV1,
+  FROCK_AI_BINDING_AUTO_MODEL,
   FROCK_AI_STRUCTURED_MODEL,
   normalizeFrockModelIdV1,
 } from "./catalog.js";
@@ -52,6 +53,40 @@ describe("Frock AI catalog", () => {
     expect(gatewayModelForFrockRequestV1(FROCK_AI_DEFAULT_MODEL, false)).toBe(
       "dynamic/flock-auto",
     );
+  });
+
+  test("resolves Auto to a concrete model where no route can carry it", () => {
+    // The `AI` binding rejects `dynamic/<route>` before inference
+    // (cloudflare/ai#617), so a deployment with no Gateway has Auto pinned
+    // rather than broken — "the platform picks the model" with zero
+    // configuration.
+    expect(gatewayModelForFrockIdV1(FROCK_AI_DEFAULT_MODEL, null)).toBe(
+      FROCK_AI_BINDING_AUTO_MODEL,
+    );
+    expect(FROCK_AI_BINDING_AUTO_MODEL.startsWith("workers-ai/@cf/")).toBe(
+      true,
+    );
+    // It is a model this deployment actually offers, not an id nobody listed.
+    expect(
+      frockAiStaticCatalogV1().models.map(
+        (model) =>
+          `workers-ai/${model.providerModelId.replace("@frock/", "@cf/")}`,
+      ),
+    ).toContain(FROCK_AI_BINDING_AUTO_MODEL);
+    expect(
+      gatewayModelForFrockRequestV1(FROCK_AI_DEFAULT_MODEL, false, null),
+    ).toBe(FROCK_AI_BINDING_AUTO_MODEL);
+    // Schema work still goes to the model that honours one.
+    expect(
+      gatewayModelForFrockRequestV1(FROCK_AI_DEFAULT_MODEL, true, null),
+    ).toBe(FROCK_AI_STRUCTURED_MODEL);
+    // A named model is unaffected: it never needed a route.
+    expect(
+      gatewayModelForFrockIdV1(
+        "@frock/deepseek-ai/deepseek-v4-flash-0731",
+        null,
+      ),
+    ).toBe("workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731");
   });
 
   test("rejects ids outside the Frock AI namespace", () => {

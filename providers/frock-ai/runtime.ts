@@ -115,7 +115,8 @@ export type FrockAiChatCompletionV1 = (
 export interface FrockAiRuntimeConfig {
   connectionId: string;
   connectionGeneration: string;
-  autoRoute: string;
+  /** `null` on a transport with no dynamic route; Auto is a pinned model there. */
+  autoRoute: string | null;
   runChatCompletion: FrockAiChatCompletionV1;
   /**
    * Deadline overrides and the timer seam behind them. The gateway binding

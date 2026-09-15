@@ -220,7 +220,8 @@ export interface ShellModelRuntimeHostV1 {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
-  frockAiAutoRoute?: string;
+  /** `null` on the `AI` binding path, which carries no dynamic route. */
+  frockAiAutoRoute?: string | null;
   runFrockAiChatCompletion?: (
     gatewayModel: string,
     body: Record<string, unknown>,

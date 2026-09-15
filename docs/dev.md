@@ -44,9 +44,12 @@ loopback origin can never be an App Link. The exchange, the bearer
 and the session are production's. The scheme is declared in the debug manifest
 only, so a release build cannot receive it.
 
-The Worker lists that return URI, and answers on `BETTER_AUTH_URL` rather than
-the production origin, only when `ALLOW_DEVELOPMENT_AUTH` is set — a variable
-`scripts/check-production-secrets.ts` refuses in production.
+The Worker answers native sign-in on `BETTER_AUTH_URL`, which is the deployment's
+own origin and nothing it hardcodes — here, the emulator's view of this machine.
+It lists that development return URI only when `ALLOW_DEVELOPMENT_AUTH` is set —
+a variable `scripts/check-production-secrets.ts` refuses in production. A Worker
+given no `BETTER_AUTH_URL` offers no native sign-in at all; the browser client is
+same-origin and needs none.
 
 ## Iterating
 

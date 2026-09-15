@@ -1,4 +1,4 @@
-import type { AdminGatewayHost } from "@frockbot/app/admin/backend";
+import type { AdminOperationsHostV1 } from "@frockbot/app/admin/operations";
 import {
   AccountAccessConflictError,
   decodeAccountAccessV1,
@@ -35,7 +35,7 @@ function appliedWrite(
 export function createDeploymentPolicyAdminHost(
   authority: () => DeploymentPolicyAdminRpc,
 ): Pick<
-  AdminGatewayHost,
+  AdminOperationsHostV1,
   | "readDeploymentPolicy"
   | "setAdmissionMode"
   | "readAccountAccess"

@@ -12,11 +12,11 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 4. ~~**Staging omits two required secrets.**~~ **Fixed.** `APPLET_VIEWER_SECRET` and `FROCKBOT_AUTHORIZATION_STATE_SECRET` are both required by `production-secrets.ts` and were absent from the staging deploy, so staging answered 503 for every Applet. Both are now sent. Still open: staging runs no secrets gate.
 
-5. **Staging `vars` differ from production silently.** `apps/cloudflare/wrangler.jsonc:377-384` omits `FROCK_AI_GATEWAY_ID`, `FROCK_AI_AUTO_ROUTE` and `NATIVE_SLICE_2_AUTH`; named environments do not inherit top-level vars.
+5. **Staging `vars` differ from production silently.** Staging is a profile rather than a named environment now, but the difference moved rather than closing: `deployments/staging.json` gives `aiGateway` an account id and no `id` or `autoRoute`, and names no `nativeAuth`, so `identityVarsV1` writes it neither `FROCK_AI_GATEWAY_ID`, `FROCK_AI_AUTO_ROUTE` nor `NATIVE_SLICE_2_AUTH`. Nothing reports the omission.
 
-6. **Two deploy paths rewrite `wrangler.jsonc` by regex** (`main.yml`'s "Configure staging D1 database" and "Configure application artifact", `release.yml`'s production counterparts). The checked-in placeholder `database_id` `00000000-0000-0000-0000-000000000000` and the string `foundation-v1` are load-bearing; reformatting the file breaks deployment.
+6. ~~**Two deploy paths rewrite `wrangler.jsonc` by regex.**~~ **Mostly fixed.** Deployment identity left the tracked files ([ADR 0028](adr/0028-open-deployment.md) stage 3): the D1 identifier is in `deployments/<profile>.json`, or resolved at deploy time and passed as `bun run deployment:config staging --d1-database-id <uuid>`, and no tracked file is rewritten at all. One rewrite is left, in both workflows' "Configure application artifact" step, and it edits the generated config under `.deployment/`: the placeholder `foundation-v1` becomes the artifact's own sha256, and the step fails loudly if the placeholder is absent.
 
-7. ~~**Closed admission does not prevent account creation.**~~ **Fixed.** Identity creation now consults the [beta-access authority](beta-access.md#where-it-is-asked), through `identityCreationHooksV1` (`apps/cloudflare/src/auth.ts`).
+7. ~~**Closed admission does not prevent account creation.**~~ **Fixed.** Identity creation now consults the [beta-access authority](beta-access.md#where-it-is-asked), through `identityCreationHooksV1` (`app/auth/better-auth/index.ts`).
 
 8. ~~**Admin is unreachable from the native app.**~~ **Fixed.** `gateway.ts` derives `isAdmin` from `session.user.email`, and `native-auth.ts` built a native session as `{user: {id}}` with no email, so a listed admin was ordinary on the phone while the same account was an admin in a browser. The native session now carries the email, looked up through the `profile` seam the same object already exposed — the lookup native admission was already doing for the same user.
 
@@ -26,7 +26,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 11. **`apple-app-site-association` is served unconditionally**, but `nativeReturnUris("android")` omits the macOS URI, so a macOS app following it reaches a 404.
 
-12. **`production-secrets.ts:171-173` states that native auth is not enabled in production**, while `wrangler.jsonc:146` sets `NATIVE_SLICE_2_AUTH` to `"android"` in production vars.
+12. ~~**`production-secrets.ts` states that native auth is not enabled in production**, while the tracked `wrangler.jsonc` sets `NATIVE_SLICE_2_AUTH` to `"android"` in production vars.~~ **Fixed.** `NATIVE_SLICE_2_AUTH` is an identity var the generator writes from a profile's `nativeAuth`, `deployments/hosted.json` names `android,macos`, and `NON_SECRET_WORKER_SETTINGS_V1` in `production-secrets.ts` says the same.
 
 13. **Two better-auth instances are constructed per request** (`apps/cloudflare/src/index.ts:2235`, `:2252`).
 

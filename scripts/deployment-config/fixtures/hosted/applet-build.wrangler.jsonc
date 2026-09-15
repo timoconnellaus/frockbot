@@ -1,0 +1,49 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "frockbot-applet-build",
+  "account_id": "374784ce2915a597adcecf9bcb2c5ee6",
+  "workers_dev": false,
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+  // No routes, by design. The build service is reachable only through the app
+  // Worker's APPLET_BUILD service binding, and the container re-checks a
+  // shared token on top of that.
+  "containers": [
+    {
+      "class_name": "AppletBuildContainer",
+      "image": "./Dockerfile",
+      // The image needs `applets/sdk` and the build contract, so the build
+      // context is the repository root; the root `.dockerignore` keeps
+      // everything else out of it.
+      "image_build_context": "../..",
+      // A build is the type checker, two esbuild passes and a Miniflare boot.
+      // `standard` rather than `basic`: the whole latency of a publish is this
+      // container, and the smaller instance spends it swapping.
+      "instance_type": "standard",
+      "max_instances": 3,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "APPLET_BUILD_CONTAINER",
+        "class_name": "AppletBuildContainer",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AppletBuildContainer"],
+    },
+  ],
+  "vars": {
+    // Builds shard by Applet id, so a check and the publish that follows it
+    // reach the same warm instance.
+    "APPLET_BUILD_SHARDS": "2",
+  },
+  "observability": {
+    "enabled": true,
+  },
+}

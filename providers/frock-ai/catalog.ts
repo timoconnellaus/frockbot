@@ -20,6 +20,19 @@ export const FROCK_AI_DEFAULT_AUTO_ROUTE = "flock-auto";
 /** Workers AI model selected when Auto must honor a JSON Schema request. */
 export const FROCK_AI_STRUCTURED_MODEL =
   "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/**
+ * What Auto is on a deployment with no AI Gateway route.
+ *
+ * The `AI` binding reaches the Gateway's *universal* endpoint, whose
+ * request-shape translation rejects a `dynamic/<route>` model before inference
+ * runs (cloudflare/ai#617). So a deployment without Gateway credentials cannot
+ * have a routed Auto, and pinning the catalog's own chat model is what keeps
+ * "the platform picks the model" true there: the same model a User would
+ * otherwise have to choose by hand, and the only `@cf/` chat model this
+ * deployment offers.
+ */
+export const FROCK_AI_BINDING_AUTO_MODEL =
+  "workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731";
 
 /** The pre-rename model-id prefix. Bots bound before the rename still carry it. */
 export const FROCK_AI_LEGACY_MODEL_PREFIX = "@flock/";
@@ -72,15 +85,20 @@ export function cloudflareModelIdForFrockIdV1(input: string): string {
   return `@cf/${id.slice(FROCK_AI_MODEL_PREFIX.length)}`;
 }
 
+/**
+ * `autoRoute` is `null` on a transport that cannot carry a dynamic route — the
+ * `AI` binding — where Auto is a concrete Workers AI model instead.
+ */
 export function gatewayModelForFrockIdV1(
   input: string,
-  autoRoute = FROCK_AI_DEFAULT_AUTO_ROUTE,
+  autoRoute: string | null = FROCK_AI_DEFAULT_AUTO_ROUTE,
 ): string {
   const id = normalizeFrockModelIdV1(input);
   if (!isFrockModelIdV1(id)) {
     throw new Error(`Frock AI model id "${input}" must start with "@frock/"`);
   }
   if (id === FROCK_AI_DEFAULT_MODEL) {
+    if (autoRoute === null) return FROCK_AI_BINDING_AUTO_MODEL;
     if (!/^[A-Za-z0-9-]+$/.test(autoRoute)) {
       throw new Error(`Frock AI Auto route "${autoRoute}" is invalid`);
     }
@@ -93,7 +111,7 @@ export function gatewayModelForFrockIdV1(
 export function gatewayModelForFrockRequestV1(
   input: string,
   structured: boolean,
-  autoRoute = FROCK_AI_DEFAULT_AUTO_ROUTE,
+  autoRoute: string | null = FROCK_AI_DEFAULT_AUTO_ROUTE,
 ): string {
   const id = normalizeFrockModelIdV1(input);
   return structured && id === FROCK_AI_DEFAULT_MODEL

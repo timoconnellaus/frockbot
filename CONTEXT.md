@@ -43,8 +43,16 @@ A user message sent mid-turn taking the place of the running turn: the running t
 _Avoid_: Steer, interrupt, barge-in, queue
 
 **Package**:
-A swappable implementation chosen at build time, behind an interface: the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
+A swappable implementation chosen at build time, behind an interface: sign-in, the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
 _Avoid_: Plugin, extension
+
+**Deployment profile**:
+Who one deployment is, in a checked-in file the deployable configs are generated from: its Cloudflare account, Worker names, hostnames, resources, auth Package and identity vars. Two exist — `hosted`, which is frockbot.com, and `simple`, which an installer writes into a deployer's own account — and a profile is which auth Package is built in, which secrets exist and which workflows run, never a fork or a gated feature.
+_Avoid_: Environment, tier, edition, tenant
+
+**Auth Package**:
+The sign-in Package, behind `AuthPackageV1`: resolve an identity from a request, serve the sign-in and sign-out routes, and hand the native authorize page its identity step. Two builds, better-auth with Google and Cloudflare Access, each named by one chooser file the profile selects; a build carries only its own.
+_Avoid_: Auth provider, identity provider, login backend
 
 **Connection Type**:
 A Package-declared kind of configured external capability. Its authorization is explicitly `none`, `api-key`, `ambient-native`, or `grant`.
@@ -151,7 +159,7 @@ What archiving or deleting a Bot does to Applets: the Applets it owns and the Bo
 _Avoid_: Preview, dependents, blast radius
 
 **Account feature**:
-A capability an administrator turns on for one account from Site administration; Applets is the first, Plugin authoring the second. Off is silence on every surface — no tools, no Composition members, no canvas, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
+A capability an administrator turns on for one account from the admin portal; Applets is the first, Plugin authoring the second. Off is silence on every surface — no tools, no Composition members, no canvas, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
 _Avoid_: Feature flag, beta, entitlement, plan
 
 **Instance Contribution**:

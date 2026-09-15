@@ -33,6 +33,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 STATE = Path(os.environ.get("NATIVE_UPDATE_STATE", ROOT / ".native-build/updates"))
 NATIVE = ROOT / "apps/native"
+HOSTED_PROFILE = ROOT / "deployments/hosted.json"
 PACKAGE = "com.frockbot.mobile"
 SIGNER = "61e6479f9c5755154c1f939cde48e8a757eff3136e54ed1dda5f61e78b3c1e37"
 FLUTTER_VERSION = "3.47.0"
@@ -60,6 +61,18 @@ def build_name():
     if not match:
         raise RuntimeError("apps/native/pubspec.yaml has no `version: <name>+<code>` line to release.")
     return match[1]
+
+
+def origin_define():
+    """The deployment a hosted client talks to.
+
+    The Dart client and the Android App Link both read it, and neither carries a host of
+    its own: `deployments/hosted.json` is the one place the hosted origin is written, so a
+    release and the patches that follow it cannot disagree about which server they reach.
+    """
+    profile = json.loads(HOSTED_PROFILE.read_text())
+    hostname = profile["workers"]["app"]["hostnames"][0]
+    return f"--dart-define=FROCKBOT_ORIGIN=https://{hostname}"
 
 
 def app_version_define(release_version):
@@ -341,7 +354,8 @@ def release(floor=0, build_number=None):
         raise RuntimeError("Android versionCode limit reached.")
     args = [cli, "release", "android", f"--flutter-version={FLUTTER_VERSION}", "--artifact=apk",
             f"--target-platform={TARGET_PLATFORM}", f"--build-name={build_name()}", f"--build-number={version}",
-            f"--public-key-path={PUBLIC_KEY}", "--", app_version_define(f"{build_name()}+{version}")]
+            f"--public-key-path={PUBLIC_KEY}", "--", origin_define(),
+            app_version_define(f"{build_name()}+{version}")]
     if not intent:
         intent = {
             "versionCode": version, "package": PACKAGE, "appId": app_id(), "buildName": build_name(),
@@ -403,7 +417,8 @@ def patch(track="staging", baseline_source="local", result=None):
     args = [cli, "patch", "android", f"--release-version={base['releaseVersion']}",
             f"--build-name={base['buildName']}", f"--build-number={base['buildNumber']}", f"--track={track}",
             f"--private-key-path={key}", f"--public-key-path={PUBLIC_KEY}",
-            "--", f"--target-platform={base['targetPlatform']}", app_version_define(base["releaseVersion"])]
+            "--", f"--target-platform={base['targetPlatform']}", origin_define(),
+            app_version_define(base["releaseVersion"])]
     if any(flag in arg for arg in args for flag in FORBIDDEN_PATCH_FLAGS):
         raise RuntimeError("A patch never overrides native or asset diffs; ship a full release instead.")
     # The release was built one above its floor; the same floor makes Gradle emit the same versionCode.

@@ -1,0 +1,539 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "frockbot-cloudflare",
+  "account_id": "374784ce2915a597adcecf9bcb2c5ee6",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "bot.frockbot.com",
+      "custom_domain": true,
+    },
+    {
+      "pattern": "ui.bot.frockbot.com",
+      "custom_domain": true,
+    },
+  ],
+  // The Flutter client, staged by `build-flutter-web.ts` under
+  // `_flutter/<buildHash>/`. It is uploaded with the deploy and answered by
+  // the asset router before this Worker runs, which is why the payload
+  // needs no route, no bucket and no seeding step: the same `wrangler dev`
+  // that runs the Worker locally serves it from the same directory.
+  //
+  // `html_handling` and `not_found_handling` are both off. The document is
+  // rendered per account by the application artifact, so an asset
+  // directory that answered `/` or invented an index would answer for it.
+  "assets": {
+    "directory": "./dist/web",
+    "html_handling": "none",
+    "not_found_handling": "none",
+  },
+  "worker_loaders": [
+    {
+      "binding": "USER_APPLICATIONS",
+    },
+    // Bot-authored Package isolates, loaded from the Bot Durable Object with
+    // `globalOutbound` disabled (plan Step 4 / decision D2). A separate binding
+    // so Bot Packages and user applications never share a loader namespace.
+    {
+      "binding": "BOT_PACKAGES",
+    },
+    // Applet server artifacts, loaded from the AppletState Durable Object and
+    // mounted as a facet (ADR 0022). Its own binding, because a loader id is
+    // served from cache with the env it was first loaded with, and an Applet's
+    // env is not a Bot Package's.
+    {
+      "binding": "APPLETS",
+    },
+  ],
+  "services": [
+    // The shared Computer host (ADR 0004). It holds SPRITES_TOKEN and the
+    // Sprites SDK; this Worker sends only an opaque credential reference.
+    {
+      "binding": "COMPUTER_HOST",
+      "service": "frockbot-computer-host",
+    },
+    // The Applet build service (plan step 8). It type-checks, lints, bundles
+    // and boots an Applet's source and returns the artifacts; it holds no
+    // storage, so this Worker stays the only thing that writes R2 and the only
+    // thing that hash-verifies what came back.
+    {
+      "binding": "APPLET_BUILD",
+      "service": "frockbot-applet-build",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "APPLICATION_ARTIFACTS",
+      "bucket_name": "frockbot-application-artifacts",
+    },
+    {
+      "binding": "MEMORY_FILES",
+      "bucket_name": "frockbot-memory-files",
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "frockbot-auth",
+      "database_id": "f83c21a4-e5a0-4cc2-b0e1-636027b8c65e",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "vectorize": [
+    {
+      "binding": "MEMORY_INDEX",
+      "index_name": "frockbot-memory",
+    },
+  ],
+  "ai": {
+    "binding": "AI",
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BOT_STATES",
+        "class_name": "BotState",
+      },
+      {
+        "name": "USER_CONFIGURATIONS",
+        "class_name": "UserConfiguration",
+      },
+      {
+        "name": "DEPLOYMENT_POLICY",
+        "class_name": "DeploymentPolicy",
+      },
+      // One object per Applet instance, `idFromName("<userId>:<appletId>")`.
+      // It is the kernel's authority for the instance and mounts the Applet's
+      // code as a facet of itself (ADR 0022).
+      {
+        "name": "APPLET_STATES",
+        "class_name": "AppletState",
+      },
+      // The account-wide voice session, one object per User (docs/voice.md).
+      // A Cloudflare Agents SDK class; the Bot runtime stays hand-rolled.
+      {
+        "name": "VOICE_ASSISTANTS",
+        "class_name": "VoiceAssistant",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BotState"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["UserConfiguration"],
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["DeploymentPolicy"],
+    },
+    {
+      "tag": "v4",
+      "new_sqlite_classes": ["AppletState"],
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["VoiceSession"],
+    },
+    // `v5` is immutable once applied, so the class it created is retired by a
+    // later tag rather than by editing it away.
+    {
+      "tag": "v6",
+      "deleted_classes": ["VoiceSession"],
+    },
+    // A new class under a new name: the retired `VoiceSession` above cannot be
+    // revived, and this one is an Agents SDK object with SQLite storage.
+    {
+      "tag": "v7",
+      "new_sqlite_classes": ["VoiceAssistant"],
+    },
+  ],
+  "vars": {
+    // Native sign-in returns for the Android and signed macOS apps.
+    "NATIVE_SLICE_2_AUTH": "android,macos",
+    "DEFAULT_APPLICATION_HASH": "foundation-v1",
+    // The provider is Frock AI; these two values are the *Cloudflare dashboard*
+    // resource names, which are still spelled `flock`. Renaming them there is a
+    // separate, manual step.
+    "FROCK_AI_GATEWAY_ID": "flock",
+    // Enables the compat HTTP transport, which is the only one that
+    // accepts a `dynamic/<route>` model (cloudflare/ai#617). Pairs
+    // with the FROCK_AI_GATEWAY_TOKEN secret.
+    "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
+    // The `flock-auto` dynamic route's target model is configured and deployed
+    // in the Cloudflare AI Gateway dashboard, never selected in application code.
+    "FROCK_AI_AUTO_ROUTE": "flock-auto",
+    "UI_ARTIFACT_HOSTS": "ui.bot.frockbot.com",
+  },
+  "env": {
+    "development": {
+      // Never deployed, and without an empty list `wrangler dev` inherits the
+      // top-level custom domain and rewrites every request URL to
+      // bot.frockbot.com — which the native auth origin check then refuses.
+      "routes": [],
+      // The Flutter client, staged by `build-flutter-web.ts` under
+      // `_flutter/<buildHash>/`. It is uploaded with the deploy and answered by
+      // the asset router before this Worker runs, which is why the payload
+      // needs no route, no bucket and no seeding step: the same `wrangler dev`
+      // that runs the Worker locally serves it from the same directory.
+      //
+      // `html_handling` and `not_found_handling` are both off. The document is
+      // rendered per account by the application artifact, so an asset
+      // directory that answered `/` or invented an index would answer for it.
+      "assets": {
+        "directory": "./dist/web",
+        "html_handling": "none",
+        "not_found_handling": "none",
+      },
+      "worker_loaders": [
+        {
+          "binding": "USER_APPLICATIONS",
+        },
+        {
+          "binding": "BOT_PACKAGES",
+        },
+        {
+          "binding": "APPLETS",
+        },
+      ],
+      "services": [
+        {
+          "binding": "COMPUTER_HOST",
+          "service": "frockbot-computer-host",
+        },
+        {
+          "binding": "APPLET_BUILD",
+          "service": "frockbot-applet-build",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "APPLICATION_ARTIFACTS",
+          "bucket_name": "frockbot-application-artifacts",
+          "remote": false,
+        },
+        {
+          "binding": "MEMORY_FILES",
+          "bucket_name": "frockbot-memory-files-development",
+          "remote": true,
+        },
+      ],
+      "d1_databases": [
+        {
+          "binding": "AUTH_DB",
+          "database_name": "frockbot-auth-development",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+          "remote": false,
+        },
+      ],
+      "vectorize": [
+        {
+          "binding": "MEMORY_INDEX",
+          "index_name": "frockbot-memory-development",
+          "remote": true,
+        },
+      ],
+      "ai": {
+        "binding": "AI",
+        "remote": true,
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "BOT_STATES",
+            "class_name": "BotState",
+          },
+          {
+            "name": "USER_CONFIGURATIONS",
+            "class_name": "UserConfiguration",
+          },
+          {
+            "name": "DEPLOYMENT_POLICY",
+            "class_name": "DeploymentPolicy",
+          },
+          {
+            "name": "APPLET_STATES",
+            "class_name": "AppletState",
+          },
+          {
+            "name": "VOICE_ASSISTANTS",
+            "class_name": "VoiceAssistant",
+          },
+        ],
+      },
+      "vars": {
+        "DEFAULT_APPLICATION_HASH": "foundation-v1",
+        "FROCK_AI_GATEWAY_ID": "flock",
+        // Enables the compat HTTP transport, which is the only one that
+        // accepts a `dynamic/<route>` model (cloudflare/ai#617). Pairs
+        // with the FROCK_AI_GATEWAY_TOKEN secret.
+        "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
+        "FROCK_AI_AUTO_ROUTE": "flock-auto",
+        "UI_ARTIFACT_HOSTS": "ui.localhost",
+        // Placeholder only. Production supplies this as a secret.
+        "FROCKBOT_ADMIN_EMAILS": "owner@example.com",
+      },
+    },
+    // Staging follows main: every merge deploys here, and only a version tag
+    // deploys production. It is production's shape with production's code and
+    // none of production's data — its own D1, its own buckets, its own
+    // Vectorize index, and its own Durable Object namespaces, because a
+    // Durable Object namespace is per-Worker and this is a different Worker.
+    //
+    // `COMPUTER_HOST` is deliberately the production Worker. It is a stateless
+    // request handler holding no per-user data — it owns only the Sprites
+    // credential — so staging exercises the same host production does rather
+    // than paying for a second container deployment. The consequence is the
+    // same ordering constraint production has: a change to the host's contract
+    // ships with a tag, so staging sees it only once that tag lands.
+    "staging": {
+      "name": "frockbot-cloudflare-staging",
+      "routes": [
+        {
+          "pattern": "staging-bot.frockbot.com",
+          "custom_domain": true,
+        },
+        {
+          "pattern": "ui.staging-bot.frockbot.com",
+          "custom_domain": true,
+        },
+      ],
+      // The Flutter client, staged by `build-flutter-web.ts` under
+      // `_flutter/<buildHash>/`. It is uploaded with the deploy and answered by
+      // the asset router before this Worker runs, which is why the payload
+      // needs no route, no bucket and no seeding step: the same `wrangler dev`
+      // that runs the Worker locally serves it from the same directory.
+      //
+      // `html_handling` and `not_found_handling` are both off. The document is
+      // rendered per account by the application artifact, so an asset
+      // directory that answered `/` or invented an index would answer for it.
+      "assets": {
+        "directory": "./dist/web",
+        "html_handling": "none",
+        "not_found_handling": "none",
+      },
+      "worker_loaders": [
+        {
+          "binding": "USER_APPLICATIONS",
+        },
+        {
+          "binding": "BOT_PACKAGES",
+        },
+        {
+          "binding": "APPLETS",
+        },
+      ],
+      "services": [
+        {
+          "binding": "COMPUTER_HOST",
+          "service": "frockbot-computer-host",
+        },
+        {
+          "binding": "APPLET_BUILD",
+          "service": "frockbot-applet-build",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "APPLICATION_ARTIFACTS",
+          "bucket_name": "frockbot-application-artifacts-staging",
+        },
+        {
+          "binding": "MEMORY_FILES",
+          "bucket_name": "frockbot-memory-files-staging",
+        },
+      ],
+      // The staging deploy replaces `database_id` with the identifier of the
+      // `frockbot-auth-staging` database, creating that database first when
+      // the account does not already have one. The placeholder is never
+      // deployed, and the two keys stay adjacent for the deploy to rewrite.
+      "d1_databases": [
+        {
+          "binding": "AUTH_DB",
+          "database_name": "frockbot-auth-staging",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+        },
+      ],
+      "vectorize": [
+        {
+          "binding": "MEMORY_INDEX",
+          "index_name": "frockbot-memory-staging",
+        },
+      ],
+      "ai": {
+        "binding": "AI",
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "BOT_STATES",
+            "class_name": "BotState",
+          },
+          {
+            "name": "USER_CONFIGURATIONS",
+            "class_name": "UserConfiguration",
+          },
+          {
+            "name": "DEPLOYMENT_POLICY",
+            "class_name": "DeploymentPolicy",
+          },
+          {
+            "name": "APPLET_STATES",
+            "class_name": "AppletState",
+          },
+          {
+            "name": "VOICE_ASSISTANTS",
+            "class_name": "VoiceAssistant",
+          },
+        ],
+      },
+      "vars": {
+        "DEFAULT_APPLICATION_HASH": "foundation-v1",
+        // Named environments do not inherit top-level vars, so the compat
+        // transport's account id is repeated here (cloudflare/ai#617). The
+        // Gateway id and Auto route keep their code defaults.
+        "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
+        "UI_ARTIFACT_HOSTS": "ui.staging-bot.frockbot.com",
+      },
+    },
+    // The browser end-to-end harness (`apps/cloudflare/e2e/harness.ts`) runs
+    // `src/index.ts` — the deployed Worker, unmodified — under `wrangler dev`.
+    // It cannot use `development`: that environment marks `MEMORY_FILES`,
+    // `MEMORY_INDEX` and `AI` remote, and a remote binding makes `wrangler dev`
+    // open a proxy session against the Cloudflare API, which fails without a
+    // `CLOUDFLARE_API_TOKEN` and so cannot run on a pull request.
+    //
+    // Only binding locality differs. `main`, `compatibility_date`,
+    // `compatibility_flags`, `migrations` and the Durable Object classes are
+    // the top-level production ones, and every var is the production value.
+    // `MEMORY_INDEX` is omitted because workerd has no local Vectorize
+    // simulator. `AI` is a local RPC service under this environment: the e2e
+    // harness starts its auxiliary Worker in a second local Wrangler process,
+    // which the dev service registry connects at the same `run(model, input)`
+    // seam without spending account credits or requiring a Cloudflare token.
+    "e2e": {
+      // This environment is never deployed. Without an empty list it would
+      // inherit the top-level custom domain and a stray `wrangler deploy --env
+      // e2e` would reassign bot.frockbot.com to it.
+      "routes": [],
+      // The Flutter client, staged by `build-flutter-web.ts` under
+      // `_flutter/<buildHash>/`. It is uploaded with the deploy and answered by
+      // the asset router before this Worker runs, which is why the payload
+      // needs no route, no bucket and no seeding step: the same `wrangler dev`
+      // that runs the Worker locally serves it from the same directory.
+      //
+      // `html_handling` and `not_found_handling` are both off. The document is
+      // rendered per account by the application artifact, so an asset
+      // directory that answered `/` or invented an index would answer for it.
+      "assets": {
+        "directory": "./dist/web",
+        "html_handling": "none",
+        "not_found_handling": "none",
+      },
+      "worker_loaders": [
+        {
+          "binding": "USER_APPLICATIONS",
+        },
+        {
+          "binding": "BOT_PACKAGES",
+        },
+        {
+          "binding": "APPLETS",
+        },
+      ],
+      // Declared as production declares them. The Computer host does not run
+      // beside the harness, so `COMPUTER_HOST` reports "not connected" and no
+      // spec uses a Computer; a binding that is declared but unreachable is
+      // what production looks like when a dependency is down. The Applet build
+      // service does run beside it — `e2e/harness.ts` starts
+      // `apps/applet-build` under its own `wrangler dev` in the dev service
+      // registry — so `applets-publish.e2e.ts` compiles an Applet with the
+      // container production compiles it with.
+      "services": [
+        {
+          "binding": "COMPUTER_HOST",
+          "service": "frockbot-computer-host",
+        },
+        {
+          "binding": "APPLET_BUILD",
+          "service": "frockbot-applet-build",
+        },
+        {
+          "binding": "AI",
+          // The deployed e2e stand-in Worker; its Cloudflare name still reads
+          // `flock`, and renaming the service is a separate manual step.
+          "service": "frockbot-flock-ai-e2e",
+          "entrypoint": "FrockAiFake",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "APPLICATION_ARTIFACTS",
+          "bucket_name": "frockbot-application-artifacts",
+          "remote": false,
+        },
+        {
+          "binding": "MEMORY_FILES",
+          "bucket_name": "frockbot-memory-files-e2e",
+          "remote": false,
+        },
+      ],
+      "d1_databases": [
+        {
+          "binding": "AUTH_DB",
+          "database_name": "frockbot-auth-e2e",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+          "remote": false,
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "BOT_STATES",
+            "class_name": "BotState",
+          },
+          {
+            "name": "USER_CONFIGURATIONS",
+            "class_name": "UserConfiguration",
+          },
+          {
+            "name": "DEPLOYMENT_POLICY",
+            "class_name": "DeploymentPolicy",
+          },
+          {
+            "name": "APPLET_STATES",
+            "class_name": "AppletState",
+          },
+          {
+            "name": "VOICE_ASSISTANTS",
+            "class_name": "VoiceAssistant",
+          },
+        ],
+      },
+      "vars": {
+        "DEFAULT_APPLICATION_HASH": "foundation-v1",
+        "FROCK_AI_GATEWAY_ID": "flock",
+        // Enables the compat HTTP transport, which is the only one that
+        // accepts a `dynamic/<route>` model (cloudflare/ai#617). Pairs
+        // with the FROCK_AI_GATEWAY_TOKEN secret.
+        "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
+        "FROCK_AI_AUTO_ROUTE": "flock-auto",
+        "UI_ARTIFACT_HOSTS": "ui.localhost",
+        // The canonical `development` identity is admin in this environment;
+        // this placeholder also proves the configured-allowlist rule.
+        "FROCKBOT_ADMIN_EMAILS": "owner@example.com",
+      },
+    },
+  },
+  "observability": {
+    "enabled": true,
+  },
+}

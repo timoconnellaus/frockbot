@@ -4,6 +4,11 @@ import {
   createFrockAiGatewayHostV1,
 } from "./frock-ai.js";
 import { FrockAiTransportErrorV1 } from "@frockbot/providers/frock-ai/runtime";
+import {
+  FROCK_AI_BINDING_AUTO_MODEL,
+  FROCK_AI_DEFAULT_MODEL,
+  gatewayModelForFrockRequestV1,
+} from "@frockbot/providers/frock-ai/catalog";
 
 const ACCOUNT_ID = "account-under-test";
 const TOKEN = "gateway-token";
@@ -39,6 +44,7 @@ function compatHost(respond: () => Response) {
   const calls: { url: string; init: RequestInit }[] = [];
   const host = createFrockAiGatewayHostV1(unusedBinding(), {
     gatewayId: "frock-test",
+    autoRoute: "flock-test-auto",
     accountId: ACCOUNT_ID,
     token: TOKEN,
     fetch: ((url: string, init: RequestInit) => {
@@ -102,6 +108,18 @@ describe("Frock AI Gateway host, compat transport", () => {
     );
   });
 
+  test("carries the Auto route, which only this transport accepts", () => {
+    const { host } = compatHost(() => new Response("data: [DONE]\n\n"));
+    expect(host.autoRoute).toBe("flock-test-auto");
+    expect(
+      gatewayModelForFrockRequestV1(
+        FROCK_AI_DEFAULT_MODEL,
+        false,
+        host.autoRoute,
+      ),
+    ).toBe("dynamic/flock-test-auto");
+  });
+
   test("stays on the binding when only one half of the credentials is set", async () => {
     const { ai, gatewayIds } = gatewayHost(
       () => new Response("data: [DONE]\n\n"),
@@ -118,6 +136,23 @@ describe("Frock AI Gateway host, compat transport", () => {
 });
 
 describe("Frock AI Gateway host, binding transport", () => {
+  test("carries no Auto route, so Auto resolves to a concrete model", () => {
+    // The binding reaches the Gateway's universal endpoint, which rejects
+    // `dynamic/<route>` before inference (cloudflare/ai#617). Saying so here is
+    // what lets Auto work on a deployment with no Gateway at all.
+    const { ai } = gatewayHost(() => new Response("data: [DONE]\n\n"));
+    expect(
+      createFrockAiGatewayHostV1(ai, { autoRoute: "flock-auto" }).autoRoute,
+    ).toBeNull();
+    expect(
+      gatewayModelForFrockRequestV1(
+        FROCK_AI_DEFAULT_MODEL,
+        false,
+        createFrockAiGatewayHostV1(ai, {}).autoRoute,
+      ),
+    ).toBe(FROCK_AI_BINDING_AUTO_MODEL);
+  });
+
   test("returns the response stream for an accepted request", async () => {
     const { ai, gatewayIds } = gatewayHost(
       () => new Response("data: [DONE]\n\n"),

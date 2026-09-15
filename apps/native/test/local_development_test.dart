@@ -25,10 +25,16 @@ void main() {
         headers['x-frockbot-user-id'],
         localDevelopment ? 'development' : isNull,
       );
-      expect(
-        hostedOrigin,
-        localDevelopment ? 'http://127.0.0.1:8787' : 'https://bot.frockbot.com',
-      );
+      // The client names no deployment of its own: a build that passes neither
+      // switch has no origin to talk to, and says so rather than guessing one.
+      const configured = String.fromEnvironment('FROCKBOT_ORIGIN');
+      if (localDevelopment) {
+        expect(hostedOrigin, 'http://127.0.0.1:8787');
+      } else if (configured.isNotEmpty) {
+        expect(hostedOrigin, configured);
+      } else {
+        expect(() => hostedOrigin, throwsStateError);
+      }
     },
   );
 

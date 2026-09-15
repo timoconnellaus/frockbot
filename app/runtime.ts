@@ -278,7 +278,8 @@ interface ModelRuntimeContributionConfig {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
-  frockAiAutoRoute?: string;
+  /** `null` on the `AI` binding path, which carries no dynamic route. */
+  frockAiAutoRoute?: string | null;
   runFrockAiChatCompletion?: (
     gatewayModel: string,
     body: Record<string, unknown>,
@@ -334,9 +335,11 @@ const modelRuntimeContributionFactories = new Map<
         frockAiAutoRoute,
         runFrockAiChatCompletion,
       }) => {
+        // `null` is a host with no dynamic route, which is a Frock AI host all
+        // the same; only an absent one is unavailable.
         if (
           !connectionGeneration ||
-          !frockAiAutoRoute ||
+          frockAiAutoRoute === undefined ||
           !runFrockAiChatCompletion
         ) {
           throw new Error("Frock AI gateway host is unavailable");

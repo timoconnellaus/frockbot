@@ -10,6 +10,7 @@ and so keeps `com.frockbot.mobile`.
 """
 
 import argparse
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -22,6 +23,14 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 NATIVE = ROOT / "apps/native"
+def hosted_origin():
+    """The deployment a hosted client talks to, from `deployments/hosted.json`.
+
+    The client carries no host of its own, so every hosted build names one here.
+    """
+    profile = json.loads((ROOT / "deployments/hosted.json").read_text())
+    return f"https://{profile['workers']['app']['hostnames'][0]}"
+
 FLUTTER = Path(os.environ.get("FROCKBOT_FLUTTER", "/Users/tim/repos/flutter/bin/flutter"))
 APP_NAME = "FrockBot Dev"
 BUNDLE_ID = "com.frockbot.mobile.dev"
@@ -206,7 +215,8 @@ def build_commands(name, number):
     """
     return [
         [FLUTTER, "build", "macos", "--release", "--config-only", f"--build-name={name}",
-         f"--build-number={number}", f"--dart-define=FROCKBOT_APP_VERSION={name}+{number}",
+         f"--build-number={number}", f"--dart-define=FROCKBOT_ORIGIN={hosted_origin()}",
+         f"--dart-define=FROCKBOT_APP_VERSION={name}+{number}",
          "--dart-define=FROCKBOT_DESKTOP_DEV=true"],
         ["xcodebuild", "build", "-workspace", "macos/Runner.xcworkspace", "-scheme", "Runner",
          "-configuration", "Release", "-derivedDataPath", DERIVED_DATA,

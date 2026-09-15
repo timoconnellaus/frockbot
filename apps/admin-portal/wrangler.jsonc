@@ -1,0 +1,30 @@
+// The hosted deployment's administrative surface. No deployment identity: the
+// account, the Worker name, the hostname and the app Worker this binds belong to
+// `deployments/<profile>.json`, and `scripts/deployment-config.ts` joins the two
+// into the config `wrangler deploy -c` takes (ADR 0028).
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "frockbot-admin-portal",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  // One hostname, covered by one Cloudflare Access application. A
+  // `workers.dev` address would be a second door into the same Worker that
+  // the Access application does not cover.
+  "workers_dev": false,
+  // Administration is RPC into the app Worker's `AdminEntrypoint`, which no
+  // route of its own answers for (ADR 0028). The portal is its one caller.
+  //
+  // Wrangler's validator refuses a service with no target even in a config it
+  // never deploys, so this carries `named-by-deployment-config`; the generator
+  // writes the deployment's own app Worker name and nothing reads this.
+  "services": [
+    {
+      "binding": "APP",
+      "service": "named-by-deployment-config",
+      "entrypoint": "AdminEntrypoint",
+    },
+  ],
+  "observability": {
+    "enabled": true,
+  },
+}

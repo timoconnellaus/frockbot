@@ -3,16 +3,19 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "imports": {
+    "#auth-package": "./src/auth-package.ts"
+  },
   "scripts": {
     "client:build": "bun run build-flutter-web.ts",
     "artifact:build": "bun run client:build && bun run build-artifact.ts",
-    "build": "bun run artifact:build && wrangler deploy --dry-run --env=\"\" --outdir dist/gateway",
+    "build": "bun run artifact:build && bun ../../scripts/deployment-config.ts hosted && wrangler deploy --dry-run -c ../../.deployment/hosted/app/wrangler.jsonc --outdir dist/gateway",
     "dev": "bun run dev.ts",
     "test": "bun test src && bun run test:workerd",
     "test:workerd": "vitest run --config vitest.config.ts",
     "test:integration": "bun run artifact:build && vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.access.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json"
   },
   "dependencies": {
     "@cloudflare/voice": "0.5.0",
@@ -24,8 +27,7 @@
     "@frockbot/core": "workspace:*",
     "@frockbot/providers": "workspace:*",
     "agents": "0.23.0",
-    "ai": "^7.0.0",
-    "better-auth": "1.7.3"
+    "ai": "^7.0.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.1.4",

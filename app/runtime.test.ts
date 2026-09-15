@@ -196,44 +196,6 @@ describe("foundation application", () => {
   test("resolves declared backend and enabled runtime Contributions through host seams", async () => {
     const backend = await createFoundationBackendContributions({
       backendHost: "gateway",
-      readDeploymentPolicy: () =>
-        Promise.resolve({
-          schemaVersion: 1 as const,
-          revision: 0,
-          admission: { mode: "closed" as const },
-          updatedAt: "2026-09-01T00:00:00.000Z",
-          updatedBy: "deployment-default",
-        }),
-      setAdmissionMode: () =>
-        Promise.reject(new Error("not used while composing")),
-      readAccountAccess: () =>
-        Promise.reject(new Error("not used while composing")),
-      setAccountAccess: () =>
-        Promise.reject(new Error("not used while composing")),
-      inviteEmail: () => Promise.reject(new Error("not used while composing")),
-      listUsers: () => Promise.resolve([]),
-      readUserFeatures: () =>
-        Promise.resolve({
-          schemaVersion: 1 as const,
-          applets: false,
-          pluginAuthoring: false,
-          plugins: [],
-          updatedAt: "2026-09-01T00:00:00.000Z",
-          updatedBy: "deployment-default",
-        }),
-      setUserFeatures: () =>
-        Promise.reject(new Error("not used while composing")),
-      readUserBilling: () =>
-        Promise.resolve({
-          includedMicros: 0,
-          purchasedMicros: 0,
-          complimentaryMicros: 0,
-          reservedMicros: 0,
-          subscribed: false,
-          canSpend: false,
-          suspended: false,
-        }),
-      grantUserCredit: () => Promise.reject(new Error("not under test")),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       listTemplateShares: () =>
@@ -336,7 +298,6 @@ describe("foundation application", () => {
         .map((contribution) => contribution.packageId)
         .sort(),
     ).toEqual([
-      "admin",
       "audit",
       "bot-template",
       "computer",

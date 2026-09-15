@@ -3,6 +3,11 @@ import {
   isBotDebugQueryRefusalV1,
   type BotDebugQueryV1,
 } from "@frockbot/app/shell/debug-protocol";
+import {
+  decodeSetUserFeaturesCommandV1,
+  type SetUserFeaturesCommandV1,
+  type UserFeaturesV1,
+} from "@frockbot/app/admin/shared";
 import { decodeBotIdV1 } from "@frockbot/core/configuration";
 
 /**
@@ -10,11 +15,14 @@ import { decodeBotIdV1 } from "@frockbot/core/configuration";
  * than by a session, so it can be read from a terminal while a Bot is wedged
  * and nobody is signed in.
  *
- * Every route is read-only except the one deliberate Turn send. That write is
- * safe because it requires both the debug token and an owner/admin identity,
- * then enters the ordinary client Turn path with its ownership check,
- * admission/refusal handling and size limit. Nothing here can reconcile,
- * cancel, or otherwise move an existing run.
+ * Two routes write. A Turn send requires both the debug token and an
+ * owner/admin identity, then enters the ordinary client Turn path with its
+ * ownership check, admission/refusal handling and size limit. An account's
+ * features write is the operator's half of administration: the admin portal is
+ * the hosted deployment's surface for it (ADR 0028), and a deployment with no
+ * portal — a self-hosted one, a test stack — turns Applets or Plugin authoring
+ * on for an account from here, under the same deployment secret. Nothing here
+ * can reconcile, cancel, or otherwise move an existing run.
  */
 export interface DebugGatewaySurface {
   /** Absent (or empty) disables the whole surface; the routes then 404. */
@@ -29,6 +37,10 @@ export interface DebugGatewaySurface {
     query: BotDebugQueryV1,
   ): Promise<unknown>;
   isAdminUser(userId: string): Promise<boolean>;
+  setAccountFeatures(
+    userId: string,
+    command: SetUserFeaturesCommandV1,
+  ): Promise<UserFeaturesV1>;
 }
 
 export type DebugTurnSubmitter = (
@@ -166,7 +178,29 @@ export function createDebugRoute(
         return submitTurn(userId, botId, text);
       }
 
-      // All other debug routes remain read-only.
+      const featuresMatch = path.match(/^\/users\/([^/]+)\/features$/);
+      if (featuresMatch) {
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const userId = decodeURIComponent(featuresMatch[1]!);
+        let command: SetUserFeaturesCommandV1;
+        try {
+          command = decodeSetUserFeaturesCommandV1(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error
+              ? error.message
+              : "account features command is invalid",
+          );
+        }
+        // The account is not provisioned or admitted by this write: the record
+        // is the account's own, and an account that never signs in keeps it.
+        return Response.json(await surface.setAccountFeatures(userId, command));
+      }
+
+      // Every other debug route is read-only.
       if (request.method !== "GET") return jsonError(405, "method not allowed");
       if (path === "" || path === "/") {
         return Response.json({
@@ -177,6 +211,7 @@ export function createDebugRoute(
             "GET /api/debug/bots/<botId>?userId=<id>&limit=<n>&events=true&before=<cursor>",
             "GET /api/debug/bots/<botId>/runs/<runId>?userId=<id>",
             "POST /api/debug/users/<userId>/bots/<botId>/turns",
+            "POST /api/debug/users/<userId>/features",
           ],
         });
       }

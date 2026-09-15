@@ -10,6 +10,8 @@ import {
   decodePackageIframeToolCommandV1,
   type AppletBuildViewV1,
   type AppletSourceViewV1,
+  type AuthIdentityCandidateV1,
+  type AuthPackageIdentityStoreV1,
   type PackageIframeCompositionV1,
 } from "@frockbot/core/contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
@@ -122,13 +124,8 @@ import {
   type AccountAdmissionDecisionV1,
   type AdmissionIdentityV1,
   decodeUserFeaturesV1,
-  decodeAdminUserBillingV1,
-  type AdminUserBillingV1,
-  type GrantUserCreditCommandV1,
-  type SetUserFeaturesCommandV1,
-  type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
-import { gatewayAuth, type IdentityCandidateV1 } from "./auth.js";
+import { AUTH_PACKAGE_V1 } from "#auth-package";
 import {
   createNativeAuth,
   NATIVE_RETURN_DEVELOPMENT,
@@ -183,7 +180,6 @@ import {
   DEPLOYMENT_POLICY_SINGLETON_NAME,
   DeploymentPolicy,
 } from "./deployment-policy.js";
-import { createDeploymentPolicyAdminHost } from "./deployment-policy-admin-host.js";
 import { ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE } from "./account-admission.js";
 import { RoutineHookError } from "@frockbot/app/routines/hook";
 
@@ -205,6 +201,9 @@ export { PluginEgress } from "./plugin-egress.js";
 // and the loopback `CAPABILITIES` entrypoint its facet is handed.
 export { AppletCapabilities, AppletState } from "./applet-state.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
+// Administration, reached only by the admin portal over a service binding
+// (ADR 0028). No route in this Worker answers for it.
+export { AdminEntrypoint } from "./admin-entrypoint.js";
 // The account-wide voice session (docs/voice.md): the one Agents SDK object.
 export { VoiceAssistant };
 
@@ -280,12 +279,23 @@ interface Env {
   APPLET_BUILD: Fetcher;
   /** Shared secret presented on every Applet build call. */
   APPLET_BUILD_TOKEN?: string;
-  AUTH_DB: D1Database;
+  /**
+   * The identity store, on a build whose auth Package has one. The Access
+   * Package stores nothing and its deployment binds no database, which is why
+   * this is optional — and why nothing outside the Package reads it.
+   */
+  AUTH_DB?: D1Database;
   DEFAULT_APPLICATION_HASH: string;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** The Zero Trust team whose keys sign every Cloudflare Access token. */
+  ACCESS_TEAM_DOMAIN?: string;
+  /** The Access application's audience tag. */
+  ACCESS_AUD?: string;
+  /** The native door's signing key on the Access build; see `AUTH_PACKAGE_V1`. */
+  NATIVE_TOKEN_SECRET?: string;
   CREDENTIAL_KEYRING?: string;
   /** Signs every Routine webhook key. Absent closes the webhook door. */
   ROUTINE_HOOK_SECRET?: string;
@@ -328,35 +338,17 @@ function appletsOf(listed: unknown): AppletSummaryV1[] {
   );
 }
 
-/** The accounts Better Auth holds, newest first. */
-async function listIdentityStoreUsers(
-  env: Env,
-  limit: number,
-): Promise<
-  Array<{ id: string; email: string; name: string; createdAt: string }>
-> {
-  const result = await env.AUTH_DB.prepare(
-    'select "id", "email", "name", "createdAt" from "user" order by "createdAt" desc limit ?',
-  )
-    .bind(limit)
-    .all<{ id: string; email: string; name: string; createdAt: string }>();
-  return result.results ?? [];
-}
-
-/** The User Durable Object's credit ledger, addressed by User, as the admin sees it. */
-function userBillingStub(
-  env: Env,
-  userId: string,
-): {
-  readBillingBalance(input: unknown): Promise<unknown>;
-  grantComplimentaryCredit(input: unknown): Promise<unknown>;
-} {
-  const id = env.USER_CONFIGURATIONS.idFromName(userId);
-  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its billing RPC surface.
-  return env.USER_CONFIGURATIONS.get(id) as unknown as {
-    readBillingBalance(input: unknown): Promise<unknown>;
-    grantComplimentaryCredit(input: unknown): Promise<unknown>;
-  };
+/**
+ * The identity store of the sign-in Package this build deploys.
+ *
+ * Admission and the operator surface read the durable identity rather than the
+ * User id a caller presented, and which store that is belongs to the Package —
+ * the better-auth build's D1 `user` table, or, on the Access build, none at
+ * all. Constructed per lookup because both reads are a single query and neither
+ * needs sign-in itself to be configured.
+ */
+function authIdentitiesV1(env: Env): AuthPackageIdentityStoreV1 {
+  return AUTH_PACKAGE_V1.create(env);
 }
 
 /** The User Durable Object's account features, addressed by User. */
@@ -383,29 +375,43 @@ function userFeaturesStub(
 function debugSurface(env: Env): DebugGatewaySurface {
   return {
     ...(env.DEBUG_TOKEN ? { token: env.DEBUG_TOKEN } : {}),
-    listUsers: () => listIdentityStoreUsers(env, 50),
+    // A build whose auth Package stores no identity lists none: there is no
+    // roll of accounts to read, because Access re-establishes who a person is
+    // on every request. Every other route still answers for a User id the
+    // operator already has.
+    listUsers: async () =>
+      (await authIdentitiesV1(env).listStoredIdentities?.(50)) ?? [],
     listBots: (userId) =>
       userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
     snapshot: (userId, botId, query) =>
       botStateStub(env, userId, botId).debugSnapshot(query),
     isAdminUser: async (userId) => {
-      // Better Auth is the durable identity source for production Users. The
-      // path's User id is never trusted on its own: it must resolve to a stored
-      // email, and that identity is evaluated by the same allowlist policy as
-      // the signed-in gateway and the admin Package.
-      const identity = await env.AUTH_DB.prepare(
-        'select "id", "email" from "user" where "id" = ? limit 1',
-      )
-        .bind(userId)
-        .first<{ id: string; email: string }>();
+      // The auth Package's store is the durable identity source. The path's
+      // User id is never trusted on its own: it must resolve to a stored email,
+      // and that identity is evaluated by the same allowlist policy as the
+      // signed-in gateway. A Package that stores nothing resolves nothing, so
+      // the one write on this surface is refused rather than granted on the
+      // strength of a User id somebody typed.
+      const identity = await authIdentitiesV1(env).storedIdentity?.(userId);
       return (
-        identity !== null &&
+        identity != null &&
         isDeploymentAdminV1(
           { id: identity.id, email: identity.email, mode: "better-auth" },
           env.FROCKBOT_ADMIN_EMAILS,
         )
       );
     },
+    setAccountFeatures: async (userId, command) =>
+      decodeUserFeaturesV1(
+        rpcJsonSnapshot(
+          await userFeaturesStub(env, userId).setFeatures({
+            schemaVersion: 1,
+            userId,
+            command,
+            updatedBy: "operator",
+          }),
+        ),
+      ),
   };
 }
 
@@ -660,6 +666,24 @@ function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
 }
 
 /**
+ * Every identity this build's sign-in Package produced is admitted.
+ *
+ * Cloudflare Access admits nobody the deployment's own policy did not, so on
+ * that build the policy *is* the allowlist: there is no authority to ask, no
+ * access record to read and no admission UI to show (ADR 0028). The hosted
+ * build's Package answers `authority` and nothing here applies to it.
+ */
+const AUTH_PACKAGE_DECIDES_ADMISSION_V1 =
+  AUTH_PACKAGE_V1.admission === "package";
+const ADMITTED_BY_AUTH_PACKAGE_V1: AccountAdmissionDecisionV1 = {
+  schemaVersion: 1,
+  admitted: true,
+  // The deployment is open to everyone its sign-in policy let through, which
+  // is what `open` says. No account is activated, because none is recorded.
+  basis: "open",
+};
+
+/**
  * The one door into the beta-access authority for browser and native alike.
  * An admin is answered here, without the authority, so a deployment whose
  * authority is unreachable still lets its admins in to see why.
@@ -671,6 +695,7 @@ async function admitAccount(
   if (identity.isAdmin) {
     return { schemaVersion: 1, admitted: true, basis: "admin" };
   }
+  if (AUTH_PACKAGE_DECIDES_ADMISSION_V1) return ADMITTED_BY_AUTH_PACKAGE_V1;
   return decodeAccountAdmissionDecisionV1(
     rpcJsonSnapshot(await deploymentPolicyStub(env).admitAccount(identity)),
   );
@@ -680,20 +705,16 @@ async function storedAdmissionIdentity(
   env: Env,
   userId: string,
 ): Promise<AdmissionIdentityV1 | null> {
-  const identity = await env.AUTH_DB.prepare(
-    'select "id", "email", "emailVerified" from "user" where "id" = ? limit 1',
-  )
-    .bind(userId)
-    .first<{ id: string; email: string; emailVerified: number }>();
+  const identity = await authIdentitiesV1(env).storedIdentity?.(userId);
   if (!identity) return null;
   const email = accessEmailV1(identity.email);
   return {
     schemaVersion: 1,
     userId,
     ...(email === undefined ? {} : { email }),
-    emailVerified: identity.emailVerified === 1,
+    emailVerified: identity.emailVerified,
     isAdmin: isDeploymentAdminV1(
-      { ...identity, mode: "better-auth" },
+      { id: identity.id, email: identity.email, mode: "better-auth" },
       env.FROCKBOT_ADMIN_EMAILS,
     ),
   };
@@ -703,6 +724,7 @@ async function admitStoredAccount(
   env: Env,
   userId: string,
 ): Promise<AccountAdmissionDecisionV1 | null> {
+  if (AUTH_PACKAGE_DECIDES_ADMISSION_V1) return ADMITTED_BY_AUTH_PACKAGE_V1;
   const identity = await storedAdmissionIdentity(env, userId);
   return identity ? admitAccount(env, identity) : null;
 }
@@ -711,6 +733,7 @@ async function checkStoredAccount(
   env: Env,
   userId: string,
 ): Promise<AccountAdmissionDecisionV1 | null> {
+  if (AUTH_PACKAGE_DECIDES_ADMISSION_V1) return ADMITTED_BY_AUTH_PACKAGE_V1;
   const identity = await storedAdmissionIdentity(env, userId);
   if (!identity) return null;
   if (identity.isAdmin) {
@@ -749,7 +772,7 @@ async function externalAccountRefusal(
  */
 async function mayCreateIdentity(
   env: Env,
-  candidate: IdentityCandidateV1,
+  candidate: AuthIdentityCandidateV1,
 ): Promise<boolean> {
   const email = accessEmailV1(candidate.email);
   if (email === undefined) return false;
@@ -776,13 +799,13 @@ function developmentAuthAllowed(env: Env): boolean {
 }
 
 /**
- * Where the app may be sent back after sign-in. Production's App Links, plus
- * the development scheme on a stack that allows development auth — the flag
+ * Where the app may be sent back after sign-in: this deployment's App Links,
+ * plus the development scheme on a stack that allows development auth — the flag
  * production's secret gate refuses.
  */
-function nativeReturnUrisFor(env: Env): readonly string[] {
+function nativeReturnUrisFor(env: Env, origin: string): readonly string[] {
   return [
-    ...nativeReturnUris(env.NATIVE_SLICE_2_AUTH),
+    ...nativeReturnUris(env.NATIVE_SLICE_2_AUTH, origin),
     ...(developmentAuthAllowed(env) ? [NATIVE_RETURN_DEVELOPMENT] : []),
   ];
 }
@@ -1910,61 +1933,6 @@ interface RuntimeExports {
 const createGatewayBackendContributions = (env: Env) =>
   createFoundationBackendContributions({
     backendHost: "gateway",
-    ...createDeploymentPolicyAdminHost(() => deploymentPolicyStub(env)),
-    listUsers: async () =>
-      (await listIdentityStoreUsers(env, 200)).map((user) => ({
-        userId: user.id,
-        email: user.email,
-        name: user.name,
-      })),
-    readUserFeatures: async (userId: string): Promise<UserFeaturesV1> =>
-      decodeUserFeaturesV1(
-        rpcJsonSnapshot(
-          await userFeaturesStub(env, userId).readFeatures({
-            schemaVersion: 1,
-            userId,
-          }),
-        ),
-      ),
-    setUserFeatures: async (
-      userId: string,
-      command: SetUserFeaturesCommandV1,
-      updatedBy: string,
-    ): Promise<UserFeaturesV1> =>
-      decodeUserFeaturesV1(
-        rpcJsonSnapshot(
-          await userFeaturesStub(env, userId).setFeatures({
-            schemaVersion: 1,
-            userId,
-            command,
-            updatedBy,
-          }),
-        ),
-      ),
-    readUserBilling: async (userId: string): Promise<AdminUserBillingV1> =>
-      decodeAdminUserBillingV1(
-        rpcJsonSnapshot(
-          await userBillingStub(env, userId).readBillingBalance({ userId }),
-        ),
-      ),
-    grantUserCredit: async (
-      userId: string,
-      command: GrantUserCreditCommandV1,
-      grantedBy: string,
-    ): Promise<AdminUserBillingV1> =>
-      decodeAdminUserBillingV1(
-        rpcJsonSnapshot(
-          await userBillingStub(env, userId).grantComplimentaryCredit({
-            userId,
-            command: {
-              id: command.id,
-              micros: command.cents * 10_000,
-              grantedBy,
-              reason: command.reason,
-            },
-          }),
-        ),
-      ),
     listTemplateShares: async (userId: string) =>
       decodeTemplateShareListViewV1(
         rpcJsonSnapshot(
@@ -2441,6 +2409,10 @@ export default {
       // workers-types cannot infer the generated local RPC stubs.
       const runtimeExports = ctx.exports as unknown as RuntimeExports;
       mountedBackend = await createGatewayBackendContributions(env);
+      // Which `env` secret the native door signs with belongs to the auth
+      // Package: the hosted build keeps signing with the live
+      // `BETTER_AUTH_SECRET`, and a build without better-auth has its own key.
+      const nativeTokenSecret = AUTH_PACKAGE_V1.nativeTokenSecret.read(env);
       const gateway = createGateway({
         loader: env.USER_APPLICATIONS,
         artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
@@ -2452,29 +2424,29 @@ export default {
           env.USER_CONFIGURATIONS.get(
             env.USER_CONFIGURATIONS.idFromName(userId),
           ).registerPush({ userId, registration }),
-        auth: gatewayAuth(env, {
+        auth: AUTH_PACKAGE_V1.create(env, {
           mayCreateIdentity: (candidate) => mayCreateIdentity(env, candidate),
         }),
-        ...(nativeReturnUrisFor(env).length > 0 && env.BETTER_AUTH_SECRET
+        // The deployment's own origin, which is what `BETTER_AUTH_URL` is: a
+        // development stack points it at its own host — the emulator reaches
+        // this machine as 10.0.2.2, never as the hosted origin — and a
+        // deployment that names none offers no native sign-in.
+        ...(env.BETTER_AUTH_URL &&
+        nativeReturnUrisFor(env, env.BETTER_AUTH_URL).length > 0 &&
+        nativeTokenSecret
           ? {
               nativeAuth: createNativeAuth({
-                secret: env.BETTER_AUTH_SECRET,
-                auth: gatewayAuth(env, {
+                secret: nativeTokenSecret,
+                auth: AUTH_PACKAGE_V1.create(env, {
                   mayCreateIdentity: (candidate) =>
                     mayCreateIdentity(env, candidate),
                 }),
-                returnUris: nativeReturnUrisFor(env),
-                // A development stack answers on whatever `BETTER_AUTH_URL`
-                // names — the emulator reaches the host as 10.0.2.2, never
-                // as the production origin — and signs the app in as the
-                // development identity in place of Google.
+                returnUris: nativeReturnUrisFor(env, env.BETTER_AUTH_URL),
+                origin: env.BETTER_AUTH_URL,
+                // The development door signs the app in as the development
+                // identity in place of Google.
                 ...(developmentAuthAllowed(env)
-                  ? {
-                      ...(env.BETTER_AUTH_URL
-                        ? { origin: env.BETTER_AUTH_URL }
-                        : {}),
-                      developmentUserId: DEVELOPMENT_USER_ID,
-                    }
+                  ? { developmentUserId: DEVELOPMENT_USER_ID }
                   : {}),
                 admit: async (userId) => {
                   // The stored identity, not anything the bearer carries: the
