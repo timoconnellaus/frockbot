@@ -25,9 +25,15 @@ val localDevelopment = dartDefine("FROCKBOT_LOCAL_DEV") == "true"
 // stacks pass their own (ADR 0028).
 val deploymentHost = dartDefine("FROCKBOT_ORIGIN")?.let { URI(it).host }
 
+// The production identity is opt-in: `scripts/native-update.py`, the acceptance runner and the
+// emulator dev stack ask for it, and nothing else can. A hand-run `flutter build apk` builds the
+// isolated `.dev` app instead, because a stock build carries no Shorebird engine: installed over
+// the phone's real app it ends that install's patch channel with no visible symptom.
+val productionIdentity = System.getenv("FROCKBOT_ANDROID_RELEASE_IDENTITY") == "true" && !localDevelopment
+
 // The isolated development package has no production Firebase registration.
 tasks.matching { it.name.endsWith("GoogleServices") }.configureEach {
-    onlyIf { !localDevelopment }
+    onlyIf { productionIdentity }
 }
 
 val existingDebugKey = file(System.getenv("FROCKBOT_ANDROID_KEYSTORE") ?: "${System.getProperty("user.home")}/.android/debug.keystore")
@@ -50,9 +56,9 @@ android {
     }
 
     defaultConfig {
-        // Preserve the installed Capacitor identity.
-        applicationId = if (localDevelopment) "com.frockbot.mobile.dev" else "com.frockbot.mobile"
-        manifestPlaceholders["appLabel"] = if (localDevelopment) "FrockBot (Dev)" else "FrockBot"
+        // Preserve the installed Capacitor identity, for the opt-in production build alone.
+        applicationId = if (productionIdentity) "com.frockbot.mobile" else "com.frockbot.mobile.dev"
+        manifestPlaceholders["appLabel"] = if (productionIdentity) "FrockBot" else "FrockBot (Dev)"
         manifestPlaceholders["cleartext"] = localDevelopment.toString()
         // A build that names no deployment claims no App Link. `.invalid` never
         // resolves, so a forgotten define cannot claim another deployment's links;

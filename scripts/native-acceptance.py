@@ -2,6 +2,7 @@
 
 inventory: wait for Pixel, read package version, pull installed APK and signer.
 install: inventory + release build with greater versionCode + same-signer -r.
+  Stock Flutter, so it ends the phone's patch channel: --replace-production.
 flow: supervised system-browser auth, named Bot, send/Stop/reconnect/Applet.
 measure: 30 cold/warm activity launches and 20 resume cycles, memory/raw gfxinfo.
 
@@ -101,7 +102,18 @@ def inventory():
     return version
 
 
-def install():
+def install(replace_production=False):
+    """Replace the phone's production app with a stock-Flutter build. Qualification only.
+
+    The build carries no Shorebird engine, so the install it replaces stops receiving
+    patches and only a fresh `native-update.py release` restores them. That is worth an
+    explicit `--replace-production`, and the same explicit request is what makes Gradle
+    emit the production identity at all.
+    """
+    if not replace_production:
+        raise RuntimeError("`install` replaces the phone's patchable app with a stock build that can never be "
+                           "patched. Pass --replace-production to mean it, or install the published release "
+                           "APK from .native-build/updates instead.")
     version = inventory()
     # A marker proves package data was retained, without reading cookies/logins.
     marker = hashlib.sha256(os.urandom(32)).hexdigest()
@@ -110,6 +122,7 @@ def install():
     environment = os.environ.copy()
     environment["FROCKBOT_INSTALLED_VERSION_CODE"] = str(version)
     environment["ANDROID_USER_HOME"] = str(ROOT / ".native-build/android-user")
+    environment["FROCKBOT_ANDROID_RELEASE_IDENTITY"] = "true"
     flutter = os.environ.get("NATIVE_FLUTTER", "/Users/tim/repos/flutter/bin/flutter")
     build_name = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$", (ROOT / "apps/native/pubspec.yaml").read_text(), re.M)[1]
     origin = json.loads((ROOT / "deployments/hosted.json").read_text())["workers"]["app"]["hostnames"][0]
@@ -266,9 +279,11 @@ if __name__ == "__main__":
     parser.add_argument("action", choices=["inventory", "install", "flow", "measure"])
     parser.add_argument("--bot-name")
     parser.add_argument("--applet-name")
+    parser.add_argument("--replace-production", action="store_true",
+                        help="Required by `install`: replace the phone's production app with this stock build.")
     args = parser.parse_args()
     try:
-        {"inventory": inventory, "install": install,
+        {"inventory": inventory, "install": lambda: install(args.replace_production),
          "flow": lambda: flow(args.bot_name, args.applet_name), "measure": measure}[args.action]()
     except KeyboardInterrupt:
         print("Device acceptance paused; no missing check is marked passed.")

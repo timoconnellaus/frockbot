@@ -662,6 +662,10 @@ function installApp(serial: string): void {
   // the Pixel: it refuses to build without knowing the installed versionCode.
   const installed = installedVersionCode(serial);
   process.env.FROCKBOT_INSTALLED_VERSION_CODE = String(installed);
+  // The stack installs on its own `frockbot-dev` emulator and nowhere else, so it
+  // rehearses the shipped identity rather than the isolated `.dev` one Gradle gives
+  // every build that does not ask. Tim's phone is unreachable from here either way.
+  process.env.FROCKBOT_ANDROID_RELEASE_IDENTITY = "true";
   say(
     `building the debug app against the local stack (versionCode ${installed + 1})`,
   );
