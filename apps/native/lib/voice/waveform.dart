@@ -24,6 +24,9 @@ import 'package:flutter/scheduler.dart';
 import '../theme/frock_theme.dart';
 
 const double voiceLevelEpsilon = 0.012;
+
+/// An envelope target loud enough to be a voice rather than the room.
+const double voiceSpeechTarget = 0.35;
 const voiceLobeTintsPerson = [Colors.white];
 const voiceLobeTintsBot = [FrockTheme.accentDeep];
 
@@ -105,8 +108,16 @@ class _MeterFrame extends ChangeNotifier {
     _ => 1,
   };
 
+  /// Thinking breaks its chase for the reply or for speech, not room noise.
+  double get thinkingPerson =>
+      personTarget >= voiceSpeechTarget ? personTarget : 0;
+
   double get botMixTarget => switch (mode) {
-    VoiceMeterMode.speaking || VoiceMeterMode.thinking => 1,
+    VoiceMeterMode.speaking => 1,
+    VoiceMeterMode.thinking =>
+      thinkingPerson + botTarget == 0
+          ? 1
+          : botTarget / (thinkingPerson + botTarget),
     _ =>
       personTarget + botTarget == 0
           ? bot.value
@@ -115,11 +126,12 @@ class _MeterFrame extends ChangeNotifier {
 
   /// The pill targets this frame: a voice, or the mode's own motion.
   double targetFor(int index) {
-    final level = math.max(personTarget, botTarget);
+    var level = math.max(personTarget, botTarget);
     switch (mode) {
       case VoiceMeterMode.connecting:
         return 0.12 + 0.1 * (0.5 + 0.5 * math.sin(time * 2.6));
       case VoiceMeterMode.thinking:
+        level = math.max(thinkingPerson, botTarget);
         if (level > 0) break;
         return 0.14 + 0.2 * (0.5 + 0.5 * math.sin(time * 5.2 - index * 1.1));
       default:

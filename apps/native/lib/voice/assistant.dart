@@ -202,6 +202,7 @@ class AssistantSessionController extends ChangeNotifier {
       unawaited(connecting.then(_abandon));
       return;
     }
+    _armStartTimer();
     _beginCall();
     final socket = await connecting;
     if (socket == null) return;
@@ -244,6 +245,13 @@ class AssistantSessionController extends ChangeNotifier {
       onError: (Object _) => unawaited(_fail('Voice stopped. Try again.')),
       onDone: () => unawaited(_ended()),
     );
+    _armStartTimer();
+  }
+
+  /// The start timeout covers the server, not the permission prompt: it runs
+  /// once both the socket and the microphone are open.
+  void _armStartTimer() {
+    if (_socket == null || _frames == null) return;
     _startTimer ??= Timer(startTimeout, () {
       if (_status != VoiceStatusV1.listening) {
         unawaited(_fail('Voice didn’t start. Try again.'));
