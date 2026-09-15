@@ -1,0 +1,9 @@
+{
+  "version": "v6",
+  "precision": 6,
+  "difference": 8,
+  "speckle": 20,
+  "mode": "spline",
+  "scale": 3,
+  "blur": 0.55
+}

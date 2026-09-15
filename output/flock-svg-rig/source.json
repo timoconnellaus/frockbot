@@ -1,0 +1,9 @@
+{
+  "source": "assets/concept-card.png",
+  "sha256": "ce08122a410e0a7433069d9150e07ea4d512bcb3979fbf485c87d118f92215a1",
+  "crops": {
+    "guardian": [20, 175, 547, 790],
+    "pixel": [548, 175, 1005, 790],
+    "sunny": [1005, 175, 1520, 790]
+  }
+}
