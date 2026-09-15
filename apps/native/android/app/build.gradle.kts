@@ -1,3 +1,4 @@
+import java.net.URI
 import java.util.Base64
 
 plugins {
@@ -22,7 +23,7 @@ val localDevelopment = dartDefine("FROCKBOT_LOCAL_DEV") == "true"
 // The App Link host is the deployment's own, never a host written into this file:
 // `scripts/native-update.py` takes it from `deployments/hosted.json` and the local
 // stacks pass their own (ADR 0028).
-val deploymentHost = dartDefine("FROCKBOT_ORIGIN")?.let { java.net.URI(it).host }
+val deploymentHost = dartDefine("FROCKBOT_ORIGIN")?.let { URI(it).host }
 
 // The isolated development package has no production Firebase registration.
 tasks.matching { it.name.endsWith("GoogleServices") }.configureEach {
