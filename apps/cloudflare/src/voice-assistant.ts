@@ -2400,7 +2400,9 @@ export class VoiceAssistant extends VoiceAgentBase<
     ledger: VoiceLedgerV1,
     delegation: VoiceDelegationRecordV1,
   ): Promise<string> {
-    const turn = await ledger.readTurn(delegation.turnId).catch(() => undefined);
+    const turn = await ledger
+      .readTurn(delegation.turnId)
+      .catch(() => undefined);
     return turn?.transcript.trim() || delegation.text;
   }
 

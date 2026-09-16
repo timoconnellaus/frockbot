@@ -1787,8 +1787,7 @@ describe("the voice session object", () => {
     await stub.probeUtterance("hello again");
     await opened.waitFor(
       (f) =>
-        f.type === "transcript_end" &&
-        !String(f.text).includes("Earlier,"),
+        f.type === "transcript_end" && !String(f.text).includes("Earlier,"),
       "the spoken reply",
     );
     const prompt = (await stub.probeSystemPrompts()).at(-1)!;
