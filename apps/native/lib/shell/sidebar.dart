@@ -797,7 +797,7 @@ class _DragGhost extends StatelessWidget {
       offset: const Offset(-24, -26),
       child: Material(
         elevation: 6,
-        color: theme.colorScheme.surfaceContainerHigh,
+        color: sidebarDragGhostColor(theme.colorScheme),
         borderRadius: BorderRadius.circular(10),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 8, 16, 8),
@@ -1097,6 +1097,12 @@ Color sidebarGroundColor(ColorScheme scheme) => scheme.surface;
 /// way a card is, not cut out of it.
 Color sidebarCardColor(ColorScheme scheme) =>
     Color.alphaBlend(Colors.white.withValues(alpha: 0.07), scheme.surface);
+
+/// A row picked up off the list: the one plane above the row, so a dragged
+/// Bot reads as held in the air over its neighbours. It has to stay lighter
+/// than the card, or the thing in hand looks pressed into the page instead.
+Color sidebarDragGhostColor(ColorScheme scheme) =>
+    Color.alphaBlend(Colors.white.withValues(alpha: 0.14), scheme.surface);
 
 /// What a swipe reveals under the row: the page, recessed, so the track the
 /// pill slides along reads as below it and never as another card.
