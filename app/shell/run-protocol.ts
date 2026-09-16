@@ -686,6 +686,12 @@ const CALL_DYNAMIC_TOOL_NAME_V1 = "call_dynamic_tool";
 const FROCKBOT_NAMESPACE_V1 = "frockbot";
 
 /**
+ * The name a `message/to-bot` event carried as a tool call, for the readers
+ * that still index or classify it by the tool that produced it.
+ */
+export const MESSAGE_TO_BOT_TOOL_NAME_V1 = `${FROCKBOT_NAMESPACE_V1}/${BOT_MESSAGE_TOOL_V1}`;
+
+/**
  * The name a projected call is shown under.
  *
  * The projection keeps the wrapper on the wire because that is what the

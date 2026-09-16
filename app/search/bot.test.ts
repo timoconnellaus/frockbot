@@ -194,6 +194,32 @@ describe("the settled-run projection", () => {
     expect(rows[1]!.body).toBe("shell\nok");
   });
 
+  test("indexes a question to another Bot with the answer it came back with", () => {
+    const rows = searchRowsFromClientRunV1(
+      "bot-a",
+      run({
+        events: [
+          {
+            type: "message/to-bot",
+            callId: "tool-1",
+            botId: "xero-books",
+            text: "What is overdue?",
+          },
+          {
+            type: "tool/result",
+            callId: "tool-1",
+            content: "$88,550 across four invoices.",
+          },
+        ],
+      }),
+    );
+    expect(
+      rows.filter((entry) => entry.kind === "tool").map((entry) => entry.body),
+    ).toEqual([
+      "frockbot/bot_message\nWhat is overdue?\n$88,550 across four invoices.",
+    ]);
+  });
+
   test("indexes the tool a namespaced call actually ran, not its wrapper", () => {
     const at = "2026-08-31T00:00:00.000Z";
     const dynamicRun = (namespace: string, toolName: string): StoredRun => ({

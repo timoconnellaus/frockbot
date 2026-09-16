@@ -291,7 +291,6 @@ class _ExchangeRows extends StatelessWidget {
         if (exchange.reply != null)
           _ExchangeMessage(
             party: answerer,
-            voice: outbound && exchange.counterpart.isVoice,
             text: exchange.reply!,
             onOpenLink: onOpenLink,
           )
@@ -320,7 +319,7 @@ class _ExchangeMessage extends StatelessWidget {
   final void Function(String url)? onOpenLink;
   const _ExchangeMessage({
     required this.party,
-    required this.voice,
+    this.voice = false,
     required this.text,
     this.onOpenLink,
   });

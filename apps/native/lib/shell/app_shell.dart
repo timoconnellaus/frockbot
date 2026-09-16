@@ -252,6 +252,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The exchange chat the right panel holds, while it holds one.
   ExchangeController? exchangeController;
 
+  /// The panel's repaint source: the exchange's own pages, and the chat whose
+  /// in-flight runs the view merges with them. Set and cleared with
+  /// [exchangeController].
+  Listenable? exchangeListenable;
+
   /// What the account can spend, from `/api/billing`. Null until read, and
   /// null on a deployment that does not meter: then credit means nothing and
   /// no surface mentions it.
@@ -804,6 +809,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _leaveRun();
       exchangeController?.dispose();
       exchangeController = null;
+      exchangeListenable = null;
       panelOpen = false;
     });
     _adoptBotPanels(botId);
@@ -1134,6 +1140,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _leaveRun();
       exchangeController?.dispose();
       exchangeController = null;
+      exchangeListenable = null;
       panelOpen = false;
     });
   }
@@ -1149,6 +1156,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       openRun = line;
       exchangeController?.dispose();
       exchangeController = null;
+      exchangeListenable = null;
       panelOpen = true;
       // Opening a run is a request to see it: a collapsed panel column would
       // otherwise swallow the run view and leave the tap with no answer.
@@ -1184,6 +1192,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       botId: bot.botId.value,
       counterpart: counterpart,
     );
+    final chat = widget.sessions.open(widget.userId, bot.botId.value).controller;
     unawaited(controller.load());
     if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
         ShellTier.single) {
@@ -1192,10 +1201,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           controller: controller,
           self: _selfParty()!,
           counterpartBackground: _counterpartBackground(counterpart),
-          liveRuns: () => widget.sessions
-              .open(widget.userId, bot.botId.value)
-              .controller
-              .runs,
+          chat: chat,
         ),
       );
       return;
@@ -1205,6 +1211,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (panelCollapsed) runBorrowedPanel = true;
       openRun = null;
       exchangeController = controller;
+      exchangeListenable = Listenable.merge([controller, chat]);
       panelOpen = true;
       // Same as a run: the tap asked to see the exchange, so a collapsed
       // column gives way to it and is handed back on the way out.
@@ -1228,6 +1235,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     exchangeController?.dispose();
     setState(() {
       exchangeController = null;
+      exchangeListenable = null;
       if (runBorrowedPanel) panelCollapsed = true;
       runBorrowedPanel = false;
       panelOpen = false;
@@ -1243,6 +1251,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           _leaveRun();
           exchangeController?.dispose();
           exchangeController = null;
+          exchangeListenable = null;
           panelOpen = false;
         }),
       );
@@ -1252,7 +1261,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final bot = selected;
     if (exchange != null && self != null && bot != null) {
       return ListenableBuilder(
-        listenable: exchange,
+        listenable: exchangeListenable ?? exchange,
         builder: (context, _) => ExchangeView(
           self: self,
           counterpart: exchange.counterpart,
@@ -1348,6 +1357,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       runBorrowedPanel = false;
       exchangeController?.dispose();
       exchangeController = null;
+      exchangeListenable = null;
       panelKey = key;
       panelOpen = true;
       panelCollapsed = false;
@@ -1900,6 +1910,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       runBorrowedPanel = false;
       exchangeController?.dispose();
       exchangeController = null;
+      exchangeListenable = null;
       conversationOpen = false;
       panelOpen = false;
       panelCollapsed = true;
@@ -2737,12 +2748,15 @@ class _ExchangeScreen extends StatefulWidget {
   final ExchangeController controller;
   final ExchangeParty self;
   final String? counterpartBackground;
-  final List<Map<String, dynamic>> Function() liveRuns;
+
+  /// The Bot's own chat: its in-flight runs are what the view merges with the
+  /// loaded pages, so the page repaints when it notifies.
+  final ChatController chat;
   const _ExchangeScreen({
     required this.controller,
     required this.self,
     required this.counterpartBackground,
-    required this.liveRuns,
+    required this.chat,
   });
 
   @override
@@ -2750,6 +2764,11 @@ class _ExchangeScreen extends StatefulWidget {
 }
 
 class _ExchangeScreenState extends State<_ExchangeScreen> {
+  late final Listenable _listenable = Listenable.merge([
+    widget.controller,
+    widget.chat,
+  ]);
+
   @override
   void dispose() {
     widget.controller.dispose();
@@ -2768,12 +2787,12 @@ class _ExchangeScreenState extends State<_ExchangeScreen> {
     ),
     body: SafeArea(
       child: ListenableBuilder(
-        listenable: widget.controller,
+        listenable: _listenable,
         builder: (context, _) => ExchangeView(
           self: widget.self,
           counterpart: widget.controller.counterpart,
           counterpartBackground: widget.counterpartBackground,
-          exchanges: widget.controller.exchanges(widget.liveRuns()),
+          exchanges: widget.controller.exchanges(widget.chat.runs),
           hasEarlier: widget.controller.before != null,
           loading: widget.controller.loading,
           error: widget.controller.error,
