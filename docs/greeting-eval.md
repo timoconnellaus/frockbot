@@ -19,9 +19,11 @@ calls at three per trial without changing the prompt.
 
 Each run sends `Hi`. Passing requires one model call, exactly one tool call
 (`send_to_user` with `disposition: finish`), one nonempty text greeting no longer
-than 240 characters, and a completed Turn. A delivery-repair call fails the
-eval even if a greeting eventually arrives. Greeting vocabulary is a small
-English heuristic; inspect the actual responses as well.
+than 240 characters, and a completed Turn. A `batch` envelope is not itself a
+call the model asked for, so a greeting sent inside one still counts as one tool
+call. A delivery-repair call fails the eval even if a greeting eventually
+arrives. Greeting vocabulary is a small English heuristic; inspect the actual
+responses as well.
 
 All ten runs must pass. The command exits nonzero on failure and writes
 requests, events, replies, elapsed time, model, commit and working-tree state
