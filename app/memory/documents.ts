@@ -105,8 +105,13 @@ export async function readMemoryDocumentsV1(
   const selected = selectNewestMemoryFilesV1(candidates);
   if (selected.length < candidates.length) complete = false;
   const documents: MemoryDocumentV1[] = [];
-  for (const candidate of selected) {
-    const read = await reads.read(candidate.path);
+  // Independent objects, read together. Serially these were one round trip per
+  // Memory file, and a rebuild pays them for every tier at once.
+  const files = await Promise.all(
+    selected.map((candidate) => reads.read(candidate.path)),
+  );
+  for (const [index, candidate] of selected.entries()) {
+    const read = files[index]!;
     if (read.status !== "ok") {
       complete = false;
       continue;
@@ -143,14 +148,13 @@ export async function readAllMemoryDocumentsV1(
   reads: WorkspaceReadsV1,
   roots: WorkspaceMemoryRootV1[],
 ): Promise<MemoryDocumentListingV1> {
-  const documents: MemoryDocumentV1[] = [];
-  let complete = true;
-  for (const root of roots) {
-    const listing = await readMemoryDocumentsV1(reads, root);
-    documents.push(...listing.documents);
-    complete &&= listing.complete;
-  }
-  return { documents, complete };
+  const listings = await Promise.all(
+    roots.map((root) => readMemoryDocumentsV1(reads, root)),
+  );
+  return {
+    documents: listings.flatMap((listing) => listing.documents),
+    complete: listings.every((listing) => listing.complete),
+  };
 }
 
 /** Every Memory document of every root a Bot can see, in tier order. */

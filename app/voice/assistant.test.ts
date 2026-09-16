@@ -674,6 +674,7 @@ describe("the system prompt", () => {
       .filter((f) => f.kind === "log")
       .map((f) => ({ ...f, botId: "b", generationId: "g" })),
     sources: [],
+    documents: [],
     logTotal: 0,
   });
 

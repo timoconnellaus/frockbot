@@ -410,6 +410,59 @@ describe("the Project tools", () => {
   });
 });
 
+describe("the Turn's Memory read", () => {
+  test("reads each file once and still indexes what it read", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const store = new MemoryStore({
+      files,
+      owner: OWNER,
+      clock: () => AT,
+    });
+    for (const fact of [
+      "Tim lives in Wollongong.",
+      "Tim rides a Brompton to the station.",
+    ]) {
+      expect(
+        (
+          await store.write({
+            root: userMemoryRootV1(OWNER),
+            tier: "profile",
+            fact,
+            writer: botWriter("bot-1"),
+          })
+        ).status,
+      ).toBe("ok");
+    }
+    const reads: string[] = [];
+    const counted: WorkspaceFilesV1 = {
+      read: (path) => {
+        reads.push(path.path);
+        return files.read(path);
+      },
+      list: (request) => files.list(request),
+      stat: (path) => files.stat(path),
+      write: (request) => files.write(request),
+      delete: (request) => files.delete(request),
+    };
+    const host = hostFor("bot-1", counted);
+    const { session, dispose } = await openSession();
+    const projection = new MemoryProjection(host);
+
+    await projection.refresh(4, session);
+
+    // The render and the index are the same pass over the same bytes. They
+    // used to be two, one after the other, on the turn-start critical path.
+    expect(reads.length).toBeGreaterThan(0);
+    expect(new Set(reads).size).toBe(reads.length);
+    expect(
+      projection
+        .index()
+        .chunks.some((chunk) => chunk.content.includes("Brompton")),
+    ).toBe(true);
+    await dispose();
+  });
+});
+
 describe("a Memory read that a bound cut short", () => {
   test("records an omission naming the tier rather than a complete-looking injection", async () => {
     const files = createTestMemoryFilesV1({ userId: "user-1" });

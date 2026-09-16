@@ -170,6 +170,13 @@ export class MemoryProjection {
   };
   #index: MemoryIndexV1 = emptyMemoryIndexV1();
   #turn: number | undefined;
+  /**
+   * The documents this Turn's tier reads already decoded, for the one reindex
+   * that follows the render. Taken exactly once and cleared: a reindex after
+   * `memory_write` or `memory_forget` is reindexing files that just changed,
+   * and must read them rather than trust what the render saw.
+   */
+  #rendered: MemoryDocumentListingV1 | undefined;
   /** This Turn's one Project-membership read, shared by injection and index. */
   #roots:
     | Promise<{
@@ -251,16 +258,21 @@ export class MemoryProjection {
     const owner = this.#host.owner;
     // A new Turn reads membership again; within one Turn the read is shared.
     this.#roots = undefined;
+    this.#rendered = undefined;
     const { own, user, projects, unavailable } = await this.roots();
-    const ownTier = await store.read(own);
-    const userTier = await store.read(user);
-    const projectTiers: MemoryProjectTierV1[] = [];
-    for (const project of projects) {
-      projectTiers.push({
-        project,
-        tier: await store.read(projectMemoryRootV1(owner, project.projectId)),
-      });
-    }
+    // The tiers are independent roots; reading them one after another turned
+    // N round trips to object storage into N × RTT on the turn-start critical
+    // path for no reason. The results are still assembled in tier order.
+    const [ownTier, userTier, ...projectReads] = await Promise.all([
+      store.read(own),
+      store.read(user),
+      ...projects.map((project) =>
+        store.read(projectMemoryRootV1(owner, project.projectId)),
+      ),
+    ]);
+    const projectTiers: MemoryProjectTierV1[] = projects.map(
+      (project, index) => ({ project, tier: projectReads[index]! }),
+    );
     // The fade's cutoff is computed once, here, and recorded below. A render
     // that decided "today" for itself would not replay: "The durable session
     // event log reconstructs … every exact normalized model request, given the
@@ -320,7 +332,16 @@ export class MemoryProjection {
     await session.flush();
 
     // The index is derived from the same documents the render just read, so it
-    // is refreshed on the same boundary and never outlives the Turn's view.
+    // is refreshed on the same boundary and never outlives the Turn's view —
+    // and from the very bytes it read, rather than listing and reading every
+    // Memory file a second time. A tier that was cut short says so exactly as
+    // a fresh listing would: the indexer reads an absent document as a deleted
+    // one, so a partial view must never be applied as if it were whole.
+    const tiers = [ownTier, userTier, ...projectTiers.map((it) => it.tier)];
+    this.#rendered = {
+      documents: tiers.flatMap((tier) => tier.documents),
+      complete: tiers.every((tier) => !tier.unavailable && !tier.omitted),
+    };
     await this.reindex();
     return this.#injection;
   }
@@ -376,6 +397,9 @@ export class MemoryProjection {
   }
 
   private async documents(): Promise<MemoryDocumentListingV1> {
+    const rendered = this.#rendered;
+    this.#rendered = undefined;
+    if (rendered) return rendered;
     const { own, user, projects } = await this.roots();
     return readAllMemoryDocumentsV1(this.#host.store.reads, [
       own,
@@ -416,6 +440,7 @@ export class MemoryProjection {
     this.#injection = { text: "", facts: [], omissions: [], faded: [] };
     this.#index = emptyMemoryIndexV1();
     this.#turn = undefined;
+    this.#rendered = undefined;
     // Membership is exactly the thing a `project_*` tool just changed, so the
     // memoized read goes with the rest of the projection.
     this.#roots = undefined;

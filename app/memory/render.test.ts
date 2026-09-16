@@ -44,6 +44,7 @@ function tier(
     profile,
     recent,
     sources: [],
+    documents: [],
     logTotal: recent.length,
   };
 }

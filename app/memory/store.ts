@@ -37,10 +37,13 @@ import {
   type MemoryFactV1,
   type SourcedMemoryFactV1,
 } from "./facts.js";
+import type { MemoryDocumentV1 } from "./documents.js";
 import {
   memoryFileKindV1,
   memoryFilePathV1,
   memoryLogPathV1,
+  memoryProjectIdOfRootV1,
+  memoryScopeOfRootV1,
   memoryShardOfV1,
   MEMORY_MAX_LOG_PARTS_V1,
   type MemoryOwnerV1,
@@ -115,6 +118,19 @@ export interface MemoryTierReadV1 {
   profile: SourcedMemoryFactV1[];
   recent: SourcedMemoryFactV1[];
   sources: MemorySourceV1[];
+  /**
+   * The same files as `sources`, with the text this read already decoded.
+   *
+   * The derived index is built from exactly these documents, and it used to
+   * list and read every one of them a second time, serially, immediately
+   * after this read handed back facts parsed from the very same bytes. The
+   * bytes are in hand; carrying them costs nothing and saves a whole second
+   * pass over object storage on the turn-start critical path.
+   *
+   * `sources` stays the durable record of what was injected — this is the
+   * indexer's input, and nothing derived is stored here.
+   */
+  documents: MemoryDocumentV1[];
   /**
    * How many log facts the tier read resolved. It equals `recent.length`:
    * `read` applies no cap of its own, so there is nothing "beyond" it — the
@@ -224,8 +240,11 @@ export class MemoryStore {
       profile: [],
       recent: [],
       sources: [],
+      documents: [],
       logTotal: 0,
     };
+    const scope = memoryScopeOfRootV1(root);
+    const projectId = memoryProjectIdOfRootV1(root);
     const entries: WorkspaceEntryV1[] = [];
     let cursor: string | undefined;
     for (let page = 0; page < MEMORY_MAX_LIST_PAGES; page += 1) {
@@ -298,14 +317,26 @@ export class MemoryStore {
     // where three files failed reported one reason and was injected as if it
     // were whole.
     const unreadable: string[] = [];
-    for (const { entry, classified } of files) {
-      if (entry.generation.size > MEMORY_MAX_FILE_BYTES) {
+    // A tier's files are independent objects, up to MEMORY_MAX_FILES_PER_TIER
+    // of them, and reading them one at a time made a tier cost N round trips
+    // where it needs about one. The results are consumed below in listing
+    // order, so what is injected, what is indexed and which files are named
+    // unreadable are all exactly what the serial read produced.
+    const reads = await Promise.all(
+      files.map(({ entry }) =>
+        entry.generation.size > MEMORY_MAX_FILE_BYTES
+          ? undefined
+          : this.#files.read(entry.path),
+      ),
+    );
+    for (const [index, { entry, classified }] of files.entries()) {
+      const read = reads[index];
+      if (!read) {
         unreadable.push(
           `"${entry.path.path}" exceeds ${MEMORY_MAX_FILE_BYTES} bytes`,
         );
         continue;
       }
-      const read = await this.#files.read(entry.path);
       if (read.status !== "ok") {
         unreadable.push(`"${entry.path.path}": ${read.reason}`);
         continue;
@@ -317,7 +348,18 @@ export class MemoryStore {
         generationId: read.file.generation.generationId,
         contentHash: read.file.generation.contentHash,
       });
-      const parsed = parseMemoryFileV1(decoder.decode(read.file.bytes));
+      const text = decoder.decode(read.file.bytes);
+      result.documents.push({
+        scope,
+        projectId,
+        path: entry.path.path,
+        botId: classified.shard,
+        kind: classified.kind,
+        text,
+        contentHash: read.file.generation.contentHash,
+        generationId: read.file.generation.generationId,
+      });
+      const parsed = parseMemoryFileV1(text);
       const sourced = parsed.map((fact) => ({
         ...fact,
         botId: classified.shard,
