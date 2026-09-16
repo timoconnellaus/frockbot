@@ -688,6 +688,11 @@ class MemoryConfiguration
       revision: request.command.expectedRevision + 1,
     });
   }
+  updateBotAvatar(
+    request: Parameters<UserConfigurationBinding["updateBotAvatar"]>[0],
+  ) {
+    return this.updateAvatar(request);
+  }
   private compositionGeneration(
     botId: string,
     generationId: string,

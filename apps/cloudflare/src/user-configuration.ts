@@ -66,6 +66,8 @@ import {
   decodeBotLifecycleViewV1,
   decodeCreateBotCommandV1,
   decodeAvatarIdentityViewV1,
+  decodeFlockReceiptV1,
+  decodeUpdateAvatarCommandV1,
   BotNotFoundError,
 } from "@frockbot/app/flock/shared";
 import {
@@ -1862,6 +1864,44 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       // The Applets the Bot owned were tombstoned in the settling transaction;
       // their state and source go now, or from the alarm.
       await this.sweepAppletCleanups(request.userId as string);
+    }
+    return receipt;
+  }
+
+  /**
+   * The Bot's object is the authority on its avatar and checks the command's
+   * revision; the directory here is what every Bot list draws from, and it
+   * only ever held the appearance the Bot was created with. The mirror is
+   * written once the Bot has applied the change, and a replayed command —
+   * the Bot answers a stored receipt — mirrors again, so a write that was
+   * lost between the two lands on the retry.
+   */
+  async updateBotAvatar(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeUpdateAvatarCommandV1),
+    });
+    const userId = request.userId as string;
+    const botId = request.botId as string;
+    const command = request.command as ReturnType<
+      typeof decodeUpdateAvatarCommandV1
+    >;
+    await this.assertFlockIdentity(userId);
+    const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+    // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+    const bot = this.env.BOT_STATES.get(id) as unknown as {
+      updateAvatar(input: unknown): Promise<unknown>;
+    };
+    const receipt = decodeFlockReceiptV1(
+      rpcJsonSnapshotV1(
+        await bot.updateAvatar({ schemaVersion: 1, userId, botId, command }),
+      ),
+    );
+    if (receipt.status === "applied") {
+      await (
+        await this.flockContribution()
+      ).mirrorAvatar(botId, command.avatar);
     }
     return receipt;
   }

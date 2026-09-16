@@ -10,13 +10,18 @@ interface UserRpc {
   readConfiguration(input: unknown): Promise<{ revision: number }>;
   listBots(input: unknown): Promise<{
     revision: number;
-    bots: Array<{ botId: string; initialName: string }>;
+    bots: Array<{
+      botId: string;
+      initialName: string;
+      avatar: { characterId: string; primary: string };
+    }>;
   }>;
   listBotLifecycles(input: unknown): Promise<{
     lifecycles: Array<{ botId: string; status: string }>;
   }>;
   readFlockBootstrap(input: unknown): Promise<{ generalBotId: string | null }>;
   createBot(input: unknown): Promise<{ status: string }>;
+  updateBotAvatar(input: unknown): Promise<{ status: string }>;
   executeBotLifecycle(input: unknown): Promise<{
     status: string;
     lifecycle: { botId: string; status: string };
@@ -239,5 +244,45 @@ describe("General in Workerd", () => {
       schemaVersion: 1,
       generalBotId: null,
     });
+  });
+
+  // Tim's report: a character chosen for a Bot changed straight back. The Bot
+  // had applied the change; the directory every list draws from still said
+  // what the Bot was created with, and the next read put that back.
+  test("a Bot's chosen avatar is what the directory lists afterwards", async () => {
+    const userId = `avatar-${crypto.randomUUID()}`;
+    const rpc = userRpc(userId);
+    const envelope = { schemaVersion: 1, userId };
+    const { generalBotId } = await rpc.readFlockBootstrap(envelope);
+    const botId = generalBotId!;
+    const chosen = { schemaVersion: 1, characterId: "fox", primary: "#ff8800" };
+    const before = (await rpc.listBots(envelope)).bots.find(
+      (bot) => bot.botId === botId,
+    )!.avatar;
+    expect(before).not.toEqual(chosen);
+    const receipt = await rpc.updateBotAvatar({
+      ...envelope,
+      botId,
+      command: {
+        schemaVersion: 1,
+        type: "bot/update-avatar",
+        commandId: `avatar-${userId}`,
+        expectedRevision: 0,
+        botId,
+        avatar: chosen,
+      },
+    });
+    expect(receipt.status).toBe("applied");
+    expect(
+      (await rpc.listBots(envelope)).bots.find((bot) => bot.botId === botId)!
+        .avatar,
+    ).toEqual(chosen);
+    // The same read after eviction, from durable state alone.
+    await evictDurableObject(user(userId));
+    expect(
+      (await userRpc(userId).listBots(envelope)).bots.find(
+        (bot) => bot.botId === botId,
+      )!.avatar,
+    ).toEqual(chosen);
   });
 });

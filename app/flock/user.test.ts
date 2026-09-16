@@ -152,6 +152,32 @@ describe("Flock User contribution", () => {
     ).rejects.toBeInstanceOf(FlockConflictError);
   });
 
+  test("mirrors an avatar the Bot applied into the directory it is listed in", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      commandBotLifecycle: () => Promise.reject(new Error("not used")),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
+    });
+    await contribution.createBot("user-1", command());
+    const chosen = {
+      schemaVersion: 1 as const,
+      characterId: "fox",
+      primary: "#ff8800",
+    };
+    const mirrored = await contribution.mirrorAvatar("alpha", chosen);
+    expect(mirrored.revision).toBe(2);
+    expect((await contribution.listBots()).bots).toMatchObject([
+      { botId: "alpha", avatar: chosen },
+    ]);
+    // The same appearance again changes nothing, so nothing is written.
+    expect((await contribution.mirrorAvatar("alpha", chosen)).revision).toBe(2);
+    // A Bot the directory does not list is not conjured back by its avatar.
+    const untouched = await contribution.mirrorAvatar("gone", chosen);
+    expect(untouched.revision).toBe(2);
+    expect(untouched.bots.map((bot) => bot.botId)).toEqual(["alpha"]);
+  });
+
   test("admits a Bot without consulting User model state", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockUserBackendContribution({
