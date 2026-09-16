@@ -22,7 +22,10 @@
 //     the tier and per-file reads now run in parallel under one shared bound.
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
-import { frockbotToolCall, toolCallTriggerPrompt } from "./harness/miniflare.ts";
+import {
+  frockbotToolCall,
+  toolCallTriggerPrompt,
+} from "./harness/miniflare.ts";
 import { provisionBot } from "./provision-bot.ts";
 
 interface TurnEvent {
@@ -218,17 +221,25 @@ describe("a Bot whose Memory spans many files across two scopes", () => {
     // Two scopes, three tiers, several files: the fan-out the tier read and
     // its per-file reads now run in parallel under one shared bound.
     const facts = [
-      { scope: "bot", tier: "profile", fact: "Fact one: the gym opens at six." },
+      {
+        scope: "bot",
+        tier: "profile",
+        fact: "Fact one: the gym opens at six.",
+      },
       { scope: "bot", tier: "log", fact: "Fact two: the slab was poured." },
-      { scope: "bot", tier: "note", fact: "Fact three: chase the electrician." },
+      {
+        scope: "bot",
+        tier: "note",
+        fact: "Fact three: chase the electrician.",
+      },
       { scope: "user", tier: "profile", fact: "Fact four: Tim lives in Gong." },
       { scope: "user", tier: "log", fact: "Fact five: the lease was signed." },
       { scope: "user", tier: "note", fact: "Fact six: call the council back." },
     ] as const;
     for (const entry of facts) {
-      expect(
-        (await stub.memoryWrite({ ...identity, ...entry })).isError,
-      ).toBe(false);
+      expect((await stub.memoryWrite({ ...identity, ...entry })).isError).toBe(
+        false,
+      );
     }
 
     await turn(identity, `run-fanout-${id}`, "What do you know about me?");
@@ -239,6 +250,8 @@ describe("a Bot whose Memory spans many files across two scopes", () => {
     expect(prompt.indexOf("User memory:")).toBeLessThan(
       prompt.indexOf("Memory: your own memory."),
     );
-    expect(prompt.indexOf("Fact four")).toBeLessThan(prompt.indexOf("Fact one"));
+    expect(prompt.indexOf("Fact four")).toBeLessThan(
+      prompt.indexOf("Fact one"),
+    );
   });
 });
