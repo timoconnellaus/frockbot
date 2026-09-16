@@ -1,13 +1,15 @@
+import { expandToolCallOccurrencesV1 } from "./batch.js";
 import type {
   LlmMessage,
   SessionEvent,
   SessionEventEnvelope,
   SessionEventInput,
+  ToolCallOccurrence,
 } from "./types.js";
-import { toolCallOccurrences, toolIntentMatches } from "./types.js";
+import { toolIntentMatches } from "./types.js";
 
 export interface ToolOccurrenceJournalEntry {
-  occurrence: ReturnType<typeof toolCallOccurrences>[number];
+  occurrence: ToolCallOccurrence;
   intent?: Extract<SessionEvent, { type: "tool/call" }>;
   result?: Extract<SessionEvent, { type: "tool/result" }>;
 }
@@ -102,7 +104,7 @@ export function validateToolOccurrenceJournal(
           `assistant tool calls for ${event.turn}:${event.step} are outside their open step`,
         );
       }
-      for (const occurrence of toolCallOccurrences(
+      for (const occurrence of expandToolCallOccurrencesV1(
         event.turn,
         event.step,
         event.toolCalls,
@@ -316,7 +318,13 @@ export class Session {
             : {}),
         });
       } else if (event.type === "tool/result") {
-        const call = journal.get(event.occurrenceId)!.occurrence.call;
+        const occurrence = journal.get(event.occurrenceId)!.occurrence;
+        // A call inside a batch has no tool call of the provider's own to
+        // answer; the batch's own result is the one the model reads, and a
+        // tool message naming an id the assistant never sent is one a
+        // provider rejects.
+        if (occurrence.parentOccurrenceId !== undefined) continue;
+        const call = occurrence.call;
         messages.push({
           role: "tool",
           callId: call.id,

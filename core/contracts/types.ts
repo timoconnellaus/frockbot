@@ -24,6 +24,13 @@ export interface ToolCall {
 
 export interface ToolCallOccurrence {
   occurrenceId: string;
+  /**
+   * The occurrence this one was declared inside, for a call in a `batch`.
+   * Absent for a call the model issued on its own. A sub-occurrence runs like
+   * any other, but it is not one of the provider's own tool calls, so it is
+   * not replayed back to the model as a tool message of its own.
+   */
+  parentOccurrenceId?: string;
   turn: number;
   step: number;
   ordinal: number;
@@ -46,28 +53,6 @@ export function toolOccurrenceId(
     throw new Error("tool occurrence coordinates are invalid");
   }
   return `tool:${turn}:${step}:${ordinal}`;
-}
-
-/**
- * The occurrence id of one call inside a batch: the batch's own id, a dot, and
- * the call's declared position in the batch.
- *
- * A dot rather than a colon, because an approval id may not carry a colon —
- * see `app/plugins/approval.ts`. The separator is the only thing that
- * distinguishes a sub-occurrence from a top-level one, and everything
- * downstream that keys on an effect id — the tool journal's "already has a
- * result" check, and every tool that dedupes its own effect on
- * `context.effectId` — needs the calls in one batch to be distinct. Sharing
- * one id collapsed three sends into one.
- */
-export function batchToolOccurrenceId(
-  occurrenceId: string,
-  subIndex: number,
-): string {
-  if (!Number.isSafeInteger(subIndex) || subIndex < 0) {
-    throw new Error("batch sub-call index is invalid");
-  }
-  return `${occurrenceId}.${subIndex}`;
 }
 
 export function toolCallOccurrences(

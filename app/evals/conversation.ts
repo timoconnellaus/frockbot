@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createAgentLoop } from "@frockbot/core/agent-loop";
+import { BATCH_TOOL_NAME } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { AGENT_LOOP_MAX_STEPS_V1 } from "@frockbot/app/agent-runtime";
 import { foundationBaseRuntimePackagesV1 } from "@frockbot/app/runtime";
@@ -108,7 +109,12 @@ for (const scenario of cases) {
       await handle.agent.whenIdle();
       const events = [...handle.agent.session.events];
       const sends = events.filter((e) => e.type === "send/to-user");
-      const calls = events.filter((e) => e.type === "tool/call");
+      // The calls the model made, not the envelope it grouped them in: a
+      // `batch` journals its own row as well as one per call inside it, and
+      // only the inner ones deliver anything.
+      const calls = events.flatMap((e) =>
+        e.type === "tool/call" && e.name !== BATCH_TOOL_NAME ? [e] : [],
+      );
       const messages = sends.flatMap((e) =>
         e.payload.type === "text" ? [e.payload.text] : [],
       );

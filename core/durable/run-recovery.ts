@@ -1,7 +1,7 @@
 import {
+  expandToolCallOccurrencesV1,
   Session,
   type SessionEvent,
-  toolCallOccurrences,
   validateSettledToolOccurrenceJournal,
   validateToolOccurrenceJournal,
   turnFailureMessage,
@@ -96,7 +96,7 @@ export function planBotRunRecovery<Snapshot>(
   if (modelState.status === "completed") {
     const resumableOccurrences = new Set(
       lastAssistant?.type === "assistant/message"
-        ? toolCallOccurrences(
+        ? expandToolCallOccurrencesV1(
             lastAssistant.turn,
             lastAssistant.step,
             lastAssistant.toolCalls,

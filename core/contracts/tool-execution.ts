@@ -174,6 +174,13 @@ export interface ToolExecution {
     turnType: TurnTypeV1;
     subagentRole?: string;
   }): ToolSchema[];
+  /**
+   * Whether this call's effect occupies a position in the conversation, read
+   * off the definition the call will actually reach. A dispatcher that runs
+   * several calls at once asks before it dispatches them, because two such
+   * effects may not race each other.
+   */
+  orderedEffect(call: ToolCall): boolean;
   prepare(
     call: ToolCall,
     context: ToolExecutionContext,

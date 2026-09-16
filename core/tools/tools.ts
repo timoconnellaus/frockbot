@@ -1,7 +1,8 @@
 import {
   admittedSubagentRolesV1,
   admittedTurnTypesV1,
-  batchToolOccurrenceId,
+  BATCH_MAX_CALLS_V1,
+  BATCH_TOOL_NAME,
   isSubagentRoleAdmittedV1,
   type LoopHookListV1,
   type PromptSectionRegistration,
@@ -13,18 +14,15 @@ import {
   type ToolGuard,
   type ToolNamespaceRegistration,
   type ToolPreparation,
-  TOOL_ATTACHMENT_LIMIT_V1,
   type ToolRegistrationOptions,
   type ToolSchema,
   type TurnTypeV1,
-  uncertainToolFailureV1,
 } from "@frockbot/core/contracts";
+
+export { BATCH_MAX_CALLS_V1, BATCH_TOOL_NAME };
 
 export const GET_DYNAMIC_TOOLS_NAME = "get_dynamic_tools";
 export const CALL_DYNAMIC_TOOL_NAME = "call_dynamic_tool";
-export const BATCH_TOOL_NAME = "batch";
-/** Most calls one `batch` may carry. */
-export const BATCH_MAX_CALLS_V1 = 25;
 export const FROCKBOT_TOOL_NAMESPACE = "frockbot";
 
 const CATALOG_DESCRIPTION_MAX_CHARS = 200;
@@ -142,57 +140,6 @@ const BATCH_SCHEMA: ToolSchema = {
     required: ["calls"],
   },
 };
-
-type BatchSubCallV1 =
-  | { kind: "call"; tool: string; arguments: unknown }
-  | { kind: "invalid"; tool: string; reason: string };
-
-/** One sub-call's outcome, kept with the position it was declared at. */
-interface BatchCallResultV1 {
-  index: number;
-  tool: string;
-  result: ToolExecutionResult;
-}
-
-/**
- * The calls of one batch, or the reason the batch itself is unusable.
- *
- * The two levels are not the same failure. A batch with no calls array, an
- * empty one, or one past the bound has nothing to run, so the whole call is
- * refused. A single malformed call is that call's own failure: the batch
- * exists so one inference buys several calls, and refusing all of them
- * because the third named no tool costs the model the other two. Such a call
- * is carried through as `invalid` and reported in its own slot, naming what
- * was wrong with it, so the model repairs that call rather than guessing
- * which of the calls was malformed.
- */
-function decodeBatchCallsV1(input: unknown): BatchSubCallV1[] | string {
-  if (!isRecord(input)) return "batch requires an object with a calls array";
-  const calls = input.calls;
-  if (!Array.isArray(calls) || calls.length === 0) {
-    return "batch requires a non-empty calls array";
-  }
-  if (calls.length > BATCH_MAX_CALLS_V1) {
-    return `batch carries at most ${BATCH_MAX_CALLS_V1} calls; this one carried ${calls.length}`;
-  }
-  return calls.map((call) => {
-    if (!isRecord(call) || typeof call.tool !== "string" || !call.tool) {
-      return {
-        kind: "invalid",
-        tool: isRecord(call) && typeof call.tool === "string" ? call.tool : "",
-        reason: "it needs a tool name",
-      };
-    }
-    if (call.arguments !== undefined && !isRecord(call.arguments)) {
-      return {
-        kind: "invalid",
-        tool: call.tool,
-        reason: "its arguments must be an object",
-      };
-    }
-    return { kind: "call", tool: call.tool, arguments: call.arguments ?? {} };
-  });
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -485,17 +432,18 @@ export class ToolRegistry implements ToolExecution {
     });
     // Successful calls are rewritten to the inner definition during prepare;
     // this body exists only to keep the registered definition total.
+    // Registered so the catalog offers it and nothing else may claim the name.
+    // A batch is never dispatched as a tool: the loop expands it into the
+    // occurrences it declares and runs each of them through this registry, so
+    // the durable log holds one `tool/call` per effect.
     this.installMetaTool({
       ...BATCH_SCHEMA,
-      // Structural only. A batch that overshoots the bound, or names a tool
-      // that is not there, is told exactly what was wrong by `execute`; the
-      // registry's refusal for invalid input is the same sentence for every
-      // tool, and the model cannot correct itself from it.
-      validate: (input) => isRecord(input) && Array.isArray(input.calls),
-      // Idempotency is the sub-calls', not the batch's: each carries its own
-      // effect id, and a re-issued batch re-issues them under the same ids.
       idempotent: false,
-      execute: (input, context) => this.runBatch(input, context),
+      execute: () =>
+        Promise.resolve({
+          content: "batch is expanded by the loop, not dispatched as a tool",
+          isError: true,
+        }),
     });
     this.installMetaTool({
       ...CALL_DYNAMIC_TOOL_SCHEMA,
@@ -829,218 +777,26 @@ export class ToolRegistry implements ToolExecution {
   }
 
   /**
-   * Runs the calls of one `batch`, together, and reports each result.
-   *
-   * Every sub-call goes through this same registry - `prepare` then
-   * `executePrepared` - so admission, guards, namespace readiness and the
-   * `tools/pre-execute` and `tools/execute` hooks apply to a call inside a
-   * batch exactly as they do to one the model issued on its own. What differs
-   * is the effect id: each sub-call gets the batch's id plus its declared
-   * position, so tools that dedupe on `context.effectId` treat the calls in
-   * one batch as the distinct effects they are.
-   *
-   * One failure does not abort the rest: the batch exists so the model can
-   * spend one inference on several calls, and collapsing the whole batch
-   * because the third call was refused would cost it the other two as well.
-   *
-   * Calls whose tool declares `orderedEffect` do not race each other. Their
-   * effect is a position in the conversation - a bubble, a hand-off, an
-   * answer - and a person reads those in the order they landed, so they run
-   * one after another in the order the model declared them. Landing order is
-   * then declared order by construction, which is what lets everything
-   * downstream - the wire ordinal, the rendered order, the unread boundary,
-   * the push order, the preview, the Turn's answer text - keep reading the
-   * log the single way it always has. Every other call is dispatched at once
-   * as before, and overlaps the ordered chain, so the parallelism that pays
-   * for the batch - slow independent reads and fetches - is untouched. An
-   * ordered effect is a validate, an append and a flush; serialising those
-   * costs nothing next to a provider call.
-   *
-   * `endsTurn` is the OR of the sub-results. A `send_to_user` with
-   * disposition "finish", a widget, or an approval inside a batch ends the
-   * Turn exactly as it would outside one; without this it would have silently
-   * failed to.
-   *
-   * Admission fencing is the batch's: the loop admitted this one effect, so
-   * there is no second admission per sub-call. A Stop is observed on
-   * `context.signal` before each sub-call is dispatched, which for the
-   * ordered chain means between its calls and for the concurrent group means
-   * before the batch begins, since that group is dispatched in one tick. A
-   * call already in flight is not cancelled mid-call, and an effect that has
-   * already landed stays landed — the same thing a Stop means at top level.
-   * The sub-calls that never started report as cancelled.
-   *
-   * Crash durability narrows, deliberately. At top level a completed call is
-   * protected twice: the tool journal skips any occurrence that already holds
-   * a result, and the effect is re-issued under the same `effectId`, which
-   * every non-idempotent tool is required to honour. A sub-call has no
-   * journal entry of its own - only the batch's aggregate result, written
-   * once every call has settled - so a crash before that write replays the
-   * whole batch and the journal's protection is absent. The key's protection
-   * is not: a sub-call's `effectId` is derived from its *declared* position,
-   * so a replayed batch re-issues call N under exactly the id it carried
-   * before, and a tool honouring its key still sees one effect. That is why
-   * these ids must never be derived from arrival order.
-   */
-  private async runBatch(
-    input: unknown,
-    context: ToolExecutionContext,
-  ): Promise<ToolExecutionResult> {
-    const decoded = decodeBatchCallsV1(input);
-    if (typeof decoded === "string") {
-      return { content: `batch was refused: ${decoded}`, isError: true };
-    }
-    // The ordered chain is started first and synchronously, so its first call
-    // is already in flight when the concurrent ones are dispatched below and
-    // the two groups overlap in time.
-    const ordered = (async () => {
-      const settled: BatchCallResultV1[] = [];
-      for (const [index, sub] of decoded.entries()) {
-        if (!this.orderedEffectV1(sub)) continue;
-        settled.push(await this.runBatchCallV1(sub, index, context));
-      }
-      return settled;
-    })();
-    const concurrent = Promise.all(
-      decoded.flatMap((sub, index) =>
-        this.orderedEffectV1(sub)
-          ? []
-          : [this.runBatchCallV1(sub, index, context)],
-      ),
-    );
-    const results = (await Promise.all([ordered, concurrent]))
-      .flat()
-      .sort((left, right) => left.index - right.index);
-    const failed = results.filter(({ result }) => result.isError).length;
-    const produced = results.flatMap(({ result }) => result.attachments ?? []);
-    const attachments = produced.slice(0, TOOL_ATTACHMENT_LIMIT_V1);
-    return {
-      content: JSON.stringify({
-        ran: results.length,
-        failed,
-        ...(produced.length > attachments.length
-          ? {
-              attachments: {
-                produced: produced.length,
-                carried: attachments.length,
-                dropped: produced.length - attachments.length,
-                note: `One tool result may carry at most ${TOOL_ATTACHMENT_LIMIT_V1} attachments, so only the first ${attachments.length} in declared call order are attached; the rest were dropped. Each result's content still names where its output lives. Ask for at most ${TOOL_ATTACHMENT_LIMIT_V1} attachment-producing calls per batch.`,
-              },
-            }
-          : {}),
-        results: results.map(({ index, tool, result }) => ({
-          index,
-          tool,
-          isError: result.isError,
-          content: result.content,
-        })),
-      }),
-      // A batch reports every result; the model reads which of them failed.
-      isError: false,
-      ...(results.some(({ result }) => result.endsTurn === true)
-        ? { endsTurn: true }
-        : {}),
-      ...(attachments.length > 0 ? { attachments } : {}),
-    };
-  }
-
-  /**
    * Whether this call's effect has a position in the conversation, and so may
-   * not race the other ordered calls of the same batch. The tool declares it
-   * once, on its definition; a batch does not decide it per call.
+   * not race another such effect dispatched alongside it. The tool declares it
+   * once, on its definition; a dispatcher does not decide it per call.
    */
-  private orderedEffectV1(sub: BatchSubCallV1): boolean {
-    if (sub.kind !== "call") return false;
-    if (sub.tool === CALL_DYNAMIC_TOOL_NAME) {
+  orderedEffect(call: ToolCall): boolean {
+    if (call.name === CALL_DYNAMIC_TOOL_NAME) {
       // The flag belongs to the tool that will actually run, and for a dynamic
       // call that is the inner definition `prepare` resolves — reading it off
       // the meta-tool finds nothing and would let a card race a send. A call
       // we cannot resolve is treated as ordered: it is refused during
       // `prepare` anyway, and the safe reading of "unknown" is not "may race".
-      const resolved = this.resolveDynamicCall({
-        id: "",
-        name: sub.tool,
-        input: sub.arguments,
-      });
+      const resolved = this.resolveDynamicCall(call);
       return (
         "error" in resolved ||
         resolved.registered.definition.orderedEffect === true
       );
     }
     return (
-      this.nativeDefinitions.get(sub.tool)?.definition.orderedEffect === true
+      this.nativeDefinitions.get(call.name)?.definition.orderedEffect === true
     );
-  }
-
-  /** One sub-call, prepared and executed through this same registry. */
-  private async runBatchCallV1(
-    sub: BatchSubCallV1,
-    index: number,
-    context: ToolExecutionContext,
-  ): Promise<BatchCallResultV1> {
-    if (context.signal.aborted) {
-      return {
-        index,
-        tool: sub.tool,
-        result: {
-          content: "Cancelled before tool execution started.",
-          isError: true,
-        },
-      };
-    }
-    if (sub.kind === "invalid") {
-      return {
-        index,
-        tool: sub.tool,
-        result: {
-          content: `batch call ${index} was refused: ${sub.reason}`,
-          isError: true,
-        },
-      };
-    }
-    if (sub.tool === BATCH_TOOL_NAME) {
-      return {
-        index,
-        tool: sub.tool,
-        result: { content: "batch cannot call itself", isError: true },
-      };
-    }
-    const call: ToolCall = {
-      id: `${context.toolCall?.id ?? context.effectId}.${index}`,
-      name: sub.tool,
-      input: sub.arguments,
-    };
-    const subContext: ToolExecutionContext = {
-      ...context,
-      effectId: batchToolOccurrenceId(context.effectId, index),
-      toolCall: call,
-    };
-    const failure = (message: string, idempotent: boolean) => ({
-      index,
-      tool: sub.tool,
-      result: {
-        content: idempotent ? message : uncertainToolFailureV1(message),
-        isError: true,
-      } satisfies ToolExecutionResult,
-    });
-    const messageOf = (error: unknown) =>
-      error instanceof Error ? error.message : `batch call ${index} failed`;
-    let preparation: ToolPreparation;
-    try {
-      preparation = await this.prepare(call, subContext);
-    } catch (error) {
-      // A throw out of `prepare` is certain: nothing dispatched.
-      return failure(messageOf(error), true);
-    }
-    if (preparation.kind === "denied") {
-      return { index, tool: sub.tool, result: preparation.result };
-    }
-    try {
-      const result = await this.executePrepared(preparation, subContext);
-      return { index, tool: sub.tool, result };
-    } catch (error) {
-      return failure(messageOf(error), preparation.idempotent);
-    }
   }
 
   private resolveDynamicCall(

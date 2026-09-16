@@ -1,9 +1,4 @@
-import {
-  batchToolOccurrenceId,
-  type LoopHooksV1,
-  type SessionEvent,
-} from "@frockbot/core/contracts";
-import { BATCH_TOOL_NAME } from "@frockbot/core/tools";
+import type { LoopHooksV1, SessionEvent } from "@frockbot/core/contracts";
 import { turnTypesByTurnV1 } from "./history.js";
 import { REPLY_TO_REQUEST_TOOL_V1 } from "./reply-to-caller.js";
 
@@ -49,44 +44,6 @@ function callerAddressedV1(
   );
 }
 
-function finishSendInputV1(input: unknown): boolean {
-  return (
-    !!input &&
-    typeof input === "object" &&
-    "disposition" in input &&
-    (input as { disposition?: unknown }).disposition === "finish"
-  );
-}
-
-/**
- * The occurrence ids of the finish sends one journaled `tool/call` declared.
- *
- * A batch journals a single `tool/call` named `batch`; the sends inside it
- * never get one of their own, so the only durable record of their disposition
- * is the batch's own declared calls — keyed the way the batch keyed them, by
- * declared position.
- */
-function finishSendOccurrencesV1(event: {
-  name: string;
-  input: unknown;
-  occurrenceId: string;
-}): string[] {
-  if (event.name === "send_to_user") {
-    return finishSendInputV1(event.input) ? [event.occurrenceId] : [];
-  }
-  if (event.name !== BATCH_TOOL_NAME) return [];
-  const calls = (event.input as { calls?: unknown } | null)?.calls;
-  if (!Array.isArray(calls)) return [];
-  return calls.flatMap((call, index) =>
-    !!call &&
-    typeof call === "object" &&
-    (call as { tool?: unknown }).tool === "send_to_user" &&
-    finishSendInputV1((call as { arguments?: unknown }).arguments)
-      ? [batchToolOccurrenceId(event.occurrenceId, index)]
-      : [],
-  );
-}
-
 function delivery(events: readonly SessionEvent[], turn: number) {
   let attempts = 0;
   let repair = false;
@@ -94,9 +51,15 @@ function delivery(events: readonly SessionEvent[], turn: number) {
   const finalCalls = new Set<string>();
   for (const event of events) {
     if (!("turn" in event) || event.turn !== turn) continue;
-    if (event.type === "tool/call") {
-      for (const occurrenceId of finishSendOccurrencesV1(event))
-        finalCalls.add(occurrenceId);
+    if (event.type === "tool/call" && event.name === "send_to_user") {
+      const input = event.input;
+      if (
+        input &&
+        typeof input === "object" &&
+        "disposition" in input &&
+        input.disposition === "finish"
+      )
+        finalCalls.add(event.occurrenceId);
     }
     // The answer a caller asked for is what ends a caller-addressed Turn, and
     // the only thing that does.
