@@ -2151,13 +2151,6 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   /**
-   * The Bot saying an answer is recorded. Its own durable outbox drains into
-   * this, so the wake-up costs one round trip from the settling transaction
-   * rather than a poll interval. It does exactly what the scheduled look-up
-   * does — reads the authoritative run record and settles the request against
-   * it — so a duplicate delivery, or one that races the poll, is a no-op.
-   */
-  /**
    * The ledger as the operator sees it on `/api/debug/voice`. A read of
    * storage and nothing else: no call is ended, no delegation is checked or
    * expired, no read-out is started. The object waking to answer it runs its
@@ -2173,6 +2166,13 @@ export class VoiceAssistant extends VoiceAgentBase<
     };
   }
 
+  /**
+   * The Bot saying an answer is recorded. Its own durable outbox drains into
+   * this, so the wake-up costs one round trip from the settling transaction
+   * rather than a poll interval. It does exactly what the scheduled look-up
+   * does — reads the authoritative run record and settles the request against
+   * it — so a duplicate delivery, or one that races the poll, is a no-op.
+   */
   async deliverVoiceReply(input: unknown): Promise<{ status: "accepted" }> {
     const request = decodeVoiceReplyDeliveryV1(input);
     if (request.userId !== this.name) {
