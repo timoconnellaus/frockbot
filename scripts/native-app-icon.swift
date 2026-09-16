@@ -1,20 +1,22 @@
 #!/usr/bin/env swift
-// Generates the native app icons from Pixel's approved transparent artwork.
+// Generates the native app icons from Pixel's approved close-up icon artwork.
 import AppKit
 import Foundation
 
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-let source = root.appendingPathComponent("output/flock-svg-rig/parts/pixel-render.png")
 let native = root.appendingPathComponent("apps/native")
+let source = native.appendingPathComponent("assets/branding/pixel-closeup-icon.png")
 
 func fail(_ message: String) -> Never {
   FileHandle.standardError.write((message + "\n").data(using: .utf8)!)
   exit(1)
 }
 
-guard let pixel = NSImage(contentsOf: source) else {
+guard let artwork = NSImage(contentsOf: source) else {
   fail("Could not read Pixel artwork at \(source.path)")
 }
+
+let coral = NSColor(srgbRed: 0.969, green: 0.231, blue: 0.384, alpha: 1)
 
 func bitmap(_ pixels: Int, opaque: Bool = false, draw: (CGRect) -> Void) -> NSBitmapImageRep {
   guard
@@ -37,7 +39,7 @@ func bitmap(_ pixels: Int, opaque: Bool = false, draw: (CGRect) -> Void) -> NSBi
   context.imageInterpolation = NSImageInterpolation.high
   NSGraphicsContext.current = context
   if opaque {
-    NSColor(srgbRed: 0.925, green: 0.22, blue: 0.42, alpha: 1).setFill()
+    coral.setFill()
     CGRect(x: 0, y: 0, width: pixels, height: pixels).fill()
   } else {
     context.cgContext.clear(CGRect(x: 0, y: 0, width: pixels, height: pixels))
@@ -48,99 +50,46 @@ func bitmap(_ pixels: Int, opaque: Bool = false, draw: (CGRect) -> Void) -> NSBi
   return rep
 }
 
-func gradient(in path: NSBezierPath) {
-  path.addClip()
-  NSGradient(
-    starting: NSColor(srgbRed: 1, green: 0.29, blue: 0.53, alpha: 1),
-    ending: NSColor(srgbRed: 0.82, green: 0.10, blue: 0.34, alpha: 1)
-  )!.draw(in: path, angle: -55)
-}
-
-func drawPixel(in frame: CGRect, safe: Bool) {
-  let width = frame.width * (safe ? 0.57 : 0.655)
-  let height = width * 615 / 457
-  let body = CGRect(
-    x: frame.midX - width / 2,
-    y: safe ? frame.height * 0.13 : frame.height * 0.055,
-    width: width,
-    height: height
-  )
+func drawArtwork(in frame: CGRect, inset: CGFloat, round: Bool) {
+  let artFrame = frame.insetBy(dx: frame.width * inset, dy: frame.height * inset)
+  let clip = round
+    ? NSBezierPath(ovalIn: artFrame)
+    : NSBezierPath(
+        roundedRect: artFrame,
+        xRadius: artFrame.width * 0.225,
+        yRadius: artFrame.height * 0.225
+      )
   NSGraphicsContext.saveGraphicsState()
-  let shadow = NSShadow()
-  shadow.shadowColor = NSColor.black.withAlphaComponent(0.22)
-  shadow.shadowBlurRadius = frame.width * 0.035
-  shadow.shadowOffset = NSSize(width: 0, height: -frame.width * 0.018)
-  shadow.set()
-  pixel.draw(in: body, from: .zero, operation: .sourceOver, fraction: 1)
+  clip.addClip()
+  coral.setFill()
+  artFrame.fill()
+  artwork.draw(in: artFrame, from: .zero, operation: .sourceOver, fraction: 1)
   NSGraphicsContext.restoreGraphicsState()
 }
 
 func fullIcon(_ pixels: Int, round: Bool = false, opaque: Bool = false) -> NSBitmapImageRep {
   bitmap(pixels, opaque: opaque) { frame in
-    let inset = round ? frame.width * 0.015 : frame.width * 0.052
-    let background = round
-      ? NSBezierPath(ovalIn: frame.insetBy(dx: inset, dy: inset))
-      : NSBezierPath(
-          roundedRect: frame.insetBy(dx: inset, dy: inset),
-          xRadius: frame.width * 0.21,
-          yRadius: frame.width * 0.21
-        )
-    NSGraphicsContext.saveGraphicsState()
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.2)
-    shadow.shadowBlurRadius = frame.width * 0.045
-    shadow.shadowOffset = NSSize(width: 0, height: -frame.width * 0.022)
-    shadow.set()
-    NSColor(srgbRed: 0.82, green: 0.10, blue: 0.34, alpha: 1).setFill()
-    background.fill()
-    NSGraphicsContext.restoreGraphicsState()
-    NSGraphicsContext.saveGraphicsState()
-    gradient(in: background)
-    NSGraphicsContext.restoreGraphicsState()
-
-    let halo = NSBezierPath(
-      ovalIn: CGRect(
-        x: frame.width * 0.15,
-        y: frame.height * 0.145,
-        width: frame.width * 0.70,
-        height: frame.height * 0.70
-      )
-    )
-    NSColor(srgbRed: 1, green: 0.965, blue: 0.88, alpha: 1).setFill()
-    halo.fill()
-    drawPixel(in: frame, safe: false)
+    if opaque {
+      coral.setFill()
+      frame.fill()
+    }
+    drawArtwork(in: frame, inset: round ? 0.01 : 0.052, round: round)
   }
 }
 
 func adaptiveForeground(_ pixels: Int) -> NSBitmapImageRep {
   bitmap(pixels) { frame in
-    let halo = NSBezierPath(
-      ovalIn: CGRect(
-        x: frame.width * 0.18,
-        y: frame.height * 0.18,
-        width: frame.width * 0.64,
-        height: frame.height * 0.64
-      )
-    )
-    NSColor(srgbRed: 1, green: 0.965, blue: 0.88, alpha: 1).setFill()
-    halo.fill()
-    drawPixel(in: frame, safe: true)
+    coral.setFill()
+    frame.fill()
+    drawArtwork(in: frame, inset: -0.015, round: false)
   }
 }
 
 func maskableIcon(_ pixels: Int) -> NSBitmapImageRep {
   bitmap(pixels, opaque: true) { frame in
-    let halo = NSBezierPath(
-      ovalIn: CGRect(
-        x: frame.width * 0.18,
-        y: frame.height * 0.18,
-        width: frame.width * 0.64,
-        height: frame.height * 0.64
-      )
-    )
-    NSColor(srgbRed: 1, green: 0.965, blue: 0.88, alpha: 1).setFill()
-    halo.fill()
-    drawPixel(in: frame, safe: true)
+    coral.setFill()
+    frame.fill()
+    drawArtwork(in: frame, inset: -0.015, round: false)
   }
 }
 
