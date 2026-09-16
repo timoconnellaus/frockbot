@@ -10,6 +10,7 @@ import {
   VoiceLedgerV1,
   VOICE_METER_CAPS_V1,
   voiceMeterDayV1,
+  type VoiceCallRecordV1,
   type VoiceDelegationRecordV1,
   type VoiceMeterV1,
   type VoiceTurnRecordV1,
@@ -1554,6 +1555,75 @@ describe("the voice session object", () => {
           String(f.text).startsWith("Workerd Bot"),
       ),
     ).toBe(false);
+    opened.socket.close();
+  });
+
+  test("two Bot answers settling together are told one at a time, and both are heard", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-both-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const call = (await stub.probeStorage("voice:call:current"))[
+      "voice:call:current"
+    ] as VoiceCallRecordV1;
+    const at = new Date().toISOString();
+    const seed = (runId: string, text: string): VoiceDelegationRecordV1 => ({
+      schemaVersion: 1,
+      runId,
+      turnId: `${call.callId}:0`,
+      callId: call.callId,
+      botId: identity.botId,
+      botName: "Workerd Bot",
+      text,
+      admittedAt: at,
+      state: "settled",
+      attempts: 1,
+      answer: `${text} is done`,
+      settledAt: at,
+    });
+    const first = seed(`run-first-${suffix}`, "the first thing");
+    const second = seed(`run-second-${suffix}`, "the second thing");
+    await stub.probePutStorage(`voice:delegation:${first.runId}`, first);
+    await stub.probePutStorage(`voice:delegation:${second.runId}`, second);
+    const stateOf = async (runId: string) =>
+      (await stub.probeStorage("voice:delegation:"))[
+        `voice:delegation:${runId}`
+      ] as VoiceDelegationRecordV1;
+    // Two scheduled announcements coming due together, which is a thing the
+    // scheduler does. One takes the floor; the other must wait rather than
+    // abort it, because it is marked as told the moment its turn is admitted.
+    await stub.probeAnnounceConcurrently([first.runId, second.runId]);
+    const told = [await stateOf(first.runId), await stateOf(second.runId)];
+    expect(told.filter((one) => one.state === "spoken")).toHaveLength(1);
+    expect(told.filter((one) => one.state === "settled")).toHaveLength(1);
+    // The held one keeps its place and is told by its own scheduled wake-up.
+    const both = await eventually(
+      async () => [await stateOf(first.runId), await stateOf(second.runId)],
+      (records) => records.every((one) => one.state === "spoken"),
+      "both answers told",
+      30_000,
+    );
+    const turnIds = both.map((one) => one.spokenTurnId);
+    expect(new Set(turnIds).size).toBe(2);
+    const turns = await stub.probeStorage("voice:turn:");
+    for (const turnId of turnIds) {
+      const turn = turns[`voice:turn:${turnId}`] as VoiceTurnRecordV1;
+      expect(turn.state).toBe("answered");
+    }
+    const synthesized = await stub.probeSynthesized();
+    expect(synthesized.some((line) => line.includes("the first thing"))).toBe(
+      true,
+    );
+    expect(synthesized.some((line) => line.includes("the second thing"))).toBe(
+      true,
+    );
     opened.socket.close();
   });
 

@@ -1731,6 +1731,11 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   private replyInFlight(call: LiveCall): boolean {
+    // A Bot answer already being told is a reply in flight from the moment it
+    // claims the floor, which is before its turn is admitted: two event turns
+    // at once would abort each other, and the one that loses is already
+    // marked spoken, so nobody would ever hear it.
+    if (call.announcing) return true;
     if (call.turnStartedAt !== undefined && call.turnSettledAt === undefined) {
       return true;
     }
@@ -2299,6 +2304,15 @@ export class VoiceAssistant extends VoiceAgentBase<
   ): Promise<void> {
     const identity = this.identity(connection);
     if (!identity) return;
+    // The floor is claimed before the first await. Everything that decides
+    // whether now is a quiet moment reads this, and a claim made after the
+    // ledger reads would be judged against a call that has already moved on:
+    // a second answer, or the person's own turn, would have walked in.
+    const controller = new AbortController();
+    call.announcing = controller;
+    const release = () => {
+      if (call.announcing === controller) call.announcing = undefined;
+    };
     const ledger = this.ledger();
     const transcript = renderVoiceBotAnswerEventV1({
       botName: delegation.botName,
@@ -2306,6 +2320,13 @@ export class VoiceAssistant extends VoiceAgentBase<
       ...(delegation.answer ? { answer: delegation.answer } : {}),
       ...(delegation.failure ? { failure: delegation.failure } : {}),
     });
+    if (controller.signal.aborted) {
+      // The person took the floor while the request was being read. Nothing
+      // has been admitted or marked, so the answer simply waits its turn.
+      release();
+      await this.scheduleAnnounce(delegation.runId);
+      return;
+    }
     const admitted = await ledger.admitTurn({
       connectionId: connection.id,
       transcript,
@@ -2319,6 +2340,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     });
     if (admitted.status === "refused") {
       // The day's turns are spent. The answer is in the Bot's conversation.
+      release();
       await ledger.dropDelegation(delegation.runId);
       this.trace(connection, "answer-dropped", {
         run: delegation.runId,
@@ -2327,16 +2349,32 @@ export class VoiceAssistant extends VoiceAgentBase<
       return;
     }
     const turnId = admitted.turn.turnId;
+    if (controller.signal.aborted) {
+      // Aborted before the delegation was marked: the turn is admitted, so it
+      // is settled here rather than left open for `recover`, and the answer is
+      // still owed — it waits for the call to be quiet again.
+      await ledger.settleTurn(turnId, { failure: "aborted" });
+      release();
+      await this.scheduleAnnounce(delegation.runId);
+      return;
+    }
     // Told once: the event turn is durable before the model is asked, so an
     // eviction in between leaves a turn the history shows and no second one.
     if (
       !(await ledger.markDelegationSpoken(delegation.runId, turnId, this.now()))
     ) {
+      // The call ended between the admission and the mark, so the delegation
+      // was cancelled with it. The turn is settled rather than left admitted
+      // and metered against a call nobody is on.
+      await ledger.settleTurn(turnId, { failure: "the call ended" });
+      release();
       return;
     }
-    const controller = new AbortController();
-    call.announcing?.abort();
-    call.announcing = controller;
+    if (controller.signal.aborted) {
+      await ledger.settleTurn(turnId, { failure: "aborted" });
+      release();
+      return;
+    }
     const generation = call.speechGeneration;
     const startedAt = Date.now();
     call.turnId = turnId;
@@ -2401,7 +2439,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       };
     } finally {
       if (call.turnId === turnId) call.turnSettledAt = Date.now();
-      if (call.announcing === controller) call.announcing = undefined;
+      release();
       await ledger.settleTurn(turnId, settlement);
     }
     const spoken = text.trim();
