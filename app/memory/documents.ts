@@ -7,6 +7,10 @@
 // every Memory file of every tier a Bot can see, through the same
 // `WorkspaceReadsV1` the renderer uses, and hands back bytes and content
 // addresses. Nothing derived is stored here.
+import {
+  type ConcurrencyLimiterV1,
+  createConcurrencyLimiterV1,
+} from "@frockbot/app/concurrency";
 import type {
   MemoryScopeNameV1,
   WorkspaceMemoryRootV1,
@@ -62,11 +66,16 @@ export interface MemoryDocumentListingV1 {
  * skipped rather than thrown — an index is derived state, and a partial read
  * that says so beats a Turn that fails because one object was briefly
  * unreachable — and the listing says it was partial.
+ *
+ * A caller reading several roots at once passes its own `inFlight` so every
+ * root's files draw on one budget rather than each root getting its own.
  */
 export async function readMemoryDocumentsV1(
   reads: WorkspaceReadsV1,
   root: WorkspaceMemoryRootV1,
+  options: { inFlight?: ConcurrencyLimiterV1 } = {},
 ): Promise<MemoryDocumentListingV1> {
+  const inFlight = options.inFlight ?? createConcurrencyLimiterV1();
   const scope = memoryScopeOfRootV1(root);
   const projectId = memoryProjectIdOfRootV1(root);
   const candidates: Array<{
@@ -79,8 +88,8 @@ export async function readMemoryDocumentsV1(
   let cursor: string | undefined;
   let pages = 0;
   for (; pages < MEMORY_MAX_LIST_PAGES; pages += 1) {
-    const outcome = await reads.list(
-      cursor === undefined ? { root } : { root, cursor },
+    const outcome = await inFlight(() =>
+      reads.list(cursor === undefined ? { root } : { root, cursor }),
     );
     if (outcome.status !== "ok") return { documents: [], complete: false };
     for (const entry of outcome.entries) {
@@ -108,7 +117,7 @@ export async function readMemoryDocumentsV1(
   // Independent objects, read together. Serially these were one round trip per
   // Memory file, and a rebuild pays them for every tier at once.
   const files = await Promise.all(
-    selected.map((candidate) => reads.read(candidate.path)),
+    selected.map((candidate) => inFlight(() => reads.read(candidate.path))),
   );
   for (const [index, candidate] of selected.entries()) {
     const read = files[index]!;
@@ -148,8 +157,11 @@ export async function readAllMemoryDocumentsV1(
   reads: WorkspaceReadsV1,
   roots: WorkspaceMemoryRootV1[],
 ): Promise<MemoryDocumentListingV1> {
+  // One budget for every root: a rebuild fans out over each root's files as
+  // well, so limiting per root would multiply rather than bound.
+  const inFlight = createConcurrencyLimiterV1();
   const listings = await Promise.all(
-    roots.map((root) => readMemoryDocumentsV1(reads, root)),
+    roots.map((root) => readMemoryDocumentsV1(reads, root, { inFlight })),
   );
   return {
     documents: listings.flatMap((listing) => listing.documents),

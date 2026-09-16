@@ -37,7 +37,10 @@ import {
   type MemoryFactV1,
   type SourcedMemoryFactV1,
 } from "./facts.js";
-import { createConcurrencyLimiterV1 } from "@frockbot/app/concurrency";
+import {
+  type ConcurrencyLimiterV1,
+  createConcurrencyLimiterV1,
+} from "@frockbot/app/concurrency";
 import type { MemoryDocumentV1 } from "./documents.js";
 import {
   memoryFileKindV1,
@@ -234,8 +237,16 @@ export class MemoryStore {
   /**
    * Reads one whole tier: every shard, merged, newest fact winning, with a
    * retraction in any shard suppressing the fact it names.
+   *
+   * A caller reading several tiers at once passes its own `inFlight` so every
+   * tier's files draw on one budget: two independent limiters nested would
+   * multiply, and a bound that is silently squared is worse than none. A
+   * caller reading a single tier passes nothing and gets its own.
    */
-  async read(root: WorkspaceMemoryRootV1): Promise<MemoryTierReadV1> {
+  async read(
+    root: WorkspaceMemoryRootV1,
+    options: { inFlight?: ConcurrencyLimiterV1 } = {},
+  ): Promise<MemoryTierReadV1> {
     const result: MemoryTierReadV1 = {
       root,
       profile: [],
@@ -246,11 +257,12 @@ export class MemoryStore {
     };
     const scope = memoryScopeOfRootV1(root);
     const projectId = memoryProjectIdOfRootV1(root);
+    const inFlight = options.inFlight ?? createConcurrencyLimiterV1();
     const entries: WorkspaceEntryV1[] = [];
     let cursor: string | undefined;
     for (let page = 0; page < MEMORY_MAX_LIST_PAGES; page += 1) {
-      const outcome = await this.#files.list(
-        cursor === undefined ? { root } : { root, cursor },
+      const outcome = await inFlight(() =>
+        this.#files.list(cursor === undefined ? { root } : { root, cursor }),
       );
       if (outcome.status !== "ok") {
         // "unavailable" is an ordinary answer: a tier that cannot be read
@@ -324,7 +336,6 @@ export class MemoryStore {
     // order, so what is injected, what is indexed and which files are named
     // unreadable are all exactly what the serial read produced; the bound is
     // on how many reads are outstanding, not on which reads happen.
-    const inFlight = createConcurrencyLimiterV1();
     const reads = await Promise.all(
       files.map(({ entry }) =>
         entry.generation.size > MEMORY_MAX_FILE_BYTES

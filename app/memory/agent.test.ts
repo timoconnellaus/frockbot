@@ -11,7 +11,12 @@ import {
   MemoryProjection,
   type MemoryRuntimeHostV1,
 } from "./agent.ts";
-import { userMemoryRootV1 } from "./roots.ts";
+import {
+  botMemoryRootV1,
+  projectMemoryRootV1,
+  userMemoryRootV1,
+} from "./roots.ts";
+import { TURN_READ_CONCURRENCY_V1 } from "@frockbot/app/concurrency";
 import { MemoryStore, MEMORY_MAX_FILES_PER_TIER } from "./store.ts";
 import {
   createInMemoryMemoryProjectsV1,
@@ -640,5 +645,100 @@ describe("memory_search", () => {
 
     const ok = await tool.execute({ query: "tuesdays" }, CONTEXT);
     expect(ok.isError).toBe(false);
+  });
+});
+
+/**
+ * A Workspace surface that serves reads normally but only after a turn of the
+ * microtask queue, and reports the high-water mark of reads outstanding at any
+ * instant. A read that resolved synchronously would never overlap another, so
+ * the deferral is what makes the ceiling observable at all.
+ */
+function readsCountConcurrency(files: WorkspaceFilesV1): {
+  files: WorkspaceFilesV1;
+  peak: () => number;
+  total: () => number;
+} {
+  let outstanding = 0;
+  let peak = 0;
+  let total = 0;
+  const counted = async <T>(run: () => Promise<T>): Promise<T> => {
+    outstanding += 1;
+    total += 1;
+    peak = Math.max(peak, outstanding);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return await run();
+    } finally {
+      outstanding -= 1;
+    }
+  };
+  return {
+    peak: () => peak,
+    total: () => total,
+    files: {
+      read: (path) => counted(() => files.read(path)),
+      list: (request) => counted(() => files.list(request)),
+      stat: (path) => files.stat(path),
+      write: (request) => files.write(request),
+      delete: (request) => files.delete(request),
+    },
+  };
+}
+
+describe("the turn-start Memory read across every tier", () => {
+  test("never holds more reads open at once than the declared bound", async () => {
+    const seed = createTestMemoryFilesV1({ userId: "user-1" });
+    const projects = createInMemoryMemoryProjectsV1();
+    const projectIds = ["proj-a", "proj-b", "proj-c", "proj-d"];
+    for (const projectId of projectIds) {
+      await projects.create({
+        projectId,
+        name: projectId,
+        description: "",
+      });
+    }
+    // Several shards in each of several tiers: enough files that a squared
+    // bound and an honest one are far apart.
+    const shardCount = 6;
+    for (let index = 0; index < shardCount; index += 1) {
+      const botId = `bot-${String(index).padStart(3, "0")}`;
+      const store = new MemoryStore({
+        files: seed,
+        owner: { userId: "user-1", botId },
+        clock: () => AT,
+      });
+      for (const root of [
+        botMemoryRootV1({ userId: "user-1", botId }),
+        userMemoryRootV1(OWNER),
+        ...projectIds.map((projectId) =>
+          projectMemoryRootV1({ userId: "user-1", botId }, projectId),
+        ),
+      ]) {
+        const written = await store.write({
+          root,
+          tier: "profile",
+          fact: `Shard ${index} learned something about ${root.kind}.`,
+          writer: botWriter(botId),
+        });
+        expect(written.status).toBe("ok");
+      }
+    }
+
+    const counting = readsCountConcurrency(seed);
+    const host = {
+      ...hostFor("bot-000", counting.files),
+      projects,
+    };
+    const { session, dispose } = await openSession();
+
+    await new MemoryProjection(host).refresh(4, session);
+
+    // The fan-out really happened — otherwise a serial read would pass this
+    // test by never overlapping anything.
+    expect(counting.total()).toBeGreaterThan(TURN_READ_CONCURRENCY_V1);
+    expect(counting.peak()).toBeGreaterThan(1);
+    expect(counting.peak()).toBeLessThanOrEqual(TURN_READ_CONCURRENCY_V1);
+    await dispose();
   });
 });

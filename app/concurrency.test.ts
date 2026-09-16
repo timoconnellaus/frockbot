@@ -69,7 +69,7 @@ describe("the turn-start read limiter", () => {
     const inFlight = createConcurrencyLimiterV1(1);
     const failure = inFlight(() => Promise.reject(new Error("read refused")));
 
-    expect(failure).rejects.toThrow("read refused");
+    await expect(failure).rejects.toThrow("read refused");
     await expect(inFlight(() => Promise.resolve("next"))).resolves.toBe("next");
   });
 

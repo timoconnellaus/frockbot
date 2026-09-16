@@ -265,14 +265,15 @@ export class MemoryProjection {
     // N round trips to object storage into N × RTT on the turn-start critical
     // path for no reason. The results are still assembled in tier order, and
     // a Bot in many Projects still starts a bounded number of reads at once.
+    // One limiter covers the whole read: the tiers are not themselves reads,
+    // so the budget is spent where the round trips are — on each tier's files
+    // — and the ceiling stays what the helper says it is rather than squaring.
     const inFlight = createConcurrencyLimiterV1();
     const [ownTier, userTier, ...projectReads] = await Promise.all([
-      inFlight(() => store.read(own)),
-      inFlight(() => store.read(user)),
+      store.read(own, { inFlight }),
+      store.read(user, { inFlight }),
       ...projects.map((project) =>
-        inFlight(() =>
-          store.read(projectMemoryRootV1(owner, project.projectId)),
-        ),
+        store.read(projectMemoryRootV1(owner, project.projectId), { inFlight }),
       ),
     ]);
     const projectTiers: MemoryProjectTierV1[] = projects.map(
