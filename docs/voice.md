@@ -868,18 +868,10 @@ matters.
 **A Bot answering a voice request.** The Turn is admitted with a `voice`
 origin and gets `reply_to_request`, which is the one answer the call is owed:
 it goes back to the voice object, mints no message and wakes no device. It is
-an `agent` Turn, the same kind a Bot-to-Bot question runs as, and it is work
-like any automation Turn: every work tool — connected apps, web fetch and
-search, the Computer, image generation, Routines — admits `agent` beside
-`chat`, `automation` and `subagent`, so a question asked out loud can be
-answered from a mailbox or a calendar. Four capabilities stay chat-only:
-`machine-control` and `machine-messages`, which reach into the person's own
-Mac and want them there to answer the approval card; `bot-messaging`, which is
-a Bot writing to another Bot from the thread; and `bot-template-export`, which
-stages a template for the person to look at and publish. Before that admission
-existed a Bot on a call was refused its own apps and told the caller the app
-had been disconnected. Subagent dispatch is the one work tool deliberately
-left at `chat` and `automation`, which is what bounds the tree to depth one.
+an `agent` Turn, the same kind a Bot-to-Bot question runs as, and which tools
+an `agent` Turn admits is the kernel's rule, in `docs/architecture.md` §4
+(tool exposure). Before that admission existed a Bot on a call was refused its
+own apps and told the caller the app had been disconnected.
 The prompt says to say the answer once and not to write it, or a version of
 it, into the conversation as well; `send_to_user` on such a Turn is for a brief
 progress note on work longer than a minute and for material that cannot be
