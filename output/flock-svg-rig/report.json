@@ -315,6 +315,141 @@
           "sha256": "a47ead5e390a319de4c4d878dbbd06bb8ff0d02cdaa708c732dcd064d08875df"
         }
       ]
+    },
+    {
+      "id": "v8-parts",
+      "label": "08 \u00b7 Anatomical parts / static assembly",
+      "characters": [
+        {
+          "name": "guardian",
+          "color": 98.96038484535121,
+          "ssim": 97.56001536078465,
+          "edge": 99.80779391544327,
+          "silhouette": 99.80259831615045,
+          "score": 97.56001536078465,
+          "paths": 73,
+          "bytes": 90843,
+          "svg": "versions/v8-parts/guardian.svg",
+          "diff": "versions/v8-parts/guardian-diff.png",
+          "sha256": "4947c7ace3f5cc98123be78c38bb7e884e7b556861ff3179d94b247425a2d748"
+        },
+        {
+          "name": "pixel",
+          "color": 98.30717220267205,
+          "ssim": 96.66734858514742,
+          "edge": 99.82927740883048,
+          "silhouette": 99.76980464785343,
+          "score": 96.66734858514742,
+          "paths": 77,
+          "bytes": 116524,
+          "svg": "versions/v8-parts/pixel.svg",
+          "diff": "versions/v8-parts/pixel-diff.png",
+          "sha256": "c09adccef9bea8bd47251d4b45ca8fc87ef59a141a7cd1578b203e91b4759f86"
+        },
+        {
+          "name": "sunny",
+          "color": 98.52080705315058,
+          "ssim": 95.47884560033525,
+          "edge": 99.94050130853007,
+          "silhouette": 99.78124536245664,
+          "score": 95.47884560033525,
+          "paths": 115,
+          "bytes": 118508,
+          "svg": "versions/v8-parts/sunny.svg",
+          "diff": "versions/v8-parts/sunny-diff.png",
+          "sha256": "5beb2dd21208e380cc533c06b1f3af0144b8c16d05b777fd3356ef6a77b319c8"
+        }
+      ]
+    },
+    {
+      "id": "v9-cleanparts",
+      "label": "09 \u00b7 Seven complete parts",
+      "characters": [
+        {
+          "name": "guardian",
+          "color": 98.92641249732866,
+          "ssim": 97.38463045414291,
+          "edge": 99.81147248030119,
+          "silhouette": 99.80479312027646,
+          "score": 97.38463045414291,
+          "paths": 17,
+          "bytes": 44179,
+          "svg": "versions/v9-cleanparts/guardian.svg",
+          "diff": "versions/v9-cleanparts/guardian-diff.png",
+          "sha256": "b5871611d238d6417ffdc7c9feb55e5a6fcc5856c093b20500a781b01f96db5b"
+        },
+        {
+          "name": "pixel",
+          "color": 98.27772870086274,
+          "ssim": 96.50571730178132,
+          "edge": 99.8316214782869,
+          "silhouette": 99.7844658467301,
+          "score": 96.50571730178132,
+          "paths": 17,
+          "bytes": 43571,
+          "svg": "versions/v9-cleanparts/pixel.svg",
+          "diff": "versions/v9-cleanparts/pixel-diff.png",
+          "sha256": "b280330343aceef9e237cb6b112b2a51125ff951201fc87166ff326e5abb314c"
+        },
+        {
+          "name": "sunny",
+          "color": 98.44632155911165,
+          "ssim": 95.11425573027627,
+          "edge": 99.80079250839837,
+          "silhouette": 99.79608998422583,
+          "score": 95.11425573027627,
+          "paths": 17,
+          "bytes": 31065,
+          "svg": "versions/v9-cleanparts/sunny.svg",
+          "diff": "versions/v9-cleanparts/sunny-diff.png",
+          "sha256": "4818052f03ffc6ee716174b343f2103995d6d04a2289ef59f2a7a997a281db9a"
+        }
+      ]
+    },
+    {
+      "id": "v10-cleanroots",
+      "label": "10 \u00b7 Clean fur and buried leg shafts",
+      "characters": [
+        {
+          "name": "guardian",
+          "color": 98.70052250702994,
+          "ssim": 96.895705981232,
+          "edge": 99.23264158435519,
+          "silhouette": 99.61002516391679,
+          "score": 96.895705981232,
+          "paths": 17,
+          "bytes": 43817,
+          "svg": "versions/v10-cleanroots/guardian.svg",
+          "diff": "versions/v10-cleanroots/guardian-diff.png",
+          "sha256": "a09912a32df9e6cbdc8433858d101a96541ca0ca7f803f696337cdedd14066bc"
+        },
+        {
+          "name": "pixel",
+          "color": 98.06295688266447,
+          "ssim": 96.12156419477684,
+          "edge": 99.54069236984242,
+          "silhouette": 99.6239325167794,
+          "score": 96.12156419477684,
+          "paths": 17,
+          "bytes": 42442,
+          "svg": "versions/v10-cleanroots/pixel.svg",
+          "diff": "versions/v10-cleanroots/pixel-diff.png",
+          "sha256": "f85abf84f92dea03aa5219954323f53ca67139850eea81f361f4d9a7c6feaf3b"
+        },
+        {
+          "name": "sunny",
+          "color": 98.44302734193442,
+          "ssim": 95.09239025260969,
+          "edge": 99.80362566275684,
+          "silhouette": 99.85219130511231,
+          "score": 95.09239025260969,
+          "paths": 17,
+          "bytes": 30232,
+          "svg": "versions/v10-cleanroots/sunny.svg",
+          "diff": "versions/v10-cleanroots/sunny-diff.png",
+          "sha256": "3ead1d130616f641817185e6d465a14118296cd9999c2a1f9332f4d0529bd46b"
+        }
+      ]
     }
   ],
   "characters": []

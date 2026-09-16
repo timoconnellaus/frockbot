@@ -375,7 +375,7 @@ export function createRoutineManageTool(
       } catch (error) {
         return refusal(error instanceof Error ? error.message : String(error));
       }
-      // A Bot paused a User's Routine in a Turn about sheep farming, with no
+      // A Bot paused a User's Routine in a Turn about avatar farming, with no
       // approval, no confirmation, and nothing in the transcript saying so.
       // The User's own Routines are theirs: switching one off, or rewriting
       // it, needs the User to have asked for it in this conversation. The

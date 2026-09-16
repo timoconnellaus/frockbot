@@ -30,7 +30,7 @@ import {
   type BotTemplateV1,
   type TemplatePackageV1,
   type TemplateRoutineV1,
-  type TemplateSheepRecipeV1,
+  type TemplateAvatarAppearanceV1,
   type TemplateSkillV1,
 } from "@frockbot/core/template";
 import type {
@@ -103,12 +103,12 @@ export interface TemplateSourceV1 {
     description?: string;
   };
   /**
-   * The recipe the exported profile carries: this Bot's own generated sheep.
+   * The recipe the exported profile carries: this Bot's own generated avatar.
    *
-   * A `SheepRecipeV1` is four layer ids — deterministic, tiny, and nobody's
+   * A `AvatarAppearanceV1` is four layer ids — deterministic, tiny, and nobody's
    * photograph — so it travels.
    */
-  sheep: TemplateSheepRecipeV1;
+  avatar: TemplateAvatarAppearanceV1;
   skills: readonly TemplateSkillCandidateV1[];
   routines: readonly TemplateRoutineCandidateV1[];
   packages: readonly TemplatePackageCandidateV1[];
@@ -294,7 +294,7 @@ export function buildBotTemplateV1(
       ...(source.profile.description
         ? { description: source.profile.description.slice(0, 10_000) }
         : {}),
-      avatar: { kind: "sheep", recipe: source.sheep },
+      avatar: { kind: "avatar", recipe: source.avatar },
     },
     skills,
     routines,

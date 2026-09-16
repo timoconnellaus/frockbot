@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>The flock · Motion studio</title>
+    <link rel="stylesheet" href="../pixel-rive-animation/studio.css" />
+    <link rel="stylesheet" href="cast.css" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="../flock-svg-rig/parts.html"
+        >FrockBot <span>/ character studio</span></a
+      ><span class="version">THE FLOCK · MOTION REVIEW</span>
+    </header>
+    <nav id="characters" aria-label="Choose a character"></nav>
+    <main>
+      <section class="preview-panel" aria-label="Animated character preview">
+        <div class="preview-heading">
+          <div>
+            <span class="eyebrow"
+              ><span id="character-name">MEET RABBIT</span></span
+            >
+            <h1>A cast with character.</h1>
+          </div>
+          <span class="live"
+            ><i></i><span id="status">Loading character…</span></span
+          >
+        </div>
+        <div class="stage" id="stage">
+          <canvas id="pixel" aria-label="Animated mascot"></canvas
+          ><img
+            id="reference"
+            src="characters/rabbit/rabbit.svg"
+            alt="Character SVG artwork"
+            hidden
+          />
+        </div>
+        <div class="stage-footer">
+          <p id="caption">A quiet breath. A blink. A passing thought.</p>
+          <button id="pause" class="quiet" disabled>Pause</button>
+        </div>
+        <div class="mini-row">
+          <span>TRY AT APP SIZE</span
+          ><canvas
+            id="small"
+            width="128"
+            height="152"
+            aria-label="Character at a small avatar size"
+          ></canvas>
+          <p>Same Rive file.<br />Independent character instance.</p>
+        </div>
+      </section>
+      <aside>
+        <div class="intro">
+          <span class="eyebrow">01 / BEHAVIOUR</span>
+          <h2>Give them something to do.</h2>
+          <p>
+            <span id="personality"
+              >A little foot tap. Two very expressive ears.</span
+            >
+          </p>
+        </div>
+        <fieldset>
+          <legend>Activity</legend>
+          <div class="choices activities" id="activities">
+            <button data-value="0" aria-pressed="true">Idle</button
+            ><button data-value="1" aria-pressed="false">Thinking</button
+            ><button data-value="2" aria-pressed="false">Working</button
+            ><button data-value="3" aria-pressed="false">Needs you</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Feeling</legend>
+          <div class="choices emotions" id="emotions">
+            <button data-value="0" aria-pressed="true">Neutral</button
+            ><button data-value="1" aria-pressed="false">Excited</button
+            ><button data-value="2" aria-pressed="false">Sad</button
+            ><button data-value="3" aria-pressed="false">Tired</button
+            ><button data-value="4" aria-pressed="false">Curious</button
+            ><button data-value="5" aria-pressed="false">Content</button
+            ><button data-value="6" aria-pressed="false">Surprised</button
+            ><button data-value="7" aria-pressed="false">Uncertain</button>
+          </div>
+        </fieldset>
+        <button id="celebrate" class="celebrate">
+          Celebrate a success <span>↗</span>
+        </button>
+        <section class="interaction">
+          <span class="eyebrow">02 / LITTLE REACTIONS</span>
+          <label class="switch"
+            ><span
+              ><strong>Follow your pointer</strong
+              ><small>Gently look towards the cursor</small></span
+            ><input type="checkbox" id="follow" checked
+          /></label>
+          <label class="switch"
+            ><span
+              ><strong>Say hello on hover</strong
+              ><small>A small, once-per-visit greeting</small></span
+            ><input type="checkbox" id="hover" checked
+          /></label>
+          <label class="switch"
+            ><span
+              ><strong>Still mode</strong
+              ><small>A calm, neutral pose with no motion</small></span
+            ><input type="checkbox" id="reduce"
+          /></label>
+        </section>
+        <section class="palette">
+          <span class="eyebrow">03 / COLOUR</span>
+          <div class="swatches" id="swatches">
+            <button
+              aria-label="Original pink"
+              data-color="#fc85ae"
+              style="--swatch: #fc85ae"
+              aria-pressed="true"
+            ></button>
+            <button
+              aria-label="Lilac"
+              data-color="#b7a0ee"
+              style="--swatch: #b7a0ee"
+              aria-pressed="false"
+            ></button>
+            <button
+              aria-label="Mint"
+              data-color="#87d5b6"
+              style="--swatch: #87d5b6"
+              aria-pressed="false"
+            ></button>
+            <button
+              aria-label="Apricot"
+              data-color="#ffb578"
+              style="--swatch: #ffb578"
+              aria-pressed="false"
+            ></button>
+            <button
+              aria-label="Sky"
+              data-color="#85c4f0"
+              style="--swatch: #85c4f0"
+              aria-pressed="false"
+            ></button>
+            <label class="custom-color"
+              >Custom
+              <input
+                type="color"
+                id="color"
+                value="#fc85ae"
+                aria-label="Custom fur colour"
+            /></label>
+          </div>
+        </section>
+        <div class="review">
+          <strong>Made for a close look.</strong>
+          <p>
+            Switch characters to compare their gestures. Activity and feeling
+            work together; each character has its own motion.
+          </p>
+          <button id="compare" class="quiet">Compare to static SVG</button
+          ><a
+            id="download-rive"
+            href="characters/rabbit/rig/build/rabbit.riv"
+            download
+            >Download this Rive file ↓</a
+          ><a id="download-svg" href="characters/rabbit/rabbit.svg" download
+            >Download separated SVG ↓</a
+          ><a href="flock-animated-characters.zip" download
+            >Download the full cast ↓</a
+          >
+          <details>
+            <summary>Animation parts</summary>
+            <div id="anatomy"></div>
+          </details>
+          <details id="concept-review" hidden>
+            <summary>Selected dog concept · one ear up</summary>
+            <img
+              src="assets/dog-concept.png"
+              alt="Approved one-ear-up dog concept with an eyes-only face"
+              style="
+                display: block;
+                width: 100%;
+                max-width: 280px;
+                margin: 12px auto;
+                border-radius: 10px;
+              "
+            />
+          </details>
+        </div>
+      </aside>
+    </main>
+    <footer>
+      Eleven characters. Eleven personalities.
+      <span>Vector artwork · native Rive animation</span>
+    </footer>
+    <script src="../pixel-rive-animation/vendor/rive.js"></script>
+    <script src="cast.js"></script>
+  </body>
+</html>

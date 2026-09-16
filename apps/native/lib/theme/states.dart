@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import 'frock_theme.dart';
 
 /// Host-owned empty and failure states, also usable when every extension fails.
@@ -30,7 +30,7 @@ class FrockEmptyState extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (icon == null)
-              const SheepAvatar(size: 64)
+              const CharacterAvatar(size: 64)
             else
               Icon(
                 icon,

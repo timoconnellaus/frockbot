@@ -1,0 +1,63 @@
+{
+  "name": "chill",
+  "width": 457,
+  "height": 615,
+  "profile": "flow",
+  "sourceCrop": [25, 56, 361, 456],
+  "conceptSha256": "5e3c8ac641a5b7598c3e3d206c60fdeb56981ada5132da637d6b43b49cedcd10",
+  "palette": {
+    "primary": "#76cafa",
+    "shade": "#76cafa",
+    "eyeColor": "#fcf6e3"
+  },
+  "parts": [
+    {
+      "id": "foot-left",
+      "pivot": [148.619, 531.214],
+      "bounds": [
+        114.91484832763672, 487.3694763183594, 179.3929443359375,
+        588.1785888671875
+      ],
+      "layer": 0,
+      "hasCompletion": true
+    },
+    {
+      "id": "foot-right",
+      "pivot": [304.452, 531.214],
+      "bounds": [
+        280.2261962890625, 488.0061950683594, 344.3928527832031,
+        588.1792602539062
+      ],
+      "layer": 1,
+      "hasCompletion": true
+    },
+    {
+      "id": "fur",
+      "pivot": [229.81, 459.19],
+      "bounds": [
+        29.917558670043945, 98.7127914428711, 430.20574951171875,
+        566.0421142578125
+      ],
+      "layer": 2,
+      "hasCompletion": true
+    },
+    {
+      "id": "eye-left",
+      "pivot": [204.929, 376.69],
+      "bounds": [
+        194.45237731933594, 350.5, 215.40475463867188, 402.8809509277344
+      ],
+      "layer": 3,
+      "hasCompletion": true
+    },
+    {
+      "id": "eye-right",
+      "pivot": [259.929, 376.69],
+      "bounds": [
+        249.45237731933594, 350.5, 270.4047546386719, 402.8809509277344
+      ],
+      "layer": 4,
+      "hasCompletion": true
+    }
+  ]
+}

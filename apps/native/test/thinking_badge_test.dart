@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/flock/sheep.dart';
+import 'package:frockbot_native/flock/avatar.dart';
 
 void main() {
   testWidgets('the typing badge keeps bouncing after its tempo changes', (

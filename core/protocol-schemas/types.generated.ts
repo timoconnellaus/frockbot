@@ -75,12 +75,10 @@ export type SessionRevokeCommand = {
   action: "sign-out";
   sessionId: Identifier;
 };
-export type SheepRecipe = {
+export type AvatarAppearance = {
   schemaVersion: 1;
-  background: string;
-  upper: string;
-  middle: string;
-  lower: string;
+  characterId: string;
+  primary: string;
 };
 export type BotRegistration = {
   schemaVersion: 1;
@@ -88,7 +86,7 @@ export type BotRegistration = {
   registeredAt: Instant;
   initialName: string;
   initialDescription?: string;
-  sheep: SheepRecipe;
+  avatar: AvatarAppearance;
   createdBy?: BotWriter;
 };
 export type BotDirectory = {
@@ -129,7 +127,7 @@ export type BotCreateCommand = {
   botId: BotId;
   name: string;
   description?: string;
-  sheep?: SheepRecipe;
+  avatar?: AvatarAppearance;
 };
 export type BotLifecycleReceipt = {
   schemaVersion: 1;
@@ -139,19 +137,19 @@ export type BotLifecycleReceipt = {
   lifecycle: BotLifecycle;
   failure?: string;
 };
-export type SheepIdentity = {
+export type AvatarIdentity = {
   schemaVersion: 1;
   botId: BotId;
   revision: number;
-  sheep: SheepRecipe;
+  avatar: AvatarAppearance;
 };
-export type BotSheepCommand = {
+export type BotAvatarCommand = {
   schemaVersion: 1;
-  type: "bot/update-sheep";
+  type: "bot/update-avatar";
   commandId: Identifier;
   expectedRevision: number;
   botId: BotId;
-  sheep: SheepRecipe;
+  avatar: AvatarAppearance;
 };
 export type FlockReceipt = {
   schemaVersion: 1;
@@ -861,7 +859,7 @@ export interface ProtocolTypes {
   AuthExchangeCommand: AuthExchangeCommand;
   AuthSessionView: AuthSessionView;
   SessionRevokeCommand: SessionRevokeCommand;
-  SheepRecipe: SheepRecipe;
+  AvatarAppearance: AvatarAppearance;
   BotRegistration: BotRegistration;
   BotDirectory: BotDirectory;
   BotLifecycle: BotLifecycle;
@@ -870,8 +868,8 @@ export interface ProtocolTypes {
   BotAppletImpact: BotAppletImpact;
   BotCreateCommand: BotCreateCommand;
   BotLifecycleReceipt: BotLifecycleReceipt;
-  SheepIdentity: SheepIdentity;
-  BotSheepCommand: BotSheepCommand;
+  AvatarIdentity: AvatarIdentity;
+  BotAvatarCommand: BotAvatarCommand;
   FlockReceipt: FlockReceipt;
   SkillRef: SkillRef;
   TurnCommand: TurnCommand;

@@ -234,7 +234,14 @@ export type VoiceAssistantServerMessageV1 =
       deliveryId: string;
       botName: string;
     }
-  | { schemaVersion: 1; type: "voice/answer-end"; deliveryId: string };
+  | { schemaVersion: 1; type: "voice/answer-end"; deliveryId: string }
+  | {
+      schemaVersion: 1;
+      type: "voice/delegation";
+      botId: string;
+      botName: string;
+      state: "asked" | "answering" | "finished";
+    };
 
 /** `voice/answer` delivery ids and the ack that names them are bounded. */
 export const VOICE_ASSISTANT_DELIVERY_ID_MAX_V1 = 200;
@@ -380,6 +387,27 @@ export function decodeVoiceAssistantServerFrameV1(
                   : "",
             }
           : { schemaVersion: 1, type: "voice/answer-end", deliveryId },
+    };
+  }
+  if (type === "voice/delegation") {
+    if (
+      typeof value.botId !== "string" ||
+      typeof value.botName !== "string" ||
+      (value.state !== "asked" &&
+        value.state !== "answering" &&
+        value.state !== "finished")
+    ) {
+      return undefined;
+    }
+    return {
+      kind: "custom",
+      message: {
+        schemaVersion: 1,
+        type: "voice/delegation",
+        botId: value.botId,
+        botName: value.botName,
+        state: value.state,
+      },
     };
   }
   switch (type) {

@@ -159,7 +159,7 @@ describe("exporting a Bot as a shareable template", () => {
     expect(template.skills[0]!.body).toBe(SKILL_BODY);
     expect(template.routines[0]!.prompt).toBe(ROUTINE_PROMPT);
     expect(template.routines[0]!.triggerKind).toBe("webhook");
-    expect(template.profile.avatar.kind).toBe("sheep");
+    expect(template.profile.avatar.kind).toBe("avatar");
 
     // Nothing else travelled.
     expect(document).not.toContain("connectionId");

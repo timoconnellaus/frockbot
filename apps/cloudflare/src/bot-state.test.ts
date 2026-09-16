@@ -5,7 +5,7 @@ import {
 } from "@frockbot/core/connection";
 import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
-import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
+import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
 import { memoryUserCompositionV1 } from "@frockbot/app/composition/user.fixture";
 import type { BotStateEnv } from "./bot-state.js";
 import { hydrateStoredRunEventsV1 } from "../test/session-log-probe.js";
@@ -179,7 +179,7 @@ describe("BotState Ollama execution", () => {
           botId: "primary",
           registeredAt: "2026-08-30T00:00:00.000Z",
           initialName: "Ollama Bot",
-          sheep: randomSheepRecipeV1(() => 0),
+          avatar: randomAvatarAppearanceV1(() => 0),
         }),
       readConfiguration: () => Promise.resolve(structuredClone(user)),
       listBots: () =>
@@ -383,7 +383,7 @@ describe("BotState mount failures", () => {
               botId: "primary",
               registeredAt: "2026-08-30T00:00:00.000Z",
               initialName: "Bot",
-              sheep: randomSheepRecipeV1(() => 0),
+              avatar: randomAvatarAppearanceV1(() => 0),
             }),
           listMemoryProjects: () => Promise.resolve([]),
           currentWorkspaceGeneration: () => Promise.resolve(undefined),
@@ -402,13 +402,13 @@ describe("BotState mount failures", () => {
     );
     const identity = { schemaVersion: 1, userId: "user-1", botId: "primary" };
 
-    await expect(state.readSheep(identity)).rejects.toThrow(
+    await expect(state.readAvatar(identity)).rejects.toThrow(
       "transient mount failure",
     );
     // The object is not dead. Before this, every later call — the recovery
     // alarm included — awaited the same rejected promise, so one transient
     // failure inside the mount held the Bot until it was evicted.
-    await expect(state.readSheep(identity)).resolves.toBeDefined();
+    await expect(state.readAvatar(identity)).resolves.toBeDefined();
     expect(attempts).toBe(2);
   });
 

@@ -40,7 +40,7 @@ export const MAX_TEMPLATE_SKILL_BODY_BYTES_V1 = 16_384;
 export const MAX_TEMPLATE_ROUTINE_PROMPT_BYTES_V1 = 8_000;
 
 /**
- * The generated sheep avatar, structurally.
+ * The generated avatar avatar, structurally.
  *
  * Declared here rather than imported from `plugin-flock` so this package keeps
  * its promise of no runtime dependency: a template travels between deployments,
@@ -49,20 +49,18 @@ export const MAX_TEMPLATE_ROUTINE_PROMPT_BYTES_V1 = 8_000;
  * that knows which ids exist, and it is what an importing deployment runs
  * before it materializes a Bot.
  */
-export interface TemplateSheepRecipeV1 {
+export interface TemplateAvatarAppearanceV1 {
   schemaVersion: 1;
-  background: string;
-  upper: string;
-  middle: string;
-  lower: string;
+  characterId: string;
+  primary: string;
 }
 
-/** The profile a template carries. Its avatar is the Bot's sheep recipe (D1). */
+/** The profile a template carries. Its avatar is the Bot's avatar recipe (D1). */
 export interface TemplateProfileV1 {
   name: string;
   title?: string;
   description?: string;
-  avatar: { kind: "sheep"; recipe: TemplateSheepRecipeV1 };
+  avatar: { kind: "avatar"; recipe: TemplateAvatarAppearanceV1 };
 }
 
 /** One own-root Skill, body verbatim. Managed and plugin Skills never appear. */
@@ -252,25 +250,21 @@ export function decodeTemplateContentHashV1(
   return pattern(value, label, HASH_PATTERN, 64);
 }
 
-export function decodeTemplateSheepRecipeV1(
+export function decodeTemplateAvatarAppearanceV1(
   value: unknown,
-): TemplateSheepRecipeV1 {
-  const recipe = exactRecord(value, "template sheep", [
+): TemplateAvatarAppearanceV1 {
+  const recipe = exactRecord(value, "template avatar", [
     "schemaVersion",
-    "background",
-    "upper",
-    "middle",
-    "lower",
+    "characterId",
+    "primary",
   ]);
   if (recipe.schemaVersion !== 1) {
-    throw new TemplateDecodeError("template sheep schema version is invalid");
+    throw new TemplateDecodeError("template avatar schema version is invalid");
   }
   return {
     schemaVersion: 1,
-    background: text(recipe.background, "template sheep background", 128),
-    upper: text(recipe.upper, "template sheep upper", 128),
-    middle: text(recipe.middle, "template sheep middle", 128),
-    lower: text(recipe.lower, "template sheep lower", 128),
+    characterId: text(recipe.characterId, "template avatar character", 128),
+    primary: text(recipe.primary, "template avatar primary colour", 7),
   };
 }
 
@@ -285,17 +279,17 @@ function decodeTemplateProfileV1(value: unknown): TemplateProfileV1 {
     "kind",
     "recipe",
   ]);
-  if (avatar.kind !== "sheep") {
-    // Sheep recipes are the only Bot avatar. A template claiming another kind
+  if (avatar.kind !== "avatar") {
+    // Avatar recipes are the only Bot avatar. A template claiming another kind
     // is refused rather than silently downgraded.
-    throw new TemplateDecodeError("template avatar must be a sheep recipe");
+    throw new TemplateDecodeError("template avatar must be a avatar recipe");
   }
   return withOptional(
     {
       name: text(profile.name, "template profile name", 100),
       avatar: {
-        kind: "sheep" as const,
-        recipe: decodeTemplateSheepRecipeV1(avatar.recipe),
+        kind: "avatar" as const,
+        recipe: decodeTemplateAvatarAppearanceV1(avatar.recipe),
       },
     },
     {
@@ -466,13 +460,11 @@ export function canonicalBotTemplateDocumentV1(
         ? {}
         : { description: decoded.profile.description }),
       avatar: {
-        kind: "sheep",
+        kind: "avatar",
         recipe: {
           schemaVersion: 1,
-          background: decoded.profile.avatar.recipe.background,
-          upper: decoded.profile.avatar.recipe.upper,
-          middle: decoded.profile.avatar.recipe.middle,
-          lower: decoded.profile.avatar.recipe.lower,
+          characterId: decoded.profile.avatar.recipe.characterId,
+          primary: decoded.profile.avatar.recipe.primary,
         },
       },
     },

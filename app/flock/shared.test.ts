@@ -9,23 +9,22 @@ import {
   decodeBotRegistrationV1,
   decodeCreateBotCommandV1,
   decodeDirectoryViewV1,
-  decodeSheepRecipeV1,
+  decodeAvatarAppearanceV1,
   lifecycleTargetStatusV1,
   migrateStoredBotDirectoryV1,
-  randomSheepRecipeV1,
-  sheepCatalog,
-  sheepLayerIds,
+  randomAvatarAppearanceV1,
+  avatarCatalog,
 } from "./shared.js";
 
 describe("Flock v1 contracts", () => {
   test("rejects unknown fields and catalog IDs", () => {
-    const sheep = randomSheepRecipeV1(() => 0);
-    expect(() => decodeSheepRecipeV1({ ...sheep, surprise: true })).toThrow(
-      "unknown or missing field",
-    );
-    expect(() => decodeSheepRecipeV1({ ...sheep, upper: "not-a-hat" })).toThrow(
-      "unknown catalog item",
-    );
+    const avatar = randomAvatarAppearanceV1(() => 0);
+    expect(() =>
+      decodeAvatarAppearanceV1({ ...avatar, surprise: true }),
+    ).toThrow("unknown or missing field");
+    expect(() =>
+      decodeAvatarAppearanceV1({ ...avatar, characterId: "not-a-character" }),
+    ).toThrow("avatar appearance is invalid");
     expect(() =>
       decodeCreateBotCommandV1({
         schemaVersion: 1,
@@ -34,7 +33,7 @@ describe("Flock v1 contracts", () => {
         expectedRevision: 0,
         botId: "alpha",
         name: "Alpha",
-        sheep,
+        avatar,
         extra: true,
       }),
     ).toThrow("unknown or missing field");
@@ -122,7 +121,7 @@ describe("Flock v1 contracts", () => {
   });
 
   test("rejects retired model seed fields", () => {
-    const sheep = randomSheepRecipeV1(() => 0);
+    const avatar = randomAvatarAppearanceV1(() => 0);
     expect(() =>
       decodeDirectoryViewV1({
         schemaVersion: 1,
@@ -137,7 +136,7 @@ describe("Flock v1 contracts", () => {
               connectionId: "connection-1",
               providerModelId: "model-1",
             },
-            sheep,
+            avatar,
           },
         ],
       }),
@@ -155,13 +154,13 @@ describe("Flock v1 contracts", () => {
   });
 
   test("exactly decodes versioned registration and membership DTOs", () => {
-    const sheep = randomSheepRecipeV1(() => 0);
+    const avatar = randomAvatarAppearanceV1(() => 0);
     const registration = {
       schemaVersion: 1 as const,
       botId: "alpha",
       registeredAt: new Date(0).toISOString(),
       initialName: "Alpha",
-      sheep,
+      avatar,
     };
     expect(decodeBotRegistrationV1(registration)).toEqual(registration);
     expect(
@@ -186,18 +185,15 @@ describe("Flock v1 contracts", () => {
     ).toThrow("botId is invalid");
   });
 
-  test("random recipes are legal and compose complete ancestor paths", () => {
+  test("random appearances are legal and use the approved catalogue", () => {
     for (let index = 0; index < 100; index += 1) {
-      const recipe = randomSheepRecipeV1(() => index / 100);
-      expect(decodeSheepRecipeV1(recipe)).toEqual(recipe);
-      const layers = sheepLayerIds(recipe);
-      expect(layers[0]).toBe(`background-${recipe.background}`);
-      expect(layers[1]).toBe("canonical");
+      const appearance = randomAvatarAppearanceV1(() => index / 100);
+      expect(decodeAvatarAppearanceV1(appearance)).toEqual(appearance);
+      expect(
+        (Object.values(avatarCatalog) as string[]).includes(appearance.primary),
+      ).toBe(true);
     }
-    expect(sheepCatalog.trees.upper).toHaveLength(24);
-    expect(sheepCatalog.trees.middle).toHaveLength(14);
-    expect(sheepCatalog.trees.lower).toHaveLength(8);
-    expect(sheepCatalog.assets).toHaveLength(50);
+    expect(Object.keys(avatarCatalog)).toHaveLength(11);
   });
 
   test("decodes the live Bot identity directory exactly", () => {
@@ -260,7 +256,7 @@ describe("Flock v1 contracts", () => {
 });
 
 describe("stored Bot directory migration", () => {
-  const sheep = randomSheepRecipeV1(() => 0);
+  const avatar = randomAvatarAppearanceV1(() => 0);
   const legacyBot = () => ({
     schemaVersion: 1,
     botId: "alpha",
@@ -278,7 +274,7 @@ describe("stored Bot directory migration", () => {
       generation: "generation-1",
     },
     initialAssignments: [],
-    sheep,
+    avatar,
   });
 
   test("drops the retired model and Assignment seed fields", () => {
@@ -313,7 +309,7 @@ describe("stored Bot directory migration", () => {
           botId: "alpha",
           registeredAt: "2026-08-29T00:00:00.000Z",
           initialName: "Alpha",
-          sheep,
+          avatar,
         },
       ],
     };

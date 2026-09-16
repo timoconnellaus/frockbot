@@ -63,17 +63,10 @@ void main() {
         isFalse,
       );
       expect(
-        sendReady(
-          connection: 'ready',
-          modelReady: false,
-          activeBotId: 'scout',
-        ),
+        sendReady(connection: 'ready', modelReady: false, activeBotId: 'scout'),
         isFalse,
       );
-      expect(
-        sendReady(connection: 'ready', modelReady: true),
-        isFalse,
-      );
+      expect(sendReady(connection: 'ready', modelReady: true), isFalse);
     });
 
     test('an empty or oversized draft is not sendable', () {

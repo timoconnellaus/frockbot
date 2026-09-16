@@ -1,6 +1,6 @@
 import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { expect, test } from "vitest";
-import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
+import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
 import {
   asUser,
   botStateStubV1,
@@ -106,7 +106,7 @@ test("legacy nonempty account keeps its registrations and never gains General", 
         botId: "existing-bot",
         registeredAt: "2026-09-01T00:00:00.000Z",
         initialName: "General",
-        sheep: randomSheepRecipeV1(() => 0),
+        avatar: randomAvatarAppearanceV1(() => 0),
       },
     ],
   };

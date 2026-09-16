@@ -4,7 +4,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
+import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
 
 interface UserRpc {
   readConfiguration(input: unknown): Promise<{ revision: number }>;
@@ -217,7 +217,7 @@ describe("General in Workerd", () => {
             botId: "existing-bot",
             registeredAt: "2026-09-01T00:00:00.000Z",
             initialName: "General",
-            sheep: randomSheepRecipeV1(() => 0),
+            avatar: randomAvatarAppearanceV1(() => 0),
           },
         ],
       });

@@ -77,12 +77,10 @@ class MemoryBlobs implements TemplateBlobStoreV1 {
   }
 }
 
-const sheep = {
+const avatar = {
   schemaVersion: 1 as const,
-  background: "meadow",
-  upper: "wool",
-  middle: "scarf",
-  lower: "boots",
+  characterId: "pixel",
+  primary: "#fc85ae",
 };
 
 function botSettings(): BotSettingsViewV1 {
@@ -98,7 +96,7 @@ function botSettings(): BotSettingsViewV1 {
 
 const bots: TemplateBotReaderV1 = {
   readSettings: () => Promise.resolve(botSettings()),
-  readSheep: () => Promise.resolve(sheep),
+  readAvatar: () => Promise.resolve(avatar),
   readSkills: () =>
     Promise.resolve([
       {

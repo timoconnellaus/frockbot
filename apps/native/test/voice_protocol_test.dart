@@ -213,6 +213,17 @@ void main() {
       })!;
       expect(state.upstream, VoiceUpstreamStateV1.asleep);
       expect(state.muted, isTrue);
+
+      final delegation = round<AssistantDelegationV1>({
+        'type': 'voice/delegation',
+        'schemaVersion': 1,
+        'botId': 'researcher',
+        'botName': 'Scout',
+        'state': 'answering',
+      })!;
+      expect(delegation.botId, 'researcher');
+      expect(delegation.botName, 'Scout');
+      expect(delegation.state, VoiceDelegationStateV1.answering);
     });
 
     test('what it ignores, rather than ending a call over', () {
@@ -224,6 +235,7 @@ void main() {
         '{"type":"status","status":"pondering"}',
         '{"type":"voice/refusal","code":"sideways","message":"?"}',
         '{"type":"voice/state","upstream":"dreaming","muted":false}',
+        '{"type":"voice/delegation","schemaVersion":1,"botId":"researcher","botName":"Scout","state":"dancing"}',
         '{}',
       ]) {
         expect(decodeAssistantServerFrameV1(frame), isNull, reason: frame);

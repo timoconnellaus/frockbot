@@ -49,3 +49,9 @@ python3 output/flock-svg-rig/scripts/check_metrics.py
 The final method clusters foreground colours deterministically, forms overlapping cumulative colour masks, removes isolated boundary noise, and fits cubic Bézier paths with Potrace. A separately fitted silhouette clips all layers. This avoids pinholes between independently traced colour regions.
 
 The VTracer experiments are retained for provenance but are not needed to reproduce the final SVGs.
+
+## Anatomical split
+
+The static parts inspector is at [parts.html](parts.html). The current split uses seven complete pieces per sheep: two eyes, two ears, two feet and one continuous fur/body. It includes a gallery of every isolated piece and individual SVG downloads. Split SVGs and pivot manifests live in `parts/`. See [the split notes](parts/README.md) for the part list, validation and review scope. The unsplit masters above remain the checkpoint reference.
+
+The [concept-to-seven-parts procedure](../../docs/design/mascot-art-workflow.md) covers reference preparation, smooth tracing, anatomical ownership, clean body outlines, buried leg shafts, static overlap checks and final delivery.

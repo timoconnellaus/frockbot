@@ -13,12 +13,10 @@ import {
   type TemplateImportPlanInputV1,
 } from "./import.ts";
 
-const sheep = {
+const avatar = {
   schemaVersion: 1 as const,
-  background: "meadow",
-  upper: "wool",
-  middle: "scarf",
-  lower: "boots",
+  characterId: "pixel",
+  primary: "#fc85ae",
 };
 
 function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
@@ -27,7 +25,7 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
     profile: {
       name: "Budget",
       description: "Watches the ledger.",
-      avatar: { kind: "sheep", recipe: sheep },
+      avatar: { kind: "avatar", recipe: avatar },
     },
     skills: [{ slug: "reconcile", name: "Reconcile", body: "# Reconcile" }],
     routines: [

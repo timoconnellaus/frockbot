@@ -68,11 +68,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     try {
       final response = await widget.api.request(
         kind == 'portal' ? '/api/billing/portal' : '/api/billing/checkout',
-        body: {
-          'id': id,
-          if (kind != 'portal') 'kind': kind,
-          'cents': ?cents,
-        },
+        body: {'id': id, if (kind != 'portal') 'kind': kind, 'cents': ?cents},
       );
       if (response is! Map || response['url'] is! String) {
         throw const FormatException('Payment link is unavailable');

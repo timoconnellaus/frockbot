@@ -5,7 +5,7 @@ import {
   FlockDecodeError,
   decodeBotLifecycleCommandV1,
   decodeCreateBotCommandV1,
-  decodeUpdateSheepCommandV1,
+  decodeUpdateAvatarCommandV1,
   type BotDirectoryViewV1,
   type BotIdentityDirectoryViewV1,
   type BotLifecycleCommandV1,
@@ -14,8 +14,8 @@ import {
   type CreateBotCommandV1,
   type FlockBootstrapViewV1,
   type FlockReceiptV1,
-  type SheepIdentityViewV1,
-  type UpdateSheepCommandV1,
+  type AvatarIdentityViewV1,
+  type UpdateAvatarCommandV1,
 } from "./shared.js";
 import {
   decodeBotUnreadCommandV1,
@@ -40,11 +40,11 @@ export interface FlockGatewayHost {
     userId: string,
     command: BotLifecycleCommandV1,
   ): Promise<BotLifecycleReceiptV1>;
-  readSheep(userId: string, botId: string): Promise<SheepIdentityViewV1>;
-  updateSheep(
+  readAvatar(userId: string, botId: string): Promise<AvatarIdentityViewV1>;
+  updateAvatar(
     userId: string,
     botId: string,
-    command: UpdateSheepCommandV1,
+    command: UpdateAvatarCommandV1,
   ): Promise<FlockReceiptV1>;
   /** The live identity of every registered Bot, read through to its owner. */
   listBotIdentities(userId: string): Promise<BotIdentityDirectoryViewV1>;
@@ -171,7 +171,7 @@ export function createFlockBackendContribution(
     packageId: "flock",
     async route(request, url, context) {
       if (!context.userId) return undefined;
-      const sheep = url.pathname.match(/^\/api\/bots\/([^/]+)\/sheep$/);
+      const avatar = url.pathname.match(/^\/api\/bots\/([^/]+)\/avatar$/);
       const unread = url.pathname.match(/^\/api\/bots\/([^/]+)\/unread$/);
       const lifecycle = url.pathname.match(/^\/api\/bots\/([^/]+)\/lifecycle$/);
       if (
@@ -181,7 +181,7 @@ export function createFlockBackendContribution(
         url.pathname !== "/api/bots/identities" &&
         url.pathname !== "/api/bots/unread" &&
         url.pathname !== "/api/bots/notifications" &&
-        !sheep &&
+        !avatar &&
         !unread &&
         !lifecycle
       )
@@ -285,21 +285,21 @@ export function createFlockBackendContribution(
             status: receipt.status === "pending" ? 202 : 200,
           });
         }
-        const botId = decodePathId(sheep![1]!);
+        const botId = decodePathId(avatar![1]!);
         if (request.method === "GET")
-          return Response.json(await host.readSheep(context.userId, botId));
+          return Response.json(await host.readAvatar(context.userId, botId));
         if (request.method !== "POST")
           return Response.json(
             { error: "method not allowed" },
             { status: 405 },
           );
-        const command = decodeUpdateSheepCommandV1(await request.json());
+        const command = decodeUpdateAvatarCommandV1(await request.json());
         if (command.botId !== botId)
           throw new FlockDecodeError(
-            "sheep command does not match request path",
+            "avatar command does not match request path",
           );
         return Response.json(
-          await host.updateSheep(context.userId, botId, command),
+          await host.updateAvatar(context.userId, botId, command),
         );
       } catch (error) {
         return errorResponse(error);
