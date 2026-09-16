@@ -372,9 +372,10 @@ class ShellSidebar extends StatelessWidget {
       0,
       (total, bot) => total + _unread(_id(bot)).count,
     );
-    // A phone's rows are cards a shade darker than the ground they sit on,
-    // the way Mail and Gmail draw theirs, so the thing a thumb slides is a
-    // thing and not a stripe of the page.
+    // A phone's rows are cards a shade lighter than the ground they sit on,
+    // so the thing a thumb slides is a thing and not a stripe of the page.
+    // The ground itself is the app's page surface: the list does not get a
+    // lighter backdrop than every other screen just to frame its own rows.
     final ground = phone ? sidebarGroundColor(theme.colorScheme) : null;
     final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -711,6 +712,7 @@ class ShellSidebar extends StatelessWidget {
             held: touchDrag,
             onHeldInPlace: actions == null ? null : () => actions(),
             ghost: _DragGhost(
+              card: phone,
               name: _name(bot),
               characterId: bot.avatar.characterId,
               primary: bot.avatar.primary,
@@ -777,10 +779,14 @@ const double _dropLineHeight = 2;
 /// A row in the air: the face and the name on a raised card, narrower than
 /// the row so the list beneath it stays legible.
 class _DragGhost extends StatelessWidget {
+  /// Whether the rows this floats over are cards, a phone's. It decides
+  /// which plane the ghost has to clear to read as held in the air.
+  final bool card;
   final String name;
   final String characterId;
   final String primary;
   const _DragGhost({
+    required this.card,
     required this.name,
     required this.characterId,
     required this.primary,
@@ -796,7 +802,9 @@ class _DragGhost extends StatelessWidget {
       offset: const Offset(-24, -26),
       child: Material(
         elevation: 6,
-        color: theme.colorScheme.surfaceContainerHigh,
+        color: card
+            ? sidebarDragGhostColor(theme.colorScheme)
+            : theme.colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(10),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 8, 16, 8),
@@ -1086,15 +1094,30 @@ class _RowControl extends StatelessWidget {
   }
 }
 
-/// A phone list's ground: the surface, a shade lighter, so its rows read as
-/// cards laid on it.
-Color sidebarGroundColor(ColorScheme scheme) =>
-    Color.alphaBlend(Colors.white.withValues(alpha: 0.05), scheme.surface);
+/// A phone list's ground: the app's own page surface, unlightened. The list
+/// is a page like every other page here, so it is the rows that are told
+/// apart from it rather than the page that is told apart from the app.
+Color sidebarGroundColor(ColorScheme scheme) => scheme.surface;
 
-/// A phone list's row: the surface, a shade darker than the ground, so what
-/// a thumb slides is visibly the thing that moves.
+/// A phone list's row: the surface, a shade lighter than the ground, so what
+/// a thumb slides is visibly the thing that moves — lifted off the page the
+/// way a card is, not cut out of it.
 Color sidebarCardColor(ColorScheme scheme) =>
-    Color.alphaBlend(Colors.black.withValues(alpha: 0.2), scheme.surface);
+    Color.alphaBlend(Colors.white.withValues(alpha: 0.07), scheme.surface);
+
+/// A row picked up off a phone's list: the one plane above the card, so a
+/// dragged Bot reads as held in the air over its neighbours. It has to stay
+/// lighter than the card, or the thing in hand looks pressed into the page
+/// instead. A desk's rows are not cards but lines on the plain ground, so a
+/// ghost there is already above what it floats over at the M3 role it has
+/// always used and keeps.
+Color sidebarDragGhostColor(ColorScheme scheme) =>
+    Color.alphaBlend(Colors.white.withValues(alpha: 0.14), scheme.surface);
+
+/// What a swipe reveals under the row: the page, recessed, so the track the
+/// pill slides along reads as below it and never as another card.
+Color sidebarSwipeTrackColor(ColorScheme scheme) =>
+    Color.alphaBlend(Colors.black.withValues(alpha: 0.22), scheme.surface);
 
 /// How far, as a share of the row's width, a swipe towards the trailing edge
 /// travels before letting go marks the Bot read. Far enough that a scroll that
@@ -1304,7 +1327,7 @@ class _SwipeActionState extends State<_SwipeAction> {
         curve: Curves.easeOut,
         color: lit
             ? scheme.primary.withValues(alpha: _past ? 0.28 : 0.16)
-            : scheme.surfaceContainerHighest,
+            : sidebarSwipeTrackColor(scheme),
         child: named(
           Material(
             type: MaterialType.transparency,
@@ -1371,7 +1394,7 @@ class _BotRow extends StatefulWidget {
   /// rather than as text.
   final String identifier;
 
-  /// Whether the row is a card on a lighter ground, a phone's, or a line in
+  /// Whether the row is a card lifted off the page, a phone's, or a line in
   /// a column, a desktop's.
   final bool card;
   final bool selected;
