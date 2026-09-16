@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  describeVoiceAgeV1,
   parseChatCompletionStreamV1,
+  renderVoiceDelegationLeadInV1,
+  renderVoiceDelegationPromptV1,
   renderVoiceSystemPromptV1,
   runVoiceTurnV1,
   VOICE_ANSWER_MAX_CHARS_V1,
@@ -703,7 +706,14 @@ describe("the system prompt", () => {
         },
       ],
       memory: { user: tier(facts), logDays: 30 },
-      unspoken: [{ botName: "Remy", text: "Your week is planned." }],
+      unspoken: [
+        {
+          botName: "Remy",
+          question: "plan my week",
+          text: "Your week is planned.",
+          askedAt: new Date(now.getTime() - 3 * 60_000),
+        },
+      ],
       now,
     });
     expect(prompt).toContain("- remy: Remy &lt;x&gt; — planner (working)");
@@ -712,8 +722,61 @@ describe("the system prompt", () => {
     expect(prompt.match(/Recent \d+/g)).toHaveLength(
       VOICE_PROMPT_MAX_LOG_FACTS_V1,
     );
-    expect(prompt).toContain("Your week is planned.");
+    // An unheard answer is placed under its own request and age, and the
+    // assistant is told it is read out separately: on the call where this
+    // went wrong, "mention them first" had the assistant answer a new question
+    // with an hour-old answer to a different one.
+    expect(prompt).toContain(
+      '- Remy, asked 3 minutes ago about "plan my week": Your week is planned.',
+    );
+    expect(prompt).toContain(
+      "never present one as the answer to what the person asks now",
+    );
+    expect(prompt).not.toContain("Mention them first");
     expect(prompt).toContain("2026-09-10");
+  });
+
+  test("an answer heard on a later call is placed by its request and its age", () => {
+    const askedAt = new Date("2026-09-16T12:18:00.000Z");
+    const result = { botName: "Bob", question: "the weather today", askedAt };
+    expect(
+      renderVoiceDelegationLeadInV1(
+        result,
+        new Date("2026-09-16T13:32:00.000Z"),
+      ),
+    ).toBe(
+      "Earlier, about an hour ago, you asked Bob about the weather today. ",
+    );
+    expect(
+      renderVoiceDelegationLeadInV1(
+        result,
+        new Date("2026-09-16T12:23:00.000Z"),
+      ),
+    ).toBe("Earlier, 5 minutes ago, you asked Bob about the weather today. ");
+
+    const at = (minutes: number) =>
+      new Date(askedAt.getTime() + minutes * 60_000);
+    expect(describeVoiceAgeV1(askedAt, at(0))).toBe("a moment ago");
+    expect(describeVoiceAgeV1(askedAt, at(1))).toBe("a moment ago");
+    expect(describeVoiceAgeV1(askedAt, at(2))).toBe("2 minutes ago");
+    expect(describeVoiceAgeV1(askedAt, at(59))).toBe("59 minutes ago");
+    expect(describeVoiceAgeV1(askedAt, at(80))).toBe("about an hour ago");
+    expect(describeVoiceAgeV1(askedAt, at(23 * 60))).toBe("about 23 hours ago");
+    // A clock that runs behind the ledger is not a negative age.
+    expect(describeVoiceAgeV1(askedAt, at(-5))).toBe("a moment ago");
+
+    // The composer is told the same age, in the same words.
+    const prompt = renderVoiceDelegationPromptV1(
+      { ...result, answer: "Sunny." },
+      at(80),
+    );
+    expect(prompt.system).toContain(
+      "This was asked about an hour ago, so open by placing it",
+    );
+    expect(
+      renderVoiceDelegationPromptV1({ ...result, answer: "Sunny." }, at(1))
+        .system,
+    ).toContain("asked a moment ago");
   });
 
   test("says when memory could not be read rather than pretending it is empty", () => {

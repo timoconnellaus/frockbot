@@ -1653,6 +1653,17 @@ describe("the voice session object", () => {
     const next = await open(userId);
     const speaker = playsAnswers(next);
     await startCall(next);
+    // The sentence was composed for the call the question was asked on, so on
+    // this one it is placed first: the person hears which request this
+    // answers and that it is not an answer to anything they just said.
+    await next.waitFor(
+      (f) =>
+        f.type === "transcript_end" &&
+        String(f.text).startsWith(
+          "Earlier, a moment ago, you asked Workerd Bot about is the launch ready. ",
+        ),
+      "the cached answer placed under its request",
+    );
     const heard = await eventually(
       async () =>
         (await stub.probeStorage("voice:delegation:"))[

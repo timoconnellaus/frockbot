@@ -30,6 +30,7 @@ import { ElevenLabsSTT, ElevenLabsTTS } from "@cloudflare/voice-elevenlabs";
 import {
   composeVoiceDelegationSpeechV1,
   parseChatCompletionStreamV1,
+  renderVoiceDelegationLeadInV1,
   renderVoiceDelegationReadOutV1,
   renderVoiceSystemPromptV1,
   pickVoiceBridgeV1,
@@ -2394,6 +2395,7 @@ export class VoiceAssistant extends VoiceAgentBase<
   private async delegationSpeech(
     ledger: VoiceLedgerV1,
     delegation: VoiceDelegationRecordV1,
+    call: LiveCall,
   ): Promise<string> {
     const result = {
       botName: delegation.botName,
@@ -2406,7 +2408,16 @@ export class VoiceAssistant extends VoiceAgentBase<
       delegation.runId,
       this.now(),
     );
-    if (admission.status === "cached") return admission.speech;
+    if (admission.status === "cached") {
+      // The sentence was composed when the answer settled, for the call the
+      // question was asked on, and says so ("a moment ago"). Heard on a later
+      // call it would land as an answer to whatever was just said, so on any
+      // other call it is placed first. A sentence composed fresh on this call
+      // already places itself: the prompt knows how long ago it was asked.
+      return delegation.callId === call.callId
+        ? admission.speech
+        : renderVoiceDelegationLeadInV1(result, this.now()) + admission.speech;
+    }
     if (admission.status === "refused") {
       return renderVoiceDelegationReadOutV1(result);
     }
@@ -2470,7 +2481,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       // call that can take seconds and the call is free to change under it.
       // Nothing durable about the read-out is written until after it.
       generation = call.speechGeneration;
-      const text = await this.delegationSpeech(ledger, delegation);
+      const text = await this.delegationSpeech(ledger, delegation, call);
       // The call as it is *now*. A new utterance, a reply that started, or a
       // socket that went, all happened while the sentence was being written,
       // and speaking into any of them would cut off the person's own turn or
@@ -2919,7 +2930,9 @@ export class VoiceAssistant extends VoiceAgentBase<
       },
       unspoken: unspoken.map((delegation) => ({
         botName: delegation.botName,
+        question: delegation.text,
         text: delegation.answer ?? delegation.failure ?? "",
+        askedAt: new Date(delegation.admittedAt),
       })),
     };
   }

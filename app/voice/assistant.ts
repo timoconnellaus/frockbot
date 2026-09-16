@@ -62,8 +62,19 @@ export interface VoiceAssistantPromptInputV1 {
   memory: VoiceAssistantMemoryContextV1;
   /** What this session remembers of its own previous conversations. */
   session?: VoiceSessionMemoryContextV1;
-  /** Answers from Bots that settled while nobody was listening. */
-  unspoken: readonly { botName: string; text: string }[];
+  /**
+   * Answers from Bots that settled while nobody was listening, each with the
+   * request it answers and when that was made. The voice object reads them
+   * out itself, first thing; the prompt carries them so the assistant can
+   * answer "what did Bob say?" and can tell an old answer from the question
+   * being asked now — never so it repeats them.
+   */
+  unspoken: readonly {
+    botName: string;
+    question: string;
+    text: string;
+    askedAt: Date;
+  }[];
   now: Date;
   timezone?: string;
 }
@@ -266,11 +277,11 @@ export function renderVoiceSystemPromptV1(
   if (input.unspoken.length > 0) {
     lines.push("<answers>");
     lines.push(
-      "These Bot answers arrived while the person was away. Mention them first, briefly:",
+      "Bot answers to earlier requests that the person has not heard yet. They are read out to the person separately, so do not repeat them unprompted, and never present one as the answer to what the person asks now. If the person asks what a Bot said, this is it:",
     );
     for (const answer of input.unspoken.slice(0, 5)) {
       lines.push(
-        `- ${escapeTag(clip(answer.botName, 60))}: ${escapeTag(clip(answer.text, 400))}`,
+        `- ${escapeTag(clip(answer.botName, 60))}, asked ${describeVoiceAgeV1(answer.askedAt, input.now)} about "${escapeTag(clip(answer.question, 120))}": ${escapeTag(clip(answer.text, 400))}`,
       );
     }
     lines.push("</answers>");
@@ -305,6 +316,35 @@ export const VOICE_RESULT_QUESTION_CHARS_V1 = 400;
 export const VOICE_RESULT_ANSWER_CHARS_V1 = 2_000;
 
 /**
+ * How long ago something was asked, in the words a person would use aloud.
+ * Under two minutes is "a moment ago"; the person still has it in mind.
+ */
+export function describeVoiceAgeV1(askedAt: Date, now: Date): string {
+  const waited = Math.max(0, now.getTime() - askedAt.getTime());
+  const minutes = Math.round(waited / 60_000);
+  if (minutes < 2) return "a moment ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  return hours === 1 ? "about an hour ago" : `about ${hours} hours ago`;
+}
+
+/**
+ * The sentence that places an answer composed in an earlier call.
+ *
+ * A read-out sentence is composed once, when the answer settles, and says
+ * "a moment ago" things — the person had just asked. When that sentence is
+ * finally heard on a later call, an hour on, it lands as if it answered
+ * whatever was just said. This lead-in, spoken before it, names the request
+ * and how long ago it was made, so the person hears an old answer as one.
+ */
+export function renderVoiceDelegationLeadInV1(
+  result: Pick<VoiceDelegationResultV1, "botName" | "question" | "askedAt">,
+  now: Date,
+): string {
+  return `Earlier, ${describeVoiceAgeV1(result.askedAt, now)}, you asked ${result.botName} about ${clip(result.question, 120)}. `;
+}
+
+/**
  * The plain read-out: the Bot's own words under the question they answer.
  *
  * This is what the person hears when the model cannot be reached, so it has to
@@ -331,8 +371,7 @@ export function renderVoiceDelegationPromptV1(
   result: VoiceDelegationResultV1,
   now: Date,
 ): { system: string; user: string } {
-  const waited = Math.max(0, now.getTime() - result.askedAt.getTime());
-  const minutes = Math.round(waited / 60_000);
+  const age = describeVoiceAgeV1(result.askedAt, now);
   return {
     system: [
       VOICE_RESULT_PROMPT_MARKER_V1,
@@ -342,9 +381,9 @@ export function renderVoiceDelegationPromptV1(
       "- Say who answered, then the answer, in one to three short spoken sentences. No markdown, no lists, no code.",
       "- The answer below is the Bot's, about the question below and nothing else. Do not add facts, do not guess at what it meant, and do not answer the question yourself.",
       "- If the Bot could not finish, say so plainly and say what it said went wrong.",
-      minutes >= 2
-        ? `- This was asked about ${minutes} minutes ago, so open by placing it: name what it was about.`
-        : "- This was asked a moment ago, so the person still has it in mind; do not restate the whole question.",
+      age === "a moment ago"
+        ? "- This was asked a moment ago, so the person still has it in mind; do not restate the whole question."
+        : `- This was asked ${age}, so open by placing it: name what it was about.`,
     ].join("\n"),
     user: [
       `Bot: ${clip(result.botName, 60)}`,

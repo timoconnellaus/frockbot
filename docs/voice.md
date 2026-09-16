@@ -503,7 +503,15 @@ for playback retries. An admitted composition whose result was lost is
 abandoned rather than paid for again; a composition that has not answered
 within eight seconds is dropped and a correlated plain read-out supplies the
 fallback. The answer remains `settled` until the correct client playback
-acknowledgment changes it to `spoken`.
+acknowledgment changes it to `spoken`. The composed sentence is written for
+the call the question was asked on ("a moment ago"), so when the cached
+sentence is finally heard on a **later** call it is preceded by a plain
+lead-in naming the request and its age — "Earlier, about an hour ago, you
+asked Bob about the weather." — and the prompt's `<answers>` block carries
+each unheard answer under its request and age with the instruction that it
+is read out separately and is never the answer to what is being asked now.
+Without both, an answer that settled after one call ended was heard at the
+start of the next as if it answered the question just asked.
 
 Conversation context is bounded and **call-scoped**: the prompt carries the
 newest 12 messages of _this call_, built from the ledger's own `turn:` records
