@@ -210,6 +210,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// take the column away at another.
   bool panelCollapsed = false;
 
+  /// Whether the run on screen borrowed a collapsed panel column. Opening a
+  /// run un-collapses the column so the run is visible; closing the run gives
+  /// the column back the way the person left it instead of leaving a panel
+  /// they had put away on screen. Any newer choice of theirs clears this.
+  bool runBorrowedPanel = false;
+
   /// Which right-panel entry is on. The region holds two — the Bot's settings
   /// and its Routines — and shows one, because a column is a place to read one
   /// thing rather than a stack of everything a feature registered.
@@ -762,7 +768,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (switching) appletsMode = false;
       if (switching) selectedConnection = ConnectionState.initializing;
       conversationOpen = true;
-      openRun = null;
+      _leaveRun();
       panelOpen = false;
     });
     _adoptBotPanels(botId);
@@ -1089,7 +1095,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     push.reading(null);
     setState(() {
       conversationOpen = false;
-      openRun = null;
+      _leaveRun();
       panelOpen = false;
     });
   }
@@ -1101,9 +1107,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     setState(() {
+      if (panelCollapsed) runBorrowedPanel = true;
       openRun = line;
       panelOpen = true;
+      // Opening a run is a request to see it: a collapsed panel column would
+      // otherwise swallow the run view and leave the tap with no answer.
+      panelCollapsed = false;
     });
+  }
+
+  /// Leaving the run on screen, by whichever way out: the column goes back
+  /// the way the person left it if the run had borrowed it from them.
+  void _leaveRun() {
+    openRun = null;
+    if (runBorrowedPanel) panelCollapsed = true;
+    runBorrowedPanel = false;
   }
 
   Widget? _rightPanel() {
@@ -1112,7 +1130,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return RunView(
         line: line,
         onClose: () => setState(() {
-          openRun = null;
+          _leaveRun();
           panelOpen = false;
         }),
       );
@@ -1191,6 +1209,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     setState(() {
       openRun = null;
+      runBorrowedPanel = false;
       panelKey = key;
       panelOpen = true;
       panelCollapsed = false;
@@ -1203,6 +1222,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final triple =
         shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.triple;
     setState(() {
+      runBorrowedPanel = false;
       if (triple) {
         panelCollapsed = !panelCollapsed;
       } else {
@@ -1712,6 +1732,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       selectedConnection = ConnectionState.initializing;
       workingRunId = null;
       openRun = null;
+      runBorrowedPanel = false;
       conversationOpen = false;
       panelOpen = false;
       panelCollapsed = true;
