@@ -1,17 +1,19 @@
 // A workerd boot, bounded.
 //
 // Each build spawns its own workerd through Miniflare, and a spawn
-// occasionally never reports ready (a bun+workerd spawn race, roughly one
-// boot in fifty). A build that awaited `ready` unbounded would hang to the
-// test's timeout, or hang the build container's request. So a boot is given
-// a deadline, a boot that misses it is let go of rather than waited on, and
-// the caller tries once more before answering with the deadline as its
-// diagnostic.
+// occasionally never comes up (a bun+workerd spawn race, roughly one boot in
+// fifty): it either never reports ready, or it fails outright and leaves the
+// runtime's stdio socket with nothing to connect to. A build that awaited
+// `ready` unbounded would hang to the test's timeout, or hang the build
+// container's request. So a boot is given a deadline, a boot that misses it
+// is let go of rather than waited on, both shapes are named
+// `RuntimeDidNotStart`, and the caller tries once more before answering with
+// that as its diagnostic.
 
 /** How long a workerd boot is given before the build gives up on it. */
 export const BOOT_DEADLINE_MS = 30_000;
 
-/** A workerd that never reported ready; the boot, not the code, failed. */
+/** A workerd that never came up; the boot, not the code, failed. */
 export class RuntimeDidNotStart extends Error {}
 
 /**
@@ -30,7 +32,10 @@ function spawnFailed(error: unknown): boolean {
   );
 }
 
-/** `ready`, or a `RuntimeDidNotStart` when it has not settled in time. */
+/**
+ * `ready`, or a `RuntimeDidNotStart` when the runtime never came up — either
+ * because `ready` did not settle in time or because the spawn failed.
+ */
 export async function bootedWithin<T>(ready: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {

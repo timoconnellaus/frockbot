@@ -57,7 +57,7 @@ custom user driver that shows nothing itself and reports to Flutter over
   released app, which would then never see an update.
 - **Symbols.** The archive build strips the executable. Rive Native is a
   static library whose C entry points Dart looks up by name at runtime, so
-  `macos/Runner/Configs/Release.xcconfig` keeps global symbols
+  `apps/native/macos/Runner/Configs/Release.xcconfig` keeps global symbols
   (`STRIP_STYLE = non-global`) and the release job fails if `makeRenderer` is
   missing from either architecture. v0.7.87 shipped without them and every Bot
   avatar surface drew Flutter's grey error box; `flutter build` and the Dev
