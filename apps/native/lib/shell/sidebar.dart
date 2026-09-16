@@ -712,6 +712,7 @@ class ShellSidebar extends StatelessWidget {
             held: touchDrag,
             onHeldInPlace: actions == null ? null : () => actions(),
             ghost: _DragGhost(
+              card: phone,
               name: _name(bot),
               characterId: bot.avatar.characterId,
               primary: bot.avatar.primary,
@@ -778,10 +779,14 @@ const double _dropLineHeight = 2;
 /// A row in the air: the face and the name on a raised card, narrower than
 /// the row so the list beneath it stays legible.
 class _DragGhost extends StatelessWidget {
+  /// Whether the rows this floats over are cards, a phone's. It decides
+  /// which plane the ghost has to clear to read as held in the air.
+  final bool card;
   final String name;
   final String characterId;
   final String primary;
   const _DragGhost({
+    required this.card,
     required this.name,
     required this.characterId,
     required this.primary,
@@ -797,7 +802,9 @@ class _DragGhost extends StatelessWidget {
       offset: const Offset(-24, -26),
       child: Material(
         elevation: 6,
-        color: sidebarDragGhostColor(theme.colorScheme),
+        color: card
+            ? sidebarDragGhostColor(theme.colorScheme)
+            : theme.colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(10),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 8, 16, 8),
@@ -1098,9 +1105,12 @@ Color sidebarGroundColor(ColorScheme scheme) => scheme.surface;
 Color sidebarCardColor(ColorScheme scheme) =>
     Color.alphaBlend(Colors.white.withValues(alpha: 0.07), scheme.surface);
 
-/// A row picked up off the list: the one plane above the row, so a dragged
-/// Bot reads as held in the air over its neighbours. It has to stay lighter
-/// than the card, or the thing in hand looks pressed into the page instead.
+/// A row picked up off a phone's list: the one plane above the card, so a
+/// dragged Bot reads as held in the air over its neighbours. It has to stay
+/// lighter than the card, or the thing in hand looks pressed into the page
+/// instead. A desk's rows are not cards but lines on the plain ground, so a
+/// ghost there is already above what it floats over at the M3 role it has
+/// always used and keeps.
 Color sidebarDragGhostColor(ColorScheme scheme) =>
     Color.alphaBlend(Colors.white.withValues(alpha: 0.14), scheme.surface);
 
