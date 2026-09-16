@@ -861,7 +861,8 @@ jobs:
           # `macos/Runner/Configs/Release.xcconfig`; v0.7.87 shipped without them
           # and every Bot avatar surface drew Flutter's grey error box.
           for arch in arm64 x86_64; do
-            nm -gU -arch "$arch" "$app/Contents/MacOS/FrockBot" | grep -q ' _makeRenderer$' \
+            symbols="$(nm -gU -arch "$arch" "$app/Contents/MacOS/FrockBot")"
+            grep -q ' _makeRenderer$' <<< "$symbols" \
               || { echo "The $arch executable lost Rive Native's exported symbols (makeRenderer); the archive stripped them." >&2; exit 1; }
           done
           details="$(codesign --display --verbose=4 "$app" 2>&1)"
