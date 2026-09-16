@@ -168,9 +168,7 @@ describe("a batched reply through a real Bot Durable Object", () => {
     const sends = lookup.run.events.filter(
       (event) => event.type === "send/to-user",
     );
-    expect(
-      sends.map((event) => [event.ordinal, event.payload?.text]),
-    ).toEqual([
+    expect(sends.map((event) => [event.ordinal, event.payload?.text])).toEqual([
       [0, "first"],
       [1, "second"],
       [2, "third"],
@@ -185,7 +183,11 @@ describe("a batched reply through a real Bot Durable Object", () => {
     // is what the unread boundary and delivery name.
     expect(
       await bot(identity).readUnread({ schemaVersion: 1, ...identity }),
-    ).toMatchObject({ unread: true, count: 3, lastMessageId: `${runId}:send:2` });
+    ).toMatchObject({
+      unread: true,
+      count: 3,
+      lastMessageId: `${runId}:send:2`,
+    });
     expect(
       (
         await bot(identity).listNotifications({ schemaVersion: 1, ...identity })
