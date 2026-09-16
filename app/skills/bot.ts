@@ -42,7 +42,10 @@ import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { projectFirstPartyPackageIframeV1 } from "@frockbot/app/shell/composition-views";
 import { appletsEnabled } from "@frockbot/app/applets-host/bot";
-import { userAccountFeaturesV1 } from "@frockbot/app/settings/bot";
+import {
+  userAccountFeaturesV1,
+  type UserAccountFeaturesReadV1,
+} from "@frockbot/app/settings/bot";
 import type { UserFeaturesV1 } from "@frockbot/app/admin/shared";
 import {
   APPLETS_SKILL_SLUG_V1,
@@ -92,21 +95,24 @@ export interface BotSkillsEnv {
 async function withheldManagedSkillSlugs(
   state: ShellBotStateV1,
   identity: BotSkillsIdentity,
+  features?: UserAccountFeaturesReadV1,
 ): Promise<readonly string[]> {
   // The same rule for each gated feature: the Skill goes exactly where the
   // tools go, and a switch that cannot be read is off. One read of the
   // account's features answers every gate.
-  let features: UserFeaturesV1 | undefined;
+  let read: UserFeaturesV1 | undefined;
   try {
-    features = await userAccountFeaturesV1(state, identity);
+    read = await (features
+      ? features()
+      : userAccountFeaturesV1(state, identity));
   } catch {
-    features = undefined;
+    read = undefined;
   }
   const withheld: string[] = [];
-  if (!features?.applets) withheld.push(APPLETS_SKILL_SLUG_V1);
+  if (!read?.applets) withheld.push(APPLETS_SKILL_SLUG_V1);
   // The plugin tools also need the artifact bucket they store a module in, so
   // a deployment without it is handed no Skill teaching them either.
-  if (!features?.pluginAuthoring || !state.env.APPLICATION_ARTIFACTS) {
+  if (!read?.pluginAuthoring || !state.env.APPLICATION_ARTIFACTS) {
     withheld.push(PLUGINS_SKILL_SLUG_V1);
   }
   return withheld;
@@ -120,6 +126,7 @@ export async function createBotSkillsHost(
   state: ShellBotStateV1,
   identity: BotSkillsIdentity,
   turn: BotSkillsTurn,
+  features?: UserAccountFeaturesReadV1,
 ): Promise<SkillsRuntimeHostV1 | undefined> {
   // Absence is a supported state, not an error: a host that binds no
   // Workspace mounts no Skills.
@@ -136,7 +143,11 @@ export async function createBotSkillsHost(
       turnId: turn.turnId,
       runId: turn.runId,
     },
-    withheldManagedSlugs: await withheldManagedSkillSlugs(state, identity),
+    withheldManagedSlugs: await withheldManagedSkillSlugs(
+      state,
+      identity,
+      features,
+    ),
   };
 }
 

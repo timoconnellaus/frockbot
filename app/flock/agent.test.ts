@@ -19,6 +19,7 @@ import {
   createBotCreateTool,
   createBotMessageTool,
   createTeammatesPromptSectionV1,
+  createTurnBotDirectoryV1,
   createBotUpdateTool,
   createdBotIdV1,
   decodeBotUpdateInputV1,
@@ -465,5 +466,41 @@ describe("bot_message", () => {
     expect(prompt).toContain("<teammates>");
     expect(prompt).toContain("Researcher");
     expect(prompt).toContain("Finds primary sources.");
+  });
+
+  test("the teammates section reads the flock once a Turn, and again after a create", async () => {
+    const test1 = harness();
+    let calls = 0;
+    const host = {
+      ...test1.host,
+      listBots: () => {
+        calls += 1;
+        return test1.host.listBots();
+      },
+    };
+    const flock = createTurnBotDirectoryV1(host);
+    const section = createTeammatesPromptSectionV1(host, flock);
+    const context = {
+      sessionId: "user-1:bot-1",
+      provider: "test",
+      model: "test",
+      turnType: "chat" as const,
+    };
+    // Two steps of one Turn. The answer cannot have changed between them, and
+    // the User Durable Object is single-threaded and shared by every Bot.
+    await section.render(context);
+    await section.render(context);
+
+    expect(calls).toBe(1);
+
+    await createBotCreateTool(host, undefined, flock).execute(
+      { name: "Researcher", description: "Finds primary sources." },
+      CONTEXT,
+    );
+    const after = await section.render(context);
+
+    // A Bot made mid-Turn is named in the next step's prompt, not after the
+    // Turn ends.
+    expect(after).toContain("Researcher");
   });
 });

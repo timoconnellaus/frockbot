@@ -513,6 +513,30 @@ export interface UserConfigurationRpcV1 {
  * One read answers every feature gate, so a Turn asks the User object once
  * rather than once per switch.
  */
+/**
+ * One Turn's reading of the account features, shared by every gate that asks.
+ *
+ * The switches are still read from the User object on every Turn — what this
+ * removes is asking three times inside one mount. The User Durable Object is
+ * single-threaded and shared by every Bot of that User, so each avoided round
+ * trip is also one less chance to queue behind a sibling Bot's Turn, which is
+ * where the tail of the admitted-to-`turn/start` gap came from.
+ *
+ * Deliberately not a cache on the Bot: it lives exactly as long as the mount
+ * that made it, so a Turn admitted after an admin moved a switch still sees
+ * where the switch is now.
+ */
+export type UserAccountFeaturesReadV1 = () => Promise<UserFeaturesV1>;
+
+/** A {@link UserAccountFeaturesReadV1} that reads at most once. */
+export function userAccountFeaturesReaderV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): UserAccountFeaturesReadV1 {
+  let pending: Promise<UserFeaturesV1> | undefined;
+  return () => (pending ??= userAccountFeaturesV1(state, identity));
+}
+
 export async function userAccountFeaturesV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
