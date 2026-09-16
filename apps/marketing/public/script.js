@@ -15,3 +15,27 @@ navigation?.addEventListener("click", (event) => {
 
 const year = document.querySelector("#year");
 if (year) year.textContent = String(new Date().getFullYear());
+
+const heroFlock = document.querySelector(".hero-flock");
+let heroVisible = true;
+
+const updateHeroMotion = () => {
+  if (!(heroFlock instanceof HTMLObjectElement)) return;
+  heroFlock.contentDocument?.documentElement.classList.toggle(
+    "paused",
+    document.hidden || !heroVisible,
+  );
+};
+
+heroFlock?.addEventListener("load", updateHeroMotion);
+document.addEventListener("visibilitychange", updateHeroMotion);
+
+if (heroFlock && "IntersectionObserver" in window) {
+  new IntersectionObserver(
+    ([entry]) => {
+      heroVisible = entry?.isIntersecting ?? false;
+      updateHeroMotion();
+    },
+    { rootMargin: "100px 0px" },
+  ).observe(heroFlock);
+}
