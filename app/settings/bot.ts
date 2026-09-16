@@ -504,16 +504,6 @@ export interface UserConfigurationRpcV1 {
 }
 
 /**
- * The account features record, read from the User Durable Object every time it
- * is asked and never cached in the Bot: the switches are the admin's, and a
- * Turn admitted after one moved should see where it is now. Throws when the
- * User object cannot answer; each caller decides what an unanswerable switch
- * means for it.
- *
- * One read answers every feature gate, so a Turn asks the User object once
- * rather than once per switch.
- */
-/**
  * One Turn's reading of the account features, shared by every gate that asks.
  *
  * The switches are still read from the User object on every Turn — what this
@@ -528,7 +518,10 @@ export interface UserConfigurationRpcV1 {
  */
 export type UserAccountFeaturesReadV1 = () => Promise<UserFeaturesV1>;
 
-/** A {@link UserAccountFeaturesReadV1} that reads at most once. */
+/**
+ * A {@link UserAccountFeaturesReadV1} that reads once and shares that answer.
+ * A failed read is not kept, so a later gate gets its own attempt.
+ */
 export function userAccountFeaturesReaderV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
@@ -543,6 +536,16 @@ export function userAccountFeaturesReaderV1(
     ));
 }
 
+/**
+ * The account features record, read from the User Durable Object every time it
+ * is asked and never cached in the Bot: the switches are the admin's, and a
+ * Turn admitted after one moved should see where it is now. Throws when the
+ * User object cannot answer; each caller decides what an unanswerable switch
+ * means for it.
+ *
+ * One read answers every feature gate, so a Turn asks the User object once
+ * rather than once per switch.
+ */
 export async function userAccountFeaturesV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
