@@ -3,6 +3,7 @@ import {
   answerInputs,
   chooseDefaultModel,
   chooseOllamaProvider,
+  commitAndLoseTheAnswer,
   connectOllama,
   E2E_CONNECTION_LABEL,
   E2E_MODEL_LABEL,
@@ -157,8 +158,8 @@ test("an uncertain profile save survives reload and checks the original command"
       const body = route.request().postDataJSON();
       firstId = body.commandId;
       expect(body.ownerId).toBe(userId);
-      await route.fetch(); // The real User owner commits before the reply is lost.
-      await route.abort("failed");
+      // The real User owner commits before the reply is lost.
+      await commitAndLoseTheAnswer(route, "failed");
     },
     { times: 1 },
   );

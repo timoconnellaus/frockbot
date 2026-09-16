@@ -5,6 +5,7 @@
 // while the Bot is hidden, and what showing the Bot again does not do.
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import {
+  commitAndLoseTheAnswer,
   createBot,
   expect,
   openApplication,
@@ -176,16 +177,26 @@ test.describe("a hide whose answer never arrives", () => {
 
     // A flaky connection that drops the answer after the Worker committed it:
     // the request really is served, and the client never hears how it went.
+    let served: () => void = () => {};
+    const theSaveWasServed = new Promise<void>((resolve) => {
+      served = resolve;
+    });
     await page.route("**/api/bots/*/settings", async (route) => {
       if (route.request().method() !== "POST") return route.fallback();
-      await route.fetch();
-      await route.abort();
+      try {
+        await commitAndLoseTheAnswer(route);
+      } finally {
+        served();
+      }
     });
     await hidden.click();
     await page
       .getByRole("button", { name: "Hide and turn off", exact: true })
       .click();
     await expect(sem(page, "bot-settings-status")).toContainText(/./u);
+    // The handler is finished before the case moves on, so nothing is still
+    // holding the save when the reload below cancels the page's requests.
+    await theSaveWasServed;
     await page.unroute("**/api/bots/*/settings");
     await settle(page);
 
