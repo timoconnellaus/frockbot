@@ -1666,7 +1666,7 @@ describe("the voice session object", () => {
         // The exact minute count is whatever the clock says by the time this
         // is spoken; what is asserted is that the request and its age are
         // spoken in front of the cached sentence.
-        /^Earlier, \d+ minutes ago, you asked Workerd Bot about is the launch ready\. /.test(
+        /^Earlier, \d+ minutes ago, you asked Workerd Bot: is the launch ready\. /.test(
           String(f.text),
         ),
       "the cached answer placed under its request",
@@ -1709,6 +1709,19 @@ describe("the voice session object", () => {
       speech: "Workerd Bot says the launch is ready.",
       speechState: "composed",
     });
+    // The spoken turn is still retained, so the placement uses what the
+    // person actually said rather than the paraphrase handed to the Bot.
+    await stub.probePutStorage("voice:turn:earlier-call:1", {
+      schemaVersion: 1,
+      turnId: "earlier-call:1",
+      callId: "earlier-call",
+      key: "earlier-call:1",
+      transcript: "Hey, is the launch ready?",
+      admittedAt: at,
+      state: "answered",
+      answer: "I'll ask.",
+      delegations: 1,
+    });
     const next = await open(userId);
     const speaker = playsAnswers(next);
     await startCall(next);
@@ -1716,7 +1729,7 @@ describe("the voice session object", () => {
       (f) =>
         f.type === "transcript_end" &&
         String(f.text).startsWith(
-          "Earlier, a moment ago, you asked Workerd Bot about is the launch ready. ",
+          "Earlier, a moment ago, you asked Workerd Bot: Hey, is the launch ready? ",
         ),
       "the young answer placed under its request on a later call",
     );
@@ -2536,7 +2549,7 @@ describe("the voice session object", () => {
       20_000,
     );
     expect(String(spoken.text)).toMatch(
-      /^[^.]+ could not finish plan the launch: .+\.$/,
+      /^You asked [^:]+: plan the launch\. [^.]+ could not finish: .+\.$/,
     );
     expect(String(spoken.text)).not.toContain("Earlier,");
     const heard = await eventually(

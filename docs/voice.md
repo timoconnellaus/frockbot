@@ -513,8 +513,10 @@ Placing is one mechanism, decided at speak time on either of two conditions:
 `voiceAgePlacedV1` holds for the age right then, or the answer is being heard
 on a call other than the one the question was asked on. On either, every
 read-out (cached, freshly composed, or the plain fallback) is preceded by a
-plain lead-in naming the request and its age — "Earlier, about an hour ago,
-you asked Bob about the weather." The lead-in is not recorded with the sentence,
+plain lead-in naming the request, in the person's own words from the retained
+spoken turn (the paraphrase handed to the Bot only when that turn is gone),
+and its age — "Earlier, about an hour ago, you asked Bob: can you ask Bob
+what the weather is?" The lead-in is not recorded with the sentence,
 so a later replay says the age it has then. The prompt's `<answers>` block
 carries each unheard answer under its request and age with the instruction
 that it is read out separately and is never the answer to what is being asked

@@ -355,7 +355,21 @@ export function renderVoiceDelegationLeadInV1(
   result: Pick<VoiceDelegationResultV1, "botName" | "question" | "askedAt">,
   now: Date,
 ): string {
-  return `Earlier, ${describeVoiceAgeV1(result.askedAt, now)}, you asked ${result.botName} about ${clip(result.question, 120)}. `;
+  return `Earlier, ${describeVoiceAgeV1(result.askedAt, now)}, ${renderVoiceAskedV1(result)} `;
+}
+
+/**
+ * "you asked Bob: can you ask Bob what the weather is?" — the request as the
+ * person put it. `question` is what they said, in their words, while the
+ * spoken turn is retained, and the assistant's paraphrase to the Bot only when
+ * it is not. Their own words end how they ended them.
+ */
+function renderVoiceAskedV1(
+  result: Pick<VoiceDelegationResultV1, "botName" | "question">,
+): string {
+  const said = clip(result.question, 120);
+  const stop = /[.!?\u2026]$/.test(said) ? "" : ".";
+  return `you asked ${result.botName}: ${said}${stop}`;
 }
 
 /**
@@ -368,13 +382,13 @@ export function renderVoiceDelegationReadOutV1(
   result: VoiceDelegationResultV1,
   options?: { placed?: boolean },
 ): string {
-  const question = options?.placed ? "" : clip(result.question, 120);
+  const asked = options?.placed
+    ? ""
+    : `You ${renderVoiceAskedV1(result).slice("you ".length)} `;
   if (result.answer) {
-    const about = question ? ` about ${question}` : "";
-    return `${result.botName} answered${about}: ${clip(result.answer, 600)}`;
+    return `${asked}${result.botName} answered: ${clip(result.answer, 600)}`;
   }
-  const what = question ? ` ${question}` : "";
-  return `${result.botName} could not finish${what}: ${clip(result.failure ?? "it stopped", 200)}.`;
+  return `${asked}${result.botName} could not finish: ${clip(result.failure ?? "it stopped", 200)}.`;
 }
 
 /**

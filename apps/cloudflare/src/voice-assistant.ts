@@ -2393,6 +2393,23 @@ export class VoiceAssistant extends VoiceAgentBase<
    * the fallback in every refused case — the person is owed the answer, not a
    * nicer phrasing of it, and it says the same thing the Bot said.
    */
+  /**
+   * The request an answer is placed under, in the person's own words.
+   *
+   * A delegation records the assistant's paraphrase to the Bot ("Tim is asking
+   * what the weather is. Please check…"), which is the right thing to hand a
+   * Bot and the wrong thing to read back to the person who said "can you ask
+   * Bob what the weather is?". The spoken turn keeps their words for as long
+   * as the delegation is kept, so the paraphrase is only the fallback.
+   */
+  private async delegationQuestion(
+    ledger: VoiceLedgerV1,
+    delegation: VoiceDelegationRecordV1,
+  ): Promise<string> {
+    const turn = await ledger.readTurn(delegation.turnId);
+    return turn?.transcript.trim() || delegation.text;
+  }
+
   private async delegationSpeech(
     ledger: VoiceLedgerV1,
     delegation: VoiceDelegationRecordV1,
@@ -2400,7 +2417,7 @@ export class VoiceAssistant extends VoiceAgentBase<
   ): Promise<string> {
     const result = {
       botName: delegation.botName,
-      question: delegation.text,
+      question: await this.delegationQuestion(ledger, delegation),
       askedAt: new Date(delegation.admittedAt),
       ...(delegation.answer ? { answer: delegation.answer } : {}),
       ...(delegation.failure ? { failure: delegation.failure } : {}),
@@ -2924,6 +2941,10 @@ export class VoiceAssistant extends VoiceAgentBase<
       this.userTimezone(userId),
       this.sessionMemoryContext(),
     ]);
+    const ledger = this.ledger();
+    const questions = await Promise.all(
+      unspoken.map((delegation) => this.delegationQuestion(ledger, delegation)),
+    );
     return {
       bots,
       timezone,
@@ -2932,9 +2953,9 @@ export class VoiceAssistant extends VoiceAgentBase<
         ...(memory ? { user: memory } : {}),
         logDays: VOICE_ASSISTANT_MEMORY_LOG_DAYS,
       },
-      unspoken: unspoken.map((delegation) => ({
+      unspoken: unspoken.map((delegation, index) => ({
         botName: delegation.botName,
-        question: delegation.text,
+        question: questions[index] ?? delegation.text,
         text: delegation.answer ?? delegation.failure ?? "",
         askedAt: new Date(delegation.admittedAt),
       })),
