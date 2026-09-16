@@ -372,9 +372,10 @@ class ShellSidebar extends StatelessWidget {
       0,
       (total, bot) => total + _unread(_id(bot)).count,
     );
-    // A phone's rows are cards a shade darker than the ground they sit on,
-    // the way Mail and Gmail draw theirs, so the thing a thumb slides is a
-    // thing and not a stripe of the page.
+    // A phone's rows are cards a shade lighter than the ground they sit on,
+    // so the thing a thumb slides is a thing and not a stripe of the page.
+    // The ground itself is the app's page surface: the list does not get a
+    // lighter backdrop than every other screen just to frame its own rows.
     final ground = phone ? sidebarGroundColor(theme.colorScheme) : null;
     final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1086,15 +1087,21 @@ class _RowControl extends StatelessWidget {
   }
 }
 
-/// A phone list's ground: the surface, a shade lighter, so its rows read as
-/// cards laid on it.
-Color sidebarGroundColor(ColorScheme scheme) =>
-    Color.alphaBlend(Colors.white.withValues(alpha: 0.05), scheme.surface);
+/// A phone list's ground: the app's own page surface, unlightened. The list
+/// is a page like every other page here, so it is the rows that are told
+/// apart from it rather than the page that is told apart from the app.
+Color sidebarGroundColor(ColorScheme scheme) => scheme.surface;
 
-/// A phone list's row: the surface, a shade darker than the ground, so what
-/// a thumb slides is visibly the thing that moves.
+/// A phone list's row: the surface, a shade lighter than the ground, so what
+/// a thumb slides is visibly the thing that moves — lifted off the page the
+/// way a card is, not cut out of it.
 Color sidebarCardColor(ColorScheme scheme) =>
-    Color.alphaBlend(Colors.black.withValues(alpha: 0.2), scheme.surface);
+    Color.alphaBlend(Colors.white.withValues(alpha: 0.07), scheme.surface);
+
+/// What a swipe reveals under the row: the page, recessed, so the track the
+/// pill slides along reads as below it and never as another card.
+Color sidebarSwipeTrackColor(ColorScheme scheme) =>
+    Color.alphaBlend(Colors.black.withValues(alpha: 0.22), scheme.surface);
 
 /// How far, as a share of the row's width, a swipe towards the trailing edge
 /// travels before letting go marks the Bot read. Far enough that a scroll that
@@ -1304,7 +1311,7 @@ class _SwipeActionState extends State<_SwipeAction> {
         curve: Curves.easeOut,
         color: lit
             ? scheme.primary.withValues(alpha: _past ? 0.28 : 0.16)
-            : scheme.surfaceContainerHighest,
+            : sidebarSwipeTrackColor(scheme),
         child: named(
           Material(
             type: MaterialType.transparency,
