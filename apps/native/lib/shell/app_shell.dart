@@ -320,22 +320,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     return open;
   }
 
-  /// Whether the panel is over the conversation rather than beside it.
+  /// Whether the panel is over the conversation rather than beside it, which
+  /// is the "nothing is covering it" clause of the focus rule in `focus.dart`.
   ///
-  /// The dual tier is the only one that draws anything over the conversation.
-  /// At the widest tier the right panel and the run view are a third column:
-  /// the conversation keeps its own, so a person with Work open is reading the
-  /// thread as plainly as one with nothing open. On a phone the panel and a
-  /// run are pushed pages, which the route check answers, and `panelOpen`
-  /// there is only state carried across a change of width. In between the
-  /// same panel is a drawer over the conversation, and `panelOpen` is what
-  /// draws it — so it is the whole question, asked at that one tier.
-  ///
-  /// A run is not a second question: at the widest tier it is the third
-  /// column, at the dual tier it reaches the screen only through that same
-  /// drawer, and on a phone it is a pushed page. Read on its own it latched
-  /// — `openRun` survives the drawer being switched off — and took the read
-  /// receipt with it for the rest of the session.
+  /// Mirrors the one condition `ShellLayout` draws the drawer on, rather than
+  /// approximating it: the dual tier, with `panelOpen` set. `openRun` is
+  /// deliberately not a second disqualifier — a run reaches the screen as the
+  /// widest tier's third column, through that same drawer, or as a pushed page
+  /// the route check answers, never on its own. Asked on its own it latched,
+  /// surviving the drawer being switched off, and took the read receipt with
+  /// it for the rest of the session.
   bool get _conversationCovered =>
       shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.dual &&
       panelOpen;
