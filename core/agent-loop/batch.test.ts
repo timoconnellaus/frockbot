@@ -62,6 +62,8 @@ interface BatchOptions {
     kind: "model" | "tool";
     effectId: string;
   }) => Promise<boolean>;
+  /** How many further effects the run's durable record can still admit. */
+  remainingEffectAdmissions?: () => Promise<number>;
 }
 
 /**
@@ -114,6 +116,9 @@ async function runTurn(
   loops.push(loop);
   const handle = await loop.create({
     admitEffect: options.admitEffect ?? (() => Promise.resolve(true)),
+    ...(options.remainingEffectAdmissions
+      ? { remainingEffectAdmissions: options.remainingEffectAdmissions }
+      : {}),
     botId: "bot-batch",
     sessionId: "batch",
     provider: provider.id,
@@ -543,6 +548,51 @@ describe("batch", () => {
     expect(over.isError).toBe(true);
     expect(over.content).toContain(String(BATCH_MAX_CALLS_V1));
     expect(empty.isError).toBe(true);
+  });
+
+  test("refuses a batch the run cannot admit, naming what is left", async () => {
+    // Each call inside a batch takes its own durable admission, and a run's
+    // record holds a bounded number of them. A batch that does not fit is
+    // refused whole, before anything is journalled, rather than overflowing
+    // the record partway through and failing the Turn on a decoder error.
+    const effects: string[] = [];
+    const turn = await runTurn(
+      [recorder("alpha", effects)],
+      [
+        { tool: "alpha", arguments: { n: 0 } },
+        { tool: "alpha", arguments: { n: 1 } },
+        { tool: "alpha", arguments: { n: 2 } },
+      ],
+      { remainingEffectAdmissions: () => Promise.resolve(2) },
+    );
+    const result = batchResultOf(turn);
+
+    expect(result.isError).toBe(true);
+    // What is left, so the model can split the work across steps rather than
+    // reading an internal failure it cannot act on.
+    expect(result.content).toContain("2 more tool call(s)");
+    expect(result.content).toContain("3");
+    // Nothing was truncated to what fit, and no sub-call was journalled or
+    // ran: the envelope is the only row the refused batch leaves.
+    expect(effects).toEqual([]);
+    expect(
+      toolEvents(turn.events, "tool/call").map((event) => event.occurrenceId),
+    ).toEqual(["tool:1:1:0"]);
+  });
+
+  test("runs a batch that exactly fits the remaining admissions", async () => {
+    const effects: string[] = [];
+    const run = await runBatch(
+      [recorder("alpha", effects)],
+      [
+        { tool: "alpha", arguments: { n: 0 } },
+        { tool: "alpha", arguments: { n: 1 } },
+      ],
+      { remainingEffectAdmissions: () => Promise.resolve(2) },
+    );
+
+    expect(run.report).toMatchObject({ ran: 2, failed: 0 });
+    expect([...effects].sort()).toEqual(["tool:1:1:0.0", "tool:1:1:0.1"]);
   });
 
   test("says a thrown non-idempotent call may still have taken effect", async () => {

@@ -141,6 +141,12 @@ export interface ShellCompositionMountOptions {
    */
   admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   /**
+   * How many further effects the run's durable record can still admit. A
+   * `batch` asks before it expands, so one that cannot fit is refused rather
+   * than overflowing the record mid-dispatch.
+   */
+  remainingEffectAdmissions?(): Promise<number>;
+  /**
    * The turn type the admitted Turn runs on; the mounted Agent trims its tool
    * catalog to it. Absent ⇒ `chat`.
    */
@@ -196,6 +202,9 @@ export function createShellCompositionHost(
         },
         persistSessionEvents: options.persistSessionEvents,
         admitEffect: options.admitEffect,
+        ...(options.remainingEffectAdmissions
+          ? { remainingEffectAdmissions: options.remainingEffectAdmissions }
+          : {}),
         agentPackages: options.agentPackages,
         modelSelection: options.modelSelection,
         systemPromptSection: options.systemPromptSection,

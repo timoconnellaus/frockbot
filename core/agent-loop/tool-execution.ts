@@ -264,6 +264,23 @@ async function runBatchV1(
     await settleV1(runtime, occurrence, refusal, "completed");
     return refusal;
   }
+  // A batch spends one durable admission per call, and a run's record holds a
+  // bounded number of them. Asked for before anything is journalled or
+  // admitted, so a batch that cannot fit is refused whole — the envelope is
+  // the only row it leaves — rather than overflowing the record partway
+  // through and failing the Turn. The refusal names what is left so the model
+  // can split the work across steps; it is never silently truncated, because a
+  // model that asked for twelve calls and got eight asked for effects it did
+  // not get.
+  const remaining = await runtime.options.remainingEffectAdmissions?.();
+  if (remaining !== undefined && decoded.length > remaining) {
+    const refusal = {
+      content: `batch was refused: this run can still take ${Math.max(remaining, 0)} more tool call(s) and this batch declared ${decoded.length}; issue fewer calls per batch across several steps.`,
+      isError: true,
+    };
+    await settleV1(runtime, occurrence, refusal, "completed");
+    return refusal;
+  }
   const subs = batchSubOccurrencesV1(occurrence);
   // Every declared call's intent is journalled here, in declared order, before
   // any of them is prepared, admitted or dispatched. That is why the log holds
