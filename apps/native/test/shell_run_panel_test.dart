@@ -28,7 +28,10 @@ Future<Future<void> Function()> pumpTripleTierShell(WidgetTester tester) async {
   store.values['directory/test-user'] = jsonEncode({
     'schemaVersion': 1,
     'revision': 1,
-    'bots': [registration('bot-one', 'Rosemary')],
+    'bots': [
+      registration('bot-one', 'Rosemary'),
+      registration('bot-two', 'Clementine'),
+    ],
   });
   store.values['selection.test-user'] = 'bot-one';
   store.values[pageCacheKey('test-user', 'bot-one')] = encodePageCache([
@@ -143,6 +146,25 @@ void main() {
 
     // Closing it returns the column to the state the person last chose.
     await closeRunView(tester);
+    expect(identifiedBy(ShellIds.runView), findsNothing);
+    expect(rightPanelSlot, findsNothing);
+    await teardown();
+  });
+
+  testWidgets('switching Bots gives a borrowed column back', (tester) async {
+    final teardown = await pumpTripleTierShell(tester);
+
+    // The person puts the column away, then borrows it for a run.
+    await tester.tap(find.byTooltip('Hide the panel'));
+    await tester.pumpAndSettle();
+    expect(rightPanelSlot, findsNothing);
+    await openRunFromTranscript(tester);
+    expect(identifiedBy(ShellIds.runView), findsOneWidget);
+
+    // Leaving the run by choosing another Bot returns the column too, rather
+    // than leaving the other Bot's settings on screen.
+    await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
+    await tester.pumpAndSettle();
     expect(identifiedBy(ShellIds.runView), findsNothing);
     expect(rightPanelSlot, findsNothing);
     await teardown();

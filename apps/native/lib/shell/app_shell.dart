@@ -768,8 +768,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (switching) appletsMode = false;
       if (switching) selectedConnection = ConnectionState.initializing;
       conversationOpen = true;
-      openRun = null;
-      runBorrowedPanel = false;
+      _leaveRun();
       panelOpen = false;
     });
     _adoptBotPanels(botId);
@@ -1096,8 +1095,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     push.reading(null);
     setState(() {
       conversationOpen = false;
-      openRun = null;
-      runBorrowedPanel = false;
+      _leaveRun();
       panelOpen = false;
     });
   }
@@ -1118,16 +1116,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
+  /// Leaving the run on screen, by whichever way out: the column goes back
+  /// the way the person left it if the run had borrowed it from them.
+  void _leaveRun() {
+    openRun = null;
+    if (runBorrowedPanel) panelCollapsed = true;
+    runBorrowedPanel = false;
+  }
+
   Widget? _rightPanel() {
     final line = openRun;
     if (line != null) {
       return RunView(
         line: line,
         onClose: () => setState(() {
-          openRun = null;
+          _leaveRun();
           panelOpen = false;
-          if (runBorrowedPanel) panelCollapsed = true;
-          runBorrowedPanel = false;
         }),
       );
     }
