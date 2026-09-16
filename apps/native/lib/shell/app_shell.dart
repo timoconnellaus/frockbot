@@ -1109,7 +1109,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     setState(() {
-      if (openRun == null) runBorrowedPanel = panelCollapsed;
+      if (panelCollapsed) runBorrowedPanel = true;
       openRun = line;
       panelOpen = true;
       // Opening a run is a request to see it: a collapsed panel column would
