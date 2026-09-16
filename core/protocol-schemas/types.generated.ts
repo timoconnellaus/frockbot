@@ -197,7 +197,13 @@ export type TurnRefusal = {
 export type RunCursor = string;
 export type Page =
   { truncated: false } | { truncated: true; nextCursor: RunCursor };
-export type ConversationQuery = { schemaVersion: 1; before?: RunCursor };
+export type ConversationQuery = {
+  schemaVersion: 1;
+  before?: RunCursor;
+  counterpart?: ExchangeCounterpart;
+};
+export type ExchangeCounterpart =
+  { kind: "bot"; botId: BotId } | { kind: "voice" };
 export type SendPayload =
   | { type: "text"; text: string }
   | { type: "attachment"; url: string; name?: string; mediaType?: string }
@@ -246,7 +252,8 @@ export type RunEvent =
       }>;
     }
   | { type: "run/events-truncated"; omittedInteractions: number }
-  | { type: "reply/to-caller"; caller: "voice"; text: string }
+  | { type: "reply/to-caller"; caller: "voice" | "bot"; text: string }
+  | { type: "message/to-bot"; callId: string; botId: BotId; text: string }
   | { type: "wake/parent"; message: string }
   | {
       type: "computer/sync";
@@ -882,6 +889,7 @@ export interface ProtocolTypes {
   RunCursor: RunCursor;
   Page: Page;
   ConversationQuery: ConversationQuery;
+  ExchangeCounterpart: ExchangeCounterpart;
   SendPayload: SendPayload;
   RunEvent: RunEvent;
   RunOutcome: RunOutcome;

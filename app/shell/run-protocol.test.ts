@@ -23,6 +23,7 @@ import {
   createClientRunListV1,
   projectClientAnnouncementsV1,
   decodeClientRunListQueryV1,
+  parseExchangeCounterpartParamV1,
   projectClientRunLookupV1,
   projectClientRunListV1,
   projectClientRunV1,
@@ -171,6 +172,151 @@ describe("client run protocol v1", () => {
         page: { truncated: false },
       })[0]?.via,
     ).toEqual(projected.via);
+  });
+
+  test("projects a bot_message call as a message to that Bot", () => {
+    const asked = storedRun([
+      event({
+        type: "tool/call",
+        seq: 0,
+        timestamp,
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "call_dynamic_tool",
+        input: {
+          namespace: "frockbot",
+          toolName: "bot_message",
+          arguments: { target_id: "researcher", message: "What is overdue?" },
+        },
+      }),
+      event({
+        type: "tool/result",
+        seq: 1,
+        timestamp,
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "call_dynamic_tool",
+        content: "Four invoices.",
+        isError: false,
+        status: "completed",
+      }),
+    ]);
+    const projected = projectClientRunV1(asked);
+    expect(projected.events).toEqual([
+      {
+        type: "message/to-bot",
+        callId: "tool-1",
+        botId: "researcher",
+        text: "What is overdue?",
+      },
+      {
+        type: "tool/result",
+        callId: "tool-1",
+        content: "Four invoices.",
+        isError: false,
+      },
+    ]);
+    // The wire pairs the result with the message exactly as with a call.
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projected],
+        page: { truncated: false },
+      })[0]?.events,
+    ).toEqual(projected.events);
+    // A target the model invented is not a Bot id. Projected as a message it
+    // would fail the client's decode of the whole page, so it stays the call
+    // it was and the rest of the Turn still reads.
+    const hallucinated = storedRun([
+      event({
+        type: "tool/call",
+        seq: 0,
+        timestamp,
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "call_dynamic_tool",
+        input: {
+          namespace: "frockbot",
+          toolName: "bot_message",
+          arguments: { target_id: "Xero Books", message: "What is overdue?" },
+        },
+      }),
+    ]);
+    const refusedEvents = projectClientRunV1(hallucinated).events;
+    expect(refusedEvents[0]).toMatchObject({
+      type: "tool/call",
+      call: { name: "call_dynamic_tool" },
+    });
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projectClientRunV1(hallucinated)],
+        page: { truncated: false },
+      })[0]?.events,
+    ).toEqual(refusedEvents);
+  });
+
+  test("projects and decodes a Bot caller's reply", () => {
+    const answered = storedRun([
+      event({
+        type: "reply/to-caller",
+        seq: 0,
+        timestamp,
+        turn: 1,
+        step: 1,
+        occurrenceId: "reply:1",
+        caller: "bot",
+        text: "Four invoices.",
+      }),
+    ]);
+    const projected = projectClientRunV1(answered);
+    expect(projected.events).toEqual([
+      { type: "reply/to-caller", caller: "bot", text: "Four invoices." },
+    ]);
+    expect(projected.outcome).toMatchObject({ text: "Four invoices." });
+    // A reply to a caller this build does not know degrades the row, as any
+    // undecodable event does, rather than being drawn as someone's answer.
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [
+          {
+            ...projected,
+            events: [{ type: "reply/to-caller", caller: "routine", text: "x" }],
+          },
+        ],
+        page: { truncated: false },
+      })[0],
+    ).toMatchObject({ status: "failed", events: [] });
+  });
+
+  test("strictly decodes the exchange counterpart on a run list query", () => {
+    expect(
+      decodeClientRunListQueryV1({
+        schemaVersion: 1,
+        counterpart: { kind: "bot", botId: "researcher" },
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      counterpart: { kind: "bot", botId: "researcher" },
+    });
+    expect(parseExchangeCounterpartParamV1("voice")).toEqual({ kind: "voice" });
+    expect(parseExchangeCounterpartParamV1("bot:researcher")).toEqual({
+      kind: "bot",
+      botId: "researcher",
+    });
+    expect(() => parseExchangeCounterpartParamV1("routine:x")).toThrow(
+      "run list query.with is invalid",
+    );
+    expect(() =>
+      decodeClientRunListQueryV1({
+        schemaVersion: 1,
+        counterpart: { kind: "voice", botId: "researcher" },
+      }),
+    ).toThrow();
   });
 
   test("projects a voice request with its spoken origin marker", () => {

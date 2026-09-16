@@ -85,6 +85,45 @@ describe("voice reads of Bot conversation", () => {
     expect(JSON.stringify(result)).not.toContain("private");
   });
 
+  test("marks a reply to a Bot caller as answered to that Bot, not spoken", () => {
+    const result = JSON.parse(
+      renderVoiceBotHistoryV1({
+        ...bot,
+        runs: [
+          run({
+            via: { kind: "bot", name: "General", botId: "general" },
+            input: "How many invoices are open?",
+            events: [
+              {
+                type: "reply/to-caller",
+                caller: "bot",
+                text: "Four invoices.",
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(result.messages).toEqual([
+      {
+        runId: "r1",
+        at,
+        role: "bot",
+        fromBotId: "general",
+        messageId: "r1:user",
+        text: "How many invoices are open?",
+      },
+      {
+        runId: "r1",
+        at,
+        role: "assistant",
+        to: "bot",
+        messageId: "r1:reply:0",
+        text: "Four invoices.",
+      },
+    ]);
+  });
+
   test("gives a voice request and its caller replies distinct message ids", () => {
     const result = JSON.parse(
       renderVoiceBotHistoryV1({

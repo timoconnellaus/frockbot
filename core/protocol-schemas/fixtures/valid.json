@@ -1499,7 +1499,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello 🐑 こんにちは"
+      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
     }
   },
   {
@@ -1856,7 +1856,7 @@
           ]
         }
       ],
-      "modelInUse": "Auto · Frock AI"
+      "modelInUse": "Auto \u00b7 Frock AI"
     }
   },
   {
@@ -2097,6 +2097,51 @@
         "message": "Provider unavailable"
       },
       "canRetry": true
+    }
+  },
+  {
+    "name": "ExchangeCounterpart bot",
+    "schema": "ExchangeCounterpart",
+    "value": {
+      "kind": "bot",
+      "botId": "xero-books"
+    }
+  },
+  {
+    "name": "ExchangeCounterpart voice",
+    "schema": "ExchangeCounterpart",
+    "value": {
+      "kind": "voice"
+    }
+  },
+  {
+    "name": "ConversationQuery with a counterpart",
+    "schema": "ConversationQuery",
+    "value": {
+      "schemaVersion": 1,
+      "counterpart": {
+        "kind": "bot",
+        "botId": "xero-books"
+      }
+    }
+  },
+  {
+    "name": "RunEvent reply to a Bot caller",
+    "schema": "RunEvent",
+    "value": {
+      "type": "reply/to-caller",
+      "caller": "bot",
+      "text": "Filed the note."
+    }
+  },
+  {
+    "name": "RunEvent message to a Bot",
+    "schema": "RunEvent",
+    "value": {
+      "type": "message/to-bot",
+      "callId": "tool-2",
+      "botId": "xero-books",
+      "text": "What is overdue?"
     }
   }
 ]

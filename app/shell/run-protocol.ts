@@ -12,6 +12,11 @@ import {
   isPublicIdentifier,
   isRpcIdentifier,
 } from "@frockbot/core/configuration";
+import {
+  dynamicToolInputV1,
+  resolveDynamicToolNameV1,
+} from "@frockbot/app/audit/classify";
+import { BOT_MESSAGE_TOOL_V1 } from "@frockbot/app/flock/shared";
 import { decodeRunCursorV1, RUN_CURSOR_PATTERN } from "./run-cursor.js";
 export { decodeRunCursorV1, RUN_CURSOR_PATTERN };
 import {
@@ -244,6 +249,20 @@ export type ClientRunEventV1 =
         input?: ClientDynamicToolCallInputV1;
       };
     }
+  /**
+   * A question this Turn put to another of the User's Bots, projected in
+   * place of the tool call that carried it: the thread marks it, and the
+   * exchange view reads it. The answer, or the refusal, is the `tool/result`
+   * on the same `callId`. The target's name is not carried — the client
+   * holds the directory, and a Bot since renamed or deleted is still named
+   * by what the client knows of it.
+   */
+  | {
+      type: "message/to-bot";
+      callId: string;
+      botId: string;
+      text: string;
+    }
   | {
       type: "tool/result";
       callId: string;
@@ -281,7 +300,7 @@ export type ClientRunEventV1 =
    */
   | {
       type: "reply/to-caller";
-      caller: "voice";
+      caller: "voice" | "bot";
       text: string;
     }
   /**
@@ -444,7 +463,15 @@ export interface ClientRunListV1 {
 export interface ClientRunListQueryV1 {
   schemaVersion: 1;
   before?: string;
+  /**
+   * Only the Turns that crossed to or from this counterpart: the ones it
+   * asked for, and the ones that messaged it. What the exchange view reads.
+   */
+  counterpart?: ClientExchangeCounterpartV1;
 }
+
+export type ClientExchangeCounterpartV1 =
+  { kind: "bot"; botId: string } | { kind: "voice" };
 
 export interface ClientTurnCommandV1 {
   schemaVersion: 1;
@@ -592,6 +619,42 @@ export interface ClientToolAttachmentV1 {
 }
 
 type ClientToolCallV1 = Extract<ClientRunEventV1, { type: "tool/call" }>;
+type ClientMessageToBotV1 = Extract<
+  ClientRunEventV1,
+  { type: "message/to-bot" }
+>;
+
+/**
+ * The message a journalled `tool/call` sent to another Bot, if it sent one.
+ *
+ * `bot_message` is namespaced, so the journal records the `call_dynamic_tool`
+ * wrapper and names the tool inside it — reading the bare name matches nothing
+ * a Bot ever called. The target is the model's own string, and the client
+ * validates the whole page it arrives on, so a hallucinated id would cost the
+ * person every other row rather than just this one: only a wire `BotId` is
+ * projected as a message, and anything else stays the tool call it was.
+ */
+export function botMessageCallV1(event: {
+  name: string;
+  input?: unknown;
+}): { botId: string; text: string } | undefined {
+  if (event.name !== CALL_DYNAMIC_TOOL_NAME_V1) return undefined;
+  if (
+    resolveDynamicToolNameV1(event.name, event.input) !== BOT_MESSAGE_TOOL_V1
+  ) {
+    return undefined;
+  }
+  const value = dynamicToolInputV1(event.input);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const input = value as Record<string, unknown>;
+  if (!isPublicIdentifier(input.target_id)) return undefined;
+  if (typeof input.message !== "string" || input.message.length === 0) {
+    return undefined;
+  }
+  return { botId: input.target_id, text: input.message };
+}
 type ClientToolResultV1 = Extract<ClientRunEventV1, { type: "tool/result" }>;
 
 /**
@@ -621,6 +684,12 @@ const CALL_DYNAMIC_TOOL_NAME_V1 = "call_dynamic_tool";
 
 /** The first-party namespace, whose tool arguments stay inside the Bot. */
 const FROCKBOT_NAMESPACE_V1 = "frockbot";
+
+/**
+ * The name a `message/to-bot` event carried as a tool call, for the readers
+ * that still index or classify it by the tool that produced it.
+ */
+export const MESSAGE_TO_BOT_TOOL_NAME_V1 = `${FROCKBOT_NAMESPACE_V1}/${BOT_MESSAGE_TOOL_V1}`;
 
 /**
  * The name a projected call is shown under.
@@ -789,14 +858,22 @@ function projectionUnits(
         event.name === CALL_DYNAMIC_TOOL_NAME_V1
           ? dynamicToolCallInput(event.input)
           : undefined;
-      const call: ClientToolCallV1 = {
-        type: "tool/call",
-        call: {
-          id: `tool-${callCount}`,
-          name: truncateWireString(event.name, MAX_EVENT_NAME_BYTES),
-          ...(dynamicInput ? { input: dynamicInput } : {}),
-        },
-      };
+      const toBot = botMessageCallV1(event);
+      const call: ClientToolCallV1 | ClientMessageToBotV1 = toBot
+        ? {
+            type: "message/to-bot",
+            callId: `tool-${callCount}`,
+            botId: toBot.botId,
+            text: truncateWireString(toBot.text, MAX_EVENT_CONTENT_BYTES),
+          }
+        : {
+            type: "tool/call",
+            call: {
+              id: `tool-${callCount}`,
+              name: truncateWireString(event.name, MAX_EVENT_NAME_BYTES),
+              ...(dynamicInput ? { input: dynamicInput } : {}),
+            },
+          };
       const unit: ProjectionUnitV1 = { events: [call], droppable: false };
       units.push(unit);
       byOccurrence.set(event.occurrenceId, unit);
@@ -813,10 +890,10 @@ function projectionUnits(
           `tool occurrence "${event.occurrenceId}" has duplicate results`,
         );
       }
-      const call = unit.events[0] as ClientToolCallV1;
+      const call = unit.events[0] as ClientToolCallV1 | ClientMessageToBotV1;
       const result: ClientToolResultV1 = {
         type: "tool/result",
-        callId: call.call.id,
+        callId: call.type === "tool/call" ? call.call.id : call.callId,
         content: truncateWireString(event.content, MAX_EVENT_CONTENT_BYTES),
         isError: event.isError,
         ...(event.attachments && event.attachments.length > 0
@@ -1507,6 +1584,18 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
       },
     };
   }
+  if (event.type === "message/to-bot") {
+    exactKeys(event, ["type", "callId", "botId", "text"], "run event");
+    return {
+      type: "message/to-bot",
+      callId: publicEventId(
+        string(event, "callId", MAX_EVENT_ID_LENGTH, "run event"),
+        "run event.callId",
+      ),
+      botId: string(event, "botId", 128, "run event"),
+      text: wireString(event, "text", MAX_EVENT_CONTENT_BYTES, "run event"),
+    };
+  }
   if (event.type === "tool/result") {
     exactKeys(event, ["type", "callId", "content", "isError"], "run event");
     if (typeof event.isError !== "boolean") {
@@ -1541,12 +1630,12 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
   }
   if (event.type === "reply/to-caller") {
     exactKeys(event, ["type", "caller", "text"], "run event");
-    if (event.caller !== "voice") {
+    if (event.caller !== "voice" && event.caller !== "bot") {
       throw new Error("run event.caller is invalid");
     }
     return {
       type: "reply/to-caller",
-      caller: "voice",
+      caller: event.caller,
       text: wireString(event, "text", MAX_EVENT_CONTENT_BYTES, "run event"),
     };
   }
@@ -1707,10 +1796,10 @@ function decodeEvents(values: unknown[]): ClientTurnEvent[] {
       index += 1;
       continue;
     }
-    if (call?.type !== "tool/call") {
+    if (call?.type !== "tool/call" && call?.type !== "message/to-bot") {
       throw new Error("run tool result has no matching call");
     }
-    const id = call.call.id;
+    const id = call.type === "tool/call" ? call.call.id : call.callId;
     if (callIds.has(id)) {
       throw new Error(`run tool call "${id}" is duplicated`);
     }
@@ -2156,7 +2245,11 @@ export function decodeClientRunListQueryV1(
   input: unknown,
 ): ClientRunListQueryV1 {
   const query = record(input, "run list query");
-  exactKeys(query, ["schemaVersion", "before"], "run list query");
+  exactKeys(
+    query,
+    ["schemaVersion", "before", "counterpart"],
+    "run list query",
+  );
   if (query.schemaVersion !== 1) {
     throw new Error("run list query.schemaVersion is invalid");
   }
@@ -2171,10 +2264,50 @@ export function decodeClientRunListQueryV1(
       throw new Error("run list query.before is invalid");
     }
   }
+  const counterpart =
+    query.counterpart === undefined
+      ? undefined
+      : decodeClientExchangeCounterpartV1(query.counterpart);
   return {
     schemaVersion: 1,
     ...(before ? { before } : {}),
+    ...(counterpart ? { counterpart } : {}),
   };
+}
+
+export function decodeClientExchangeCounterpartV1(
+  input: unknown,
+): ClientExchangeCounterpartV1 {
+  const counterpart = record(input, "run list query.counterpart");
+  if (counterpart.kind === "voice") {
+    exactKeys(counterpart, ["kind"], "run list query.counterpart");
+    return { kind: "voice" };
+  }
+  if (counterpart.kind === "bot") {
+    exactKeys(counterpart, ["kind", "botId"], "run list query.counterpart");
+    return {
+      kind: "bot",
+      botId: string(counterpart, "botId", 128, "run list query.counterpart"),
+    };
+  }
+  throw new Error("run list query.counterpart.kind is invalid");
+}
+
+/**
+ * The `with` half of a run page URL, as the client writes it: `voice`, or
+ * `bot:<id>`.
+ */
+export function parseExchangeCounterpartParamV1(
+  value: string,
+): ClientExchangeCounterpartV1 {
+  if (value === "voice") return { kind: "voice" };
+  if (value.startsWith("bot:")) {
+    return decodeClientExchangeCounterpartV1({
+      kind: "bot",
+      botId: value.slice("bot:".length),
+    });
+  }
+  throw new Error("run list query.with is invalid");
 }
 
 export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {

@@ -28,7 +28,7 @@ interface VoiceHistoryMessageV1 {
   messageId?: string;
   text: string;
   fromBotId?: string;
-  to?: "user" | "voice";
+  to?: "user" | "voice" | "bot";
 }
 
 function clip(text: string, max: number): string {
@@ -93,7 +93,7 @@ function visibleMessages(run: ClientRunV1): VoiceHistoryMessageV1[] {
       messages.push({
         ...source,
         role: "assistant",
-        to: "voice",
+        to: event.caller,
         messageId: `${run.runId}:reply:${replyCount++}`,
         text: clip(event.text, VOICE_HISTORY_TEXT_CHARS_V1),
       });

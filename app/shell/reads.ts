@@ -24,6 +24,7 @@ import {
   projectClientAnnouncementsV1,
   projectClientRunLookupV1,
   projectClientRunOrDegradedV1,
+  botMessageCallV1,
   type ClientRunListV1,
   type ClientRunLookupV1,
   type ClientRunV1,
@@ -168,6 +169,30 @@ export async function listRuns(
     conversationId === undefined ||
     run.sessionId === undefined ||
     run.sessionId === conversationId;
+  // The exchange view's read: only the Turns that crossed to or from one
+  // counterpart. Inbound is on the admission; outbound is a `bot_message`
+  // call in the journal, so a filtered scan hydrates what it inspects. The
+  // scan budget bounds it, and a page that found little still says where the
+  // client resumes.
+  const counterpart = query.counterpart;
+  const touchesCounterpart = (
+    run: Parameters<typeof projectClientRunOrDegradedV1>[0],
+  ) => {
+    if (!counterpart) return true;
+    // A record nobody can decode names no counterpart; it is a Turn of the
+    // conversation, not of an exchange.
+    if (!("events" in run)) return false;
+    const origin = run.admission?.origin;
+    if (counterpart.kind === "voice") return origin?.kind === "voice";
+    if (origin?.kind === "bot" && origin.fromBotId === counterpart.botId) {
+      return true;
+    }
+    return run.events.some(
+      (event) =>
+        event.type === "tool/call" &&
+        botMessageCallV1(event)?.botId === counterpart.botId,
+    );
+  };
   const activeRunId = query.before
     ? undefined
     : await state.authority.readActiveRunId();
@@ -193,7 +218,12 @@ export async function listRuns(
     // An automation firing occupies the object like any other run, and is
     // still not part of the conversation: the visible transcript never
     // shows one, running or settled.
-    if (active && isVisibleRunV1(active.run) && inConversation(active.run))
+    if (
+      active &&
+      isVisibleRunV1(active.run) &&
+      inConversation(active.run) &&
+      touchesCounterpart(active.run)
+    )
       selected.set(active.run.runId, {
         run: projectClientRunOrDegradedV1(active.run),
       });
@@ -259,7 +289,10 @@ export async function listRuns(
       // The marker is the durable fact that this firing contributed a message.
       // A firing that broke before it could say anything has no send event to
       // derive that from, and its message is projected below.
-      if (!isVisibleRunV1(stored.run) && marker === undefined) {
+      if (
+        (!isVisibleRunV1(stored.run) && marker === undefined) ||
+        !touchesCounterpart(stored.run)
+      ) {
         scanCursor = candidate.cursor;
         continue;
       }

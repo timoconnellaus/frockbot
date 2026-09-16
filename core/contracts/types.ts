@@ -373,8 +373,8 @@ export interface SessionEventMap {
     turn: number;
     step: number;
     occurrenceId: string;
-    /** The only caller that can be addressed this way today. */
-    caller: "voice";
+    /** Who asked: the account's voice session, or another Bot of the User. */
+    caller: "voice" | "bot";
     text: string;
   };
   /**
@@ -1428,7 +1428,7 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       turn();
       step();
       eventString(event.occurrenceId, "session event.occurrenceId");
-      if (event.caller !== "voice") {
+      if (event.caller !== "voice" && event.caller !== "bot") {
         throw new Error("session event.caller is invalid");
       }
       eventString(event.text, "session event.text");

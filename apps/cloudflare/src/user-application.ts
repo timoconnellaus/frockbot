@@ -29,6 +29,7 @@ import {
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
+  parseExchangeCounterpartParamV1,
   decodeClientRunStopCommandV1,
   decodeClientTurnCommandV1,
   type ClientRunLookupQueryV1,
@@ -1155,15 +1156,20 @@ function createUserApplicationRoute() {
       try {
         const queryKeys = [...url.searchParams.keys()];
         if (
-          queryKeys.some((key) => key !== "before") ||
-          url.searchParams.getAll("before").length > 1
+          queryKeys.some((key) => key !== "before" && key !== "with") ||
+          url.searchParams.getAll("before").length > 1 ||
+          url.searchParams.getAll("with").length > 1
         ) {
           throw new Error("run list query is invalid");
         }
         const before = url.searchParams.get("before");
+        const counterpart = url.searchParams.get("with");
         query = decodeClientRunListQueryV1({
           schemaVersion: 1,
           ...(before === null ? {} : { before }),
+          ...(counterpart === null
+            ? {}
+            : { counterpart: parseExchangeCounterpartParamV1(counterpart) }),
         });
       } catch (error) {
         return jsonError(

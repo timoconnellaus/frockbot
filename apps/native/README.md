@@ -17,7 +17,7 @@ On this task's restricted Mac, the SDK cache could not be written. An APFS clone
 
 ## Voice playback and Bot exchanges
 
-Voice-originated Bot work is one blue **Voice session** exchange, with its request and explicit reply to voice. The card says Queued, Working or Answered from durable Bot state; it does not infer Played from a completed Bot Turn. It opens expanded and collapses per card: each exchange keeps its own collapse state under its own run, apart from the thread's saved scroll position. Explicit `send_to_user` messages remain ordinary messages.
+Voice-originated Bot work, like a message from another Bot, is a centred **Message from Voice** marker in the thread that opens the view-only exchange chat; the marker says queued, stopped or couldn’t answer from durable Bot state and never infers Played from a completed Bot Turn. The convention and its wire reads are in [docs/architecture.md](../../docs/architecture.md). Explicit `send_to_user` messages remain ordinary messages.
 
 The native speaker uses `com.frockbot/pcm`: Android receipts follow the AudioTrack playback head, and macOS receipts use AVAudioPlayerNode's `dataPlayedBack` callback. Dart acknowledges an exact voice delivery only after `voice/answer-end`, actual PCM received and all device receipts. Silent samples still count as pending audio. Interrupts, discarded audio, device failures and closed/replaced calls invalidate receipts. The browser retains its existing unavailable PCM playback behaviour and cannot acknowledge audio it did not play.
 

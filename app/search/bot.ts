@@ -9,7 +9,10 @@
 // Projection happens after settlement, never before it, so a failed index
 // write loses nothing: the run is already durable in the Bot Durable Object,
 // and `rebuildSearchIndex` reconstructs every row this call would have made.
-import { clientToolCallNameV1 } from "@frockbot/app/shell/run-protocol";
+import {
+  clientToolCallNameV1,
+  MESSAGE_TO_BOT_TOOL_NAME_V1,
+} from "@frockbot/app/shell/run-protocol";
 import { boundSearchBodyV1, type SearchRowV1 } from "./shared.js";
 
 /**
@@ -118,6 +121,18 @@ export function searchRowsFromClientRunV1(
     }
   }
   for (const event of run.events) {
+    // A question to another Bot is projected in place of the tool call that
+    // carried it, and is indexed under the name that call had.
+    if (event.type === "message/to-bot" && event.callId) {
+      const result = results.get(event.callId);
+      push(
+        "tool",
+        [MESSAGE_TO_BOT_TOOL_NAME_V1, event.text, result]
+          .filter((part) => typeof part === "string" && part.length > 0)
+          .join("\n"),
+      );
+      continue;
+    }
     if (event.type !== "tool/call" || !event.call) continue;
     const result = results.get(event.call.id);
     const name = clientToolCallNameV1(event.call);

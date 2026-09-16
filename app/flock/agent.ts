@@ -64,6 +64,7 @@ import type {
 } from "@frockbot/core/contracts";
 import { decodeTurnTypeV1 } from "@frockbot/core/contracts";
 import {
+  BOT_MESSAGE_TOOL_V1,
   FlockConflictError,
   isFlockIdentifier,
   randomAvatarAppearanceV1,
@@ -72,6 +73,7 @@ import {
   type FlockReceiptV1,
 } from "./shared.js";
 import { flockDefinitionV1 } from "./definition.js";
+export { BOT_MESSAGE_TOOL_V1 } from "./shared.js";
 export type {
   BotDirectoryViewV1,
   CreateBotCommandV1,
@@ -133,7 +135,6 @@ export interface BotMessageOutcomeV1 {
   text: string;
 }
 
-export const BOT_MESSAGE_TOOL_V1 = "bot_message";
 export const BOT_MESSAGING_CAPABILITY_V1 = "bot-messaging";
 export const TEAMMATES_PROMPT_SECTION_V1 = "teammates";
 export const INBOUND_AGENT_PROMPT_SECTION_V1 = "agent-message";
@@ -649,7 +650,7 @@ export function createBotMessageTool(
     name: BOT_MESSAGE_TOOL_V1,
     namespace: "frockbot",
     description:
-      "Ask one of your User's other Bots a question. Use a target_id from <teammates>. The other Bot runs an agent Turn and its send_to_user-style reply is returned here as this tool result. Do not message yourself or fan out speculatively.",
+      "Ask one of your User's other Bots a question. Use a target_id from <teammates>. The other Bot runs an agent Turn and its reply is returned here as this tool result. Do not message yourself or fan out speculatively.",
     inputSchema: BOT_MESSAGE_SCHEMA as unknown as Record<string, unknown>,
     idempotent: true,
     validate: (input) => {
@@ -774,7 +775,9 @@ export function createInboundAgentPromptSectionV1(
         // answer goes back to the caller, anything else is conversation.
         return `The person asked you the current question out loud, through the account's voice assistant. Answer it with a single \`${REPLY_TO_REQUEST_TOOL_V1}\` call: that answer goes back to the voice session and is read out to them, and it ends this Turn. It is spoken, so keep it short and speakable — a few sentences, no markdown, no lists, no code. Say it once: do not also write the answer, or a version of it, into this conversation with \`send_to_user\`. A send here is for two things only — a brief progress note when the work will take more than a minute, and material that cannot be spoken, such as a link, a table or code, which you then point to in the spoken answer. Do not finish this Turn with \`send_to_user\`; the person is waiting to hear an answer, and a send is not one.`;
       }
-      return `Bot ${promptText(inbound.fromBotName)} (${promptText(inbound.fromBotId)}) asked you the current question. Answer it directly with a send_to_user call carrying disposition:"finish"; that answer returns to the asking Bot.`;
+      // The same two addressees as voice: the answer goes back to the Bot
+      // that asked, and a send is a message to the person, not an answer.
+      return `Bot ${promptText(inbound.fromBotName)} (${promptText(inbound.fromBotId)}) asked you the current question. Answer it with a single \`${REPLY_TO_REQUEST_TOOL_V1}\` call: that answer is returned to the asking Bot as its tool result, and it ends this Turn. Make it complete and direct — it is the whole of what the other Bot receives. Do not also write the answer into this conversation with \`send_to_user\`: a send here is for your User, and only when they should hear about this directly. Do not finish this Turn with \`send_to_user\`; the other Bot is waiting on an answer, and a send is not one.`;
     },
   };
 }
@@ -800,10 +803,13 @@ export function createFlockRuntimeFeature(
       // Mounted only on a Turn that actually has a caller to answer, and
       // bound to that caller here rather than read from an argument. The
       // Shell owns the delivery; Flock provides the caller identity.
-      ...(host.inboundAgent?.kind === "voice"
+      ...(host.inboundAgent
         ? [
             runtime.tools.register(
-              createReplyToRequestToolV1("voice", runtime.sessions),
+              createReplyToRequestToolV1(
+                host.inboundAgent.kind,
+                runtime.sessions,
+              ),
             ),
           ]
         : []),

@@ -68,6 +68,9 @@ declare const validators: {
   isConversationQuery(
     value: unknown,
   ): value is ProtocolTypes["ConversationQuery"];
+  isExchangeCounterpart(
+    value: unknown,
+  ): value is ProtocolTypes["ExchangeCounterpart"];
   isSendPayload(value: unknown): value is ProtocolTypes["SendPayload"];
   isRunEvent(value: unknown): value is ProtocolTypes["RunEvent"];
   isRunOutcome(value: unknown): value is ProtocolTypes["RunOutcome"];

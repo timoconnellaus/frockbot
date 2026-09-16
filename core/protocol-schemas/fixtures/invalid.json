@@ -1837,7 +1837,7 @@
     "schema": "RunEvent",
     "value": {
       "type": "reply/to-caller",
-      "caller": "bot",
+      "caller": "routine",
       "text": "Booked."
     }
   },
@@ -1852,6 +1852,63 @@
         "type": "text",
         "text": "Booked."
       }
+    }
+  },
+  {
+    "name": "ExchangeCounterpart wrong shape",
+    "schema": "ExchangeCounterpart",
+    "value": null
+  },
+  {
+    "name": "ExchangeCounterpart unknown kind",
+    "schema": "ExchangeCounterpart",
+    "value": {
+      "kind": "routine"
+    }
+  },
+  {
+    "name": "ExchangeCounterpart bot without an id",
+    "schema": "ExchangeCounterpart",
+    "value": {
+      "kind": "bot"
+    }
+  },
+  {
+    "name": "ExchangeCounterpart voice carrying a Bot's id",
+    "schema": "ExchangeCounterpart",
+    "value": {
+      "kind": "voice",
+      "botId": "xero"
+    }
+  },
+  {
+    "name": "ConversationQuery with an unknown counterpart",
+    "schema": "ConversationQuery",
+    "value": {
+      "schemaVersion": 1,
+      "counterpart": {
+        "kind": "person"
+      }
+    }
+  },
+  {
+    "name": "RunEvent message to a Bot without its text",
+    "schema": "RunEvent",
+    "value": {
+      "type": "message/to-bot",
+      "callId": "tool-2",
+      "botId": "xero-books"
+    }
+  },
+  {
+    "name": "RunEvent message to a Bot carrying a name",
+    "schema": "RunEvent",
+    "value": {
+      "type": "message/to-bot",
+      "callId": "tool-2",
+      "botId": "xero-books",
+      "botName": "Xero",
+      "text": "What is overdue?"
     }
   }
 ]

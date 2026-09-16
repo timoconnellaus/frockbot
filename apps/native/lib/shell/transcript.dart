@@ -8,6 +8,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'markdown.dart';
@@ -32,6 +33,19 @@ class TranscriptView extends StatefulWidget {
   final ApprovalsController? approvals;
   final Future<void> Function({bool older}) onRefresh;
   final void Function(TranscriptLine line) onOpenRun;
+
+  /// Opens the view-only chat between this Bot and the marker's counterpart.
+  final void Function(TranscriptLine line)? onOpenExchange;
+
+  /// Another Bot's character and colour, for the marker that names it. Null
+  /// draws the default character: a Bot no longer in the flock still gets a
+  /// face.
+  final String? Function(String botId)? backgroundOf;
+  final String? Function(String botId)? primaryOf;
+
+  /// Another Bot's current name. The wire names a Bot only by id where this
+  /// Bot did the asking; null falls back to what the projection knows.
+  final String? Function(String botId)? nameOf;
   final void Function(TranscriptLine line)? onRetryTurn;
 
   /// Where a failure whose remedy is Billing sends the person.
@@ -69,6 +83,10 @@ class TranscriptView extends StatefulWidget {
     this.bottomSpace,
     this.pendingText,
     this.approvals,
+    this.onOpenExchange,
+    this.backgroundOf,
+    this.primaryOf,
+    this.nameOf,
     this.onRetryTurn,
     this.onOpenBilling,
     this.onOpenLink,
@@ -246,9 +264,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       final row = GestureDetector(
         key: ValueKey('row:${line.id}'),
         onLongPress:
-            widget.onMessageActions == null ||
-                line.role == LineRole.system ||
-                line.voiceExchange != null
+            widget.onMessageActions == null || line.role == LineRole.system
             ? null
             : () => widget.onMessageActions!(line),
         onSecondaryTapUp:
@@ -406,11 +422,14 @@ class _TranscriptViewState extends State<TranscriptView> {
     TranscriptLine line,
     SupersedeDrainState drain,
   ) {
-    if (line.voiceExchange != null) {
-      return _VoiceExchangeCard(
+    if (line.exchange != null) {
+      final botId = line.exchange!.counterpart.botId;
+      return _ExchangeMarker(
         line: line,
-        onOpenRun: onOpenRun,
-        onOpenLink: onOpenLink,
+        background: botId == null ? null : widget.backgroundOf?.call(botId),
+        primary: botId == null ? null : widget.primaryOf?.call(botId),
+        name: botId == null ? null : widget.nameOf?.call(botId),
+        onOpen: widget.onOpenExchange,
       );
     }
     if (line.role == LineRole.system) {
@@ -685,100 +704,119 @@ class _EmptyThread extends StatelessWidget {
   }
 }
 
-class _VoiceExchangeCard extends StatelessWidget {
+/// One line in the thread for a message that crossed to or from a
+/// counterpart: who, which way, and where it stands. The words themselves
+/// are read on the exchange view this opens, never here — the thread stays
+/// this Bot's conversation with the person.
+class _ExchangeMarker extends StatelessWidget {
   final TranscriptLine line;
-  final void Function(TranscriptLine) onOpenRun;
-  final void Function(String)? onOpenLink;
-  const _VoiceExchangeCard({
+  final String? background;
+  final String? primary;
+  final String? name;
+  final void Function(TranscriptLine line)? onOpen;
+  const _ExchangeMarker({
     required this.line,
-    required this.onOpenRun,
-    this.onOpenLink,
+    required this.background,
+    required this.primary,
+    required this.name,
+    required this.onOpen,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final exchange = line.voiceExchange!;
-    final blue = theme.brightness == Brightness.dark
-        ? const Color(0xff91caff)
-        : const Color(0xff185c9a);
-    final status = switch (exchange.status) {
-      VoiceExchangeStatus.queued => 'Queued',
-      VoiceExchangeStatus.working => 'Working',
-      VoiceExchangeStatus.answered => 'Answered',
-      VoiceExchangeStatus.stopped => 'Stopped',
-      VoiceExchangeStatus.failed => 'Couldn’t answer',
-    };
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        key: ValueKey('voice-exchange:${line.runId}'),
-        constraints: const BoxConstraints(maxWidth: 720),
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: blue.withValues(alpha: 0.08),
-          border: Border.all(color: blue.withValues(alpha: 0.3)),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Theme(
-          data: theme.copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            // A storage slot of its own. PageStorage names an entry by the
-            // PageStorageKeys above it, and the only one here is the
-            // transcript list's — the slot its scroll position already writes
-            // a double into. Sharing it made the tile read that offset back as
-            // its expanded flag and throw on mount, which a release build
-            // paints as a grey box over the thread. Per-card also keeps one
-            // card's collapse from driving every other card in the thread.
-            key: PageStorageKey('voice-exchange:${line.runId}'),
-            initiallyExpanded: true,
-            leading: Icon(Icons.graphic_eq_rounded, color: blue),
-            iconColor: blue,
-            collapsedIconColor: blue,
-            title: Text(
-              'Voice session',
-              style: theme.textTheme.titleSmall?.copyWith(color: blue),
-            ),
-            subtitle: Text(
-              status,
-              style: theme.textTheme.labelSmall?.copyWith(color: blue),
-            ),
-            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            expandedCrossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Request to Bot',
-                style: theme.textTheme.labelSmall?.copyWith(color: blue),
+    final exchange = line.exchange!;
+    final muted = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8);
+    final quiet = theme.textTheme.bodySmall?.copyWith(color: muted);
+    final named = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontWeight: FontWeight.w500,
+    );
+    final status = exchange.statusLabel;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+      child: Center(
+        child: identified(
+          ShellIds.exchange(line.id),
+          Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+            child: InkWell(
+              key: ValueKey('exchange:${line.id}'),
+              borderRadius: BorderRadius.circular(999),
+              onTap: onOpen == null ? null : () => onOpen!(line),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 2,
+                  children: [
+                    Text(
+                      exchange.direction == ExchangeDirection.outbound
+                          ? 'Messaged'
+                          : 'Message from',
+                      style: quiet,
+                    ),
+                    CounterpartAvatar(
+                      counterpart: exchange.counterpart,
+                      background: background,
+                      primary: primary,
+                      size: 18,
+                    ),
+                    Text(name ?? exchange.counterpart.label, style: named),
+                    if (status != null) Text('· $status', style: quiet),
+                  ],
+                ),
               ),
-              const SizedBox(height: 4),
-              SelectableText(exchange.request),
-              if (exchange.reply != null) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Divider(height: 1, color: blue.withValues(alpha: 0.2)),
-                ),
-                Text(
-                  'Reply to voice',
-                  style: theme.textTheme.labelSmall?.copyWith(color: blue),
-                ),
-                const SizedBox(height: 4),
-                ShellMarkdown(text: exchange.reply!, onOpenLink: onOpenLink),
-              ],
-              if (exchange.status == VoiceExchangeStatus.queued) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'Waiting for the Bot to finish its current work.',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-              if (line.tools.isNotEmpty || line.pluginCalls.isNotEmpty)
-                TextButton(
-                  onPressed: () => onOpenRun(line),
-                  child: const Text('View activity'),
-                ),
-            ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A counterpart's face: the Bot's own sheep, or the waveform for the voice
+/// session, which has no face of its own.
+class CounterpartAvatar extends StatelessWidget {
+  final ExchangeCounterpart counterpart;
+  final String? background;
+  final String? primary;
+  final double size;
+  const CounterpartAvatar({
+    super.key,
+    required this.counterpart,
+    required this.size,
+    this.background,
+    this.primary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!counterpart.isVoice) {
+      return CharacterAvatar(
+        size: size,
+        characterId: background,
+        primary: primary,
+        motion: CharacterMotion.quiet,
+      );
+    }
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: scheme.primary.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(size * 0.27),
+      ),
+      child: Icon(
+        Icons.graphic_eq_rounded,
+        size: size * 0.7,
+        color: scheme.primary,
       ),
     );
   }
