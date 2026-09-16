@@ -677,8 +677,10 @@ Bot's Packages declare join the same row at the wider tiers, built straight from
 the Package catalog the shell holds (`ChatHeader.packageEntries`): they belong
 to one Bot, so they are never drawn over the list of every Bot. A phone's bar
 stays GrokBot's three things and those doors are rows on the Bot's page instead.
-Bot messages have no avatar or tool-count row; the in-chat avatar is reserved
-for the working indicator and its typing badge. A message that crossed to or
+Bot messages have no avatar or tool-count row, and the thread draws no working
+row: the Bot's companion beside the composer takes the working pose and wears
+the typing badge while a Turn runs, and the thread only says something when a
+Stop is being waited on or a Turn is queued behind the one it displaced. A message that crossed to or
 from a counterpart — another of the User's Bots, or the voice session — is one
 centred marker in the thread, "Messaged 🐑 Codex Watch" or "Message from 🐑
 Xero Books", wearing the counterpart's own sheep and, while queued, stopped

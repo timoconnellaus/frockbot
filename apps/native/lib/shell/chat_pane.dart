@@ -214,6 +214,19 @@ class _ChatPaneState extends State<ChatPane> {
 
   Widget _column(BuildContext context, ChatController c) {
     final avatarSize = MediaQuery.sizeOf(context).width <= 640 ? 50.0 : 64.0;
+    final runs = projectRuns(c.runs);
+    final working = c.activeRunId != null;
+    // The Turn the companion's badge is paced by: the assistant line still
+    // streaming, or none while the submission is being delivered.
+    final runningLine = working
+        ? runs
+              .where(
+                (line) =>
+                    line.role == LineRole.assistant &&
+                    line.status == LineStatus.streaming,
+              )
+              .lastOrNull
+        : null;
     return Column(
       children: [
         if (c.connection == ConnectionState.disconnected ||
@@ -259,10 +272,7 @@ class _ChatPaneState extends State<ChatPane> {
                     starters: widget.starters,
                     onSelect: _prefill,
                   ),
-            lines: [
-              ...projectRuns(c.runs),
-              ...projectAnnouncements(c.announcements),
-            ],
+            lines: [...runs, ...projectAnnouncements(c.announcements)],
             pendingText: c.visiblePendingText,
             loading: c.loading,
             hasEarlier: c.before != null,
@@ -331,29 +341,49 @@ class _ChatPaneState extends State<ChatPane> {
             Positioned(
               left: 10,
               bottom: 10 + MediaQuery.paddingOf(context).bottom,
-              child: CharacterAvatar(
-                size: avatarSize,
-                characterId: widget.background,
-                primary: widget.primary,
-                enableGaze: true,
-                // Alive while the Bot works; the still picture between Turns.
-                // An idle loop here redrew the whole window sixty times a
-                // second for as long as a chat was open, and even a resting
-                // artboard beside the field cost keystrokes typed right after
-                // a tap on the composer (errors.e2e, skill-menu.e2e). Hover
-                // gaze and the occasional twitch are lost at rest as a result;
-                // bring them back once the artboard and the text field can
-                // share a frame.
-                motion: c.activeRunId == null
-                    ? CharacterMotion.still
-                    : CharacterMotion.active,
-                activity: c.activeRunId == null
-                    ? CharacterActivity.idle
-                    : CharacterActivity.thinking,
-                semanticsLabel: c.activeRunId == null
-                    ? 'Bot is ready'
-                    : 'Bot is thinking',
-              ),
+              // The companion is the working indicator: while a Turn runs it
+              // takes the working pose and wears the typing badge, paced by
+              // the Turn's own stream. Nothing in the thread says "thinking"
+              // any more; the character does.
+              child: working
+                  ? identified(
+                      ShellIds.workingIndicator,
+                      Semantics(
+                        container: true,
+                        liveRegion: true,
+                        label: 'Working',
+                        child: WorkingPace(
+                          line: runningLine,
+                          builder: (context, tempo) => CharacterAvatar(
+                            size: avatarSize,
+                            characterId: widget.background,
+                            primary: widget.primary,
+                            enableGaze: true,
+                            motion: CharacterMotion.active,
+                            activity: CharacterActivity.working,
+                            working: true,
+                            tempo: tempo,
+                          ),
+                        ),
+                      ),
+                    )
+                  : CharacterAvatar(
+                      size: avatarSize,
+                      characterId: widget.background,
+                      primary: widget.primary,
+                      enableGaze: true,
+                      // The still picture between Turns. An idle loop here
+                      // redrew the whole window sixty times a second for as
+                      // long as a chat was open, and even a resting artboard
+                      // beside the field cost keystrokes typed right after a
+                      // tap on the composer (errors.e2e, skill-menu.e2e).
+                      // Hover gaze and the occasional twitch are lost at rest
+                      // as a result; bring them back once the artboard and
+                      // the text field can share a frame.
+                      motion: CharacterMotion.still,
+                      activity: CharacterActivity.idle,
+                      semanticsLabel: 'Bot is ready',
+                    ),
             ),
           ],
         ),

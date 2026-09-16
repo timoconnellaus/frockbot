@@ -33,6 +33,10 @@ abstract final class ShellIds {
   static const skillMenu = 'skill-menu';
   static const skillChips = 'skill-chips';
   static const workingIndicator = 'working-indicator';
+
+  /// The words a running Turn earns in the thread: a Stop being waited on,
+  /// or a Turn queued behind the one it displaced.
+  static const workingNotice = 'working-notice';
   static const runView = 'run-view';
   static const runViewClose = 'run-view-close';
   static const reconnect = 'reconnect-button';

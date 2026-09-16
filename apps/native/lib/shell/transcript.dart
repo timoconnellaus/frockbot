@@ -397,17 +397,6 @@ class _TranscriptViewState extends State<TranscriptView> {
                 ),
               ),
             ...rows,
-            // Keep the latest messages in place when the working row goes.
-            if (!ordered.any(
-              (line) =>
-                  line.role == LineRole.assistant &&
-                  line.status == LineStatus.streaming &&
-                  line.empty,
-            ))
-              SizedBox(
-                key: const ValueKey('row:working-space'),
-                height: WorkingIndicator.avatarSize + workingPadding.vertical,
-              ),
             if (widget.bottomSpace != null) widget.bottomSpace!,
           ].reversed.toList(),
         ),
@@ -457,21 +446,19 @@ class _TranscriptViewState extends State<TranscriptView> {
       );
     }
     if (line.status == LineStatus.streaming && line.empty) {
-      // A plain running Turn is the animated row and no words. Two states earn
-      // words: a Stop the person asked for and is now waiting on, and a Turn
-      // still waiting behind the one it displaced.
+      // A plain running Turn draws nothing in the thread: the companion
+      // beside the composer is the one that works. Two states earn words: a
+      // Stop the person asked for and is now waiting on, and a Turn still
+      // waiting behind the one it displaced.
+      final label = line.stopRequested
+          ? 'Stopping…'
+          : line.pending
+          ? supersedeDrainLabel(drain) ?? 'Waiting…'
+          : null;
+      if (label == null) return null;
       return Padding(
         padding: workingPadding,
-        child: WorkingIndicator(
-          line: line,
-          background: widget.background,
-          primary: widget.primary,
-          label: line.stopRequested
-              ? 'Stopping…'
-              : line.pending
-              ? supersedeDrainLabel(drain) ?? 'Waiting…'
-              : null,
-        ),
+        child: WorkingIndicator(label: label),
       );
     }
     final children = <Widget>[
