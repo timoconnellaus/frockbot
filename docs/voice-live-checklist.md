@@ -77,8 +77,8 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
 9. Leave the footer open in a quiet room for an hour. Expect: the OpenAI and
    ElevenLabs dashboards show no spend for that hour.
 10. Check the ElevenLabs dashboard for character counts against the meter
-    (`voice:meter:<day>` in the object's storage, readable through the
-    `/api/debug` snapshot once that route is extended) and the OpenAI usage
+    (`voice:meter:<day>` in the object's storage, which the
+    `GET /api/debug/voice` read does not yet include) and the OpenAI usage
     page for `gpt-transcribe` minutes.
 
 ## Flutter

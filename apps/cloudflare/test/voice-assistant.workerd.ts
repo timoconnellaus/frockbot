@@ -866,6 +866,91 @@ describe("the voice session object", () => {
     next.socket.close();
   });
 
+  test("the operator's snapshot replays the call and names the owed answer without spending it", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-snapshot-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
+
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("please plan my week")).toBe(true);
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).includes("Done: Asked"),
+      "delegation acknowledged aloud",
+    );
+    const asked = (
+      Object.values(
+        await stub.probeStorage("voice:delegation:"),
+      ) as VoiceDelegationRecordV1[]
+    )[0]!;
+
+    // The call is over before the Bot answers: the answer arrives with nobody
+    // listening, which is the state the incident left the ledger in.
+    opened.socket.close();
+    await settle(100);
+    await eventually(
+      async () => {
+        await stub.probeCheckDelegation(asked.runId);
+        return (
+          Object.values(
+            await stub.probeStorage("voice:delegation:"),
+          ) as VoiceDelegationRecordV1[]
+        )[0]!;
+      },
+      (record) => record.state === "settled",
+      "the delegation to settle with nobody listening",
+      20_000,
+    );
+
+    const snapshot = await stub.debugSnapshot();
+    expect(snapshot.turns.map((turn) => turn.transcript)).toEqual([
+      "please plan my week",
+    ]);
+    expect(snapshot.delegations.map((one) => one.runId)).toEqual([asked.runId]);
+    expect(snapshot.delegations[0]).toMatchObject({
+      botId: identity.botId,
+      text: "please plan my week",
+      state: "settled",
+    });
+    // The owed answer is what the read exists to name.
+    expect(snapshot.unspoken).toEqual([asked.runId]);
+
+    // Reading twice is reading: no call ended, nothing expired, nothing moved.
+    const again = await stub.debugSnapshot();
+    expect({ ...again, capturedAt: snapshot.capturedAt }).toEqual(snapshot);
+
+    // And the operator's read did not spend the answer: the next call still
+    // reads it out first, and only then is nothing owed.
+    const next = await open(identity.userId);
+    const speaker = playsAnswers(next);
+    await startCall(next);
+    await next.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
+      "the owed answer read out on the next call",
+    );
+    await eventually(
+      async () =>
+        (
+          Object.values(
+            await stub.probeStorage("voice:delegation:"),
+          ) as VoiceDelegationRecordV1[]
+        )[0]!,
+      (record) => record.state === "spoken",
+      "the answer marked spoken once its audio played",
+    );
+    expect(speaker.played).toHaveLength(1);
+    expect((await stub.debugSnapshot()).unspoken).toEqual([]);
+    next.socket.close();
+  });
+
   test("a renamed Bot is prompted and spoken about under the name it has now", async () => {
     const suffix = crypto.randomUUID();
     const identity = {

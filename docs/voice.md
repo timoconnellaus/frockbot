@@ -438,6 +438,13 @@ socket never became ready — the connect stalled or was refused — and the
 left before the turn detector committed a transcript. Only the `closed` code
 and reason say which side closed the socket.
 
+No trace line carries the words. What a person said, what each Bot answered
+and which settled answers are still owed are readable afterwards from the
+ledger itself, through the token-gated operator read `GET
+/api/debug/voice?userId=<id>` — a read of storage that ends no call, expires
+no delegation and starts no read-out. The fields are documented in
+`.claude/skills/frockbot-debug/SKILL.md`.
+
 ### Text turns
 
 `{type:"text_message",text}` runs a turn without STT. Not used by the footer;
