@@ -26,6 +26,7 @@ dependencies:
   # `record` owns microphone permission. Playback uses the app’s device sink
   # so completion means samples were played, not just handed to the device.
   record: 7.1.1
+  flutter_slidable: 4.0.3
 
 dev_dependencies:
   flutter_test:

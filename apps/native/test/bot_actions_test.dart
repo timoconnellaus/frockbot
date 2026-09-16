@@ -12,6 +12,10 @@ import 'settings_test.dart' show SettingsApi;
 import 'shell_layout_test.dart' show bot, byIdentifier, host, unread;
 import 'widget_test.dart' show MemoryStore;
 
+/// A drag slow enough that only its distance counts, not its speed.
+Future<void> slowDrag(WidgetTester tester, Finder finder, Offset by) =>
+    tester.timedDrag(finder, by, const Duration(milliseconds: 600));
+
 List<BotAction> actionsOf(BotActionState state) => [
   for (final item in botActionsFor(state)) item.action,
 ];
@@ -65,18 +69,6 @@ void main() {
           if (item.confirms) item.action,
       ];
       expect(asks, [BotAction.archive]);
-    });
-  });
-
-  group('letting go of a swipe', () {
-    test('marks read past a third of the row, towards the trailing edge', () {
-      expect(sidebarSwipeOutcomeV1(130, 360), SidebarSwipeOutcome.read);
-      expect(sidebarSwipeOutcomeV1(90, 360), SidebarSwipeOutcome.close);
-    });
-
-    test('stays open on the Hide button past half its width', () {
-      expect(sidebarSwipeOutcomeV1(-50, 360), SidebarSwipeOutcome.reveal);
-      expect(sidebarSwipeOutcomeV1(-30, 360), SidebarSwipeOutcome.close);
     });
   });
 
@@ -254,7 +246,7 @@ void main() {
       );
       final row = byIdentifier(ShellIds.sidebarBot('scout'));
       final before = tester.getTopLeft(row);
-      await tester.drag(row, Offset(tester.getSize(row).width / 2, 0));
+      await slowDrag(tester, row, Offset(tester.getSize(row).width / 2, 0));
       await tester.pumpAndSettle();
       expect(read, ['scout']);
       expect(tester.getTopLeft(row), before);
@@ -268,7 +260,8 @@ void main() {
           onSwipeHide: (_) => fail('wrong way'),
         ),
       );
-      await tester.drag(
+      await slowDrag(
+        tester,
         byIdentifier(ShellIds.sidebarBot('scout')),
         const Offset(60, 0),
       );
@@ -288,7 +281,7 @@ void main() {
         );
         final row = byIdentifier(ShellIds.sidebarBot('scout'));
         final before = tester.getTopLeft(row);
-        await tester.drag(row, const Offset(-120, 0));
+        await slowDrag(tester, row, const Offset(-120, 0));
         await tester.pumpAndSettle();
         // The swipe alone hides nothing: the row stays slid over the button.
         expect(hidden, isEmpty);
@@ -299,6 +292,60 @@ void main() {
         expect(tester.getTopLeft(row), before);
       },
     );
+
+    testWidgets('a long swipe hides on release, no tap needed', (tester) async {
+      final hidden = <String>[];
+      await tester.pumpWidget(
+        sidebar(
+          phone: true,
+          onSwipeRead: (_) => fail('wrong way'),
+          onSwipeHide: hidden.add,
+        ),
+      );
+      final row = byIdentifier(ShellIds.sidebarBot('scout'));
+      await slowDrag(tester, row, Offset(-tester.getSize(row).width * 0.7, 0));
+      await tester.pumpAndSettle();
+      expect(hidden, ['scout']);
+    });
+
+    testWidgets('opening a second row closes the first', (tester) async {
+      await tester.pumpWidget(
+        host(
+          ShellSidebar(
+            bots: [bot('scout', 'Scout'), bot('rosemary', 'Rosemary')],
+            profiles: const {},
+            unread: const {},
+            archived: const {},
+            activeBotId: null,
+            focusedBotId: null,
+            workingBotId: null,
+            loaded: true,
+            showHidden: false,
+            onSelect: (_) {},
+            onCreateBot: () {},
+            onSearch: () {},
+            onProfile: () {},
+            onMarketplace: () {},
+            onVoice: () {},
+            voiceControl: VoiceControlState.idle,
+            onToggleHidden: () {},
+            onRetry: () async {},
+            onSwipeHide: (_) {},
+            phone: true,
+          ),
+        ),
+      );
+      final scout = byIdentifier(ShellIds.sidebarBot('scout'));
+      final rosemary = byIdentifier(ShellIds.sidebarBot('rosemary'));
+      final scoutAt = tester.getTopLeft(scout);
+      await slowDrag(tester, scout, const Offset(-120, 0));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(scout).dx, lessThan(scoutAt.dx));
+      await slowDrag(tester, rosemary, const Offset(-120, 0));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(scout), scoutAt);
+      expect(byIdentifier(BotActionIds.swipeHide('rosemary')), findsOneWidget);
+    });
 
     testWidgets('a hidden row reveals no Hide', (tester) async {
       await tester.pumpWidget(
@@ -312,7 +359,7 @@ void main() {
       );
       final row = byIdentifier(ShellIds.sidebarBot('scout'));
       final before = tester.getTopLeft(row);
-      await tester.drag(row, const Offset(-120, 0));
+      await slowDrag(tester, row, const Offset(-120, 0));
       await tester.pumpAndSettle();
       expect(tester.getTopLeft(row), before);
       expect(byIdentifier(BotActionIds.swipeHide('scout')), findsNothing);
@@ -330,7 +377,7 @@ void main() {
         ),
       );
       final row = byIdentifier(ShellIds.sidebarBot('scout'));
-      await tester.drag(row, Offset(tester.getSize(row).width / 2, 0));
+      await slowDrag(tester, row, Offset(tester.getSize(row).width / 2, 0));
       await tester.pumpAndSettle();
     });
 
@@ -344,7 +391,7 @@ void main() {
       );
       final row = byIdentifier(ShellIds.sidebarBot('scout'));
       final before = tester.getTopLeft(row);
-      await tester.drag(row, Offset(tester.getSize(row).width / 2, 0));
+      await slowDrag(tester, row, Offset(tester.getSize(row).width / 2, 0));
       await tester.pumpAndSettle();
       expect(tester.getTopLeft(row), before);
     });
