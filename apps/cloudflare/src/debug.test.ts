@@ -336,4 +336,41 @@ describe("debug route", () => {
 
     expect(target.features).toEqual([]);
   });
+
+  test("reads a User's voice ledger under the user id it is asked for", async () => {
+    const reads: string[] = [];
+    const route = createDebugRoute(
+      surface({
+        voice: (userId) => {
+          reads.push(userId);
+          return Promise.resolve({ schemaVersion: 1, userId, turns: [] });
+        },
+      }),
+    );
+    const request = get("/api/debug/voice?userId=user-1", authorized);
+
+    const response = await route(request, new URL(request.url));
+
+    expect(response?.status).toBe(200);
+    expect((await response?.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      userId: "user-1",
+      turns: [],
+    });
+    expect(reads).toEqual(["user-1"]);
+  });
+
+  test("requires the user a voice ledger is read under, and 404s with no voice objects", async () => {
+    const withVoice = createDebugRoute(
+      surface({ voice: () => Promise.resolve({ schemaVersion: 1 }) }),
+    );
+    const missing = get("/api/debug/voice", authorized);
+    expect((await withVoice(missing, new URL(missing.url)))?.status).toBe(400);
+
+    const withoutVoice = createDebugRoute(surface());
+    const request = get("/api/debug/voice?userId=user-1", authorized);
+    expect((await withoutVoice(request, new URL(request.url)))?.status).toBe(
+      404,
+    );
+  });
 });

@@ -35,6 +35,7 @@ usage:
   debug.sh bots <userId>
   debug.sh bot  <userId> <botId> [--events] [--limit N] [--before CURSOR]
   debug.sh run  <userId> <botId> <runId>
+  debug.sh voice <userId>                     voice calls, transcripts, delegations
   debug.sh send <userId> <botId> [<text...>]   read text from stdin if omitted
   debug.sh watch <userId> <botId> <runId>      poll every 3s until settled
   debug.sh token store [<value>]   store a token durably (reads stdin if omitted)
@@ -308,6 +309,13 @@ case "$command" in
       exit 2
     }
     request "/api/debug/bots?userId=$1"
+    ;;
+  voice)
+    [ $# -ge 1 ] || {
+      usage
+      exit 2
+    }
+    request "/api/debug/voice?userId=$1"
     ;;
   bot)
     [ $# -ge 2 ] || {

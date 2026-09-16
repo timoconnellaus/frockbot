@@ -581,3 +581,63 @@ describe("voice dictation lease", () => {
     expect((await l.dictationLease())?.leaseId).toBe("lease-c");
   });
 });
+
+describe("voice ledger debug snapshot", () => {
+  test("replays a call: transcripts in order, delegations, and what is still owed", async () => {
+    const { ledger: l } = ledger();
+    await liveCall(l);
+    const first = await l.admitTurn({
+      connectionId: "c1",
+      transcript: "what is the weather",
+      at: later(1_000),
+    });
+    const second = await l.admitTurn({
+      connectionId: "c1",
+      transcript: "what is in my email",
+      at: later(2_000),
+    });
+    if (first.status !== "admitted" || second.status !== "admitted") {
+      throw new Error("unreachable");
+    }
+    const asked = await l.admitDelegation({
+      turnId: first.turn.turnId,
+      botId: "bob",
+      botName: "Bob",
+      text: "Tim is asking what the weather is",
+      at: later(1_500),
+    });
+    if (asked.status !== "admitted") throw new Error("unreachable");
+    await l.settleDelegation(
+      asked.delegation.runId,
+      { answer: "I can't check it" },
+      later(10_000),
+    );
+
+    const snapshot = await l.debugSnapshot();
+
+    expect(snapshot.schemaVersion).toBe(1);
+    expect(snapshot.userId).toBe("user-1");
+    expect(snapshot.currentCall?.callId).toBe("call-1");
+    expect(snapshot.turns.map((turn) => turn.transcript)).toEqual([
+      "what is the weather",
+      "what is in my email",
+    ]);
+    expect(snapshot.delegations).toHaveLength(1);
+    expect(snapshot.delegations[0]?.answer).toBe("I can't check it");
+    // Settled but never acknowledged as played: still owed to the next call.
+    expect(snapshot.unspoken).toEqual([asked.delegation.runId]);
+    // A read changes nothing.
+    expect(await l.debugSnapshot()).toEqual(snapshot);
+  });
+
+  test("an empty ledger reads as empty rather than failing", async () => {
+    const { ledger: l } = ledger();
+    expect(await l.debugSnapshot()).toEqual({
+      schemaVersion: 1,
+      userId: "user-1",
+      turns: [],
+      delegations: [],
+      unspoken: [],
+    });
+  });
+});

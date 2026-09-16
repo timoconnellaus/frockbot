@@ -36,6 +36,12 @@ export interface DebugGatewaySurface {
     botId: string,
     query: BotDebugQueryV1,
   ): Promise<unknown>;
+  /**
+   * The User's voice assistant ledger: calls, spoken turns with their
+   * transcripts, and the Bot delegations each made. Absent on a deployment
+   * with no voice objects; the route then 404s.
+   */
+  voice?(userId: string): Promise<unknown>;
   isAdminUser(userId: string): Promise<boolean>;
   setAccountFeatures(
     userId: string,
@@ -210,6 +216,7 @@ export function createDebugRoute(
             "GET /api/debug/bots?userId=<id>",
             "GET /api/debug/bots/<botId>?userId=<id>&limit=<n>&events=true&before=<cursor>",
             "GET /api/debug/bots/<botId>/runs/<runId>?userId=<id>",
+            "GET /api/debug/voice?userId=<id>",
             "POST /api/debug/users/<userId>/bots/<botId>/turns",
             "POST /api/debug/users/<userId>/features",
           ],
@@ -226,6 +233,11 @@ export function createDebugRoute(
       if (path === "/bots") {
         if (!userId) return jsonError(400, "userId is required");
         return Response.json(await surface.listBots(userId));
+      }
+      if (path === "/voice") {
+        if (!surface.voice) return jsonError(404, "not found");
+        if (!userId) return jsonError(400, "userId is required");
+        return Response.json(await surface.voice(userId));
       }
       const runMatch = path.match(/^\/bots\/([^/]+)\/runs\/([^/]+)$/);
       const botMatch = path.match(/^\/bots\/([^/]+)$/);

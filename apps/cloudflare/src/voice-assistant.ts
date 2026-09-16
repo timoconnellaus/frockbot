@@ -44,6 +44,7 @@ import {
   voiceCallIsStaleV1,
   type VoiceCallRecordV1,
   type VoiceDelegationRecordV1,
+  type VoiceLedgerDebugSnapshotV1,
   type VoiceLedgerStorageV1,
 } from "@frockbot/app/voice/ledger";
 import {
@@ -64,6 +65,7 @@ import {
   VOICE_MEMORY_MAX_OPERATIONS_V1,
   VOICE_MEMORY_MAX_TEXT_CHARS_V1,
   type VoiceMemoryChunkV1,
+  type VoiceMemoryJobV1,
   type VoiceMemoryOperationV1,
   type VoiceMemoryRecordV1,
   type VoiceMemorySourceReaderV1,
@@ -179,6 +181,12 @@ function voiceReplyTextOfRunV1(run: ClientRunV1): string | undefined {
     if (typeof text === "string" && text.trim()) return text;
   }
   return undefined;
+}
+
+/** What `debugSnapshot` returns: the ledger plus the memory jobs owed. */
+export interface VoiceAssistantDebugSnapshotV1 extends VoiceLedgerDebugSnapshotV1 {
+  capturedAt: string;
+  memoryJobs: VoiceMemoryJobV1[];
 }
 
 interface VoiceReplyDeliveryV1 {
@@ -2149,6 +2157,22 @@ export class VoiceAssistant extends VoiceAgentBase<
    * does — reads the authoritative run record and settles the request against
    * it — so a duplicate delivery, or one that races the poll, is a no-op.
    */
+  /**
+   * The ledger as the operator sees it on `/api/debug/voice`. A read of
+   * storage and nothing else: no call is ended, no delegation is checked or
+   * expired, no read-out is started. The object waking to answer it runs its
+   * ordinary `onStart` recovery, which is the same thing any request does.
+   */
+  async debugSnapshot(): Promise<VoiceAssistantDebugSnapshotV1> {
+    const ledger = await this.ledger().debugSnapshot();
+    const memoryJobs = await this.memory().jobs();
+    return {
+      ...ledger,
+      capturedAt: new Date(this.now()).toISOString(),
+      memoryJobs,
+    };
+  }
+
   async deliverVoiceReply(input: unknown): Promise<{ status: "accepted" }> {
     const request = decodeVoiceReplyDeliveryV1(input);
     if (request.userId !== this.name) {
