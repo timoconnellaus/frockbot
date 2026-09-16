@@ -448,6 +448,8 @@ export function createTaskTool(
     // from, so a reconciled call reads its own task back.
     idempotent: false,
     admission: { turnTypes: ["chat", "automation"] },
+    // It appends the subagent card to the conversation.
+    orderedEffect: true,
     validate: (input: unknown) => {
       try {
         decodeTaskToolInputV1(input);
@@ -906,6 +908,8 @@ export function createTaskResumeTool(
     },
     idempotent: false,
     admission: { turnTypes: ["chat", "automation"] },
+    // It appends the subagent card to the conversation.
+    orderedEffect: true,
     validate: (input: unknown) => {
       try {
         decodeTaskResumeInputV1(input);

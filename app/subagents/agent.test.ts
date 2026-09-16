@@ -8,6 +8,12 @@ import {
   createTaskStopTool,
   createTaskTool,
   decodeTaskToolInputV1,
+  TASK_CHECK_TOOL_V1,
+  TASK_MESSAGE_TOOL_V1,
+  TASK_RESUME_TOOL_V1,
+  TASK_STOP_TOOL_V1,
+  TASK_TOOL_V1,
+  type SubagentEventRecorderV1,
   subagentsAdmissionCeilingV1,
   TASK_DISPATCH_CAPABILITY_V1,
   TASK_LIFECYCLE_CAPABILITY_V1,
@@ -20,7 +26,17 @@ import {
   TASK_PROMPT_MAX_BYTES_V1,
   type TaskModelBindingV1,
 } from "./records.js";
-import type { ToolExecutionContext } from "@frockbot/core/contracts";
+import { createAgentLoop } from "@frockbot/core/agent-loop";
+import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
+import {
+  BATCH_TOOL_NAME,
+  type SessionEvent,
+  type ToolExecutionContext,
+} from "@frockbot/core/contracts";
+import {
+  CALL_DYNAMIC_TOOL_NAME,
+  frockbotToolCallV1,
+} from "@frockbot/core/tools";
 
 const BINDING: TaskModelBindingV1 = {
   packageId: "provider-ollama-cloud",
@@ -479,5 +495,189 @@ describe("delivering queued messages into the child's next step", () => {
     expect(
       foldPendingTaskMessagesV1(rejected, [{ seq: 0, message: "hi" }], "tk-1"),
     ).toBe(rejected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ordering. A dispatch draws a card in the conversation, so two of them in one
+// `batch` may not race: the person reads the cards in the order the model
+// declared them, and a replay under different scheduling must draw the same
+// order. That is what `orderedEffect` buys, and the tools that append
+// `task/dispatched` are the ones that need it.
+// ---------------------------------------------------------------------------
+
+describe("the subagent tools' conversation ordering", () => {
+  /** Runs one Turn whose only call is a `batch`, through the real loop. */
+  async function runBatch(
+    calls: unknown[],
+    dispatch: (
+      request: SubagentDispatchRequestV1,
+    ) => Promise<SubagentDispatchOutcomeV1>,
+  ): Promise<SessionEvent[]> {
+    const root = createAgentRuntimeHarness();
+    root.systemPrompt.register({ id: "identity", render: () => "Test agent." });
+    let served = 0;
+    root.llm.register({
+      id: "fixture",
+      async *stream() {
+        if (served++ === 0) {
+          yield {
+            type: "tool-call",
+            call: {
+              id: "provider-call",
+              name: BATCH_TOOL_NAME,
+              input: { calls },
+            },
+          };
+          yield { type: "finish", reason: "tool-calls" };
+          return;
+        }
+        yield { type: "text-delta", text: "done" };
+        yield { type: "finish", reason: "completed" };
+      },
+    });
+    // The recorder the real mount installs: it appends `task/dispatched` to
+    // the Turn's log at the moment the host answers.
+    const record: SubagentEventRecorderV1 = {
+      dispatched: (event) =>
+        root.sessions
+          .get("batch")
+          ?.append({ type: "task/dispatched", turn: 1, step: 1, ...event }),
+      messaged: () => undefined,
+    };
+    const host = {
+      botId: "bot",
+      writer: { sessionId: "batch", turnId: "run-1", runId: "run-1" },
+      turnType: "chat" as const,
+      models: () =>
+        subagentModelCatalogV1({
+          bindings: [BINDING],
+          defaultBinding: BINDING,
+          turnType: "chat",
+        }),
+      dispatch,
+    };
+    root.tools.register(createTaskTool(host, record));
+    const loop = createAgentLoop(root, {
+      maxSteps: 3,
+      composition: {
+        generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
+        artifactSetHash: "a".repeat(64),
+      },
+    });
+    try {
+      const handle = await loop.create({
+        botId: "bot-batch",
+        sessionId: "batch",
+        provider: "fixture",
+        model: "fixture",
+        turnType: "chat",
+        admitEffect: () => Promise.resolve(true),
+      });
+      handle.agent.send("go");
+      await handle.agent.whenIdle();
+      return [...handle.agent.session.events];
+    } finally {
+      await loop.dispose();
+      await root.dispose();
+    }
+  }
+
+  test("two dispatches in one batch draw their cards in declared order", async () => {
+    // The regression: `record.dispatched` runs after `host.dispatch` resolves,
+    // so dispatched at once the slower call's card lands second whatever the
+    // model declared. Declaring the effect ordered puts the two calls in the
+    // chain, where landing order is declared order by construction.
+    const events = await runBatch(
+      [
+        {
+          tool: CALL_DYNAMIC_TOOL_NAME,
+          arguments: {
+            namespace: "frockbot",
+            toolName: TASK_TOOL_V1,
+            arguments: { description: "first", prompt: "do the first thing" },
+          },
+        },
+        {
+          tool: CALL_DYNAMIC_TOOL_NAME,
+          arguments: {
+            namespace: "frockbot",
+            toolName: TASK_TOOL_V1,
+            arguments: { description: "second", prompt: "do the second thing" },
+          },
+        },
+      ],
+      async (request) => {
+        // The first declared call is the slow one, so completion order and
+        // declared order disagree unless the chain serialises them.
+        await Bun.sleep(request.description === "first" ? 30 : 0);
+        return {
+          status: "dispatched",
+          taskId: `tk-${request.description}`,
+          model: "m",
+        };
+      },
+    );
+
+    expect(
+      events
+        .filter((event) => event.type === "task/dispatched")
+        .map((event) => (event as { taskId: string }).taskId),
+    ).toEqual(["tk-first", "tk-second"]);
+  });
+
+  test("every subagent tool that appends a card declares the ordering, and no other does", async () => {
+    // The classification, kept where a sixth subagent tool has to face it:
+    // `Task` and `task_resume` both append `task/dispatched`, which the
+    // transcript draws in conversation position. `task_check` reads,
+    // `task_stop` cancels, and `task_message` appends `task/message`, which
+    // the transcript does not draw at all.
+    const root = createAgentRuntimeHarness();
+    const host = {
+      botId: "bot",
+      writer: { sessionId: "batch", turnId: "run-1", runId: "run-1" },
+      turnType: "chat" as const,
+      models: () =>
+        subagentModelCatalogV1({
+          bindings: [BINDING],
+          defaultBinding: BINDING,
+          turnType: "chat",
+        }),
+      dispatch: () => Promise.reject(new Error("unused")),
+      check: () => Promise.reject(new Error("unused")),
+      message: () => Promise.reject(new Error("unused")),
+      stop: () => Promise.reject(new Error("unused")),
+      resume: () => Promise.reject(new Error("unused")),
+    };
+    try {
+      for (const definition of [
+        createTaskTool(host),
+        createTaskCheckTool(host),
+        createTaskMessageTool(host),
+        createTaskStopTool(host),
+        createTaskResumeTool(host),
+      ]) {
+        root.tools.register(definition);
+      }
+      const ordered = (name: string) =>
+        root.tools.orderedEffect(
+          frockbotToolCallV1({ id: "call-1", name, input: {} }),
+        );
+      expect({
+        [TASK_TOOL_V1]: ordered(TASK_TOOL_V1),
+        [TASK_RESUME_TOOL_V1]: ordered(TASK_RESUME_TOOL_V1),
+        [TASK_CHECK_TOOL_V1]: ordered(TASK_CHECK_TOOL_V1),
+        [TASK_MESSAGE_TOOL_V1]: ordered(TASK_MESSAGE_TOOL_V1),
+        [TASK_STOP_TOOL_V1]: ordered(TASK_STOP_TOOL_V1),
+      }).toEqual({
+        [TASK_TOOL_V1]: true,
+        [TASK_RESUME_TOOL_V1]: true,
+        [TASK_CHECK_TOOL_V1]: false,
+        [TASK_MESSAGE_TOOL_V1]: false,
+        [TASK_STOP_TOOL_V1]: false,
+      });
+    } finally {
+      await root.dispose();
+    }
   });
 });
