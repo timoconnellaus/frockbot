@@ -1700,6 +1700,10 @@ export class VoiceAssistant extends VoiceAgentBase<
     const history: { role: "user" | "assistant"; content: string }[] = [];
     for (const turn of turns) {
       if (turn.turnId === currentTurnId) continue;
+      // An event turn that failed was never told: its answer is still owed
+      // and will be admitted again, so leaving it here would show the model
+      // the same "[Bot answer] …" twice.
+      if (turn.event && turn.state === "failed") continue;
       history.push({ role: "user", content: turn.transcript });
       if (turn.answer)
         history.push({ role: "assistant", content: turn.answer });
@@ -2313,162 +2317,173 @@ export class VoiceAssistant extends VoiceAgentBase<
     const release = () => {
       if (call.announcing === controller) call.announcing = undefined;
     };
-    const ledger = this.ledger();
-    const transcript = renderVoiceBotAnswerEventV1({
-      botName: delegation.botName,
-      question: await this.delegationQuestion(ledger, delegation),
-      ...(delegation.answer ? { answer: delegation.answer } : {}),
-      ...(delegation.failure ? { failure: delegation.failure } : {}),
-    });
-    if (controller.signal.aborted) {
-      // The person took the floor while the request was being read. Nothing
-      // has been admitted or marked, so the answer simply waits its turn.
-      release();
-      await this.scheduleAnnounce(delegation.runId);
-      return;
-    }
-    const admitted = await ledger.admitTurn({
-      connectionId: connection.id,
-      transcript,
-      at: this.now(),
-      event: {
-        kind: "bot-answer",
-        botId: delegation.botId,
+    try {
+      const ledger = this.ledger();
+      const transcript = renderVoiceBotAnswerEventV1({
         botName: delegation.botName,
-        runId: delegation.runId,
-      },
-    });
-    if (admitted.status === "refused") {
-      // The day's turns are spent. The answer is in the Bot's conversation.
-      release();
-      await ledger.dropDelegation(delegation.runId);
-      this.trace(connection, "answer-dropped", {
-        run: delegation.runId,
-        reason: "quota",
+        question: await this.delegationQuestion(ledger, delegation),
+        ...(delegation.answer ? { answer: delegation.answer } : {}),
+        ...(delegation.failure ? { failure: delegation.failure } : {}),
       });
-      return;
-    }
-    const turnId = admitted.turn.turnId;
-    if (controller.signal.aborted) {
-      // Aborted before the delegation was marked: the turn is admitted, so it
-      // is settled here rather than left open for `recover`, and the answer is
-      // still owed — it waits for the call to be quiet again.
-      await ledger.settleTurn(turnId, { failure: "aborted" });
-      release();
-      await this.scheduleAnnounce(delegation.runId);
-      return;
-    }
-    // Told once: the event turn is durable before the model is asked, so an
-    // eviction in between leaves a turn the history shows and no second one.
-    if (
-      !(await ledger.markDelegationSpoken(delegation.runId, turnId, this.now()))
-    ) {
-      // The call ended between the admission and the mark, so the delegation
-      // was cancelled with it. The turn is settled rather than left admitted
-      // and metered against a call nobody is on.
-      await ledger.settleTurn(turnId, { failure: "the call ended" });
-      release();
-      return;
-    }
-    if (controller.signal.aborted) {
-      await ledger.settleTurn(turnId, { failure: "aborted" });
-      release();
-      return;
-    }
-    const generation = call.speechGeneration;
-    const startedAt = Date.now();
-    call.turnId = turnId;
-    call.turnAdmittedAt = admitted.turn.admittedAt;
-    call.turnTranscript = transcript;
-    call.turnOrdinal =
-      Number.parseInt(turnId.slice(turnId.lastIndexOf(":") + 1), 10) || 1;
-    call.turnStartedAt = startedAt;
-    call.turnSettledAt = undefined;
-    this.sendDelegationState(delegation.botId, delegation.botName, "answering");
-    this.trace(connection, "turn", {
-      turn: turnId,
-      event: "bot-answer",
-      run: delegation.runId,
-      chars: transcript.length,
-      model: this.voiceModel() ?? "auto",
-    });
-    const system = call.promptContext.then(async (promptContext) => {
-      const rendered = renderVoiceSystemPromptV1({
-        ...promptContext,
-        session: await this.sessionMemoryContext(),
-        now: this.now(),
-      });
-      call.lastSystem = rendered;
-      return rendered;
-    });
-    const history = await this.callHistory(call.callId, turnId);
-    const host = this.turnHost(
-      identity.userId,
-      call,
-      turnId,
-      (await call.promptContext).timezone,
-    );
-    let settlement: { answer: string } | { failure: string } = {
-      failure: "no settlement",
-    };
-    let text = "";
-    try {
-      for await (const chunk of runVoiceTurnV1(
-        host,
-        {
-          system,
-          history,
-          transcript,
-          signal: controller.signal,
-          acknowledge: false,
-        },
-        (result) => {
-          // Nothing said is a decision here, not a failure: the assistant
-          // judged the answer not worth interrupting for.
-          settlement =
-            result.outcome === "aborted"
-              ? { failure: "aborted" }
-              : { answer: result.answer };
-        },
-      )) {
-        if (chunk.kind === "text") text += chunk.text;
+      if (controller.signal.aborted) {
+        // The person took the floor while the request was being read. Nothing
+        // has been admitted or marked, so the answer simply waits its turn.
+        await this.scheduleAnnounce(delegation.runId);
+        return;
       }
-    } catch (error) {
-      settlement = {
-        failure: error instanceof Error ? error.message : String(error),
+      const admitted = await ledger.admitTurn({
+        connectionId: connection.id,
+        transcript,
+        at: this.now(),
+        event: {
+          kind: "bot-answer",
+          botId: delegation.botId,
+          botName: delegation.botName,
+          runId: delegation.runId,
+        },
+      });
+      if (admitted.status === "refused") {
+        // The day's turns are spent. The answer is in the Bot's conversation.
+        await ledger.dropDelegation(delegation.runId);
+        this.trace(connection, "answer-dropped", {
+          run: delegation.runId,
+          reason: "quota",
+        });
+        return;
+      }
+      const turnId = admitted.turn.turnId;
+      if (controller.signal.aborted) {
+        // Aborted before the delegation was marked: the turn is admitted, so it
+        // is settled here rather than left open for `recover`, and the answer is
+        // still owed — it waits for the call to be quiet again.
+        await ledger.settleTurn(turnId, { failure: "aborted" });
+        await this.scheduleAnnounce(delegation.runId);
+        return;
+      }
+      // Told once: the event turn is durable before the model is asked, so an
+      // eviction in between leaves a turn the history shows and no second one.
+      if (
+        !(await ledger.markDelegationSpoken(
+          delegation.runId,
+          turnId,
+          this.now(),
+        ))
+      ) {
+        // The call ended between the admission and the mark, so the delegation
+        // was cancelled with it. The turn is settled rather than left admitted
+        // and metered against a call nobody is on.
+        await ledger.settleTurn(turnId, { failure: "the call ended" });
+        return;
+      }
+      if (controller.signal.aborted) {
+        await ledger.settleTurn(turnId, { failure: "aborted" });
+        return;
+      }
+      const generation = call.speechGeneration;
+      const startedAt = Date.now();
+      call.turnId = turnId;
+      call.turnAdmittedAt = admitted.turn.admittedAt;
+      call.turnTranscript = transcript;
+      call.turnOrdinal =
+        Number.parseInt(turnId.slice(turnId.lastIndexOf(":") + 1), 10) || 1;
+      call.turnStartedAt = startedAt;
+      call.turnSettledAt = undefined;
+      this.sendDelegationState(
+        delegation.botId,
+        delegation.botName,
+        "answering",
+      );
+      this.trace(connection, "turn", {
+        turn: turnId,
+        event: "bot-answer",
+        run: delegation.runId,
+        chars: transcript.length,
+        model: this.voiceModel() ?? "auto",
+      });
+      const system = call.promptContext.then(async (promptContext) => {
+        const rendered = renderVoiceSystemPromptV1({
+          ...promptContext,
+          session: await this.sessionMemoryContext(),
+          now: this.now(),
+        });
+        call.lastSystem = rendered;
+        return rendered;
+      });
+      const history = await this.callHistory(call.callId, turnId);
+      const host = this.turnHost(
+        identity.userId,
+        call,
+        turnId,
+        (await call.promptContext).timezone,
+      );
+      let settlement: { answer: string } | { failure: string } = {
+        failure: "no settlement",
       };
+      let text = "";
+      try {
+        for await (const chunk of runVoiceTurnV1(
+          host,
+          {
+            system,
+            history,
+            transcript,
+            signal: controller.signal,
+            acknowledge: false,
+          },
+          (result) => {
+            // Nothing said is a decision here, not a failure: the assistant
+            // judged the answer not worth interrupting for.
+            settlement =
+              result.outcome === "aborted"
+                ? { failure: "aborted" }
+                : { answer: result.answer };
+          },
+        )) {
+          if (chunk.kind === "text") text += chunk.text;
+        }
+      } catch (error) {
+        settlement = {
+          failure: error instanceof Error ? error.message : String(error),
+        };
+      } finally {
+        if (call.turnId === turnId) call.turnSettledAt = Date.now();
+        release();
+        await ledger.settleTurn(turnId, settlement);
+      }
+      const spoken = text.trim();
+      this.trace(connection, "turn-settled", {
+        turn: turnId,
+        event: "bot-answer",
+        ms: Date.now() - startedAt,
+        ...("failure" in settlement
+          ? { failure: settlement.failure }
+          : {
+              outcome: spoken ? "answered" : "silent",
+              answerChars: spoken.length,
+            }),
+      });
+      this.sendDelegationState(
+        delegation.botId,
+        delegation.botName,
+        "finished",
+      );
+      if (
+        !spoken ||
+        controller.signal.aborted ||
+        this.#calls.get(connection.id) !== call ||
+        call.speechGeneration !== generation
+      ) {
+        return;
+      }
+      try {
+        await this.speak(connection, spoken);
+      } catch {
+        // The audio never left; the words are on record in the turn. The
+        // person can ask, and the Bot's conversation has the answer.
+        this.trace(connection, "answer-unspoken", { turn: turnId });
+      }
     } finally {
-      if (call.turnId === turnId) call.turnSettledAt = Date.now();
       release();
-      await ledger.settleTurn(turnId, settlement);
-    }
-    const spoken = text.trim();
-    this.trace(connection, "turn-settled", {
-      turn: turnId,
-      event: "bot-answer",
-      ms: Date.now() - startedAt,
-      ...("failure" in settlement
-        ? { failure: settlement.failure }
-        : {
-            outcome: spoken ? "answered" : "silent",
-            answerChars: spoken.length,
-          }),
-    });
-    this.sendDelegationState(delegation.botId, delegation.botName, "finished");
-    if (
-      !spoken ||
-      controller.signal.aborted ||
-      this.#calls.get(connection.id) !== call ||
-      call.speechGeneration !== generation
-    ) {
-      return;
-    }
-    try {
-      await this.speak(connection, spoken);
-    } catch {
-      // The audio never left; the words are on record in the turn. The
-      // person can ask, and the Bot's conversation has the answer.
-      this.trace(connection, "answer-unspoken", { turn: turnId });
     }
   }
 
