@@ -319,10 +319,15 @@ export const VOICE_RESULT_ANSWER_CHARS_V1 = 2_000;
  * How long ago something was asked, in the words a person would use aloud.
  * Under two minutes is "a moment ago"; the person still has it in mind.
  */
+const VOICE_AGE_RECENT_MINUTES_V1 = 2;
+
+function voiceAgeMinutesV1(askedAt: Date, now: Date): number {
+  return Math.round(Math.max(0, now.getTime() - askedAt.getTime()) / 60_000);
+}
+
 export function describeVoiceAgeV1(askedAt: Date, now: Date): string {
-  const waited = Math.max(0, now.getTime() - askedAt.getTime());
-  const minutes = Math.round(waited / 60_000);
-  if (minutes < 2) return "a moment ago";
+  const minutes = voiceAgeMinutesV1(askedAt, now);
+  if (minutes < VOICE_AGE_RECENT_MINUTES_V1) return "a moment ago";
   if (minutes < 60) return `${minutes} minutes ago`;
   const hours = Math.round(minutes / 60);
   return hours === 1 ? "about an hour ago" : `about ${hours} hours ago`;
@@ -381,8 +386,8 @@ export function renderVoiceDelegationPromptV1(
       "- Say who answered, then the answer, in one to three short spoken sentences. No markdown, no lists, no code.",
       "- The answer below is the Bot's, about the question below and nothing else. Do not add facts, do not guess at what it meant, and do not answer the question yourself.",
       "- If the Bot could not finish, say so plainly and say what it said went wrong.",
-      age === "a moment ago"
-        ? "- This was asked a moment ago, so the person still has it in mind; do not restate the whole question."
+      voiceAgeMinutesV1(result.askedAt, now) < VOICE_AGE_RECENT_MINUTES_V1
+        ? `- This was asked ${age}, so the person still has it in mind; do not restate the whole question.`
         : `- This was asked ${age}, so open by placing it: name what it was about.`,
     ].join("\n"),
     user: [
