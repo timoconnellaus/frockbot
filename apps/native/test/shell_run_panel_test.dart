@@ -81,6 +81,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(identifiedBy(ShellIds.runView), findsOneWidget);
 
+    // Asking for a run again while one is open keeps the loan on the books.
+    await tester.longPress(find.text('do it'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Work details'));
+    await tester.pumpAndSettle();
+    expect(identifiedBy(ShellIds.runView), findsOneWidget);
+
     // Closing the run gives the column back the way the person left it.
     await tester.tap(
       find.descendant(
