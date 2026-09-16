@@ -57,7 +57,7 @@ export const catalogProviderDefinitionsV1: PackageDefinitionV1[] =
             ? [`${provider.id}-oauth`]
             : []),
         ],
-        admission: { turnTypes: ["chat", "automation", "subagent"] },
+        admission: { turnTypes: ["chat", "agent", "automation", "subagent"] },
       },
     ],
     connectionTypes: [

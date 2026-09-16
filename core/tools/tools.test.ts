@@ -243,7 +243,12 @@ describe("ToolRegistry turn admission", () => {
   test("offers a tool with no declaration on every turn type", async () => {
     const tools = admissionRegistry();
     tools.register(work);
-    for (const turnType of ["chat", "automation", "subagent"] as const) {
+    for (const turnType of [
+      "chat",
+      "agent",
+      "automation",
+      "subagent",
+    ] as const) {
       expect(admittedNames(tools, { turnType })).toEqual(["work"]);
     }
   });
@@ -354,7 +359,7 @@ describe("ToolRegistry turn admission", () => {
     description: "Runs a shell command on the Computer.",
     inputSchema: { type: "object" },
     admission: {
-      turnTypes: ["chat", "automation", "subagent"],
+      turnTypes: ["chat", "agent", "automation", "subagent"],
       subagentRoles: ["executor", "computerUse"],
     },
     execute: () => Promise.resolve({ content: "ran", isError: false }),
@@ -364,7 +369,7 @@ describe("ToolRegistry turn admission", () => {
     description: "Drives the browser on the Computer.",
     inputSchema: { type: "object" },
     admission: {
-      turnTypes: ["chat", "automation", "subagent"],
+      turnTypes: ["chat", "agent", "automation", "subagent"],
       subagentRoles: ["executor", "browserUse", "computerUse"],
     },
     execute: () => Promise.resolve({ content: "snapshot", isError: false }),

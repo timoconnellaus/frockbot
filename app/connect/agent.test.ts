@@ -26,14 +26,17 @@ const CAPABILITY = {
   connectionId: "connection-1",
 };
 
-function context(effectId = "effect-1"): ToolExecutionContext {
+function context(
+  effectId = "effect-1",
+  turnType: ToolExecutionContext["turnType"] = "chat",
+): ToolExecutionContext {
   return {
     botId: "bot",
     agentId: "bot",
     sessionId: "session",
     compositionGenerationId: "generation",
     effectId,
-    turnType: "chat",
+    turnType,
     signal: new AbortController().signal,
   };
 }
@@ -106,10 +109,11 @@ async function mount(options: {
 async function run(
   root: Awaited<ReturnType<typeof mount>>["root"],
   c: ToolCall,
+  turnType: ToolExecutionContext["turnType"] = "chat",
 ) {
-  const prepared = await root.tools.prepare(c, context());
+  const prepared = await root.tools.prepare(c, context("effect-1", turnType));
   if (prepared.kind === "denied") return prepared.result;
-  return root.tools.executePrepared(prepared, context());
+  return root.tools.executePrepared(prepared, context("effect-1", turnType));
 }
 
 describe("a connected app in a Bot's Turn", () => {
@@ -160,6 +164,36 @@ describe("a connected app in a Bot's Turn", () => {
       arguments: { to: "a@example.com", body: "hi" },
       version: "20250930_00",
     });
+    await root.dispose();
+  });
+
+  test("answers a voice or Bot-to-Bot question with the app's tools too", async () => {
+    // A question handed over from the voice session or another Bot runs as an
+    // `agent` Turn. It is work like any automation Turn and gets the same
+    // tools: refusing them here is what made a Bot on a call report that its
+    // mailbox had been disconnected.
+    const { root, requests } = await mount({
+      respond: (url) =>
+        url.pathname.endsWith("/tools")
+          ? Response.json(TOOL_LIST)
+          : Response.json({
+              successful: true,
+              data: { id: "msg_2" },
+              error: null,
+            }),
+    });
+    const result = await run(
+      root,
+      call("gmail", "send_email", { to: "a@example.com", body: "hi" }),
+      "agent",
+    );
+    expect(result).toEqual({
+      content: JSON.stringify({ id: "msg_2" }),
+      isError: false,
+    });
+    expect(
+      requests.some((r) => r.url.pathname.includes("/tools/execute/")),
+    ).toBe(true);
     await root.dispose();
   });
 

@@ -472,7 +472,7 @@ export function createWebFeature(
 ): RuntimeFeatureV1<AgentRuntimeV1> {
   return (runtime) =>
     runtime.tools.register(createWebFetchToolDefinitionV1(config), {
-      admissionCeiling: ["chat", "automation", "subagent"],
+      admissionCeiling: ["chat", "agent", "automation", "subagent"],
       subagentRoleCeiling: ["executor"],
     });
 }

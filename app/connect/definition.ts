@@ -20,7 +20,7 @@ export const connectDefinitionV1: PackageDefinitionV1 = {
     kind: "tool" as const,
     connectionTypes: [connectConnectionTypeIdV1(toolkit.slug)],
     admission: {
-      turnTypes: ["chat", "automation", "subagent"] as const,
+      turnTypes: ["chat", "agent", "automation", "subagent"] as const,
       subagentRoles: ["executor"],
     },
   })),

@@ -169,7 +169,12 @@ describe("computer_doctor", () => {
     const state = fixture();
     const harness = await mount(state.host);
 
-    for (const turnType of ["chat", "automation", "subagent"] as const) {
+    for (const turnType of [
+      "chat",
+      "agent",
+      "automation",
+      "subagent",
+    ] as const) {
       const names = (
         await discoverFrockbotTools(harness.tools, { turnType })
       ).map((schema) => schema.name);

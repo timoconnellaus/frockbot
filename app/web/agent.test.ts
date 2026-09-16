@@ -247,7 +247,12 @@ describe("the web-fetch Capability enablement", () => {
     expect(feature).toBeDefined();
     await runtime.mount(feature!);
 
-    for (const turnType of ["chat", "automation", "subagent"] as const) {
+    for (const turnType of [
+      "chat",
+      "agent",
+      "automation",
+      "subagent",
+    ] as const) {
       expect({
         turnType,
         names: (await discoverFrockbotTools(runtime.tools, { turnType })).map(

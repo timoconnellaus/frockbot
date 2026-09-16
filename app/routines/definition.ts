@@ -9,7 +9,7 @@ export const routinesDefinitionV1: PackageDefinitionV1 = {
       kind: "tool",
       connectionTypes: [],
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
         subagentRoles: ["executor"],
       },
     },

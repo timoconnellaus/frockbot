@@ -77,6 +77,7 @@ export const IMAGE_TOOL_SUBAGENT_ROLES: readonly string[] = ["executor"];
 
 export const IMAGE_TOOL_TURN_TYPES: readonly TurnTypeV1[] = [
   "chat",
+  "agent",
   "automation",
   "subagent",
 ];
