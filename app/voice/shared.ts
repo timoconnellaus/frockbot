@@ -193,17 +193,7 @@ export type VoiceAssistantClientMessageV1 =
    * while the person is still hearing something waits for it rather than
    * cutting it off. `playing` is sound actually leaving the device.
    */
-  | { schemaVersion: 1; type: "voice/speech"; playing: boolean }
-  /**
-   * One read-out finished playing, all of it. Sent only on a clean drain of
-   * that exact delivery: a reply the person interrupted, a socket that closed
-   * mid-answer and a device that never took the audio all send nothing, and
-   * the answer stays owed.
-   *
-   * Evidence, never proof. The person may have walked away. What it rules out
-   * is the case the server can rule out: audio that never finished playing.
-   */
-  | { schemaVersion: 1; type: "voice/played"; deliveryId: string };
+  | { schemaVersion: 1; type: "voice/speech"; playing: boolean };
 
 export type VoiceAssistantRefusalCodeV1 =
   "exclusive" | "superseded" | "quota" | "unconfigured";
@@ -224,17 +214,10 @@ export type VoiceAssistantServerMessageV1 =
       muted: boolean;
     }
   /**
-   * A Bot answer is about to be read out, under this delivery's id. The audio
-   * that follows belongs to it until `voice/answer-end` says the last of it
-   * has been sent; only then can a clean drain mean the whole answer played.
+   * Where a request to a Bot is: asked, its answer being put into words by
+   * the assistant, or done. Chrome only — the footer names the Bot — and
+   * nothing durable turns on it.
    */
-  | {
-      schemaVersion: 1;
-      type: "voice/answer";
-      deliveryId: string;
-      botName: string;
-    }
-  | { schemaVersion: 1; type: "voice/answer-end"; deliveryId: string }
   | {
       schemaVersion: 1;
       type: "voice/delegation";
@@ -242,9 +225,6 @@ export type VoiceAssistantServerMessageV1 =
       botName: string;
       state: "asked" | "answering" | "finished";
     };
-
-/** `voice/answer` delivery ids and the ack that names them are bounded. */
-export const VOICE_ASSISTANT_DELIVERY_ID_MAX_V1 = 200;
 
 /** Every JSON message a client may see: the SDK's own, or one of ours. */
 export type VoiceAssistantSdkMessageV1 =
@@ -288,17 +268,6 @@ export function decodeVoiceAssistantClientMessageV1(
       type: "voice/speech",
       playing: value.playing === true,
     };
-  }
-  if (value.type === "voice/played") {
-    const deliveryId = value.deliveryId;
-    if (
-      typeof deliveryId !== "string" ||
-      !deliveryId ||
-      deliveryId.length > VOICE_ASSISTANT_DELIVERY_ID_MAX_V1
-    ) {
-      return undefined;
-    }
-    return { schemaVersion: 1, type: "voice/played", deliveryId };
   }
   return undefined;
 }
@@ -362,31 +331,6 @@ export function decodeVoiceAssistantServerFrameV1(
         upstream,
         muted: value.muted === true,
       },
-    };
-  }
-  if (type === "voice/answer" || type === "voice/answer-end") {
-    const deliveryId = value.deliveryId;
-    if (
-      typeof deliveryId !== "string" ||
-      !deliveryId ||
-      deliveryId.length > VOICE_ASSISTANT_DELIVERY_ID_MAX_V1
-    ) {
-      return undefined;
-    }
-    return {
-      kind: "custom",
-      message:
-        type === "voice/answer"
-          ? {
-              schemaVersion: 1,
-              type: "voice/answer",
-              deliveryId,
-              botName:
-                typeof value.botName === "string"
-                  ? value.botName.slice(0, 100)
-                  : "",
-            }
-          : { schemaVersion: 1, type: "voice/answer-end", deliveryId },
     };
   }
   if (type === "voice/delegation") {

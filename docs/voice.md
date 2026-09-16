@@ -188,12 +188,11 @@ Binary frames: PCM16 little-endian, mono, **24 kHz**, arbitrary chunk
 boundaries (a chunk may end on an odd byte; carry the byte). The client plays
 them in order and measures amplitude from what it is playing.
 
-A delegated answer is bracketed by `voice/answer` (`deliveryId`, `botName`)
-and `voice/answer-end` (`deliveryId`). The client sends `voice/played` for
-that delivery only after its complete audio has drained without interruption.
-Sending all bytes, returning from SDK `speak()`, and silence in the waveform
-are not playback acknowledgments. `voice/speech` reports actual playback so
-an arriving Bot answer can wait for a natural pause in ordinary voice speech.
+`voice/delegation` (`botId`, `botName`, `state` ∈ `asked | answering |
+finished`) tells the footer where a request to a Bot is: asked, its answer
+being put into words, done. Chrome only; nothing durable turns on it.
+`voice/speech` reports actual playback so an arriving Bot answer can wait for
+a natural pause in ordinary voice speech.
 
 ### Status
 
@@ -303,22 +302,18 @@ the call and shows the failure, rather than leaving a live-looking footer over
 a socket nobody is listening on.
 
 A Bot answer that settles while an utterance, reply, or playback is in flight
-waits for a natural pause. Completed answers are read in order, and the next
-answer waits for the previous delivery's playback acknowledgment. A bounded
-acknowledgment timeout releases the delivery slot without marking the answer
-played; the same bound applies to a client's own `voice/speech` playing report,
-so a device whose completion never comes back cannot hold the queue for the
-rest of the call. A read-out whose audio never arrives is retried promptly a
-few times and then falls back to the slow drain, so a speech provider that
-stays down is not asked for the same sentence every few seconds. Synthesis
-refused by the speech-character cap skips those prompt retries and waits on the
-slow drain instead, so it still goes out if the cap resets; a used-up listening
-allowance does not delay an otherwise recoverable read-out. A read-out the
-person talks over, or one whose call is replaced, spends none of those
-retries. Interrupted, disconnected and failed audio leaves the durable answer
-available for a later read-out. Every delivery names its request and current
-connection owner; duplicate or stale acknowledgments cannot settle another
-answer.
+waits for a natural pause, then becomes a turn of the call: the assistant is
+told the answer, in the person's seat and marked as what it is, and decides
+what to say — one or two sentences, or nothing. There is no queue of answers
+across calls. A call that ends takes its open requests with it, so an answer
+that arrives after a hang-up is never read out, on that call or the next; the
+Bot's reply stays in the Bot's own conversation, where the person can read it.
+A socket that drops without `end_call` keeps the call inside the rejoin
+window, and an answer arriving then waits for the same device to come back to
+the same conversation; the alarm that ends an abandoned call cancels it. A
+person who starts talking while the answer's turn is being written takes the
+floor: the turn is aborted, its words are never spoken, and the answer is not
+owed again.
 
 ### Sleep and wake (cost control)
 
@@ -375,7 +370,9 @@ same way, but does **not** end the call: the call record survives the 60 s
 rejoin window so a client back from a network change continues the same
 conversation, and an alarm ends it if nobody comes back (see "Session
 memory"). A Bot Turn the assistant already admitted keeps running; its answer
-is spoken on the next call or dropped after 24 h.
+is told on this call if the same device rejoins it in time, and cancelled with
+the call otherwise — never carried to the next call. `end_call` cancels the
+call's open requests at once.
 
 The client closes with a code and a reason that name the path that ended the
 call, because the server's log is the only record of it: `1000` with
@@ -419,7 +416,12 @@ someone), `interrupted` (the SDK stopped the reply in flight: preceded by
 local energy gate sent `interrupt` — and since the phone sends silence while
 the reply plays, a `speech-started` _after_ it is the person's own barge-in
 being heard), `delegation-held` (a Bot answer settled mid-reply and waits for
-it to finish), `audio` (the first synthesized chunk of each sentence reached
+it to finish), `answer-dropped` (a Bot answer arrived for a call that is over,
+or the day's turns were spent; it stays in the Bot's conversation), `turn` and
+`turn-settled` with `event: "bot-answer"` (the assistant being told a Bot's
+answer, and what it decided: `outcome: silent` is a choice, not a failure),
+`answer-unspoken` (the assistant's words for an answer never became sound),
+`audio` (the first synthesized chunk of each sentence reached
 the socket — the sentence's length in characters, the chunk's bytes, the
 running chunk count, the turn and `sinceTurnMs`, how long after the turn began
 this sentence's sound left; the first `audio` of a turn is its time to first
@@ -439,10 +441,10 @@ left before the turn detector committed a transcript. Only the `closed` code
 and reason say which side closed the socket.
 
 No trace line carries the words. What a person said, what each Bot answered
-and which settled answers are still owed are readable afterwards from the
-ledger itself, through the token-gated operator read `GET
-/api/debug/voice?userId=<id>` — a read of storage that ends no call, expires
-no delegation and starts no read-out. The fields are documented in
+and what became of each request are readable afterwards from the ledger
+itself, through the token-gated operator read `GET
+/api/debug/voice?userId=<id>` — a read of storage that ends no call and
+expires no delegation. The fields are documented in
 `.claude/skills/frockbot-debug/SKILL.md`.
 
 ### Text turns
@@ -463,9 +465,10 @@ kept for tests.
 - `delegation:<runId>` — a Bot delegation: target Bot, text, `runId` derived
   as `sha256(userId, callId, turnId, botId)` (so a retried tool call admits
   the same Bot Turn once), state
-  `admitted | settled | spoken | cancelled | expired`, the id of the delivery
-  currently being read out, and the composed sentence with its own
-  `admitted | composed | abandoned` state.
+  `admitted | settled | spoken | cancelled | expired` — `spoken` is told to
+  the assistant, with the id of the event turn that told it; `cancelled` is a
+  request whose call ended first — and, for a turn that was a Bot's answer
+  arriving rather than the person speaking, the turn record's `event`.
 
 Delegations use the Bot's `runVoice` door and the existing agent lane.
 The command records the call, voice Turn and request IDs before dispatch;
@@ -493,42 +496,26 @@ lost dispatch or wake. A callback schedules its next check without deduping
 onto its own executing schedule row, which the scheduler will delete. A
 lookup that finds no admitted run resends the same recorded intent under the
 same ID, with bounded retries and an explicit failure when exhausted.
-`onStart` recreates pending checks from the ledger, and a new call recovers
-settled answers that have not been played.
+`onStart` recreates pending checks from the ledger; a request whose call is no
+longer the live one is cancelled on waking.
 
-The answer is put into one to three spoken sentences using its original
-question, Bot identity and explicit reply. This composition has durable
-intent, consumes the daily model-turn allowance once, and caches its result
-for playback retries. An admitted composition whose result was lost is
-abandoned rather than paid for again; a composition that has not answered
-within eight seconds is dropped and a correlated plain read-out supplies the
-fallback. Only a composed sentence is cached: a read-out is written for the
-moment it is spoken, so a dropped composition stores nothing and the next
-read-out is written again against the age it has then. The answer remains
-`settled` until the correct client playback acknowledgment changes it to
-`spoken`. A sentence is composed once but may be spoken much later —
-composing and speaking are separate moments and either can be retried — so
-the composer is told never to say when the request was made.
-Placing is one mechanism, decided at speak time on either of two conditions:
-`voiceAgePlacedV1` holds for the age right then, or the answer is being heard
-on a call other than the one the question was asked on. On either, every
-read-out (cached, freshly composed, or the plain fallback) is preceded by a
-plain lead-in naming the request and its age — "Earlier, about an hour ago,
-you asked Bob: can you ask Bob what the weather is?" The request is the
-person's own words, read from the retained spoken turn; the paraphrase the
-assistant handed the Bot ("Tim is asking what the weather is. Please check…")
-is the fallback only when that turn is gone or cannot be read, and only it
-gets a closing full stop added. One clause names the request wherever it
-appears: the lead-in, an unplaced plain read-out ("You asked Bob: … Bob
-answered: …" / "… Bob could not finish: …"), the composer prompt, and the
-prompt's `<answers>` block. A turn that asked several Bots places every one
-of its answers under that whole sentence, and the Bot's name says which
-request each answers. The lead-in is not recorded with the sentence, so a
-later replay says the age it has then. The `<answers>` block carries the five
-oldest unheard answers under their request and age with the instruction that
-they are read out separately and are never the answer to what is being asked
-now. Without both, an answer that settled after one call ended was heard at
-the start of the next as if it answered the question just asked.
+A settled answer is handed to the assistant as one turn of the call it was
+asked on (`announceDelegation`, then the event turn). The turn is admitted and
+metered like a spoken one, marked as a Bot's answer, and carries the request
+in the person's own words from the retained spoken turn — "[Bot answer] Bob,
+asked earlier in this conversation about "can you ask Bob what the weather
+is?", has answered: …" — so the assistant can say "about the weather" rather
+than recite its own paraphrase. The system prompt says what such a message
+is and that saying nothing is a choice it may make. No bridge fills the
+silence, because nobody asked a question just now. What it says is spoken
+once it is whole; a person who starts talking meanwhile aborts it and their
+turn takes the floor. The delegation is marked `spoken` the moment the turn
+is admitted — told once, whatever is then said — and the turn record keeps
+what was said, or that nothing was. An answer with no call to be told on
+(the call ended, or the day's turns are spent) is dropped: `cancelled` in the
+ledger, on record in the Bot's own conversation. Nothing is composed ahead of
+time, cached, or acknowledged by the phone: the old read-out queue, its
+playback receipt and its lead-in were removed on 2026-09-17 in favour of this.
 
 Conversation context is bounded and **call-scoped**: the prompt carries the
 newest 12 messages of _this call_, built from the ledger's own `turn:` records
@@ -773,7 +760,7 @@ nothing. What is counted per account, durably, per UTC day:
   window past the cap shuts the upstream for the day and tells the client);
 - dictation seconds, booked and renewed the same way (bounded at 120 min/day);
 - TTS characters sent to ElevenLabs (bounded at 200k/day);
-- model turns, including one admitted composition per Bot answer (bounded at 600/day), and Bot delegations (bounded at 8 per turn burst, 200/day).
+- model turns, including the turn that tells the assistant a Bot's answer (bounded at 600/day), and Bot delegations (bounded at 8 per turn burst, 200/day).
 
 Exceeding a cap answers `voice/refusal` with `quota` on the next upstream wake
 or turn and leaves the footer open; the day rolls at UTC midnight. One live
@@ -876,7 +863,9 @@ matters.
 
 **A Bot answering a voice request.** The Turn is admitted with a `voice`
 origin and gets `reply_to_request`, which is the one answer the call is owed:
-it goes back to the voice object, mints no message and wakes no device. It is
+it goes back to the voice object, mints no message and wakes no device. If the
+call has ended by then the request was cancelled with it, and the reply is
+simply where every such reply is, in the Bot's own conversation. It is
 an `agent` Turn, the same kind a Bot-to-Bot question runs as, and which tools
 an `agent` Turn admits is the kernel's rule, in `docs/architecture.md` §4
 (tool exposure). Before that admission existed a Bot on a call was refused its

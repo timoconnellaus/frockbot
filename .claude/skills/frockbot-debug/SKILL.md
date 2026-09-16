@@ -115,24 +115,25 @@ the object the phone's voice screen talks to. This is the only place the words
 a person spoke on a call are readable:
 
 - `currentCall` — the live call, if one is open.
-- `turns[]` — every spoken turn still retained (24 hours), oldest first, each
-  with its `transcript` (what the person said), `answer` (what the assistant
-  said back), `state`, and how many `delegations` it made.
+- `turns[]` — every turn still retained (24 hours), oldest first, each with
+  its `transcript` (what the person said), `answer` (what the assistant said
+  back), `state`, and how many `delegations` it made. A turn with an `event`
+  of kind `bot-answer` is not the person speaking: it is a Bot's answer being
+  told to the assistant, its `transcript` is the message the assistant was
+  given, and its `answer` is what the assistant chose to say — empty when it
+  chose to say nothing.
 - `delegations[]` — every question handed to a Bot, oldest first: `text` is the
   assistant's paraphrase that became the Bot's `voice-…` run, `runId` is that
   run (read it with `run`), `answer`/`failure` is what settled, and `state`
-  says whether it was ever heard. `settled` means the answer arrived but the
-  phone never acknowledged playing it, so it is still owed: **the next call
-  reads it out first**, before anything the person says. Heard on a later call
-  it is spoken behind a lead-in naming the request and its age ("Earlier,
-  about an hour ago, you asked Bob about …", `docs/voice.md`), so an owed
-  answer should never sound like the answer to what was just asked.
-- `unspoken[]` — the run ids of those owed answers, oldest first.
+  says what became of it. `settled` is answered and on its way to the
+  assistant; `spoken` is told to the assistant, by the turn in `spokenTurnId`;
+  `cancelled` is a request whose call ended first — the Bot's reply is in the
+  Bot's own thread and is never read out on a later call. Nothing is owed
+  across calls: a new call opens listening, whatever the last one left.
 - `memoryJobs[]` — the per-call memory finalizations owed or done.
 
-Reading it ends no call, expires nothing and starts no read-out. The object
-does wake to answer, which runs its ordinary start-up recovery, the same as
-any request to it.
+Reading it ends no call and expires nothing. The object does wake to answer,
+which runs its ordinary start-up recovery, the same as any request to it.
 
 **Not on this surface:** the User settings view — enabled Packages,
 Connections, the account model, the platform model. Those live in the User

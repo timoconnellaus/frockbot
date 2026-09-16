@@ -61,12 +61,11 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
    thread as a centred "Message from Voice" marker rather than an ordinary
    user message, and tapping it opens the view-only "Remy ⇄ Voice" chat with
    the request and, once given, Remy's reply, with no ordinary user
-   notification; when Remy finishes, the answer is read out. Close the tab
-   before Remy finishes, reopen and start voice again: the answer is read out
-   first, and because it is being heard on a different call it opens with the
-   plain lead-in that places it, in your own words rather than the assistant's
-   paraphrase to Remy — "Earlier, <however long ago>, you asked Remy: ask Remy
-   to plan my week." — before Remy's answer.
+   notification; when Remy finishes, the assistant tells you the answer in a
+   sentence or two, naming Remy and what it was about, at the next pause.
+   Hang up before Remy finishes, then start voice again: nothing is said
+   unasked. The new call opens listening, and Remy's reply is in the "Remy ⇄
+   Voice" chat for you to read.
 5. Stay silent for 25 s. Expect: `voice/state` reports `asleep` (visible in
    the network tab), no audio frames go up, the footer keeps animating from the
    microphone. Speak: the first syllable is transcribed (pre-roll).
