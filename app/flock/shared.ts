@@ -64,6 +64,11 @@ export interface BotRegistrationV1 {
    * a User-created Bot and for every registration written before this existed.
    */
   createdBy?: BotSelfWriterV1;
+  /**
+   * What the Bot wears now, not what it was created wearing: the Bot object is
+   * the authority, and this is the mirror every list of Bots draws from. See
+   * the avatar mirror in this Package's README.
+   */
   avatar: AvatarAppearanceV1;
 }
 export interface BotMembershipViewV1 {

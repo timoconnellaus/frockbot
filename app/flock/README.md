@@ -3,11 +3,17 @@
 Built-in Package for durable Bot registration and character identity.
 
 - Gateway Contribution: authenticated exact v1 Bot directory and avatar routes.
-- User Contribution: bounded directory, immutable registration seeds, optimistic revision, durable create receipts, and [General bootstrap](#general-bootstrap).
+- User Contribution: bounded directory, creation-time registration seeds, optimistic revision, durable create receipts, the [avatar mirror](#the-avatar-mirror), and [General bootstrap](#general-bootstrap).
 - Bot Contribution: idempotent materialization and durable avatar update receipts.
 - Hosted client Contribution: Bot list/create/switch and responsive character picker in generic shell outlets.
 
 The native client bundles eleven approved Rive characters with neutral PNG fallbacks. Appearance is a character id plus a validated primary colour.
+
+## The avatar mirror
+
+The Bot Durable Object is the authority on a Bot's avatar: it holds the identity, and an update command is fenced on that identity's revision. But every list of Bots draws its appearance from the User's directory registration, so a change that lived in the Bot alone came back undone on the next directory read. A change therefore goes through the User's `updateBotAvatar`, which calls the Bot's `updateAvatar` and, once the Bot reports the command applied, mirrors the appearance into the registration with `mirrorAvatar` — one directory revision, a no-op when the appearance is unchanged or the Bot is no longer listed. A registration's `avatar` is therefore the Bot's current appearance, not a creation-time seed like `initialName` and `initialDescription`.
+
+What is mirrored is the avatar the Bot reports wearing, read back from it, rather than the one the command asked for. The Bot answers a replayed command from its stored receipt without touching its identity, so a mirror write lost between the two calls heals on the retry while a stale replay cannot drag the directory back to an older appearance.
 
 ## General bootstrap
 

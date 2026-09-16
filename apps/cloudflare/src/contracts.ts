@@ -469,6 +469,17 @@ export interface UserConfigurationBinding {
     userId: string;
     command: CreateBotCommandV1;
   }): Promise<FlockReceiptV1>;
+  /**
+   * Changes what a Bot wears. The Bot's own object accepts or refuses the
+   * command; the User's directory is told afterwards, so a list of Bots shows
+   * the change rather than the appearance the Bot was created with.
+   */
+  updateBotAvatar(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: UpdateAvatarCommandV1;
+  }): Promise<FlockReceiptV1>;
   getBotRegistration(request: {
     schemaVersion: 1;
     userId: string;

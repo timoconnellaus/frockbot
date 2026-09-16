@@ -13,6 +13,7 @@ import {
   lifecycleTargetStatusV1,
   migrateStoredBotDirectoryV1,
   randomAvatarAppearanceV1,
+  type AvatarAppearanceV1,
   type BotDirectoryViewV1,
   type BotLifecycleCommandV1,
   type BotLifecycleDirectoryViewV1,
@@ -152,6 +153,46 @@ export class FlockUserBackendContribution {
         ? initialDirectory()
         : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(stored)),
     );
+  }
+
+  /**
+   * Records what a Bot wears now, after the Bot itself accepted the change.
+   *
+   * The Bot's own object is the authority on its avatar — its revision is what
+   * an update command is checked against — but the directory is what every
+   * list of Bots draws from, and it carried only the appearance the Bot was
+   * created with. A change that lived in the Bot alone came back undone on
+   * the next directory read. Answers with the directory as it stands; a Bot
+   * the directory no longer lists is left alone rather than re-registered.
+   */
+  async mirrorAvatar(
+    botId: string,
+    avatar: AvatarAppearanceV1,
+  ): Promise<BotDirectoryViewV1> {
+    return this.host.storage.transaction(async (storage) => {
+      const currentValue = await storage.get<unknown>(DIRECTORY_KEY);
+      const current =
+        currentValue === undefined
+          ? initialDirectory()
+          : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(currentValue));
+      const found = current.bots.find((bot) => bot.botId === botId);
+      if (!found) return structuredClone(current);
+      const same =
+        found.avatar.characterId === avatar.characterId &&
+        found.avatar.primary === avatar.primary;
+      if (same) return structuredClone(current);
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        bots: current.bots.map((bot) =>
+          bot.botId === botId
+            ? { ...bot, avatar: structuredClone(avatar) }
+            : bot,
+        ),
+      } satisfies BotDirectoryViewV1;
+      await storage.put(DIRECTORY_KEY, next);
+      return structuredClone(next);
+    });
   }
 
   async registration(botId: string): Promise<BotRegistrationV1> {

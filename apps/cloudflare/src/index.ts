@@ -627,6 +627,7 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     readFlockBootstrap: (request) => rpc.readFlockBootstrap(request),
     executeBotLifecycle: (request) => rpc.executeBotLifecycle(request),
     createBot: (request) => rpc.createBot(request),
+    updateBotAvatar: (request) => rpc.updateBotAvatar(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
     readConnectionsFrame: (request) => rpc.readConnectionsFrame(request),
@@ -2358,10 +2359,12 @@ const createGatewayBackendContributions = (env: Env) =>
           command,
         }),
       ),
+    // Through the User rather than the Bot: the Bot applies the change and
+    // the User's directory, which every Bot list reads, is told of it.
     updateAvatar: async (userId, botId, command) =>
       decodeFlockReceiptV1(
         rpcJsonSnapshot(
-          await botStateStub(env, userId, botId).updateAvatar({
+          await userConfigurationStub(env, userId).updateBotAvatar({
             schemaVersion: 1,
             userId,
             botId,
