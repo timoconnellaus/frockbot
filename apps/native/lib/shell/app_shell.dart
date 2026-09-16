@@ -182,6 +182,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// is a subtree the shell's `setState` does not reach, so the page listens
   /// to this to redraw the rows its Packages contribute.
   final ValueNotifier<int> catalogRevision = ValueNotifier(0);
+
+  /// Bumped when a Bot's character changes, so a pushed Bot page — which the
+  /// shell's own rebuilds do not reach — redraws its preview with the choice.
+  final ValueNotifier<int> avatarRevision = ValueNotifier(0);
   String? error;
   bool loaded = false;
 
@@ -1715,7 +1719,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         child: identified(
           SettingsIds.botPage,
           ListenableBuilder(
-            listenable: Listenable.merge([slots, catalogRevision]),
+            listenable: Listenable.merge([
+              slots,
+              catalogRevision,
+              avatarRevision,
+            ]),
             builder: (context, _) => SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
               child: Column(
@@ -1857,7 +1865,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
     if (chosen == null || !mounted) return;
     setState(() => _predictedAvatar[botId] = chosen);
+    avatarRevision.value++;
     await load();
+    if (mounted) avatarRevision.value++;
   }
 
   Widget _dangerZone(String botId, String botName) => BotDangerZone(
@@ -2742,6 +2752,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _headerChat?.removeListener(_repaintHeader);
     slots.dispose();
     catalogRevision.dispose();
+    avatarRevision.dispose();
     voiceSession?.dispose();
     dictation?.removeListener(_repaint);
     dictation?.dispose();

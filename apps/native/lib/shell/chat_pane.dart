@@ -21,7 +21,6 @@ import '../applets/chat_card.dart';
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
-import '../flock/avatar.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
 import 'composer.dart';
@@ -213,7 +212,6 @@ class _ChatPaneState extends State<ChatPane> {
   }
 
   Widget _column(BuildContext context, ChatController c) {
-    final avatarSize = MediaQuery.sizeOf(context).width <= 640 ? 50.0 : 64.0;
     return Column(
       children: [
         if (c.connection == ConnectionState.disconnected ||
@@ -310,49 +308,7 @@ class _ChatPaneState extends State<ChatPane> {
               child: const Text('Check message status'),
             ),
           ),
-        // The companion is laid over the row rather than in it. In a Row its
-        // column was 74 points tall — the artboard plus its bottom inset —
-        // which is more than the composer at rest and less than the composer
-        // with Stop showing, so the row's height switched masters at the end
-        // of every Turn and the thread above jumped ten points. The composer
-        // alone sets the height now; the transcript's reserved Stop space
-        // keeps the thread still, as it did before the companion arrived.
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Padding(
-              padding: EdgeInsets.only(left: avatarSize + 12),
-              child: _composer(c),
-            ),
-            Positioned(
-              left: 10,
-              bottom: 10,
-              child: CharacterAvatar(
-                size: avatarSize,
-                characterId: widget.background,
-                primary: widget.primary,
-                enableGaze: true,
-                // Alive while the Bot works; the still picture between Turns.
-                // An idle loop here redrew the whole window sixty times a
-                // second for as long as a chat was open, and even a resting
-                // artboard beside the field cost keystrokes typed right after
-                // a tap on the composer (errors.e2e, skill-menu.e2e). Hover
-                // gaze and the occasional twitch are lost at rest as a result;
-                // bring them back once the artboard and the text field can
-                // share a frame.
-                motion: c.activeRunId == null
-                    ? CharacterMotion.still
-                    : CharacterMotion.active,
-                activity: c.activeRunId == null
-                    ? CharacterActivity.idle
-                    : CharacterActivity.thinking,
-                semanticsLabel: c.activeRunId == null
-                    ? 'Bot is ready'
-                    : 'Bot is thinking',
-              ),
-            ),
-          ],
-        ),
+        _composer(c),
       ],
     );
   }

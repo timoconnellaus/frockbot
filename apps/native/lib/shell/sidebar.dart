@@ -653,15 +653,27 @@ class ShellSidebar extends StatelessWidget {
               _RowControl(onPressed: (at) => actions(position: at)),
             )
           : null,
-      avatar: CharacterAvatar(
-        size: 36,
-        characterId: bot.avatar.characterId,
-        primary: bot.avatar.primary,
-        motion: CharacterMotion.quiet,
-        activity: _working(bot)
-            ? CharacterActivity.working
-            : CharacterActivity.idle,
-        working: _working(bot),
+      // The character is drawn larger than the slot it is laid out in: the
+      // row's two lines of text set its height, and a character the size of
+      // the text column looked lost beside it. The artboard's picture has
+      // room around the figure, so the overflow spills into the row's own
+      // padding rather than onto the rows above and below.
+      avatar: SizedBox.square(
+        dimension: sidebarRowAvatarSlot,
+        child: OverflowBox(
+          maxWidth: sidebarRowAvatarSize,
+          maxHeight: sidebarRowAvatarSize,
+          child: CharacterAvatar(
+            size: sidebarRowAvatarSize,
+            characterId: bot.avatar.characterId,
+            primary: bot.avatar.primary,
+            motion: CharacterMotion.quiet,
+            activity: _working(bot)
+                ? CharacterActivity.working
+                : CharacterActivity.idle,
+            working: _working(bot),
+          ),
+        ),
       ),
       name: _name(bot),
       nameStyle: theme.textTheme.bodyMedium?.copyWith(
@@ -1136,6 +1148,14 @@ const sidebarSwipeRevealFraction = 0.22;
 /// The share of the row the read mark takes when the swipe rests on it. A
 /// touch wider than the Hide button, because 'Unread' is the longer word.
 const sidebarSwipeReadRevealFraction = 0.26;
+
+/// The square a Bot row lays its character out in; the row's height comes
+/// from its text, and this keeps the avatar from adding to it.
+const double sidebarRowAvatarSlot = 36;
+
+/// How large the character is actually drawn in that slot. It overflows the
+/// slot by seven points a side, inside the row's eight points of padding.
+const double sidebarRowAvatarSize = 50;
 
 /// The inset a phone's row sits at inside the list, and the radius of its
 /// corners. The row's own card, its ink and the clip the swipe panes slide

@@ -8,8 +8,11 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/voice/assistant.dart';
@@ -30,6 +33,8 @@ AssistantSessionController session(FakeVoiceSocket socket) =>
       player: FakeVoicePlayer(),
     );
 
+final footerBoundary = GlobalKey();
+
 Future<void> mount(
   WidgetTester tester,
   AssistantSessionController controller, {
@@ -48,16 +53,39 @@ Future<void> mount(
         children: [
           const Expanded(child: SizedBox.expand()),
           if (footer)
-            VoiceFooter(
-              session: controller,
-              onEnd: onEnd ?? () {},
-              botAppearance: botAppearance,
+            RepaintBoundary(
+              key: footerBoundary,
+              child: VoiceFooter(
+                session: controller,
+                onEnd: onEnd ?? () {},
+                botAppearance: botAppearance,
+              ),
             ),
         ],
       ),
     ),
   );
   await tester.pump();
+}
+
+/// Optional review artifact, kept outside the repository:
+/// `--dart-define=VOICE_VISUAL_OUTPUT=<dir>`.
+Future<void> captureFooter(WidgetTester tester, String name) async {
+  const output = String.fromEnvironment('VOICE_VISUAL_OUTPUT');
+  if (output.isEmpty) return;
+  // The character is an asset image, decoded off the test's fake clock; give
+  // it real time to land before the frame is read back.
+  await tester.runAsync(() => Future<void>.delayed(const Duration(seconds: 1)));
+  await tester.pump();
+  await tester.runAsync(() async {
+    final image =
+        await (footerBoundary.currentContext!.findRenderObject()!
+                as RenderRepaintBoundary)
+            .toImage(pixelRatio: 2);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    await File('$output/$name.png').writeAsBytes(bytes!.buffer.asUint8List());
+    image.dispose();
+  });
 }
 
 void main() {
@@ -287,7 +315,9 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Asked Scout'), findsOneWidget);
+    // The pose carries the state; no words sit beside the character.
+    expect(find.text('Asked Scout'), findsNothing);
+    await captureFooter(tester, 'voice-footer-delegated');
     semantics.dispose();
   });
 

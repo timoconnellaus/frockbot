@@ -11,6 +11,10 @@ import 'chat_icons.dart';
 /// accent, so "working" and "yours" never read as the same colour.
 const computerRunningColor = Color(0xff5aa9ff);
 
+/// The character in the conversation's bar. Large enough to read as the Bot
+/// rather than as an icon, and the same figure the sidebar row draws.
+const double chatHeaderAvatarSize = 40;
+
 /// The conversation's title bar.
 ///
 /// On a phone it is GrokBot's: the way back to the Bot list, the Bot's name as
@@ -86,7 +90,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
           clipBehavior: Clip.none,
           children: [
             CharacterAvatar(
-              size: 28,
+              size: chatHeaderAvatarSize,
               characterId: background,
               primary: primary,
               motion: CharacterMotion.quiet,
@@ -157,7 +161,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                       backgroundColor: scheme.onSurface.withValues(alpha: 0.06),
                       foregroundColor: scheme.onSurface,
                       shape: const StadiumBorder(),
-                      padding: const EdgeInsets.fromLTRB(5, 5, 9, 5),
+                      // Three points above and below the character keep the
+                      // pill inside the 52-point bar with its avatar at the
+                      // size the sidebar and the wide tiers draw it.
+                      padding: const EdgeInsets.fromLTRB(4, 3, 9, 3),
                       minimumSize: const Size(0, 34),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
