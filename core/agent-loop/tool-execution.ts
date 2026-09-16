@@ -182,6 +182,26 @@ async function runOccurrenceV1(
   return result;
 }
 
+/**
+ * One declared call that never reaches a tool: journalled under its own id and
+ * settled with the reason it was refused. It gets the same pair of durable
+ * events a dispatched call gets, so the rule the transcript follows has no
+ * gaps — one row per declared call, whatever became of it — but nothing is
+ * prepared, admitted or executed for it, because there is no tool to run.
+ */
+async function refuseSubCallV1(
+  runtime: LoopRuntime,
+  occurrence: ToolCallOccurrence,
+  content: string,
+  signal: AbortSignal,
+): Promise<undefined> {
+  const existing = journalEntryV1(runtime, occurrence.occurrenceId);
+  if (existing?.result) return undefined;
+  await journalIntentV1(runtime, occurrence, existing, signal);
+  await settleV1(runtime, occurrence, { content, isError: true });
+  return undefined;
+}
+
 /** One sub-call's durable outcome, kept with the position it was declared at. */
 interface BatchCallReportV1 {
   index: number;
@@ -241,26 +261,40 @@ async function runBatchV1(
     return refusal;
   }
   const subs = batchSubOccurrencesV1(occurrence);
-  const ordered: ToolCallOccurrence[] = [];
-  const concurrent: ToolCallOccurrence[] = [];
-  for (const sub of subs) {
-    (runtime.services.tools.orderedEffect(sub.call)
+  const ordered: number[] = [];
+  const concurrent: number[] = [];
+  decoded.forEach((sub, index) => {
+    // A call that decoded into nothing dispatchable is refused in the chain
+    // rather than alongside it: its refusal is a row in the transcript, and
+    // rows the model declared in order read in that order.
+    (sub.kind === "invalid" ||
+    runtime.services.tools.orderedEffect(subs[index]!.call)
       ? ordered
       : concurrent
-    ).push(sub);
-  }
+    ).push(index);
+  });
   // The ordered chain is started first and synchronously, so its first call is
   // already in flight when the concurrent ones are dispatched and the two
   // groups overlap in time.
   const chain = (async () => {
     const results: (ToolExecutionResult | undefined)[] = [];
-    for (const sub of ordered) {
-      results.push(await runOccurrenceV1(runtime, sub, signal));
+    for (const index of ordered) {
+      const sub = decoded[index]!;
+      results.push(
+        sub.kind === "invalid"
+          ? await refuseSubCallV1(
+              runtime,
+              subs[index]!,
+              `batch call ${index} was refused: ${sub.reason}`,
+              signal,
+            )
+          : await runOccurrenceV1(runtime, subs[index]!, signal),
+      );
     }
     return results;
   })();
   const rest = Promise.all(
-    concurrent.map((sub) => runOccurrenceV1(runtime, sub, signal)),
+    concurrent.map((index) => runOccurrenceV1(runtime, subs[index]!, signal)),
   );
   const dispatched = await Promise.allSettled([chain, rest]);
   const fenced = dispatched.find((outcome) => outcome.status === "rejected");
@@ -270,15 +304,6 @@ async function runBatchV1(
   );
   const journal = validateToolOccurrenceJournal(runtime.session.events);
   const results: BatchCallReportV1[] = decoded.map((sub, index) => {
-    if (sub.kind === "invalid") {
-      return {
-        index,
-        tool: sub.tool,
-        isError: true,
-        content: `batch call ${index} was refused: ${sub.reason}`,
-        attachments: [],
-      };
-    }
     const settled = journal.get(
       batchToolOccurrenceId(occurrence.occurrenceId, index),
     )!.result!;

@@ -28,12 +28,22 @@ export function batchToolOccurrenceId(
 }
 
 /**
+ * The journalled tool name of a declared call that reached no tool. Every
+ * occurrence the log carries is named, and an unusable call is journalled
+ * under this one rather than under a tool it never ran — the tool it named,
+ * if it named one at all, is in the occurrence's input with the rest of what
+ * the model wrote, which is what makes the refusal diagnosable.
+ */
+export const BATCH_INVALID_CALL_NAME_V1 = "invalid_tool_call";
+
+/**
  * One declared call of a batch: either something to dispatch, or the reason
- * that one call is unusable.
+ * that one call is unusable. An unusable call keeps `raw` — exactly what the
+ * model wrote in that slot — so its refusal is diagnosable from the log.
  */
 export type BatchSubCallV1 =
   | { kind: "call"; tool: string; arguments: unknown }
-  | { kind: "invalid"; tool: string; reason: string };
+  | { kind: "invalid"; tool: string; reason: string; raw: unknown };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -70,6 +80,7 @@ export function decodeBatchCallsV1(input: unknown): BatchSubCallV1[] | string {
         kind: "invalid",
         tool: isRecord(call) && typeof call.tool === "string" ? call.tool : "",
         reason: "it needs a tool name",
+        raw: call,
       };
     }
     if (call.tool === BATCH_TOOL_NAME) {
@@ -77,6 +88,7 @@ export function decodeBatchCallsV1(input: unknown): BatchSubCallV1[] | string {
         kind: "invalid",
         tool: call.tool,
         reason: "batch cannot call itself",
+        raw: call,
       };
     }
     if (call.arguments !== undefined && !isRecord(call.arguments)) {
@@ -84,6 +96,7 @@ export function decodeBatchCallsV1(input: unknown): BatchSubCallV1[] | string {
         kind: "invalid",
         tool: call.tool,
         reason: "its arguments must be an object",
+        raw: call,
       };
     }
     return { kind: "call", tool: call.tool, arguments: call.arguments ?? {} };
@@ -91,13 +104,16 @@ export function decodeBatchCallsV1(input: unknown): BatchSubCallV1[] | string {
 }
 
 /**
- * The occurrences one batch declares, in declared order.
+ * The occurrences one batch declares, in declared order — one per declared
+ * call, whatever became of it.
  *
  * A call inside a batch is a tool occurrence like any other: it is journalled,
  * admitted, executed and settled under its own id, so the audit index, the
  * journal's replay skip and every effect-keyed tool see the effects a batch
- * performs rather than one opaque row. Only well-formed calls get one — an
- * invalid call dispatches nothing, so there is no effect for the log to name.
+ * performs rather than one opaque row. A call that fails structural decoding
+ * gets an occurrence too: it dispatches nothing, but it is still something the
+ * model asked for, and without a row of its own it would vanish from the
+ * transcript entirely once the envelope is drawn as its sub-calls.
  */
 export function batchSubOccurrencesV1(
   parent: ToolCallOccurrence,
@@ -105,24 +121,18 @@ export function batchSubOccurrencesV1(
   if (parent.call.name !== BATCH_TOOL_NAME) return [];
   const decoded = decodeBatchCallsV1(parent.call.input);
   if (typeof decoded === "string") return [];
-  return decoded.flatMap((sub, index) =>
-    sub.kind === "call"
-      ? [
-          {
-            occurrenceId: batchToolOccurrenceId(parent.occurrenceId, index),
-            parentOccurrenceId: parent.occurrenceId,
-            turn: parent.turn,
-            step: parent.step,
-            ordinal: index,
-            call: {
-              id: `${parent.call.id}.${index}`,
-              name: sub.tool,
-              input: sub.arguments,
-            },
-          },
-        ]
-      : [],
-  );
+  return decoded.map((sub, index) => ({
+    occurrenceId: batchToolOccurrenceId(parent.occurrenceId, index),
+    parentOccurrenceId: parent.occurrenceId,
+    turn: parent.turn,
+    step: parent.step,
+    ordinal: index,
+    call: {
+      id: `${parent.call.id}.${index}`,
+      name: sub.kind === "call" ? sub.tool : BATCH_INVALID_CALL_NAME_V1,
+      input: sub.kind === "call" ? sub.arguments : sub.raw,
+    },
+  }));
 }
 
 /**

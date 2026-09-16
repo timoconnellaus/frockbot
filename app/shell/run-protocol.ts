@@ -743,12 +743,14 @@ function decodeDynamicToolCallInput(
 /**
  * The `batch` occurrences whose own call and result the transcript omits.
  *
- * A batch that dispatched is drawn as the calls it made: each sub-call
- * journals its own `tool/call` and `tool/result`, so those rows already say
+ * A batch whose calls were declared is drawn as those calls: every declared
+ * call journals its own `tool/call` and `tool/result` — the ones that ran and
+ * the ones refused for being malformed alike — so those rows already say
  * everything the envelope would, and drawing the envelope too shows the same
- * work — and the same attachments — a second time. A batch refused before
- * dispatch has no sub-call rows to stand in for it, so its own refusal is the
- * only record that anything was attempted, and it stays.
+ * work, and the same attachments, a second time. Only a batch refused before
+ * any call was declared — no calls array, an empty one, or one past the bound
+ * — has no sub-call rows to stand in for it, so its own refusal is the only
+ * record that anything was attempted, and it stays.
  */
 function expandedBatchOccurrencesV1(
   events: readonly SessionEvent[],

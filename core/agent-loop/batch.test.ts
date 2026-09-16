@@ -3,6 +3,7 @@
 // what the model reads back.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  BATCH_INVALID_CALL_NAME_V1,
   BATCH_MAX_CALLS_V1,
   BATCH_TOOL_NAME,
   decodeSessionEvent,
@@ -407,9 +408,11 @@ describe("batch", () => {
     expect(run.report.results[0]?.content).toBe(
       "batch call 0 was refused: batch cannot call itself",
     );
-    // A refusal dispatches nothing, so the log names no effect for it.
+    // A refusal reaches no tool, but it is still a call the model declared,
+    // so it is journalled under its own id like any other.
     expect(toolEvents(run.events, "tool/call")).toEqual([
       { occurrenceId: "tool:1:1:0", name: BATCH_TOOL_NAME },
+      { occurrenceId: "tool:1:1:0.0", name: BATCH_INVALID_CALL_NAME_V1 },
     ]);
   });
 
@@ -483,6 +486,28 @@ describe("batch", () => {
     // The surviving call keeps the id its declared position gives it, so a
     // replay re-issues it under the same key.
     expect(effects).toEqual(["tool:1:1:0.1"]);
+    // The nameless call still journals its own pair of events: a name the log
+    // accepts, the arguments the model actually wrote, and the refusal. A
+    // declared call that left no trace at all was invisible to the person
+    // reading the thread.
+    expect(
+      run.events.find(
+        (event) =>
+          event.type === "tool/call" && event.occurrenceId === "tool:1:1:0.0",
+      ),
+    ).toMatchObject({
+      name: BATCH_INVALID_CALL_NAME_V1,
+      input: { arguments: {} },
+    });
+    expect(
+      run.events.find(
+        (event) =>
+          event.type === "tool/result" && event.occurrenceId === "tool:1:1:0.0",
+      ),
+    ).toMatchObject({
+      isError: true,
+      content: "batch call 0 was refused: it needs a tool name",
+    });
   });
 
   test("refuses a batch past the declared bound, and an empty one", async () => {
