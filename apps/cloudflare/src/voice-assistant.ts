@@ -54,6 +54,7 @@ import {
   renderVoiceBotStatusV1,
   VOICE_HISTORY_MAX_LIMIT_V1,
 } from "@frockbot/app/voice/history";
+import { withDeadlineV1 } from "@frockbot/core/deadline";
 import type { SearchIndexResultsV1 } from "@frockbot/app/search/shared";
 import {
   decodeVoiceMemoryUpdateV1,
@@ -2446,11 +2447,17 @@ export class VoiceAssistant extends VoiceAgentBase<
     if (admission.status === "refused") {
       return leadIn + renderVoiceDelegationReadOutV1(result, { placed });
     }
-    const composed = await composeVoiceDelegationSpeechV1(
-      { chat: (body, signal) => this.chatCompletion(body, signal) },
-      result,
-      AbortSignal.timeout(VOICE_RESULT_COMPOSE_TIMEOUT_MS),
-    );
+    const deadline = withDeadlineV1(VOICE_RESULT_COMPOSE_TIMEOUT_MS);
+    let composed: string | undefined;
+    try {
+      composed = await composeVoiceDelegationSpeechV1(
+        { chat: (body, signal) => this.chatCompletion(body, signal) },
+        result,
+        deadline.signal,
+      );
+    } finally {
+      deadline.clear();
+    }
     if (!composed) {
       return leadIn + renderVoiceDelegationReadOutV1(result, { placed });
     }

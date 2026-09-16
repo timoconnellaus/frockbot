@@ -1,4 +1,5 @@
 /** Hosted equivalents of pi-ai 0.85.1 OAuth flows; no loopback servers or ambient credentials. */
+import { withDeadlineV1 } from "@frockbot/core/deadline";
 import { oauthProviderIdsV1 } from "./definition.js";
 export { oauthProviderIdsV1 };
 export type OAuthProviderIdV1 = (typeof oauthProviderIdsV1)[number];
@@ -74,23 +75,28 @@ async function request(
   fields: Record<string, string>,
   json = false,
 ) {
-  const response = await fetch(url, {
-    method: "POST",
-    redirect: "manual",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": json
-        ? "application/json"
-        : "application/x-www-form-urlencoded",
-    },
-    body: json ? JSON.stringify(fields) : new URLSearchParams(fields),
-    signal: AbortSignal.timeout(30000),
-  });
-  const body = (await response.json().catch(() => {
-    if (response.ok) throw new Error("Invalid OAuth response");
-    return {};
-  })) as Record<string, unknown>;
-  return { response, body };
+  const deadline = withDeadlineV1(30000);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": json
+          ? "application/json"
+          : "application/x-www-form-urlencoded",
+      },
+      body: json ? JSON.stringify(fields) : new URLSearchParams(fields),
+      signal: deadline.signal,
+    });
+    const body = (await response.json().catch(() => {
+      if (response.ok) throw new Error("Invalid OAuth response");
+      return {};
+    })) as Record<string, unknown>;
+    return { response, body };
+  } finally {
+    deadline.clear();
+  }
 }
 function oauthErrorCode(body: Record<string, unknown>): unknown {
   return body.error && typeof body.error === "object"
@@ -187,29 +193,35 @@ async function copilotToken(
   refresh: string,
   now: number,
 ): Promise<OAuthTokenV1> {
-  const response = await fetch(
-    "https://api.github.com/copilot_internal/v2/token",
-    {
-      redirect: "manual",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${refresh}`,
-        "User-Agent": "GitHubCopilotChat/0.35.0",
-        "Editor-Version": "vscode/1.107.0",
-        "Editor-Plugin-Version": "copilot-chat/0.35.0",
-        "Copilot-Integration-Id": "vscode-chat",
+  const deadline = withDeadlineV1(30000);
+  let body: Record<string, unknown>;
+  try {
+    const response = await fetch(
+      "https://api.github.com/copilot_internal/v2/token",
+      {
+        redirect: "manual",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${refresh}`,
+          "User-Agent": "GitHubCopilotChat/0.35.0",
+          "Editor-Version": "vscode/1.107.0",
+          "Editor-Plugin-Version": "copilot-chat/0.35.0",
+          "Copilot-Integration-Id": "vscode-chat",
+        },
+        signal: deadline.signal,
       },
-      signal: AbortSignal.timeout(30000),
-    },
-  );
-  if (!response.ok)
-    throw new Error(
-      `Copilot authorization rejected (${response.status}); sign in again`,
     );
-  const body = (await response.json().catch(() => {
-    if (response.ok) throw new Error("Invalid OAuth response");
-    return {};
-  })) as Record<string, unknown>;
+    if (!response.ok)
+      throw new Error(
+        `Copilot authorization rejected (${response.status}); sign in again`,
+      );
+    body = (await response.json().catch(() => {
+      if (response.ok) throw new Error("Invalid OAuth response");
+      return {};
+    })) as Record<string, unknown>;
+  } finally {
+    deadline.clear();
+  }
   const access = string(body.token);
   const proxy = /(?:^|;)proxy-ep=([^;]+)/.exec(access)?.[1];
   const host =

@@ -3,6 +3,7 @@ import {
   decodeConnectionModelCatalogV1,
   type ConnectionModelV1,
 } from "@frockbot/core/connection";
+import { withDeadlineV1 } from "@frockbot/core/deadline";
 
 export type OllamaFetch = (
   input: string | URL | Request,
@@ -36,17 +37,12 @@ export interface OllamaCloudClientConfig {
 /**
  * Bound one provider call: the caller's signal still cancels it, and a deadline
  * of its own settles it when the provider simply never answers.
+ *
+ * Re-exported from its shared home so the Package's own callers keep their
+ * import. Every caller clears it in a `finally`: see `@frockbot/core/deadline`
+ * for what an uncleared timer costs a Durable Object.
  */
-export function withDeadlineV1(
-  timeoutMs: number,
-  signal?: AbortSignal,
-): { signal: AbortSignal; timedOut: () => boolean } {
-  const deadline = AbortSignal.timeout(timeoutMs);
-  return {
-    signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
-    timedOut: () => deadline.aborted,
-  };
-}
+export { withDeadlineV1 };
 
 /** The endpoint every Connection uses until its User points it elsewhere. */
 export const DEFAULT_OLLAMA_API_BASE_URL = "https://ollama.com";
@@ -246,40 +242,47 @@ export class OllamaCloudClient {
       this.requestTimeoutMs,
       init.signal ?? undefined,
     );
-    let response: Response;
+    // The deadline guards the body read as well as the fetch, so it is cleared
+    // once, around both — an uncleared timer keeps the calling Durable Object
+    // awake for the rest of the timeout.
     try {
-      response = await this.fetcher(`${this.apiBaseUrl}${path}`, {
-        ...init,
-        signal: deadline.signal,
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-          ...init.headers,
-        },
-      });
-    } catch (error) {
-      throw deadline.timedOut()
-        ? new Error(
-            `Ollama Cloud did not answer within ${this.requestTimeoutMs}ms`,
-          )
-        : error;
-    }
-    if (!response.ok) {
-      throw new Error(`Ollama Cloud request failed (${response.status})`);
-    }
-    try {
-      return await boundedJson(
-        response,
-        path === "/tags"
-          ? MAX_CATALOG_RESPONSE_BYTES
-          : MAX_MODEL_RESPONSE_BYTES,
-      );
-    } catch (error) {
-      throw deadline.timedOut()
-        ? new Error(
-            `Ollama Cloud did not answer within ${this.requestTimeoutMs}ms`,
-          )
-        : error;
+      let response: Response;
+      try {
+        response = await this.fetcher(`${this.apiBaseUrl}${path}`, {
+          ...init,
+          signal: deadline.signal,
+          headers: {
+            authorization: `Bearer ${apiKey}`,
+            "content-type": "application/json",
+            ...init.headers,
+          },
+        });
+      } catch (error) {
+        throw deadline.timedOut()
+          ? new Error(
+              `Ollama Cloud did not answer within ${this.requestTimeoutMs}ms`,
+            )
+          : error;
+      }
+      if (!response.ok) {
+        throw new Error(`Ollama Cloud request failed (${response.status})`);
+      }
+      try {
+        return await boundedJson(
+          response,
+          path === "/tags"
+            ? MAX_CATALOG_RESPONSE_BYTES
+            : MAX_MODEL_RESPONSE_BYTES,
+        );
+      } catch (error) {
+        throw deadline.timedOut()
+          ? new Error(
+              `Ollama Cloud did not answer within ${this.requestTimeoutMs}ms`,
+            )
+          : error;
+      }
+    } finally {
+      deadline.clear();
     }
   }
 
@@ -378,48 +381,55 @@ export class OllamaCloudClient {
   ): Promise<void> {
     const model = modelId(providerModelId);
     const deadline = withDeadlineV1(this.probeTimeoutMs, signal);
-    let response: Response;
+    // Cleared around the whole probe, body read included. The probe's own
+    // budget is thirty seconds, and an uncleared timer is thirty seconds of a
+    // User Durable Object kept awake after the key has already been proven.
     try {
-      response = await this.fetcher(`${this.apiBaseUrl}/chat`, {
-        method: "POST",
-        signal: deadline.signal,
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: "hi" }],
-          stream: false,
-          options: { num_predict: PROBE_PREDICTED_TOKENS },
-        }),
-      });
-    } catch (error) {
-      throw deadline.timedOut()
-        ? new Error(
-            `Ollama Cloud did not answer within ${this.probeTimeoutMs}ms`,
-          )
-        : error;
-    }
-    if (!response.ok) {
-      const reported = await boundedText(response);
-      if (response.status === 401 || response.status === 403) {
+      let response: Response;
+      try {
+        response = await this.fetcher(`${this.apiBaseUrl}/chat`, {
+          method: "POST",
+          signal: deadline.signal,
+          headers: {
+            authorization: `Bearer ${apiKey}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: "hi" }],
+            stream: false,
+            options: { num_predict: PROBE_PREDICTED_TOKENS },
+          }),
+        });
+      } catch (error) {
+        throw deadline.timedOut()
+          ? new Error(
+              `Ollama Cloud did not answer within ${this.probeTimeoutMs}ms`,
+            )
+          : error;
+      }
+      if (!response.ok) {
+        const reported = await boundedText(response);
+        if (response.status === 401 || response.status === 403) {
+          throw new Error(
+            `Ollama Cloud rejected the key for inference: ${reported || `HTTP ${response.status}`}`,
+          );
+        }
         throw new Error(
-          `Ollama Cloud rejected the key for inference: ${reported || `HTTP ${response.status}`}`,
+          `Ollama Cloud inference probe failed (${response.status})${reported ? `: ${reported}` : ""}`,
         );
       }
-      throw new Error(
-        `Ollama Cloud inference probe failed (${response.status})${reported ? `: ${reported}` : ""}`,
+      const payload = object(
+        await boundedJson(response, MAX_PROBE_RESPONSE_BYTES),
+        "Ollama Cloud inference probe",
       );
-    }
-    const payload = object(
-      await boundedJson(response, MAX_PROBE_RESPONSE_BYTES),
-      "Ollama Cloud inference probe",
-    );
-    if (typeof payload.error === "string") {
-      throw new Error(
-        `Ollama Cloud rejected the key for inference: ${payload.error.slice(0, MAX_PROBE_FAILURE_TEXT)}`,
-      );
+      if (typeof payload.error === "string") {
+        throw new Error(
+          `Ollama Cloud rejected the key for inference: ${payload.error.slice(0, MAX_PROBE_FAILURE_TEXT)}`,
+        );
+      }
+    } finally {
+      deadline.clear();
     }
   }
 }
