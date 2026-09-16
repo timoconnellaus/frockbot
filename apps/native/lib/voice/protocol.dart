@@ -277,6 +277,15 @@ final class AssistantVoiceStateV1 extends AssistantServerFrameV1 {
   const AssistantVoiceStateV1(this.upstream, this.muted);
 }
 
+enum VoiceDelegationStateV1 { asked, answering, finished }
+
+final class AssistantDelegationV1 extends AssistantServerFrameV1 {
+  final String botId;
+  final String botName;
+  final VoiceDelegationStateV1 state;
+  const AssistantDelegationV1(this.botId, this.botName, this.state);
+}
+
 /// One JSON text frame from the assistant socket.
 ///
 /// Answers null rather than throwing for anything unknown or malformed: the
@@ -336,6 +345,17 @@ AssistantServerFrameV1? decodeAssistantServerFrameV1(String raw) {
       };
       if (upstream == null) return null;
       return AssistantVoiceStateV1(upstream, value['muted'] == true);
+    case 'voice/delegation':
+      final botId = value['botId'];
+      final botName = value['botName'];
+      final state = switch (value['state']) {
+        'asked' => VoiceDelegationStateV1.asked,
+        'answering' => VoiceDelegationStateV1.answering,
+        'finished' => VoiceDelegationStateV1.finished,
+        _ => null,
+      };
+      if (botId is! String || botName is! String || state == null) return null;
+      return AssistantDelegationV1(botId, botName, state);
     case 'welcome':
       final version = value['protocol_version'];
       return AssistantWelcomeV1(version is int ? version : 0);

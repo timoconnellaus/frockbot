@@ -52,8 +52,8 @@ import type {
   BotRegistrationV1,
   CreateBotCommandV1,
   FlockReceiptV1,
-  SheepIdentityViewV1,
-  UpdateSheepCommandV1,
+  AvatarIdentityViewV1,
+  UpdateAvatarCommandV1,
 } from "@frockbot/app/flock/shared";
 import type {
   TemplateCommandV1,
@@ -573,16 +573,16 @@ export interface UserConfigurationBinding {
 }
 
 export interface BotConfigurationBinding {
-  readSheep(request: {
+  readAvatar(request: {
     schemaVersion: 1;
     userId: string;
     botId: string;
-  }): Promise<SheepIdentityViewV1>;
-  updateSheep(request: {
+  }): Promise<AvatarIdentityViewV1>;
+  updateAvatar(request: {
     schemaVersion: 1;
     userId: string;
     botId: string;
-    command: UpdateSheepCommandV1;
+    command: UpdateAvatarCommandV1;
   }): Promise<FlockReceiptV1>;
   readConfiguration(
     request: BotConfigurationReadRpcV1,

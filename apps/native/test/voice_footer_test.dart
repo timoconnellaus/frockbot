@@ -11,6 +11,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/footer.dart';
 import 'package:frockbot_native/voice/waveform.dart';
@@ -35,6 +36,7 @@ Future<void> mount(
   required double width,
   VoidCallback? onEnd,
   bool footer = true,
+  ({String characterId, String primary})? Function(String botId)? botAppearance,
 }) async {
   tester.view.physicalSize = Size(width, 800);
   tester.view.devicePixelRatio = 1;
@@ -45,7 +47,12 @@ Future<void> mount(
       home: Column(
         children: [
           const Expanded(child: SizedBox.expand()),
-          if (footer) VoiceFooter(session: controller, onEnd: onEnd ?? () {}),
+          if (footer)
+            VoiceFooter(
+              session: controller,
+              onEnd: onEnd ?? () {},
+              botAppearance: botAppearance,
+            ),
         ],
       ),
     ),
@@ -239,6 +246,49 @@ void main() {
     await tester.pump();
     expect(controller.notice, isNull);
     expect(find.byKey(voiceFooterAnimationKey), findsOneWidget);
+  });
+
+  testWidgets('the Bot being consulted rises into the voice stage', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final socket = FakeVoiceSocket();
+    final controller = session(socket);
+    addTearDown(controller.dispose);
+    await mount(
+      tester,
+      controller,
+      width: 390,
+      botAppearance: (_) => (characterId: 'dog', primary: '#dca258'),
+    );
+    await controller.start();
+    await tester.pump();
+    socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+    socket.deliver(
+      jsonEncode({
+        'schemaVersion': 1,
+        'type': 'voice/delegation',
+        'botId': 'dog-bot',
+        'botName': 'Scout',
+        'state': 'asked',
+      }),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(find.byType(CharacterAvatar), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label == 'Asked Scout' &&
+            widget.properties.liveRegion == true,
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Asked Scout'), findsOneWidget);
+    semantics.dispose();
   });
 
   testWidgets('the slab is the brand pink, with no top border', (tester) async {

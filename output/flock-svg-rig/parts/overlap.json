@@ -1,0 +1,54 @@
+{
+  "rotationDegrees": [-12, 0, 12],
+  "verticalOffsets": [-20, 0, 20],
+  "characters": {
+    "pixel": [
+      {
+        "part": "foot-left",
+        "posesChecked": 9,
+        "exposedRootArea": 0,
+        "pivot": [175, 475],
+        "height": 138.88
+      },
+      {
+        "part": "foot-right",
+        "posesChecked": 9,
+        "exposedRootArea": 0,
+        "pivot": [283, 475],
+        "height": 134.99
+      }
+    ],
+    "guardian": [
+      {
+        "part": "foot-left",
+        "posesChecked": 9,
+        "exposedRootArea": 0,
+        "pivot": [193, 475],
+        "height": 145.02
+      },
+      {
+        "part": "foot-right",
+        "posesChecked": 9,
+        "exposedRootArea": 0,
+        "pivot": [343, 475],
+        "height": 152.47
+      }
+    ],
+    "sunny": [
+      {
+        "part": "foot-left",
+        "posesChecked": 9,
+        "exposedRootArea": 0,
+        "pivot": [191, 475],
+        "height": 149.04
+      },
+      {
+        "part": "foot-right",
+        "posesChecked": 9,
+        "exposedRootArea": 0,
+        "pivot": [311, 475],
+        "height": 146.13
+      }
+    ]
+  }
+}

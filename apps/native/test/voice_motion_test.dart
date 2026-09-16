@@ -100,11 +100,14 @@ void main() {
               widget.properties.identifier == ShellIds.conversation,
         );
         final chat = tester.getRect(conversation);
+        final composer = tester.getRect(find.byType(Composer));
         final dock = find.byKey(const ValueKey('dictation-dock'));
         final stop = find.byKey(const ValueKey('dictation-stop'));
         void checkFrame() {
           final rect = tester.getRect(dock);
-          expect(rect.left, chat.left);
+          // The persistent Bot companion owns the strip between the chat edge
+          // and its composer; dictation replaces the composer itself.
+          expect(rect.left, composer.left);
           expect(rect.right, chat.right);
           expect(rect.bottom, greaterThanOrEqualTo(800));
           final button = tester.getRect(stop);

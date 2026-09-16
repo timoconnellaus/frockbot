@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../client/transport.dart';
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import '../shell/semantics.dart';
 import '../shell/desktop_layout.dart';
 import 'controller.dart';
@@ -682,9 +682,11 @@ class _SearchOverlayState extends State<SearchOverlay> {
               child: Row(
                 children: [
                   if (entry.category == SearchCategory.bots && bot != null)
-                    SheepAvatar(
+                    CharacterAvatar(
                       size: phone ? 42 : 32,
-                      background: bot.background,
+                      characterId: bot.background,
+                      primary: bot.primary,
+                      motion: CharacterMotion.quiet,
                     )
                   else
                     _icon(entry),

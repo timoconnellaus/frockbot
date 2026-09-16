@@ -8,8 +8,6 @@ import {
 } from "@frockbot/core/configuration";
 export type { BotSelfWriterV1 } from "@frockbot/core/configuration";
 import { APPLET_IMPACT_FINGERPRINT_V1 } from "@frockbot/core/contracts";
-import assetManifest from "./assets/manifest.json" with { type: "json" };
-
 export const FLOCK_DIRECTORY_LIMIT = 100;
 
 /**
@@ -40,13 +38,10 @@ export function isFlockIdentifier(value: unknown): value is string {
   return isPublicIdentifier(value);
 }
 
-type Band = "upper" | "middle" | "lower";
-export interface SheepRecipeV1 {
+export interface AvatarAppearanceV1 {
   schemaVersion: 1;
-  background: string;
-  upper: string;
-  middle: string;
-  lower: string;
+  characterId: string;
+  primary: string;
 }
 export interface BotRegistrationV1 {
   schemaVersion: 1;
@@ -65,7 +60,7 @@ export interface BotRegistrationV1 {
    * a User-created Bot and for every registration written before this existed.
    */
   createdBy?: BotSelfWriterV1;
-  sheep: SheepRecipeV1;
+  avatar: AvatarAppearanceV1;
 }
 export interface BotMembershipViewV1 {
   schemaVersion: 1;
@@ -128,21 +123,21 @@ export interface CreateBotCommandV1 {
   description?: string;
   /** The Bot and Turn issuing this command, when a Bot issues it. */
   createdBy?: BotSelfWriterV1;
-  sheep?: SheepRecipeV1;
+  avatar?: AvatarAppearanceV1;
 }
-export interface UpdateSheepCommandV1 {
+export interface UpdateAvatarCommandV1 {
   schemaVersion: 1;
-  type: "bot/update-sheep";
+  type: "bot/update-avatar";
   commandId: string;
   expectedRevision: number;
   botId: string;
-  sheep: SheepRecipeV1;
+  avatar: AvatarAppearanceV1;
 }
-export interface SheepIdentityViewV1 {
+export interface AvatarIdentityViewV1 {
   schemaVersion: 1;
   botId: string;
   revision: number;
-  sheep: SheepRecipeV1;
+  avatar: AvatarAppearanceV1;
 }
 export interface FlockReceiptV1 {
   schemaVersion: 1;
@@ -218,29 +213,18 @@ export class BotNotFoundError extends Error {
   }
 }
 
-const backgrounds = assetManifest.backgrounds.map((item) => item.id);
-const tree = assetManifest.trees as Record<
-  Band,
-  Array<{ id: string; label: string; parent: string | null; kind: string }>
->;
-const ids = Object.fromEntries(
-  (Object.keys(tree) as Band[]).map((band) => [
-    band,
-    tree[band].map((item) => item.id),
-  ]),
-) as Record<Band, string[]>;
-const nodeIndex = new Map<
-  string,
-  { id: string; parent: string | null; band: Band }
->();
-for (const band of Object.keys(tree) as Band[])
-  for (const node of tree[band])
-    nodeIndex.set(node.id, { id: node.id, parent: node.parent, band });
-
-export const sheepCatalog = {
-  backgrounds: assetManifest.backgrounds,
-  trees: assetManifest.trees,
-  assets: assetManifest.assets,
+export const avatarCatalog = {
+  pixel: "#fc85ae",
+  guardian: "#3c3543",
+  sunny: "#ffc928",
+  chill: "#59c7ff",
+  nudge: "#ff8b27",
+  fox: "#ef6b4a",
+  dog: "#dca258",
+  goat: "#d8c8ab",
+  cow: "#f4eee4",
+  cat: "#8b72d9",
+  rabbit: "#d7b9f1",
 } as const;
 
 function record(input: unknown, label: string): Record<string, unknown> {
@@ -305,28 +289,23 @@ function revision(value: unknown): number {
     throw new FlockDecodeError("revision is invalid");
   return value as number;
 }
-export function decodeSheepRecipeV1(input: unknown): SheepRecipeV1 {
-  const value = record(input, "sheep recipe");
-  exact(value, ["schemaVersion", "background", "upper", "middle", "lower"]);
+export function decodeAvatarAppearanceV1(input: unknown): AvatarAppearanceV1 {
+  const value = record(input, "avatar appearance");
+  exact(value, ["schemaVersion", "characterId", "primary"]);
   if (value.schemaVersion !== 1)
-    throw new FlockDecodeError("unsupported sheep recipe");
-  const recipe = {
+    throw new FlockDecodeError("unsupported avatar appearance");
+  const appearance = {
     schemaVersion: 1,
-    background: identifier(value.background, "background"),
-    upper: identifier(value.upper, "upper"),
-    middle: identifier(value.middle, "middle"),
-    lower: identifier(value.lower, "lower"),
-  } satisfies SheepRecipeV1;
+    characterId: identifier(value.characterId, "characterId"),
+    primary:
+      typeof value.primary === "string" ? value.primary.toLowerCase() : "",
+  } satisfies AvatarAppearanceV1;
   if (
-    !backgrounds.includes(recipe.background) ||
-    !ids.upper.includes(recipe.upper) ||
-    !ids.middle.includes(recipe.middle) ||
-    !ids.lower.includes(recipe.lower)
+    !Object.hasOwn(avatarCatalog, appearance.characterId) ||
+    !/^#[0-9a-f]{6}$/.test(appearance.primary)
   )
-    throw new FlockDecodeError(
-      "sheep recipe references an unknown catalog item",
-    );
-  return recipe;
+    throw new FlockDecodeError("avatar appearance is invalid");
+  return appearance;
 }
 
 export function decodeCreateBotCommandV1(input: unknown): CreateBotCommandV1 {
@@ -334,7 +313,7 @@ export function decodeCreateBotCommandV1(input: unknown): CreateBotCommandV1 {
   exact(
     value,
     ["schemaVersion", "type", "commandId", "expectedRevision", "botId", "name"],
-    ["description", "createdBy", "sheep"],
+    ["description", "createdBy", "avatar"],
   );
   if (value.schemaVersion !== 1 || value.type !== "bot/create")
     throw new FlockDecodeError("unsupported create Bot command");
@@ -355,32 +334,34 @@ export function decodeCreateBotCommandV1(input: unknown): CreateBotCommandV1 {
       ? {}
       : { description: boundedText(value.description, "description", 10_000) }),
     ...(createdBy ? { createdBy } : {}),
-    sheep:
-      value.sheep === undefined ? undefined : decodeSheepRecipeV1(value.sheep),
+    avatar:
+      value.avatar === undefined
+        ? undefined
+        : decodeAvatarAppearanceV1(value.avatar),
   };
 }
 
-export function decodeUpdateSheepCommandV1(
+export function decodeUpdateAvatarCommandV1(
   input: unknown,
-): UpdateSheepCommandV1 {
-  const value = record(input, "update sheep command");
+): UpdateAvatarCommandV1 {
+  const value = record(input, "update avatar command");
   exact(value, [
     "schemaVersion",
     "type",
     "commandId",
     "expectedRevision",
     "botId",
-    "sheep",
+    "avatar",
   ]);
-  if (value.schemaVersion !== 1 || value.type !== "bot/update-sheep")
-    throw new FlockDecodeError("unsupported update sheep command");
+  if (value.schemaVersion !== 1 || value.type !== "bot/update-avatar")
+    throw new FlockDecodeError("unsupported update avatar command");
   return {
     schemaVersion: 1,
-    type: "bot/update-sheep",
+    type: "bot/update-avatar",
     commandId: identifier(value.commandId, "commandId"),
     expectedRevision: revision(value.expectedRevision),
     botId: botIdentifier(value.botId),
-    sheep: decodeSheepRecipeV1(value.sheep),
+    avatar: decodeAvatarAppearanceV1(value.avatar),
   };
 }
 
@@ -388,7 +369,7 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   const bot = record(input, "Bot registration");
   exact(
     bot,
-    ["schemaVersion", "botId", "registeredAt", "initialName", "sheep"],
+    ["schemaVersion", "botId", "registeredAt", "initialName", "avatar"],
     ["initialDescription", "createdBy"],
   );
   if (bot.schemaVersion !== 1)
@@ -412,7 +393,7 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
           ),
         }),
     ...(createdBy ? { createdBy } : {}),
-    sheep: decodeSheepRecipeV1(bot.sheep),
+    avatar: decodeAvatarAppearanceV1(bot.avatar),
   };
 }
 
@@ -649,16 +630,18 @@ export function decodeStoredFlockReceiptV1(
   };
 }
 
-export function decodeSheepIdentityViewV1(input: unknown): SheepIdentityViewV1 {
-  const value = record(input, "sheep identity");
-  exact(value, ["schemaVersion", "botId", "revision", "sheep"]);
+export function decodeAvatarIdentityViewV1(
+  input: unknown,
+): AvatarIdentityViewV1 {
+  const value = record(input, "avatar identity");
+  exact(value, ["schemaVersion", "botId", "revision", "avatar"]);
   if (value.schemaVersion !== 1)
-    throw new FlockDecodeError("unsupported sheep identity");
+    throw new FlockDecodeError("unsupported avatar identity");
   return {
     schemaVersion: 1,
     botId: botIdentifier(value.botId),
     revision: revision(value.revision),
-    sheep: decodeSheepRecipeV1(value.sheep),
+    avatar: decodeAvatarAppearanceV1(value.avatar),
   };
 }
 
@@ -720,36 +703,25 @@ export function decodeBotIdentityDirectoryViewV1(
   return { schemaVersion: 1, identities };
 }
 
-export function randomSheepRecipeV1(
+export function randomAvatarAppearanceV1(
   random: () => number = Math.random,
-): SheepRecipeV1 {
-  const pick = (items: string[]) =>
-    items[Math.min(items.length - 1, Math.floor(random() * items.length))]!;
+): AvatarAppearanceV1 {
+  const characters = Object.keys(avatarCatalog) as Array<
+    keyof typeof avatarCatalog
+  >;
+  const characterId =
+    characters[
+      Math.min(characters.length - 1, Math.floor(random() * characters.length))
+    ]!;
   return {
     schemaVersion: 1,
-    background: pick(backgrounds),
-    upper: pick(ids.upper),
-    middle: pick(ids.middle),
-    lower: pick(ids.lower),
+    characterId,
+    primary: avatarCatalog[characterId],
   };
 }
 
-export function sheepLayerIds(recipe: SheepRecipeV1): string[] {
-  const result = [`background-${recipe.background}`, "canonical"];
-  for (const selected of [recipe.upper, recipe.middle, recipe.lower]) {
-    const path: string[] = [];
-    let node = nodeIndex.get(selected);
-    while (node) {
-      if (node.parent !== null) path.unshift(node.id);
-      node = node.parent ? nodeIndex.get(node.parent) : undefined;
-    }
-    result.push(...path);
-  }
-  return result;
-}
-
 export function flockCommandFingerprint(
-  value: CreateBotCommandV1 | UpdateSheepCommandV1 | BotLifecycleCommandV1,
+  value: CreateBotCommandV1 | UpdateAvatarCommandV1 | BotLifecycleCommandV1,
 ): string {
   return JSON.stringify(value);
 }

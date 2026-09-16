@@ -255,7 +255,7 @@ abstract final class RoutineIds {
 /// The names follow what `delete-bot.e2e.ts` and `bot-info.e2e.ts` select on —
 /// the create gesture, the danger zone's three verbs, and the one confirmation
 /// they share, whose title carries the Bot's name. The create sheet's names are
-/// new: its wardrobe is one choice, not four selects.
+/// new: its character is one choice, followed by an optional colour.
 abstract final class FlockIds {
   static const createTrigger = ShellIds.sidebarCreateBot;
   static const createSheet = 'flock-create';

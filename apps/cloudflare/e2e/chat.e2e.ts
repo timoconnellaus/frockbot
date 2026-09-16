@@ -417,7 +417,7 @@ test("a delivered reply is one bubble, wide enough for its own text", async () =
 // in a gutter to the left of the running Turn's bubbles and then vanish when
 // the Turn ended, which took the bubble sideways with it. The working row is
 // under the bubbles now, so a bubble is at the transcript's left edge while
-// the Bot is still writing, the sheep is below it rather than beside it, and
+// the Bot is still writing, the avatar is below it rather than beside it, and
 // the end of the Turn moves nothing horizontally.
 test("the working avatar sits below the bubbles and never shifts them", async () => {
   const { page, ollamaBaseUrl } = application();
@@ -491,12 +491,12 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
 });
 
 // Tim's report: sending while the Bot is working put the new message *under*
-// the working sheep, because the sheep belonged to the running Turn's article
+// the working avatar, because the avatar belonged to the running Turn's article
 // and the new message was appended after it. The reader watched their own words
 // arrive below the animation that was supposedly about to answer them — and the
 // Turn they had just replaced was labelled "Interrupted by your next message.",
 // which said nothing their own message did not already say.
-test("a message sent mid-Turn lands above the working sheep, unlabelled", async () => {
+test("a message sent mid-Turn lands above the working avatar, unlabelled", async () => {
   const { page, ollamaBaseUrl } = application();
   await createBot(page, "Stepper");
 
@@ -525,7 +525,7 @@ test("a message sent mid-Turn lands above the working sheep, unlabelled", async 
     )
     .toBe(true);
 
-  // The order the reader sees: their new message, then the sheep, with nothing
+  // The order the reader sees: their new message, then the avatar, with nothing
   // of the thread after it.
   await expect
     .poll(

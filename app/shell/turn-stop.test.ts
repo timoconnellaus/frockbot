@@ -211,7 +211,7 @@ describe("durable Stop", () => {
         turn: 1,
         step: 1,
         requestId: "request-1",
-        text: "Sheep farming begins with",
+        text: "Avatar farming begins with",
       },
     ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
     const { storage, contribution } = await fixture(

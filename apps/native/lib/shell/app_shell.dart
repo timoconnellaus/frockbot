@@ -530,13 +530,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _loadDirectory() async {
     unawaited(_readCredit());
     try {
-      final cached = await widget.store.read('directory/${widget.userId}');
+      final cacheKey = 'directory/${widget.userId}';
+      final cached = await widget.store.read(cacheKey);
       if (cached != null && bots.isEmpty) {
-        _adopt(
-          wire.BotDirectory.fromJson(jsonDecode(cached)).bots,
-          const {},
-          fromCache: true,
-        );
+        try {
+          _adopt(
+            wire.BotDirectory.fromJson(jsonDecode(cached)).bots,
+            const {},
+            fromCache: true,
+          );
+        } catch (_) {
+          // The directory is a disposable projection. Drop an older wire
+          // shape and continue to the authority instead of stranding the app
+          // before its network read.
+          await widget.store.delete(cacheKey);
+        }
       }
       final directory = wire.BotDirectory.fromJson(
         await widget.api.request('/api/bots'),
@@ -558,13 +566,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           widget.sessions.forget(widget.userId, prior.botId.value);
         }
       }
-      await widget.store.write(
-        'directory/${widget.userId}',
-        jsonEncode({
-          ...directory.toJson()! as Map,
-          'bots': [for (final bot in active) bot.toJson()],
-        }),
-      );
+      try {
+        await widget.store.write(
+          cacheKey,
+          jsonEncode({
+            ...directory.toJson()! as Map,
+            'bots': [for (final bot in active) bot.toJson()],
+          }),
+        );
+      } catch (_) {
+        // This cache only makes the next cold start faster. The directory the
+        // authority just returned remains usable when browser storage is full
+        // or unavailable.
+      }
       if (!mounted) return;
       generalBotId = general;
       _adopt(
@@ -618,7 +632,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       searchableBots = readable ?? active;
       // The directory is authority on what a Bot wears; whatever it says now
       // replaces anything drawn ahead of it.
-      _predictedSheep.clear();
+      _predictedAvatar.clear();
       archived = archivedIds;
       // The cached directory is an answer, so the skeleton goes now rather
       // than waiting on a read that only replaces it.
@@ -810,6 +824,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               onSaved: _readBackBotSettings,
               onPredict: (profile) => predictProfile(botId, profile),
               background: _background(botId),
+              primary: _primary(botId),
               onEditAvatar: () => unawaited(_editAvatar(botId, name)),
               dangerZone: _dangerZone(botId, name),
             ),
@@ -1532,6 +1547,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     onSaved: _readBackBotSettings,
                     onPredict: (profile) => predictProfile(botId, profile),
                     background: _background(botId),
+                    primary: _primary(botId),
                     onEditAvatar: () =>
                         unawaited(_editAvatar(botId, _name(bot))),
                     dangerZone: _dangerZone(botId, _name(bot)),
@@ -1633,27 +1649,35 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Colours chosen here that the directory has not reported back yet. The
   /// Flock owns what a Bot looks like, and the client picked the recipe it
   /// sent, so drawing it now is showing what was chosen rather than guessing.
-  final Map<String, String> _predictedSheep = {};
+  final Map<String, AvatarSelection> _predictedAvatar = {};
 
-  /// The sheep a Bot wears, from the registration the directory carries — or
+  /// The avatar a Bot wears, from the registration the directory carries — or
   /// the colour just chosen for it, until the read that confirms it lands.
   String? _background(String botId) =>
-      _predictedSheep[botId] ??
+      _predictedAvatar[botId]?.characterId ??
       bots
           .where((bot) => bot.botId.value == botId)
-          .map((bot) => bot.sheep.background)
+          .map((bot) => bot.avatar.characterId)
+          .firstOrNull;
+
+  String? _primary(String botId) =>
+      _predictedAvatar[botId]?.primary ??
+      bots
+          .where((bot) => bot.botId.value == botId)
+          .map((bot) => bot.avatar.primary)
           .firstOrNull;
 
   Future<void> _editAvatar(String botId, String botName) async {
-    final chosen = await SheepColourSheet.show(
+    final chosen = await AvatarPickerSheet.show(
       context,
       api: widget.api,
       botId: botId,
       botName: botName,
       background: _background(botId),
+      primary: _primary(botId),
     );
     if (chosen == null || !mounted) return;
-    setState(() => _predictedSheep[botId] = chosen);
+    setState(() => _predictedAvatar[botId] = chosen);
     await load();
   }
 
@@ -1787,6 +1811,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             textScale:
                                 MediaQuery.textScalerOf(context).scale(14) / 14,
                             background: _background(bot.botId.value),
+                            primary: _primary(bot.botId.value),
                             // A phone's bar is GrokBot's three things; the wider tiers
                             // name each entry of the right panel beside the title.
                             onBack: single ? _openBack : null,
@@ -1918,6 +1943,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 .unread[bot.botId.value]
                                 ?.unreadFromMessageId,
                             background: _background(bot.botId.value),
+                            primary: _primary(bot.botId.value),
                             onDictate: () => unawaited(_dictate()),
                             onStopDictation: () => unawaited(_stopDictation()),
                             dictationState:
@@ -1968,6 +1994,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 ? const SizedBox.shrink()
                 : VoiceFooter(
                     session: session,
+                    botAppearance: (botId) => bots
+                        .where((bot) => bot.botId.value == botId)
+                        .map(
+                          (bot) => (
+                            characterId: bot.avatar.characterId,
+                            primary: bot.avatar.primary,
+                          ),
+                        )
+                        .firstOrNull,
                     onEnd: () => unawaited(_endVoice(reason: 'end-button')),
                   ),
           ),
@@ -2000,7 +2035,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   profiles[bot.botId.value]?.title ??
                   bot.initialDescription ??
                   '',
-              background: bot.sheep.background,
+              background: bot.avatar.characterId,
+              primary: bot.avatar.primary,
               unread: activity.unread[bot.botId.value]?.unread == true,
               archived: archived.contains(bot.botId.value),
               hidden: profiles[bot.botId.value]?.hiddenFromSidebar == true,
@@ -2101,7 +2137,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             bot: SearchBot(
               id: botId,
               name: _name(matchedBot),
-              background: matchedBot.sheep.background,
+              background: matchedBot.avatar.characterId,
+              primary: matchedBot.avatar.primary,
               archived: true,
             ),
             runId: hit.runId,

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../audit/page.dart';
 import '../client/transport.dart';
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../theme/states.dart';
@@ -138,7 +138,10 @@ class _BotRecoveryPageState extends State<BotRecoveryPage>
   Widget row(wire.BotRegistration bot, bool archived) => Card(
     child: ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-      leading: SheepAvatar(background: bot.sheep.background),
+      leading: CharacterAvatar(
+        characterId: bot.avatar.characterId,
+        primary: bot.avatar.primary,
+      ),
       title: Text(bot.initialName),
       subtitle: Text(
         archived

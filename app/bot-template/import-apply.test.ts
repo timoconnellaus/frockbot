@@ -25,12 +25,10 @@ import type {
 const USER = "user-b";
 const SHARE_ID = `user-a.${"a".repeat(32)}`;
 
-const sheep = {
+const avatar = {
   schemaVersion: 1 as const,
-  background: "meadow",
-  upper: "wool",
-  middle: "scarf",
-  lower: "boots",
+  characterId: "pixel",
+  primary: "#fc85ae",
 };
 
 class MemoryStorage implements UserSettingsStorage {
@@ -102,7 +100,7 @@ const blobs: TemplateBlobStoreV1 = {
 
 const bots: TemplateBotReaderV1 = {
   readSettings: () => Promise.reject(new Error("not used")),
-  readSheep: () => Promise.resolve(sheep),
+  readAvatar: () => Promise.resolve(avatar),
   readSkills: () => Promise.resolve([]),
   readRoutines: () => Promise.resolve([]),
 };
@@ -113,7 +111,7 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
     profile: {
       name: "Budget",
       description: "Watches the ledger.",
-      avatar: { kind: "sheep", recipe: sheep },
+      avatar: { kind: "avatar", recipe: avatar },
     },
     skills: [
       { slug: "reconcile", name: "Reconcile", body: "# Reconcile\nSteps." },

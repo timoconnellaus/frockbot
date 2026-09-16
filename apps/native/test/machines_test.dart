@@ -147,14 +147,22 @@ void main() {
 
   test('a pairing code says how long it has, not when it stops', () {
     final now = DateTime.parse('2026-09-06T12:00:00.000Z');
-    expect(pairingWindowV1('2026-09-06T12:05:00.000Z', now: now),
-        'in 5 minutes');
-    expect(pairingWindowV1('2026-09-06T12:01:00.000Z', now: now),
-        'in 1 minute');
-    expect(pairingWindowV1('2026-09-06T12:00:30.000Z', now: now),
-        'in under a minute');
-    expect(pairingWindowV1('2026-09-06T11:59:00.000Z', now: now),
-        'now — get another');
+    expect(
+      pairingWindowV1('2026-09-06T12:05:00.000Z', now: now),
+      'in 5 minutes',
+    );
+    expect(
+      pairingWindowV1('2026-09-06T12:01:00.000Z', now: now),
+      'in 1 minute',
+    );
+    expect(
+      pairingWindowV1('2026-09-06T12:00:30.000Z', now: now),
+      'in under a minute',
+    );
+    expect(
+      pairingWindowV1('2026-09-06T11:59:00.000Z', now: now),
+      'now — get another',
+    );
     expect(pairingWindowV1('never', now: now), 'shortly');
   });
 
@@ -247,8 +255,10 @@ void main() {
     });
 
     test('a plan from whatever was pasted', () {
-      expect(templateShareIdV1('  https://bot.example/templates/v1/u.abc  '),
-          'u.abc');
+      expect(
+        templateShareIdV1('  https://bot.example/templates/v1/u.abc  '),
+        'u.abc',
+      );
       expect(templateShareIdV1('u.abc'), 'u.abc');
       expect(
         templateCommandV1(

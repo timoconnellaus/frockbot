@@ -21,6 +21,7 @@ import '../applets/chat_card.dart';
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
+import '../flock/avatar.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
 import 'composer.dart';
@@ -59,8 +60,9 @@ class ChatPane extends StatefulWidget {
   final DictationState dictationState;
   final ValueListenable<double>? dictationLevel;
 
-  /// The Bot's sheep background, so its avatar is the same one everywhere.
+  /// The Bot's character and chosen colour, shared by every avatar surface.
   final String? background;
+  final String? primary;
 
   /// What the empty thread offers to write into the composer.
   final List<StarterSuggestionV1> starters;
@@ -83,6 +85,7 @@ class ChatPane extends StatefulWidget {
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
+    this.primary,
     this.starters = const [],
   });
 
@@ -235,6 +238,7 @@ class _ChatPaneState extends State<ChatPane> {
         Expanded(
           child: TranscriptView(
             background: widget.background,
+            primary: widget.primary,
             starters: widget.starters.isEmpty
                 ? null
                 : StarterSuggestions(
@@ -288,22 +292,45 @@ class _ChatPaneState extends State<ChatPane> {
               child: const Text('Check message status'),
             ),
           ),
-        Composer(
-          editor: editor,
-          focus: focus,
-          // Readiness is about the transport, the Bot and the model; whether
-          // there is something worth sending is the Composer's own question.
-          ready: c.canSend,
-          stoppable: c.stoppable,
-          stopping: c.stopping,
-          onSend: _send,
-          onStop: c.stop,
-          onChanged: (value) => unawaited(c.saveDraft(value)),
-          skills: skills,
-          onDictate: widget.onDictate,
-          onStopDictation: widget.onStopDictation,
-          dictationState: widget.dictationState,
-          dictationLevel: widget.dictationLevel,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 2, 10),
+              child: CharacterAvatar(
+                size: MediaQuery.sizeOf(context).width <= 640 ? 50 : 64,
+                characterId: widget.background,
+                primary: widget.primary,
+                enableGaze: true,
+                activity: c.activeRunId == null
+                    ? CharacterActivity.idle
+                    : CharacterActivity.thinking,
+                semanticsLabel: c.activeRunId == null
+                    ? 'Bot is ready'
+                    : 'Bot is thinking',
+              ),
+            ),
+            Expanded(
+              child: Composer(
+                editor: editor,
+                focus: focus,
+                // Readiness is about the transport, the Bot and the model;
+                // whether there is something worth sending is the Composer's
+                // own question.
+                ready: c.canSend,
+                stoppable: c.stoppable,
+                stopping: c.stopping,
+                onSend: _send,
+                onStop: c.stop,
+                onChanged: (value) => unawaited(c.saveDraft(value)),
+                skills: skills,
+                onDictate: widget.onDictate,
+                onStopDictation: widget.onStopDictation,
+                dictationState: widget.dictationState,
+                dictationLevel: widget.dictationLevel,
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -340,6 +367,7 @@ class ConversationView extends StatefulWidget {
   final DictationState dictationState;
   final ValueListenable<double>? dictationLevel;
   final String? background;
+  final String? primary;
 
   /// Whether this is General, whose empty thread offers starter suggestions.
   final bool general;
@@ -365,6 +393,7 @@ class ConversationView extends StatefulWidget {
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
+    this.primary,
     this.general = false,
     this.featuresRevision = 0,
   });
@@ -456,6 +485,7 @@ class _ConversationViewState extends State<ConversationView>
     botId: widget.botId,
     child: ChatPane(
       background: widget.background,
+      primary: widget.primary,
       starters: starters,
       controller: session.controller,
       onReconnect: session.channel.connect,

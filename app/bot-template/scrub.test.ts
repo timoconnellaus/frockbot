@@ -14,19 +14,17 @@ import {
 } from "./scrub.ts";
 import type { TemplateOmissionReasonV1 } from "./shared.ts";
 
-const sheep = {
+const avatar = {
   schemaVersion: 1 as const,
-  background: "meadow",
-  upper: "wool",
-  middle: "scarf",
-  lower: "boots",
+  characterId: "pixel",
+  primary: "#fc85ae",
 };
 
 function source(overrides: Partial<TemplateSourceV1> = {}): TemplateSourceV1 {
   return {
     botId: "budget",
     profile: { name: "Budget", title: "Money minder" },
-    sheep,
+    avatar,
     skills: [],
     routines: [],
     packages: [],
@@ -358,9 +356,9 @@ describe("Connections", () => {
 });
 
 describe("profile avatar and Memory", () => {
-  it("exports the Bot's sheep avatar", () => {
+  it("exports the Bot's avatar avatar", () => {
     const { template } = buildBotTemplateV1(source());
-    expect(template.profile.avatar).toEqual({ kind: "sheep", recipe: sheep });
+    expect(template.profile.avatar).toEqual({ kind: "avatar", recipe: avatar });
   });
 
   it("records that Memory is never exported", () => {

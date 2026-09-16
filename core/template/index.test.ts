@@ -17,12 +17,10 @@ import {
   type BotTemplateV1,
 } from "./index.ts";
 
-const sheep = {
+const avatar = {
   schemaVersion: 1 as const,
-  background: "meadow",
-  upper: "wool",
-  middle: "scarf",
-  lower: "boots",
+  characterId: "pixel",
+  primary: "#fc85ae",
 };
 
 function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
@@ -31,7 +29,7 @@ function template(overrides: Partial<BotTemplateV1> = {}): BotTemplateV1 {
     profile: {
       name: "Budget",
       title: "Money minder",
-      avatar: { kind: "sheep", recipe: sheep },
+      avatar: { kind: "avatar", recipe: avatar },
     },
     skills: [
       { slug: "reconcile", name: "Reconcile", body: "# Reconcile\nSteps." },
@@ -85,16 +83,16 @@ describe("decodeBotTemplateV1", () => {
     ).toThrow(TemplateDecodeError);
   });
 
-  it("refuses an avatar that is not a sheep recipe", () => {
+  it("refuses an avatar that is not an avatar recipe", () => {
     expect(() =>
       decodeBotTemplateV1({
         ...template(),
         profile: {
           name: "Budget",
-          avatar: { kind: "image", recipe: sheep },
+          avatar: { kind: "image", recipe: avatar },
         },
       }),
-    ).toThrow(/sheep recipe/);
+    ).toThrow(/avatar recipe/);
   });
 
   it("refuses an avatar carrying uploaded image bytes", () => {

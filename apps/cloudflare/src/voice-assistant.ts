@@ -334,6 +334,8 @@ interface LiveCall {
   pendingDelivery?: {
     deliveryId: string;
     runId: string;
+    botId: string;
+    botName: string;
     armedAt: number;
     text: string;
     audioBytes: number;
@@ -1157,6 +1159,9 @@ export class VoiceAssistant extends VoiceAgentBase<
       deliveryId,
       this.now(),
     );
+    if (marked) {
+      this.sendDelegationState(pending.botId, pending.botName, "finished");
+    }
     this.trace(connection, "played", { delivery: deliveryId, marked });
     // Whatever was waiting behind it can go now.
     await this.speakNextSettledDelegation();
@@ -2012,8 +2017,10 @@ export class VoiceAssistant extends VoiceAgentBase<
         if (admission.status === "refused")
           return `Refused: ${admission.reason}`;
         if (admission.status === "duplicate") {
+          this.sendDelegationState(botId, bot.initialName, "asked");
           return `${bot.initialName} was already asked this; its answer will be read out when it settles.`;
         }
+        this.sendDelegationState(botId, bot.initialName, "asked");
         this.dispatchDelegation(userId, admission.delegation);
         await this.scheduleDelegationCheck(admission.delegation.runId, 0);
         // Never a blanket "working". A Bot that is mid-Turn queues this behind
@@ -2484,6 +2491,8 @@ export class VoiceAssistant extends VoiceAgentBase<
       call.pendingDelivery = {
         deliveryId,
         runId: delegation.runId,
+        botId: delegation.botId,
+        botName: delegation.botName,
         armedAt: Date.now(),
         text,
         audioBytes: 0,
@@ -2491,6 +2500,11 @@ export class VoiceAssistant extends VoiceAgentBase<
         suppressed: false,
         ready: false,
       };
+      this.sendDelegationState(
+        delegation.botId,
+        delegation.botName,
+        "answering",
+      );
       this.send(connection, {
         schemaVersion: 1,
         type: "voice/answer",
@@ -2567,6 +2581,22 @@ export class VoiceAssistant extends VoiceAgentBase<
       );
     });
     await call.speechChain;
+  }
+
+  private sendDelegationState(
+    botId: string,
+    botName: string,
+    state: "asked" | "answering" | "finished",
+  ): void {
+    for (const connection of this.getConnections()) {
+      this.send(connection, {
+        schemaVersion: 1,
+        type: "voice/delegation",
+        botId,
+        botName,
+        state,
+      });
+    }
   }
 
   // -- dictation lease ------------------------------------------------------

@@ -338,7 +338,7 @@ void main() {
       final lines = projectRuns([
         run(
           runId: 'run-a',
-          input: 'QA check: reply with a short haiku about sheep.',
+          input: 'QA check: reply with a short haiku about avatar.',
           admittedAt: '2026-09-05T12:19:00.000Z',
           sentText: haiku,
         ),
@@ -376,7 +376,7 @@ void main() {
       ];
 
       expect(thread(stamped), [
-        'user: QA check: reply with a short haiku about sheep.',
+        'user: QA check: reply with a short haiku about avatar.',
         'assistant: $haiku',
         'user: Second message sent while the first reply is still running.',
         'assistant: $answer',

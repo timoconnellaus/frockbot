@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../client/auth.dart';
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import '../shell/semantics.dart';
 
 import '../theme/frock_theme.dart';
@@ -53,7 +53,7 @@ class SignInPage extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const Center(child: SheepAvatar(size: 112)),
+                            const Center(child: CharacterAvatar(size: 112)),
                             const SizedBox(height: 24),
                             Text(
                               'FrockBot',

@@ -167,14 +167,12 @@
     }
   },
   {
-    "name": "SheepRecipe valid",
-    "schema": "SheepRecipe",
+    "name": "AvatarAppearance valid",
+    "schema": "AvatarAppearance",
     "value": {
       "schemaVersion": 1,
-      "background": "1.1.0",
-      "upper": "1.1.0",
-      "middle": "1.1.0",
-      "lower": "1.1.0"
+      "characterId": "pixel",
+      "primary": "#fc85ae"
     }
   },
   {
@@ -185,12 +183,10 @@
       "botId": "default",
       "registeredAt": "2026-09-05T00:00:00.000Z",
       "initialName": "1.1.0",
-      "sheep": {
+      "avatar": {
         "schemaVersion": 1,
-        "background": "1.1.0",
-        "upper": "1.1.0",
-        "middle": "1.1.0",
-        "lower": "1.1.0"
+        "characterId": "pixel",
+        "primary": "#fc85ae"
       }
     }
   },
@@ -273,36 +269,32 @@
     }
   },
   {
-    "name": "SheepIdentity valid",
-    "schema": "SheepIdentity",
+    "name": "AvatarIdentity valid",
+    "schema": "AvatarIdentity",
     "value": {
       "schemaVersion": 1,
       "botId": "default",
       "revision": 2,
-      "sheep": {
+      "avatar": {
         "schemaVersion": 1,
-        "background": "hot-pink",
-        "upper": "upper-neutral",
-        "middle": "middle-neutral",
-        "lower": "lower-neutral"
+        "characterId": "pixel",
+        "primary": "#fc85ae"
       }
     }
   },
   {
-    "name": "BotSheepCommand valid",
-    "schema": "BotSheepCommand",
+    "name": "BotAvatarCommand valid",
+    "schema": "BotAvatarCommand",
     "value": {
       "schemaVersion": 1,
-      "type": "bot/update-sheep",
+      "type": "bot/update-avatar",
       "commandId": "command-1",
       "expectedRevision": 2,
       "botId": "default",
-      "sheep": {
+      "avatar": {
         "schemaVersion": 1,
-        "background": "hot-pink",
-        "upper": "upper-neutral",
-        "middle": "middle-neutral",
-        "lower": "lower-neutral"
+        "characterId": "pixel",
+        "primary": "#fc85ae"
       }
     }
   },

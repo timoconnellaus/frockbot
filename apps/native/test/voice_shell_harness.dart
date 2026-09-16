@@ -51,9 +51,7 @@ class VoiceShellHarness {
         home: ValueListenableBuilder(
           valueListenable: reducedMotion,
           builder: (context, reduced, _) => MediaQuery(
-            data: MediaQuery.of(context).copyWith(
-              disableAnimations: reduced,
-            ),
+            data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
             child: AppShell(
               key: key,
               api: api,
@@ -124,8 +122,11 @@ void expectUnclippedControl(WidgetTester tester, Finder finder) {
         control.getTransformTo(parent),
         (Offset.zero & control.size).inflate(16),
       );
-      expect(clip.intersect(paddedControl), paddedControl,
-          reason: '${parent.runtimeType} must not clip the stop or its space');
+      expect(
+        clip.intersect(paddedControl),
+        paddedControl,
+        reason: '${parent.runtimeType} must not clip the stop or its space',
+      );
     }
     child = parent;
   }

@@ -29,6 +29,40 @@ class OfflineApi extends NativeApi {
       throw const FormatException('offline fixture');
 }
 
+class DirectoryApi extends NativeApi {
+  DirectoryApi(super.store);
+
+  @override
+  Future<Object?> request(
+    String path, {
+    Object? body,
+    int limit = 512000,
+    bool authenticated = true,
+  }) async => switch (path) {
+    '/api/bots' => {
+      'schemaVersion': 1,
+      'revision': 2,
+      'bots': [registration('bot-one', 'Rosemary')],
+    },
+    '/api/bots/lifecycles' => {'schemaVersion': 1, 'lifecycles': <Object>[]},
+    _ => throw const FormatException('outside this fixture'),
+  };
+
+  @override
+  Future<WebSocketChannel> socket(String botId, String? cursor) async =>
+      throw const FormatException('outside this fixture');
+}
+
+class WriteRefusingStore extends MemoryStore {
+  @override
+  Future<void> write(String key, String value) async {
+    if (key.startsWith('directory/')) {
+      throw const FormatException('browser storage unavailable');
+    }
+    return super.write(key, value);
+  }
+}
+
 Finder identifiedBy(String id) => find.byWidgetPredicate(
   (widget) => widget is Semantics && widget.properties.identifier == id,
 );
@@ -37,17 +71,90 @@ Map<String, dynamic> registration(String botId, String name) => {
   'botId': botId,
   'registeredAt': '2026-09-05T00:00:00.000Z',
   'initialName': name,
-  'sheep': {
-    'schemaVersion': 1,
-    'background': 'a',
-    'upper': 'b',
-    'middle': 'c',
-    'lower': 'd',
-  },
+  'avatar': {'schemaVersion': 1, 'characterId': 'pixel', 'primary': '#fc85ae'},
 };
 
 void main() {
   creditTests();
+  testWidgets('an obsolete cached directory cannot block the current one', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    store.values['directory/test-user'] = jsonEncode({
+      'schemaVersion': 1,
+      'revision': 1,
+      'bots': [
+        {
+          'schemaVersion': 1,
+          'botId': 'bot-one',
+          'registeredAt': '2026-09-05T00:00:00.000Z',
+          'initialName': 'Rosemary',
+          'sheep': {
+            'schemaVersion': 1,
+            'background': 'hot-pink',
+            'upper': 'upper-neutral',
+            'middle': 'middle-neutral',
+            'lower': 'lower-neutral',
+          },
+        },
+      ],
+    });
+    final api = DirectoryApi(store);
+    final sessions = BotSessions(api: api, store: store);
+    final links = ValueNotifier<String?>(null);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AppShell(
+          api: api,
+          store: store,
+          sessions: sessions,
+          userId: 'test-user',
+          botLinks: links,
+          onSignOut: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('bot-bot-one')), findsOneWidget);
+    expect(store.values['directory/test-user'], contains('"avatar"'));
+    expect(store.values['directory/test-user'], isNot(contains('"sheep"')));
+
+    await tester.pumpWidget(const SizedBox());
+    sessions.clear();
+    links.dispose();
+  });
+
+  testWidgets('a refused directory cache cannot hide the current Bots', (
+    tester,
+  ) async {
+    final store = WriteRefusingStore();
+    final api = DirectoryApi(store);
+    final sessions = BotSessions(api: api, store: store);
+    final links = ValueNotifier<String?>(null);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AppShell(
+          api: api,
+          store: store,
+          sessions: sessions,
+          userId: 'test-user',
+          botLinks: links,
+          onSignOut: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('bot-bot-one')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    sessions.clear();
+    links.dispose();
+  });
+
   testWidgets(
     'a phone opens on the Bot list, and Back from a chat is the list',
     (tester) async {

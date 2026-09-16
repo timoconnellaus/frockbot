@@ -12,7 +12,7 @@ import {
   flockCommandFingerprint,
   lifecycleTargetStatusV1,
   migrateStoredBotDirectoryV1,
-  randomSheepRecipeV1,
+  randomAvatarAppearanceV1,
   type BotDirectoryViewV1,
   type BotLifecycleCommandV1,
   type BotLifecycleDirectoryViewV1,
@@ -228,7 +228,7 @@ export class FlockUserBackendContribution {
     current: BotDirectoryViewV1,
     bot: Pick<
       CreateBotCommandV1,
-      "botId" | "name" | "description" | "createdBy" | "sheep"
+      "botId" | "name" | "description" | "createdBy" | "avatar"
     >,
   ): Promise<BotDirectoryViewV1> {
     // A new Bot carries neither a model nor a grant. Both resolve from the
@@ -245,8 +245,8 @@ export class FlockUserBackendContribution {
       // The creator is durable history: a Bot the Flock made on another
       // Bot's behalf says so in the registration seed itself.
       ...(bot.createdBy ? { createdBy: structuredClone(bot.createdBy) } : {}),
-      sheep: structuredClone(
-        bot.sheep ?? randomSheepRecipeV1(this.host.random),
+      avatar: structuredClone(
+        bot.avatar ?? randomAvatarAppearanceV1(this.host.random),
       ),
     };
     const next = {

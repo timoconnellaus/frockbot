@@ -60,7 +60,6 @@
     "./echo/agent": "./echo/agent.ts",
     "./flock": "./flock/index.ts",
     "./flock/agent": "./flock/agent.ts",
-    "./flock/assets/manifest.json": "./flock/assets/manifest.json",
     "./flock/backend": "./flock/backend.ts",
     "./flock/bot": "./flock/bot.ts",
     "./flock/definition": "./flock/definition.ts",

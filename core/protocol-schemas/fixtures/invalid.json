@@ -374,8 +374,8 @@
     "value": null
   },
   {
-    "name": "SheepRecipe wrong shape",
-    "schema": "SheepRecipe",
+    "name": "AvatarAppearance wrong shape",
+    "schema": "AvatarAppearance",
     "value": null
   },
   {
@@ -419,8 +419,8 @@
     }
   },
   {
-    "name": "SheepIdentity without a sheep",
-    "schema": "SheepIdentity",
+    "name": "AvatarIdentity without a avatar",
+    "schema": "AvatarIdentity",
     "value": {
       "schemaVersion": 1,
       "botId": "default",
@@ -428,20 +428,18 @@
     }
   },
   {
-    "name": "BotSheepCommand with the wrong type",
-    "schema": "BotSheepCommand",
+    "name": "BotAvatarCommand with the wrong type",
+    "schema": "BotAvatarCommand",
     "value": {
       "schemaVersion": 1,
       "type": "bot/create",
       "commandId": "command-1",
       "expectedRevision": 2,
       "botId": "default",
-      "sheep": {
+      "avatar": {
         "schemaVersion": 1,
-        "background": "hot-pink",
-        "upper": "upper-neutral",
-        "middle": "middle-neutral",
-        "lower": "lower-neutral"
+        "characterId": "pixel",
+        "primary": "#fc85ae"
       }
     }
   },

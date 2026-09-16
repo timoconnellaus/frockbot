@@ -66,7 +66,7 @@ import { decodeTurnTypeV1 } from "@frockbot/core/contracts";
 import {
   FlockConflictError,
   isFlockIdentifier,
-  randomSheepRecipeV1,
+  randomAvatarAppearanceV1,
   type BotDirectoryViewV1,
   type CreateBotCommandV1,
   type FlockReceiptV1,
@@ -584,7 +584,7 @@ export function createBotCreateTool(
         context.effectId,
         decoded.name,
       );
-      const sheep = randomSheepRecipeV1(random);
+      const avatar = randomAvatarAppearanceV1(random);
       try {
         for (let attempt = 0; ; attempt += 1) {
           const directory = await host.listBots();
@@ -608,7 +608,7 @@ export function createBotCreateTool(
                 ? {}
                 : { description: decoded.description }),
               createdBy: host.writer,
-              sheep,
+              avatar,
             });
             if (receipt.status === "rejected") {
               return refusal(

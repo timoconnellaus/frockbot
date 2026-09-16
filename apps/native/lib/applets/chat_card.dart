@@ -48,8 +48,7 @@ class _AppletChatCardState extends State<AppletChatCard>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final scope = context
-        .dependOnInheritedWidgetOfExactType<AppletChatScope>();
+    final scope = context.dependOnInheritedWidgetOfExactType<AppletChatScope>();
     if (scope != null && (api?.api != scope.api || botId != scope.botId)) {
       api = AppletsApi(scope.api);
       botId = scope.botId;

@@ -45,6 +45,7 @@ class SearchBot {
   final String name;
   final String description;
   final String? background;
+  final String? primary;
   final bool unread;
   final bool archived;
   final bool hidden;
@@ -53,6 +54,7 @@ class SearchBot {
     required this.name,
     this.description = '',
     this.background,
+    this.primary,
     this.unread = false,
     this.archived = false,
     this.hidden = false,

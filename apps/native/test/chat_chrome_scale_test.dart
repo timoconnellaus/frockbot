@@ -225,47 +225,43 @@ void main() {
     variant: TargetPlatformVariant.desktop(),
   );
 
-  testWidgets(
-    'a desk\'s Bot list draws its controls compact',
-    (tester) async {
-      tester.view.physicalSize = const Size(1000, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.pumpWidget(_sidebar(phone: false));
-      await tester.pumpAndSettle();
+  testWidgets('a desk\'s Bot list draws its controls compact', (tester) async {
+    tester.view.physicalSize = const Size(1000, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(_sidebar(phone: false));
+    await tester.pumpAndSettle();
 
-      for (final id in [VoiceIds.sidebarStart, ShellIds.sidebarCreateBot]) {
-        final button = tester.widget<IconButton>(
+    for (final id in [VoiceIds.sidebarStart, ShellIds.sidebarCreateBot]) {
+      final button = tester.widget<IconButton>(
+        find.descendant(
+          of: byIdentifier(id),
+          matching: find.byType(IconButton),
+        ),
+      );
+      expect(
+        tester.getSize(
           find.descendant(
             of: byIdentifier(id),
             matching: find.byType(IconButton),
           ),
-        );
-        expect(
-          tester.getSize(
-            find.descendant(
-              of: byIdentifier(id),
-              matching: find.byType(IconButton),
-            ),
-          ),
-          const Size.square(36),
-          reason: id,
-        );
-        expect(
-          button.style?.iconSize?.resolve({}),
-          chatIconSizeDesktop,
-          reason: id,
-        );
-      }
-      final marketplaceGlyph = tester.widget<Icon>(
-        find.descendant(
-          of: byIdentifier(ShellIds.sidebarMarketplace),
-          matching: find.byIcon(Icons.storefront_outlined),
         ),
+        const Size.square(36),
+        reason: id,
       );
-      expect(marketplaceGlyph.size, chatIconSizeDesktop);
-    },
-    variant: TargetPlatformVariant.desktop(),
-  );
+      expect(
+        button.style?.iconSize?.resolve({}),
+        chatIconSizeDesktop,
+        reason: id,
+      );
+    }
+    final marketplaceGlyph = tester.widget<Icon>(
+      find.descendant(
+        of: byIdentifier(ShellIds.sidebarMarketplace),
+        matching: find.byIcon(Icons.storefront_outlined),
+      ),
+    );
+    expect(marketplaceGlyph.size, chatIconSizeDesktop);
+  }, variant: TargetPlatformVariant.desktop());
 }

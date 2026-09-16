@@ -6,7 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/flock/sheep.dart';
+import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/shell/focus.dart';
 import 'package:frockbot_native/shell/markdown.dart';
@@ -24,12 +24,10 @@ wire.BotRegistration bot(String botId, String name) =>
       'botId': botId,
       'registeredAt': '2026-09-05T00:00:00.000Z',
       'initialName': name,
-      'sheep': {
+      'avatar': {
         'schemaVersion': 1,
-        'background': 'a',
-        'upper': 'b',
-        'middle': 'c',
-        'lower': 'd',
+        'characterId': 'pixel',
+        'primary': '#fc85ae',
       },
     });
 
@@ -645,7 +643,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('No Bots yet. Add your first sheep.'), findsNothing);
+      expect(find.text('No Bots yet. Add your first avatar.'), findsNothing);
       await tester.tap(byIdentifier(ShellIds.sidebarRetry));
       expect(retries, 1);
     });
@@ -929,7 +927,7 @@ void main() {
 
       expect(find.text('workspace_write'), findsNothing);
       expect(find.text('Used 1 tool'), findsNothing);
-      expect(find.byType(SheepAvatar), findsNothing);
+      expect(find.byType(CharacterAvatar), findsNothing);
       await tester.longPress(find.text('do it'));
       expect(opened?.runId, 'run-a');
     });

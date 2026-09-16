@@ -1,0 +1,80 @@
+{
+  "name": "goat",
+  "profile": "standing",
+  "artboard": "Goat",
+  "stateMachine": "Goat",
+  "viewModel": "Goat",
+  "activities": {
+    "0": "Idle",
+    "1": "Thinking",
+    "2": "Working",
+    "3": "Needs attention",
+    "4": "Success",
+    "5": "Still"
+  },
+  "emotions": {
+    "0": "Neutral",
+    "1": "Excited",
+    "2": "Sad",
+    "3": "Tired",
+    "4": "Curious",
+    "5": "Content",
+    "6": "Surprised",
+    "7": "Uncertain"
+  },
+  "properties": {
+    "activity": {
+      "type": "Number",
+      "default": 0
+    },
+    "emotion": {
+      "type": "Number",
+      "default": 0
+    },
+    "hovered": {
+      "type": "Boolean",
+      "default": "false"
+    },
+    "lookX": {
+      "type": "Number",
+      "default": 0
+    },
+    "lookY": {
+      "type": "Number",
+      "default": 0
+    },
+    "primary": {
+      "type": "Color",
+      "default": "FFFFF3D8"
+    },
+    "shade": {
+      "type": "Color",
+      "default": "FFFFF3D8"
+    },
+    "eyeColor": {
+      "type": "Color",
+      "default": "FFFCF6E3"
+    },
+    "reducedMotion": {
+      "type": "Boolean",
+      "default": "false"
+    }
+  },
+  "palette": {
+    "primary": "#fff3d8",
+    "shade": "#fff3d8",
+    "eyeColor": "#fcf6e3"
+  },
+  "parts": [
+    "tail",
+    "foot-left",
+    "foot-right",
+    "fur",
+    "ear-left",
+    "ear-right",
+    "head",
+    "eye-left",
+    "eye-right"
+  ],
+  "sourceSvgSha256": "88d906d1f7d778c163ca7676eb77da13d36eda13d05f60c3c6cf40a07a988eb9"
+}

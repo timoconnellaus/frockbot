@@ -172,11 +172,7 @@ class NativeApi {
             !path.startsWith('/api/auth/native/')) {
           onSessionRejected?.call(message);
         }
-        throw RequestFailure(
-          message,
-          response.statusCode,
-          _refusalCode(bytes),
-        );
+        throw RequestFailure(message, response.statusCode, _refusalCode(bytes));
       }
       return decodeBoundedJson(utf8.decode(bytes), maxBytes: limit);
     } on RequestFailure {

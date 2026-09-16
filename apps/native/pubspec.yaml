@@ -26,6 +26,7 @@ dependencies:
   # `record` owns microphone permission. Playback uses the app’s device sink
   # so completion means samples were played, not just handed to the device.
   record: 7.1.1
+  rive: 0.14.11
 
 dev_dependencies:
   flutter_test:
@@ -37,7 +38,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/sheep/
+    - assets/characters/
     - assets/connectors/
     - shorebird.yaml
   fonts:

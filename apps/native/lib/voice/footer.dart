@@ -6,9 +6,11 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../shell/semantics.dart';
+import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import 'assistant.dart';
 import 'motion.dart';
+import 'protocol.dart';
 import 'waveform.dart';
 
 const double voiceFooterHeight = 96;
@@ -20,14 +22,29 @@ const Key voiceFooterAnimationKey = ValueKey('voice-footer-animation');
 class VoiceFooter extends StatefulWidget {
   final AssistantSessionController session;
   final VoidCallback onEnd;
-  const VoiceFooter({super.key, required this.session, required this.onEnd});
+  final ({String characterId, String primary})? Function(String botId)?
+  botAppearance;
+  const VoiceFooter({
+    super.key,
+    required this.session,
+    required this.onEnd,
+    this.botAppearance,
+  });
 
   @override
   State<VoiceFooter> createState() => _VoiceFooterState();
 }
 
 class _VoiceFooterState extends State<VoiceFooter> {
-  late (bool, String?, String?, VoiceSessionPhase) _presentation;
+  late (
+    bool,
+    String?,
+    String?,
+    VoiceSessionPhase,
+    String?,
+    VoiceDelegationStateV1?,
+  )
+  _presentation;
 
   @override
   void initState() {
@@ -36,11 +53,14 @@ class _VoiceFooterState extends State<VoiceFooter> {
     widget.session.addListener(_changed);
   }
 
-  (bool, String?, String?, VoiceSessionPhase) _readPresentation() => (
+  (bool, String?, String?, VoiceSessionPhase, String?, VoiceDelegationStateV1?)
+  _readPresentation() => (
     widget.session.muted,
     widget.session.error,
     widget.session.notice,
     widget.session.phase,
+    widget.session.delegatedBotId,
+    widget.session.delegationState,
   );
 
   void _changed() {
@@ -193,6 +213,12 @@ class _VoiceFooterState extends State<VoiceFooter> {
           voiceFooterStageInset,
           constraints.maxWidth - voiceFooterControlsWidth - width,
         );
+        final botId = widget.session.delegatedBotId;
+        final appearance = botId == null
+            ? null
+            : widget.botAppearance?.call(botId);
+        final botName = widget.session.delegatedBotName;
+        final delegation = widget.session.delegationState;
         return Stack(
           children: [
             Positioned(
@@ -209,6 +235,96 @@ class _VoiceFooterState extends State<VoiceFooter> {
                 mode: () => widget.session.meterMode,
                 enabled: widget.session.active,
                 onAccent: true,
+              ),
+            ),
+            Positioned(
+              left: left,
+              top: 4,
+              width: width,
+              height: voiceFooterHeight - 8,
+              child: IgnorePointer(
+                child: AnimatedSwitcher(
+                  duration: FrockTheme.motion(
+                    context,
+                    const Duration(milliseconds: 350),
+                  ),
+                  switchInCurve: Curves.easeOutBack,
+                  switchOutCurve: Curves.easeInCubic,
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0, 0.45),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: ScaleTransition(
+                        scale: Tween<double>(
+                          begin: 0.82,
+                          end: 1,
+                        ).animate(animation),
+                        child: child,
+                      ),
+                    ),
+                  ),
+                  child: appearance == null || botId == null
+                      ? const SizedBox.shrink(key: ValueKey('voice-no-bot'))
+                      : Semantics(
+                          key: ValueKey('voice-bot-$botId'),
+                          liveRegion: true,
+                          label: delegation == VoiceDelegationStateV1.answering
+                              ? '$botName is answering'
+                              : delegation == VoiceDelegationStateV1.finished
+                              ? '$botName finished'
+                              : 'Asked $botName',
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CharacterAvatar(
+                                  size: 76,
+                                  characterId: appearance.characterId,
+                                  primary: appearance.primary,
+                                  activity:
+                                      delegation ==
+                                          VoiceDelegationStateV1.finished
+                                      ? CharacterActivity.success
+                                      : CharacterActivity.thinking,
+                                  emotion:
+                                      delegation ==
+                                          VoiceDelegationStateV1.answering
+                                      ? CharacterEmotion.content
+                                      : CharacterEmotion.curious,
+                                ),
+                                const SizedBox(width: 4),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 110,
+                                  ),
+                                  child: Text(
+                                    delegation ==
+                                            VoiceDelegationStateV1.answering
+                                        ? '$botName is answering'
+                                        : delegation ==
+                                              VoiceDelegationStateV1.finished
+                                        ? '$botName finished'
+                                        : 'Asked $botName',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                ),
               ),
             ),
           ],

@@ -17,7 +17,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import 'semantics.dart';
 import 'transcript_model.dart';
 
@@ -187,14 +187,15 @@ class WorkingIndicator extends StatefulWidget {
   final TranscriptLine line;
   final String? label;
 
-  /// The Bot's sheep, so the working row wears the same one the thread and the
-  /// sidebar do.
+  /// The Bot's appearance, shared with the thread and sidebar.
   final String? background;
+  final String? primary;
   const WorkingIndicator({
     super.key,
     required this.line,
     this.label,
     this.background,
+    this.primary,
   });
 
   @override
@@ -264,9 +265,11 @@ class _WorkingIndicatorState extends State<WorkingIndicator> {
         label: widget.label ?? 'Working',
         child: Row(
           children: [
-            SheepAvatar(
+            CharacterAvatar(
               size: WorkingIndicator.avatarSize,
-              background: widget.background,
+              characterId: widget.background,
+              primary: widget.primary,
+              activity: CharacterActivity.working,
               working: true,
               tempo: workingBadgePeriod(_plan),
             ),

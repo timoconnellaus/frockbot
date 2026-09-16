@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createFlockUserBackendContribution } from "./user.js";
 import {
   FlockConflictError,
-  randomSheepRecipeV1,
+  randomAvatarAppearanceV1,
   type BotDirectoryViewV1,
 } from "./shared.js";
 
@@ -117,7 +117,7 @@ function command(commandId = "create-1", expectedRevision = 0) {
     expectedRevision,
     botId: "alpha",
     name: "Alpha",
-    sheep: randomSheepRecipeV1(() => 0),
+    avatar: randomAvatarAppearanceV1(() => 0),
   };
 }
 
@@ -213,7 +213,7 @@ describe("Flock User contribution", () => {
           initialName: "Legacy",
           initialModel: { connectionId: "openai", providerModelId: "gpt-5" },
           initialAssignments: [],
-          sheep: randomSheepRecipeV1(() => 0),
+          avatar: randomAvatarAppearanceV1(() => 0),
         },
       ],
     });
@@ -649,7 +649,7 @@ describe("Flock User contribution", () => {
         botId: `bot-${index}`,
         registeredAt: "2026-08-29T00:00:00.000Z",
         initialName: `Bot ${index}`,
-        sheep: randomSheepRecipeV1(() => 0),
+        avatar: randomAvatarAppearanceV1(() => 0),
       })),
     };
     await storage.put("flock:directory:v1", full);
