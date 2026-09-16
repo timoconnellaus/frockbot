@@ -39,7 +39,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/sheep/
+    - assets/characters/
     - assets/connectors/
     - shorebird.yaml
   fonts:
