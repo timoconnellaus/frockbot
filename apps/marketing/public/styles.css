@@ -739,6 +739,32 @@
   .split-heading-bottom {
     align-items: end;
   }
+  .tinker .split-heading > div > p,
+  .open-page .split-heading > div > p {
+    max-width: 520px;
+    color: var(--muted);
+    font-size: 1.05rem;
+    line-height: 1.65;
+  }
+  .open-page .split-heading > div > p + p {
+    margin-top: 14px;
+  }
+  .tinker-actions,
+  .open-actions {
+    margin-top: 28px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .button-outline {
+    background: transparent;
+    color: var(--ink);
+    box-shadow: inset 0 0 0 2px var(--ink);
+  }
+  .button-outline:hover {
+    background: var(--ink);
+    color: #fff;
+  }
   .use-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);

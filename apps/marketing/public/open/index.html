@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="FrockBot is an open-source, always-on agent harness: persistent Bots on their own cloud computer, 40 model providers, everything-is-a-plugin, and a one-command install into your own Cloudflare account."
+    />
+    <meta name="theme-color" content="#1e1d27" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="FrockBot, open all the way down" />
+    <meta
+      property="og:description"
+      content="Always-on Bots with their own cloud computer. MIT licensed. Bring your own model. Everything is a plugin. One command to run it yourself."
+    />
+    <meta property="og:image" content="https://frockbot.com/assets/hero.png" />
+    <meta property="og:url" content="https://frockbot.com/open/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://frockbot.com/open/" />
+    <link rel="icon" href="/assets/favicon.png" />
+    <link rel="apple-touch-icon" href="/assets/app-icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/script.js" defer></script>
+    <title>Open source · FrockBot</title>
+  </head>
+  <body class="open-page">
+    <svg class="svg-sprite" aria-hidden="true">
+      <symbol id="github-mark" viewBox="0 0 24 24">
+        <path
+          d="M12 .7C5.73.7.65 5.78.65 12.05c0 5.02 3.25 9.28 7.76 10.78.57.1.78-.25.78-.55v-2.16c-3.16.69-3.83-1.34-3.83-1.34-.52-1.31-1.26-1.66-1.26-1.66-1.03-.7.08-.69.08-.69 1.14.08 1.74 1.17 1.74 1.17 1.01 1.74 2.66 1.24 3.31.95.1-.73.4-1.24.72-1.53-2.52-.29-5.17-1.26-5.17-5.62 0-1.24.44-2.25 1.17-3.05-.12-.29-.51-1.44.11-3 0 0 .95-.3 3.12 1.16a10.8 10.8 0 0 1 5.68 0c2.17-1.47 3.12-1.16 3.12-1.16.62 1.56.23 2.71.11 3 .73.8 1.17 1.81 1.17 3.05 0 4.37-2.65 5.32-5.18 5.61.41.35.77 1.05.77 2.12v3.14c0 .3.21.66.78.55a11.4 11.4 0 0 0 7.75-10.78C23.35 5.78 18.27.7 12 .7Z"
+        />
+      </symbol>
+    </svg>
+    <header class="site-header">
+      <div class="container nav-shell">
+        <a class="brand" href="/" aria-label="FrockBot home">
+          <img src="/assets/app-icon.png" alt="" width="48" height="48" />
+          <span class="brand-name"
+            >Frock<span class="brand-accent">Bot</span></span
+          >
+        </a>
+        <button
+          class="menu-button"
+          type="button"
+          aria-expanded="false"
+          aria-controls="site-nav"
+        >
+          <span></span><span></span><span></span
+          ><span class="sr-only">Toggle navigation</span>
+        </button>
+        <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
+          <a href="/">Home</a>
+          <a href="#shape">The shape</a>
+          <a href="#models">Models</a>
+          <a href="#plugins">Plugins</a>
+          <a href="#run">Run it yourself</a>
+          <a
+            class="github-logo-link"
+            href="https://github.com/timoconnellaus/frockbot"
+            aria-label="FrockBot source code on GitHub"
+          >
+            <svg aria-hidden="true">
+              <use href="#github-mark" />
+            </svg>
+          </a>
+          <a
+            class="button button-small"
+            href="https://github.com/timoconnellaus/frockbot"
+            >Star on GitHub <span aria-hidden="true">→</span></a
+          >
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="legal-hero" aria-labelledby="open-title">
+        <div class="container legal-hero-shell">
+          <div>
+            <p class="eyebrow">For the tinkerers</p>
+            <h1 id="open-title">Open,<br /><em>all the way down.</em></h1>
+            <p class="legal-intro">
+              An always-on agent with its own cloud computer, the kind that
+              usually costs US$200 a month, except this one is MIT licensed,
+              runs on the model you choose, treats every capability as a
+              plugin, and installs into your own Cloudflare account with one
+              command.
+            </p>
+            <p class="open-actions">
+              <a
+                class="button"
+                href="https://github.com/timoconnellaus/frockbot#run-your-own"
+                >Read the install guide <span aria-hidden="true">→</span></a
+              >
+              <a class="button button-outline" href="https://bot.frockbot.com"
+                >Or use the hosted one for US$20</a
+              >
+            </p>
+          </div>
+          <img
+            src="/assets/characters/guardian.png"
+            alt="Guardian, the black sheep of the FrockBot flock"
+            width="180"
+            height="180"
+          />
+        </div>
+      </section>
+
+      <section class="section" id="shape" aria-labelledby="shape-title">
+        <div class="container">
+          <div class="split-heading">
+            <div>
+              <p class="section-label">The shape</p>
+              <h2 id="shape-title">Bots, not<br /><em>chats.</em></h2>
+            </div>
+            <p>
+              A Bot is a persistent Durable Object with a conversation, memory,
+              routines, tools, and a desktop on a shared cloud computer. It
+              keeps working after you close the laptop and comes back only when
+              it needs an approval.
+            </p>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <span class="feature-number">01</span
+              ><img
+                class="feature-character"
+                src="/assets/characters/sunny.png"
+                alt=""
+              />
+              <h3>Persistent by default</h3>
+              <p>
+                Every Bot is its own Durable Object. History, notes and
+                instructions survive across sessions, deploys and devices.
+              </p>
+            </article>
+            <article class="feature-card feature-card-pink">
+              <span class="feature-number">02</span
+              ><img
+                class="feature-character"
+                src="/assets/characters/cow.png"
+                alt=""
+              />
+              <h3>A real computer</h3>
+              <p>
+                Browser, filesystem and terminal on a Fly Sprite. Each Bot gets
+                its own desktop and folders. Watch the screen or take control.
+              </p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-number">03</span
+              ><img
+                class="feature-character"
+                src="/assets/characters/chill.png"
+                alt=""
+              />
+              <h3>Routines and triggers</h3>
+              <p>
+                Cron schedules, webhooks and connected-app events wake a Bot
+                and run a Turn without you in the loop.
+              </p>
+            </article>
+            <article class="feature-card feature-card-dark">
+              <span class="feature-number">04</span
+              ><img
+                class="feature-character"
+                src="/assets/characters/nudge.png"
+                alt=""
+              />
+              <h3>Approvals in the loop</h3>
+              <p>
+                Spending, sending, publishing a plugin: each is an approval
+                card on the Turn's own log. Allow once, or always.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="section pricing"
+        id="models"
+        aria-labelledby="models-title"
+      >
+        <div class="container">
+          <div class="split-heading split-heading-bottom">
+            <div>
+              <p class="section-label">Models</p>
+              <h2 id="models-title">Bring your<br /><em>own model.</em></h2>
+            </div>
+            <div>
+              <p>
+                Forty providers ship in the box: Anthropic, OpenAI, Google,
+                DeepSeek, Mistral, Groq, OpenRouter, Bedrock, Vertex, Workers
+                AI, and the rest, including OAuth sign-in where a provider
+                offers it. Pick a model per Bot. Keys never leave the Worker.
+              </p>
+              <p>
+                Prefer not to think about it? The hosted deployment includes
+                metered models on the same balance as the computer. A
+                deployment with no keys at all still works: Auto resolves to a
+                Workers AI model on the account's own binding.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="plugins" aria-labelledby="plugins-title">
+        <div class="container">
+          <div class="split-heading split-heading-bottom">
+            <div>
+              <p class="section-label">Plugins</p>
+              <h2 id="plugins-title">
+                Everything a Bot does<br /><em>is a plugin.</em>
+              </h2>
+            </div>
+            <div>
+              <p>
+                Plugins wrap the agent loop. They declare hooks on the loop's
+                events, register tools under their own namespace, keep their
+                own storage, and name the hosts they may reach. Each User's
+                plugins mount into one Dynamic Worker with a hard CPU budget
+                and a loopback into the kernel; a plugin that throws or
+                overruns is quarantined and the Turn carries on.
+              </p>
+              <p>
+                Bots can write plugins too. Publishing one never runs it: the
+                Bot puts an approval card in front of you naming the tools,
+                hooks, grants and hosts it wants, and nothing mounts until you
+                say so. Read the ADR before you argue with it; it's in the
+                repo.
+              </p>
+              <p class="open-actions">
+                <a
+                  class="button button-outline"
+                  href="https://github.com/timoconnellaus/frockbot/blob/main/docs/adr/0026-plugins.md"
+                  >ADR 0026: Plugins <span aria-hidden="true">→</span></a
+                >
+                <a
+                  class="button button-outline"
+                  href="https://github.com/timoconnellaus/frockbot/blob/main/docs/architecture.md"
+                  >Architecture <span aria-hidden="true">→</span></a
+                >
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section pricing" id="run" aria-labelledby="run-title">
+        <div class="container">
+          <div class="split-heading split-heading-bottom">
+            <div>
+              <p class="section-label">Run it yourself</p>
+              <h2 id="run-title">One command.<br /><em>Your account.</em></h2>
+            </div>
+            <div>
+              <p>
+                <code>bun run setup</code> installs the same code frockbot.com
+                runs into a Cloudflare account you own: Workers, Durable
+                Objects, R2, Vectorize and Containers, with Cloudflare Access
+                as the sign-in and no billing at all. You need a Workers Paid
+                plan, one domain on the account, a free Zero Trust team, and a
+                Fly token for the computer. Model, voice and connected-app
+                keys are optional and each one only unlocks its own thing.
+              </p>
+              <p>
+                The web client and the container images are published with
+                every release, so there is no Docker and no Flutter on your
+                machine. A Mac app is built; the phone apps are on the way.
+              </p>
+              <p class="open-actions">
+                <a
+                  class="button"
+                  href="https://github.com/timoconnellaus/frockbot#run-your-own"
+                  >Read the install guide <span aria-hidden="true">→</span></a
+                >
+                <a
+                  class="button button-outline"
+                  href="https://github.com/timoconnellaus/frockbot/releases"
+                  >Releases <span aria-hidden="true">→</span></a
+                >
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta" aria-labelledby="cta-title">
+        <div class="container cta-shell">
+          <div>
+            <h2 id="cta-title">
+              Read the source.<br />Then <em>change it.</em>
+            </h2>
+            <p>
+              MIT licensed. Issues, ADRs and the constitution are all in the
+              open.
+            </p>
+          </div>
+          <div class="cta-action">
+            <a
+              class="button button-white"
+              href="https://github.com/timoconnellaus/frockbot"
+              >Open the repo →</a
+            >
+            <small>No wool required</small>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-shell">
+        <a class="brand" href="/" aria-label="FrockBot home">
+          <img src="/assets/app-icon.png" alt="" width="44" height="44" />
+          <span class="brand-name"
+            >Frock<span class="brand-accent">Bot</span></span
+          >
+        </a>
+        <div class="footer-links">
+          <span>© <span id="year">2026</span> FrockBot</span>
+          <a href="mailto:hello@frockbot.com">Contact</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="/terms/">Terms</a>
+          <a href="https://bot.frockbot.com">Open app</a>
+          <a
+            class="github-logo-link"
+            href="https://github.com/timoconnellaus/frockbot"
+            aria-label="FrockBot source code on GitHub"
+          >
+            <svg aria-hidden="true">
+              <use href="#github-mark" />
+            </svg>
+          </a>
+          <span>Open source.</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
