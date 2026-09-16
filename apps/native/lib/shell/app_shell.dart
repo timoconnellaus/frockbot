@@ -1103,6 +1103,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     setState(() {
       openRun = line;
       panelOpen = true;
+      // Opening a run is a request to see it: a collapsed panel column would
+      // otherwise swallow the run view and leave the tap with no answer.
+      panelCollapsed = false;
     });
   }
 
