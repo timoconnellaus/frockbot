@@ -400,7 +400,7 @@
   }
   .hero-flock {
     flex: none;
-    width: max(1360px, 108vw);
+    width: min(1360px, 108vw);
     max-width: none;
     height: auto;
     filter: drop-shadow(0 -4px 22px rgb(236 56 107 / 22%));
