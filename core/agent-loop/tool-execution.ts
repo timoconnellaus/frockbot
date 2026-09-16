@@ -183,11 +183,10 @@ async function runOccurrenceV1(
 }
 
 /**
- * One declared call that never reaches a tool: journalled under its own id and
- * settled with the reason it was refused. It gets the same pair of durable
- * events a dispatched call gets, so the rule the transcript follows has no
- * gaps — one row per declared call, whatever became of it — but nothing is
- * prepared, admitted or executed for it, because there is no tool to run.
+ * One declared call that never reaches a tool: its intent is already in the
+ * log, and it is settled here with the reason it was refused. It gets the same
+ * pair of durable events a dispatched call gets, but nothing is prepared,
+ * admitted or executed for it, because there is no tool to run.
  */
 async function refuseSubCallV1(
   runtime: LoopRuntime,
@@ -261,12 +260,26 @@ async function runBatchV1(
     return refusal;
   }
   const subs = batchSubOccurrencesV1(occurrence);
+  // Every declared call's intent is journalled here, in declared order, before
+  // any of them is prepared, admitted or dispatched. That is why the log holds
+  // one row per declared call in declared order: row order is declared order by
+  // construction, rather than depending on how many microtasks a given call
+  // spends in prepare(). The intent is built from the call the model wrote, not
+  // from the prepared one, so journalling it early records nothing different.
+  for (const sub of subs) {
+    await journalIntentV1(
+      runtime,
+      sub,
+      journalEntryV1(runtime, sub.occurrenceId),
+      signal,
+    );
+  }
   const ordered: number[] = [];
   const concurrent: number[] = [];
   decoded.forEach((sub, index) => {
     // A call that decoded into nothing dispatchable is refused in the chain
-    // rather than alongside it: its refusal is a row in the transcript, and
-    // rows the model declared in order read in that order.
+    // rather than alongside it, so its result lands in declared order with the
+    // other ordered effects.
     (sub.kind === "invalid" ||
     runtime.services.tools.orderedEffect(subs[index]!.call)
       ? ordered

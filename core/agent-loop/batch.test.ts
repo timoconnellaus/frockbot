@@ -510,6 +510,25 @@ describe("batch", () => {
     });
   });
 
+  test("journals every declared call's intent in declared order", async () => {
+    const run = await runBatch(
+      [recorder("alpha", [])],
+      [
+        { tool: "alpha", arguments: { n: 1 } },
+        { tool: "", arguments: {} },
+      ],
+    );
+
+    // A refused call settles in the same tick it is reached, while a
+    // dispatched one has to wait on prepare(). Journalling every declared
+    // intent before anything is dispatched is what keeps the rows in declared
+    // order regardless, so the person reads call 0 above call 1.
+    expect(
+      toolEvents(run.events, "tool/call").map((event) => event.occurrenceId),
+    ).toEqual(["tool:1:1:0", "tool:1:1:0.0", "tool:1:1:0.1"]);
+    expect(run.report).toMatchObject({ ran: 2, failed: 1 });
+  });
+
   test("refuses a batch past the declared bound, and an empty one", async () => {
     const tooMany = Array.from({ length: BATCH_MAX_CALLS_V1 + 1 }, () => ({
       tool: "alpha",
