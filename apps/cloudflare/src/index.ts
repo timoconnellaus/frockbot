@@ -385,6 +385,8 @@ function debugSurface(env: Env): DebugGatewaySurface {
       userConfigurationStub(env, userId).listBots({ schemaVersion: 1, userId }),
     snapshot: (userId, botId, query) =>
       botStateStub(env, userId, botId).debugSnapshot(query),
+    voice: async (userId) =>
+      (await getAgentByName(env.VOICE_ASSISTANTS, userId)).debugSnapshot(),
     isAdminUser: async (userId) => {
       // The auth Package's store is the durable identity source. The path's
       // User id is never trusted on its own: it must resolve to a stored email,

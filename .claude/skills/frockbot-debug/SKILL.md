@@ -28,6 +28,7 @@ which then looks like "no production token" when the token was there all along.
 .claude/skills/frockbot-debug/scripts/debug.sh bots <userId>
 .claude/skills/frockbot-debug/scripts/debug.sh bot <userId> <botId> [--events] [--limit N] [--before CURSOR]
 .claude/skills/frockbot-debug/scripts/debug.sh run <userId> <botId> <runId>
+.claude/skills/frockbot-debug/scripts/debug.sh voice <userId>
 .claude/skills/frockbot-debug/scripts/debug.sh send <userId> <botId> <text...>
 .claude/skills/frockbot-debug/scripts/debug.sh send <userId> <botId> < message.txt
 .claude/skills/frockbot-debug/scripts/debug.sh watch <userId> <botId> <runId>
@@ -108,6 +109,28 @@ curl -s -H "authorization: Bearer $DEBUG_TOKEN" \
   Package id there). It does **not** carry the resolved model binding; that is
   resolved per Turn from the User's enabled Packages and Connections.
 - `notifications` — unacknowledged Bot notifications.
+
+`GET /api/debug/voice?userId=<id>` returns the User's voice assistant ledger,
+the object the phone's voice screen talks to. This is the only place the words
+a person spoke on a call are readable:
+
+- `currentCall` — the live call, if one is open.
+- `turns[]` — every spoken turn still retained (24 hours), oldest first, each
+  with its `transcript` (what the person said), `answer` (what the assistant
+  said back), `state`, and how many `delegations` it made.
+- `delegations[]` — every question handed to a Bot, oldest first: `text` is the
+  assistant's paraphrase that became the Bot's `voice-…` run, `runId` is that
+  run (read it with `run`), `answer`/`failure` is what settled, and `state`
+  says whether it was ever heard. `settled` means the answer arrived but the
+  phone never acknowledged playing it, so it is still owed: **the next call
+  reads it out first**, before anything the person says. That is what "the
+  assistant answered an earlier question" looks like from the ledger.
+- `unspoken[]` — the run ids of those owed answers, oldest first.
+- `memoryJobs[]` — the per-call memory finalizations owed or done.
+
+Reading it ends no call, expires nothing and starts no read-out. The object
+does wake to answer, which runs its ordinary start-up recovery, the same as
+any request to it.
 
 **Not on this surface:** the User settings view — enabled Packages,
 Connections, the account model, the platform model. Those live in the User
