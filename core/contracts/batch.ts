@@ -4,6 +4,14 @@ import { toolCallOccurrences } from "./types.js";
 export const BATCH_TOOL_NAME = "batch";
 /** Most calls one `batch` may carry. */
 export const BATCH_MAX_CALLS_V1 = 25;
+/**
+ * Admissions a batch leaves unspent for the step that reads its result. A
+ * batch that does not end the Turn is followed by another model request, and
+ * that request takes an admission of its own, so a batch that filled the run's
+ * record to the brim would fail the Turn one step later on a decoder error the
+ * model cannot act on.
+ */
+export const BATCH_ADMISSION_RESERVE_V1 = 1;
 
 /**
  * The occurrence id of one call inside a batch: the batch's own id, a dot, and

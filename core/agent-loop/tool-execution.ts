@@ -1,4 +1,5 @@
 import {
+  BATCH_ADMISSION_RESERVE_V1,
   BATCH_TOOL_NAME,
   batchSubOccurrencesV1,
   batchToolOccurrenceId,
@@ -245,7 +246,11 @@ interface BatchCallReportV1 {
  *
  * `endsTurn` is the OR of the sub-results. A `send_to_user` with disposition
  * "finish", a widget, or an approval inside a batch ends the Turn exactly as
- * it would outside one.
+ * it would outside one. It is the OR of the calls this dispatch ran, not of
+ * the journal: `tool/result` does not record `endsTurn`, so a sub-call whose
+ * result the journal already holds cannot contribute one on a resume. That is
+ * the same shape a top-level call has — `executeToolsV1` skips an occurrence
+ * the journal has settled too — and not a batch-specific gap to fix here.
  */
 async function runBatchV1(
   runtime: LoopRuntime,
@@ -268,14 +273,20 @@ async function runBatchV1(
   // bounded number of them. Asked for before anything is journalled or
   // admitted, so a batch that cannot fit is refused whole — the envelope is
   // the only row it leaves — rather than overflowing the record partway
-  // through and failing the Turn. The refusal names what is left so the model
-  // can split the work across steps; it is never silently truncated, because a
-  // model that asked for twelve calls and got eight asked for effects it did
-  // not get.
+  // through and failing the Turn. The budget is not spent to the brim: the
+  // step that reads the batch's result needs an admission of its own, so
+  // `BATCH_ADMISSION_RESERVE_V1` is held back and the refusal names the number
+  // that is true after the reservation — a batch the model can act on. It is
+  // never silently truncated, because a model that asked for twelve calls and
+  // got eight asked for effects it did not get.
   const remaining = await runtime.options.remainingEffectAdmissions?.();
-  if (remaining !== undefined && decoded.length > remaining) {
+  const fits =
+    remaining === undefined
+      ? undefined
+      : Math.max(remaining - BATCH_ADMISSION_RESERVE_V1, 0);
+  if (fits !== undefined && decoded.length > fits) {
     const refusal = {
-      content: `batch was refused: this run can still take ${Math.max(remaining, 0)} more tool call(s) and this batch declared ${decoded.length}; issue fewer calls per batch across several steps.`,
+      content: `batch was refused: this run can still take ${fits} more tool call(s) and this batch declared ${decoded.length}; issue fewer calls per batch across several steps.`,
       isError: true,
     };
     await settleV1(runtime, occurrence, refusal, "completed");
@@ -308,6 +319,13 @@ async function runBatchV1(
       : concurrent
     ).push(index);
   });
+  // Nothing outlives the batch that started it. A sub-call that throws — a
+  // fence, an abort — records where it was declared instead of rejecting out
+  // from under its siblings, so every dispatched call has settled its own
+  // `tool/result` before the batch decides its outcome. Rethrowing while a
+  // sibling was still running let that sibling append a result after the Turn
+  // had already closed, which invalidates the journal for good.
+  const failures = new Map<number, unknown>();
   // The ordered chain is started first and synchronously, so its first call is
   // already in flight when the concurrent ones are dispatched and the two
   // groups overlap in time.
@@ -315,28 +333,37 @@ async function runBatchV1(
     const results: (ToolExecutionResult | undefined)[] = [];
     for (const index of ordered) {
       const sub = decoded[index]!;
-      results.push(
-        sub.kind === "invalid"
-          ? await refuseSubCallV1(
-              runtime,
-              subs[index]!,
-              `batch call ${index} was refused: ${sub.reason}`,
-              signal,
-            )
-          : await runOccurrenceV1(runtime, subs[index]!, signal),
-      );
+      try {
+        results.push(
+          sub.kind === "invalid"
+            ? await refuseSubCallV1(
+                runtime,
+                subs[index]!,
+                `batch call ${index} was refused: ${sub.reason}`,
+                signal,
+              )
+            : await runOccurrenceV1(runtime, subs[index]!, signal),
+        );
+      } catch (error) {
+        failures.set(index, error);
+        break;
+      }
     }
     return results;
   })();
-  const rest = Promise.all(
-    concurrent.map((index) => runOccurrenceV1(runtime, subs[index]!, signal)),
+  const rest = concurrent.map((index) =>
+    runOccurrenceV1(runtime, subs[index]!, signal).catch((error: unknown) => {
+      failures.set(index, error);
+      return undefined;
+    }),
   );
-  const dispatched = await Promise.allSettled([chain, rest]);
-  const fenced = dispatched.find((outcome) => outcome.status === "rejected");
-  if (fenced) throw fenced.reason;
-  const dispatchedResults = dispatched.flatMap((outcome) =>
-    outcome.status === "fulfilled" ? outcome.value : [],
-  );
+  const dispatchedResults = (await Promise.all([chain, ...rest])).flat();
+  if (failures.size > 0) {
+    // Declared position, not whichever rejected first, so a replay of the same
+    // batch fails the Turn the same way it failed the first time.
+    const first = Math.min(...failures.keys());
+    throw failures.get(first);
+  }
   const journal = validateToolOccurrenceJournal(runtime.session.events);
   const results: BatchCallReportV1[] = decoded.map((sub, index) => {
     const settled = journal.get(

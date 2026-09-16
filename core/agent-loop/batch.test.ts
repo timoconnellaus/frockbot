@@ -3,6 +3,7 @@
 // what the model reads back.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  BATCH_ADMISSION_RESERVE_V1,
   BATCH_INVALID_CALL_NAME_V1,
   BATCH_MAX_CALLS_V1,
   BATCH_TOOL_NAME,
@@ -64,6 +65,11 @@ interface BatchOptions {
   }) => Promise<boolean>;
   /** How many further effects the run's durable record can still admit. */
   remainingEffectAdmissions?: () => Promise<number>;
+  /**
+   * How long to keep watching the log after the Turn goes idle, so a sub-call
+   * that outlived its Turn would be caught appending to it.
+   */
+  quiesceMs?: number;
 }
 
 /**
@@ -128,6 +134,7 @@ async function runTurn(
   if (options.resume) handle.agent.resume();
   else handle.agent.send("do the work");
   await handle.agent.whenIdle();
+  if (options.quiesceMs !== undefined) await Bun.sleep(options.quiesceMs);
 
   return { events: [...handle.agent.session.events], requests };
 }
@@ -568,9 +575,12 @@ describe("batch", () => {
     const result = batchResultOf(turn);
 
     expect(result.isError).toBe(true);
-    // What is left, so the model can split the work across steps rather than
-    // reading an internal failure it cannot act on.
-    expect(result.content).toContain("2 more tool call(s)");
+    // What is left *after* the reservation, so the model can split the work
+    // across steps rather than reading an internal failure it cannot act on,
+    // or acting on a number that no longer fits once the reservation is taken.
+    expect(result.content).toContain(
+      `${2 - BATCH_ADMISSION_RESERVE_V1} more tool call(s)`,
+    );
     expect(result.content).toContain("3");
     // Nothing was truncated to what fit, and no sub-call was journalled or
     // ran: the envelope is the only row the refused batch leaves.
@@ -580,19 +590,32 @@ describe("batch", () => {
     ).toEqual(["tool:1:1:0"]);
   });
 
-  test("runs a batch that exactly fits the remaining admissions", async () => {
+  test("runs a batch that fits the remaining admissions less the reserve", async () => {
     const effects: string[] = [];
-    const run = await runBatch(
-      [recorder("alpha", effects)],
-      [
-        { tool: "alpha", arguments: { n: 0 } },
-        { tool: "alpha", arguments: { n: 1 } },
-      ],
-      { remainingEffectAdmissions: () => Promise.resolve(2) },
-    );
+    const calls = [
+      { tool: "alpha", arguments: { n: 0 } },
+      { tool: "alpha", arguments: { n: 1 } },
+    ];
+    const run = await runBatch([recorder("alpha", effects)], calls, {
+      remainingEffectAdmissions: () =>
+        Promise.resolve(calls.length + BATCH_ADMISSION_RESERVE_V1),
+    });
 
     expect(run.report).toMatchObject({ ran: 2, failed: 0 });
     expect([...effects].sort()).toEqual(["tool:1:1:0.0", "tool:1:1:0.1"]);
+
+    // The same batch against a budget it would fill to the brim is refused:
+    // the step that reads the result needs an admission of its own, and a run
+    // that overflows its record fails the Turn on a decoder error instead.
+    const brim: string[] = [];
+    const refused = batchResultOf(
+      await runTurn([recorder("alpha", brim)], calls, {
+        remainingEffectAdmissions: () => Promise.resolve(calls.length),
+      }),
+    );
+
+    expect(refused.isError).toBe(true);
+    expect(brim).toEqual([]);
   });
 
   test("says a thrown non-idempotent call may still have taken effect", async () => {
@@ -772,6 +795,72 @@ describe("batch ordering", () => {
         (event) => event.type === "tool/call" || event.type === "tool/result",
       ).length % 2,
     ).toBe(0);
+  });
+
+  test("nothing outlives a batch whose concurrent call is fenced", async () => {
+    // A fence on one concurrent call used to tear the Turn down while its
+    // slower sibling was still executing, and that sibling then appended a
+    // `tool/result` for an occurrence whose step and Turn had already closed.
+    // The session log is the reconstruction surface: an event after `turn/end`
+    // makes it describe something that never happened, and it never heals.
+    const landed: string[] = [];
+    const turn = await runTurn(
+      [
+        {
+          name: "send",
+          description: "send fixture.",
+          inputSchema: { type: "object" },
+          orderedEffect: true,
+          execute: (input) => {
+            landed.push((input as { text: string }).text);
+            return Promise.resolve({ content: "sent", isError: false });
+          },
+        },
+        {
+          name: "read",
+          description: "read fixture.",
+          inputSchema: { type: "object" },
+          execute: async (input) => {
+            await Bun.sleep((input as { delay: number }).delay);
+            landed.push(`read:${(input as { id: string }).id}`);
+            return { content: "read", isError: false };
+          },
+        },
+      ],
+      [
+        { tool: "send", arguments: { text: "one" } },
+        { tool: "read", arguments: { id: "fenced", delay: 0 } },
+        { tool: "read", arguments: { id: "slow", delay: 40 } },
+      ],
+      {
+        admitEffect: ({ effectId }) =>
+          Promise.resolve(effectId !== "tool:1:1:0.1"),
+        quiesceMs: 200,
+      },
+    );
+
+    // The property, and it is stronger than asserting which error surfaced:
+    // the log stops at the Turn's own end, however the sub-calls raced.
+    expect(turn.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "cancelled",
+    });
+    // And every occurrence carries exactly one result, so nothing was settled
+    // twice by the cancellation sweep and the late sub-call both.
+    const results = toolEvents(turn.events, "tool/result").map(
+      ({ occurrenceId }) => occurrenceId,
+    );
+    expect(results).toEqual([...new Set(results)]);
+    expect(results).toEqual(
+      expect.arrayContaining(
+        toolEvents(turn.events, "tool/call").map(
+          ({ occurrenceId }) => occurrenceId,
+        ),
+      ),
+    );
+    // The fence still fails the Turn, and it does not swallow the slow call:
+    // it ran to completion before the batch propagated.
+    expect(landed).toEqual(["one", "read:slow"]);
   });
 
   test("carries at most the durable attachment limit, in declared order, and says so", async () => {
