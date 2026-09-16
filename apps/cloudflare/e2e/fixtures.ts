@@ -30,6 +30,7 @@ import {
   type BrowserContext,
   type Locator,
   type Page,
+  type Route,
 } from "@playwright/test";
 import {
   e2eOllamaEndpointV1,
@@ -635,6 +636,29 @@ export async function openProfileMenu(page: Page): Promise<void> {
  */
 export async function settle(page: Page): Promise<void> {
   await page.waitForTimeout(700);
+}
+
+/**
+ * Serve an intercepted request for real, then drop its answer on the floor:
+ * the authority commits the change and the client never hears how it went.
+ *
+ * The page can lose interest in the request first — it reloads, or the client
+ * gives up — and Playwright then refuses the abort because the browser already
+ * handled the route. The answer is lost either way, which is the very case
+ * being arranged, so that refusal is not a failure. It surfaced as a red
+ * `Main` on 2026-09-16: the abort raced a reload and threw from the handler,
+ * outside any assertion, three attempts running.
+ */
+export async function commitAndLoseTheAnswer(
+  route: Route,
+  errorCode?: string,
+): Promise<void> {
+  await route.fetch();
+  try {
+    await route.abort(errorCode);
+  } catch (error) {
+    if (!/already handled/u.test(String(error))) throw error;
+  }
 }
 
 /**
