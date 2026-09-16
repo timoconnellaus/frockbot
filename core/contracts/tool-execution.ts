@@ -135,6 +135,15 @@ export interface ToolDefinition extends ToolSchema {
    * under the same `effectId` — and is expected to honour that key.
    */
   idempotent?: boolean;
+  /**
+   * Whether this tool's effect occupies a position in the conversation: a
+   * message bubble, a hand-off, an answer. Two such effects are not
+   * interchangeable once they have landed — the order they landed in is the
+   * order a person reads them in, and is the order their durable identities
+   * are minted in — so a dispatcher that runs several calls at once must not
+   * let them race each other. Everything else may run concurrently.
+   */
+  orderedEffect?: boolean;
   /** The turn types this tool is offered on. Absent means all of them. */
   admission?: TurnAdmissionV1;
   validate?(input: unknown): boolean;

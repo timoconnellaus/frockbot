@@ -188,42 +188,6 @@ describe("message-time unread and notification records", () => {
     });
   });
 
-  test("names a batch's sends the way the transcript does, by declared position", async () => {
-    // One batch's three sends, landed out of order: the one declared first
-    // finished last. The transcript draws them at their declared ordinal, so
-    // the unread boundary and the push intent have to name the same bubble.
-    const landed = ["tool:1:1:0.1", "tool:1:1:0.2", "tool:1:1:0.0"].map(
-      (occurrenceId, index) =>
-        ({
-          ...send(index + 1, occurrenceId),
-          occurrenceId,
-        }) satisfies SessionEvent,
-    );
-    const records = await messageRecords({
-      run: run(landed),
-      events: landed,
-      read: reader(),
-    });
-
-    expect(
-      Object.keys(records)
-        .filter((key) => key.startsWith(PUSH_OUTBOX_PREFIX))
-        .map((key) => {
-          const notice = records[key] as MessageNotice;
-          return [notice.body, notice.messageId];
-        }),
-    ).toEqual([
-      ["tool:1:1:0.0", "run-1:send:0"],
-      ["tool:1:1:0.1", "run-1:send:1"],
-      ["tool:1:1:0.2", "run-1:send:2"],
-    ]);
-    // The boundary is the last bubble of the batch as it is drawn, which is
-    // the last one declared — not whichever call happened to land last.
-    expect(records[UNREAD_STATE_KEY]).toMatchObject({
-      lastMessageId: "run-1:send:2",
-    });
-  });
-
   test("a subagent send does not create user unread or push records", async () => {
     const event = send(1, "Internal");
     const subagent = {

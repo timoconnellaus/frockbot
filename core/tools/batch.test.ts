@@ -294,3 +294,89 @@ describe("batch sub-call failures", () => {
     ]);
   });
 });
+
+describe("batch ordering", () => {
+  /**
+   * A tool whose effect has a place in the conversation, and which takes as
+   * long to land as its input asks for.
+   */
+  function orderedEffect(
+    name: string,
+    landed: string[],
+    timeline?: string[],
+  ): ToolDefinition {
+    return {
+      name,
+      description: `${name} fixture.`,
+      inputSchema: { type: "object" },
+      orderedEffect: true,
+      execute: async (input) => {
+        const { text, delay } = input as { text: string; delay: number };
+        await Bun.sleep(delay);
+        landed.push(text);
+        timeline?.push(`${name}:${text}`);
+        return { content: text, isError: false };
+      },
+    };
+  }
+
+  test("ordered effects land in declared order, whatever their latency", async () => {
+    // The whole point: a send's position in the conversation is where the
+    // model wrote it, not how fast the append happened to be. Dispatched at
+    // once these would land back to front, and every consumer of "the Turn's
+    // sends" — the wire ordinal, the rendered order, the unread boundary, the
+    // push order, the preview, the answer text — reads the log's order.
+    const landed: string[] = [];
+    const tools = registry(orderedEffect("send", landed));
+
+    const result = await runBatch(tools, [
+      { tool: "send", arguments: { text: "one", delay: 30 } },
+      { tool: "send", arguments: { text: "two", delay: 10 } },
+      { tool: "send", arguments: { text: "three", delay: 0 } },
+    ]);
+
+    expect(landed).toEqual(["one", "two", "three"]);
+    expect(JSON.parse(result.content as string)).toMatchObject({
+      ran: 3,
+      failed: 0,
+    });
+  });
+
+  test("ordering the sends does not serialise the rest of the batch", async () => {
+    // Ordered calls run one after another; everything else still runs at
+    // once, and overlaps them. Serialising the whole batch would make the two
+    // slow reads wait for each other and for the sends, which is the cost the
+    // batch exists to avoid.
+    const timeline: string[] = [];
+    const landed: string[] = [];
+    const slow: ToolDefinition = {
+      name: "read",
+      description: "read fixture.",
+      inputSchema: { type: "object" },
+      execute: async (input) => {
+        const { id } = input as { id: string };
+        timeline.push(`read:start:${id}`);
+        await Bun.sleep(40);
+        timeline.push(`read:end:${id}`);
+        return { content: id, isError: false };
+      },
+    };
+    const tools = registry(orderedEffect("send", landed, timeline), slow);
+
+    await runBatch(tools, [
+      { tool: "send", arguments: { text: "one", delay: 5 } },
+      { tool: "read", arguments: { id: "a" } },
+      { tool: "send", arguments: { text: "two", delay: 5 } },
+      { tool: "read", arguments: { id: "b" } },
+    ]);
+
+    expect(timeline).toEqual([
+      "read:start:a",
+      "read:start:b",
+      "send:one",
+      "send:two",
+      "read:end:a",
+      "read:end:b",
+    ]);
+  });
+});

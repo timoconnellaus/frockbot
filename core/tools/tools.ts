@@ -106,7 +106,8 @@ const BATCH_DESCRIPTION = [
   `Run up to ${BATCH_MAX_CALLS_V1} independent tool calls in one step, together.`,
   "Each call runs on its own: one failing does not stop the others, and each gets its own result.",
   "Use it only when no call depends on another call's result. Dependent calls stay in separate steps.",
-  "The calls run in the order you declare them, whatever order they finish in, so several send_to_user calls arrive as separate messages in the order written here.",
+  "The calls all start together and may finish in any order. Calls whose effect has a place in the conversation — send_to_user among them — take effect in the order you write them, so several send_to_user calls arrive as separate messages in that order.",
+  "If two calls' side effects are order-sensitive in some other way — writing and then moving the same file, say — put them in separate steps instead of one batch.",
   "batch cannot call itself.",
 ].join(" ");
 
@@ -144,6 +145,13 @@ const BATCH_SCHEMA: ToolSchema = {
 type BatchSubCallV1 =
   | { kind: "call"; tool: string; arguments: unknown }
   | { kind: "invalid"; tool: string; reason: string };
+
+/** One sub-call's outcome, kept with the position it was declared at. */
+interface BatchCallResultV1 {
+  index: number;
+  tool: string;
+  result: ToolExecutionResult;
+}
 
 /**
  * The calls of one batch, or the reason the batch itself is unusable.
@@ -834,6 +842,19 @@ export class ToolRegistry implements ToolExecution {
    * spend one inference on several calls, and collapsing the whole batch
    * because the third call was refused would cost it the other two as well.
    *
+   * Calls whose tool declares `orderedEffect` do not race each other. Their
+   * effect is a position in the conversation - a bubble, a hand-off, an
+   * answer - and a person reads those in the order they landed, so they run
+   * one after another in the order the model declared them. Landing order is
+   * then declared order by construction, which is what lets everything
+   * downstream - the wire ordinal, the rendered order, the unread boundary,
+   * the push order, the preview, the Turn's answer text - keep reading the
+   * log the single way it always has. Every other call is dispatched at once
+   * as before, and overlaps the ordered chain, so the parallelism that pays
+   * for the batch - slow independent reads and fetches - is untouched. An
+   * ordered effect is a validate, an append and a flush; serialising those
+   * costs nothing next to a provider call.
+   *
    * `endsTurn` is the OR of the sub-results. A `send_to_user` with
    * disposition "finish", a widget, or an approval inside a batch ends the
    * Turn exactly as it would outside one; without this it would have silently
@@ -863,68 +884,27 @@ export class ToolRegistry implements ToolExecution {
     if (typeof decoded === "string") {
       return { content: `batch was refused: ${decoded}`, isError: true };
     }
-    const results = await Promise.all(
-      decoded.map(async (sub, index) => {
-        if (sub.kind === "invalid") {
-          return {
-            index,
-            tool: sub.tool,
-            result: {
-              content: `batch call ${index} was refused: ${sub.reason}`,
-              isError: true,
-            } satisfies ToolExecutionResult,
-          };
-        }
-        if (sub.tool === BATCH_TOOL_NAME) {
-          return {
-            index,
-            tool: sub.tool,
-            result: {
-              content: "batch cannot call itself",
-              isError: true,
-            } satisfies ToolExecutionResult,
-          };
-        }
-        const call: ToolCall = {
-          id: `${context.toolCall?.id ?? context.effectId}.${index}`,
-          name: sub.tool,
-          input: sub.arguments,
-        };
-        const subContext: ToolExecutionContext = {
-          ...context,
-          effectId: batchToolOccurrenceId(context.effectId, index),
-          toolCall: call,
-        };
-        const failure = (message: string, idempotent: boolean) => ({
-          index,
-          tool: sub.tool,
-          result: {
-            content: idempotent ? message : uncertainToolFailureV1(message),
-            isError: true,
-          } satisfies ToolExecutionResult,
-        });
-        const messageOf = (error: unknown) =>
-          error instanceof Error
-            ? error.message
-            : `batch call ${index} failed`;
-        let preparation: ToolPreparation;
-        try {
-          preparation = await this.prepare(call, subContext);
-        } catch (error) {
-          // A throw out of `prepare` is certain: nothing dispatched.
-          return failure(messageOf(error), true);
-        }
-        if (preparation.kind === "denied") {
-          return { index, tool: sub.tool, result: preparation.result };
-        }
-        try {
-          const result = await this.executePrepared(preparation, subContext);
-          return { index, tool: sub.tool, result };
-        } catch (error) {
-          return failure(messageOf(error), preparation.idempotent);
-        }
-      }),
+    // The ordered chain is started first and synchronously, so its first call
+    // is already in flight when the concurrent ones are dispatched below and
+    // the two groups overlap in time.
+    const ordered = (async () => {
+      const settled: BatchCallResultV1[] = [];
+      for (const [index, sub] of decoded.entries()) {
+        if (!this.orderedEffectV1(sub)) continue;
+        settled.push(await this.runBatchCallV1(sub, index, context));
+      }
+      return settled;
+    })();
+    const concurrent = Promise.all(
+      decoded.flatMap((sub, index) =>
+        this.orderedEffectV1(sub)
+          ? []
+          : [this.runBatchCallV1(sub, index, context)],
+      ),
     );
+    const results = (await Promise.all([ordered, concurrent]))
+      .flat()
+      .sort((left, right) => left.index - right.index);
     const failed = results.filter(({ result }) => result.isError).length;
     const attachments = results.flatMap(
       ({ result }) => result.attachments ?? [],
@@ -947,6 +927,79 @@ export class ToolRegistry implements ToolExecution {
         : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
     };
+  }
+
+  /**
+   * Whether this call's effect has a position in the conversation, and so may
+   * not race the other ordered calls of the same batch. The tool declares it
+   * once, on its definition; a batch does not decide it per call.
+   */
+  private orderedEffectV1(sub: BatchSubCallV1): boolean {
+    if (sub.kind !== "call") return false;
+    return (
+      this.nativeDefinitions.get(sub.tool)?.definition.orderedEffect === true
+    );
+  }
+
+  /** One sub-call, prepared and executed through this same registry. */
+  private async runBatchCallV1(
+    sub: BatchSubCallV1,
+    index: number,
+    context: ToolExecutionContext,
+  ): Promise<BatchCallResultV1> {
+    if (sub.kind === "invalid") {
+      return {
+        index,
+        tool: sub.tool,
+        result: {
+          content: `batch call ${index} was refused: ${sub.reason}`,
+          isError: true,
+        },
+      };
+    }
+    if (sub.tool === BATCH_TOOL_NAME) {
+      return {
+        index,
+        tool: sub.tool,
+        result: { content: "batch cannot call itself", isError: true },
+      };
+    }
+    const call: ToolCall = {
+      id: `${context.toolCall?.id ?? context.effectId}.${index}`,
+      name: sub.tool,
+      input: sub.arguments,
+    };
+    const subContext: ToolExecutionContext = {
+      ...context,
+      effectId: batchToolOccurrenceId(context.effectId, index),
+      toolCall: call,
+    };
+    const failure = (message: string, idempotent: boolean) => ({
+      index,
+      tool: sub.tool,
+      result: {
+        content: idempotent ? message : uncertainToolFailureV1(message),
+        isError: true,
+      } satisfies ToolExecutionResult,
+    });
+    const messageOf = (error: unknown) =>
+      error instanceof Error ? error.message : `batch call ${index} failed`;
+    let preparation: ToolPreparation;
+    try {
+      preparation = await this.prepare(call, subContext);
+    } catch (error) {
+      // A throw out of `prepare` is certain: nothing dispatched.
+      return failure(messageOf(error), true);
+    }
+    if (preparation.kind === "denied") {
+      return { index, tool: sub.tool, result: preparation.result };
+    }
+    try {
+      const result = await this.executePrepared(preparation, subContext);
+      return { index, tool: sub.tool, result };
+    } catch (error) {
+      return failure(messageOf(error), preparation.idempotent);
+    }
   }
 
   private resolveDynamicCall(

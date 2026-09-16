@@ -367,6 +367,9 @@ function createSendToUserTool(
       unknown
     >,
     admission: { turnTypes: ["chat", "agent", "automation"] },
+    // A send is a bubble in the conversation, and two sends are read in the
+    // order they landed in.
+    orderedEffect: true,
     validate: (input: unknown) =>
       typeof input === "object" && input !== null && !Array.isArray(input),
     execute: async (
@@ -452,6 +455,9 @@ function createWakeParentTool(sessions: {
       additionalProperties: false,
     },
     admission: { turnTypes: ["automation", "subagent"] },
+    // The hand-off is appended to the parent conversation, so it has a
+    // position there.
+    orderedEffect: true,
     validate: (input: unknown) =>
       typeof input === "object" && input !== null && !Array.isArray(input),
     execute: async (

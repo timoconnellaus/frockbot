@@ -3,7 +3,6 @@ import {
   APPLET_ID_V1,
   decodeSendToUserPayloadV1,
   decodeSkillRefsV1,
-  parseToolOccurrenceIdV1,
   type SendToUserPayloadV1,
   type SessionEvent,
   type SkillRefV1,
@@ -740,50 +739,6 @@ function decodeDynamicToolCallInput(
   };
 }
 
-/**
- * Each send's ordinal, keyed by the occurrence that made it, in the order the
- * calls were declared in.
- *
- * Every send this system records is keyed by a tool occurrence id — it is the
- * sending tool's own `context.effectId`. A log holding a send keyed by
- * anything else is one this function will not reorder at all: it returns
- * nothing, and the caller falls back to counting in log order, which is what
- * every send got before a batch could issue several of them at once.
- */
-export function sendOrdinalsV1(
-  events: readonly SessionEvent[],
-): Map<string, number> {
-  const declared: Array<{
-    occurrenceId: string;
-    at: { turn: number; step: number; ordinal: number; subIndex: number };
-  }> = [];
-  const projected = new Map<string, number>();
-  for (const event of events) {
-    if (event.type !== "send/to-user") continue;
-    const ordinal = projectedSendOrdinalV1(event.occurrenceId);
-    if (ordinal !== undefined) {
-      projected.set(event.occurrenceId, ordinal);
-      continue;
-    }
-    const at = parseToolOccurrenceIdV1(event.occurrenceId);
-    if (!at) return new Map();
-    declared.push({ occurrenceId: event.occurrenceId, at });
-  }
-  declared.sort(
-    (left, right) =>
-      left.at.turn - right.at.turn ||
-      left.at.step - right.at.step ||
-      left.at.ordinal - right.at.ordinal ||
-      left.at.subIndex - right.at.subIndex,
-  );
-  return new Map([
-    ...declared.map(
-      ({ occurrenceId }, ordinal) => [occurrenceId, ordinal] as const,
-    ),
-    ...projected,
-  ]);
-}
-
 function projectionUnits(
   events: readonly SessionEvent[],
   status: ClientRunStatusV1,
@@ -791,36 +746,6 @@ function projectionUnits(
   const units: ProjectionUnitV1[] = [];
   const byOccurrence = new Map<string, ProjectionUnitV1>();
   let callCount = 0;
-  // A send's ordinal is its identity, not a sort hint: "The message the cloud
-  // names is `<runId>:send:<ordinal>`". Counting appends in log order made
-  // that identity depend on the order the sends happened to finish in, which
-  // is not fixed once a batch dispatches several of them at once - replaying
-  // the same batch under different scheduling would hand the same payload a
-  // different message id, and the log durably records whatever order
-  // happened, so nothing heals it.
-  //
-  // So the ordinal comes from where the call was *declared*: the Turn, the
-  // step, the call's ordinal in that step, and its position inside a batch.
-  // Execution order and replay order cannot move it.
-  //
-  // Render order follows the same sequence. The slots the sends occupy are
-  // left where the log put them, relative to the tool interactions around
-  // them, but the payloads fill those slots in declared order: slot N carries
-  // the send declared Nth. Otherwise a reader would see a later bubble drawn
-  // above an earlier one while it carried the lower ordinal, and the tool's
-  // own description promises the model the calls "arrive as separate messages
-  // in the order written here".
-  const sendOrdinals = sendOrdinalsV1(events);
-  const declaredSends = events
-    .filter(
-      (event): event is Extract<SessionEvent, { type: "send/to-user" }> =>
-        event.type === "send/to-user",
-    )
-    .map((event, index) => ({
-      event,
-      ordinal: sendOrdinals.get(event.occurrenceId) ?? index,
-    }))
-    .sort((left, right) => left.ordinal - right.ordinal);
   let sendCount = 0;
   let projectedIncompleteSync = false;
   for (const event of events) {
@@ -879,14 +804,9 @@ function projectionUnits(
       unit.events.push(result);
       unit.droppable = true;
     } else if (event.type === "send/to-user") {
-      const declared = declaredSends[sendCount];
       units.push({
         events: [
-          {
-            type: "send/to-user",
-            payload: declared?.event.payload ?? event.payload,
-            ordinal: declared?.ordinal ?? sendCount,
-          },
+          { type: "send/to-user", payload: event.payload, ordinal: sendCount },
         ],
         droppable: true,
       });
@@ -1096,28 +1016,6 @@ export interface ProjectedSendV1 {
   text: string;
 }
 
-const PROJECTED_SEND_OCCURRENCE_PREFIX = "projected:";
-
-/**
- * The key of the send this module projects back onto a run. No tool minted it,
- * so it carries its ordinal itself — that ordinal is the identity the message
- * was already named by, and `sendOrdinalsV1` reads it back rather than
- * treating the key as unmintable and dropping the whole run to log order.
- */
-function projectedSendOccurrenceIdV1(ordinal: number): string {
-  return `${PROJECTED_SEND_OCCURRENCE_PREFIX}${ordinal}`;
-}
-
-function projectedSendOrdinalV1(occurrenceId: string): number | undefined {
-  if (!occurrenceId.startsWith(PROJECTED_SEND_OCCURRENCE_PREFIX)) {
-    return undefined;
-  }
-  const ordinal = Number(
-    occurrenceId.slice(PROJECTED_SEND_OCCURRENCE_PREFIX.length),
-  );
-  return Number.isSafeInteger(ordinal) && ordinal >= 0 ? ordinal : undefined;
-}
-
 function withProjectedSendV1(
   run: StoredRun,
   send: ProjectedSendV1 | undefined,
@@ -1135,7 +1033,7 @@ function withProjectedSendV1(
       timestamp: last?.timestamp ?? run.acceptedAt,
       turn: 0,
       step: 0,
-      occurrenceId: projectedSendOccurrenceIdV1(send.ordinal),
+      occurrenceId: `projected:${send.ordinal}`,
       payload: { type: "text", text: send.text },
     } satisfies SessionEvent,
   ];
