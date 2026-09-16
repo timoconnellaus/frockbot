@@ -1088,7 +1088,7 @@ class _BotRowState extends State<_BotRow> {
     return Padding(
       padding: widget.card
           ? sidebarCardInset
-          : const EdgeInsets.symmetric(horizontal: 8),
+          : const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       // Hover and focus are the row's and its control's together, so moving
       // onto the control or tabbing to it keeps it on screen.
       child: MouseRegion(

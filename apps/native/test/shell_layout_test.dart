@@ -467,6 +467,40 @@ void main() {
       expect(formatSidebarMessageTime('not an instant', now), '');
     });
 
+    testWidgets('leaves a small gap between Bots', (tester) async {
+      await tester.pumpWidget(
+        host(
+          ShellSidebar(
+            bots: [bot('scout', 'Scout'), bot('rosemary', 'Rosemary')],
+            profiles: const {},
+            unread: const {},
+            archived: const {},
+            activeBotId: null,
+            focusedBotId: null,
+            workingBotId: null,
+            loaded: true,
+            showHidden: false,
+            onSelect: (_) {},
+            onCreateBot: () {},
+            onSearch: () {},
+            onProfile: () {},
+            onMarketplace: () {},
+            onVoice: () {},
+            voiceControl: VoiceControlState.idle,
+            onToggleHidden: () {},
+            onRetry: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final scout = tester.getRect(byIdentifier(ShellIds.sidebarBot('scout')));
+      final rosemary = tester.getRect(
+        byIdentifier(ShellIds.sidebarBot('rosemary')),
+      );
+      expect(rosemary.top - scout.bottom, 4);
+    });
+
     testWidgets('carries a stable identifier per Bot and per group', (
       tester,
     ) async {
