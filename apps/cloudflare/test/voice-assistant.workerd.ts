@@ -866,6 +866,67 @@ describe("the voice session object", () => {
     next.socket.close();
   });
 
+  test("a renamed Bot is prompted and spoken about under the name it has now", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `voice-renamed-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    // Registration seeds "Workerd Bot" and no description; the person then
+    // edits the Bot's own profile, which is the half the seed cannot carry.
+    await provisionBot(identity);
+    // SAFETY: the generated stub type is too deep for the compiler here; this
+    // names only the two Bot RPCs the rename makes.
+    const botRpc = env.BOT_STATES.getByName(
+      `${identity.userId}:${identity.botId}`,
+    ) as unknown as {
+      readConfiguration(input: unknown): Promise<{ revision: number }>;
+      executeConfiguration(input: unknown): Promise<{ status: string }>;
+    };
+    const before = await botRpc.readConfiguration(identity);
+    expect(
+      await botRpc.executeConfiguration({
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          type: "bot/set-profile",
+          commandId: `rename-${suffix}`,
+          expectedRevision: before.revision,
+          botId: identity.botId,
+          profile: {
+            name: "Weekly Planner",
+            description: "Plans the week.",
+          },
+        },
+      }),
+    ).toMatchObject({ status: "applied" });
+
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("please plan my week")).toBe(true);
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" && String(f.text).includes("Done: Asked"),
+      "delegation acknowledged aloud",
+    );
+
+    // What the model is told about the account, and what the person hears.
+    const prompt = (await stub.probeSystemPrompts()).at(-1)!;
+    expect(prompt).toContain(
+      `- ${identity.botId}: Weekly Planner — Plans the week.`,
+    );
+    expect(prompt).not.toContain("Workerd Bot");
+    const delegations = Object.values(
+      await stub.probeStorage("voice:delegation:"),
+    ) as VoiceDelegationRecordV1[];
+    expect(delegations[0]).toMatchObject({ botName: "Weekly Planner" });
+    opened.socket.close();
+  });
+
   test("two answers coming due together are read out one at a time", async () => {
     const suffix = crypto.randomUUID();
     const identity = {
