@@ -579,6 +579,12 @@ test("the Applets button lists the Bot's Applets, a Bot embeds one as a live car
   ollamaBaseUrl,
   baseURL,
 }, testInfo) => {
+  // This is the longest spec in the file — a list, a Bot turn that embeds a
+  // live card, and two delete dialogs — and it finishes by waiting on the
+  // card's own 30s refresh to notice the delete. That last wait alone can be
+  // most of what the project's default budget has left by then, so this one
+  // gets a budget of its own rather than racing the refresh interval.
+  test.setTimeout(480_000);
   const stubs = await installAppletRoutes(page, testInfo, baseURL);
   // The card is a published Applet embedded in the thread, so this spec never
   // sees the draft state the other two are about.
