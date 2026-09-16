@@ -81,14 +81,56 @@
     <main>
       <section class="hero" aria-labelledby="hero-title">
         <div class="container hero-shell">
-          <img
-            class="hero-image"
-            src="/assets/hero.png"
-            alt="A sheep wearing pink heart-shaped sunglasses and a raspberry fashion coat"
-            width="1536"
-            height="1024"
-            fetchpriority="high"
-          />
+          <div
+            class="hero-cast"
+            role="img"
+            aria-label="Pixel, Sunny, Guardian, Fox and Chill, five members of the FrockBot character cast"
+          >
+            <span class="cast-halo" aria-hidden="true"></span>
+            <img
+              class="hero-character hero-character-fox"
+              src="/assets/characters/fox.png"
+              alt=""
+              width="457"
+              height="615"
+              fetchpriority="high"
+            />
+            <img
+              class="hero-character hero-character-sunny"
+              src="/assets/characters/sunny.png"
+              alt=""
+              width="457"
+              height="615"
+              fetchpriority="high"
+            />
+            <img
+              class="hero-character hero-character-pixel"
+              src="/assets/characters/pixel.png"
+              alt=""
+              width="457"
+              height="615"
+              fetchpriority="high"
+            />
+            <img
+              class="hero-character hero-character-guardian"
+              src="/assets/characters/guardian.png"
+              alt=""
+              width="457"
+              height="615"
+              fetchpriority="high"
+            />
+            <img
+              class="hero-character hero-character-chill"
+              src="/assets/characters/chill.png"
+              alt=""
+              width="457"
+              height="615"
+              fetchpriority="high"
+            />
+            <span class="cast-note" aria-hidden="true"
+              >Pick your character ↗</span
+            >
+          </div>
           <div class="hero-copy">
             <h1 id="hero-title">
               A team of bots<br />that finishes<br /><em>the job.</em>
@@ -112,8 +154,13 @@
           <p class="hero-note">Early access · US$20 a month ↗</p>
           <article class="bot-card" aria-label="Example bot activity">
             <div class="bot-card-head">
-              <img src="/assets/app-icon.png" alt="" width="40" height="40" />
-              <strong>Margo · Research bot</strong>
+              <img
+                src="/assets/characters/pixel.png"
+                alt=""
+                width="52"
+                height="62"
+              />
+              <strong>Pixel · Research bot</strong>
               <span>Working</span>
             </div>
             <p>
@@ -121,7 +168,7 @@
               left you a recommendation with sources.
             </p>
             <div class="composer" aria-hidden="true">
-              Ask Margo a follow-up… <span>→</span>
+              Ask Pixel a follow-up… <span>→</span>
             </div>
           </article>
         </div>
@@ -154,7 +201,11 @@
           <div class="feature-grid">
             <article class="feature-card">
               <span class="feature-number">01</span
-              ><span class="feature-icon">◉</span>
+              ><img
+                class="feature-character"
+                src="/assets/characters/sunny.png"
+                alt=""
+              />
               <h3>Remembers the job</h3>
               <p>
                 Each bot keeps its own history and notes, so you pick up where
@@ -163,13 +214,21 @@
             </article>
             <article class="feature-card feature-card-pink">
               <span class="feature-number">02</span
-              ><span class="feature-icon">↻</span>
+              ><img
+                class="feature-character"
+                src="/assets/characters/nudge.png"
+                alt=""
+              />
               <h3>Works while you don't</h3>
               <p>Set a routine once. The bot runs it and reports back.</p>
             </article>
             <article class="feature-card">
               <span class="feature-number">03</span
-              ><span class="feature-icon">＋</span>
+              ><img
+                class="feature-character"
+                src="/assets/characters/dog.png"
+                alt=""
+              />
               <h3>Builds what it's missing</h3>
               <p>
                 When a job needs a tool that doesn't exist, the bot writes one.
@@ -177,7 +236,11 @@
             </article>
             <article class="feature-card feature-card-dark">
               <span class="feature-number">04</span
-              ><span class="feature-icon">⌁</span>
+              ><img
+                class="feature-character"
+                src="/assets/characters/cow.png"
+                alt=""
+              />
               <h3>Can use a computer</h3>
               <p>
                 Your team shares a cloud computer. Each bot has its own desktop
@@ -201,23 +264,25 @@
           </div>
           <div class="workspace" aria-label="Example bot workspace">
             <div class="workspace-bar">
-              <i></i><i></i><i></i><strong>Margo’s workspace</strong
+              <i></i><i></i><i></i><strong>Pixel’s workspace</strong
               ><span>Live · 10:42</span>
             </div>
             <div class="workspace-body">
               <aside>
                 <strong>Your bots</strong>
                 <div class="bot-row active">
-                  <img src="/assets/app-icon.png" alt="" />Margo
+                  <img src="/assets/characters/pixel.png" alt="" />Pixel
                 </div>
-                <div class="bot-row">Monty</div>
+                <div class="bot-row">
+                  <img src="/assets/characters/sunny.png" alt="" />Sunny
+                </div>
                 <div class="bot-row">＋ New bot</div>
               </aside>
               <div class="workspace-thread">
                 <div class="workspace-thread-head">
-                  <img src="/assets/app-icon.png" alt="" />
+                  <img src="/assets/characters/pixel.png" alt="" />
                   <span
-                    ><strong>Margo</strong
+                    ><strong>Pixel</strong
                     ><small>Market brief · Today at 10:42</small></span
                   >
                 </div>
@@ -234,12 +299,17 @@
                   </p>
                 </div>
                 <div class="workspace-composer">
-                  <span>Message Margo</span><i>↑</i>
+                  <img
+                    class="workspace-companion"
+                    src="/assets/characters/pixel.png"
+                    alt=""
+                  />
+                  <span>Message Pixel</span><i>↑</i>
                 </div>
               </div>
-              <section class="workspace-panel" aria-label="Margo details">
+              <section class="workspace-panel" aria-label="Pixel details">
                 <div class="workspace-screen">
-                  <span>Margo’s screen</span>
+                  <span>Pixel’s screen</span>
                 </div>
                 <div class="workspace-panel-title">
                   <strong>Routines</strong><b>＋</b>
@@ -276,6 +346,11 @@
                 Get a morning brief on the topics you follow, with links to the
                 sources.
               </p>
+              <img
+                class="use-character"
+                src="/assets/characters/rabbit.png"
+                alt=""
+              />
               <div class="mini-report">
                 <strong>Today’s brief</strong><i></i><i></i><i></i>
               </div>
@@ -287,6 +362,11 @@
                 Track decisions, prep updates, and surface the blocker before
                 the meeting.
               </p>
+              <img
+                class="use-character"
+                src="/assets/characters/fox.png"
+                alt=""
+              />
               <div class="mini-report">
                 <strong>Weekly pulse</strong><i></i><i></i><i></i>
               </div>
@@ -298,6 +378,11 @@
                 Watch the pages, prices, or feeds you care about and get told
                 when they move.
               </p>
+              <img
+                class="use-character"
+                src="/assets/characters/guardian.png"
+                alt=""
+              />
               <div class="mini-report">
                 <strong>Price change spotted</strong><i></i><i></i><i></i>
               </div>
@@ -380,7 +465,7 @@
         <div class="container cta-shell">
           <div>
             <h2 id="cta-title">
-              Your next great hire<br />might be <em>a sheep.</em>
+              Your next great hire<br />has <em>character.</em>
             </h2>
             <p>
               Start with one bot for a job you need done. Add more as the work
@@ -392,6 +477,15 @@
               >Join the early flock →</a
             >
             <small>Early access · No wool required</small>
+          </div>
+          <div class="cta-flock" aria-hidden="true">
+            <img src="/assets/characters/chill.png" alt="" />
+            <img src="/assets/characters/cat.png" alt="" />
+            <img src="/assets/characters/goat.png" alt="" />
+            <img src="/assets/characters/pixel.png" alt="" />
+            <img src="/assets/characters/sunny.png" alt="" />
+            <img src="/assets/characters/dog.png" alt="" />
+            <img src="/assets/characters/cow.png" alt="" />
           </div>
         </div>
       </section>
