@@ -26,6 +26,14 @@ async function runPluginTool(name: string, effectId: string) {
   const session = harness.sessions.create(SESSION);
   session.append({ type: "turn/start", turn: 1 });
   session.append({ type: "step/start", turn: 1, step: 1 });
+  session.append({
+    type: "tool/call",
+    turn: 1,
+    step: 1,
+    occurrenceId: effectId,
+    name,
+    input: { pluginId: "demo" },
+  });
   await session.flush();
   const host = {
     plugins: {
@@ -67,8 +75,9 @@ async function runPluginTool(name: string, effectId: string) {
   }
   const result = await harness.tools.executePrepared(preparation, context);
   const ordered = harness.tools.orderedEffect(call);
-  // The harness fails the dispose of a tool that appended a card without
-  // declaring the ordering, so this closes the run rather than leaking it.
+  // The harness reads the journal back on dispose and fails a tool that
+  // appended a card without declaring the ordering, so this closes the run
+  // rather than leaking it.
   await harness.dispose();
   return { result, ordered, events: [...session.events] };
 }

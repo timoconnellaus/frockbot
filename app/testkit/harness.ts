@@ -7,7 +7,6 @@ import {
   type RuntimeFeatureV1,
   SessionStore,
   type SessionStoreConfig,
-  type ToolCall,
 } from "@frockbot/core/contracts";
 import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
 import { LlmRegistry } from "@frockbot/core/models";
@@ -33,6 +32,45 @@ export const CONVERSATION_POSITIONED_EVENTS_V1 = [
   "task/dispatched",
 ] as const;
 
+/**
+ * What the journal says about ordering, read back after the fact: for every
+ * conversation-positioned event, the `tool/call` that shares its occurrence
+ * id names the tool that appended it, and that tool has to have declared
+ * `orderedEffect`. Nothing is intercepted — this reads only what was
+ * journalled, so it sees a sub-call of a `batch` exactly as it sees a
+ * top-level call, and a run that journalled no calls says nothing.
+ */
+function undeclaredConversationAppends(
+  sessions: SessionStore,
+  tools: ToolRegistry,
+): string[] {
+  const observed = new Set<string>();
+  for (const session of sessions.list()) {
+    const calls = new Map<string, { name: string; input: unknown }>();
+    for (const event of session.events) {
+      if (event.type === "tool/call") {
+        calls.set(event.occurrenceId, { name: event.name, input: event.input });
+      }
+    }
+    for (const event of session.events) {
+      if (
+        !(CONVERSATION_POSITIONED_EVENTS_V1 as readonly string[]).includes(
+          event.type,
+        )
+      ) {
+        continue;
+      }
+      const occurrenceId = (event as { occurrenceId?: string }).occurrenceId;
+      if (!occurrenceId) continue;
+      const call = calls.get(occurrenceId);
+      if (!call) continue;
+      if (tools.orderedEffect({ id: occurrenceId, ...call })) continue;
+      observed.add(`${call.name} appended ${event.type}`);
+    }
+  }
+  return [...observed];
+}
+
 export interface AgentRuntimeHarness extends AgentRuntimeV1 {
   readonly systemPrompt: SystemPromptRegistry;
   readonly llm: LlmRegistry;
@@ -52,45 +90,6 @@ export function createAgentRuntimeHarness(
   const cleanups: Array<() => Promise<void>> = [];
   const sessions = new SessionStore(options.sessions);
   const tools = new ToolRegistry(hooks, systemPrompt);
-  // Every tool any test runs through this harness is watched: if its execution
-  // put a conversation-positioned event on the log under its own effect id,
-  // the tool has to have declared `orderedEffect`. The check is here rather
-  // than in one feature's tests because it is the whole catalog's invariant,
-  // and it is what the *next* such tool meets without anybody remembering to
-  // write a test for it.
-  const unordered = new Set<string>();
-  // The call the model wrote, kept against the preparation it produced: a
-  // dynamic tool's ordering is declared on the inner definition and read
-  // through the meta-call, which is the call a dispatcher classifies.
-  const declaredCalls = new WeakMap<object, ToolCall>();
-  const prepare = tools.prepare.bind(tools);
-  tools.prepare = async (call, context) => {
-    const preparation = await prepare(call, context);
-    declaredCalls.set(preparation, call);
-    return preparation;
-  };
-  const dispatch = tools.executePrepared.bind(tools);
-  tools.executePrepared = async (preparation, context) => {
-    const before = sessions.get(context.sessionId)?.events.length ?? 0;
-    const result = await dispatch(preparation, context);
-    const call =
-      declaredCalls.get(preparation) ?? context.toolCall ?? preparation.call;
-    const landed = sessions
-      .get(context.sessionId)
-      ?.events.slice(before)
-      .find(
-        (event) =>
-          (CONVERSATION_POSITIONED_EVENTS_V1 as readonly string[]).includes(
-            event.type,
-          ) &&
-          (event as { occurrenceId?: string }).occurrenceId ===
-            context.effectId,
-      );
-    if (landed && !tools.orderedEffect(call)) {
-      unordered.add(`${preparation.call.name} appended ${landed.type}`);
-    }
-    return result;
-  };
   const harness: AgentRuntimeHarness = {
     sessions,
     systemPrompt,
@@ -102,12 +101,11 @@ export function createAgentRuntimeHarness(
       cleanups.push(await mountRuntimeFeaturesV1(harness, [feature]));
     },
     async dispose() {
+      const undeclared = undeclaredConversationAppends(sessions, tools);
       for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-      if (unordered.size > 0) {
-        const observed = [...unordered].join("; ");
-        unordered.clear();
+      if (undeclared.length > 0) {
         throw new Error(
-          `${observed}. A tool whose effect takes a position in the conversation must declare orderedEffect, or a batch will let it race the others and the transcript, the wire ordinals and the notifications will disagree about what happened first.`,
+          `${undeclared.join("; ")}. A tool whose effect takes a position in the conversation must declare orderedEffect, or a batch will let it race the others and the transcript, the wire ordinals and the notifications will disagree about what happened first.`,
         );
       }
     },

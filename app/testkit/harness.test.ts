@@ -1,6 +1,8 @@
 // The harness's own guard: a tool whose effect takes a position in the
 // conversation has to declare `orderedEffect`, and the harness every feature
-// test already uses is what notices when one does not.
+// test already uses is what notices when one does not. It reads the journal
+// back after the run rather than watching dispatch, so what it checks is
+// exactly what the durable log says happened.
 import { expect, test } from "bun:test";
 import type {
   ToolDefinition,
@@ -52,6 +54,17 @@ async function runTool(definition: ToolDefinition, append: boolean) {
     turnType: "chat",
     signal: new AbortController().signal,
   };
+  // What the loop journals before it dispatches: the guard reads the tool
+  // name off this row to decide which definition owned the append.
+  session.append({
+    type: "tool/call",
+    turn: 1,
+    step: 1,
+    occurrenceId: EFFECT,
+    name: call.name,
+    input: call.input,
+  });
+  await session.flush();
   const preparation = await harness.tools.prepare(call, context);
   if (preparation.kind !== "ready") throw new Error("the call was denied");
   await harness.tools.executePrepared(preparation, context);

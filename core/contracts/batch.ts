@@ -2,7 +2,10 @@ import type { ToolCallOccurrence } from "./types.js";
 import { toolCallOccurrences } from "./types.js";
 
 export const BATCH_TOOL_NAME = "batch";
-/** Most calls one `batch` may carry. */
+/**
+ * Most calls one `batch` may carry. Raising this is safe; LOWERING it is not —
+ * see the durable-format warning on `decodeBatchCallsV1`.
+ */
 export const BATCH_MAX_CALLS_V1 = 25;
 /**
  * Admissions a batch leaves unspent for the step that reads its result. A
@@ -72,6 +75,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * It is pure, and every reader of a batch — the loop that dispatches it and
  * the journal that derives its occurrences — decodes it here, so what runs
  * and what the durable log says ran cannot drift apart.
+ *
+ * WARNING — this function is part of the DURABLE FORMAT. It is re-run over
+ * stored assistant messages: `validateToolOccurrenceJournal` derives a step's
+ * sub-occurrences by decoding the message again long after the step ran, so
+ * changing what it accepts rewrites history. Lowering `BATCH_MAX_CALLS_V1`,
+ * tightening the `arguments` check, or adding a new `invalid` case all
+ * retroactively change which sub-occurrences an already-stored message
+ * declares; the `tool/call` and `tool/result` rows stored for those ids then
+ * fail validation permanently on a Bot that has been running fine for months,
+ * and recovery turns that into `invalidToolJournal` for every later Turn in
+ * the conversation. Widening acceptance — raising the cap, accepting a shape
+ * that was rejected before — is the only safe direction: it can only add
+ * occurrences to messages whose stored rows never existed. Anything narrower
+ * needs a new decoder behind a new version, not an edit here.
  */
 export function decodeBatchCallsV1(input: unknown): BatchSubCallV1[] | string {
   if (!isRecord(input)) return "batch requires an object with a calls array";
