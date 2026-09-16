@@ -52,6 +52,17 @@ function recorder(name: string, effects: string[]): ToolDefinition {
   };
 }
 
+/** A tool whose dispatch throws, so the caller cannot see whether it ran. */
+function thrower(name: string, idempotent: boolean): ToolDefinition {
+  return {
+    name,
+    description: `${name} fixture.`,
+    inputSchema: { type: "object" },
+    idempotent,
+    execute: () => Promise.reject(new Error("fetch failed")),
+  };
+}
+
 describe("batch", () => {
   test("is offered to the model as a native tool", () => {
     const names = registry()
@@ -108,7 +119,8 @@ describe("batch", () => {
     expect(report.results[1]).toMatchObject({
       index: 1,
       isError: true,
-      content: "the bucket went away",
+      content:
+        "the bucket went away (the loop cannot tell whether this call took effect)",
     });
     expect(effects.length).toBe(2);
   });
@@ -170,5 +182,32 @@ describe("batch", () => {
     expect(over.isError).toBe(true);
     expect(over.content).toContain(String(BATCH_MAX_CALLS_V1));
     expect(empty.isError).toBe(true);
+  });
+});
+
+describe("batch sub-call failures", () => {
+  test("says a thrown non-idempotent call may still have taken effect", async () => {
+    const tools = registry(
+      thrower("send_email", false),
+      thrower("read_inbox", true),
+    );
+
+    const result = await runBatch(tools, [
+      { tool: "send_email", arguments: {} },
+      { tool: "read_inbox", arguments: {} },
+    ]);
+
+    // The same sentence the loop gives a top-level throw: it is what the
+    // model reads to decide whether retrying would send the mail twice.
+    expect(JSON.parse(result.content as string).results).toEqual([
+      {
+        index: 0,
+        tool: "send_email",
+        isError: true,
+        content:
+          "fetch failed (the loop cannot tell whether this call took effect)",
+      },
+      { index: 1, tool: "read_inbox", isError: true, content: "fetch failed" },
+    ]);
   });
 });

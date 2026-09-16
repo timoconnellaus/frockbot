@@ -1,19 +1,11 @@
 import {
   type ToolCallOccurrence,
   type ToolExecutionResult,
+  uncertainToolFailureV1,
   validateToolOccurrenceJournal,
 } from "@frockbot/core/contracts";
 import { EffectAdmissionFencedError } from "./errors.js";
 import type { LoopRuntime } from "./runtime.js";
-
-/**
- * What a tool reports when its own dispatch failed and the loop cannot tell
- * whether the work happened. The model reads it and decides; the loop does
- * not try to find out.
- */
-function uncertainToolFailure(message: string): string {
-  return `${message} (the loop cannot tell whether this call took effect)`;
-}
 
 /**
  * Runs every occurrence and reports whether any result ended the Turn. The
@@ -112,7 +104,7 @@ export async function executeToolsV1(
         result = {
           content: preparation.idempotent
             ? message
-            : uncertainToolFailure(message),
+            : uncertainToolFailureV1(message),
           isError: true,
         };
       }

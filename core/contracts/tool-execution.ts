@@ -148,6 +148,16 @@ export type ToolPreparation =
   | { kind: "ready"; call: ToolCall; idempotent: boolean }
   | { kind: "denied"; call: ToolCall; result: ToolExecutionResult };
 
+/**
+ * What a tool reports when its own dispatch threw and the caller cannot tell
+ * whether the work happened. The model reads it and decides whether to retry;
+ * nothing else tries to find out. Every dispatcher of a non-idempotent tool
+ * says it the same way, inside a batch and outside one.
+ */
+export function uncertainToolFailureV1(message: string): string {
+  return `${message} (the loop cannot tell whether this call took effect)`;
+}
+
 /** The kernel-declared tool execution interface. Implemented by a Package. */
 export interface ToolExecution {
   /** The catalog trimmed to what this turn type — and role — admits. */

@@ -1281,6 +1281,43 @@ describe("client run protocol v1", () => {
     ]);
   });
 
+  test("keeps declared send names when a run also projects a send", () => {
+    // A failed run tells its notice as a message, appended with a key no tool
+    // minted. That key must not cost the real sends their declared names.
+    const landed = ["tool:1:1:0.1", "tool:1:1:0.0", "tool:1:1:0.2"];
+    const projected = projectClientRunV1(
+      storedRun(
+        landed.map((occurrenceId, seq) =>
+          event({
+            type: "send/to-user",
+            seq,
+            timestamp,
+            turn: 1,
+            step: 1,
+            occurrenceId,
+            payload: { type: "text", text: occurrenceId },
+          }),
+        ),
+        "failed",
+      ),
+      { ordinal: 3, text: "notice" },
+    );
+
+    expect(
+      projected.events
+        .filter((entry) => entry.type === "send/to-user")
+        .map((entry) => [
+          entry.payload.type === "text" ? entry.payload.text : "",
+          entry.ordinal,
+        ]),
+    ).toEqual([
+      ["tool:1:1:0.1", 1],
+      ["tool:1:1:0.0", 0],
+      ["tool:1:1:0.2", 2],
+      ["notice", 3],
+    ]);
+  });
+
   test("truncates sends alongside tool interactions, oldest first", () => {
     const sends = Array.from({ length: 600 }, (_, index) =>
       event({

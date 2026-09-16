@@ -16,6 +16,7 @@ import {
   type ToolRegistrationOptions,
   type ToolSchema,
   type TurnTypeV1,
+  uncertainToolFailureV1,
 } from "@frockbot/core/contracts";
 
 export const GET_DYNAMIC_TOOLS_NAME = "get_dynamic_tools";
@@ -855,25 +856,33 @@ export class ToolRegistry implements ToolExecution {
           effectId: batchToolOccurrenceId(context.effectId, index),
           toolCall: call,
         };
+        const failure = (message: string, idempotent: boolean) => ({
+          index,
+          tool: sub.tool,
+          result: {
+            content: idempotent ? message : uncertainToolFailureV1(message),
+            isError: true,
+          } satisfies ToolExecutionResult,
+        });
+        const messageOf = (error: unknown) =>
+          error instanceof Error
+            ? error.message
+            : `batch call ${index} failed`;
+        let preparation: ToolPreparation;
         try {
-          const preparation = await this.prepare(call, subContext);
-          const result =
-            preparation.kind === "denied"
-              ? preparation.result
-              : await this.executePrepared(preparation, subContext);
+          preparation = await this.prepare(call, subContext);
+        } catch (error) {
+          // A throw out of `prepare` is certain: nothing dispatched.
+          return failure(messageOf(error), true);
+        }
+        if (preparation.kind === "denied") {
+          return { index, tool: sub.tool, result: preparation.result };
+        }
+        try {
+          const result = await this.executePrepared(preparation, subContext);
           return { index, tool: sub.tool, result };
         } catch (error) {
-          return {
-            index,
-            tool: sub.tool,
-            result: {
-              content:
-                error instanceof Error
-                  ? error.message
-                  : `batch call ${index} failed`,
-              isError: true,
-            } satisfies ToolExecutionResult,
-          };
+          return failure(messageOf(error), preparation.idempotent);
         }
       }),
     );
