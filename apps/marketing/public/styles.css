@@ -1444,3 +1444,304 @@
     }
   }
 }
+
+.hero-flock .arrival {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: hero-arrive 650ms var(--enter) both
+    cubic-bezier(0.2, 0.85, 0.28, 1.18);
+}
+.hero-flock .character {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: hero-character-idle var(--body-time) var(--phase) infinite
+    ease-in-out;
+}
+.hero-flock [id$="-eye-left"],
+.hero-flock [id$="-eye-right"] {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: hero-blink var(--blink-time) var(--phase) infinite ease-in-out;
+}
+.hero-flock [id$="-ear-left"] {
+  transform-box: fill-box;
+  transform-origin: 70% 70%;
+  animation: hero-ear-left var(--twitch-time) var(--phase) infinite ease-in-out;
+}
+.hero-flock [id$="-ear-right"] {
+  transform-box: fill-box;
+  transform-origin: 30% 70%;
+  animation: hero-ear-right var(--twitch-time) calc(var(--phase) - 1.2s)
+    infinite ease-in-out;
+}
+.hero-flock [id$="-tail"],
+.hero-flock [id$="-tail-tip"] {
+  transform-box: fill-box;
+  transform-origin: 25% 70%;
+  animation: hero-tail-flick var(--tail-time) var(--phase) infinite ease-in-out;
+}
+#rabbit-foot-right,
+#dog-foot-left,
+#goat-foot-right {
+  transform-box: fill-box;
+  transform-origin: 50% 20%;
+  animation: hero-foot-tap var(--foot-time) var(--phase) infinite ease-in-out;
+}
+#chill-fur,
+#nudge-fur,
+#sunny-fur {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: hero-soft-squish var(--soft-time) var(--phase) infinite ease-in-out;
+}
+.hero-flock.paused * {
+  animation-play-state: paused !important;
+}
+
+@keyframes hero-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(42px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes hero-character-idle {
+  0%,
+  72%,
+  78%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  74% {
+    transform: translateY(-5px) rotate(-0.8deg);
+  }
+  76% {
+    transform: translateY(-1px) rotate(0.45deg);
+  }
+}
+@keyframes hero-blink {
+  0%,
+  54%,
+  57%,
+  100% {
+    transform: scaleY(1);
+  }
+  55%,
+  56% {
+    transform: scaleY(0.08);
+  }
+}
+@keyframes hero-ear-left {
+  0%,
+  64%,
+  70%,
+  100% {
+    transform: rotate(0deg);
+  }
+  66% {
+    transform: rotate(-7deg);
+  }
+  68% {
+    transform: rotate(3deg);
+  }
+}
+@keyframes hero-ear-right {
+  0%,
+  78%,
+  84%,
+  100% {
+    transform: rotate(0deg);
+  }
+  80% {
+    transform: rotate(7deg);
+  }
+  82% {
+    transform: rotate(-3deg);
+  }
+}
+@keyframes hero-tail-flick {
+  0%,
+  68%,
+  75%,
+  100% {
+    transform: rotate(0deg);
+  }
+  70% {
+    transform: rotate(-8deg);
+  }
+  72% {
+    transform: rotate(6deg);
+  }
+  74% {
+    transform: rotate(-2deg);
+  }
+}
+@keyframes hero-foot-tap {
+  0%,
+  81%,
+  88%,
+  100% {
+    transform: rotate(0deg) translateY(0);
+  }
+  83% {
+    transform: rotate(-4deg) translateY(-8px);
+  }
+  86% {
+    transform: rotate(1deg) translateY(0);
+  }
+}
+@keyframes hero-soft-squish {
+  0%,
+  60%,
+  66%,
+  100% {
+    transform: scale(1);
+  }
+  62% {
+    transform: scale(1.018, 0.982);
+  }
+  64% {
+    transform: scale(0.992, 1.008);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-flock * {
+    animation: none !important;
+  }
+}
+.hero-flock [data-hero-motion="motion-0"] {
+  --enter: 0ms;
+}
+.hero-flock [data-hero-motion="motion-1"] {
+  --body-time: 24s;
+  --blink-time: 19s;
+  --twitch-time: 27s;
+  --tail-time: 22s;
+  --foot-time: 26s;
+  --soft-time: 23s;
+  --phase: -3s;
+}
+.hero-flock [data-hero-motion="motion-2"] {
+  --enter: 45ms;
+}
+.hero-flock [data-hero-motion="motion-3"] {
+  --body-time: 28s;
+  --blink-time: 23s;
+  --twitch-time: 31s;
+  --tail-time: 26s;
+  --foot-time: 30s;
+  --soft-time: 27s;
+  --phase: -11s;
+}
+.hero-flock [data-hero-motion="motion-4"] {
+  --enter: 90ms;
+}
+.hero-flock [data-hero-motion="motion-5"] {
+  --body-time: 26s;
+  --blink-time: 21s;
+  --twitch-time: 29s;
+  --tail-time: 24s;
+  --foot-time: 28s;
+  --soft-time: 25s;
+  --phase: -7s;
+}
+.hero-flock [data-hero-motion="motion-6"] {
+  --enter: 135ms;
+}
+.hero-flock [data-hero-motion="motion-7"] {
+  --body-time: 30s;
+  --blink-time: 25s;
+  --twitch-time: 33s;
+  --tail-time: 28s;
+  --foot-time: 32s;
+  --soft-time: 29s;
+  --phase: -17s;
+}
+.hero-flock [data-hero-motion="motion-8"] {
+  --enter: 180ms;
+}
+.hero-flock [data-hero-motion="motion-9"] {
+  --body-time: 23s;
+  --blink-time: 18s;
+  --twitch-time: 26s;
+  --tail-time: 21s;
+  --foot-time: 25s;
+  --soft-time: 22s;
+  --phase: -13s;
+}
+.hero-flock [data-hero-motion="motion-10"] {
+  --enter: 225ms;
+}
+.hero-flock [data-hero-motion="motion-11"] {
+  --body-time: 27s;
+  --blink-time: 22s;
+  --twitch-time: 30s;
+  --tail-time: 25s;
+  --foot-time: 29s;
+  --soft-time: 26s;
+  --phase: -5s;
+}
+.hero-flock [data-hero-motion="motion-12"] {
+  --enter: 270ms;
+}
+.hero-flock [data-hero-motion="motion-13"] {
+  --body-time: 31s;
+  --blink-time: 26s;
+  --twitch-time: 34s;
+  --tail-time: 29s;
+  --foot-time: 33s;
+  --soft-time: 30s;
+  --phase: -19s;
+}
+.hero-flock [data-hero-motion="motion-14"] {
+  --enter: 315ms;
+}
+.hero-flock [data-hero-motion="motion-15"] {
+  --body-time: 25s;
+  --blink-time: 20s;
+  --twitch-time: 28s;
+  --tail-time: 23s;
+  --foot-time: 27s;
+  --soft-time: 24s;
+  --phase: -2s;
+}
+.hero-flock [data-hero-motion="motion-16"] {
+  --enter: 360ms;
+}
+.hero-flock [data-hero-motion="motion-17"] {
+  --body-time: 29s;
+  --blink-time: 24s;
+  --twitch-time: 32s;
+  --tail-time: 27s;
+  --foot-time: 31s;
+  --soft-time: 28s;
+  --phase: -15s;
+}
+.hero-flock [data-hero-motion="motion-18"] {
+  --enter: 405ms;
+}
+.hero-flock [data-hero-motion="motion-19"] {
+  --body-time: 22s;
+  --blink-time: 17s;
+  --twitch-time: 25s;
+  --tail-time: 20s;
+  --foot-time: 24s;
+  --soft-time: 21s;
+  --phase: -9s;
+}
+.hero-flock [data-hero-motion="motion-20"] {
+  --enter: 450ms;
+}
+.hero-flock [data-hero-motion="motion-21"] {
+  --body-time: 32s;
+  --blink-time: 27s;
+  --twitch-time: 35s;
+  --tail-time: 30s;
+  --foot-time: 34s;
+  --soft-time: 31s;
+  --phase: -22s;
+}

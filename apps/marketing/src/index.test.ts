@@ -193,6 +193,30 @@ describe("marketing worker", () => {
     );
   });
 
+  test("renders the animated hero under the production security policy", async () => {
+    const homepage = await worker.fetch(new Request("https://frockbot.com/"), {
+      ASSETS: assets(new Response(await publicFile("index.html"))),
+    });
+    const policy = homepage.headers.get("content-security-policy") ?? "";
+    expect(policy).toContain("object-src 'none'");
+    expect(policy).toContain("style-src 'self'");
+    expect(policy).not.toContain("'unsafe-inline'");
+    expect(homepage.headers.get("x-frame-options")).toBe("DENY");
+    const page = await homepage.text();
+    const hero = page.slice(
+      page.indexOf('<div class="hero-peek"'),
+      page.indexOf("</section>", page.indexOf('<div class="hero-peek"')),
+    );
+    expect(hero).toMatch(/<svg[^>]*class="hero-flock"/);
+    expect(hero).not.toMatch(/<object\b|<style\b|\bstyle=/);
+    expect(hero).toContain('data-character="pixel"');
+    expect(hero).toContain('id="rabbit-foot-right"');
+    const css = await publicFile("styles.css");
+    expect(css).toContain(".hero-flock .arrival");
+    expect(css).toContain(".hero-flock.paused *");
+    expect(css).toContain("prefers-reduced-motion: reduce");
+  });
+
   test.each(["/download/mac", "/download/mac/"])(
     "%s redirects to the latest notarized disk image on our own domain",
     async (path: string) => {
