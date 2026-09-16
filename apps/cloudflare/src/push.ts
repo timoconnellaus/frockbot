@@ -1,4 +1,5 @@
 import { isPublicIdentifier } from "@frockbot/core/configuration";
+import { withDeadlineV1 } from "@frockbot/core/deadline";
 
 export interface PushDevice {
   deviceId: string;
@@ -173,23 +174,31 @@ async function accessToken(
     key,
     encoder.encode(`${header}.${claims}`),
   );
-  const auth = await request("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion: `${header}.${claims}.${base64url(new Uint8Array(signature))}`,
-    }),
-    signal: AbortSignal.timeout(10_000),
-  }).catch(() => {
-    throw new RetryablePushError("Push authorization is unavailable");
-  });
-  if (!auth.ok)
-    throw new RetryablePushError(`Push authorization failed (${auth.status})`);
-  const access = (await auth.json()) as {
-    access_token: string;
-    expires_in?: number;
-  };
+  const deadline = withDeadlineV1(10_000);
+  let access: { access_token: string; expires_in?: number };
+  try {
+    const auth = await request("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion: `${header}.${claims}.${base64url(new Uint8Array(signature))}`,
+      }),
+      signal: deadline.signal,
+    }).catch(() => {
+      throw new RetryablePushError("Push authorization is unavailable");
+    });
+    if (!auth.ok)
+      throw new RetryablePushError(
+        `Push authorization failed (${auth.status})`,
+      );
+    access = (await auth.json()) as {
+      access_token: string;
+      expires_in?: number;
+    };
+  } finally {
+    deadline.clear();
+  }
   accessTokens.set(account.client_email, {
     token: access.access_token,
     expiresAt:
@@ -211,24 +220,30 @@ export async function sendFcm(
 ): Promise<"sent" | "unregistered"> {
   const account = JSON.parse(secret) as ServiceAccount;
   const bearer = await accessToken(account, request);
-  const result = await request(
-    `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account.project_id)}/messages:send`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${bearer}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: {
-          token,
-          data,
-          android: { priority: notify ? "HIGH" : "NORMAL", ttl: "86400s" },
+  const deadline = withDeadlineV1(10_000);
+  let result: Response;
+  try {
+    result = await request(
+      `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account.project_id)}/messages:send`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${bearer}`,
+          "Content-Type": "application/json",
         },
-      }),
-      signal: AbortSignal.timeout(10_000),
-    },
-  );
+        body: JSON.stringify({
+          message: {
+            token,
+            data,
+            android: { priority: notify ? "HIGH" : "NORMAL", ttl: "86400s" },
+          },
+        }),
+        signal: deadline.signal,
+      },
+    );
+  } finally {
+    deadline.clear();
+  }
   if (result.status === 404) {
     const error = (await result.json()) as {
       error?: { details?: { errorCode?: string }[] };

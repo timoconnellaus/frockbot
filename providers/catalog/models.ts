@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ConnectionModelV1 } from "@frockbot/core/connection";
+import { withDeadlineV1 } from "@frockbot/core/deadline";
 import {
   loadRadiusGatewayConfig,
   getRadiusModelsFromConfig,
@@ -19,14 +20,19 @@ export async function loadProviderModelsV1(
   baseUrl?: string,
 ): Promise<Model<Api>[]> {
   if (providerId !== "radius") return providerModelsV1(providerId);
-  return getRadiusModelsFromConfig(
-    providerId,
-    await loadRadiusGatewayConfig(
-      baseUrl ?? "https://radius.pi.dev",
-      apiKey,
-      AbortSignal.timeout(15_000),
-    ),
-  );
+  const deadline = withDeadlineV1(15_000);
+  try {
+    return getRadiusModelsFromConfig(
+      providerId,
+      await loadRadiusGatewayConfig(
+        baseUrl ?? "https://radius.pi.dev",
+        apiKey,
+        deadline.signal,
+      ),
+    );
+  } finally {
+    deadline.clear();
+  }
 }
 export function connectionModelV1(
   model: Model<Api>,

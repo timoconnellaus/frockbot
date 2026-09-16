@@ -5,6 +5,7 @@ import {
   stable,
   type SubscriptionState,
 } from "./ledger.js";
+import { withDeadlineV1 } from "@frockbot/core/deadline";
 
 export interface StripeConfig {
   secretKey: string;
@@ -65,20 +66,27 @@ export class StripeClient {
     fields?: Record<string, string>,
     key?: string,
   ): Promise<StripeObject> {
-    const response = await this.request(`https://api.stripe.com/v1/${path}`, {
-      method: fields ? "POST" : "GET",
-      headers: {
-        authorization: `Bearer ${this.config.secretKey}`,
-        "Stripe-Version": "2025-02-24.acacia",
-        ...(fields
-          ? { "content-type": "application/x-www-form-urlencoded" }
-          : {}),
-        ...(key ? { "Idempotency-Key": key } : {}),
-      },
-      ...(fields ? { body: new URLSearchParams(fields) } : {}),
-      signal: AbortSignal.timeout(20_000),
-    });
-    const body = await boundedText(response);
+    const deadline = withDeadlineV1(20_000);
+    let response: Response;
+    let body: string;
+    try {
+      response = await this.request(`https://api.stripe.com/v1/${path}`, {
+        method: fields ? "POST" : "GET",
+        headers: {
+          authorization: `Bearer ${this.config.secretKey}`,
+          "Stripe-Version": "2025-02-24.acacia",
+          ...(fields
+            ? { "content-type": "application/x-www-form-urlencoded" }
+            : {}),
+          ...(key ? { "Idempotency-Key": key } : {}),
+        },
+        ...(fields ? { body: new URLSearchParams(fields) } : {}),
+        signal: deadline.signal,
+      });
+      body = await boundedText(response);
+    } finally {
+      deadline.clear();
+    }
     if (!response.ok)
       throw new BillingError(
         "Stripe could not complete this request. Please try again.",

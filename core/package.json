@@ -6,6 +6,7 @@
   "exports": {
     "./concurrency": "./concurrency.ts",
     "./contracts": "./contracts/index.ts",
+    "./deadline": "./deadline.ts",
     "./contracts/contributions": "./contracts/contributions.ts",
     "./durable": "./durable/index.ts",
     "./durable/composition-failure": "./durable/composition/failure.ts",
