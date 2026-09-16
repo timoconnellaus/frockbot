@@ -132,6 +132,8 @@ export function createBotExportTemplateTool(
     // The staging command id is derived from the occurrence, so re-running
     // meets the durable receipt and reports the same share.
     idempotent: true,
+    // It appends an agent-card to the conversation.
+    orderedEffect: true,
     validate: (input: unknown) =>
       input === undefined ||
       (typeof input === "object" &&

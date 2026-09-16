@@ -654,6 +654,7 @@ describe("AgentLoop", () => {
     if (request?.type !== "model/request") throw new Error("request missing");
     expect(request.request.tools.map((schema) => schema.name)).toEqual([
       "work",
+      "batch",
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);
@@ -700,6 +701,7 @@ describe("AgentLoop", () => {
     if (request?.type !== "model/request") throw new Error("request missing");
     expect(request.request.tools.map((schema) => schema.name)).toEqual([
       "send_to_user",
+      "batch",
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);
@@ -1552,6 +1554,63 @@ describe("AgentLoop", () => {
       type: "turn/end",
       outcome: "cancelled",
     });
+  });
+  test("settles a Stop that lands between the intent and the dispatch as interrupted", async () => {
+    // A Stop is not a failure. The occurrence is journalled, the Stop arrives
+    // while that intent is being made durable, and nothing is dispatched under
+    // it — so the result says `interrupted`, which is what the audit index
+    // reads to tell a cancelled effect from one that ran and broke.
+    const provider: LlmProvider = {
+      id: "stop-during-intent",
+      async *stream() {
+        yield {
+          type: "tool-call",
+          call: { id: "external", name: "external", input: {} },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      },
+    };
+    let executions = 0;
+    const tool: ToolDefinition = {
+      name: "external",
+      description: "An effect the Stop must arrive ahead of.",
+      inputSchema: { type: "object" },
+      execute() {
+        executions += 1;
+        return Promise.resolve({ content: "ran", isError: false });
+      },
+    };
+    let stop: (() => void) | undefined;
+    const runtime = mountRuntime(provider, tool, async (_sessionId, events) => {
+      if (
+        events.some(
+          (event) => event.type === "tool/call" && event.name === "external",
+        )
+      ) {
+        stop?.();
+      }
+    });
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-stop-intent",
+      sessionId: "stop-intent",
+      provider: provider.id,
+      model: "test-model",
+    });
+    stop = () => handle.agent.cancel();
+
+    handle.agent.send("Start an external effect.");
+    await handle.agent.whenIdle();
+
+    expect(executions).toBe(0);
+    expect(handle.agent.session.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool/result",
+        occurrenceId: "tool:1:1:0",
+        isError: true,
+        status: "interrupted",
+      }),
+    );
   });
   test("re-issues an open tool occurrence under the same effect id", async () => {
     let modelRequests = 0;

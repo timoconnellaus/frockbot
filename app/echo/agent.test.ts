@@ -80,6 +80,6 @@ describe("echo feature", () => {
     await runtime.dispose();
     expect(
       runtime.tools.schemas({ turnType: "chat" }).map((tool) => tool.name),
-    ).toEqual(["get_dynamic_tools", "call_dynamic_tool"]);
+    ).toEqual(["batch", "get_dynamic_tools", "call_dynamic_tool"]);
   });
 });

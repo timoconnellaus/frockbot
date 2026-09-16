@@ -385,6 +385,7 @@ describe("the Computer tools' subagent roles", () => {
     // screen, or the processes a shell left behind.
     expect(await named("browserUse")).toEqual([
       "computer_browser",
+      "batch",
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);
@@ -395,10 +396,12 @@ describe("the Computer tools' subagent roles", () => {
     expect(await named("executor")).toContain("computer_exec");
     // The two video roles have no Computer at all.
     expect(await named("watchVideo")).toEqual([
+      "batch",
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);
     expect(await named("videoReview")).toEqual([
+      "batch",
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);

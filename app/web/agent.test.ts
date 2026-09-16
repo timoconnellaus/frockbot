@@ -255,7 +255,7 @@ describe("the web-fetch Capability enablement", () => {
         ),
       }).toEqual({
         turnType,
-        names: ["web_fetch", "get_dynamic_tools", "call_dynamic_tool"],
+        names: ["web_fetch", "batch", "get_dynamic_tools", "call_dynamic_tool"],
       });
     }
     await runtime.dispose();

@@ -135,6 +135,15 @@ export interface ToolDefinition extends ToolSchema {
    * under the same `effectId` — and is expected to honour that key.
    */
   idempotent?: boolean;
+  /**
+   * Whether this tool's effect occupies a position in the conversation: a
+   * message bubble, a hand-off, an answer. Two such effects are not
+   * interchangeable once they have landed — the order they landed in is the
+   * order a person reads them in, and is the order their durable identities
+   * are minted in — so a dispatcher that runs several calls at once must not
+   * let them race each other. Everything else may run concurrently.
+   */
+  orderedEffect?: boolean;
   /** The turn types this tool is offered on. Absent means all of them. */
   admission?: TurnAdmissionV1;
   validate?(input: unknown): boolean;
@@ -148,6 +157,16 @@ export type ToolPreparation =
   | { kind: "ready"; call: ToolCall; idempotent: boolean }
   | { kind: "denied"; call: ToolCall; result: ToolExecutionResult };
 
+/**
+ * What a tool reports when its own dispatch threw and the caller cannot tell
+ * whether the work happened. The model reads it and decides whether to retry;
+ * nothing else tries to find out. Every dispatcher of a non-idempotent tool
+ * says it the same way, inside a batch and outside one.
+ */
+export function uncertainToolFailureV1(message: string): string {
+  return `${message} (the loop cannot tell whether this call took effect)`;
+}
+
 /** The kernel-declared tool execution interface. Implemented by a Package. */
 export interface ToolExecution {
   /** The catalog trimmed to what this turn type — and role — admits. */
@@ -155,6 +174,13 @@ export interface ToolExecution {
     turnType: TurnTypeV1;
     subagentRole?: string;
   }): ToolSchema[];
+  /**
+   * Whether this call's effect occupies a position in the conversation, read
+   * off the definition the call will actually reach. A dispatcher that runs
+   * several calls at once asks before it dispatches them, because two such
+   * effects may not race each other.
+   */
+  orderedEffect(call: ToolCall): boolean;
   prepare(
     call: ToolCall,
     context: ToolExecutionContext,

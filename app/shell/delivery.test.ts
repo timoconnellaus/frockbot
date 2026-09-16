@@ -8,7 +8,10 @@ import type {
 } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { createWebFetchToolDefinitionV1 } from "@frockbot/app/web/agent";
+import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
 import { shellAgentFeature } from "./agent.js";
+import type { StoredRun } from "./backend-contracts.js";
+import { projectClientRunV1 } from "./run-protocol.js";
 import { createReplyToRequestToolV1 } from "./reply-to-caller.js";
 
 async function run(
@@ -364,6 +367,7 @@ test("a final greeting completes in one model call even if the model would repea
       requests++;
       expect(request.tools.map((tool) => tool.name)).toEqual([
         "send_to_user",
+        "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);
@@ -491,6 +495,7 @@ test("a repaired interim update restores the full toolset for the rest of the Tu
       }
       expect(request.tools.map((tool) => tool.name)).toEqual([
         "send_to_user",
+        "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);
@@ -599,6 +604,7 @@ test("specialist schemas are disclosed on demand and interim work reaches a fina
       requests++;
       expect(request.tools.map((t) => t.name)).toEqual([
         "send_to_user",
+        "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);
@@ -669,5 +675,125 @@ test("specialist schemas are disclosed on demand and interim work reaches a fina
   expect(events.at(-1)).toMatchObject({
     type: "turn/end",
     outcome: "completed",
+  });
+});
+
+test("a batched finish send ends the Turn in one model call", async () => {
+  let requests = 0;
+  const events = await run({
+    id: "test",
+    async *stream() {
+      requests++;
+      yield {
+        type: "tool-call",
+        call: {
+          id: "parts",
+          name: "batch",
+          input: {
+            calls: [
+              {
+                tool: "send_to_user",
+                arguments: {
+                  disposition: "continue",
+                  payload: { type: "text", text: "First part." },
+                },
+              },
+              {
+                tool: "send_to_user",
+                arguments: {
+                  disposition: "finish",
+                  payload: { type: "text", text: "Second part." },
+                },
+              },
+            ],
+          },
+        },
+      };
+      yield { type: "finish", reason: "tool-calls" };
+    },
+  });
+  expect(requests).toBe(1);
+  expect(
+    events
+      .filter((event) => event.type === "send/to-user")
+      .map((event) => event.payload),
+  ).toEqual([
+    { type: "text", text: "First part." },
+    { type: "text", text: "Second part." },
+  ]);
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
+/** The Turn's own events, as the client is given them. */
+function projectedRun(events: SessionEvent[]) {
+  const run: StoredRun = {
+    runId: "run-delivery",
+    commandFingerprint: "fingerprint",
+    sessionId: "user:test",
+    acceptedAt: "2026-09-16T00:00:00.000Z",
+    input: "hi",
+    events,
+    effectAdmissions: [],
+    status: "completed",
+    phase: "executing",
+    compositionGenerationId: "test-composition-generation",
+    configurationSnapshot: initializeBotSettingsV1("test"),
+    previousEventCount: 0,
+    responseText: "done",
+  };
+  return projectClientRunV1(run);
+}
+
+test("a batch draws one row per declared call, including the malformed one", async () => {
+  const events = await run({
+    id: "test",
+    async *stream() {
+      yield {
+        type: "tool-call",
+        call: {
+          id: "mixed",
+          name: "batch",
+          input: {
+            calls: [
+              {
+                tool: "send_to_user",
+                arguments: {
+                  disposition: "finish",
+                  payload: { type: "text", text: "Only part." },
+                },
+              },
+              { arguments: { text: "the other part" } },
+            ],
+          },
+        },
+      };
+      yield { type: "finish", reason: "tool-calls" };
+    },
+  });
+
+  expect(events.filter((event) => event.type === "send/to-user")).toHaveLength(
+    1,
+  );
+
+  // The seam between two rules: a malformed call must not cost its siblings
+  // their run, and a dispatched batch is drawn as its calls rather than its
+  // envelope. Together they once made the malformed call vanish from the
+  // thread, so the Bot silently did less than it was asked to. The count is
+  // asserted so dropping either row fails here.
+  const projected = projectedRun(events);
+  const calls = projected.events.flatMap((event) =>
+    event.type === "tool/call" ? [event.call.name] : [],
+  );
+  expect(calls).toEqual(["send_to_user", "invalid_tool_call"]);
+  const results = projected.events.flatMap((event) =>
+    event.type === "tool/result" ? [event] : [],
+  );
+  expect(results).toHaveLength(2);
+  expect(results[1]).toMatchObject({
+    isError: true,
+    content: "batch call 1 was refused: it needs a tool name",
   });
 });

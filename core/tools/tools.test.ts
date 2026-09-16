@@ -196,7 +196,10 @@ describe("ToolRegistry turn admission", () => {
       .schemas(admission)
       .map((schema) => schema.name)
       .filter(
-        (name) => name !== "get_dynamic_tools" && name !== "call_dynamic_tool",
+        (name) =>
+          name !== "get_dynamic_tools" &&
+          name !== "call_dynamic_tool" &&
+          name !== "batch",
       );
   }
 

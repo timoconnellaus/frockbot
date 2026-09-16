@@ -67,7 +67,7 @@ Behavior made available by an installed Package, such as a model, tool set, memo
 _Avoid_: Plugin, feature
 
 **Tool Namespace**:
-A model-facing group of dynamic tools disclosed by name in the system prompt and by schema only on request. A tool without a namespace is native; a namespaced tool is discovered and invoked through the registry's two meta-tools.
+A model-facing group of dynamic tools disclosed by name in the system prompt and by schema only on request. A tool without a namespace is native; a namespaced tool is discovered and invoked through the registry's discovery and invocation meta-tools.
 _Avoid_: Package, Connection, tool prefix
 
 **Enablement**:

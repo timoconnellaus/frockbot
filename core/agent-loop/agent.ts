@@ -36,6 +36,16 @@ export interface AgentOptions {
   subagentRole?: string;
   /** Durably linearizes each new effect against Stop immediately before use. */
   admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
+  /**
+   * How many further effects this run's durable record can still admit.
+   *
+   * Only a caller that plans several admissions at once needs it: a `batch`
+   * asks before it expands, so a batch that cannot fit is refused as a tool
+   * error the model can act on rather than throwing out of the admission that
+   * would have overflowed the record. Absent ⇒ the host keeps no such record
+   * and admits without bound.
+   */
+  remainingEffectAdmissions?(): Promise<number>;
   modelBinding?: ModelBindingSnapshot;
 }
 

@@ -3,13 +3,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createAgentLoop } from "@frockbot/core/agent-loop";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
+import { modelToolCallsV1 } from "./grading.js";
 import { AGENT_LOOP_MAX_STEPS_V1 } from "@frockbot/app/agent-runtime";
 import { foundationBaseRuntimePackagesV1 } from "@frockbot/app/runtime";
 import { OpenAICompatibleProvider } from "@frockbot/providers/openai-compatible";
 
 export function gradeGreeting(events: readonly SessionEvent[]) {
   const requests = events.filter((e) => e.type === "model/request");
-  const calls = events.filter((e) => e.type === "tool/call");
+  const calls = modelToolCallsV1(events);
   const sends = events.filter((e) => e.type === "send/to-user");
   const input = calls[0]?.input;
   const text = sends[0]?.payload.type === "text" ? sends[0].payload.text : "";

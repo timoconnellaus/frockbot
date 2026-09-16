@@ -6,14 +6,18 @@ import {
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
 import { createShellBotBackendContribution } from "./backend.js";
-import { stopRun } from "./turn.js";
+import { remainingRunEffectAdmissions, stopRun } from "./turn.js";
 import type { ShellBotBackendHost } from "./backend-state.js";
 import {
   botTurnCommandFingerprintV1,
+  requireStoredRunV1,
   type StoredRun,
 } from "./backend-contracts.js";
 import { interruptedRunSettlementV1 } from "./backend-recovery.js";
-import { SessionEventLog } from "@frockbot/core/durable";
+import {
+  SessionEventLog,
+  STORED_EFFECT_ADMISSIONS_MAX,
+} from "@frockbot/core/durable";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
@@ -390,5 +394,44 @@ describe("stopped run settlement", () => {
     expect(() => interruptedRunSettlementV1(run, run.events)).toThrow(
       `run "${turn.runId}" has no durable stop or supersede intent`,
     );
+  });
+});
+
+describe("effect admission budget", () => {
+  function admissions(count: number): StoredRun["effectAdmissions"] {
+    return Array.from({ length: count }, (_, index) => ({
+      kind: "tool" as const,
+      effectId: `tool:1:1:${index}`,
+      outcome: "admitted" as const,
+    }));
+  }
+
+  test("reports what the run's record can still admit", async () => {
+    const { contribution } = await fixture(
+      storedRun({ effectAdmissions: admissions(10) }),
+    );
+
+    await expect(
+      remainingRunEffectAdmissions(contribution.state, turn.runId),
+    ).resolves.toBe(STORED_EFFECT_ADMISSIONS_MAX - 10);
+  });
+
+  test("reports nothing left at the bound the record decoder enforces", async () => {
+    const { contribution } = await fixture(
+      storedRun({ effectAdmissions: admissions(STORED_EFFECT_ADMISSIONS_MAX) }),
+    );
+
+    await expect(
+      remainingRunEffectAdmissions(contribution.state, turn.runId),
+    ).resolves.toBe(0);
+    // The budget is the decodable bound itself, not a second number beside
+    // it: one admission past it is a record that can no longer be read back.
+    expect(() =>
+      requireStoredRunV1(
+        storedRun({
+          effectAdmissions: admissions(STORED_EFFECT_ADMISSIONS_MAX + 1),
+        }),
+      ),
+    ).toThrow();
   });
 });

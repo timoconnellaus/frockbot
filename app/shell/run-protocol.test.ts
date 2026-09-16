@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type SessionEvent } from "@frockbot/core/contracts";
 import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
+import { CONVERSATION_POSITIONED_EVENTS_V1 } from "@frockbot/app/testkit";
 import type { StoredRun } from "./backend-contracts.js";
 import { planBotRunRecovery } from "./backend-recovery.js";
 import {
@@ -90,6 +91,57 @@ function storedRun(
 }
 
 describe("client run protocol v1", () => {
+  test("draws every conversation-positioned event as its own row, in log order", () => {
+    // What the enumeration the tool harness guards actually means: each of
+    // these takes a position in the conversation, so the order the log holds
+    // them in is the order a person reads them in.
+    const position = { turn: 1, step: 1, timestamp };
+    const events: SessionEvent[] = [
+      {
+        type: "send/to-user",
+        ...position,
+        seq: 0,
+        occurrenceId: "tool:1:1:0",
+        payload: { type: "text", text: "A bubble." },
+      },
+      {
+        type: "reply/to-caller",
+        ...position,
+        seq: 1,
+        occurrenceId: "tool:1:1:1",
+        caller: "voice",
+        text: "An answer.",
+      },
+      {
+        type: "wake/parent",
+        ...position,
+        seq: 2,
+        occurrenceId: "tool:1:1:2",
+        message: "A hand-off.",
+      },
+      {
+        type: "task/dispatched",
+        ...position,
+        seq: 3,
+        occurrenceId: "tool:1:1:3",
+        taskId: "tk-1",
+        taskType: "general",
+        description: "A dispatch.",
+        model: "test-model",
+        background: false,
+      },
+    ];
+    expect(
+      projectClientRunV1(storedRun(events))
+        .events.map((event) => event.type)
+        .filter((type) =>
+          (CONVERSATION_POSITIONED_EVENTS_V1 as readonly string[]).includes(
+            type,
+          ),
+        ),
+    ).toEqual([...CONVERSATION_POSITIONED_EVENTS_V1]);
+  });
+
   test("projects an agent Turn with its Bot origin marker", () => {
     const agent = {
       ...storedRun([]),
@@ -2355,5 +2407,137 @@ describe("message identity across retry pages", () => {
     expect(() =>
       decodeClientTurnCommandV1({ ...command, retryOf: "attempt-2" }),
     ).toThrow(/itself/);
+  });
+});
+
+describe("a batch in the run projection", () => {
+  function batchCall(occurrenceId: string, seq: number): SessionEvent {
+    return event({
+      type: "tool/call",
+      seq,
+      timestamp,
+      turn: 1,
+      step: 1,
+      occurrenceId,
+      name: "batch",
+      input: {
+        calls: [
+          { tool: "send_to_user", arguments: { text: "one" } },
+          { tool: "send_to_user", arguments: { text: "two" } },
+        ],
+      },
+    });
+  }
+
+  test("a dispatched batch draws its sub-calls and not its envelope", () => {
+    const projected = projectClientRunV1(
+      storedRun([
+        batchCall("tool:1:1:0", 0),
+        event({
+          type: "tool/call",
+          seq: 1,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.0",
+          name: "send_to_user",
+          input: {},
+        }),
+        event({
+          type: "tool/result",
+          seq: 2,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.0",
+          name: "send_to_user",
+          content: "sent one",
+          isError: false,
+          status: "completed",
+        }),
+        event({
+          type: "tool/call",
+          seq: 3,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.1",
+          name: "send_to_user",
+          input: {},
+        }),
+        event({
+          type: "tool/result",
+          seq: 4,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.1",
+          name: "send_to_user",
+          content: "sent two",
+          isError: false,
+          status: "completed",
+        }),
+        event({
+          type: "tool/result",
+          seq: 5,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "batch",
+          content: JSON.stringify({ ran: 2, failed: 0 }),
+          isError: false,
+          status: "completed",
+        }),
+      ]),
+    );
+
+    // Indistinguishable from the same two calls issued across separate steps.
+    expect(projected.events).toEqual([
+      { type: "tool/call", call: { id: "tool-1", name: "send_to_user" } },
+      {
+        type: "tool/result",
+        callId: "tool-1",
+        content: "sent one",
+        isError: false,
+      },
+      { type: "tool/call", call: { id: "tool-2", name: "send_to_user" } },
+      {
+        type: "tool/result",
+        callId: "tool-2",
+        content: "sent two",
+        isError: false,
+      },
+    ]);
+  });
+
+  test("a batch refused before dispatch still draws its refusal", () => {
+    const projected = projectClientRunV1(
+      storedRun([
+        batchCall("tool:1:1:0", 0),
+        event({
+          type: "tool/result",
+          seq: 1,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "batch",
+          content: "batch was refused: batch requires a non-empty calls array",
+          isError: true,
+          status: "completed",
+        }),
+      ]),
+    );
+
+    expect(projected.events).toEqual([
+      { type: "tool/call", call: { id: "tool-1", name: "batch" } },
+      {
+        type: "tool/result",
+        callId: "tool-1",
+        content: "batch was refused: batch requires a non-empty calls array",
+        isError: true,
+      },
+    ]);
   });
 });

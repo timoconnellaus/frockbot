@@ -24,6 +24,13 @@ export interface ToolCall {
 
 export interface ToolCallOccurrence {
   occurrenceId: string;
+  /**
+   * The occurrence this one was declared inside, for a call in a `batch`.
+   * Absent for a call the model issued on its own. A sub-occurrence runs like
+   * any other, but it is not one of the provider's own tool calls, so it is
+   * not replayed back to the model as a tool message of its own.
+   */
+  parentOccurrenceId?: string;
   turn: number;
   step: number;
   ordinal: number;

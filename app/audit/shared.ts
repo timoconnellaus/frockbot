@@ -39,7 +39,7 @@ const MAX_TARGET_LENGTH = 160;
 const MAX_TOOL_NAME_LENGTH = 128;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const OCCURRENCE_PATTERN =
-  /^tool:([1-9][0-9]{0,8}):([1-9][0-9]{0,8}):([0-9]{1,9})$/;
+  /^tool:([1-9][0-9]{0,8}):([1-9][0-9]{0,8}):([0-9]{1,9})(?:\.[0-9]{1,9})?$/;
 
 export class AuditDecodeError extends Error {
   constructor(message: string) {
@@ -255,6 +255,11 @@ function integer(
  * already in the durable event as one string
  * (`core/contracts/types.ts`, `toolOccurrenceId`), so audit needs no new
  * coordinate and no new authority to place an effect in a conversation.
+ *
+ * A call declared inside a `batch` carries the batch's id and a dotted
+ * position (`core/contracts/batch.ts`, `batchToolOccurrenceId`). It is placed
+ * at the batch's own coordinates — that is where the model issued it — and
+ * the rows stay distinct because an entry is keyed by its occurrence id.
  */
 export function decodeAuditOccurrenceIdV1(value: unknown): {
   turn: number;

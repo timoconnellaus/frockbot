@@ -99,6 +99,8 @@ export interface FoundationRuntimeOptions {
   systemPromptSection?: string;
   /** Explicit effect adapter for the standalone development/test runtime. */
   admitEffect: AgentOptions["admitEffect"];
+  /** How many further effects the run's record can admit; absent ⇒ unbounded. */
+  remainingEffectAdmissions?: AgentOptions["remainingEffectAdmissions"];
   modelSelection?: RuntimeModelSelection;
   /** The Composition generation this root is pinned to; defaults to bootstrap. */
   composition?: CompositionPinV1;
@@ -195,6 +197,9 @@ export async function createFoundationRuntime(
     provider,
     model,
     admitEffect: options.admitEffect,
+    ...(options.remainingEffectAdmissions
+      ? { remainingEffectAdmissions: options.remainingEffectAdmissions }
+      : {}),
     ...(options.turnType ? { turnType: options.turnType } : {}),
     ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),
     ...(selection?.connectionId

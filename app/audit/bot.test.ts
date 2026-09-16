@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { createAgentLoop } from "@frockbot/core/agent-loop";
+import type { ToolCall } from "@frockbot/core/contracts";
+import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import {
   AuditOutboxV1,
   auditEntriesFromStoredRunV1,
@@ -126,6 +129,16 @@ describe("projecting a settled run", () => {
     expect(await outcomes({ status: "interrupted", content: "" })).toBe(
       "interrupted",
     );
+    // A Stop that landed before the effect was dispatched. The text carries no
+    // word of refusal and the result is flagged an error, so `status` is the
+    // only thing standing between a cancelled effect and an `error` row.
+    expect(
+      await outcomes({
+        status: "interrupted",
+        isError: true,
+        content: "Cancelled before tool execution started.",
+      }),
+    ).toBe("interrupted");
     // No result at all is `unknown`, never `error`: the durable log does not
     // know how the effect ended, and inventing an answer is what the
     // reconciliation rule forbids.
@@ -323,5 +336,109 @@ describe("what the row is allowed to claim", () => {
       target: "machine:994dc2ee-1",
     });
     expect(entries[0]?.preview).toContain("rm -rf ~/x");
+  });
+});
+
+describe("projecting a run the loop actually produced", () => {
+  /**
+   * One Turn, run through the real loop, offered as a projectable run.
+   *
+   * The journal is the audit index's only source, so the property worth
+   * testing is the one the durable log produces — not a hand-written log that
+   * assumes the shape the loop happens to write.
+   */
+  async function turnOf(toolCall: ToolCall): Promise<AuditProjectableRunV1> {
+    const root = createAgentRuntimeHarness();
+    let served = 0;
+    root.llm.register({
+      id: "fixture",
+      async *stream() {
+        if (served++ === 0) {
+          yield { type: "tool-call", call: toolCall };
+          yield { type: "finish", reason: "tool-calls" };
+          return;
+        }
+        yield { type: "text-delta", text: "done" };
+        yield { type: "finish", reason: "completed" };
+      },
+    });
+    root.tools.register({
+      name: "computer_exec",
+      description: "Runs a command on the Computer.",
+      inputSchema: { type: "object" },
+      execute: () => Promise.resolve({ content: "a\nb", isError: false }),
+    });
+    const loop = createAgentLoop(root, {
+      maxSteps: 3,
+      composition: {
+        generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
+        artifactSetHash: "a".repeat(64),
+      },
+    });
+    try {
+      const handle = await loop.create({
+        botId: "foreman",
+        sessionId: "audit",
+        provider: "fixture",
+        model: "fixture",
+        turnType: "chat",
+        admitEffect: () => Promise.resolve(true),
+      });
+      handle.agent.send("list the files");
+      await handle.agent.whenIdle();
+      return {
+        runId: "run-1",
+        status: "completed",
+        events: handle.agent.session.events,
+        acceptedAt: AT,
+      };
+    } finally {
+      await loop.dispose();
+      await root.dispose();
+    }
+  }
+
+  /** What the row says about the effect, rather than where it was keyed. */
+  function effect(entry: AuditEntryV1): Partial<AuditEntryV1> {
+    const { occurrenceId, effectId, at, ...rest } = entry;
+    void occurrenceId;
+    void effectId;
+    void at;
+    return rest;
+  }
+
+  test("an effect issued inside a batch is audited exactly as at top level", async () => {
+    const command = { command: "cat ~/.ssh/config" };
+
+    const direct = await auditEntriesFromStoredRunV1(
+      "foreman",
+      await turnOf({ id: "c1", name: "computer_exec", input: command }),
+    );
+    const batched = await auditEntriesFromStoredRunV1(
+      "foreman",
+      await turnOf({
+        id: "c1",
+        name: "batch",
+        input: { calls: [{ tool: "computer_exec", arguments: command }] },
+      }),
+    );
+
+    // The command runs either way, so the User's record of it must exist
+    // either way: the model's choice of call shape is not a way out of the
+    // audit index.
+    expect(direct.map(effect)).toEqual([
+      expect.objectContaining({ toolName: "computer_exec", kind: "shell" }),
+    ]);
+    expect(batched.map(effect)).toEqual(direct.map(effect));
+    // The batch itself performs nothing, so it contributes no row of its own,
+    // and the row it does contribute is keyed by the call's declared position.
+    expect(batched.map((entry) => entry.occurrenceId)).toEqual([
+      "tool:1:1:0.0",
+    ]);
+    for (const entry of batched) {
+      expect(decodeAuditEntryV1(JSON.parse(JSON.stringify(entry)))).toEqual(
+        entry,
+      );
+    }
   });
 });

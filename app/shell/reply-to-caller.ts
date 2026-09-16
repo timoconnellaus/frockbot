@@ -51,6 +51,8 @@ export function createReplyToRequestToolV1(
     // Only ever offered on the lane a caller can reach, and only mounted at
     // all when this Turn actually has one.
     admission: { turnTypes: ["agent"] },
+    // The answer is appended to the session, so it has a position there.
+    orderedEffect: true,
     validate: (input: unknown) =>
       typeof input === "object" && input !== null && !Array.isArray(input),
     execute: async (

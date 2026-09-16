@@ -310,6 +310,8 @@ export function pluginTools(
         additionalProperties: false,
       },
       idempotent: false,
+      // It appends the approval card to the conversation.
+      orderedEffect: true,
       async answer(input, context) {
         const pluginId = requireString(input, "pluginId");
         const result = await host.plugins.publish(
@@ -342,6 +344,8 @@ export function pluginTools(
         additionalProperties: false,
       },
       idempotent: false,
+      // It appends the approval card to the conversation.
+      orderedEffect: true,
       async answer(input, context) {
         const pluginId = requireString(input, "pluginId");
         const result = await host.plugins.enable(

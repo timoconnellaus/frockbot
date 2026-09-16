@@ -11,6 +11,7 @@ import {
   CALL_DYNAMIC_TOOL_NAME,
   frockbotToolCallV1,
   FROCKBOT_NAMESPACE_USE_INSTRUCTIONS,
+  BATCH_TOOL_NAME,
   GET_DYNAMIC_TOOLS_NAME,
   ToolRegistry,
 } from "./tools.js";
@@ -92,7 +93,7 @@ function dynamicTool(
 }
 
 describe("progressive tool disclosure", () => {
-  test("keeps namespaced schemas hidden and always exposes the two meta-tools", async () => {
+  test("keeps namespaced schemas hidden and always exposes the meta-tools", async () => {
     const { tools } = toolsFixture();
     tools.register({
       name: "native_read",
@@ -103,9 +104,15 @@ describe("progressive tool disclosure", () => {
     tools.register(dynamicTool("mail", "search"));
 
     expect(tools.schemas({ turnType: "chat" }).map(({ name }) => name)).toEqual(
-      ["native_read", GET_DYNAMIC_TOOLS_NAME, CALL_DYNAMIC_TOOL_NAME],
+      [
+        "native_read",
+        BATCH_TOOL_NAME,
+        GET_DYNAMIC_TOOLS_NAME,
+        CALL_DYNAMIC_TOOL_NAME,
+      ],
     );
     expect(tools.registeredNames?.()).toEqual([
+      BATCH_TOOL_NAME,
       CALL_DYNAMIC_TOOL_NAME,
       GET_DYNAMIC_TOOLS_NAME,
       "mail/search",

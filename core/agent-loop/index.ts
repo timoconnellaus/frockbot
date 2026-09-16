@@ -11,6 +11,7 @@ import {
 import {
   type CompositionPinV1,
   decodeSkillRefsV1,
+  expandToolCallOccurrencesV1,
   type LoopStepContinuationV1,
   type NormalizedModelRequest,
   type Session,
@@ -711,7 +712,7 @@ class LoopAgent implements Agent, LoopRuntime {
     }
 
     const journal = validateToolOccurrenceJournal(this.session.events);
-    for (const occurrence of toolCallOccurrences(
+    for (const occurrence of expandToolCallOccurrencesV1(
       turn,
       step,
       assistant.toolCalls,

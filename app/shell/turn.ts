@@ -17,6 +17,7 @@ import {
   IDENTITY_KEY,
   RUN_PREFIX,
   SessionEventLog,
+  STORED_EFFECT_ADMISSIONS_MAX,
   storedRunRecordV2,
   type BotIdentity,
   type BotTurnExecutionInput,
@@ -317,6 +318,8 @@ export async function executeTurn(
             input.command.sessionId,
             effect,
           ),
+        remainingEffectAdmissions: () =>
+          remainingRunEffectAdmissions(state, input.command.runId),
         ...(isolate ? { isolate } : {}),
         ...(appletRouting ? { applets: appletRouting } : {}),
       }).mount(mounting, signal);
@@ -504,6 +507,27 @@ export async function fenceRunAdmission(
   const query = decodeClientRunLookupQueryV1(input);
   return projectClientRunLookupV1(
     await state.authority.fenceRunAdmission(identity, query.runId),
+  );
+}
+
+/**
+ * How many further effects this run's record can still admit.
+ *
+ * The bound is the decoder's own: a record past it cannot be stored, so
+ * anything that plans several admissions at once — a `batch` expanding its
+ * calls — asks here first and refuses what will not fit, rather than
+ * discovering the bound as a throw out of the admission that crossed it.
+ */
+export async function remainingRunEffectAdmissions(
+  state: ShellBotStateV1,
+  runId: string,
+): Promise<number> {
+  const run = optionalStoredRun(
+    await state.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
+  );
+  return Math.max(
+    STORED_EFFECT_ADMISSIONS_MAX - (run?.effectAdmissions.length ?? 0),
+    0,
   );
 }
 

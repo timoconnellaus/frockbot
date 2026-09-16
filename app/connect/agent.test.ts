@@ -140,7 +140,7 @@ describe("a connected app in a Bot's Turn", () => {
     expect(root.tools.registeredNames?.()).toContain("gmail/send_email");
     // The tools are absent from the native schema list: disclosed on request.
     expect(root.tools.schemas({ turnType: "chat" }).map((s) => s.name)).toEqual(
-      ["get_dynamic_tools", "call_dynamic_tool"],
+      ["batch", "get_dynamic_tools", "call_dynamic_tool"],
     );
     const result = await run(
       root,

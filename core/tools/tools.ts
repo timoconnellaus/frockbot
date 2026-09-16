@@ -1,6 +1,8 @@
 import {
   admittedSubagentRolesV1,
   admittedTurnTypesV1,
+  BATCH_MAX_CALLS_V1,
+  BATCH_TOOL_NAME,
   isSubagentRoleAdmittedV1,
   type LoopHookListV1,
   type PromptSectionRegistration,
@@ -16,6 +18,8 @@ import {
   type ToolSchema,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+
+export { BATCH_MAX_CALLS_V1, BATCH_TOOL_NAME };
 
 export const GET_DYNAMIC_TOOLS_NAME = "get_dynamic_tools";
 export const CALL_DYNAMIC_TOOL_NAME = "call_dynamic_tool";
@@ -94,6 +98,46 @@ const CALL_DYNAMIC_TOOL_SCHEMA: ToolSchema = {
       toolName: { type: "string" },
     },
     required: ["namespace", "toolName"],
+  },
+};
+
+const BATCH_DESCRIPTION = [
+  `Run up to ${BATCH_MAX_CALLS_V1} independent tool calls in one step, together.`,
+  "Each call runs on its own: one failing does not stop the others, and each gets its own result.",
+  "Use it only when no call depends on another call's result. Dependent calls stay in separate steps.",
+  "The calls all start together and may finish in any order. Calls whose effect has a place in the conversation — send_to_user among them — take effect in the order you write them, so several send_to_user calls arrive as separate messages in that order.",
+  "If two calls' side effects are order-sensitive in some other way — writing and then moving the same file, say — put them in separate steps instead of one batch.",
+  "batch cannot call itself.",
+].join(" ");
+
+const BATCH_SCHEMA: ToolSchema = {
+  name: BATCH_TOOL_NAME,
+  description: BATCH_DESCRIPTION,
+  inputSchema: {
+    type: "object",
+    properties: {
+      calls: {
+        type: "array",
+        description: "The calls to run, in the order they should take effect.",
+        minItems: 1,
+        maxItems: BATCH_MAX_CALLS_V1,
+        items: {
+          type: "object",
+          properties: {
+            tool: {
+              type: "string",
+              description: "The name of the tool to call.",
+            },
+            arguments: {
+              type: "object",
+              description: "That tool's own input.",
+            },
+          },
+          required: ["tool"],
+        },
+      },
+    },
+    required: ["calls"],
   },
 };
 
@@ -386,6 +430,19 @@ export class ToolRegistry implements ToolExecution {
       idempotent: true,
       execute: (input, context) => this.discover(input, context),
     });
+    // Registered so the catalog offers it and nothing else may claim the name.
+    // A batch is never dispatched as a tool: the loop expands it into the
+    // occurrences it declares and runs each of them through this registry, so
+    // the durable log holds one `tool/call` per effect.
+    this.installMetaTool({
+      ...BATCH_SCHEMA,
+      idempotent: false,
+      execute: () =>
+        Promise.resolve({
+          content: "batch is expanded by the loop, not dispatched as a tool",
+          isError: true,
+        }),
+    });
     // Successful calls are rewritten to the inner definition during prepare;
     // this body exists only to keep the registered definition total.
     this.installMetaTool({
@@ -511,6 +568,9 @@ export class ToolRegistry implements ToolExecution {
         (registered) =>
           registered.definition.name !== GET_DYNAMIC_TOOLS_NAME &&
           registered.definition.name !== CALL_DYNAMIC_TOOL_NAME &&
+          // The meta-tools are listed together, after the tools they operate
+          // on, rather than first because the constructor installed them.
+          registered.definition.name !== BATCH_TOOL_NAME &&
           registered.admitted.includes(admission.turnType) &&
           isSubagentRoleAdmittedV1(
             registered.admittedRoles,
@@ -524,7 +584,7 @@ export class ToolRegistry implements ToolExecution {
       }));
     return [
       exposed,
-      [GET_DYNAMIC_TOOLS_SCHEMA, CALL_DYNAMIC_TOOL_SCHEMA],
+      [BATCH_SCHEMA, GET_DYNAMIC_TOOLS_SCHEMA, CALL_DYNAMIC_TOOL_SCHEMA],
     ].flat();
   }
 
@@ -713,6 +773,29 @@ export class ToolRegistry implements ToolExecution {
         };
     return this.hooks.toolResult(preparation.call, initial, context, () =>
       Promise.resolve(initial),
+    );
+  }
+
+  /**
+   * Whether this call's effect has a position in the conversation, and so may
+   * not race another such effect dispatched alongside it. The tool declares it
+   * once, on its definition; a dispatcher does not decide it per call.
+   */
+  orderedEffect(call: ToolCall): boolean {
+    if (call.name === CALL_DYNAMIC_TOOL_NAME) {
+      // The flag belongs to the tool that will actually run, and for a dynamic
+      // call that is the inner definition `prepare` resolves — reading it off
+      // the meta-tool finds nothing and would let a card race a send. A call
+      // we cannot resolve is treated as ordered: it is refused during
+      // `prepare` anyway, and the safe reading of "unknown" is not "may race".
+      const resolved = this.resolveDynamicCall(call);
+      return (
+        "error" in resolved ||
+        resolved.registered.definition.orderedEffect === true
+      );
+    }
+    return (
+      this.nativeDefinitions.get(call.name)?.definition.orderedEffect === true
     );
   }
 

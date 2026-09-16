@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createAgentLoop } from "@frockbot/core/agent-loop";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
+import { modelToolCallsV1 } from "./grading.js";
 import { AGENT_LOOP_MAX_STEPS_V1 } from "@frockbot/app/agent-runtime";
 import { foundationBaseRuntimePackagesV1 } from "@frockbot/app/runtime";
 import { OpenAICompatibleProvider } from "@frockbot/providers/openai-compatible";
@@ -108,7 +109,7 @@ for (const scenario of cases) {
       await handle.agent.whenIdle();
       const events = [...handle.agent.session.events];
       const sends = events.filter((e) => e.type === "send/to-user");
-      const calls = events.filter((e) => e.type === "tool/call");
+      const calls = modelToolCallsV1(events);
       const messages = sends.flatMap((e) =>
         e.payload.type === "text" ? [e.payload.text] : [],
       );

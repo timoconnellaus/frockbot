@@ -622,7 +622,12 @@ function decodeStoredRunEventRange(
   };
 }
 
-const STORED_EFFECT_ADMISSIONS_MAX = 256;
+/**
+ * Most effect admissions one run record may carry. The decoder enforces it, so
+ * a run that would exceed it cannot be stored; anything that plans several
+ * admissions at once reads the bound from here rather than restating it.
+ */
+export const STORED_EFFECT_ADMISSIONS_MAX = 256;
 const STORED_EFFECT_ID_MAX_BYTES = 512;
 
 function decodeStoredEffectAdmissions(value: unknown): StoredEffectAdmission[] {
