@@ -719,7 +719,11 @@ export function createTurnBotDirectoryV1(
 ): TurnBotDirectoryV1 {
   let pending: Promise<BotDirectoryViewV1> | undefined;
   return {
-    read: () => (pending ??= host.listBots()),
+    read: () =>
+      (pending ??= host.listBots().catch((error: unknown) => {
+        pending = undefined;
+        throw error;
+      })),
     invalidate: () => {
       pending = undefined;
     },

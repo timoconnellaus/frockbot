@@ -503,4 +503,23 @@ describe("bot_message", () => {
     // Turn ends.
     expect(after).toContain("Researcher");
   });
+
+  test("a failed flock read does not answer for the rest of the Turn", async () => {
+    const test1 = harness();
+    let calls = 0;
+    const host = {
+      ...test1.host,
+      listBots: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.reject(new Error("User object is busy"))
+          : test1.host.listBots();
+      },
+    };
+    const flock = createTurnBotDirectoryV1(host);
+
+    await expect(flock.read()).rejects.toThrow("User object is busy");
+    await expect(flock.read()).resolves.toMatchObject({ schemaVersion: 1 });
+    expect(calls).toBe(2);
+  });
 });

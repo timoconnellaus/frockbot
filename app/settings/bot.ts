@@ -534,7 +534,13 @@ export function userAccountFeaturesReaderV1(
   identity: BotIdentity,
 ): UserAccountFeaturesReadV1 {
   let pending: Promise<UserFeaturesV1> | undefined;
-  return () => (pending ??= userAccountFeaturesV1(state, identity));
+  return () =>
+    (pending ??= userAccountFeaturesV1(state, identity).catch(
+      (error: unknown) => {
+        pending = undefined;
+        throw error;
+      },
+    ));
 }
 
 export async function userAccountFeaturesV1(
