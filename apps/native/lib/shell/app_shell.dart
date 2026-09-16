@@ -319,13 +319,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         !resumed ||
         !push.focused ||
         !_conversationVisible ||
-        panelOpen ||
-        openRun != null ||
+        _conversationCovered ||
         ModalRoute.of(context)?.isCurrent != true) {
       return null;
     }
     return open;
   }
+
+  /// Whether the panel is over the conversation rather than beside it, which
+  /// is the "nothing is covering it" clause of the focus rule in `focus.dart`.
+  ///
+  /// Mirrors the one condition `ShellLayout` draws the drawer on, rather than
+  /// approximating it: the dual tier, with `panelOpen` set. `openRun` is
+  /// deliberately not a second disqualifier — a run reaches the screen as the
+  /// widest tier's third column, through that same drawer, or as a pushed page
+  /// the route check answers, never on its own. Asked on its own it latched,
+  /// surviving the drawer being switched off, and took the read receipt with
+  /// it for the rest of the session.
+  bool get _conversationCovered =>
+      shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.dual &&
+      panelOpen;
 
   void _readLatest(String botId, String? messageId) {
     if (!mounted) return;

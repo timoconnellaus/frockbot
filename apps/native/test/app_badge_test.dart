@@ -10,18 +10,31 @@ import 'package:frockbot_native/client/bot_sessions.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/shell/app_shell.dart';
+import 'package:frockbot_native/shell/run_view.dart';
+import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'navigation_test.dart' show identifiedBy;
 import 'widget_test.dart' show MemoryStore;
 
 /// A two-Bot account whose unread fan-out a test holds open, so it can act
 /// inside the window the shell spends with a directory and no counts.
 class _ShellApi extends NativeApi {
-  _ShellApi(super.store, this.bots, this.fanOut, {this.directoryFails = false});
+  _ShellApi(
+    super.store,
+    this.bots,
+    this.fanOut, {
+    this.directoryFails = false,
+    this.turns,
+  });
   final List<Map<String, Object?>> bots;
   Completer<Object?> fanOut;
   int unreadRequests = 0;
+
+  /// The Turns every Bot's transcript answers with, or null for an account
+  /// whose transcript this test never opens.
+  final List<Map<String, Object?>>? turns;
 
   /// Whether `/api/bots` fails, leaving the shell with no directory at all
   /// while the fan-out still answers. A test flips it to bring the read back.
@@ -53,6 +66,14 @@ class _ShellApi extends NativeApi {
     if (path == '/api/bots/unread') {
       unreadRequests++;
       return fanOut.future;
+    }
+    final page = turns;
+    if (page != null && path.endsWith('/turns')) {
+      return {
+        'schemaVersion': 1,
+        'runs': page,
+        'page': {'truncated': false},
+      };
     }
     throw const FormatException('offline fixture');
   }
@@ -446,6 +467,263 @@ void main() {
       await tester.pumpAndSettle();
       expect(calls.map((call) => call.method), ['set']);
       expect((calls.single.arguments as Map)['label'], '2');
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    // Opening the panel is not the same act at every width. At the widest
+    // tier it is a third column beside the conversation, which stays in plain
+    // sight; narrower, the same panel is a drawer over it. `panelOpen` cannot
+    // tell them apart on its own — and it latches, because the header's switch
+    // at the widest tier collapses the column and leaves the flag set — so
+    // reading it as "covered" everywhere took the focused Bot's suppression
+    // away for the rest of the session and let the dock count a chat the
+    // person was reading.
+    for (final open in [
+      (
+        name: 'beside the conversation leaves it suppressed',
+        width: 1200.0,
+        label: '2',
+      ),
+      (name: 'over the conversation counts it again', width: 800.0, label: '5'),
+    ]) {
+      testWidgets('and a panel ${open.name}', (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        tester.view.physicalSize = Size(open.width, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final calls = <MethodCall>[];
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel('com.frockbot/badge'),
+              (call) async {
+                calls.add(call);
+                return null;
+              },
+            );
+
+        final store = MemoryStore();
+        store.values['selection.test-user'] = 'beta';
+        final fanOut = Completer<Object?>()
+          ..complete({
+            'schemaVersion': 1,
+            'unread': [
+              view('alpha', count: 2).toJson(),
+              view('beta', count: 3).toJson(),
+            ],
+          });
+        final api = _ShellApi(store, [
+          registration('alpha', 'Alpha'),
+          registration('beta', 'Beta'),
+        ], fanOut);
+        final sessions = BotSessions(api: api, store: store);
+        final links = ValueNotifier<String?>(null);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: AppShell(
+              api: api,
+              store: store,
+              sessions: sessions,
+              userId: 'test-user',
+              botLinks: links,
+              onSignOut: () async {},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect((calls.last.arguments as Map)['label'], '2');
+
+        await tester.tap(identifiedBy(ShellIds.botPanelToggle));
+        await tester.pumpAndSettle();
+        expect((calls.last.arguments as Map)['label'], open.label);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        sessions.clear();
+        links.dispose();
+        api.close();
+        debugDefaultTargetPlatformOverride = null;
+      });
+    }
+
+    // A run is not a covering of its own. At the dual tier it reaches the
+    // screen through the same drawer `panelOpen` already stands for, and
+    // `openRun` outlives that drawer being switched off — so reading it as
+    // "covered" left the person looking at the chat with the count climbing
+    // for the rest of the session, the same latch one tier down.
+    testWidgets('and a run whose drawer is switched off stops covering', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('com.frockbot/badge'), (
+            call,
+          ) async {
+            calls.add(call);
+            return null;
+          });
+
+      final store = MemoryStore();
+      store.values['selection.test-user'] = 'beta';
+      final fanOut = Completer<Object?>()
+        ..complete({
+          'schemaVersion': 1,
+          'unread': [
+            view('alpha', count: 2).toJson(),
+            view('beta', count: 3).toJson(),
+          ],
+        });
+      final api = _ShellApi(
+        store,
+        [registration('alpha', 'Alpha'), registration('beta', 'Beta')],
+        fanOut,
+        turns: [
+          {
+            'schemaVersion': 3,
+            'runId': 'run-1',
+            'input': 'Hello',
+            'status': 'completed',
+            'admittedAt': '2026-09-05T12:19:00.000Z',
+            'events': [
+              {
+                'type': 'send/to-user',
+                'payload': {'type': 'text', 'text': 'Both messages arrived.'},
+                'ordinal': 0,
+              },
+            ],
+            'outcome': {'type': 'completed', 'text': ''},
+          },
+        ],
+      );
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect((calls.last.arguments as Map)['label'], '2');
+
+      await tester.longPress(find.text('Both messages arrived.'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Work details'));
+      await tester.pumpAndSettle();
+      // The run arrives as the drawer, which does cover the conversation.
+      expect(find.byType(RunView), findsOneWidget);
+      expect((calls.last.arguments as Map)['label'], '5');
+
+      // Dismissing the drawer is the one thing that uncovers the conversation:
+      // the run itself outlives it, and the header's own switch is behind the
+      // scrim while the drawer is up.
+      await tester.tap(identifiedBy(ShellIds.scrim));
+      await tester.pumpAndSettle();
+      // The drawer has slid off the screen and the run has outlived it, which
+      // is the whole of the latch: the conversation is in plain sight again.
+      expect(
+        tester.getTopLeft(find.byType(RunView)).dx,
+        greaterThanOrEqualTo(800.0),
+      );
+      expect((calls.last.arguments as Map)['label'], '2');
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    // Only the dual tier draws a drawer over the conversation. On a phone the
+    // panel is a page of its own, so `panelOpen` there is nothing but state
+    // carried across the change of width — and reading it as "covered"
+    // latched the same way one tier up: the person narrows the window onto a
+    // full-screen chat with nothing over it and the count keeps climbing.
+    testWidgets('and a panel flag carried onto a phone covers nothing', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('com.frockbot/badge'), (
+            call,
+          ) async {
+            calls.add(call);
+            return null;
+          });
+
+      final store = MemoryStore();
+      final fanOut = Completer<Object?>()
+        ..complete({
+          'schemaVersion': 1,
+          'unread': [
+            view('alpha', count: 2).toJson(),
+            view('beta', count: 3).toJson(),
+          ],
+        });
+      final api = _ShellApi(store, [
+        registration('alpha', 'Alpha'),
+        registration('beta', 'Beta'),
+      ], fanOut);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Opening Beta from the list is what puts its conversation up, which is
+      // the page the phone width then shows whole.
+      await tester.tap(identifiedBy(ShellIds.sidebarBot('beta')));
+      await tester.pumpAndSettle();
+      expect((calls.last.arguments as Map)['label'], '2');
+
+      // The drawer, which does cover the conversation at this width.
+      await tester.tap(identifiedBy(ShellIds.botPanelToggle));
+      await tester.pumpAndSettle();
+      expect((calls.last.arguments as Map)['label'], '5');
+
+      // Narrowing to a phone: the drawer is not drawn at all here, the
+      // conversation is the whole screen, and the flag is only left over.
+      tester.view.physicalSize = const Size(600, 900);
+      await tester.pumpAndSettle();
+      expect(identifiedBy(ShellIds.conversation).hitTestable(), findsOneWidget);
+      expect(identifiedBy(ShellIds.rightPanel), findsNothing);
+      expect((calls.last.arguments as Map)['label'], '2');
 
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();

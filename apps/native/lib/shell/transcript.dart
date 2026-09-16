@@ -6,6 +6,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
@@ -89,11 +90,17 @@ class _TranscriptViewState extends State<TranscriptView> {
   static const workingPadding = EdgeInsets.fromLTRB(16, 6, 16, 6);
 
   final GlobalKey focusKey = GlobalKey();
+
+  /// One key per line, so the newest message can be measured against the
+  /// viewport. Keyed by line id and handed to every row rather than to the
+  /// newest alone: a key that appeared and disappeared as the thread grew
+  /// would rebuild the row it left, and a live Applet card with it.
+  final Map<String, GlobalKey> probes = {};
   final ScrollController scroll = ScrollController();
   @override
   void initState() {
     super.initState();
-    scroll.addListener(_reportRead);
+    scroll.addListener(_scheduleReportRead);
   }
 
   /// The lines the cached newest-send id was derived from. `_reportRead` runs
@@ -103,18 +110,26 @@ class _TranscriptViewState extends State<TranscriptView> {
   List<TranscriptLine>? _latestSendSource;
   String? _latestSendId;
 
+  /// The line the newest send is drawn on, which is not always its own id: a
+  /// failed attempt is displayed on the message it was a retry of.
+  String? _latestSendLineId;
+
+  /// The message id a line delivers, or null where it delivers none.
+  String? _sendIdOf(TranscriptLine line) =>
+      line.failureMessageId ??
+      (line.role == LineRole.assistant &&
+              (line.id.contains(':send:') ||
+                  (line.id.endsWith(':failed') && line.notice != null))
+          ? line.id
+          : null);
+
   String? _newestSendId(List<TranscriptLine> ordered) {
     _latestSendSource = widget.lines;
     _latestSendId = null;
+    _latestSendLineId = null;
     String? newestAt;
     for (final line in ordered) {
-      final messageId =
-          line.failureMessageId ??
-          (line.role == LineRole.assistant &&
-                  (line.id.contains(':send:') ||
-                      (line.id.endsWith(':failed') && line.notice != null))
-              ? line.id
-              : null);
+      final messageId = _sendIdOf(line);
       if (messageId == null) continue;
       // A retry is displayed with its original message, but read order is the
       // order of the actual attempts, including a reply to an older message.
@@ -125,14 +140,49 @@ class _TranscriptViewState extends State<TranscriptView> {
           (at.compareTo(newestAt) >= 0 && !followsFailure)) {
         newestAt = at;
         _latestSendId = messageId;
+        _latestSendLineId = line.id;
       }
     }
     return _latestSendId;
   }
 
+  /// Whether any part of the newest message's row is inside the viewport.
+  ///
+  /// Reading a message is seeing it, not being pinned to the end of the list.
+  /// A thread nudged up a line — to copy something, or because the composer
+  /// grew — is still the thread the person is reading, and the count it raises
+  /// is one they can see is stale. The end of the list is kept as a second
+  /// answer: a short thread that does not scroll has no row geometry to ask.
+  bool get _showingLatest {
+    if (scroll.hasClients && scroll.position.pixels <= 8) return true;
+    final lineId = _latestSendLineId;
+    final box = lineId == null
+        ? null
+        : probes[lineId]?.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return false;
+    final RenderObject? viewport = RenderAbstractViewport.maybeOf(box);
+    if (viewport is! RenderBox || !viewport.hasSize) return false;
+    final top = box.localToGlobal(Offset.zero, ancestor: viewport).dy;
+    return top < viewport.size.height && top + box.size.height > 0;
+  }
+
+  bool _readScheduled = false;
+
+  /// A scroll notification arrives while the position is changing, before the
+  /// frame that moves the rows has been laid out: asking a row where it is
+  /// then answers for where it was. The report waits for the end of the frame,
+  /// where the geometry is the one the person is looking at.
+  void _scheduleReportRead() {
+    if (_readScheduled || !mounted) return;
+    _readScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _readScheduled = false;
+      _reportRead();
+    });
+  }
+
   void _reportRead() {
     if (!mounted) return;
-    final atLatest = scroll.hasClients && scroll.position.pixels <= 8;
     final newest = identical(_latestSendSource, widget.lines)
         ? _latestSendId
         : _newestSendId(
@@ -142,7 +192,9 @@ class _TranscriptViewState extends State<TranscriptView> {
             ),
           );
     widget.onReadLatest?.call(
-      atLatest && newest != null && ModalRoute.of(context)?.isCurrent == true
+      newest != null &&
+              _showingLatest &&
+              ModalRoute.of(context)?.isCurrent == true
           ? newest
           : null,
     );
@@ -181,6 +233,9 @@ class _TranscriptViewState extends State<TranscriptView> {
     final target = widget.focusRunId;
     var marked = false;
     final rows = <Widget>[];
+    // The probes outlive one build only for the lines still drawn; a thread
+    // that pages in and out must not accumulate keys for rows that are gone.
+    final drawn = <String>{};
     for (final line in ordered) {
       final content = _row(context, line, drain);
       if (content == null) continue;
@@ -203,8 +258,12 @@ class _TranscriptViewState extends State<TranscriptView> {
                 line,
                 position: details.globalPosition,
               ),
-        child: content,
+        child: KeyedSubtree(
+          key: probes.putIfAbsent(line.id, GlobalKey.new),
+          child: content,
+        ),
       );
+      drawn.add(line.id);
       if (line.id == widget.unreadFromMessageId ||
           (line.failureMessageId != null &&
               line.failureMessageId == widget.unreadFromMessageId)) {
@@ -260,6 +319,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       }
       rows.add(row);
     }
+    probes.removeWhere((id, _) => !drawn.contains(id));
     if (marked && focused != target) {
       focused = target;
       WidgetsBinding.instance.addPostFrameCallback((_) {
