@@ -25,6 +25,7 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../templates/page.dart';
 
+import '../theme/caret.dart';
 import 'avatar.dart';
 
 /// A Bot id from the name a person typed, with a suffix so two Bots called the
@@ -349,34 +350,41 @@ class _CreateBotSheetState extends State<CreateBotSheet> {
                   const SizedBox(height: 8),
                   identified(
                     FlockIds.createName,
-                    TextFormField(
-                      initialValue: state.name,
-                      enabled: !state.busy,
-                      autofocus: true,
-                      maxLength: 100,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(labelText: 'Bot name'),
-                      onChanged: (next) => state.edit(() => state.name = next),
-                      validator: (next) => (next ?? '').trim().isEmpty
-                          ? 'Give this Bot a name.'
-                          : null,
+                    SteadyCaret(
+                      child: TextFormField(
+                        initialValue: state.name,
+                        enabled: !state.busy,
+                        autofocus: true,
+                        maxLength: 100,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: 'Bot name',
+                        ),
+                        onChanged: (next) =>
+                            state.edit(() => state.name = next),
+                        validator: (next) => (next ?? '').trim().isEmpty
+                            ? 'Give this Bot a name.'
+                            : null,
+                      ),
                     ),
                   ),
                   identified(
                     FlockIds.createFirstMessage,
-                    TextFormField(
-                      initialValue: state.firstMessage,
-                      enabled: !state.busy,
-                      minLines: 3,
-                      maxLines: 3,
-                      maxLength: 4000,
-                      decoration: const InputDecoration(
-                        labelText: 'First message',
-                        helperText:
-                            'Optional. Sent as soon as the Bot is yours.',
+                    SteadyCaret(
+                      child: TextFormField(
+                        initialValue: state.firstMessage,
+                        enabled: !state.busy,
+                        minLines: 3,
+                        maxLines: 3,
+                        maxLength: 4000,
+                        decoration: const InputDecoration(
+                          labelText: 'First message',
+                          helperText:
+                              'Optional. Sent as soon as the Bot is yours.',
+                        ),
+                        onChanged: (next) =>
+                            state.edit(() => state.firstMessage = next),
                       ),
-                      onChanged: (next) =>
-                          state.edit(() => state.firstMessage = next),
                     ),
                   ),
                   if (state.message != null)

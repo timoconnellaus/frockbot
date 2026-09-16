@@ -12,6 +12,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../theme/caret.dart';
 import 'semantics.dart';
 
 /// What one Bot row can be asked to do.
@@ -275,17 +276,19 @@ class _LabelPickerState extends State<_LabelPicker> {
               ),
               const SizedBox(height: 12),
             ],
-            TextField(
-              controller: controller,
-              autofocus: widget.choices.isEmpty,
-              maxLength: 120,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                labelText: 'Label',
-                hintText: 'Work, Home, Projects…',
-                counterText: '',
+            SteadyCaret(
+              child: TextField(
+                controller: controller,
+                autofocus: widget.choices.isEmpty,
+                maxLength: 120,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  labelText: 'Label',
+                  hintText: 'Work, Home, Projects…',
+                  counterText: '',
+                ),
+                onSubmitted: (value) => Navigator.pop(context, value.trim()),
               ),
-              onSubmitted: (value) => Navigator.pop(context, value.trim()),
             ),
           ],
         ),

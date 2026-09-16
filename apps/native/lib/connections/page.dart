@@ -10,6 +10,7 @@ import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../settings/page.dart';
 import '../shell/semantics.dart';
+import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'document.dart';
@@ -1137,26 +1138,30 @@ class _ApiKeyFormState extends State<_ApiKeyForm> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Divider(height: 24),
-        TextField(
-          controller: name,
-          enabled: !widget.busy,
-          decoration: const InputDecoration(
-            labelText: 'Account name',
-            counterText: '',
+        SteadyCaret(
+          child: TextField(
+            controller: name,
+            enabled: !widget.busy,
+            decoration: const InputDecoration(
+              labelText: 'Account name',
+              counterText: '',
+            ),
+            maxLength: 120,
+            textInputAction: TextInputAction.next,
           ),
-          maxLength: 120,
-          textInputAction: TextInputAction.next,
         ),
         const SizedBox(height: 12),
-        TextField(
-          controller: key,
-          enabled: !widget.busy,
-          obscureText: true,
-          autocorrect: false,
-          enableSuggestions: false,
-          decoration: const InputDecoration(labelText: 'API key'),
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => _submit(),
+        SteadyCaret(
+          child: TextField(
+            controller: key,
+            enabled: !widget.busy,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: const InputDecoration(labelText: 'API key'),
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _submit(),
+          ),
         ),
         if (declared.isNotEmpty) ...[
           const SizedBox(height: 4),
@@ -1181,20 +1186,22 @@ class _ApiKeyFormState extends State<_ApiKeyForm> {
             for (final field in declared)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: TextField(
-                  controller: settings.putIfAbsent(
-                    field.id.value,
-                    () => TextEditingController(
-                      text: field.value.value is String
-                          ? field.value.value as String
-                          : '',
+                child: SteadyCaret(
+                  child: TextField(
+                    controller: settings.putIfAbsent(
+                      field.id.value,
+                      () => TextEditingController(
+                        text: field.value.value is String
+                            ? field.value.value as String
+                            : '',
+                      ),
                     ),
-                  ),
-                  enabled: !widget.busy,
-                  decoration: InputDecoration(
-                    labelText: field.label,
-                    helperText: field.hint,
-                    helperMaxLines: 4,
+                    enabled: !widget.busy,
+                    decoration: InputDecoration(
+                      labelText: field.label,
+                      helperText: field.hint,
+                      helperMaxLines: 4,
+                    ),
                   ),
                 ),
               ),
