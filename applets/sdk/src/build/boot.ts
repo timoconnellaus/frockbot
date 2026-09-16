@@ -14,6 +14,22 @@ export const BOOT_DEADLINE_MS = 30_000;
 /** A workerd that never reported ready; the boot, not the code, failed. */
 export class RuntimeDidNotStart extends Error {}
 
+/**
+ * The same race seen from the other side: the spawn fails outright rather
+ * than hanging, and the runtime's stdio socket is never there to connect to.
+ * That is a boot that did not happen, not a fault in the code being built.
+ */
+function spawnFailed(error: unknown): boolean {
+  const { code, syscall } = (error ?? {}) as {
+    code?: unknown;
+    syscall?: unknown;
+  };
+  return (
+    (syscall === "connect" || syscall === "spawn") &&
+    (code === "ENOENT" || code === "ECONNREFUSED" || code === "EAGAIN")
+  );
+}
+
 /** `ready`, or a `RuntimeDidNotStart` when it has not settled in time. */
 export async function bootedWithin<T>(ready: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -30,6 +46,14 @@ export async function bootedWithin<T>(ready: Promise<T>): Promise<T> {
   });
   try {
     return await Promise.race([ready, deadline]);
+  } catch (error) {
+    if (!spawnFailed(error)) throw error;
+    throw new RuntimeDidNotStart(
+      `The Workers runtime could not be spawned: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
+    );
   } finally {
     clearTimeout(timer);
   }
