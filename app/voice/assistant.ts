@@ -85,6 +85,7 @@ export const VOICE_PROMPT_MAX_LOG_FACTS_V1 = 30;
 export const VOICE_PROMPT_MAX_FACT_CHARS_V1 = 240;
 export const VOICE_PROMPT_MAX_BOTS_V1 = 32;
 export const VOICE_PROMPT_HISTORY_MESSAGES_V1 = 12;
+export const VOICE_PROMPT_MAX_UNSPOKEN_V1 = 5;
 export const VOICE_TURN_MAX_STEPS_V1 = 4;
 export const VOICE_TURN_MAX_TOKENS_V1 = 400;
 export const VOICE_ANSWER_MAX_CHARS_V1 = 1_200;
@@ -279,7 +280,10 @@ export function renderVoiceSystemPromptV1(
     lines.push(
       "Bot answers to earlier requests that the person has not heard yet. They are read out to the person separately, so do not repeat them unprompted, and never present one as the answer to what the person asks now. If the person asks what a Bot said, this is it:",
     );
-    for (const answer of input.unspoken.slice(0, 5)) {
+    for (const answer of input.unspoken.slice(
+      0,
+      VOICE_PROMPT_MAX_UNSPOKEN_V1,
+    )) {
       lines.push(
         `- ${escapeTag(clip(answer.botName, 60))}, asked ${describeVoiceAgeV1(answer.askedAt, input.now)} about "${escapeTag(clip(answer.question, 120))}": ${escapeTag(clip(answer.text, 400))}`,
       );

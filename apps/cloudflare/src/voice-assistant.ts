@@ -37,6 +37,7 @@ import {
   runVoiceTurnV1,
   voiceAgePlacedV1,
   VOICE_PROMPT_HISTORY_MESSAGES_V1,
+  VOICE_PROMPT_MAX_UNSPOKEN_V1,
   type VoiceAssistantHostV1,
   type VoiceAssistantPromptInputV1,
   type VoiceBotSummaryV1,
@@ -2391,6 +2392,9 @@ export class VoiceAssistant extends VoiceAgentBase<
    * Bot and the wrong thing to read back to the person who said "can you ask
    * Bob what the weather is?". The spoken turn keeps their words for as long
    * as the delegation is kept, so the paraphrase is only the fallback.
+   *
+   * When one turn asked several Bots, each answer is placed under the whole
+   * sentence the person said, and the Bot's name says which request it answers.
    */
   private async delegationQuestion(
     ledger: VoiceLedgerV1,
@@ -2943,12 +2947,14 @@ export class VoiceAssistant extends VoiceAgentBase<
     ]);
     const ledger = this.ledger();
     const placedUnspoken = await Promise.all(
-      unspoken.map(async (delegation) => ({
-        botName: delegation.botName,
-        question: await this.delegationQuestion(ledger, delegation),
-        text: delegation.answer ?? delegation.failure ?? "",
-        askedAt: new Date(delegation.admittedAt),
-      })),
+      unspoken
+        .slice(0, VOICE_PROMPT_MAX_UNSPOKEN_V1)
+        .map(async (delegation) => ({
+          botName: delegation.botName,
+          question: await this.delegationQuestion(ledger, delegation),
+          text: delegation.answer ?? delegation.failure ?? "",
+          askedAt: new Date(delegation.admittedAt),
+        })),
     );
     return {
       bots,
