@@ -75,7 +75,8 @@ TranscriptLine line({
 
 void main() {
   testWidgets(
-    'reports read only while the newest delivered message is displayed',
+    'reports read while the newest delivered message is on screen, not only '
+    'while the thread is pinned to its end',
     (tester) async {
       final reports = <String?>[];
       final lines = [
@@ -90,7 +91,9 @@ void main() {
           id: 'run-new:send:0',
           runId: 'run-new',
           role: LineRole.assistant,
-          text: 'New',
+          // Long enough to still be on screen a nudge away from the end, and
+          // to be well out of it at the other end of the thread.
+          text: List.filled(400, 'New').join(' '),
           status: LineStatus.completed,
         ),
       ];
@@ -98,7 +101,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SizedBox(
-              height: 80,
+              height: 120,
               child: TranscriptView(
                 lines: lines,
                 loading: false,
@@ -116,6 +119,12 @@ void main() {
       expect(reports, contains('run-new:send:0'));
 
       final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
+      // A thread nudged off its end — to copy a line, or because the composer
+      // grew — is still the thread being read while the reply is in view.
+      scrollable.position.jumpTo(40);
+      await tester.pump();
+      expect(reports.last, 'run-new:send:0');
+
       scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
       await tester.pump();
       expect(reports.last, isNull);

@@ -10,6 +10,11 @@
 /// A window in the background is not being read even though its chat is still
 /// "open", and neither is one behind a drawer, a run or another route.
 ///
+/// "Covering" is a question about the tier, not about a flag. At the widest
+/// tier the right panel and the run view are a third column beside the
+/// conversation, which stays in plain sight; narrower, the same panel is a
+/// drawer over it and a run is a page.
+///
 /// The Bot Durable Object counts every settled Turn, because it cannot know
 /// which chat is on screen; the read receipt that clears the count is a round
 /// trip behind the message that raised it. Rendering the fan-out verbatim

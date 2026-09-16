@@ -10,9 +10,11 @@ import 'package:frockbot_native/client/bot_sessions.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/shell/app_shell.dart';
+import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'navigation_test.dart' show identifiedBy;
 import 'widget_test.dart' show MemoryStore;
 
 /// A two-Bot account whose unread fan-out a test holds open, so it can act
@@ -460,6 +462,83 @@ void main() {
       api.close();
       debugDefaultTargetPlatformOverride = null;
     });
+
+    // Opening the panel is not the same act at every width. At the widest
+    // tier it is a third column beside the conversation, which stays in plain
+    // sight; narrower, the same panel is a drawer over it. `panelOpen` cannot
+    // tell them apart on its own — and it latches, because the header's switch
+    // at the widest tier collapses the column and leaves the flag set — so
+    // reading it as "covered" everywhere took the focused Bot's suppression
+    // away for the rest of the session and let the dock count a chat the
+    // person was reading.
+    for (final open in [
+      (
+        name: 'beside the conversation leaves it suppressed',
+        width: 1200.0,
+        label: '2',
+      ),
+      (name: 'over the conversation counts it again', width: 800.0, label: '5'),
+    ]) {
+      testWidgets('and a panel ${open.name}', (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        tester.view.physicalSize = Size(open.width, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final calls = <MethodCall>[];
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel('com.frockbot/badge'),
+              (call) async {
+                calls.add(call);
+                return null;
+              },
+            );
+
+        final store = MemoryStore();
+        store.values['selection.test-user'] = 'beta';
+        final fanOut = Completer<Object?>()
+          ..complete({
+            'schemaVersion': 1,
+            'unread': [
+              view('alpha', count: 2).toJson(),
+              view('beta', count: 3).toJson(),
+            ],
+          });
+        final api = _ShellApi(store, [
+          registration('alpha', 'Alpha'),
+          registration('beta', 'Beta'),
+        ], fanOut);
+        final sessions = BotSessions(api: api, store: store);
+        final links = ValueNotifier<String?>(null);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: AppShell(
+              api: api,
+              store: store,
+              sessions: sessions,
+              userId: 'test-user',
+              botLinks: links,
+              onSignOut: () async {},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect((calls.last.arguments as Map)['label'], '2');
+
+        await tester.tap(identifiedBy(ShellIds.botPanelToggle));
+        await tester.pumpAndSettle();
+        expect((calls.last.arguments as Map)['label'], open.label);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        sessions.clear();
+        links.dispose();
+        api.close();
+        debugDefaultTargetPlatformOverride = null;
+      });
+    }
 
     testWidgets('and keeping it quiet while the directory is unknown', (
       tester,

@@ -313,13 +313,29 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         !resumed ||
         !push.focused ||
         !_conversationVisible ||
-        panelOpen ||
-        openRun != null ||
+        _conversationCovered ||
         ModalRoute.of(context)?.isCurrent != true) {
       return null;
     }
     return open;
   }
+
+  /// Whether the panel is over the conversation rather than beside it.
+  ///
+  /// At the widest tier the right panel and the run view are a third column:
+  /// the conversation keeps its own, so a person with Work open is reading the
+  /// thread as plainly as one with nothing open. Narrower, the same panel is a
+  /// drawer over the conversation and a run is a page, and then the chat is
+  /// covered.
+  ///
+  /// The distinction is what the flag cannot carry on its own. `panelOpen`
+  /// latches: at the widest tier the header's switch collapses the column and
+  /// leaves it set, and only the panel's own close clears it. Reading it as
+  /// "covered" at every tier therefore stopped the read receipt for the rest
+  /// of the session, and let the badge climb on a chat in plain sight.
+  bool get _conversationCovered =>
+      shellTierForWidth(MediaQuery.sizeOf(context).width) != ShellTier.triple &&
+      (panelOpen || openRun != null);
 
   void _readLatest(String botId, String? messageId) {
     if (!mounted) return;
