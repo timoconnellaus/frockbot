@@ -169,6 +169,89 @@ describe("batch", () => {
     expect(result.endsTurn).toBe(true);
   });
 
+  test("a structurally invalid call fails alone, and the rest still run", async () => {
+    const effects: string[] = [];
+    const tools = registry(recorder("alpha", effects));
+
+    const result = await runBatch(tools, [
+      { tool: "alpha", arguments: { n: 1 } },
+      { tool: "alpha", arguments: { n: 2 } },
+      { tool: "alpha", arguments: ["not an object"] },
+    ]);
+
+    // Losing two good calls because the third was malformed is exactly what
+    // the batch exists to avoid, and the report names what was wrong with
+    // that one call so the model repairs it rather than guessing.
+    const report = JSON.parse(result.content) as {
+      ran: number;
+      failed: number;
+      results: Array<{ index: number; isError: boolean; content: string }>;
+    };
+    expect(result.isError).toBe(false);
+    expect(report).toMatchObject({ ran: 3, failed: 1 });
+    expect(report.results[2]).toMatchObject({
+      index: 2,
+      isError: true,
+      content: "batch call 2 was refused: its arguments must be an object",
+    });
+    expect(effects).toHaveLength(2);
+  });
+
+  test("a call missing its tool name fails alone", async () => {
+    const effects: string[] = [];
+    const tools = registry(recorder("alpha", effects));
+
+    const result = await runBatch(tools, [
+      { arguments: {} },
+      { tool: "alpha", arguments: {} },
+    ]);
+
+    const report = JSON.parse(result.content) as {
+      failed: number;
+      results: Array<{ content: string }>;
+    };
+    expect(report.failed).toBe(1);
+    expect(report.results[0]?.content).toBe(
+      "batch call 0 was refused: it needs a tool name",
+    );
+    expect(effects).toEqual(["tool:1:1:0.1"]);
+  });
+
+  test("replaying a batch re-issues every call under the id it had before", async () => {
+    // A sub-call gets no journal entry of its own, so a crash before the
+    // batch's result is written replays every call in it. What stops that
+    // sending the mail twice is the effect id: it comes from the declared
+    // position, so the replay re-issues call N under the same key and a tool
+    // honouring that key sees one effect. Deriving these ids from arrival
+    // order would break replay silently.
+    const keyed = (seen: string[]): ToolDefinition => ({
+      name: "send_email",
+      description: "Records the key each call ran under.",
+      inputSchema: { type: "object" },
+      execute: (input, context) => {
+        seen.push(`${JSON.stringify(input)}@${context.effectId}`);
+        return Promise.resolve({ content: "sent", isError: false });
+      },
+    });
+    const first: string[] = [];
+    const second: string[] = [];
+    const calls = [
+      { tool: "send_email", arguments: { to: "ada" } },
+      { tool: "send_email", arguments: { to: "bob" } },
+      { tool: "send_email", arguments: { to: "cleo" } },
+    ];
+
+    await runBatch(registry(keyed(first)), calls);
+    await runBatch(registry(keyed(second)), calls);
+
+    expect(first.sort()).toEqual([
+      '{"to":"ada"}@tool:1:1:0.0',
+      '{"to":"bob"}@tool:1:1:0.1',
+      '{"to":"cleo"}@tool:1:1:0.2',
+    ]);
+    expect(second.sort()).toEqual(first);
+  });
+
   test("refuses a batch past the declared bound, and an empty one", async () => {
     const tools = registry(recorder("alpha", []));
     const tooMany = Array.from({ length: BATCH_MAX_CALLS_V1 + 1 }, () => ({

@@ -802,7 +802,25 @@ function projectionUnits(
   // So the ordinal comes from where the call was *declared*: the Turn, the
   // step, the call's ordinal in that step, and its position inside a batch.
   // Execution order and replay order cannot move it.
+  //
+  // Render order follows the same sequence. The slots the sends occupy are
+  // left where the log put them, relative to the tool interactions around
+  // them, but the payloads fill those slots in declared order: slot N carries
+  // the send declared Nth. Otherwise a reader would see a later bubble drawn
+  // above an earlier one while it carried the lower ordinal, and the tool's
+  // own description promises the model the calls "arrive as separate messages
+  // in the order written here".
   const sendOrdinals = sendOrdinalsV1(events);
+  const declaredSends = events
+    .filter(
+      (event): event is Extract<SessionEvent, { type: "send/to-user" }> =>
+        event.type === "send/to-user",
+    )
+    .map((event, index) => ({
+      event,
+      ordinal: sendOrdinals.get(event.occurrenceId) ?? index,
+    }))
+    .sort((left, right) => left.ordinal - right.ordinal);
   let sendCount = 0;
   let projectedIncompleteSync = false;
   for (const event of events) {
@@ -861,12 +879,13 @@ function projectionUnits(
       unit.events.push(result);
       unit.droppable = true;
     } else if (event.type === "send/to-user") {
+      const declared = declaredSends[sendCount];
       units.push({
         events: [
           {
             type: "send/to-user",
-            payload: event.payload,
-            ordinal: sendOrdinals.get(event.occurrenceId) ?? sendCount,
+            payload: declared?.event.payload ?? event.payload,
+            ordinal: declared?.ordinal ?? sendCount,
           },
         ],
         droppable: true,

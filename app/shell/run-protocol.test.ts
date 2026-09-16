@@ -1242,7 +1242,7 @@ describe("client run protocol v1", () => {
     ).toEqual(projected.events);
   });
 
-  test("names a batch's sends by where they were declared, not when they landed", () => {
+  test("draws and names a batch's sends by where they were declared, not when they landed", () => {
     // Three sends issued by one batch. The middle one finished first, so the
     // durable log holds them out of order — which is exactly what Promise.all
     // makes possible, and what a replay may do differently.
@@ -1266,7 +1266,9 @@ describe("client run protocol v1", () => {
     // The ordinal is the message's identity — "The message the cloud names is
     // `<runId>:send:<ordinal>`" — so it has to come from the declared
     // position. Counting appends would have given the same payload a
-    // different id on a replay that scheduled the calls differently.
+    // different id on a replay that scheduled the calls differently, and a
+    // payload drawn out of step with the id it carries reads as the answer's
+    // parts arriving shuffled.
     expect(
       projected.events
         .filter((entry) => entry.type === "send/to-user")
@@ -1275,8 +1277,8 @@ describe("client run protocol v1", () => {
           entry.ordinal,
         ]),
     ).toEqual([
-      ["tool:1:1:0.1", 1],
       ["tool:1:1:0.0", 0],
+      ["tool:1:1:0.1", 1],
       ["tool:1:1:0.2", 2],
     ]);
   });
@@ -1311,8 +1313,8 @@ describe("client run protocol v1", () => {
           entry.ordinal,
         ]),
     ).toEqual([
-      ["tool:1:1:0.1", 1],
       ["tool:1:1:0.0", 0],
+      ["tool:1:1:0.1", 1],
       ["tool:1:1:0.2", 2],
       ["notice", 3],
     ]);

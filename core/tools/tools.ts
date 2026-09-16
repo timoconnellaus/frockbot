@@ -141,11 +141,22 @@ const BATCH_SCHEMA: ToolSchema = {
   },
 };
 
-interface BatchSubCallV1 {
-  tool: string;
-  arguments: unknown;
-}
+type BatchSubCallV1 =
+  | { kind: "call"; tool: string; arguments: unknown }
+  | { kind: "invalid"; tool: string; reason: string };
 
+/**
+ * The calls of one batch, or the reason the batch itself is unusable.
+ *
+ * The two levels are not the same failure. A batch with no calls array, an
+ * empty one, or one past the bound has nothing to run, so the whole call is
+ * refused. A single malformed call is that call's own failure: the batch
+ * exists so one inference buys several calls, and refusing all of them
+ * because the third named no tool costs the model the other two. Such a call
+ * is carried through as `invalid` and reported in its own slot, naming what
+ * was wrong with it, so the model repairs that call rather than guessing
+ * which of the calls was malformed.
+ */
 function decodeBatchCallsV1(input: unknown): BatchSubCallV1[] | string {
   if (!isRecord(input)) return "batch requires an object with a calls array";
   const calls = input.calls;
@@ -155,17 +166,23 @@ function decodeBatchCallsV1(input: unknown): BatchSubCallV1[] | string {
   if (calls.length > BATCH_MAX_CALLS_V1) {
     return `batch carries at most ${BATCH_MAX_CALLS_V1} calls; this one carried ${calls.length}`;
   }
-  const decoded: BatchSubCallV1[] = [];
-  for (const [index, call] of calls.entries()) {
+  return calls.map((call) => {
     if (!isRecord(call) || typeof call.tool !== "string" || !call.tool) {
-      return `batch call ${index} needs a tool name`;
+      return {
+        kind: "invalid",
+        tool: isRecord(call) && typeof call.tool === "string" ? call.tool : "",
+        reason: "it needs a tool name",
+      };
     }
     if (call.arguments !== undefined && !isRecord(call.arguments)) {
-      return `batch call ${index} arguments must be an object`;
+      return {
+        kind: "invalid",
+        tool: call.tool,
+        reason: "its arguments must be an object",
+      };
     }
-    decoded.push({ tool: call.tool, arguments: call.arguments ?? {} });
-  }
-  return decoded;
+    return { kind: "call", tool: call.tool, arguments: call.arguments ?? {} };
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -825,6 +842,18 @@ export class ToolRegistry implements ToolExecution {
    * Admission fencing is the batch's: the loop admitted this one effect, and
    * a Stop reaches the sub-calls through `context.signal` rather than through
    * a second admission per call.
+   *
+   * Crash durability narrows, deliberately. At top level a completed call is
+   * protected twice: the tool journal skips any occurrence that already holds
+   * a result, and the effect is re-issued under the same `effectId`, which
+   * every non-idempotent tool is required to honour. A sub-call has no
+   * journal entry of its own - only the batch's aggregate result, written
+   * once every call has settled - so a crash before that write replays the
+   * whole batch and the journal's protection is absent. The key's protection
+   * is not: a sub-call's `effectId` is derived from its *declared* position,
+   * so a replayed batch re-issues call N under exactly the id it carried
+   * before, and a tool honouring its key still sees one effect. That is why
+   * these ids must never be derived from arrival order.
    */
   private async runBatch(
     input: unknown,
@@ -836,6 +865,16 @@ export class ToolRegistry implements ToolExecution {
     }
     const results = await Promise.all(
       decoded.map(async (sub, index) => {
+        if (sub.kind === "invalid") {
+          return {
+            index,
+            tool: sub.tool,
+            result: {
+              content: `batch call ${index} was refused: ${sub.reason}`,
+              isError: true,
+            } satisfies ToolExecutionResult,
+          };
+        }
         if (sub.tool === BATCH_TOOL_NAME) {
           return {
             index,
