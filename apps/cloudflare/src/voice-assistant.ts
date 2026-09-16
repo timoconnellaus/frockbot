@@ -2876,6 +2876,7 @@ export class VoiceAssistant extends VoiceAgentBase<
             profile: [],
             recent: [],
             sources: [],
+            documents: [],
             logTotal: 0,
             unavailable: error instanceof Error ? error.message : String(error),
           };

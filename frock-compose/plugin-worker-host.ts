@@ -58,6 +58,7 @@ import {
   type PluginGrantV1,
   type PluginSlotV1,
 } from "@frockbot/core/contracts";
+import { createConcurrencyLimiterV1 } from "@frockbot/core/concurrency";
 import {
   CompositionMountFailureError,
   type CompositionFailurePhaseV1,
@@ -455,16 +456,28 @@ export class PluginWorkerHost {
     const ordered = pluginMountOrderV1(members, refused);
     failures.push(...ordered.failures);
 
-    const resolved: ResolvedPlugin[] = [];
-    for (const member of ordered.order) {
-      try {
-        resolved.push({
-          member,
-          source: await this.options.artifacts.loadPackageArtifact(
+    // The artifacts are immutable objects addressed by content hash, so
+    // reading them is order-independent and they are read together: one round
+    // trip per member, in sequence, is mount latency nobody gets back. The
+    // mount order itself is unchanged — `ordered.order` still decides it, and
+    // a member whose artifact is missing still fails in its own place.
+    const inFlight = createConcurrencyLimiterV1();
+    const sources = await Promise.all(
+      ordered.order.map((member) =>
+        inFlight(() =>
+          this.options.artifacts.loadPackageArtifact(
             member.artifact.contentHash,
           ),
-        });
-      } catch (error) {
+        ).then(
+          (source) => ({ source, error: undefined }),
+          (error: unknown) => ({ source: undefined, error }),
+        ),
+      ),
+    );
+    const resolved: ResolvedPlugin[] = [];
+    for (const [index, member] of ordered.order.entries()) {
+      const { source, error } = sources[index]!;
+      if (source === undefined) {
         // Site one: the immutable artifact read. A generation whose artifact
         // is gone never resolves, and that is a different repair from a broken
         // one.
@@ -473,7 +486,9 @@ export class PluginWorkerHost {
           phase: "resolve",
           message: `plugin "${member.packageId}" artifact "${member.artifact.contentHash}" is unavailable: ${errorMessage(error)}`,
         });
+        continue;
       }
+      resolved.push({ member, source });
     }
     if (resolved.length === 0) {
       return {

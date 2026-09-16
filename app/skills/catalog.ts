@@ -43,8 +43,13 @@ import {
   type SkillSourceV1,
   type WorkspaceEntryV1,
   type WorkspaceInstructionRootV1,
+  type WorkspaceReadOutcomeV1,
   type WorkspaceReadsV1,
 } from "@frockbot/core/contracts";
+import {
+  createConcurrencyLimiterV1,
+  type ConcurrencyLimiterV1,
+} from "@frockbot/core/concurrency";
 import { loadManagedSkillsV1, MANAGED_SKILL_DOCUMENTS_V1 } from "./managed.js";
 import {
   SKILL_FILE_NAME,
@@ -305,6 +310,8 @@ export async function loadSkillCatalogV1(
     maxSkills?: number;
     root?: WorkspaceInstructionRootV1;
     source?: "bot" | "user";
+    /** Shared so the two instruction roots hold one budget between them. */
+    inFlight?: ConcurrencyLimiterV1;
   } = {},
 ): Promise<SkillCatalogV1> {
   const maxSkills = options.maxSkills ?? SKILL_MAX_CATALOG_ENTRIES;
@@ -337,6 +344,28 @@ export async function loadSkillCatalogV1(
     .filter((entry) => isSkillDocumentPathV1(entry.path.path))
     .sort((left, right) => left.path.path.localeCompare(right.path.path));
 
+  // The bodies are independent objects, and reading them one after another
+  // made a root cost one round trip per SKILL.md on the turn-start critical
+  // path. Every candidate that the checks above a read would admit is fetched
+  // together; the loop below still decides in listing order, and a candidate
+  // the look-ahead did not cover - because refusals after its read freed room
+  // under the catalog bound - is read where it always was. Nothing about which
+  // Skills load, or which refusals are recorded, moves; the bound is only on
+  // how many of them are outstanding at once.
+  const inFlight = options.inFlight ?? createConcurrencyLimiterV1();
+  const prefetched = new Map<string, Promise<WorkspaceReadOutcomeV1>>();
+  for (const entry of candidates) {
+    if (prefetched.size >= maxSkills) break;
+    const source = sourceOf(entry);
+    if (!isLoadableSkillSourceV1(source, owner)) continue;
+    if (source.generation.size > SKILL_MAX_FILE_BYTES) continue;
+    const read = inFlight(() => reads.read(source.path));
+    // A read this loop may never await must not surface as an unhandled
+    // rejection; the awaiting caller still sees the same failure.
+    read.catch(() => {});
+    prefetched.set(source.path.path, read);
+  }
+
   for (const entry of candidates) {
     const source = sourceOf(entry);
     const path = source.path.path;
@@ -364,7 +393,7 @@ export async function loadSkillCatalogV1(
       });
       continue;
     }
-    const read = await reads.read(source.path);
+    const read = await (prefetched.get(path) ?? reads.read(source.path));
     if (read.status !== "ok") {
       catalog.refusals.push({
         path,
@@ -544,9 +573,18 @@ export async function loadFullSkillCatalogV1(
   } = {},
 ): Promise<SkillCatalogV1> {
   const sources: SkillCatalogSourcesV1 = {};
-  for (const { source, root } of skillInstructionRootsV1(owner)) {
-    const loaded = await loadSkillCatalogV1(reads, owner, { root, source });
-    sources[source] = { skills: loaded.skills, refusals: loaded.refusals };
+  // The two roots are independent; reading them in sequence doubled the wall
+  // clock of a phase that is already on the turn-start path.
+  const roots = skillInstructionRootsV1(owner);
+  const inFlight = createConcurrencyLimiterV1();
+  const loaded = await Promise.all(
+    roots.map(({ source, root }) =>
+      loadSkillCatalogV1(reads, owner, { root, source, inFlight }),
+    ),
+  );
+  for (const [index, { source }] of roots.entries()) {
+    const catalog = loaded[index]!;
+    sources[source] = { skills: catalog.skills, refusals: catalog.refusals };
   }
   if (options.managed !== false) {
     const withheld = options.withheldManagedSlugs ?? [];

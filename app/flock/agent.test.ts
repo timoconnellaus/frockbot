@@ -19,6 +19,7 @@ import {
   createBotCreateTool,
   createBotMessageTool,
   createTeammatesPromptSectionV1,
+  createTurnBotDirectoryV1,
   createBotUpdateTool,
   createdBotIdV1,
   decodeBotUpdateInputV1,
@@ -363,10 +364,10 @@ describe("bot_create", () => {
   test("registers one Bot in the User's flock with its description", async () => {
     const test1 = harness();
 
-    const result = await createBotCreateTool(test1.host).execute(
-      { name: "Budget", description: "Watches the money." },
-      CONTEXT,
-    );
+    const result = await createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    ).execute({ name: "Budget", description: "Watches the money." }, CONTEXT);
 
     expect(result.isError).toBe(false);
     const directory = await test1.host.listBots();
@@ -386,14 +387,20 @@ describe("bot_create", () => {
   test("records the creating Bot and Turn on the registration", async () => {
     const test1 = harness();
 
-    await createBotCreateTool(test1.host).execute({ name: "Budget" }, CONTEXT);
+    await createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    ).execute({ name: "Budget" }, CONTEXT);
 
     expect((await test1.host.listBots()).bots[0]!.createdBy).toEqual(WRITER);
   });
 
   test("a replay after eviction creates exactly one Bot", async () => {
     const test1 = harness();
-    const tool = createBotCreateTool(test1.host);
+    const tool = createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    );
     expect(tool.idempotent).toBe(true);
 
     const first = await tool.execute({ name: "Budget" }, CONTEXT);
@@ -407,7 +414,10 @@ describe("bot_create", () => {
 
   test("a different occurrence creates a distinct Bot", async () => {
     const test1 = harness();
-    const tool = createBotCreateTool(test1.host);
+    const tool = createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    );
 
     await tool.execute({ name: "Budget" }, CONTEXT);
     await tool.execute(
@@ -420,7 +430,8 @@ describe("bot_create", () => {
   });
 
   test("refuses a nameless call and an unknown field", async () => {
-    const tool = createBotCreateTool(harness().host);
+    const host = harness().host;
+    const tool = createBotCreateTool(host, createTurnBotDirectoryV1(host));
 
     expect(tool.validate?.({})).toBe(false);
     expect(tool.validate?.({ name: "Budget", model: "glm" })).toBe(false);
@@ -433,7 +444,9 @@ describe("the self-management seam", () => {
     const host = harness().host;
 
     expect(createBotUpdateTool(host).admission).toBeUndefined();
-    expect(createBotCreateTool(host).admission).toBeUndefined();
+    expect(
+      createBotCreateTool(host, createTurnBotDirectoryV1(host)).admission,
+    ).toBeUndefined();
   });
 });
 
@@ -451,11 +464,17 @@ describe("bot_message", () => {
 
   test("the teammates section names the other Bots and their descriptions", async () => {
     const test1 = harness();
-    await createBotCreateTool(test1.host).execute(
+    await createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    ).execute(
       { name: "Researcher", description: "Finds primary sources." },
       CONTEXT,
     );
-    const prompt = await createTeammatesPromptSectionV1(test1.host).render({
+    const prompt = await createTeammatesPromptSectionV1(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    ).render({
       sessionId: "user-1:bot-1",
       provider: "test",
       model: "test",
@@ -465,5 +484,60 @@ describe("bot_message", () => {
     expect(prompt).toContain("<teammates>");
     expect(prompt).toContain("Researcher");
     expect(prompt).toContain("Finds primary sources.");
+  });
+
+  test("the teammates section reads the flock once a Turn, and again after a create", async () => {
+    const test1 = harness();
+    let calls = 0;
+    const host = {
+      ...test1.host,
+      listBots: () => {
+        calls += 1;
+        return test1.host.listBots();
+      },
+    };
+    const flock = createTurnBotDirectoryV1(host);
+    const section = createTeammatesPromptSectionV1(host, flock);
+    const context = {
+      sessionId: "user-1:bot-1",
+      provider: "test",
+      model: "test",
+      turnType: "chat" as const,
+    };
+    // Two steps of one Turn. The answer cannot have changed between them, and
+    // the User Durable Object is single-threaded and shared by every Bot.
+    await section.render(context);
+    await section.render(context);
+
+    expect(calls).toBe(1);
+
+    await createBotCreateTool(host, flock).execute(
+      { name: "Researcher", description: "Finds primary sources." },
+      CONTEXT,
+    );
+    const after = await section.render(context);
+
+    // A Bot made mid-Turn is named in the next step's prompt, not after the
+    // Turn ends.
+    expect(after).toContain("Researcher");
+  });
+
+  test("a failed flock read does not answer for the rest of the Turn", async () => {
+    const test1 = harness();
+    let calls = 0;
+    const host = {
+      ...test1.host,
+      listBots: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.reject(new Error("User object is busy"))
+          : test1.host.listBots();
+      },
+    };
+    const flock = createTurnBotDirectoryV1(host);
+
+    await expect(flock.read()).rejects.toThrow("User object is busy");
+    await expect(flock.read()).resolves.toMatchObject({ schemaVersion: 1 });
+    expect(calls).toBe(2);
   });
 });

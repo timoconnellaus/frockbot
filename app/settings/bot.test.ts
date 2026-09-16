@@ -19,6 +19,7 @@ import {
   executeConfiguration,
   readConfiguration,
   resolveConfiguration,
+  userAccountFeaturesReaderV1,
 } from "@frockbot/app/settings/bot";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 
@@ -788,5 +789,61 @@ describe("Bot Package setting commands", () => {
         }),
       ),
     ).rejects.toThrow("reused for a different command");
+  });
+});
+
+describe("the account features read of one mount", () => {
+  const features = {
+    schemaVersion: 1,
+    applets: true,
+    pluginAuthoring: false,
+    plugins: [] as string[],
+    updatedAt: "2026-09-16T00:00:00.000Z",
+    updatedBy: "owner-id",
+  } as const;
+
+  function featuresState(readFeatures: () => Promise<unknown>) {
+    return {
+      env: {
+        USER_CONFIGURATIONS: {
+          idFromName: () => "user-1",
+          get: () => ({ readFeatures }),
+        },
+      },
+    } as never;
+  }
+
+  test("reads once for every gate that asks", async () => {
+    let calls = 0;
+    const read = userAccountFeaturesReaderV1(
+      featuresState(() => {
+        calls += 1;
+        return Promise.resolve(structuredClone(features));
+      }),
+      { userId: "user-1", botId: "bot-1" },
+    );
+
+    expect(await read()).toEqual(features);
+    expect(await read()).toEqual(features);
+    expect(calls).toBe(1);
+  });
+
+  test("a failed read does not answer for the gates that come after it", async () => {
+    let calls = 0;
+    const read = userAccountFeaturesReaderV1(
+      featuresState(() => {
+        calls += 1;
+        return calls === 1
+          ? Promise.reject(new Error("User object is busy"))
+          : Promise.resolve(structuredClone(features));
+      }),
+      { userId: "user-1", botId: "bot-1" },
+    );
+
+    // Each gate had its own chance before the memo; a transient failure must
+    // not close every gate of the mount.
+    await expect(read()).rejects.toThrow("User object is busy");
+    expect(await read()).toEqual(features);
+    expect(calls).toBe(2);
   });
 });

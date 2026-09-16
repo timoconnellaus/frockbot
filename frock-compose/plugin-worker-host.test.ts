@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { TURN_READ_CONCURRENCY_V1 } from "@frockbot/core/concurrency";
 import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
   decodePluginDescriptorV1,
@@ -151,6 +152,7 @@ function harness(
     healthThrows?: string;
     deadlineMs?: number;
     artifacts?: Record<string, string>;
+    loadArtifact?: (contentHash: string) => Promise<string>;
     recordHookFailure?: (failure: IsolateHookFailureV1) => Promise<void>;
   } = {},
 ): Harness {
@@ -219,6 +221,7 @@ function harness(
     },
     artifacts: {
       loadPackageArtifact: (contentHash) => {
+        if (input.loadArtifact) return input.loadArtifact(contentHash);
         const source = input.artifacts?.[contentHash];
         if (input.artifacts && source === undefined) {
           return Promise.reject(new Error("missing artifact"));
@@ -992,6 +995,28 @@ describe("what the worker reports at mount", () => {
         message: expect.stringMatching(/artifact .* is unavailable/),
       },
     ]);
+  });
+
+  test("artifact reads stay under the shared bound without losing any", async () => {
+    const members = [...Array(TURN_READ_CONCURRENCY_V1 * 3).keys()].map((n) =>
+      member(`plugin-${n}`, { contentHash: `${n}`.padStart(64, "0") }),
+    );
+    let running = 0;
+    let peak = 0;
+    const subject = harness({
+      loadArtifact: async (contentHash) => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        running -= 1;
+        return `export const tools = []; // ${contentHash}`;
+      },
+    });
+    const prepared = await subject.host.mount(members);
+
+    expect(peak).toBe(TURN_READ_CONCURRENCY_V1);
+    expect(prepared.failures).toEqual([]);
+    expect(prepared.mounted).toEqual(members.map((one) => one.packageId));
   });
 });
 

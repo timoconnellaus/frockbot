@@ -551,6 +551,7 @@ async function applySelfProfileV1(
 
 export function createBotCreateTool(
   host: FlockSelfRuntimeHostV1,
+  flock: TurnBotDirectoryV1,
   random?: () => number,
 ): ToolDefinition {
   return {
@@ -615,6 +616,9 @@ export function createBotCreateTool(
                 `bot_create was rejected: ${receipt.failure ?? "the Flock refused it"}`,
               );
             }
+            // The flock this Turn has already named in its prompt is now out
+            // of date by exactly this Bot.
+            flock.invalidate();
             return {
               content: `Created Bot "${decoded.name}" as ${botId}. It follows your User's default model and holds no capabilities of its own.`,
               isError: false,
@@ -690,15 +694,53 @@ function promptText(value: string): string {
   );
 }
 
+/**
+ * One Turn's reading of the Bot directory, for the sections that only need to
+ * name the flock.
+ *
+ * `listBots` is a cross-Durable-Object call to the User object, and the
+ * teammates section rendered it on every step's prompt assembly - the same
+ * answer, fetched again, against an object that is single-threaded and shared
+ * by every Bot this User owns.
+ *
+ * It is a Turn-scoped memo and not a cache: the runtime Contribution this
+ * lives in is built once per admitted Turn. `bot_create` invalidates it, so a
+ * Bot made mid-Turn is named in the next step's prompt rather than after the
+ * Turn ends. Fencing reads - `bot_create`'s own revision check - never go
+ * through it.
+ */
+export interface TurnBotDirectoryV1 {
+  read(): Promise<BotDirectoryViewV1>;
+  invalidate(): void;
+}
+
+export function createTurnBotDirectoryV1(
+  host: FlockSelfRuntimeHostV1,
+): TurnBotDirectoryV1 {
+  let pending: Promise<BotDirectoryViewV1> | undefined;
+  return {
+    read: () =>
+      (pending ??= host.listBots().catch((error: unknown) => {
+        pending = undefined;
+        throw error;
+      })),
+    invalidate: () => {
+      pending = undefined;
+    },
+  };
+}
+
 export function createTeammatesPromptSectionV1(
   host: FlockSelfRuntimeHostV1,
+  directory: TurnBotDirectoryV1,
 ): PromptSection {
   return {
     id: TEAMMATES_PROMPT_SECTION_V1,
     order: 92,
     render: async (context) => {
       if (context.turnType !== "chat") return "";
-      const teammates = (await host.listBots()).bots.filter(
+      const view = await directory.read();
+      const teammates = view.bots.filter(
         (bot) => bot.botId !== host.owner.botId,
       );
       if (teammates.length === 0) return "";
@@ -749,8 +791,11 @@ export function createFlockRuntimeFeature(
     const messagingCeiling = flockAdmissionCeilingV1(
       BOT_MESSAGING_CAPABILITY_V1,
     );
+    const turnDirectory = createTurnBotDirectoryV1(host);
     const disposers = [
-      runtime.systemPrompt.register(createTeammatesPromptSectionV1(host)),
+      runtime.systemPrompt.register(
+        createTeammatesPromptSectionV1(host, turnDirectory),
+      ),
       runtime.systemPrompt.register(createInboundAgentPromptSectionV1(host)),
       // Mounted only on a Turn that actually has a caller to answer, and
       // bound to that caller here rather than read from an argument. The
@@ -763,7 +808,7 @@ export function createFlockRuntimeFeature(
           ]
         : []),
       runtime.tools.register(createBotUpdateTool(host)),
-      runtime.tools.register(createBotCreateTool(host)),
+      runtime.tools.register(createBotCreateTool(host, turnDirectory)),
       runtime.tools.register(
         createBotMessageTool(host),
         messagingCeiling ? { admissionCeiling: messagingCeiling } : undefined,

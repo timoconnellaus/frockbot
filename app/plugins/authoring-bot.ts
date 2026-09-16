@@ -21,7 +21,7 @@ import {
   proposeUserCompositionV1,
 } from "@frockbot/app/composition/bot";
 import { pluginSettingsKeyV1 } from "@frockbot/app/isolates/bot";
-import { userAccountFeaturesV1 } from "@frockbot/app/settings/bot";
+import type { UserAccountFeaturesReadV1 } from "@frockbot/app/settings/bot";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import {
   recordPluginIntentOutcomeV1,
@@ -49,13 +49,14 @@ export async function pluginAuthoringRuntimeHost(
   state: ShellBotStateV1,
   identity: BotIdentity,
   turn: PluginAuthoringTurnV1,
+  features: UserAccountFeaturesReadV1,
 ): Promise<PluginAuthoringRuntimeHostV1 | undefined> {
   const artifacts = state.env.APPLICATION_ARTIFACTS;
   const workspace = state.env.WORKSPACE_FILES;
   if (!artifacts || !workspace) return undefined;
   let enabled: boolean;
   try {
-    enabled = (await userAccountFeaturesV1(state, identity)).pluginAuthoring;
+    enabled = (await features()).pluginAuthoring;
   } catch {
     enabled = false;
   }

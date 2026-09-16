@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./concurrency": "./concurrency.ts",
     "./contracts": "./contracts/index.ts",
     "./contracts/contributions": "./contracts/contributions.ts",
     "./durable": "./durable/index.ts",

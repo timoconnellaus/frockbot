@@ -50,6 +50,7 @@ import {
 import {
   executeConfigurationCommand,
   readBotSettingsV1,
+  userAccountFeaturesReaderV1,
   userConfigurationV1,
 } from "@frockbot/app/settings/bot";
 import { createBotSkillsHost } from "@frockbot/app/skills/bot";
@@ -119,6 +120,9 @@ export async function agentRuntime(
   modelSelection: RuntimeModelSelection;
 }> {
   const userConfiguration = userConfigurationV1(state, identity);
+  // Three gates below ask the User object for the same account features
+  // record. One mount, one read: see `userAccountFeaturesReaderV1`.
+  const accountFeatures = userAccountFeaturesReaderV1(state, identity);
   const user = await userConfiguration.readConfiguration({
     schemaVersion: 1,
     userId: identity.userId,
@@ -230,12 +234,12 @@ export async function agentRuntime(
   // before the Composition is built for the same reason the machine gate is:
   // the answer decides whether the Package is mounted at all.
   const applets = turn
-    ? await appletsRuntimeHost(state, identity, turn)
+    ? await appletsRuntimeHost(state, identity, turn, accountFeatures)
     : undefined;
   // A Bot writes a Plugin only inside an admitted Turn, for the same reason,
   // and only behind the account's Plugin-authoring switch (ADR 0026).
   const plugins = turn
-    ? await pluginAuthoringRuntimeHost(state, identity, turn)
+    ? await pluginAuthoringRuntimeHost(state, identity, turn, accountFeatures)
     : undefined;
   // Filled in once this Turn's model binding is resolved, below. The tool
   // and the prompt section both read it lazily, from inside the Turn.
@@ -246,7 +250,12 @@ export async function agentRuntime(
       readSecret,
       ...(turn
         ? {
-            skills: await createBotSkillsHost(state, identity, turn),
+            skills: await createBotSkillsHost(
+              state,
+              identity,
+              turn,
+              accountFeatures,
+            ),
           }
         : {}),
       ...(turn

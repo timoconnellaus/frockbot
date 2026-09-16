@@ -34,7 +34,10 @@ import {
   currentUserCompositionV1,
   proposeUserCompositionV1,
 } from "@frockbot/app/composition/bot";
-import { userAccountFeaturesV1 } from "@frockbot/app/settings/bot";
+import {
+  userAccountFeaturesV1,
+  type UserAccountFeaturesReadV1,
+} from "@frockbot/app/settings/bot";
 import {
   createAppletCapabilityHostV1,
   createAppletInstanceBindingV1,
@@ -175,12 +178,13 @@ export async function appletsRuntimeHost(
   state: ShellBotStateV1,
   identity: BotIdentity,
   turn: { sessionId: string; runId: string; turnId: string },
+  features: UserAccountFeaturesReadV1,
 ): Promise<AppletsRuntimeHostV1 | undefined> {
   const capability = appletCapabilityHost(state, identity);
   if (!capability) return undefined;
   let enabled: boolean;
   try {
-    enabled = await appletsEnabled(state, identity);
+    enabled = (await features()).applets;
   } catch {
     enabled = false;
   }
