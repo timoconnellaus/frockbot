@@ -23,7 +23,8 @@ import { ToolRegistry } from "@frockbot/core/tools";
  * tool on its own can see.
  *
  * This is the one enumeration: a new conversation-positioned event type is an
- * edit here, and every harness in the repo starts checking it at once.
+ * edit here, and every harness that journals its tool calls starts checking it
+ * at once.
  */
 export const CONVERSATION_POSITIONED_EVENTS_V1 = [
   "send/to-user",
@@ -38,7 +39,14 @@ export const CONVERSATION_POSITIONED_EVENTS_V1 = [
  * id names the tool that appended it, and that tool has to have declared
  * `orderedEffect`. Nothing is intercepted — this reads only what was
  * journalled, so it sees a sub-call of a `batch` exactly as it sees a
- * top-level call, and a run that journalled no calls says nothing.
+ * top-level call.
+ *
+ * What that leaves uncovered is the larger half: a violation is reported only
+ * for an event whose occurrence has a journalled `tool/call`, so this covers a
+ * test that runs the real dispatch path or writes the `tool/call` row itself,
+ * and is inert for a harness that appends events directly — most of them. A
+ * tool exercised without a journalled call can drop `orderedEffect` and no
+ * test here will notice.
  */
 function undeclaredConversationAppends(
   sessions: SessionStore,

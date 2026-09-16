@@ -273,6 +273,11 @@ async function runBatchV1(
   // A batch spends one durable admission per call, and a run's record holds a
   // bounded number of them, so a batch that cannot fit is refused whole rather
   // than overflowing the record partway through and failing the Turn. The
+  // bound is not `batch`'s: a run has always been able to exhaust it with
+  // enough tool calls across enough steps, and a record past it has always
+  // failed to decode. What a batch changes is how easily an ordinary Turn
+  // reaches it — 25 admissions in one step — and so whether it is worth saying
+  // something the model can act on instead of throwing. The
   // budget is not spent to the brim: the step that reads the batch's result
   // needs an admission of its own, so `BATCH_ADMISSION_RESERVE_V1` is held
   // back and the refusal names the number that is true after the reservation —

@@ -1,8 +1,9 @@
 // The harness's own guard: a tool whose effect takes a position in the
-// conversation has to declare `orderedEffect`, and the harness every feature
-// test already uses is what notices when one does not. It reads the journal
-// back after the run rather than watching dispatch, so what it checks is
-// exactly what the durable log says happened.
+// conversation has to declare `orderedEffect`, and the harness notices when
+// one does not — for a run that journalled the `tool/call`. It reads the
+// journal back after the run rather than watching dispatch, so what it checks
+// is exactly what the durable log says happened, and a harness that appends
+// events without a call row is not checked at all.
 import { expect, test } from "bun:test";
 import type {
   ToolDefinition,
