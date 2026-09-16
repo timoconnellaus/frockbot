@@ -304,7 +304,11 @@ class ShellSidebar extends StatelessWidget {
       0,
       (total, bot) => total + _unread(_id(bot)).count,
     );
-    return Column(
+    // A phone's rows are cards a shade darker than the ground they sit on,
+    // the way Mail and Gmail draw theirs, so the thing a thumb slides is a
+    // thing and not a stripe of the page.
+    final ground = phone ? sidebarGroundColor(theme.colorScheme) : null;
+    final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Header(
@@ -516,6 +520,7 @@ class ShellSidebar extends StatelessWidget {
         if (!phone) _Foot(onMarketplace: onMarketplace),
       ],
     );
+    return ground == null ? column : ColoredBox(color: ground, child: column);
   }
 
   Widget _row(BuildContext context, wire.BotRegistration bot) {
@@ -535,6 +540,7 @@ class ShellSidebar extends StatelessWidget {
     final row = _BotRow(
       key: ValueKey('bot-$botId'),
       identifier: ShellIds.sidebarBot(botId),
+      card: phone,
       selected: selected,
       enabled: !isArchived,
       onTap: isArchived ? null : () => onSelect(botId),
@@ -643,6 +649,16 @@ class _RowControl extends StatelessWidget {
     );
   }
 }
+
+/// A phone list's ground: the surface, a shade lighter, so its rows read as
+/// cards laid on it.
+Color sidebarGroundColor(ColorScheme scheme) =>
+    Color.alphaBlend(Colors.white.withValues(alpha: 0.05), scheme.surface);
+
+/// A phone list's row: the surface, a shade darker than the ground, so what
+/// a thumb slides is visibly the thing that moves.
+Color sidebarCardColor(ColorScheme scheme) =>
+    Color.alphaBlend(Colors.black.withValues(alpha: 0.2), scheme.surface);
 
 /// How far, as a share of the row's width, a swipe towards the trailing edge
 /// travels before letting go marks the Bot read. Far enough that a scroll that
@@ -886,7 +902,7 @@ class _RowShape extends CustomClipper<RRect> {
 
   @override
   RRect getClip(Size size) => RRect.fromRectAndRadius(
-    Rect.fromLTWH(8, 0, size.width - 16, size.height),
+    Rect.fromLTWH(8, 2, size.width - 16, size.height - 4),
     const Radius.circular(10),
   );
 
@@ -902,6 +918,10 @@ class _BotRow extends StatefulWidget {
   /// child of that node, the engine would carry the row's text as a label
   /// rather than as text.
   final String identifier;
+
+  /// Whether the row is a card on a lighter ground, a phone's, or a line in
+  /// a column, a desktop's.
+  final bool card;
   final bool selected;
   final bool enabled;
   final VoidCallback? onTap;
@@ -923,6 +943,7 @@ class _BotRow extends StatefulWidget {
   const _BotRow({
     super.key,
     required this.identifier,
+    this.card = false,
     required this.selected,
     required this.enabled,
     required this.onTap,
@@ -960,7 +981,9 @@ class _BotRowState extends State<_BotRow> {
       selected: selected,
       button: enabled,
       child: Material(
-        color: selected
+        color: widget.card
+            ? sidebarCardColor(theme.colorScheme)
+            : selected
             ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
@@ -1041,7 +1064,9 @@ class _BotRowState extends State<_BotRow> {
       ),
     );
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: widget.card
+          ? const EdgeInsets.fromLTRB(8, 2, 8, 2)
+          : const EdgeInsets.symmetric(horizontal: 8),
       // Hover and focus are the row's and its control's together, so moving
       // onto the control or tabbing to it keeps it on screen.
       child: MouseRegion(
