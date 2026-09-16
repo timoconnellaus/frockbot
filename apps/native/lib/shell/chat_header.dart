@@ -3,17 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart' hide ConnectionState;
 
 import '../client/chat_controller.dart';
-import '../flock/avatar.dart';
 import 'semantics.dart';
 import 'chat_icons.dart';
 
 /// The blue a running Computer's icon wears: a cooler note beside the
 /// accent, so "working" and "yours" never read as the same colour.
 const computerRunningColor = Color(0xff5aa9ff);
-
-/// The character in the conversation's bar. Large enough to read as the Bot
-/// rather than as an icon, and the same figure the sidebar row draws.
-const double chatHeaderAvatarSize = 40;
 
 /// The conversation's title bar.
 ///
@@ -26,8 +21,6 @@ const double chatHeaderAvatarSize = 40;
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
-  final String? background;
-  final String? primary;
 
   /// Back to the Bot list. The phone's, where the conversation is a page.
   final VoidCallback? onBack;
@@ -60,8 +53,6 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     super.key,
     required this.name,
     this.textScale = 1,
-    this.background,
-    this.primary,
     this.onBack,
     this.onOpenBot,
     this.onSettings,
@@ -86,24 +77,12 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     final title = Row(
       mainAxisSize: onOpenBot == null ? MainAxisSize.max : MainAxisSize.min,
       children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            CharacterAvatar(
-              size: chatHeaderAvatarSize,
-              characterId: background,
-              primary: primary,
-              motion: CharacterMotion.quiet,
-            ),
-            if (connection == ConnectionState.reconnecting)
-              const Positioned(
-                right: -2,
-                bottom: -2,
-                child: _DelayedConnectionDot(),
-              ),
-          ],
-        ),
-        const SizedBox(width: 8),
+        // Slow recovery marks the name itself: the bar carries no character
+        // now that the Bot's companion sits beside the composer.
+        if (connection == ConnectionState.reconnecting) ...[
+          const _DelayedConnectionDot(),
+          const SizedBox(width: 6),
+        ],
         Flexible(
           child: Text(
             name,
@@ -139,7 +118,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 icon: Icon(Icons.arrow_back_rounded, size: chatIconSize),
               ),
             ),
-      // With no back arrow the avatar is the first thing in the bar, and it
+      // With no back arrow the name is the first thing in the bar, and it
       // sits as far from the left edge as the last icon's glyph does from the
       // right: 4 of trailing space plus the icon's own margin inside its
       // 40-wide button.
@@ -161,10 +140,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                       backgroundColor: scheme.onSurface.withValues(alpha: 0.06),
                       foregroundColor: scheme.onSurface,
                       shape: const StadiumBorder(),
-                      // Three points above and below the character keep the
-                      // pill inside the 52-point bar with its avatar at the
-                      // size the sidebar and the wide tiers draw it.
-                      padding: const EdgeInsets.fromLTRB(4, 3, 9, 3),
+                      padding: const EdgeInsets.fromLTRB(12, 5, 9, 5),
                       minimumSize: const Size(0, 34),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),

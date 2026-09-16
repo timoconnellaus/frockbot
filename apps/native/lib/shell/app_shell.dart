@@ -2003,8 +2003,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             connection: selectedConnection,
                             textScale:
                                 MediaQuery.textScalerOf(context).scale(14) / 14,
-                            background: _background(bot.botId.value),
-                            primary: _primary(bot.botId.value),
                             // A phone's bar is GrokBot's three things; the wider tiers
                             // name each entry of the right panel beside the title.
                             onBack: single ? _openBack : null,
