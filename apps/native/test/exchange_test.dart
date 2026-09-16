@@ -380,6 +380,53 @@ void main() {
     );
   });
 
+  testWidgets('two messages in one Turn are two rows', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    // Both messages carry their Turn's admission time, so only their own
+    // identity tells the two rows apart.
+    final exchanges = projectExchanges([
+      chatRun(
+        id: 'twice',
+        at: '2026-09-16T01:00:00.000Z',
+        input: 'Ask Xero twice',
+        events: [
+          toBot('tool-1', 'What is overdue?', botId: 'xero-books'),
+          result('tool-1', 'Four invoices.'),
+          toBot('tool-2', 'Which is oldest?', botId: 'xero-books'),
+          result('tool-2', 'The 4 Sep one.'),
+        ],
+      ),
+    ], const ExchangeCounterpart.bot(botId: 'xero-books', name: 'Xero Books'));
+    expect(exchanges.map((e) => e.request), [
+      'What is overdue?',
+      'Which is oldest?',
+    ]);
+    expect(exchanges.map((e) => e.id).toSet(), hasLength(2));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ExchangeView(
+            self: const ExchangeParty(name: 'General', background: 'hot-pink'),
+            counterpart: const ExchangeCounterpart.bot(
+              botId: 'xero-books',
+              name: 'Xero Books',
+            ),
+            counterpartBackground: 'electric-blue',
+            exchanges: exchanges,
+            clock: clock,
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.takeException(), isNull);
+    expect(find.text('What is overdue?'), findsOneWidget);
+    expect(find.text('Which is oldest?'), findsOneWidget);
+  });
+
   test('exchange times read as a person says them', () {
     expect(formatExchangeTime('2026-09-16T00:14:00.000Z', clock), isNot(''));
     final local = DateTime(2026, 9, 16, 8, 14).toUtc().toIso8601String();

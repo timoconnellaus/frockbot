@@ -100,6 +100,10 @@ class ExchangeCounterpart {
 /// the request is the counterpart's and the reply is this Bot's; outbound the
 /// other way round.
 class Exchange {
+  /// This exchange's own identity — its Turn, and the call that sent it —
+  /// so two messages to the same Bot in one Turn stay two rows. Their
+  /// timestamps are the Turn's, and are equal.
+  final String id;
   final ExchangeCounterpart counterpart;
   final ExchangeDirection direction;
   final String request;
@@ -109,6 +113,7 @@ class Exchange {
   /// When the request was admitted, ISO-8601, when the projection knows.
   final String? at;
   const Exchange({
+    required this.id,
     required this.counterpart,
     required this.direction,
     required this.request,
@@ -479,6 +484,7 @@ Exchange? inboundExchange(Map<String, dynamic> run) {
   final events = (run['events'] as List?) ?? const [];
   final reply = _callerReply(events, counterpart);
   return Exchange(
+    id: '${run['runId']}:inbound',
     counterpart: counterpart,
     direction: ExchangeDirection.inbound,
     request: (run['input'] as String?) ?? '',
@@ -555,6 +561,7 @@ List<TranscriptLine> _spokenLines(
           at: at,
           status: LineStatus.completed,
           exchange: Exchange(
+            id: '$runId:exchange:$callId',
             // Named by id alone: the wire does not carry the target's name,
             // and the client's directory does.
             counterpart: ExchangeCounterpart.bot(
@@ -818,8 +825,15 @@ List<Exchange> projectExchanges(
       }
     }
   }
-  exchanges.sort((a, b) => (a.at ?? '').compareTo(b.at ?? ''));
-  return exchanges;
+  // Every exchange of one Turn carries that Turn's admission time, so the
+  // sort must not be free to reorder them: they are already appended in the
+  // order the Turn made them, and a tie keeps that order.
+  final ordered = exchanges.indexed.toList()
+    ..sort((a, b) {
+      final at = (a.$2.at ?? '').compareTo(b.$2.at ?? '');
+      return at != 0 ? at : a.$1.compareTo(b.$1);
+    });
+  return [for (final entry in ordered) entry.$2];
 }
 
 /// When an exchange happened, for the view: the time today, the weekday and

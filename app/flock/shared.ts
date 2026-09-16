@@ -8,6 +8,10 @@ import {
 } from "@frockbot/core/configuration";
 export type { BotSelfWriterV1 } from "@frockbot/core/configuration";
 import { APPLET_IMPACT_FINGERPRINT_V1 } from "@frockbot/core/contracts";
+
+/** The Flock's Bot-to-Bot message tool, by name. */
+export const BOT_MESSAGE_TOOL_V1 = "bot_message";
+
 export const FLOCK_DIRECTORY_LIMIT = 100;
 
 /**

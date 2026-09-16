@@ -24,7 +24,7 @@ import {
   projectClientAnnouncementsV1,
   projectClientRunLookupV1,
   projectClientRunOrDegradedV1,
-  BOT_MESSAGE_TOOL_NAME_V1,
+  botMessageCallV1,
   type ClientRunListV1,
   type ClientRunLookupV1,
   type ClientRunV1,
@@ -190,11 +190,7 @@ export async function listRuns(
     return run.events.some(
       (event) =>
         event.type === "tool/call" &&
-        event.name === BOT_MESSAGE_TOOL_NAME_V1 &&
-        typeof event.input === "object" &&
-        event.input !== null &&
-        (event.input as Record<string, unknown>).target_id ===
-          counterpart.botId,
+        botMessageCallV1(event)?.botId === counterpart.botId,
     );
   };
   const activeRunId = query.before

@@ -122,9 +122,7 @@ class ExchangeView extends StatelessWidget {
                     children: [
                       for (final exchange in exchanges.reversed)
                         _ExchangeRows(
-                          key: ValueKey(
-                            'exchange:${exchange.at}:${exchange.direction}',
-                          ),
+                          key: ValueKey('exchange:${exchange.id}'),
                           exchange: exchange,
                           self: self,
                           other: other,

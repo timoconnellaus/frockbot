@@ -183,8 +183,12 @@ describe("client run protocol v1", () => {
         turn: 1,
         step: 1,
         occurrenceId: "tool:1:1:0",
-        name: "bot_message",
-        input: { target_id: "researcher", message: "What is overdue?" },
+        name: "call_dynamic_tool",
+        input: {
+          namespace: "frockbot",
+          toolName: "bot_message",
+          arguments: { target_id: "researcher", message: "What is overdue?" },
+        },
       }),
       event({
         type: "tool/result",
@@ -193,7 +197,7 @@ describe("client run protocol v1", () => {
         turn: 1,
         step: 1,
         occurrenceId: "tool:1:1:0",
-        name: "bot_message",
+        name: "call_dynamic_tool",
         content: "Four invoices.",
         isError: false,
         status: "completed",
@@ -222,8 +226,10 @@ describe("client run protocol v1", () => {
         page: { truncated: false },
       })[0]?.events,
     ).toEqual(projected.events);
-    // A call the tool refused before it named a Bot stays an ordinary call.
-    const refused = storedRun([
+    // A target the model invented is not a Bot id. Projected as a message it
+    // would fail the client's decode of the whole page, so it stays the call
+    // it was and the rest of the Turn still reads.
+    const hallucinated = storedRun([
       event({
         type: "tool/call",
         seq: 0,
@@ -231,14 +237,26 @@ describe("client run protocol v1", () => {
         turn: 1,
         step: 1,
         occurrenceId: "tool:1:1:0",
-        name: "bot_message",
-        input: { target_id: "" },
+        name: "call_dynamic_tool",
+        input: {
+          namespace: "frockbot",
+          toolName: "bot_message",
+          arguments: { target_id: "Xero Books", message: "What is overdue?" },
+        },
       }),
     ]);
-    expect(projectClientRunV1(refused).events[0]).toMatchObject({
+    const refusedEvents = projectClientRunV1(hallucinated).events;
+    expect(refusedEvents[0]).toMatchObject({
       type: "tool/call",
-      call: { name: "bot_message" },
+      call: { name: "call_dynamic_tool" },
     });
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projectClientRunV1(hallucinated)],
+        page: { truncated: false },
+      })[0]?.events,
+    ).toEqual(refusedEvents);
   });
 
   test("projects and decodes a Bot caller's reply", () => {

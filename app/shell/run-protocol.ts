@@ -12,6 +12,11 @@ import {
   isPublicIdentifier,
   isRpcIdentifier,
 } from "@frockbot/core/configuration";
+import {
+  dynamicToolInputV1,
+  resolveDynamicToolNameV1,
+} from "@frockbot/app/audit/classify";
+import { BOT_MESSAGE_TOOL_V1 } from "@frockbot/app/flock/shared";
 import { decodeRunCursorV1, RUN_CURSOR_PATTERN } from "./run-cursor.js";
 export { decodeRunCursorV1, RUN_CURSOR_PATTERN };
 import {
@@ -619,20 +624,35 @@ type ClientMessageToBotV1 = Extract<
   { type: "message/to-bot" }
 >;
 
-/** The Flock's `bot_message` tool, by name: the Shell projects, it does not mount. */
-export const BOT_MESSAGE_TOOL_NAME_V1 = "bot_message";
-
-function botMessageInput(
-  value: unknown,
-): { botId: string; text: string } | undefined {
+/**
+ * The message a journalled `tool/call` sent to another Bot, if it sent one.
+ *
+ * `bot_message` is namespaced, so the journal records the `call_dynamic_tool`
+ * wrapper and names the tool inside it — reading the bare name matches nothing
+ * a Bot ever called. The target is the model's own string, and the client
+ * validates the whole page it arrives on, so a hallucinated id would cost the
+ * person every other row rather than just this one: only a wire `BotId` is
+ * projected as a message, and anything else stays the tool call it was.
+ */
+export function botMessageCallV1(event: {
+  name: string;
+  input?: unknown;
+}): { botId: string; text: string } | undefined {
+  if (event.name !== CALL_DYNAMIC_TOOL_NAME_V1) return undefined;
+  if (
+    resolveDynamicToolNameV1(event.name, event.input) !== BOT_MESSAGE_TOOL_V1
+  ) {
+    return undefined;
+  }
+  const value = dynamicToolInputV1(event.input);
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
   const input = value as Record<string, unknown>;
-  if (typeof input.target_id !== "string" || typeof input.message !== "string")
+  if (!isPublicIdentifier(input.target_id)) return undefined;
+  if (typeof input.message !== "string" || input.message.length === 0) {
     return undefined;
-  if (input.target_id.length === 0 || input.message.length === 0)
-    return undefined;
+  }
   return { botId: input.target_id, text: input.message };
 }
 type ClientToolResultV1 = Extract<ClientRunEventV1, { type: "tool/result" }>;
@@ -832,15 +852,12 @@ function projectionUnits(
         event.name === CALL_DYNAMIC_TOOL_NAME_V1
           ? dynamicToolCallInput(event.input)
           : undefined;
-      const toBot =
-        event.name === BOT_MESSAGE_TOOL_NAME_V1
-          ? botMessageInput(event.input)
-          : undefined;
+      const toBot = botMessageCallV1(event);
       const call: ClientToolCallV1 | ClientMessageToBotV1 = toBot
         ? {
             type: "message/to-bot",
             callId: `tool-${callCount}`,
-            botId: truncate(toBot.botId, 128),
+            botId: toBot.botId,
             text: truncateWireString(toBot.text, MAX_EVENT_CONTENT_BYTES),
           }
         : {

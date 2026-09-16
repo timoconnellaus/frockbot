@@ -64,6 +64,7 @@ import type {
 } from "@frockbot/core/contracts";
 import { decodeTurnTypeV1 } from "@frockbot/core/contracts";
 import {
+  BOT_MESSAGE_TOOL_V1,
   FlockConflictError,
   isFlockIdentifier,
   randomAvatarAppearanceV1,
@@ -72,6 +73,7 @@ import {
   type FlockReceiptV1,
 } from "./shared.js";
 import { flockDefinitionV1 } from "./definition.js";
+export { BOT_MESSAGE_TOOL_V1 } from "./shared.js";
 export type {
   BotDirectoryViewV1,
   CreateBotCommandV1,
@@ -133,7 +135,6 @@ export interface BotMessageOutcomeV1 {
   text: string;
 }
 
-export const BOT_MESSAGE_TOOL_V1 = "bot_message";
 export const BOT_MESSAGING_CAPABILITY_V1 = "bot-messaging";
 export const TEAMMATES_PROMPT_SECTION_V1 = "teammates";
 export const INBOUND_AGENT_PROMPT_SECTION_V1 = "agent-message";
