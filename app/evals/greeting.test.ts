@@ -4,6 +4,61 @@ import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { shellAgentFeature } from "../shell/agent.js";
 import { gradeGreeting } from "./greeting.js";
 
+test("greeting grader reads a batched send as the call the model made", async () => {
+  const root = createAgentRuntimeHarness();
+  await root.mount(shellAgentFeature);
+  root.llm.register({
+    id: "fixture",
+    async *stream() {
+      yield {
+        type: "tool-call",
+        call: {
+          id: "batch-1",
+          name: "batch",
+          input: {
+            calls: [
+              {
+                tool: "send_to_user",
+                arguments: {
+                  disposition: "finish",
+                  payload: { type: "text", text: "Hello! How can I help?" },
+                },
+              },
+            ],
+          },
+        },
+      };
+      yield { type: "finish", reason: "completed" };
+    },
+  });
+  const loop = createAgentLoop(root, {
+    maxSteps: 3,
+    composition: {
+      generationId: "1970-01-01T00:00:00.000Z:0123456789abcdef",
+      artifactSetHash: "a".repeat(64),
+    },
+  });
+  try {
+    const handle = await loop.create({
+      botId: "eval",
+      sessionId: "eval",
+      provider: "fixture",
+      model: "fixture",
+      turnType: "chat",
+      admitEffect: () => Promise.resolve(true),
+    });
+    handle.agent.send("Hi");
+    await handle.agent.whenIdle();
+    const result = gradeGreeting(handle.agent.session.events);
+    expect(result.checks.onlySendToUser).toBe(true);
+    expect(result.checks.finalDisposition).toBe(true);
+    expect(result.passed).toBe(true);
+  } finally {
+    await loop.dispose();
+    await root.dispose();
+  }
+});
+
 for (const repairFirst of [false, true]) {
   test(`greeting grader ${repairFirst ? "rejects repaired delivery" : "accepts a single final send"}`, async () => {
     const root = createAgentRuntimeHarness();
