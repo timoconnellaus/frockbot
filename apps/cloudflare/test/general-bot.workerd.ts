@@ -285,4 +285,48 @@ describe("General in Workerd", () => {
       )!.avatar,
     ).toEqual(chosen);
   });
+
+  // A retried command answers from the Bot's stored receipt without touching
+  // what the Bot wears, so the retry must not drag the directory back to the
+  // avatar that older command asked for.
+  test("a replayed avatar command leaves the directory on the later choice", async () => {
+    const userId = `avatar-replay-${crypto.randomUUID()}`;
+    const rpc = userRpc(userId);
+    const envelope = { schemaVersion: 1, userId };
+    const { generalBotId } = await rpc.readFlockBootstrap(envelope);
+    const botId = generalBotId!;
+    const listedAvatar = async () =>
+      (await rpc.listBots(envelope)).bots.find((bot) => bot.botId === botId)!
+        .avatar;
+    const first = { schemaVersion: 1, characterId: "fox", primary: "#ff8800" };
+    const second = { schemaVersion: 1, characterId: "cat", primary: "#8b72d9" };
+    const command = (
+      commandId: string,
+      expectedRevision: number,
+      avatar: typeof first,
+    ) => ({
+      ...envelope,
+      botId,
+      command: {
+        schemaVersion: 1,
+        type: "bot/update-avatar",
+        commandId,
+        expectedRevision,
+        botId,
+        avatar,
+      },
+    });
+    expect(
+      (await rpc.updateBotAvatar(command("replay-first", 0, first))).status,
+    ).toBe("applied");
+    expect(
+      (await rpc.updateBotAvatar(command("replay-second", 1, second))).status,
+    ).toBe("applied");
+    expect(await listedAvatar()).toEqual(second);
+    // The first command arrives again: the Bot replays its receipt.
+    expect(
+      (await rpc.updateBotAvatar(command("replay-first", 0, first))).status,
+    ).toBe("applied");
+    expect(await listedAvatar()).toEqual(second);
+  });
 });

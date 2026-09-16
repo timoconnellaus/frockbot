@@ -1872,9 +1872,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
    * The Bot's object is the authority on its avatar and checks the command's
    * revision; the directory here is what every Bot list draws from, and it
    * only ever held the appearance the Bot was created with. The mirror is
-   * written once the Bot has applied the change, and a replayed command —
-   * the Bot answers a stored receipt — mirrors again, so a write that was
-   * lost between the two lands on the retry.
+   * written once the Bot has applied the change, and what it writes is the
+   * avatar the Bot reports wearing rather than the one the command asked
+   * for: a replayed command — the Bot answers a stored receipt without
+   * touching its identity — then mirrors what the Bot wears now, so a write
+   * lost between the two heals on the retry without an older command
+   * dragging the directory back.
    */
   async updateBotAvatar(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
@@ -1892,6 +1895,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
     const bot = this.env.BOT_STATES.get(id) as unknown as {
       updateAvatar(input: unknown): Promise<unknown>;
+      readAvatar(input: unknown): Promise<unknown>;
     };
     const receipt = decodeFlockReceiptV1(
       rpcJsonSnapshotV1(
@@ -1899,9 +1903,14 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       ),
     );
     if (receipt.status === "applied") {
+      const identity = decodeAvatarIdentityViewV1(
+        rpcJsonSnapshotV1(
+          await bot.readAvatar({ schemaVersion: 1, userId, botId }),
+        ),
+      );
       await (
         await this.flockContribution()
-      ).mirrorAvatar(botId, command.avatar);
+      ).mirrorAvatar(botId, identity.avatar);
     }
     return receipt;
   }
