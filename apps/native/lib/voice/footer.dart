@@ -282,25 +282,18 @@ class _VoiceFooterState extends State<VoiceFooter> {
                           // the semantics label for a screen reader.
                           child: Align(
                             alignment: Alignment.centerLeft,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CharacterAvatar(
-                                  size: 76,
-                                  characterId: appearance.characterId,
-                                  primary: appearance.primary,
-                                  activity:
-                                      delegation ==
-                                          VoiceDelegationStateV1.finished
-                                      ? CharacterActivity.success
-                                      : CharacterActivity.thinking,
-                                  emotion:
-                                      delegation ==
-                                          VoiceDelegationStateV1.answering
-                                      ? CharacterEmotion.content
-                                      : CharacterEmotion.curious,
-                                ),
-                              ],
+                            child: CharacterAvatar(
+                              size: 76,
+                              characterId: appearance.characterId,
+                              primary: appearance.primary,
+                              activity:
+                                  delegation == VoiceDelegationStateV1.finished
+                                  ? CharacterActivity.success
+                                  : CharacterActivity.thinking,
+                              emotion:
+                                  delegation == VoiceDelegationStateV1.answering
+                                  ? CharacterEmotion.content
+                                  : CharacterEmotion.curious,
                             ),
                           ),
                         ),
