@@ -29,7 +29,7 @@ import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
 } from "@frockbot/core/contracts";
-import { createConcurrencyLimiterV1 } from "@frockbot/app/concurrency";
+import { createConcurrencyLimiterV1 } from "@frockbot/core/concurrency";
 import { createMemoryEmbedder } from "./embeddings.js";
 import {
   readAllMemoryDocumentsV1,

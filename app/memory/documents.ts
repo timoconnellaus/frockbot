@@ -10,7 +10,7 @@
 import {
   type ConcurrencyLimiterV1,
   createConcurrencyLimiterV1,
-} from "@frockbot/app/concurrency";
+} from "@frockbot/core/concurrency";
 import type {
   MemoryScopeNameV1,
   WorkspaceMemoryRootV1,

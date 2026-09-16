@@ -43,7 +43,6 @@
     "./composition/bot": "./composition/bot.ts",
     "./composition/user": "./composition/user.ts",
     "./composition/user.fixture": "./composition/user.fixture.ts",
-    "./concurrency": "./concurrency.ts",
     "./connect": "./connect/index.ts",
     "./connect/agent": "./connect/agent.ts",
     "./connect/backend": "./connect/backend.ts",

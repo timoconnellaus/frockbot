@@ -49,7 +49,7 @@ import {
 import {
   createConcurrencyLimiterV1,
   type ConcurrencyLimiterV1,
-} from "@frockbot/app/concurrency";
+} from "@frockbot/core/concurrency";
 import { loadManagedSkillsV1, MANAGED_SKILL_DOCUMENTS_V1 } from "./managed.js";
 import {
   SKILL_FILE_NAME,

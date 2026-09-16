@@ -16,7 +16,7 @@ import {
   projectMemoryRootV1,
   userMemoryRootV1,
 } from "./roots.ts";
-import { TURN_READ_CONCURRENCY_V1 } from "@frockbot/app/concurrency";
+import { TURN_READ_CONCURRENCY_V1 } from "@frockbot/core/concurrency";
 import { MemoryStore, MEMORY_MAX_FILES_PER_TIER } from "./store.ts";
 import {
   createInMemoryMemoryProjectsV1,

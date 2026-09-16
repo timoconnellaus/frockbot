@@ -58,6 +58,7 @@ import {
   type PluginGrantV1,
   type PluginSlotV1,
 } from "@frockbot/core/contracts";
+import { createConcurrencyLimiterV1 } from "@frockbot/core/concurrency";
 import {
   CompositionMountFailureError,
   type CompositionFailurePhaseV1,
@@ -460,14 +461,17 @@ export class PluginWorkerHost {
     // trip per member, in sequence, is mount latency nobody gets back. The
     // mount order itself is unchanged — `ordered.order` still decides it, and
     // a member whose artifact is missing still fails in its own place.
+    const inFlight = createConcurrencyLimiterV1();
     const sources = await Promise.all(
       ordered.order.map((member) =>
-        this.options.artifacts
-          .loadPackageArtifact(member.artifact.contentHash)
-          .then(
-            (source) => ({ source, error: undefined }),
-            (error: unknown) => ({ source: undefined, error }),
+        inFlight(() =>
+          this.options.artifacts.loadPackageArtifact(
+            member.artifact.contentHash,
           ),
+        ).then(
+          (source) => ({ source, error: undefined }),
+          (error: unknown) => ({ source: undefined, error }),
+        ),
       ),
     );
     const resolved: ResolvedPlugin[] = [];

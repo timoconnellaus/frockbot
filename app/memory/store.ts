@@ -40,7 +40,7 @@ import {
 import {
   type ConcurrencyLimiterV1,
   createConcurrencyLimiterV1,
-} from "@frockbot/app/concurrency";
+} from "@frockbot/core/concurrency";
 import type { MemoryDocumentV1 } from "./documents.js";
 import {
   memoryFileKindV1,
