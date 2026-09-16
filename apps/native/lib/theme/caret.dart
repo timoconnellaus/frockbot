@@ -22,6 +22,11 @@ import 'package:flutter/material.dart';
 /// pixel of softness on a Retina screen, where the glyphs beside it are
 /// unsnapped anyway, and it buys a caret that is not drawn through the last
 /// letter.
+///
+/// Every [TextField] and [TextFormField] in the app is wrapped in it, since
+/// they all have the defect; wrap a new one too. `test/caret_test.dart` holds
+/// a tripwire asserting a bare field still carries the nudge, so this whole
+/// file goes when Flutter stops drawing it.
 class SteadyCaret extends StatelessWidget {
   final Widget child;
   const SteadyCaret({super.key, required this.child});
