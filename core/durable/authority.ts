@@ -1692,9 +1692,12 @@ export class BotDurableAuthority<Snapshot> {
       const run = await this.readRunFrom(transaction, runId);
       if (!run) throw new Error(`run "${runId}" was not accepted`);
       const eventLog = new SessionEventLog(transaction);
-      const latest = await eventLog.read(run.sessionId);
+      // The guard needs the log's length, not its contents. Reading the log
+      // here hydrated every retained model request, on every flush — and a
+      // Turn's preamble flushes about eight times.
+      const persisted = await eventLog.count(run.sessionId);
       for (const [index, event] of durableEvents.entries()) {
-        if (event.seq !== latest.length + index) {
+        if (event.seq !== persisted + index) {
           throw new Error(
             "Bot session persistence received non-contiguous events",
           );

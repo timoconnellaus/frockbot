@@ -382,6 +382,63 @@ describe("the paged Session event log", () => {
     expect(await log.readRange(SESSION_ID, 0, events.length)).toEqual(events);
   });
 
+  test("counts the log from its index without hydrating any event", async () => {
+    const storage = new MemoryStorage();
+    const session = new Session(SESSION_ID);
+    for (let turn = 1; turn <= 12; turn += 1) {
+      session.appendBatch([
+        { type: "turn/start", turn },
+        {
+          type: "model/request",
+          turn,
+          step: 1,
+          request: {
+            requestId: `request-${turn}`,
+            provider: "fake",
+            model: "large-context",
+            system: "s".repeat(80_000),
+            messages: [],
+            tools: [],
+          },
+        },
+        { type: "turn/end", turn, outcome: "completed" },
+      ]);
+    }
+    const events = [...session.events];
+    const log = new SessionEventLog(storage);
+    await log.rewrite(SESSION_ID, events);
+
+    const reads: string[] = [];
+    const get = storage.get.bind(storage);
+    storage.get = <T>(key: string): Promise<T | undefined> => {
+      reads.push(key);
+      return get<T>(key);
+    };
+
+    expect(await log.count(SESSION_ID)).toBe(events.length);
+
+    // The index alone. A flush asking where the next event goes must not pay
+    // for every page and every retained request to be told.
+    expect(reads).toEqual([sessionEventLogIndexKeyV1(SESSION_ID)]);
+  });
+
+  test("counts an unmigrated log from its legacy value", async () => {
+    const storage = new MemoryStorage();
+    const events = journal();
+    storage.values.set("latest-events", structuredClone(events));
+
+    expect(await new SessionEventLog(storage).count(SESSION_ID)).toBe(
+      events.length,
+    );
+    expect(storage.values.has("latest-events")).toBe(true);
+  });
+
+  test("counts an empty log as zero", async () => {
+    expect(
+      await new SessionEventLog(new MemoryStorage()).count(SESSION_ID),
+    ).toBe(0);
+  });
+
   test("migrates the legacy single value on demand", async () => {
     const storage = new MemoryStorage();
     const events = journal(1_900_000);

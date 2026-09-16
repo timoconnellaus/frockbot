@@ -293,6 +293,30 @@ function requirePage(
 export class SessionEventLog {
   constructor(private readonly storage: SessionEventLogStorage) {}
 
+  /**
+   * How many events the log holds, without hydrating any of them.
+   *
+   * The count is what the index exists to record, and a caller that only has
+   * to know where the next event goes must not pay for the whole conversation
+   * to learn it: `read` walks every page and, for every cut entry, fetches and
+   * re-verifies each payload chunk. A Bot with a hundred retained 80 KiB model
+   * requests paid all of that on every flush of a Turn.
+   *
+   * A log with no index has not been migrated yet, so its length is the legacy
+   * array's — the same number `read` would derive from it.
+   */
+  async count(sessionId: string): Promise<number> {
+    const index = requireIndex(
+      await this.storage.get<SessionEventLogIndexV1>(
+        sessionEventLogIndexKeyV1(sessionId),
+      ),
+      sessionId,
+    );
+    if (index) return index.eventCount;
+    const legacy = (await this.storage.get<unknown[]>(LATEST_EVENTS_KEY)) ?? [];
+    return legacy.length;
+  }
+
   async read(sessionId: string): Promise<SessionEvent[]> {
     const index = requireIndex(
       await this.storage.get<SessionEventLogIndexV1>(
