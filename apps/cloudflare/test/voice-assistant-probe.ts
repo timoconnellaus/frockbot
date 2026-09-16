@@ -301,8 +301,10 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
             new RegExp(
               `^${VOICE_BOT_ANSWER_MARKER_V1.replace(/[[\]]/g, "\\$&")} (.*?), asked`,
             ).exec(last.content)?.[1] ?? "The Bot";
-          const answered = /has answered: (.*)$/s.exec(last.content)?.[1];
-          const failed = /could not finish: (.*)$/s.exec(last.content)?.[1];
+          const answered = /has answered, in its own words: "(.*)"/s.exec(
+            last.content,
+          )?.[1];
+          const failed = /could not finish: "(.*)"/s.exec(last.content)?.[1];
           return answered
             ? `${bot} says ${answered}`
             : `${bot} could not finish that: ${failed ?? ""}`;

@@ -504,9 +504,12 @@ asked on (`announceDelegation`, then the event turn). The turn is admitted and
 metered like a spoken one, marked as a Bot's answer, and carries the request
 in the person's own words from the retained spoken turn — "[Bot answer] Bob,
 asked earlier in this conversation about "can you ask Bob what the weather
-is?", has answered: …" — so the assistant can say "about the weather" rather
-than recite its own paraphrase. The system prompt says what such a message
-is and that saying nothing is a choice it may make. No bridge fills the
+is?", has answered, in its own words: …" — so the assistant can say "about the
+weather" rather than recite its own paraphrase. The Bot's words are quoted as
+data, said so in the message itself and in the system prompt, and the event
+turn runs with no tools at all, so a Bot's answer can reach nothing durable.
+The system prompt says what such a message is and that saying nothing is a
+choice it may make. No bridge fills the
 silence, because nobody asked a question just now. What it says is spoken
 once it is whole; a person who starts talking meanwhile aborts it and their
 turn takes the floor. The delegation is marked `spoken` the moment the turn

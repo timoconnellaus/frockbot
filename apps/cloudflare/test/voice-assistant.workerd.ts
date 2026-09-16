@@ -1555,6 +1555,23 @@ describe("the voice session object", () => {
           String(f.text).startsWith("Workerd Bot"),
       ),
     ).toBe(false);
+    // The call still knows the Bot answered: a later turn asking about it
+    // carries the event message in its history, so nobody is asked twice.
+    expect(await stub.probeUtterance("what did Bob say?")).toBe(true);
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" &&
+        String(f.text).startsWith("You said: what did Bob say?"),
+      "the follow-up answered",
+    );
+    const messages = (await stub.probeChatMessages()).at(-1)!;
+    expect(
+      messages.some(
+        (message) =>
+          message.role === "user" &&
+          message.content.startsWith(VOICE_BOT_ANSWER_MARKER_V1),
+      ),
+    ).toBe(true);
     opened.socket.close();
   });
 

@@ -1703,10 +1703,6 @@ export class VoiceAssistant extends VoiceAgentBase<
     const history: { role: "user" | "assistant"; content: string }[] = [];
     for (const turn of turns) {
       if (turn.turnId === currentTurnId) continue;
-      // An event turn that failed was never told: its answer is still owed
-      // and will be admitted again, so leaving it here would show the model
-      // the same "[Bot answer] …" twice.
-      if (turn.event && turn.state === "failed") continue;
       history.push({ role: "user", content: turn.transcript });
       if (turn.answer)
         history.push({ role: "assistant", content: turn.answer });
@@ -2446,6 +2442,7 @@ export class VoiceAssistant extends VoiceAgentBase<
             transcript,
             signal: controller.signal,
             acknowledge: false,
+            tools: false,
           },
           (result) => {
             // Nothing said is a decision here, not a failure: the assistant
