@@ -1646,6 +1646,9 @@ function botIdentityView(
     ...(profile.label === undefined ? {} : { label: profile.label }),
     ...(profile.title === undefined ? {} : { title: profile.title }),
     ...(profile.pinnedAt === undefined ? {} : { pinnedAt: profile.pinnedAt }),
+    ...(profile.sidebarOrder === undefined
+      ? {}
+      : { sidebarOrder: profile.sidebarOrder }),
   };
 }
 

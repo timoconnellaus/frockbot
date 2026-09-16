@@ -111,6 +111,14 @@ export interface BotProfile {
    * order — earliest pin first — without a second ordering field.
    */
   pinnedAt?: string;
+  /**
+   * Where the sidebar draws this Bot among the Bots of its label: lower
+   * first. A Bot without one sits after every Bot with one, in directory
+   * order, which is what the list looked like before anything was dragged.
+   * The gaps between neighbours are the client's to choose, so a drop is
+   * usually one write.
+   */
+  sidebarOrder?: number;
 }
 
 /**
@@ -126,6 +134,7 @@ export interface BotProfilePatchV1 {
   hiddenFromSidebar?: boolean;
   /** An ISO 8601 instant pins the Bot; the empty string unpins it. */
   pinnedAt?: string;
+  sidebarOrder?: number;
 }
 
 export interface BotNotificationPolicy {
@@ -1122,7 +1131,16 @@ const BOT_PROFILE_OPTIONAL_FIELDS = [
   "namedBy",
   "hiddenFromSidebar",
   "pinnedAt",
+  "sidebarOrder",
 ] as const;
+
+/** A sidebar position: any safe integer, so a drop between two can always be one. */
+function sidebarOrder(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    throw new ConfigurationDecodeError(`${label} must be an integer`);
+  }
+  return value;
+}
 
 function botProfile(value: unknown): BotProfile {
   const profile = exactRecord(
@@ -1156,6 +1174,14 @@ function botProfile(value: unknown): BotProfile {
     ...(profile.pinnedAt === undefined
       ? {}
       : { pinnedAt: profileTimestamp(profile.pinnedAt, "profile.pinnedAt") }),
+    ...(profile.sidebarOrder === undefined
+      ? {}
+      : {
+          sidebarOrder: sidebarOrder(
+            profile.sidebarOrder,
+            "profile.sidebarOrder",
+          ),
+        }),
   };
 }
 
@@ -1192,7 +1218,15 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
     value,
     "profile",
     [],
-    ["name", "label", "description", "title", "hiddenFromSidebar", "pinnedAt"],
+    [
+      "name",
+      "label",
+      "description",
+      "title",
+      "hiddenFromSidebar",
+      "pinnedAt",
+      "sidebarOrder",
+    ],
   );
   if (Reflect.ownKeys(patch).length === 0) {
     throw new ConfigurationDecodeError("profile has invalid fields");
@@ -1226,6 +1260,14 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
               ? ""
               : profileTimestamp(patch.pinnedAt, "profile.pinnedAt"),
         }),
+    ...(patch.sidebarOrder === undefined
+      ? {}
+      : {
+          sidebarOrder: sidebarOrder(
+            patch.sidebarOrder,
+            "profile.sidebarOrder",
+          ),
+        }),
   };
 }
 
@@ -1255,6 +1297,7 @@ export function applyBotProfilePatchV1(
     if (patch.hiddenFromSidebar) next.hiddenFromSidebar = true;
     else delete next.hiddenFromSidebar;
   }
+  if (patch.sidebarOrder !== undefined) next.sidebarOrder = patch.sidebarOrder;
   return next;
 }
 

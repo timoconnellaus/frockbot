@@ -306,22 +306,39 @@ export class RoutineStore {
       prefix: ROUTINE_PREFIX,
       limit: ROUTINE_LIMIT_PER_BOT,
     });
-    const routines = [...stored.values()].map((value) =>
-      decodeRoutineRecordV1(value),
-    );
     const views: RoutineViewV1[] = [];
-    for (const record of routines) {
+    for (const value of stored.values()) {
+      let record: RoutineRecordV1;
+      try {
+        record = decodeRoutineRecordV1(value);
+      } catch {
+        // The scheduler and the inbox already skip a record this deploy cannot
+        // read; this read did not, and its RoutineDecodeError left the route
+        // as a 400 — the caller's request coming back at them for a stored
+        // shape they never sent — so one unreadable Routine took the whole
+        // surface with it and the app could only say "Routines couldn’t
+        // load". A Routine nothing can read is one Routine missing from the
+        // list, never a list that cannot be read.
+        continue;
+      }
       const key = await this.#storage.get<unknown>(
         routineHookKeyRecordV1(record.routineId),
       );
+      let hookKeyVersion: number | undefined;
+      try {
+        hookKeyVersion =
+          key === undefined ? undefined : decodeRoutineHookKeyV1(key).keyVersion;
+      } catch {
+        // The same tolerance for the key beside it: the Routine is still the
+        // reader's, shown without a key it can mint again.
+        hookKeyVersion = undefined;
+      }
       views.push(
         routineViewV1(
           record,
           timezone,
           nextRuns?.get(record.routineId),
-          key === undefined
-            ? undefined
-            : decodeRoutineHookKeyV1(key).keyVersion,
+          hookKeyVersion,
         ),
       );
     }

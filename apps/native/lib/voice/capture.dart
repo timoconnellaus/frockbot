@@ -15,6 +15,8 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:record/record.dart';
 
 import 'speech_gate.dart' show pcm16Rms;
@@ -103,6 +105,74 @@ class PcmFrameChunker {
 int pcmFrameBytes(int sampleRate, Duration frame) =>
     (sampleRate * 2 * frame.inMicroseconds) ~/ Duration.microsecondsPerSecond;
 
+/// Whether the recorder is asked to clean the signal on [platform].
+///
+/// Echo cancellation, noise suppression and auto gain are the phone's: there
+/// the speaker is inches from the microphone, and without cancellation the
+/// assistant barges in on itself. On a Mac the recorder answers the same
+/// request by turning voice processing on at the engine's input node, and
+/// that unit is an input-and-output pair: with nothing rendering through the
+/// same engine's output — playback here is the app's own device sink — the
+/// input it hands over is silence. That is what the first voice session
+/// after allowing the microphone was: a meter that never moved and a word
+/// never detected, on a microphone that was open the whole time. The desk
+/// gets a plain microphone; the browser keeps its own processing.
+bool voiceCaptureProcessingV1(TargetPlatform platform, {bool web = kIsWeb}) =>
+    web ||
+    switch (platform) {
+      TargetPlatform.android || TargetPlatform.iOS || TargetPlatform.fuchsia =>
+        true,
+      TargetPlatform.macOS || TargetPlatform.windows || TargetPlatform.linux =>
+        false,
+    };
+
+/// The recorder's configuration for one [profile] on one [platform].
+RecordConfig voiceRecordConfigV1({
+  required VoiceCaptureProfile profile,
+  required TargetPlatform platform,
+  required int sampleRate,
+  bool web = kIsWeb,
+  int? streamBufferSize,
+}) {
+  final processing = voiceCaptureProcessingV1(platform, web: web);
+  return switch (profile) {
+    VoiceCaptureProfile.dictation => RecordConfig(
+      encoder: AudioEncoder.pcm16bits,
+      numChannels: 1,
+      sampleRate: sampleRate,
+      echoCancel: processing,
+      noiseSuppress: processing,
+      autoGain: processing,
+      androidConfig: const AndroidRecordConfig(
+        // The communication source is the one Android attaches its own
+        // echo canceller and noise suppressor to.
+        audioSource: AndroidAudioSource.voiceCommunication,
+        audioManagerMode: AudioManagerMode.modeInCommunication,
+      ),
+    ),
+    VoiceCaptureProfile.call => RecordConfig(
+      encoder: AudioEncoder.pcm16bits,
+      numChannels: 1,
+      sampleRate: sampleRate,
+      echoCancel: processing,
+      noiseSuppress: processing,
+      autoGain: processing,
+      // The call already holds the session: the plugin must not set a
+      // mode, start Bluetooth on its own, or ask for a second, media-
+      // shaped focus that would fight the call's.
+      androidConfig: const AndroidRecordConfig(
+        audioSource: AndroidAudioSource.voiceCommunication,
+        audioManagerMode: AudioManagerMode.modeNormal,
+        manageBluetooth: false,
+      ),
+      audioInterruption: AudioInterruptionMode.none,
+      // One frame per read where the platform allows it. The plugin
+      // reads a whole buffer at a time, so the buffer is the latency.
+      streamBufferSize: streamBufferSize,
+    ),
+  };
+}
+
 /// The microphone through the `record` package.
 ///
 /// Echo cancellation, noise suppression and auto gain are asked for on every
@@ -137,42 +207,15 @@ class RecordVoiceCapture implements VoiceCapture {
     _frames = frames;
     final Stream<Uint8List> source;
     try {
-      final config = switch (profile) {
-        VoiceCaptureProfile.dictation => const RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          numChannels: 1,
-          echoCancel: true,
-          noiseSuppress: true,
-          autoGain: true,
-          androidConfig: AndroidRecordConfig(
-            // The communication source is the one Android attaches its own
-            // echo canceller and noise suppressor to.
-            audioSource: AndroidAudioSource.voiceCommunication,
-            audioManagerMode: AudioManagerMode.modeInCommunication,
-          ),
-        ),
-        VoiceCaptureProfile.call => RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          numChannels: 1,
-          echoCancel: true,
-          noiseSuppress: true,
-          autoGain: true,
-          // The call already holds the session: the plugin must not set a
-          // mode, start Bluetooth on its own, or ask for a second, media-
-          // shaped focus that would fight the call's.
-          androidConfig: const AndroidRecordConfig(
-            audioSource: AndroidAudioSource.voiceCommunication,
-            audioManagerMode: AudioManagerMode.modeNormal,
-            manageBluetooth: false,
-          ),
-          audioInterruption: AudioInterruptionMode.none,
-          // One frame per read where the platform allows it. The plugin
-          // reads a whole buffer at a time, so the buffer is the latency.
-          streamBufferSize: await _callBuffer(sampleRate, frameBytes),
-        ),
-      };
       source = await _recorder.startStream(
-        config.copyWith(sampleRate: sampleRate),
+        voiceRecordConfigV1(
+          profile: profile,
+          platform: defaultTargetPlatform,
+          sampleRate: sampleRate,
+          streamBufferSize: profile == VoiceCaptureProfile.call
+              ? await _callBuffer(sampleRate, frameBytes)
+              : null,
+        ),
       );
     } on Object {
       await frames.close();

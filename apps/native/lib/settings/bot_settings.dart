@@ -46,6 +46,11 @@ class BotSettingsController extends ChangeNotifier {
   bool pinned = false;
   String pinnedAt = '';
   bool hidden = false;
+
+  /// Where the sidebar draws the Bot. This page never changes it — a drag on
+  /// the list does — but it saves the whole profile, so it carries the value
+  /// it read rather than saving the Bot back to the end of its group.
+  int? sidebarOrder;
   bool notifications = true;
 
   /// The Bot's model override, as the `custom-models` Package stores it, and
@@ -83,6 +88,7 @@ class BotSettingsController extends ChangeNotifier {
       hidden = profile['hiddenFromSidebar'] == true;
       pinnedAt = profile['pinnedAt'] as String? ?? '';
       pinned = pinnedAt.isNotEmpty;
+      sidebarOrder = (profile['sidebarOrder'] as num?)?.toInt();
       notifications =
           ((answer['notifications'] as Map?)?['enabled'] ?? true) == true;
       model =
@@ -146,6 +152,7 @@ class BotSettingsController extends ChangeNotifier {
     'title': title.trim(),
     'hiddenFromSidebar': hidden,
     'pinnedAt': pinInstant,
+    if (sidebarOrder case final int order) 'sidebarOrder': order,
   };
 
   /// The instant the sidebar orders a pinned Bot by. It is minted once and
@@ -163,6 +170,7 @@ class BotSettingsController extends ChangeNotifier {
     label: body['label'] as String?,
     pinnedAt: body['pinnedAt'] as String?,
     hiddenFromSidebar: body['hiddenFromSidebar'] == true,
+    sidebarOrder: (body['sidebarOrder'] as num?)?.toInt(),
   );
 
   /// The profile the sidebar would draw for what is on screen, which is what

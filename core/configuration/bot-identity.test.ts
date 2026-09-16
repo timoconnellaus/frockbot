@@ -183,6 +183,54 @@ describe("bot/set-profile", () => {
     ).toEqual({ name: "Housework" });
   });
 
+  test("keeps a sidebar position, and takes only an integer for one", () => {
+    expect(
+      decodeBotSettingsViewV1(settings({ name: "Housework", sidebarOrder: 2 })),
+    ).toMatchObject({ profile: { sidebarOrder: 2 } });
+    expect(() =>
+      decodeBotSettingsViewV1(
+        settings({ name: "Housework", sidebarOrder: 1.5 }),
+      ),
+    ).toThrow("profile.sidebarOrder must be an integer");
+    const current: BotProfile = { name: "Housework", label: "Work" };
+    // A drop into another label is one patch: the label and the place in it.
+    expect(
+      applyBotProfilePatchV1(
+        current,
+        { label: "Home", sidebarOrder: 1000 },
+        "user",
+      ),
+    ).toEqual({ name: "Housework", label: "Home", sidebarOrder: 1000 });
+    // An unrelated edit leaves the position where the drop put it.
+    expect(
+      applyBotProfilePatchV1(
+        { ...current, sidebarOrder: 1000 },
+        { title: "Chief" },
+        "user",
+      ).sidebarOrder,
+    ).toBe(1000);
+    expect(
+      decodeConfigurationCommandV1({
+        schemaVersion: 1,
+        commandId: "cmd-order",
+        expectedRevision: 2,
+        type: "bot/set-profile",
+        botId: "primary",
+        profile: { sidebarOrder: -3 },
+      }),
+    ).toMatchObject({ profile: { sidebarOrder: -3 } });
+    expect(() =>
+      decodeConfigurationCommandV1({
+        schemaVersion: 1,
+        commandId: "cmd-order",
+        expectedRevision: 2,
+        type: "bot/set-profile",
+        botId: "primary",
+        profile: { sidebarOrder: "first" },
+      }),
+    ).toThrow("profile.sidebarOrder must be an integer");
+  });
+
   test("pins with an instant and unpins with the empty string", () => {
     const at = "2026-09-03T10:15:00.000Z";
     expect(

@@ -3,6 +3,9 @@
 /// browser specs select on.
 library;
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
@@ -14,6 +17,7 @@ import 'package:frockbot_native/shell/run_view.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/send_payload.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
+import 'package:frockbot_native/shell/sidebar_order.dart';
 import 'package:frockbot_native/shell/slots.dart';
 import 'package:frockbot_native/shell/transcript.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -499,6 +503,307 @@ void main() {
         byIdentifier(ShellIds.sidebarBot('rosemary')),
       );
       expect(rosemary.top - scout.bottom, 4);
+    });
+
+    test('draws each group in its sidebar order', () {
+      final grouped = groupSidebarBots(
+        [bot('a', 'A'), bot('b', 'B'), bot('c', 'C'), bot('d', 'D')],
+        (value) => value.botId.value,
+        {
+          'a': const SidebarProfile(label: 'Work'),
+          'b': const SidebarProfile(label: 'Work', sidebarOrder: 0),
+          'd': const SidebarProfile(sidebarOrder: 5),
+        },
+      );
+      expect(
+        [
+          for (final group in grouped.groups)
+            [for (final value in group.bots) value.botId.value],
+        ],
+        [
+          ['b', 'a'],
+          ['d', 'c'],
+        ],
+      );
+    });
+
+    ShellSidebar sidebar({
+      required List<wire.BotRegistration> bots,
+      Map<String, SidebarProfile> profiles = const {},
+      bool phone = false,
+      required void Function(SidebarDrop drop) onMove,
+      void Function(String botId, {Offset? position})? onActions,
+    }) => ShellSidebar(
+      bots: bots,
+      profiles: profiles,
+      unread: const {},
+      archived: const {},
+      activeBotId: null,
+      focusedBotId: null,
+      workingBotId: null,
+      loaded: true,
+      showHidden: false,
+      onSelect: (_) {},
+      onCreateBot: () {},
+      onSearch: () {},
+      onProfile: () {},
+      onMarketplace: () {},
+      onVoice: () {},
+      voiceControl: VoiceControlState.idle,
+      onToggleHidden: () {},
+      onRetry: () async {},
+      onActions: onActions,
+      onMove: onMove,
+      phone: phone,
+    );
+
+    testWidgets('a pointer drags a row above another, and the drop says so', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final drops = <SidebarDrop>[];
+      await tester.pumpWidget(
+        host(
+          sidebar(
+            bots: [bot('scout', 'Scout'), bot('rosemary', 'Rosemary')],
+            onMove: drops.add,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final scout = tester.getRect(byIdentifier(ShellIds.sidebarBot('scout')));
+      final from = tester.getCenter(
+        byIdentifier(ShellIds.sidebarBot('rosemary')),
+      );
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      // Past the slop, so the row lifts; then into Scout's upper half.
+      await gesture.moveTo(from + const Offset(0, -24));
+      await tester.pump();
+      await gesture.moveTo(Offset(scout.center.dx, scout.top + 6));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(drops, [
+        const SidebarDrop(
+          botId: 'rosemary',
+          label: '',
+          beforeBotId: 'scout',
+          group: ['scout', 'rosemary'],
+        ),
+      ]);
+      // The lift did not disturb the list's own spacing.
+      final settled = tester.getRect(
+        byIdentifier(ShellIds.sidebarBot('rosemary')),
+      );
+      expect(settled.top - scout.bottom, 4);
+    });
+
+    testWidgets('dropping a row on a heading moves it into that label', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final drops = <SidebarDrop>[];
+      await tester.pumpWidget(
+        host(
+          sidebar(
+            bots: [bot('scout', 'Scout'), bot('rosemary', 'Rosemary')],
+            profiles: {'scout': const SidebarProfile(label: 'Work')},
+            onMove: drops.add,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final from = tester.getCenter(
+        byIdentifier(ShellIds.sidebarBot('rosemary')),
+      );
+      final heading = tester.getCenter(find.text('WORK'));
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      await gesture.moveTo(from + const Offset(0, -24));
+      await tester.pump();
+      await gesture.moveTo(heading);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(drops, [
+        const SidebarDrop(
+          botId: 'rosemary',
+          label: 'Work',
+          beforeBotId: 'scout',
+          group: ['scout'],
+        ),
+      ]);
+    });
+
+    testWidgets(
+      'a finger holds a row to lift it, and let go in place opens its actions',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final drops = <SidebarDrop>[];
+        final opened = <String>[];
+        await tester.pumpWidget(
+          host(
+            sidebar(
+              bots: [bot('scout', 'Scout'), bot('rosemary', 'Rosemary')],
+              phone: true,
+              onMove: drops.add,
+              onActions: (botId, {position}) => opened.add(botId),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final scout = tester.getRect(
+          byIdentifier(ShellIds.sidebarBot('scout')),
+        );
+        final from = tester.getCenter(
+          byIdentifier(ShellIds.sidebarBot('rosemary')),
+        );
+        var gesture = await tester.startGesture(from);
+        await tester.pump(const Duration(milliseconds: 600));
+        await gesture.moveTo(from + const Offset(0, -24));
+        await tester.pump();
+        await gesture.moveTo(Offset(scout.center.dx, scout.top + 6));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(drops.map((drop) => drop.beforeBotId), ['scout']);
+        expect(opened, isEmpty);
+
+        // The same hold, released where it began, is the press it used to be.
+        gesture = await tester.startGesture(from);
+        await tester.pump(const Duration(milliseconds: 600));
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(opened, ['rosemary']);
+        expect(drops, hasLength(1));
+      },
+    );
+
+    testWidgets(
+      'on a Mac the strip is one inset at a desk and the page inset in one column',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        Widget layout() => MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          builder: (context, child) => DesktopTitleBarPadding(child: child!),
+          home: ShellLayout(
+            panelOpen: false,
+            onDismiss: () {},
+            conversationOpen: true,
+            onBack: () {},
+            sidebar: const Text('bots'),
+            conversation: const Text('thread'),
+            rightPanel: null,
+          ),
+        );
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+
+        tester.view.physicalSize = const Size(1440, 900);
+        await tester.pumpWidget(layout());
+        await tester.pumpAndSettle();
+        // Every column starts under the strip, once, and the strip itself
+        // runs the whole width of the window above them.
+        expect(
+          tester.getTopLeft(byIdentifier(ShellIds.sidebar)).dy,
+          desktopTitleBarInset,
+        );
+        expect(
+          tester.getTopLeft(byIdentifier(ShellIds.conversation)).dy,
+          desktopTitleBarInset,
+        );
+        expect(
+          tester.getRect(find.byType(DesktopTitleStrip)),
+          const Rect.fromLTWH(0, 0, 1440, desktopTitleBarInset),
+        );
+
+        tester.view.physicalSize = const Size(390, 800);
+        await tester.pumpWidget(layout());
+        await tester.pumpAndSettle();
+        // One column: the conversation's page is under the traffic lights.
+        expect(
+          tester.getTopLeft(byIdentifier(ShellIds.conversation)).dy,
+          desktopTitleBarInset,
+        );
+      },
+    );
+
+    testWidgets('an archived row stays put, and a pinned tile is not a row', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final drops = <SidebarDrop>[];
+      await tester.pumpWidget(
+        host(
+          ShellSidebar(
+            bots: [
+              bot('scout', 'Scout'),
+              bot('rosemary', 'Rosemary'),
+              bot('atlas', 'Atlas'),
+            ],
+            profiles: {
+              'atlas': const SidebarProfile(
+                pinnedAt: '2026-09-01T00:00:00.000Z',
+              ),
+            },
+            unread: const {},
+            archived: const {'rosemary'},
+            activeBotId: null,
+            focusedBotId: null,
+            workingBotId: null,
+            loaded: true,
+            showHidden: false,
+            onSelect: (_) {},
+            onCreateBot: () {},
+            onSearch: () {},
+            onProfile: () {},
+            onMarketplace: () {},
+            onVoice: () {},
+            voiceControl: VoiceControlState.idle,
+            onToggleHidden: () {},
+            onRetry: () async {},
+            onMove: drops.add,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(byIdentifier(ShellIds.sidebarPinned('atlas')), findsOneWidget);
+
+      // An archived Bot is not lifted: dragging it lands nothing.
+      final scout = tester.getRect(byIdentifier(ShellIds.sidebarBot('scout')));
+      final from = tester.getCenter(
+        byIdentifier(ShellIds.sidebarBot('rosemary')),
+      );
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      await gesture.moveTo(from + const Offset(0, -24));
+      await tester.pump();
+      await gesture.moveTo(Offset(scout.center.dx, scout.top + 6));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(drops, isEmpty);
     });
 
     testWidgets('carries a stable identifier per Bot and per group', (

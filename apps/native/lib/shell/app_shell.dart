@@ -69,6 +69,7 @@ import 'run_view.dart';
 import 'semantics.dart';
 import 'focus.dart' show sidebarUnreadFor;
 import 'sidebar.dart';
+import 'sidebar_order.dart';
 import 'slots.dart';
 import 'starters.dart';
 import 'transcript.dart';
@@ -1407,22 +1408,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// to overwrite this change with what it remembers.
   Future<bool> _patchProfile(String botId, Map<String, Object?> patch) async {
     final before = profiles[botId] ?? const SidebarProfile();
-    predictProfile(
-      botId,
-      SidebarProfile(
-        name: before.name,
-        title: before.title,
-        label: patch.containsKey('label')
-            ? patch['label'] as String?
-            : before.label,
-        pinnedAt: patch.containsKey('pinnedAt')
-            ? patch['pinnedAt'] as String?
-            : before.pinnedAt,
-        hiddenFromSidebar: patch.containsKey('hiddenFromSidebar')
-            ? patch['hiddenFromSidebar'] == true
-            : before.hiddenFromSidebar,
-      ),
-    );
+    predictProfile(botId, before.patched(patch));
     final failure = await quickWrites.setProfile(botId, patch);
     if (!mounted) return false;
     if (failure != null) {
@@ -1433,6 +1419,39 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     await _readBackBotSettings();
     if (selected?.botId.value == botId) await botSettings?.load();
     return true;
+  }
+
+  /// A row let go somewhere else in the list. The rows are drawn where they
+  /// landed at once and each write goes to the Bot it belongs to; the first
+  /// refusal puts the whole list back to what the authority last said, since
+  /// a half-applied reorder is not a state anyone asked for.
+  Future<void> _moveBot(SidebarDrop drop) async {
+    final writes = planSidebarDropV1(drop, profiles);
+    if (writes.isEmpty) return;
+    final before = profiles;
+    setState(() {
+      profiles = {
+        ...profiles,
+        for (final write in writes)
+          write.botId: (profiles[write.botId] ?? const SidebarProfile())
+              .patched(write.patch),
+      };
+    });
+    for (final write in writes) {
+      final failure = await quickWrites.setProfile(write.botId, write.patch);
+      if (!mounted) return;
+      if (failure != null) {
+        setState(() => profiles = before);
+        _say(failure);
+        await _loadIdentities();
+        return;
+      }
+    }
+    await _readBackBotSettings();
+    if (selected case final bot?
+        when writes.any((write) => write.botId == bot.botId.value)) {
+      await botSettings?.load();
+    }
   }
 
   Future<void> _setNotifications(String botId, {required bool enabled}) async {
@@ -1932,6 +1951,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onToggleHidden: () =>
                                 setState(() => showHidden = !showHidden),
                             onRetry: load,
+                            onMove: (drop) => unawaited(_moveBot(drop)),
                             onActions: (botId, {position}) => unawaited(
                               _botActions(botId, position: position),
                             ),

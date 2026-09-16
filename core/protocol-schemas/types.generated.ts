@@ -598,6 +598,7 @@ export type BotIdentity = {
   label?: string;
   title?: string;
   pinnedAt?: Instant;
+  sidebarOrder?: number;
 };
 export type BotWriter = {
   kind: "bot";

@@ -1,8 +1,11 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/settings/controller.dart';
 import 'package:frockbot_native/settings/document.dart';
 import 'package:frockbot_native/settings/model_picker.dart';
@@ -296,6 +299,61 @@ void main() {
       },
     );
   }
+
+  group('the Mac window’s title strip', () {
+    Widget app(LocalStore store, NativeApi api) => MaterialApp(
+      theme: FrockTheme.theme(Brightness.dark),
+      builder: (context, child) => DesktopTitleBarPadding(child: child!),
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => SettingsPage(api: api, store: store, userId: 'tim'),
+            ),
+          ),
+          child: const Text('open'),
+        ),
+      ),
+    );
+
+    testWidgets('keeps the Settings header out from under the traffic lights', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final store = MemoryStore();
+      final api = SettingsApi(store, (path, body) async => document());
+      await tester.pumpWidget(app(store, api));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      // The lights sit inside the strip. Nothing of the header — the way
+      // back, the title, the refresh — may be drawn in it.
+      for (final control in [
+        find.byType(BackButton),
+        find.text('Personal details'),
+        find.byTooltip('Refresh settings'),
+      ]) {
+        expect(
+          tester.getTopLeft(control).dy,
+          greaterThanOrEqualTo(desktopTitleBarInset),
+        );
+      }
+    });
+
+    testWidgets('adds nothing on a phone', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final store = MemoryStore();
+      final api = SettingsApi(store, (path, body) async => document());
+      await tester.pumpWidget(app(store, api));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.byType(BackButton)).dy,
+        lessThan(desktopTitleBarInset),
+      );
+    });
+  });
 
   testWidgets('the model field is the host picker, and its choice travels', (
     tester,

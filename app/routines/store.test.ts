@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { RoutineStore, RoutineNotFoundError } from "./store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
-import { ROUTINE_RUN_LOG_LIMIT } from "./storage-keys.js";
+import {
+  ROUTINE_RUN_LOG_LIMIT,
+  routineHookKeyRecordV1,
+  routineKeyV1,
+} from "./storage-keys.js";
 import type { RoutineCommandV1 } from "./shared.js";
 import type { RoutineRunEntryV1, RoutineWriterV1 } from "./records.js";
 
@@ -318,5 +322,43 @@ describe("a schedule that never comes around", () => {
     await expect(
       routines.execute(create({ schedule: "0 0 29 2 *" }), USER, ZONE),
     ).resolves.toMatchObject({ status: "applied" });
+  });
+});
+
+describe("RoutineStore.list", () => {
+  test("a stored Routine this deploy cannot read is missing, not fatal", async () => {
+    const storage = createMemoryRoutineStorageV1();
+    const routines = new RoutineStore(storage);
+    await routines.execute(create(), USER, ZONE);
+    // A record written under a trigger kind this deploy no longer has, the
+    // way a retired shape reads back after a deploy: the scheduler and the
+    // inbox already skip it, and the list read used to throw on it instead,
+    // which reached the app as "Routines couldn’t load".
+    await storage.put(routineKeyV1("stale"), {
+      schemaVersion: 1,
+      routineId: "stale",
+      name: "Old trigger",
+      prompt: "Fire on a retired trigger.",
+      trigger: { kind: "connection", connectionId: "c1" },
+      enabled: true,
+      createdBy: USER,
+      updatedBy: USER,
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    });
+    const listed = await routines.list("scout", undefined, ZONE);
+    expect(listed.routines.map((routine) => routine.routineId)).toEqual([
+      "brief",
+    ]);
+  });
+
+  test("a hook key that cannot be read leaves the Routine, without a key", async () => {
+    const storage = createMemoryRoutineStorageV1();
+    const routines = new RoutineStore(storage);
+    await routines.execute(create(), USER, ZONE);
+    await storage.put(routineHookKeyRecordV1("brief"), { schemaVersion: 2 });
+    const listed = await routines.list("scout", undefined, ZONE);
+    expect(listed.routines).toHaveLength(1);
+    expect(listed.routines[0]!.hookKeyVersion).toBeUndefined();
   });
 });
