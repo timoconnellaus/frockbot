@@ -1378,7 +1378,7 @@ class _BotRow extends StatefulWidget {
   /// rather than as text.
   final String identifier;
 
-  /// Whether the row is a card on a lighter ground, a phone's, or a line in
+  /// Whether the row is a card lifted off the page, a phone's, or a line in
   /// a column, a desktop's.
   final bool card;
   final bool selected;
