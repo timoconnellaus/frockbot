@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
+import '../theme/caret.dart';
 import 'action.dart';
 import '../theme/rows.dart';
 import 'document.dart';
@@ -636,28 +637,32 @@ class ViewFieldNode extends StatelessWidget {
     // only place the typed characters go is the action input that carries them
     // to the credential route.
     if (field.kind == 'secret') {
-      return TextFormField(
-        enabled: enabled,
-        obscureText: true,
-        autocorrect: false,
-        enableSuggestions: false,
-        decoration: decoration,
-        onChanged: (next) =>
-            scope.controller.change(id, next.isEmpty ? null : next),
+      return SteadyCaret(
+        child: TextFormField(
+          enabled: enabled,
+          obscureText: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: decoration,
+          onChanged: (next) =>
+              scope.controller.change(id, next.isEmpty ? null : next),
+        ),
       );
     }
     final number = field.kind == 'number';
-    return TextFormField(
-      initialValue: value?.toString() ?? '',
-      enabled: enabled,
-      decoration: decoration,
-      maxLength: field.maxLength,
-      keyboardType: number
-          ? const TextInputType.numberWithOptions(decimal: true, signed: true)
-          : TextInputType.text,
-      onChanged: (next) => scope.controller.change(
-        id,
-        number ? (next.isEmpty ? null : num.tryParse(next)) : next,
+    return SteadyCaret(
+      child: TextFormField(
+        initialValue: value?.toString() ?? '',
+        enabled: enabled,
+        decoration: decoration,
+        maxLength: field.maxLength,
+        keyboardType: number
+            ? const TextInputType.numberWithOptions(decimal: true, signed: true)
+            : TextInputType.text,
+        onChanged: (next) => scope.controller.change(
+          id,
+          number ? (next.isEmpty ? null : num.tryParse(next)) : next,
+        ),
       ),
     );
   }

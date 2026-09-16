@@ -12,6 +12,7 @@ import '../client/transport.dart';
 import '../flock/avatar.dart';
 import '../shell/semantics.dart';
 import '../shell/desktop_layout.dart';
+import '../theme/caret.dart';
 import 'controller.dart';
 
 Future<SearchSelection?> showSearchOverlayV1(
@@ -255,60 +256,62 @@ class _SearchOverlayState extends State<SearchOverlay> {
     final scheme = Theme.of(context).colorScheme;
     final field = identified(
       SearchIds.field,
-      TextField(
-        controller: editor,
-        focusNode: focus,
-        autofocus: true,
-        autocorrect: false,
-        maxLength: searchMaxQueryLengthV1,
-        textInputAction: TextInputAction.search,
-        style: TextStyle(fontSize: phone ? 20 : 17),
-        decoration: InputDecoration(
-          counterText: '',
-          hintText: 'Search',
-          filled: phone,
-          fillColor: scheme.surfaceContainerHighest,
-          prefixIcon: Icon(
-            Icons.search_rounded,
-            size: phone ? 23 : 21,
-            color: scheme.onSurfaceVariant,
-          ),
-          suffixIcon: editor.text.isEmpty
-              ? null
-              : IconButton(
-                  tooltip: 'Clear search',
-                  onPressed: () {
-                    editor.clear();
-                    controller.setQuery('');
-                    focus.requestFocus();
-                  },
-                  icon: const Icon(Icons.cancel_rounded, size: 18),
-                ),
-          border: phone
-              ? OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(28),
-                  borderSide: BorderSide.none,
-                )
-              : InputBorder.none,
-          enabledBorder: phone
-              ? OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(28),
-                  borderSide: BorderSide(
-                    color: scheme.outlineVariant.withValues(alpha: 0.5),
+      SteadyCaret(
+        child: TextField(
+          controller: editor,
+          focusNode: focus,
+          autofocus: true,
+          autocorrect: false,
+          maxLength: searchMaxQueryLengthV1,
+          textInputAction: TextInputAction.search,
+          style: TextStyle(fontSize: phone ? 20 : 17),
+          decoration: InputDecoration(
+            counterText: '',
+            hintText: 'Search',
+            filled: phone,
+            fillColor: scheme.surfaceContainerHighest,
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              size: phone ? 23 : 21,
+              color: scheme.onSurfaceVariant,
+            ),
+            suffixIcon: editor.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Clear search',
+                    onPressed: () {
+                      editor.clear();
+                      controller.setQuery('');
+                      focus.requestFocus();
+                    },
+                    icon: const Icon(Icons.cancel_rounded, size: 18),
                   ),
-                )
-              : InputBorder.none,
-          focusedBorder: phone
-              ? OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(28),
-                  borderSide: BorderSide(color: scheme.outlineVariant),
-                )
-              : InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 13),
-          isDense: true,
+            border: phone
+                ? OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: BorderSide.none,
+                  )
+                : InputBorder.none,
+            enabledBorder: phone
+                ? OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: BorderSide(
+                      color: scheme.outlineVariant.withValues(alpha: 0.5),
+                    ),
+                  )
+                : InputBorder.none,
+            focusedBorder: phone
+                ? OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: BorderSide(color: scheme.outlineVariant),
+                  )
+                : InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(vertical: 13),
+            isDense: true,
+          ),
+          onChanged: controller.setQuery,
+          onSubmitted: (_) => _activate(selected),
         ),
-        onChanged: controller.setQuery,
-        onSubmitted: (_) => _activate(selected),
       ),
     );
     return Padding(

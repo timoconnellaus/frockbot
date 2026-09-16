@@ -8,6 +8,7 @@ import '../flock/avatar.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../shell/sidebar.dart' show SidebarProfile;
+import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../theme/states.dart';
@@ -472,33 +473,35 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     id,
     Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        key: ValueKey('$id.${state.loads}'),
-        initialValue: value,
-        minLines: lines,
-        maxLines: lines,
-        maxLength: maxLength,
-        // The counter is news only as the budget runs out; a "7/100" under
-        // every name is a ledger nobody asked for.
-        decoration: InputDecoration(labelText: label, helperText: hint),
-        buildCounter:
-            (
-              context, {
-              required currentLength,
-              required isFocused,
-              required maxLength,
-            }) => maxLength != null && currentLength >= maxLength * 0.9
-            ? Text(
-                '$currentLength/$maxLength',
-                style: Theme.of(context).textTheme.bodySmall,
-              )
-            : null,
-        onChanged: (next) => _typed(() => onChanged(next)),
-        validator: required
-            ? (next) => (next ?? '').trim().isEmpty
-                  ? 'Enter a name for this Bot.'
-                  : null
-            : null,
+      child: SteadyCaret(
+        child: TextFormField(
+          key: ValueKey('$id.${state.loads}'),
+          initialValue: value,
+          minLines: lines,
+          maxLines: lines,
+          maxLength: maxLength,
+          // The counter is news only as the budget runs out; a "7/100" under
+          // every name is a ledger nobody asked for.
+          decoration: InputDecoration(labelText: label, helperText: hint),
+          buildCounter:
+              (
+                context, {
+                required currentLength,
+                required isFocused,
+                required maxLength,
+              }) => maxLength != null && currentLength >= maxLength * 0.9
+              ? Text(
+                  '$currentLength/$maxLength',
+                  style: Theme.of(context).textTheme.bodySmall,
+                )
+              : null,
+          onChanged: (next) => _typed(() => onChanged(next)),
+          validator: required
+              ? (next) => (next ?? '').trim().isEmpty
+                    ? 'Enter a name for this Bot.'
+                    : null
+              : null,
+        ),
       ),
     ),
   );

@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
 import '../orientation.dart' show isNativeMobile;
+import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
 import '../voice/dictation.dart';
 import '../voice/motion.dart';
@@ -502,30 +503,32 @@ class _ComposerState extends State<Composer> {
                           ShellIds.composer,
                           Semantics(
                             label: 'Message your Bot',
-                            child: TextField(
-                              key: const ValueKey('composer'),
-                              controller: widget.editor,
-                              focusNode: widget.focus,
-                              style: fieldStyle,
-                              minLines: 1,
-                              maxLines: 6,
-                              keyboardType: TextInputType.multiline,
-                              textInputAction: TextInputAction.newline,
-                              decoration: InputDecoration(
-                                hintText: 'Message your Bot',
-                                filled: false,
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                contentPadding: composerFieldPadding,
-                                counterText: '',
+                            child: SteadyCaret(
+                              child: TextField(
+                                key: const ValueKey('composer'),
+                                controller: widget.editor,
+                                focusNode: widget.focus,
+                                style: fieldStyle,
+                                minLines: 1,
+                                maxLines: 6,
+                                keyboardType: TextInputType.multiline,
+                                textInputAction: TextInputAction.newline,
+                                decoration: InputDecoration(
+                                  hintText: 'Message your Bot',
+                                  filled: false,
+                                  border: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  contentPadding: composerFieldPadding,
+                                  counterText: '',
+                                ),
+                                onChanged: (value) {
+                                  AcceptanceMetrics.instance.inputChanged();
+                                  widget.onChanged(value);
+                                  _refreshPopover();
+                                  setState(() {});
+                                },
                               ),
-                              onChanged: (value) {
-                                AcceptanceMetrics.instance.inputChanged();
-                                widget.onChanged(value);
-                                _refreshPopover();
-                                setState(() {});
-                              },
                             ),
                           ),
                         ),

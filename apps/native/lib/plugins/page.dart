@@ -5,6 +5,7 @@ import '../connections/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../settings/page.dart';
 import '../shell/semantics.dart';
+import '../theme/caret.dart';
 import '../view/surface.dart';
 import 'document.dart';
 
@@ -294,14 +295,16 @@ class _PluginsPageState extends State<PluginsPage> {
       controller: controller,
       banner: (_) => Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: TextField(
-          decoration: InputDecoration(
-            prefixIcon: const Icon(Icons.search),
-            hintText: capabilities && botId == null
-                ? 'Find a feature'
-                : 'Find a plugin',
+        child: SteadyCaret(
+          child: TextField(
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search),
+              hintText: capabilities && botId == null
+                  ? 'Find a feature'
+                  : 'Find a plugin',
+            ),
+            onChanged: controller.search,
           ),
-          onChanged: controller.search,
         ),
       ),
     );

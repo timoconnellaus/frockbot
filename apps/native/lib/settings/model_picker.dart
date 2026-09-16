@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
+import '../theme/caret.dart';
 import '../theme/states.dart';
 
 /// A bounded, revision-pinned view of the owner's available model catalog.
@@ -89,19 +90,21 @@ class _ModelPickerState extends State<ModelPicker> {
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
                   child: identified(
                     SettingsIds.modelPickerSearch,
-                    TextField(
-                      decoration: const InputDecoration(
-                        labelText: 'Search models',
-                        counterText: '',
-                        prefixIcon: Icon(Icons.search_rounded),
+                    SteadyCaret(
+                      child: TextField(
+                        decoration: const InputDecoration(
+                          labelText: 'Search models',
+                          counterText: '',
+                          prefixIcon: Icon(Icons.search_rounded),
+                        ),
+                        maxLength: 100,
+                        textInputAction: TextInputAction.search,
+                        onChanged: search,
+                        onSubmitted: (_) {
+                          debounce?.cancel();
+                          unawaited(load());
+                        },
                       ),
-                      maxLength: 100,
-                      textInputAction: TextInputAction.search,
-                      onChanged: search,
-                      onSubmitted: (_) {
-                        debounce?.cancel();
-                        unawaited(load());
-                      },
                     ),
                   ),
                 ),
