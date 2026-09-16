@@ -8,7 +8,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'markdown.dart';
@@ -37,9 +37,11 @@ class TranscriptView extends StatefulWidget {
   /// Opens the view-only chat between this Bot and the marker's counterpart.
   final void Function(TranscriptLine line)? onOpenExchange;
 
-  /// Another Bot's sheep, for the marker that names it. Null draws the
-  /// default sheep: a Bot no longer in the flock still gets a face.
+  /// Another Bot's character and colour, for the marker that names it. Null
+  /// draws the default character: a Bot no longer in the flock still gets a
+  /// face.
   final String? Function(String botId)? backgroundOf;
+  final String? Function(String botId)? primaryOf;
 
   /// Another Bot's current name. The wire names a Bot only by id where this
   /// Bot did the asking; null falls back to what the projection knows.
@@ -83,6 +85,7 @@ class TranscriptView extends StatefulWidget {
     this.approvals,
     this.onOpenExchange,
     this.backgroundOf,
+    this.primaryOf,
     this.nameOf,
     this.onRetryTurn,
     this.onOpenBilling,
@@ -424,6 +427,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       return _ExchangeMarker(
         line: line,
         background: botId == null ? null : widget.backgroundOf?.call(botId),
+        primary: botId == null ? null : widget.primaryOf?.call(botId),
         name: botId == null ? null : widget.nameOf?.call(botId),
         onOpen: widget.onOpenExchange,
       );
@@ -707,11 +711,13 @@ class _EmptyThread extends StatelessWidget {
 class _ExchangeMarker extends StatelessWidget {
   final TranscriptLine line;
   final String? background;
+  final String? primary;
   final String? name;
   final void Function(TranscriptLine line)? onOpen;
   const _ExchangeMarker({
     required this.line,
     required this.background,
+    required this.primary,
     required this.name,
     required this.onOpen,
   });
@@ -758,6 +764,7 @@ class _ExchangeMarker extends StatelessWidget {
                     CounterpartAvatar(
                       counterpart: exchange.counterpart,
                       background: background,
+                      primary: primary,
                       size: 18,
                     ),
                     Text(name ?? exchange.counterpart.label, style: named),
@@ -778,18 +785,25 @@ class _ExchangeMarker extends StatelessWidget {
 class CounterpartAvatar extends StatelessWidget {
   final ExchangeCounterpart counterpart;
   final String? background;
+  final String? primary;
   final double size;
   const CounterpartAvatar({
     super.key,
     required this.counterpart,
     required this.size,
     this.background,
+    this.primary,
   });
 
   @override
   Widget build(BuildContext context) {
     if (!counterpart.isVoice) {
-      return SheepAvatar(size: size, background: background);
+      return CharacterAvatar(
+        size: size,
+        characterId: background,
+        primary: primary,
+        motion: CharacterMotion.quiet,
+      );
     }
     final scheme = Theme.of(context).colorScheme;
     return Container(

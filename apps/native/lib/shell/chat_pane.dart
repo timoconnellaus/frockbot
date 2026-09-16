@@ -49,6 +49,7 @@ class ChatPane extends StatefulWidget {
 
   /// Another Bot's sheep and current name, for the marker that names it.
   final String? Function(String botId)? backgroundOf;
+  final String? Function(String botId)? primaryOf;
   final String? Function(String botId)? nameOf;
   final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
@@ -83,6 +84,7 @@ class ChatPane extends StatefulWidget {
     this.onOpenRun,
     this.onOpenExchange,
     this.backgroundOf,
+    this.primaryOf,
     this.nameOf,
     this.onOpenSettings,
     this.onMessageActions,
@@ -281,6 +283,7 @@ class _ChatPaneState extends State<ChatPane> {
             onOpenRun: widget.onOpenRun ?? (_) {},
             onOpenExchange: widget.onOpenExchange,
             backgroundOf: widget.backgroundOf,
+            primaryOf: widget.primaryOf,
             nameOf: widget.nameOf,
             onRetryTurn: c.canSend ? _retry : null,
             onOpenBilling: widget.onOpenBilling,
@@ -392,6 +395,7 @@ class ConversationView extends StatefulWidget {
   final void Function(TranscriptLine line) onOpenRun;
   final void Function(TranscriptLine line)? onOpenExchange;
   final String? Function(String botId)? backgroundOf;
+  final String? Function(String botId)? primaryOf;
   final String? Function(String botId)? nameOf;
   final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
@@ -421,6 +425,7 @@ class ConversationView extends StatefulWidget {
     required this.onOpenRun,
     this.onOpenExchange,
     this.backgroundOf,
+    this.primaryOf,
     this.nameOf,
     this.onOpenSettings,
     this.onMessageActions,
@@ -536,6 +541,7 @@ class _ConversationViewState extends State<ConversationView>
       onOpenRun: widget.onOpenRun,
       onOpenExchange: widget.onOpenExchange,
       backgroundOf: widget.backgroundOf,
+      primaryOf: widget.primaryOf,
       nameOf: widget.nameOf,
       onOpenSettings: widget.onOpenSettings,
       onMessageActions: widget.onMessageActions,

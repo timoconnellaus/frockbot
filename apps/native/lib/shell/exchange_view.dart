@@ -9,7 +9,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'markdown.dart';
@@ -20,7 +20,8 @@ import 'transcript.dart';
 class ExchangeParty {
   final String name;
   final String? background;
-  const ExchangeParty({required this.name, this.background});
+  final String? primary;
+  const ExchangeParty({required this.name, this.background, this.primary});
 }
 
 class ExchangeView extends StatelessWidget {
@@ -28,6 +29,7 @@ class ExchangeView extends StatelessWidget {
   final ExchangeParty self;
   final ExchangeCounterpart counterpart;
   final String? counterpartBackground;
+  final String? counterpartPrimary;
 
   /// Oldest first.
   final List<Exchange> exchanges;
@@ -50,6 +52,7 @@ class ExchangeView extends StatelessWidget {
     required this.counterpart,
     required this.exchanges,
     this.counterpartBackground,
+    this.counterpartPrimary,
     this.hasEarlier = false,
     this.loading = false,
     this.error,
@@ -66,6 +69,7 @@ class ExchangeView extends StatelessWidget {
     final other = ExchangeParty(
       name: counterpart.label,
       background: counterpartBackground,
+      primary: counterpartPrimary,
     );
     return identified(
       ShellIds.exchangeView,
@@ -82,6 +86,7 @@ class ExchangeView extends StatelessWidget {
                       self: self,
                       counterpart: counterpart,
                       counterpartBackground: counterpartBackground,
+                      counterpartPrimary: counterpartPrimary,
                     ),
                   ),
                   if (onClose != null)
@@ -188,11 +193,13 @@ class ExchangeTitle extends StatelessWidget {
   final ExchangeParty self;
   final ExchangeCounterpart counterpart;
   final String? counterpartBackground;
+  final String? counterpartPrimary;
   const ExchangeTitle({
     super.key,
     required this.self,
     required this.counterpart,
     this.counterpartBackground,
+    this.counterpartPrimary,
   });
 
   @override
@@ -202,7 +209,12 @@ class ExchangeTitle extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SheepAvatar(size: 22, background: self.background),
+        CharacterAvatar(
+          size: 22,
+          characterId: self.background,
+          primary: self.primary,
+          motion: CharacterMotion.quiet,
+        ),
         const SizedBox(width: 8),
         Flexible(
           child: Text(self.name, style: style, overflow: TextOverflow.ellipsis),
@@ -218,6 +230,7 @@ class ExchangeTitle extends StatelessWidget {
         CounterpartAvatar(
           counterpart: counterpart,
           background: counterpartBackground,
+          primary: counterpartPrimary,
           size: 22,
         ),
         const SizedBox(width: 8),
@@ -337,7 +350,12 @@ class _ExchangeMessage extends StatelessWidget {
                   counterpart: ExchangeCounterpart.voice(),
                   size: 26,
                 )
-              : SheepAvatar(size: 26, background: party.background),
+              : CharacterAvatar(
+                  size: 26,
+                  characterId: party.background,
+                  primary: party.primary,
+                  motion: CharacterMotion.quiet,
+                ),
           const SizedBox(width: 10),
           Flexible(
             child: Column(

@@ -1192,7 +1192,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       botId: bot.botId.value,
       counterpart: counterpart,
     );
-    final chat = widget.sessions.open(widget.userId, bot.botId.value).controller;
+    final chat = widget.sessions
+        .open(widget.userId, bot.botId.value)
+        .controller;
     unawaited(controller.load());
     if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
         ShellTier.single) {
@@ -1201,6 +1203,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           controller: controller,
           self: _selfParty()!,
           counterpartBackground: _counterpartBackground(counterpart),
+          counterpartPrimary: _counterpartPrimary(counterpart),
           chat: chat,
         ),
       );
@@ -1225,11 +1228,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     return ExchangeParty(
       name: _name(bot),
       background: _background(bot.botId.value),
+      primary: _primary(bot.botId.value),
     );
   }
 
   String? _counterpartBackground(ExchangeCounterpart counterpart) =>
       counterpart.botId == null ? null : _background(counterpart.botId!);
+
+  String? _counterpartPrimary(ExchangeCounterpart counterpart) =>
+      counterpart.botId == null ? null : _primary(counterpart.botId!);
 
   void _closeExchange() {
     exchangeController?.dispose();
@@ -1266,6 +1273,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           self: self,
           counterpart: exchange.counterpart,
           counterpartBackground: _counterpartBackground(exchange.counterpart),
+          counterpartPrimary: _counterpartPrimary(exchange.counterpart),
           exchanges: exchange.exchanges(
             widget.sessions
                 .open(widget.userId, bot.botId.value)
@@ -2109,6 +2117,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onOpenRun: _openRun,
                             onOpenExchange: _openExchange,
                             backgroundOf: _background,
+                            primaryOf: _primary,
                             nameOf: _botNameOf,
                             onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,
@@ -2748,6 +2757,7 @@ class _ExchangeScreen extends StatefulWidget {
   final ExchangeController controller;
   final ExchangeParty self;
   final String? counterpartBackground;
+  final String? counterpartPrimary;
 
   /// The Bot's own chat: its in-flight runs are what the view merges with the
   /// loaded pages, so the page repaints when it notifies.
@@ -2756,6 +2766,7 @@ class _ExchangeScreen extends StatefulWidget {
     required this.controller,
     required this.self,
     required this.counterpartBackground,
+    required this.counterpartPrimary,
     required this.chat,
   });
 
@@ -2783,6 +2794,7 @@ class _ExchangeScreenState extends State<_ExchangeScreen> {
         self: widget.self,
         counterpart: widget.controller.counterpart,
         counterpartBackground: widget.counterpartBackground,
+        counterpartPrimary: widget.counterpartPrimary,
       ),
     ),
     body: SafeArea(
@@ -2792,6 +2804,7 @@ class _ExchangeScreenState extends State<_ExchangeScreen> {
           self: widget.self,
           counterpart: widget.controller.counterpart,
           counterpartBackground: widget.counterpartBackground,
+          counterpartPrimary: widget.counterpartPrimary,
           exchanges: widget.controller.exchanges(widget.chat.runs),
           hasEarlier: widget.controller.before != null,
           loading: widget.controller.loading,
