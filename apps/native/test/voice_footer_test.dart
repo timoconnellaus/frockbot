@@ -307,13 +307,8 @@ void main() {
 
     expect(find.byType(CharacterAvatar), findsOneWidget);
     expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is Semantics &&
-            widget.properties.label == 'Asked Scout' &&
-            widget.properties.liveRegion == true,
-      ),
-      findsOneWidget,
+      tester.getSemantics(find.byKey(const ValueKey('voice-bot-dog-bot'))),
+      matchesSemantics(label: 'Asked Scout', isLiveRegion: true),
     );
     // The pose carries the state; no words sit beside the character.
     expect(find.text('Asked Scout'), findsNothing);
