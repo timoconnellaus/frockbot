@@ -15,6 +15,7 @@
 /// selectable and its own group is how a person reaches it again.
 library;
 
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
@@ -26,6 +27,7 @@ import '../update/desktop_update.dart';
 import 'chat_icons.dart';
 import 'focus.dart';
 import 'semantics.dart';
+import 'sidebar_order.dart';
 
 /// What the sidebar's voice control offers right now. [ending] is the window
 /// between the footer leaving and the previous call's teardown finishing: a
@@ -51,24 +53,76 @@ class SidebarProfile {
   final String? label;
   final String? pinnedAt;
   final bool hiddenFromSidebar;
+
+  /// Where the Bot sits among the Bots of its label, lower first. Absent
+  /// puts it after every Bot that has one, in the order the directory lists.
+  final int? sidebarOrder;
   const SidebarProfile({
     this.name,
     this.title,
     this.label,
     this.pinnedAt,
     this.hiddenFromSidebar = false,
+    this.sidebarOrder,
   });
 
   static SidebarProfile? decode(Object? value) {
     if (value is! Map) return null;
+    final order = value['sidebarOrder'];
     return SidebarProfile(
       name: value['name'] as String?,
       title: value['title'] as String?,
       label: value['label'] as String?,
       pinnedAt: value['pinnedAt'] as String?,
       hiddenFromSidebar: value['hiddenFromSidebar'] == true,
+      sidebarOrder: order is num ? order.toInt() : null,
     );
   }
+
+  /// This profile with a `bot/set-profile` patch drawn over it: what the
+  /// sidebar shows while the command is on its way. The empty string clears
+  /// a text field, the way the authority reads it.
+  SidebarProfile patched(Map<String, Object?> patch) => SidebarProfile(
+    name: patch.containsKey('name') ? patch['name'] as String? : name,
+    title: patch.containsKey('title') ? patch['title'] as String? : title,
+    label: patch.containsKey('label') ? patch['label'] as String? : label,
+    pinnedAt: patch.containsKey('pinnedAt')
+        ? patch['pinnedAt'] as String?
+        : pinnedAt,
+    hiddenFromSidebar: patch.containsKey('hiddenFromSidebar')
+        ? patch['hiddenFromSidebar'] == true
+        : hiddenFromSidebar,
+    sidebarOrder: patch.containsKey('sidebarOrder')
+        ? (patch['sidebarOrder'] as num?)?.toInt()
+        : sidebarOrder,
+  );
+}
+
+/// The Bots of one group in the order the sidebar draws them: by
+/// `sidebarOrder`, lowest first, with the Bots that have none after them in
+/// the order they arrived. Stable, so two equal numbers keep directory order.
+List<T> orderSidebarBots<T>(
+  List<T> bots,
+  String Function(T) idOf,
+  Map<String, SidebarProfile> profiles,
+) {
+  final placed = [
+    for (var index = 0; index < bots.length; index++)
+      (
+        bot: bots[index],
+        order: profiles[idOf(bots[index])]?.sidebarOrder,
+        index: index,
+      ),
+  ];
+  placed.sort((left, right) {
+    final l = left.order;
+    final r = right.order;
+    if (l == null && r == null) return left.index - right.index;
+    if (l == null) return 1;
+    if (r == null) return -1;
+    return l != r ? l.compareTo(r) : left.index - right.index;
+  });
+  return [for (final entry in placed) entry.bot];
 }
 
 class PinnedSidebarBots<T> {
@@ -146,17 +200,24 @@ GroupedSidebarBots<T> groupSidebarBots<T>(
       labelled[key] = SidebarBotGroup('label:$key', label, [bot]);
     }
   }
+  List<T> ordered(List<T> group) => orderSidebarBots(group, idOf, profiles);
   if (labelled.isEmpty) {
     return GroupedSidebarBots(false, [
-      SidebarBotGroup('all', '', [...bots]),
+      SidebarBotGroup('all', '', ordered(bots)),
     ]);
   }
   return GroupedSidebarBots(true, [
-    ...labelled.values,
+    for (final group in labelled.values)
+      SidebarBotGroup(group.key, group.label, ordered(group.bots)),
     if (unassigned.isNotEmpty)
-      SidebarBotGroup('unassigned', 'Unassigned', unassigned),
+      SidebarBotGroup('unassigned', 'Unassigned', ordered(unassigned)),
   ]);
 }
+
+/// The label a drop into [group] writes: the group's own spelling, or the
+/// empty string for Unassigned and for the plain list.
+String sidebarGroupDropLabel<T>(SidebarBotGroup<T> group) =>
+    group.key.startsWith('label:') ? group.label : '';
 
 /// The local time label beside the latest message: a time today, a weekday
 /// inside the last week, a date beyond it.
@@ -241,6 +302,12 @@ class ShellSidebar extends StatelessWidget {
 
   /// A phone's swipe towards the leading edge, then the button it reveals.
   final void Function(String botId)? onSwipeHide;
+
+  /// A row dragged and let go over the list: above or below another row, or
+  /// on a group's heading. Reordering and moving between labels are the one
+  /// gesture; a pointer drags a row outright, a finger holds it first. Null
+  /// leaves the rows where they are.
+  final void Function(SidebarDrop drop)? onMove;
   const ShellSidebar({
     super.key,
     required this.bots,
@@ -264,6 +331,7 @@ class ShellSidebar extends StatelessWidget {
     this.onActions,
     this.onSwipeRead,
     this.onSwipeHide,
+    this.onMove,
     this.phone = false,
     this.error,
   });
@@ -443,17 +511,30 @@ class ShellSidebar extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           if (grouped.showHeadings && group.label.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(20, 14, 16, 4),
-                              child: Text(
-                                group.label.toUpperCase(),
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant
-                                      .withValues(alpha: 0.85),
+                            _HeadingTarget(
+                              label: sidebarGroupDropLabel(group),
+                              groupIds: [
+                                for (final bot in group.bots) _id(bot),
+                              ],
+                              onMove: onMove,
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  14,
+                                  16,
+                                  4,
+                                ),
+                                child: Text(
+                                  group.label.toUpperCase(),
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant
+                                        .withValues(alpha: 0.85),
+                                  ),
                                 ),
                               ),
                             ),
-                          for (final bot in group.bots) _row(context, bot),
+                          for (final bot in group.bots)
+                            _row(context, bot, group: group),
                         ],
                       ),
                     ),
@@ -524,7 +605,14 @@ class ShellSidebar extends StatelessWidget {
     return ground == null ? column : ColoredBox(color: ground, child: column);
   }
 
-  Widget _row(BuildContext context, wire.BotRegistration bot) {
+  /// One row. In a [group] it can be dragged to another place or another
+  /// group, and is where another row can be dropped; a hidden Bot's row is
+  /// outside every group, so it is neither.
+  Widget _row(
+    BuildContext context,
+    wire.BotRegistration bot, {
+    SidebarBotGroup<wire.BotRegistration>? group,
+  }) {
     final theme = Theme.of(context);
     final botId = _id(bot);
     final view = unread[botId];
@@ -538,6 +626,15 @@ class ShellSidebar extends StatelessWidget {
     final actions = onActions == null
         ? null
         : ({Offset? position}) => onActions!(botId, position: position);
+    final move = onMove;
+    // A finger holds a row to lift it, which is the press that used to open
+    // the actions; letting go without having moved still opens them, so the
+    // hold keeps both meanings.
+    final touchDrag =
+        move != null &&
+        group != null &&
+        !isArchived &&
+        sidebarDragIsHeld(context);
     final row = _BotRow(
       key: ValueKey('bot-$botId'),
       identifier: ShellIds.sidebarBot(botId),
@@ -546,6 +643,7 @@ class ShellSidebar extends StatelessWidget {
       enabled: !isArchived,
       onTap: isArchived ? null : () => onSelect(botId),
       onActions: actions,
+      longPressOpens: !touchDrag,
       // A phone reaches the actions by pressing the row, and so may any
       // touch screen; a pointer has the control and the secondary click.
       control: !phone && actions != null
@@ -604,6 +702,42 @@ class ShellSidebar extends StatelessWidget {
               ],
             ),
     );
+    // An archived Bot has stopped: it is not dragged about, though the rows
+    // around it still are, so it stays a place another row can land beside.
+    final Widget lifted = move == null || group == null || isArchived
+        ? row
+        : _DragSource(
+            botId: botId,
+            held: touchDrag,
+            onHeldInPlace: actions == null ? null : () => actions(),
+            ghost: _DragGhost(
+              name: _name(bot),
+              characterId: bot.avatar.characterId,
+              primary: bot.avatar.primary,
+            ),
+            child: row,
+          );
+    final Widget swiped = _swipeRow(bot, lifted, isArchived, isUnread, view);
+    if (move == null || group == null) return swiped;
+    return _RowDropTarget(
+      key: ValueKey('drop-$botId'),
+      botId: botId,
+      label: sidebarGroupDropLabel(group),
+      groupIds: [for (final member in group.bots) _id(member)],
+      onMove: move,
+      child: swiped,
+    );
+  }
+
+  /// A phone's row slides to mark read or to reveal Hide; a desk's does not.
+  Widget _swipeRow(
+    wire.BotRegistration bot,
+    Widget row,
+    bool isArchived,
+    bool isUnread,
+    wire.UnreadView? view,
+  ) {
+    final botId = _id(bot);
     // An archived Bot has stopped: nothing to read, nothing worth hiding.
     if (!phone || isArchived) return row;
     final read = onSwipeRead;
@@ -622,6 +756,302 @@ class ShellSidebar extends StatelessWidget {
       child: row,
     );
   }
+}
+
+/// Whether a row must be held before it lifts: on a touch platform a drag
+/// that starts at once would be a scroll, so the row waits for a long press,
+/// the way `ReorderableListView` does; a pointer lifts the row outright.
+bool sidebarDragIsHeld(BuildContext context) =>
+    switch (Theme.of(context).platform) {
+      TargetPlatform.android ||
+      TargetPlatform.iOS ||
+      TargetPlatform.fuchsia => true,
+      TargetPlatform.macOS ||
+      TargetPlatform.windows ||
+      TargetPlatform.linux => false,
+    };
+
+/// The strip a drop draws where the row would land.
+const double _dropLineHeight = 2;
+
+/// A row in the air: the face and the name on a raised card, narrower than
+/// the row so the list beneath it stays legible.
+class _DragGhost extends StatelessWidget {
+  final String name;
+  final String characterId;
+  final String primary;
+  const _DragGhost({
+    required this.name,
+    required this.characterId,
+    required this.primary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // Anchored at the pointer, so the drop target reads the pointer itself;
+    // drawn a little up and left of it, the way a picked-up card sits under
+    // a fingertip rather than hanging from it.
+    return Transform.translate(
+      offset: const Offset(-24, -26),
+      child: Material(
+        elevation: 6,
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 16, 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CharacterAvatar(
+                size: 28,
+                characterId: characterId,
+                primary: primary,
+                motion: CharacterMotion.quiet,
+              ),
+              const SizedBox(width: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What lifts a row. [held] waits for a long press first; otherwise the row
+/// lifts as soon as the pointer moves.
+///
+/// A held row let go where it was lifted is the press it used to be, so
+/// [onHeldInPlace] opens the actions the long press opened before rows could
+/// be moved. A row let go anywhere else, over nothing, just settles back.
+class _DragSource extends StatefulWidget {
+  final String botId;
+  final bool held;
+  final VoidCallback? onHeldInPlace;
+  final Widget ghost;
+  final Widget child;
+  const _DragSource({
+    required this.botId,
+    required this.held,
+    required this.onHeldInPlace,
+    required this.ghost,
+    required this.child,
+  });
+
+  @override
+  State<_DragSource> createState() => _DragSourceState();
+}
+
+class _DragSourceState extends State<_DragSource> {
+  double _travelled = 0;
+
+  void _update(DragUpdateDetails details) {
+    _travelled += details.delta.distance;
+  }
+
+  void _ended(DraggableDetails details) {
+    final stayed = _travelled < kTouchSlop;
+    _travelled = 0;
+    if (!details.wasAccepted && stayed) widget.onHeldInPlace?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final faded = Opacity(opacity: 0.35, child: widget.child);
+    if (widget.held) {
+      return LongPressDraggable<String>(
+        data: widget.botId,
+        dragAnchorStrategy: pointerDragAnchorStrategy,
+        feedback: widget.ghost,
+        childWhenDragging: faded,
+        onDragStarted: () => _travelled = 0,
+        onDragUpdate: _update,
+        onDragEnd: _ended,
+        child: widget.child,
+      );
+    }
+    return Draggable<String>(
+      data: widget.botId,
+      axis: Axis.vertical,
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: widget.ghost,
+      childWhenDragging: faded,
+      child: widget.child,
+    );
+  }
+}
+
+/// Where a lifted row can land beside another: its upper half means above
+/// that row, its lower half below. The line says which before letting go.
+class _RowDropTarget extends StatefulWidget {
+  final String botId;
+  final String label;
+  final List<String> groupIds;
+  final void Function(SidebarDrop drop) onMove;
+  final Widget child;
+  const _RowDropTarget({
+    super.key,
+    required this.botId,
+    required this.label,
+    required this.groupIds,
+    required this.onMove,
+    required this.child,
+  });
+
+  @override
+  State<_RowDropTarget> createState() => _RowDropTargetState();
+}
+
+class _RowDropTargetState extends State<_RowDropTarget> {
+  /// Null while nothing hovers; otherwise whether it hovers the lower half.
+  bool? _below;
+
+  bool _lowerHalf(Offset global) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return false;
+    return box.globalToLocal(global).dy > box.size.height / 2;
+  }
+
+  /// The row a drop below this one lands above: the next in the group that
+  /// is not the row in the air, or nothing at the group's end.
+  String? _after(String dragged) {
+    final ids = widget.groupIds;
+    for (
+      var index = ids.indexOf(widget.botId) + 1;
+      index < ids.length;
+      index++
+    ) {
+      if (ids[index] != dragged) return ids[index];
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) => DragTarget<String>(
+    onWillAcceptWithDetails: (details) => details.data != widget.botId,
+    onMove: (details) {
+      if (details.data == widget.botId) return;
+      final below = _lowerHalf(details.offset);
+      if (below != _below) setState(() => _below = below);
+    },
+    onLeave: (_) {
+      if (_below != null) setState(() => _below = null);
+    },
+    onAcceptWithDetails: (details) {
+      final below = _lowerHalf(details.offset);
+      setState(() => _below = null);
+      widget.onMove(
+        SidebarDrop(
+          botId: details.data,
+          label: widget.label,
+          beforeBotId: below ? _after(details.data) : widget.botId,
+          group: widget.groupIds,
+        ),
+      );
+    },
+    builder: (context, candidates, rejected) => Stack(
+      children: [
+        widget.child,
+        if (_below case final bool below)
+          Positioned(
+            left: 16,
+            right: 16,
+            top: below ? null : 0,
+            bottom: below ? 0 : null,
+            child: const _DropLine(),
+          ),
+      ],
+    ),
+  );
+}
+
+/// A group's heading as a place to land: the row goes to the top of that
+/// group, and into its label.
+class _HeadingTarget extends StatefulWidget {
+  final String label;
+  final List<String> groupIds;
+  final void Function(SidebarDrop drop)? onMove;
+  final Widget child;
+  const _HeadingTarget({
+    required this.label,
+    required this.groupIds,
+    required this.onMove,
+    required this.child,
+  });
+
+  @override
+  State<_HeadingTarget> createState() => _HeadingTargetState();
+}
+
+class _HeadingTargetState extends State<_HeadingTarget> {
+  bool _over = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final move = widget.onMove;
+    if (move == null) return widget.child;
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (_) => true,
+      onMove: (_) {
+        if (!_over) setState(() => _over = true);
+      },
+      onLeave: (_) {
+        if (_over) setState(() => _over = false);
+      },
+      onAcceptWithDetails: (details) {
+        setState(() => _over = false);
+        final first = widget.groupIds
+            .where((id) => id != details.data)
+            .firstOrNull;
+        move(
+          SidebarDrop(
+            botId: details.data,
+            label: widget.label,
+            beforeBotId: first,
+            group: widget.groupIds,
+          ),
+        );
+      },
+      builder: (context, candidates, rejected) => Stack(
+        children: [
+          widget.child,
+          if (_over)
+            const Positioned(
+              left: 16,
+              right: 16,
+              bottom: 0,
+              child: _DropLine(),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DropLine extends StatelessWidget {
+  const _DropLine();
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    child: Container(
+      height: _dropLineHeight,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary,
+        borderRadius: BorderRadius.circular(1),
+      ),
+    ),
+  );
 }
 
 /// The control a desktop row grows under the pointer and on focus: one quiet
@@ -962,6 +1392,10 @@ class _BotRow extends StatefulWidget {
   /// A control that takes the time's place while the pointer is over the row
   /// or the row has focus; null where a press is how the actions are reached.
   final Widget? control;
+
+  /// Off where a long press lifts the row instead; the lift opens the
+  /// actions itself when the row is let go where it was.
+  final bool longPressOpens;
   const _BotRow({
     super.key,
     required this.identifier,
@@ -978,6 +1412,7 @@ class _BotRow extends StatefulWidget {
     required this.trailing,
     this.onActions,
     this.control,
+    this.longPressOpens = true,
   });
 
   @override
@@ -1011,7 +1446,9 @@ class _BotRowState extends State<_BotRow> {
         borderRadius: const BorderRadius.all(sidebarCardRadius),
         child: InkWell(
           onTap: widget.onTap,
-          onLongPress: onActions == null ? null : () => onActions(),
+          onLongPress: onActions == null || !widget.longPressOpens
+              ? null
+              : () => onActions(),
           onSecondaryTapUp: onActions == null
               ? null
               : (details) => onActions(position: details.globalPosition),
@@ -1088,7 +1525,7 @@ class _BotRowState extends State<_BotRow> {
     return Padding(
       padding: widget.card
           ? sidebarCardInset
-          : const EdgeInsets.symmetric(horizontal: 8),
+          : const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       // Hover and focus are the row's and its control's together, so moving
       // onto the control or tabbing to it keeps it on screen.
       child: MouseRegion(

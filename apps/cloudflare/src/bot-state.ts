@@ -7,6 +7,7 @@ import {
 } from "./billing-readiness.js";
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
 import { cleanHiddenBotNotifications } from "./hidden-bot-notifications-cleanup.js";
+import { cleanRetiredRoutineStateV1 } from "./routine-state-cleanup.js";
 import type { MessageNotice } from "@frockbot/app/notifications/messages";
 import {
   PUSH_OUTBOX_DRAIN_LIMIT,
@@ -552,6 +553,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       await cleanNotificationTestState(this.ctx.storage);
       await cleanHiddenBotNotifications(this.ctx.storage);
       await cleanBotAvatarTestState(this.ctx.storage);
+      await cleanRetiredRoutineStateV1(this.ctx.storage);
     });
     this.outboundFetch = dependencies.outboundFetch;
     // The surfaces are built per identity in `bindSurfaces`, not here: they

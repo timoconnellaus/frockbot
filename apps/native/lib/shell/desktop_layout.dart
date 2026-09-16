@@ -12,7 +12,7 @@
 /// drawer beside the conversation was a second door to the same room.
 library;
 
-import 'dart:math' show min;
+import 'dart:math' show max, min;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
@@ -21,9 +21,9 @@ import 'package:flutter/services.dart';
 import '../theme/frock_theme.dart';
 import 'semantics.dart';
 
-/// Whether this is the Mac app, whose window has no title bar: the shell
-/// draws to the edge and keeps a strip at the top of the Bot list clear for
-/// the traffic lights.
+/// Whether this is the Mac app, whose window has no title bar: the app keeps
+/// a strip across the top of the window clear for the traffic lights, and
+/// every page starts below it.
 bool get desktopTitleBarless =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
 
@@ -54,9 +54,59 @@ abstract final class DesktopWindow {
   }
 }
 
-/// The strip at the top of the Bot list where the title bar was. Empty, so
-/// the traffic lights have the room they need, and the window follows a drag
-/// that starts on it.
+/// The title bar's height, told to every page as a top inset.
+///
+/// A title-less window has no status bar to report, so nothing under the
+/// app knew the traffic lights were there: a page pushed over the shell put
+/// its back arrow and its title in the top-left corner, under them. This
+/// says the strip is not the page's, the way a phone's status bar is not,
+/// and every `AppBar` and `SafeArea` below it moves down by itself. On any
+/// other platform it is the child, untouched — a phone keeps its own insets
+/// and gains none.
+///
+/// The strip itself is drawn here too, over the whole width of the window
+/// and nothing else: because every page keeps out of the inset, the strip
+/// covers no control, and the window follows a drag that starts anywhere
+/// along its top and zooms on a double-click there, the way a Mac window
+/// with a title bar does — on the shell and on any page over it alike.
+class DesktopTitleBarPadding extends StatelessWidget {
+  final Widget child;
+  const DesktopTitleBarPadding({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!desktopTitleBarless) return child;
+    final media = MediaQuery.of(context);
+    return MediaQuery(
+      data: media.copyWith(
+        padding: media.padding.copyWith(
+          top: max(media.padding.top, desktopTitleBarInset),
+        ),
+        viewPadding: media.viewPadding.copyWith(
+          top: max(media.viewPadding.top, desktopTitleBarInset),
+        ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          child,
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: desktopTitleBarInset,
+            child: DesktopTitleStrip(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The strip across the top of the window where the title bar was. Empty, so
+/// the traffic lights have the room they need; the window follows a drag that
+/// starts on it and zooms on a double-click, over the channel the Mac window
+/// answers. Drawn once, by [DesktopTitleBarPadding], above every page.
 class DesktopTitleStrip extends StatelessWidget {
   const DesktopTitleStrip({super.key});
 
@@ -172,18 +222,12 @@ class ShellLayout extends StatelessWidget {
                         _Column(
                           width: shellSidebarWidth,
                           border: Border(right: BorderSide(color: divider)),
+                          // The Mac's title strip is the app's inset now
+                          // ([DesktopTitleBarPadding]), read by the safe area
+                          // above; the column draws nothing for it.
                           child: SafeArea(
                             top: false,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                if (desktopTitleBarless)
-                                  const DesktopTitleStrip(),
-                                Expanded(
-                                  child: identified(ShellIds.sidebar, sidebar),
-                                ),
-                              ],
-                            ),
+                            child: identified(ShellIds.sidebar, sidebar),
                           ),
                         ),
                         // The header is the conversation's, not the window's:

@@ -12,10 +12,11 @@ class MainFlutterWindow: NSWindow {
 
     // No title bar: the app runs to the window's edge and draws its own
     // chrome, the way a desktop tool does. The traffic lights stay where
-    // macOS puts them; the Flutter shell keeps its top-left corner clear for
-    // them (see `desktopTitleBarInset` in `shell/desktop_layout.dart`) and
-    // asks, over the channel below, for the window to follow a drag that
-    // starts in that strip.
+    // macOS puts them; the Flutter app keeps a strip across the top of the
+    // window clear for them (see `desktopTitleBarInset` in
+    // `shell/desktop_layout.dart`) and asks, over the channel below, for the
+    // window to follow a drag that starts anywhere in that strip and to zoom
+    // on a double-click there.
     self.titleVisibility = .hidden
     self.titlebarAppearsTransparent = true
     self.styleMask.insert(.fullSizeContentView)

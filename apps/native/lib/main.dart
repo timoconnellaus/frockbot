@@ -27,6 +27,7 @@ import 'connections/document.dart' show connectReturns, isConnectReturnV1;
 import 'flock/avatar.dart' show riveRuntimeReady;
 import 'orientation.dart';
 import 'shell/app_shell.dart';
+import 'shell/desktop_layout.dart' show DesktopTitleBarPadding;
 import 'theme/frock_theme.dart';
 import 'update/desktop_update.dart';
 import 'update/update_ready.dart';
@@ -276,9 +277,13 @@ class _FrockBotAppState extends State<FrockBotApp> {
     builder: (context, child) {
       final framed = UpdateReadyFrame(controller: updates, child: child!);
       final desktop = desktopUpdates;
-      return desktop == null
-          ? framed
-          : DesktopUpdateFrame(controller: desktop, child: framed);
+      // Outermost, so every page below — the shell and anything pushed over
+      // it — reads the Mac window's title strip as a top inset.
+      return DesktopTitleBarPadding(
+        child: desktop == null
+            ? framed
+            : DesktopUpdateFrame(controller: desktop, child: framed),
+      );
     },
     home: userId == null
         ? SignInPage(

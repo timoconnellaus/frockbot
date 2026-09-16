@@ -253,6 +253,28 @@ describe("Flock v1 contracts", () => {
       decodeBotIdentityViewV1({ ...identity, pinnedAt: "someday" }),
     ).toThrow("pinnedAt is invalid");
   });
+
+  test("carries the sidebar position, and refuses one that is not an integer", () => {
+    const identity = {
+      schemaVersion: 1 as const,
+      botId: "alpha",
+      name: "Atlas",
+      namedBy: "user" as const,
+      hiddenFromSidebar: false,
+      label: "Work",
+      sidebarOrder: 2000,
+    };
+    expect(decodeBotIdentityViewV1(structuredClone(identity))).toEqual(
+      identity,
+    );
+    const { sidebarOrder: _order, ...unplaced } = identity;
+    expect(decodeBotIdentityViewV1(structuredClone(unplaced))).toEqual(
+      unplaced,
+    );
+    expect(() =>
+      decodeBotIdentityViewV1({ ...identity, sidebarOrder: "top" }),
+    ).toThrow("sidebarOrder is invalid");
+  });
 });
 
 describe("stored Bot directory migration", () => {

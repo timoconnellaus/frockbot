@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ViewNode } from "@frockbot/core/protocol-schemas";
+import valid from "../../core/protocol-schemas/fixtures/valid.json";
 import {
   ROUTINE_EDITOR_FIELDS_V1,
   routineMomentV1,
@@ -52,6 +53,57 @@ function frame(over: Partial<RoutinesFrameV1> = {}): RoutinesFrameV1 {
     ...over,
   };
 }
+
+const leads: RoutineViewV1 = {
+  schemaVersion: 1,
+  routineId: "r2",
+  name: "Inbound leads",
+  prompt: "Triage the lead.",
+  trigger: { kind: "webhook" },
+  timezone: "Australia/Sydney",
+  enabled: true,
+  createdBy: { kind: "user" },
+  updatedBy: { kind: "user" },
+  createdAt: "2026-09-01T00:00:00.000Z",
+  updatedAt: "2026-09-01T00:00:00.000Z",
+  hookKeyVersion: 2,
+};
+
+// The one document the Flutter host reads through its own generated decoder,
+// pinned byte for byte: the same fixture is in the shared protocol fixtures,
+// which `apps/native/test/protocol_fixtures.dart` validates with the Dart
+// evaluator. A projection change that the app's decoder would refuse goes red
+// here rather than as "Routines couldn’t load" on a phone. Only the revision
+// is left out: it is a hash of the frame, and a number is a number.
+test("the projection is the document the shared fixture pins for the app", () => {
+  const fixture = valid.find(
+    (row) => row.name === "ViewDocument routines projection",
+  );
+  const document = routinesDocumentV1(
+    frame({
+      routines: [morning, leads],
+      inbox: [
+        { ...completion, repeatCount: 3 },
+        {
+          schemaVersion: 1,
+          entryId: "e2",
+          runId: "run-2",
+          routineId: "r2",
+          text: "Lead triaged.",
+          attribution: "Inbound leads",
+          createdAt: "2026-09-02T23:05:00.000Z",
+          acknowledged: true,
+          acknowledgedAt: "2026-09-02T23:06:00.000Z",
+        },
+      ],
+      unacknowledged: 1,
+      editing: morning,
+    }),
+  );
+  expect({ ...document, revision: 0 } as unknown).toEqual(
+    fixture?.value as unknown,
+  );
+});
 
 test("a Routine says what it fires on and when it last did and next will", () => {
   const document = routinesDocumentV1(frame());

@@ -174,6 +174,12 @@ export interface BotIdentityViewV1 {
    * first. Absent means not pinned.
    */
   pinnedAt?: string;
+  /**
+   * Where this Bot sits among the Bots of its label, lower first; a Bot
+   * without one follows every Bot with one. Purely organisational, like the
+   * label.
+   */
+  sidebarOrder?: number;
 }
 
 export interface BotIdentityDirectoryViewV1 {
@@ -656,7 +662,7 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
   exact(
     value,
     ["schemaVersion", "botId", "name", "namedBy", "hiddenFromSidebar"],
-    ["label", "title", "pinnedAt"],
+    ["label", "title", "pinnedAt", "sidebarOrder"],
   );
   if (value.schemaVersion !== 1 || typeof value.hiddenFromSidebar !== "boolean")
     throw new FlockDecodeError("Bot identity is invalid");
@@ -675,7 +681,17 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
     ...(value.pinnedAt === undefined
       ? {}
       : { pinnedAt: timestampText(value.pinnedAt, "pinnedAt") }),
+    ...(value.sidebarOrder === undefined
+      ? {}
+      : { sidebarOrder: sidebarOrderNumber(value.sidebarOrder) }),
   };
+}
+
+function sidebarOrderNumber(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    throw new FlockDecodeError("sidebarOrder is invalid");
+  }
+  return value;
 }
 
 /** An ISO 8601 instant. The sidebar orders pinned Bots by it. */
