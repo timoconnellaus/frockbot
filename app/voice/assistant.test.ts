@@ -4,6 +4,7 @@ import {
   parseChatCompletionStreamV1,
   renderVoiceDelegationLeadInV1,
   renderVoiceDelegationPromptV1,
+  renderVoiceDelegationReadOutV1,
   renderVoiceSystemPromptV1,
   runVoiceTurnV1,
   VOICE_ANSWER_MAX_CHARS_V1,
@@ -765,18 +766,32 @@ describe("the system prompt", () => {
     // A clock that runs behind the ledger is not a negative age.
     expect(describeVoiceAgeV1(askedAt, at(-5))).toBe("a moment ago");
 
-    // The composer is told the same age, in the same words.
-    const prompt = renderVoiceDelegationPromptV1(
-      { ...result, answer: "Sunny." },
-      at(80),
-    );
+    // Placing is the lead-in's job alone: the composer is never told an age,
+    // so a sentence composed once and spoken an hour later cannot contradict
+    // the lead-in spoken in front of it.
+    const prompt = renderVoiceDelegationPromptV1({
+      ...result,
+      answer: "Sunny.",
+    });
+    expect(prompt.system).not.toContain("ago");
     expect(prompt.system).toContain(
-      "This was asked about an hour ago, so open by placing it",
+      "Never say when the request was made, and do not restate the whole question",
+    );
+
+    // The plain read-out drops the question once the lead-in has said it.
+    const answered = { ...result, answer: "Sunny." };
+    expect(renderVoiceDelegationReadOutV1(answered)).toBe(
+      "Bob answered about the weather today: Sunny.",
+    );
+    expect(renderVoiceDelegationReadOutV1(answered, { placed: true })).toBe(
+      "Bob answered: Sunny.",
     );
     expect(
-      renderVoiceDelegationPromptV1({ ...result, answer: "Sunny." }, at(1))
-        .system,
-    ).toContain("asked a moment ago");
+      renderVoiceDelegationReadOutV1(
+        { ...result, failure: "it stopped" },
+        { placed: true },
+      ),
+    ).toBe("Bob could not finish: it stopped.");
   });
 
   test("says when memory could not be read rather than pretending it is empty", () => {

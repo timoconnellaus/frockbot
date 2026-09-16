@@ -334,13 +334,13 @@ export function describeVoiceAgeV1(askedAt: Date, now: Date): string {
 }
 
 /**
- * The sentence that places an answer composed in an earlier call.
+ * The sentence that places an answer the person did not hear when they asked.
  *
- * A read-out sentence is composed once, when the answer settles, and says
- * "a moment ago" things — the person had just asked. When that sentence is
- * finally heard on a later call, an hour on, it lands as if it answered
- * whatever was just said. This lead-in, spoken before it, names the request
- * and how long ago it was made, so the person hears an old answer as one.
+ * A read-out sentence is composed once and may be spoken much later — the
+ * composition and the speaking are separate moments, and either can be
+ * retried. So the composer never says when the request was made; this lead-in
+ * is the one place an age is spoken, and it is written at speak time from the
+ * age right then, so the person hears an old answer as one.
  */
 export function renderVoiceDelegationLeadInV1(
   result: Pick<VoiceDelegationResultV1, "botName" | "question" | "askedAt">,
@@ -357,12 +357,13 @@ export function renderVoiceDelegationLeadInV1(
  */
 export function renderVoiceDelegationReadOutV1(
   result: VoiceDelegationResultV1,
+  options?: { placed?: boolean },
 ): string {
-  const about = clip(result.question, 120);
+  const about = options?.placed ? "" : ` about ${clip(result.question, 120)}`;
   if (result.answer) {
-    return `${result.botName} answered about ${about}: ${clip(result.answer, 600)}`;
+    return `${result.botName} answered${about}: ${clip(result.answer, 600)}`;
   }
-  return `${result.botName} could not finish ${about}: ${clip(result.failure ?? "it stopped", 200)}.`;
+  return `${result.botName} could not finish${about}: ${clip(result.failure ?? "it stopped", 200)}.`;
 }
 
 /**
@@ -374,9 +375,10 @@ export const VOICE_RESULT_PROMPT_MARKER_V1 = "<bot-answer-read-out>";
 /** What the assistant is asked, to say a Bot's answer in its own voice. */
 export function renderVoiceDelegationPromptV1(
   result: VoiceDelegationResultV1,
-  now: Date,
-): { system: string; user: string } {
-  const age = describeVoiceAgeV1(result.askedAt, now);
+): {
+  system: string;
+  user: string;
+} {
   return {
     system: [
       VOICE_RESULT_PROMPT_MARKER_V1,
@@ -386,9 +388,7 @@ export function renderVoiceDelegationPromptV1(
       "- Say who answered, then the answer, in one to three short spoken sentences. No markdown, no lists, no code.",
       "- The answer below is the Bot's, about the question below and nothing else. Do not add facts, do not guess at what it meant, and do not answer the question yourself.",
       "- If the Bot could not finish, say so plainly and say what it said went wrong.",
-      voiceAgeMinutesV1(result.askedAt, now) < VOICE_AGE_RECENT_MINUTES_V1
-        ? `- This was asked ${age}, so the person still has it in mind; do not restate the whole question.`
-        : `- This was asked ${age}, so open by placing it: name what it was about.`,
+      "- Never say when the request was made, and do not restate the whole question: when the person needs placing, that is said before your sentence.",
     ].join("\n"),
     user: [
       `Bot: ${clip(result.botName, 60)}`,
@@ -408,12 +408,11 @@ export function renderVoiceDelegationPromptV1(
 export async function composeVoiceDelegationSpeechV1(
   host: Pick<VoiceAssistantHostV1, "chat">,
   result: VoiceDelegationResultV1,
-  now: Date,
   signal: AbortSignal,
 ): Promise<string> {
   const fallback = renderVoiceDelegationReadOutV1(result);
   try {
-    const prompt = renderVoiceDelegationPromptV1(result, now);
+    const prompt = renderVoiceDelegationPromptV1(result);
     const stream = await host.chat(
       {
         messages: [

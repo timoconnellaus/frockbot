@@ -29,6 +29,7 @@ import {
 import { ElevenLabsSTT, ElevenLabsTTS } from "@cloudflare/voice-elevenlabs";
 import {
   composeVoiceDelegationSpeechV1,
+  describeVoiceAgeV1,
   parseChatCompletionStreamV1,
   renderVoiceDelegationLeadInV1,
   renderVoiceDelegationReadOutV1,
@@ -2395,7 +2396,6 @@ export class VoiceAssistant extends VoiceAgentBase<
   private async delegationSpeech(
     ledger: VoiceLedgerV1,
     delegation: VoiceDelegationRecordV1,
-    call: LiveCall,
   ): Promise<string> {
     const result = {
       botName: delegation.botName,
@@ -2404,33 +2404,29 @@ export class VoiceAssistant extends VoiceAgentBase<
       ...(delegation.answer ? { answer: delegation.answer } : {}),
       ...(delegation.failure ? { failure: delegation.failure } : {}),
     };
-    const admission = await ledger.admitDelegationSpeech(
-      delegation.runId,
-      this.now(),
-    );
+    // A sentence is composed once but may be spoken much later, so how long
+    // ago the request was made is decided here, at the moment it is spoken,
+    // and never by the composer. The lead-in is not recorded with the
+    // sentence: a replay later still says the age it has then.
+    const now = this.now();
+    const placed = describeVoiceAgeV1(result.askedAt, now) !== "a moment ago";
+    const leadIn = placed ? renderVoiceDelegationLeadInV1(result, now) : "";
+    const admission = await ledger.admitDelegationSpeech(delegation.runId, now);
     if (admission.status === "cached") {
-      // The sentence was composed when the answer settled, for the call the
-      // question was asked on, and says so ("a moment ago"). Heard on a later
-      // call it would land as an answer to whatever was just said, so on any
-      // other call it is placed first. A sentence composed fresh on this call
-      // already places itself: the prompt knows how long ago it was asked.
-      return delegation.callId === call.callId
-        ? admission.speech
-        : renderVoiceDelegationLeadInV1(result, this.now()) + admission.speech;
+      return leadIn + admission.speech;
     }
     if (admission.status === "refused") {
-      return renderVoiceDelegationReadOutV1(result);
+      return leadIn + renderVoiceDelegationReadOutV1(result, { placed });
     }
     const spoken = await composeVoiceDelegationSpeechV1(
       { chat: (body, signal) => this.chatCompletion(body, signal) },
       result,
-      this.now(),
       AbortSignal.timeout(VOICE_RESULT_COMPOSE_TIMEOUT_MS),
     );
     // Durable before the audio: an eviction between here and the speaker
     // loses the read-out, never the sentence it was going to say.
     await ledger.recordDelegationSpeech(delegation.runId, spoken);
-    return spoken;
+    return leadIn + spoken;
   }
 
   /**
@@ -2481,7 +2477,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       // call that can take seconds and the call is free to change under it.
       // Nothing durable about the read-out is written until after it.
       generation = call.speechGeneration;
-      const text = await this.delegationSpeech(ledger, delegation, call);
+      const text = await this.delegationSpeech(ledger, delegation);
       // The call as it is *now*. A new utterance, a reply that started, or a
       // socket that went, all happened while the sentence was being written,
       // and speaking into any of them would cut off the person's own turn or

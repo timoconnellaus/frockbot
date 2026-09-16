@@ -503,15 +503,19 @@ for playback retries. An admitted composition whose result was lost is
 abandoned rather than paid for again; a composition that has not answered
 within eight seconds is dropped and a correlated plain read-out supplies the
 fallback. The answer remains `settled` until the correct client playback
-acknowledgment changes it to `spoken`. The composed sentence is written for
-the call the question was asked on ("a moment ago"), so when the cached
-sentence is finally heard on a **later** call it is preceded by a plain
+acknowledgment changes it to `spoken`. A sentence is composed once but may be
+spoken much later — composing and speaking are separate moments and either can
+be retried — so the composer is told never to say when the request was made.
+Placing is one mechanism, decided at speak time from the age right then: when
+`describeVoiceAgeV1` is anything other than "a moment ago", every read-out
+(cached, freshly composed, or the plain fallback) is preceded by a plain
 lead-in naming the request and its age — "Earlier, about an hour ago, you
-asked Bob about the weather." — and the prompt's `<answers>` block carries
-each unheard answer under its request and age with the instruction that it
-is read out separately and is never the answer to what is being asked now.
-Without both, an answer that settled after one call ended was heard at the
-start of the next as if it answered the question just asked.
+asked Bob about the weather." The lead-in is not recorded with the sentence,
+so a later replay says the age it has then. The prompt's `<answers>` block
+carries each unheard answer under its request and age with the instruction
+that it is read out separately and is never the answer to what is being asked
+now. Without both, an answer that settled after one call ended was heard at
+the start of the next as if it answered the question just asked.
 
 Conversation context is bounded and **call-scoped**: the prompt carries the
 newest 12 messages of _this call_, built from the ledger's own `turn:` records

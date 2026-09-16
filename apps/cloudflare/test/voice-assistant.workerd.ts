@@ -1606,6 +1606,9 @@ describe("the voice session object", () => {
     await opened.waitFor(state("awake"), "awake");
     const runId = `voice-${"f".repeat(32)}`;
     const at = new Date().toISOString();
+    // Asked five minutes ago, so by the time it is finally heard the person
+    // no longer has it in mind and it has to be placed.
+    const askedAt = new Date(Date.now() - 5 * 60_000).toISOString();
     const key = `voice:delegation:${runId}`;
     await stub.probePutStorage(key, {
       schemaVersion: 1,
@@ -1615,7 +1618,7 @@ describe("the voice session object", () => {
       botId: "bot",
       botName: "Workerd Bot",
       text: "is the launch ready",
-      admittedAt: at,
+      admittedAt: askedAt,
       state: "settled",
       attempts: 0,
       answer: "The launch is ready.",
@@ -1653,14 +1656,15 @@ describe("the voice session object", () => {
     const next = await open(userId);
     const speaker = playsAnswers(next);
     await startCall(next);
-    // The sentence was composed for the call the question was asked on, so on
-    // this one it is placed first: the person hears which request this
-    // answers and that it is not an answer to anything they just said.
+    // The sentence was composed before this call and says nothing about when
+    // the request was made, so the age is spoken here, in front of it: the
+    // person hears which request this answers and that it is not an answer to
+    // anything they just said.
     await next.waitFor(
       (f) =>
         f.type === "transcript_end" &&
         String(f.text).startsWith(
-          "Earlier, a moment ago, you asked Workerd Bot about is the launch ready. ",
+          "Earlier, 5 minutes ago, you asked Workerd Bot about is the launch ready. ",
         ),
       "the cached answer placed under its request",
     );
