@@ -118,6 +118,7 @@
         "@cloudflare/vitest-plugin": "^1.1.4",
         "@cloudflare/workers-types": "5.20260907.1",
         "@playwright/test": "1.63.0",
+        "@rive-app/flutter-native-wasm": "44.0.0",
         "@types/bun": "1.4.1",
         "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
         "vitest": "^4.1.0",
@@ -641,6 +642,8 @@
     "@reteps/dockerfmt-linux-arm64": ["@reteps/dockerfmt-linux-arm64@0.5.4", "", { "os": "linux", "cpu": "arm64" }, "sha512-6pVakO06eXtDuvxy1Dnjs/gQyUoGGycle8PRSt5IFRwLi/AVaOQwfkfmW0WP8VH9wNUeti6BfJ3ksTn2G+XMxg=="],
 
     "@reteps/dockerfmt-linux-x64": ["@reteps/dockerfmt-linux-x64@0.5.4", "", { "os": "linux", "cpu": "x64" }, "sha512-OD6SIlUV1D4TgJoTui3FMBAZsGbTSPYsiT0BKhD6jMUcJb3GpFTa7dY9rL8rP9FUqfL7OTHVUGUOL4Rh64Olog=="],
+
+    "@rive-app/flutter-native-wasm": ["@rive-app/flutter-native-wasm@44.0.0", "", {}, "sha512-hi8FaCl08+Qix2TxqyeUnzJOaE4ER9//itoQN4S0EsrxIaCNX58a7SPLqICmBXdOhfLQx5FQPNWUGmHjKo30rQ=="],
 
     "@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.6", "", { "os": "android", "cpu": "arm" }, "sha512-b+jTcARdTiFLI6jB4a5XjTm0RWd6KcRfQj/I2356fxUZemiho9zQLxo0RtCuMDAyKcLo6cEltkgbQp6d1+sjjQ=="],
 

@@ -351,8 +351,12 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
                   fit: rive.Fit.contain,
                   hitTestBehavior: rive.RiveHitTestBehavior.none,
                 ),
-                rive.RiveLoading() => const SizedBox.shrink(),
-                rive.RiveFailed() => Image.asset(
+                // A runtime that never arrives — a script the CSP refuses, a
+                // request that hangs — leaves the loader in `RiveLoading`
+                // forever rather than failing, so the still stands in for
+                // waiting as well as for failure. An empty slot is never the
+                // better answer: the still is what the animation replaces.
+                _ => Image.asset(
                   'assets/characters/$_characterId.png',
                   fit: BoxFit.contain,
                   excludeFromSemantics: true,

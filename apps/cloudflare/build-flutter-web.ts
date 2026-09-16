@@ -6,7 +6,9 @@
  * the origin it was served from, which is what a deployment, a `wrangler dev`
  * on an arbitrary port and the e2e harness all need. CanvasKit is built local
  * (`--no-web-resources-cdn`) so the app origin's `script-src 'self'` stays
- * true and the engine is never fetched from gstatic.
+ * true and the engine is never fetched from gstatic. Rive Native's WebAssembly
+ * runtime is staged here for the same reason and named by
+ * `RIVE_NATIVE_WASM_HOST`; see `stageRiveWasm`.
  *
  * Everything is staged under `_flutter/<buildHash>/`, so every URL the
  * document names is content-addressed and can be served `immutable`. The
@@ -80,6 +82,86 @@ const BUILD_FLAGS = [
 ];
 
 /**
+ * Rive Native's WebAssembly runtime, served from this origin.
+ *
+ * `rive_native` otherwise fetches `wasm/rive_native.js` from jsdelivr as the
+ * app starts, which the app origin's `script-src 'self' 'wasm-unsafe-eval'`
+ * refuses. Its loader appends a `<script>` and awaits the `load` event, so a
+ * blocked script is not a failure it ever sees: `RiveNative.init()` never
+ * settles, `main()` never reaches `runApp`, and the window stays blank. That
+ * is what turned `Main` red on 2026-09-16 — every browser end-to-end test
+ * timed out waiting for a shell that was still awaiting a script the browser
+ * had already refused.
+ *
+ * The payload is staged under its own version rather than the Flutter build
+ * hash, because that hash is only known after a build which has to be told
+ * this URL first. A version is just as immutable a name.
+ */
+const RIVE_WASM_PACKAGE = "@rive-app/flutter-native-wasm";
+// Resolved rather than joined onto a `node_modules`, because the workspace
+// install is free to hoist the package to the repository root instead.
+const riveManifest = Bun.resolveSync(`${RIVE_WASM_PACKAGE}/package.json`, root);
+const rivePackageRoot = resolve(riveManifest, "..");
+
+/** The wasm version the resolved `rive_native` links against, from its source. */
+async function riveWasmVersion(): Promise<string> {
+  const packageConfig = JSON.parse(
+    await readFile(
+      resolve(nativeRoot, ".dart_tool/package_config.json"),
+      "utf8",
+    ),
+  ) as { packages?: { name?: string; rootUri?: string }[] };
+  const entry = packageConfig.packages?.find(
+    (candidate) => candidate.name === "rive_native",
+  );
+  if (!entry?.rootUri?.startsWith("file:")) {
+    throw new Error(
+      "apps/native/.dart_tool/package_config.json does not resolve rive_native " +
+        "to a file: root.",
+    );
+  }
+  const packageRoot = fileURLToPath(entry.rootUri);
+  const source = await readFile(
+    resolve(packageRoot, "lib/src/wasm_version.dart"),
+    "utf8",
+  );
+  const version = /wasmVersion\s*=\s*'([^']+)'/u.exec(source);
+  if (!version) {
+    throw new Error("rive_native's wasm_version.dart states no wasmVersion.");
+  }
+  return version[1]!;
+}
+
+/**
+ * Copy the runtime into `dist/web`, and answer the URL prefix it is served at.
+ *
+ * The staged version has to be the one `rive_native` asks for: it names the
+ * exports the Dart side links against, so a mismatch is a blank artboard at
+ * runtime rather than an error at build time. The two are pinned in different
+ * files — `pubspec.lock` and `package.json` — so the drift is checked here
+ * rather than assumed.
+ */
+async function stageRiveWasm(expected: string): Promise<string> {
+  const installed = (
+    JSON.parse(await readFile(riveManifest, "utf8")) as { version?: string }
+  ).version;
+  if (installed !== expected) {
+    throw new Error(
+      `rive_native expects ${RIVE_WASM_PACKAGE}@${expected}, but ${installed} is installed. ` +
+        "Update that dependency in apps/cloudflare/package.json to match.",
+    );
+  }
+  const staged = resolve(assetsRoot, "rive", expected);
+  for (const directory of ["wasm", "wasm_compatibility"]) {
+    await cp(resolve(rivePackageRoot, directory), resolve(staged, directory), {
+      recursive: true,
+      force: true,
+    });
+  }
+  return `/rive/${expected}/`;
+}
+
+/**
  * The version name from `pubspec.yaml`, handed to the Dart program so the
  * Profile page can say which release it is. The browser build has no build
  * number of its own and no Shorebird patch, so the name alone is the version.
@@ -106,11 +188,13 @@ async function appVersionDefine(): Promise<string> {
 const SOURCE_ROOTS = ["lib", "web", "assets", "vendor"];
 const SOURCE_FILES = ["pubspec.yaml", "pubspec.lock"];
 
-async function sourceFingerprint(): Promise<string> {
+async function sourceFingerprint(riveHostDefine: string): Promise<string> {
   const digest = createHash("sha256");
   // The flags and this script are part of what the output is: a change to
-  // either produces a different bundle from the same Dart.
+  // either produces a different bundle from the same Dart. So is the Rive
+  // runtime's URL, which a version bump moves and the bundle has baked in.
   digest.update(BUILD_FLAGS.join(" "));
+  digest.update(riveHostDefine);
   digest.update(await readFile(fileURLToPath(import.meta.url)));
   // The toolchain too — a Flutter upgrade rewrites the engine even though no
   // file in this repository moved.
@@ -180,20 +264,50 @@ async function stagedIsCurrent(fingerprint: string): Promise<boolean> {
   return true;
 }
 
-const fingerprint = await sourceFingerprint();
+/**
+ * Run a `flutter` subcommand, and fail the build if it did.
+ *
+ * A failed command leaves whatever the last successful one wrote in place —
+ * a stale `package_config.json`, a stale `build/web` — so an unread exit code
+ * is how a build that never happened gets staged and announced as one.
+ */
+function flutter(...args: string[]): void {
+  const run = Bun.spawnSync({
+    cmd: ["flutter", ...args],
+    cwd: nativeRoot,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  if (run.exitCode !== 0) {
+    throw new Error(`\`flutter ${args.join(" ")}\` exited ${run.exitCode}.`);
+  }
+}
+
+// `flutter build` resolves the pub dependencies itself, but the wasm version
+// has to be read out of the resolved `rive_native` before the build, because
+// the build is what carries the URL it produces.
+flutter("pub", "get");
+const riveVersion = await riveWasmVersion();
+const riveHostDefine = `--dart-define=RIVE_NATIVE_WASM_HOST=/rive/${riveVersion}/`;
+
+const fingerprint = await sourceFingerprint(riveHostDefine);
 if (await stagedIsCurrent(fingerprint)) {
+  // The staging directory is rewritten whole by a build, so the runtime is
+  // copied on the skipping path too rather than only alongside one.
+  await stageRiveWasm(riveVersion);
   process.stdout.write(
     "The Flutter web client is already built from these sources; skipping.\n",
   );
   process.exit(0);
 }
 
-Bun.spawnSync({
-  cmd: ["flutter", "build", "web", ...BUILD_FLAGS, await appVersionDefine()],
-  cwd: nativeRoot,
-  stdout: "inherit",
-  stderr: "inherit",
-});
+flutter(
+  "build",
+  "web",
+  ...BUILD_FLAGS,
+  await appVersionDefine(),
+  riveHostDefine,
+);
 
 const files = await emittedFiles(flutterOut);
 if (
@@ -201,6 +315,18 @@ if (
   !files.includes("main.dart.js")
 ) {
   throw new Error("Flutter web build did not emit an entry point");
+}
+
+// The define actually reached the compiler. A dart-define that stops being
+// read — a renamed key, a flag dropped from the command — leaves the jsdelivr
+// default compiled in, and the only symptom is a blank window in a browser
+// whose policy refuses it. Better to fail here than to ship that.
+const entry = await readFile(resolve(flutterOut, "main.dart.js"), "utf8");
+if (entry.includes("cdn.jsdelivr.net")) {
+  throw new Error(
+    "The web bundle still names cdn.jsdelivr.net, which the app origin's " +
+      "`script-src 'self'` refuses. RIVE_NATIVE_WASM_HOST did not take.",
+  );
 }
 
 const digest = createHash("sha256");
@@ -225,11 +351,15 @@ for (const path of files) {
   });
 }
 
-// Every URL under the prefix carries the build hash, so a browser may keep it
-// for a year: a new build is a new path, not a new body at the same one.
+const riveHost = await stageRiveWasm(riveVersion);
+
+// Every URL under either prefix carries a version — the build hash, or Rive's
+// own — so a browser may keep it for a year: a new build is a new path, not a
+// new body at the same one.
 await writeFile(
   resolve(assetsRoot, "_headers"),
-  `/${payloadPrefix}/*\n  cache-control: public, max-age=31536000, immutable\n`,
+  `/${payloadPrefix}/*\n  cache-control: public, max-age=31536000, immutable\n` +
+    `${riveHost}*\n  cache-control: public, max-age=31536000, immutable\n`,
 );
 await writeFile(
   resolve(root, "dist/flutter-web.json"),
@@ -237,5 +367,6 @@ await writeFile(
 );
 
 process.stdout.write(
-  `Built the Flutter web client at /${payloadPrefix}/${buildHash}/ (${files.length} files)\n`,
+  `Built the Flutter web client at /${payloadPrefix}/${buildHash}/ (${files.length} files)\n` +
+    `Staged Rive Native's wasm runtime at ${riveHost}\n`,
 );

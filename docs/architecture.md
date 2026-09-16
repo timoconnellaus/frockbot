@@ -317,8 +317,21 @@ browser asks for (the engine's `.symbols` maps, Flutter's own `index.html`, the
 PWA manifest and its icons, and the service worker `--pwa-strategy=none` leaves
 empty), hashes every remaining file's path and contents into one build hash, and
 stages the payload under `apps/cloudflare/dist/web/_flutter/<buildHash>/`. It
-writes a `_headers` file marking everything under the prefix `immutable` for a
-year, and records the hash in `apps/cloudflare/dist/flutter-web.json`.
+also stages Rive Native's WebAssembly runtime under
+`apps/cloudflare/dist/web/rive/<wasmVersion>/` and names it to the Dart side
+with `--dart-define=RIVE_NATIVE_WASM_HOST=/rive/<wasmVersion>/`, so that
+runtime too comes from this origin (see the policy below). It writes a
+`_headers` file marking everything under either prefix `immutable` for a year,
+and records the build hash in `apps/cloudflare/dist/flutter-web.json`.
+
+The runtime is named by Rive's own version rather than the build hash, because
+that hash is only known after a build that has to be told the URL first. The
+version the Dart package asks for and the version the npm dependency installs
+are pinned in different files, so the build reads the former out of
+`apps/native/.dart_tool/package_config.json` — which is why it runs `flutter
+pub get` before anything else — and refuses on drift. It also refuses to stage
+a bundle whose `main.dart.js` still names `cdn.jsdelivr.net`, so a dropped or
+renamed `--dart-define` fails the build rather than shipping a blank window.
 
 That directory is the app Worker's `assets` binding
 (`apps/cloudflare/wrangler.jsonc:27`, and again in `development` (:176),
@@ -360,7 +373,14 @@ measure text.
 href>` of its own. All of this is the app origin's alone — the artifact origin,
 where untrusted pages live, keeps `default-src 'none'` (`gateway.ts`) unchanged.
 CanvasKit is built local (`--no-web-resources-cdn`) so `script-src 'self'` stays
-true and no engine byte is fetched from gstatic.
+true and no engine byte is fetched from gstatic. Rive Native's WebAssembly
+runtime is staged and served from this origin for the same reason: left to
+itself `rive_native` fetches it from jsdelivr, and because its loader appends a
+`<script>` and awaits a `load` event that a refusal never fires, a blocked
+runtime is not a failure it sees — `RiveNative.init()` simply never settles.
+Widening `script-src` was rejected in favour of serving the bytes; the loader is
+additionally given a deadline in `lib/main.dart`, past which a missing runtime
+costs the animation rather than the window.
 
 There is no service worker. Every URL under the prefix is content-addressed and
 served `immutable`, so a cache the page managed itself would duplicate the
@@ -1046,7 +1066,7 @@ Applets are off for every account until an admin turns them on. The switch is th
 2. **Workerd, hermetic** — `apps/cloudflare/vitest.config.ts`, `test/**/*.workerd.ts`, entry `./test/computer-compatibility-worker.ts`, with Miniflare fakes for the Computer host, Frock AI and Vectorize, and a D1 `AUTH_DB` the auth-schema suite migrates from `migrations/` via `readD1Migrations`. `fileParallelism: false`.
 3. **Workerd, integration** — `apps/cloudflare/vitest.integration.config.ts`, `test/integration/**/*.integration.ts`, entry `./src/index.ts`, with the real gateway, the built artifact and D1 migrations via `readD1Migrations`.
 4. **Computer host** — `apps/computer-host/vitest.config.ts` plus `bun test src container`. Opt-in live suites `test:live` and `test:live:desktop` are not run by CI.
-5. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 28 spec files.
+5. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 29 spec files.
 6. **Flutter** — `apps/native/test/*.dart` plus `integration_test/settings_screens.dart`, which is a screenshot runner.
 7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-layer-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-assets.ts --check` (the Applet and Plugin SDK scaffolds, the Applets and Plugins Skills and the two page HTMLs, as strings the Worker bundle can carry), then `scripts/typecheck.ts`.
 
