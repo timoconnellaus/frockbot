@@ -271,6 +271,8 @@ export function createMachineApprovalToolV1(config: {
     // Chat only. The card that gates this tool is a chat-only payload, and a
     // Turn that cannot ask must not run a command on somebody's laptop.
     admission: { turnTypes: ["chat"] },
+    // It appends the approval card to the conversation.
+    orderedEffect: true,
     validate: (input: unknown) =>
       typeof input === "object" && input !== null && !Array.isArray(input),
     execute: async (

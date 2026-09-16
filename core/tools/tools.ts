@@ -860,9 +860,14 @@ export class ToolRegistry implements ToolExecution {
    * Turn exactly as it would outside one; without this it would have silently
    * failed to.
    *
-   * Admission fencing is the batch's: the loop admitted this one effect, and
-   * a Stop reaches the sub-calls through `context.signal` rather than through
-   * a second admission per call.
+   * Admission fencing is the batch's: the loop admitted this one effect, so
+   * there is no second admission per sub-call. A Stop is observed on
+   * `context.signal` before each sub-call is dispatched, which for the
+   * ordered chain means between its calls and for the concurrent group means
+   * before the batch begins, since that group is dispatched in one tick. A
+   * call already in flight is not cancelled mid-call, and an effect that has
+   * already landed stays landed — the same thing a Stop means at top level.
+   * The sub-calls that never started report as cancelled.
    *
    * Crash durability narrows, deliberately. At top level a completed call is
    * protected twice: the tool journal skips any occurrence that already holds
@@ -936,6 +941,22 @@ export class ToolRegistry implements ToolExecution {
    */
   private orderedEffectV1(sub: BatchSubCallV1): boolean {
     if (sub.kind !== "call") return false;
+    if (sub.tool === CALL_DYNAMIC_TOOL_NAME) {
+      // The flag belongs to the tool that will actually run, and for a dynamic
+      // call that is the inner definition `prepare` resolves — reading it off
+      // the meta-tool finds nothing and would let a card race a send. A call
+      // we cannot resolve is treated as ordered: it is refused during
+      // `prepare` anyway, and the safe reading of "unknown" is not "may race".
+      const resolved = this.resolveDynamicCall({
+        id: "",
+        name: sub.tool,
+        input: sub.arguments,
+      });
+      return (
+        "error" in resolved ||
+        resolved.registered.definition.orderedEffect === true
+      );
+    }
     return (
       this.nativeDefinitions.get(sub.tool)?.definition.orderedEffect === true
     );
@@ -947,6 +968,16 @@ export class ToolRegistry implements ToolExecution {
     index: number,
     context: ToolExecutionContext,
   ): Promise<BatchCallResultV1> {
+    if (context.signal.aborted) {
+      return {
+        index,
+        tool: sub.tool,
+        result: {
+          content: "Cancelled before tool execution started.",
+          isError: true,
+        },
+      };
+    }
     if (sub.kind === "invalid") {
       return {
         index,

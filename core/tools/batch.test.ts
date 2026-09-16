@@ -7,7 +7,12 @@ import type {
   ToolExecutionContext,
   ToolExecutionResult,
 } from "@frockbot/core/contracts";
-import { BATCH_MAX_CALLS_V1, BATCH_TOOL_NAME, ToolRegistry } from "./tools.js";
+import {
+  BATCH_MAX_CALLS_V1,
+  BATCH_TOOL_NAME,
+  CALL_DYNAMIC_TOOL_NAME,
+  ToolRegistry,
+} from "./tools.js";
 
 const CONTEXT: ToolExecutionContext = {
   botId: "primary",
@@ -29,11 +34,13 @@ function registry(...definitions: ToolDefinition[]): ToolRegistry {
 async function runBatch(
   tools: ToolRegistry,
   calls: unknown,
+  signal: AbortSignal = CONTEXT.signal,
 ): Promise<ToolExecutionResult> {
   const call = { id: "provider-call", name: BATCH_TOOL_NAME, input: { calls } };
-  const preparation = await tools.prepare(call, CONTEXT);
+  const context = { ...CONTEXT, signal };
+  const preparation = await tools.prepare(call, context);
   if (preparation.kind === "denied") return preparation.result;
-  return tools.executePrepared(preparation, { ...CONTEXT, toolCall: call });
+  return tools.executePrepared(preparation, { ...context, toolCall: call });
 }
 
 /** A tool that records the effect id every call ran under. */
@@ -377,6 +384,100 @@ describe("batch ordering", () => {
       "send:two",
       "read:end:a",
       "read:end:b",
+    ]);
+  });
+
+  test("a dynamic tool's own orderedEffect decides, not the meta-tool's", async () => {
+    // A batch reaches a dynamic tool through `call_dynamic_tool`, which
+    // declares nothing. Reading the flag off that outer name would put every
+    // approval card and agent card — all of which append to the conversation
+    // — back in the racing group.
+    const landed: string[] = [];
+    const tools = registry({
+      ...orderedEffect("send_card", landed),
+      namespace: "frockbot",
+    });
+
+    const result = await runBatch(tools, [
+      {
+        tool: CALL_DYNAMIC_TOOL_NAME,
+        arguments: {
+          namespace: "frockbot",
+          toolName: "send_card",
+          arguments: { text: "one", delay: 30 },
+        },
+      },
+      {
+        tool: CALL_DYNAMIC_TOOL_NAME,
+        arguments: {
+          namespace: "frockbot",
+          toolName: "send_card",
+          arguments: { text: "two", delay: 10 },
+        },
+      },
+      {
+        tool: CALL_DYNAMIC_TOOL_NAME,
+        arguments: {
+          namespace: "frockbot",
+          toolName: "send_card",
+          arguments: { text: "three", delay: 0 },
+        },
+      },
+    ]);
+
+    expect(landed).toEqual(["one", "two", "three"]);
+    expect(JSON.parse(result.content as string)).toMatchObject({
+      ran: 3,
+      failed: 0,
+    });
+  });
+
+  test("a Stop partway through the chain starts none of the calls after it", async () => {
+    // Serialising the chain is what creates a window for a Stop to land in,
+    // so the chain has to observe one: the sends that already landed stay
+    // landed, and the rest never start.
+    const landed: string[] = [];
+    const stop = new AbortController();
+    const send: ToolDefinition = {
+      name: "send",
+      description: "send fixture.",
+      inputSchema: { type: "object" },
+      orderedEffect: true,
+      execute: async (input) => {
+        const { text } = input as { text: string };
+        await Bun.sleep(1);
+        landed.push(text);
+        if (text === "one") stop.abort();
+        return { content: text, isError: false };
+      },
+    };
+    const tools = registry(send);
+
+    const result = await runBatch(
+      tools,
+      [
+        { tool: "send", arguments: { text: "one" } },
+        { tool: "send", arguments: { text: "two" } },
+        { tool: "send", arguments: { text: "three" } },
+      ],
+      stop.signal,
+    );
+
+    expect(landed).toEqual(["one"]);
+    expect(JSON.parse(result.content as string).results).toEqual([
+      { index: 0, tool: "send", isError: false, content: "one" },
+      {
+        index: 1,
+        tool: "send",
+        isError: true,
+        content: "Cancelled before tool execution started.",
+      },
+      {
+        index: 2,
+        tool: "send",
+        isError: true,
+        content: "Cancelled before tool execution started.",
+      },
     ]);
   });
 });
