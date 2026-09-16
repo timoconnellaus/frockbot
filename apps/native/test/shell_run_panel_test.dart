@@ -81,6 +81,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(identifiedBy(ShellIds.runView), findsOneWidget);
 
+    // Closing the run gives the column back the way the person left it.
+    await tester.tap(
+      find.descendant(
+        of: identifiedBy(ShellIds.runViewClose),
+        matching: find.byType(IconButton),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(identifiedBy(ShellIds.runView), findsNothing);
+    expect(identifiedBy(ShellIds.slot(ShellSlot.rightPanel.id)), findsNothing);
+
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
     links.dispose();
