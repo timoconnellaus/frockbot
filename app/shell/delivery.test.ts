@@ -674,3 +674,52 @@ test("specialist schemas are disclosed on demand and interim work reaches a fina
     outcome: "completed",
   });
 });
+
+test("a batched finish send ends the Turn in one model call", async () => {
+  let requests = 0;
+  const events = await run({
+    id: "test",
+    async *stream() {
+      requests++;
+      yield {
+        type: "tool-call",
+        call: {
+          id: "parts",
+          name: "batch",
+          input: {
+            calls: [
+              {
+                tool: "send_to_user",
+                arguments: {
+                  disposition: "continue",
+                  payload: { type: "text", text: "First part." },
+                },
+              },
+              {
+                tool: "send_to_user",
+                arguments: {
+                  disposition: "finish",
+                  payload: { type: "text", text: "Second part." },
+                },
+              },
+            ],
+          },
+        },
+      };
+      yield { type: "finish", reason: "tool-calls" };
+    },
+  });
+  expect(requests).toBe(1);
+  expect(
+    events
+      .filter((event) => event.type === "send/to-user")
+      .map((event) => event.payload),
+  ).toEqual([
+    { type: "text", text: "First part." },
+    { type: "text", text: "Second part." },
+  ]);
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});

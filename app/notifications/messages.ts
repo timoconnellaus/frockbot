@@ -16,6 +16,7 @@ import {
   advanceUnreadActivityV1,
   isMessageBoundaryV1,
 } from "../shell/unread.js";
+import { sendOrdinalsV1 } from "../shell/run-protocol.js";
 
 /**
  * What one user-visible message is called, everywhere.
@@ -185,6 +186,12 @@ export async function messageRecords(input: {
   const allSends = input.run.events.filter(
     (event) => event.type === "send/to-user",
   );
+  // The same namer the transcript uses, so the id the unread boundary and the
+  // push intent carry names the bubble the client draws. A batch can append
+  // its sends in any order; declared position is what fixes their identity.
+  // An empty map is the deliberate fallback for a run holding a send this
+  // system did not key, and means counting in log order as before.
+  const declaredOrdinals = sendOrdinalsV1(input.run.events);
   const automation = input.run.admission?.turnType === "automation";
   const voice = input.run.admission?.origin?.kind === "voice";
   return visibleMessageRecordsV1({
@@ -193,7 +200,8 @@ export async function messageRecords(input: {
     messages: sends.map((event) => ({
       messageId: messageIdV1(
         input.run.runId,
-        allSends.findIndex((candidate) => candidate.seq === event.seq),
+        declaredOrdinals.get(event.occurrenceId) ??
+          allSends.findIndex((candidate) => candidate.seq === event.seq),
       ),
       runId: input.run.runId,
       createdAt: event.timestamp,

@@ -750,7 +750,9 @@ function decodeDynamicToolCallInput(
  * nothing, and the caller falls back to counting in log order, which is what
  * every send got before a batch could issue several of them at once.
  */
-function sendOrdinalsV1(events: readonly SessionEvent[]): Map<string, number> {
+export function sendOrdinalsV1(
+  events: readonly SessionEvent[],
+): Map<string, number> {
   const declared: Array<{
     occurrenceId: string;
     at: { turn: number; step: number; ordinal: number; subIndex: number };
