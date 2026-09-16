@@ -33,7 +33,16 @@ import 'protocol/client_wire.generated.dart' as wire;
 
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
-  await RiveNative.init();
+  // Rive's animated characters need their runtime, but the app is not their
+  // waiting room. On the web the loader appends a `<script>` and awaits its
+  // `load` event, which a Content-Security-Policy refusal or a 404 never
+  // fires — so without a deadline `init()` never settles and nobody ever sees
+  // a frame. Past it the characters fall back to their stills, which is a far
+  // smaller loss than a blank window.
+  await RiveNative.init().timeout(
+    const Duration(seconds: 10),
+    onTimeout: () => false,
+  );
   await setMobileOrientation();
   // The browser draws to a canvas, so the accessibility tree is the only DOM
   // there is: without it a screen reader sees an empty page and a browser test
