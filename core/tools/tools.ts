@@ -13,6 +13,7 @@ import {
   type ToolGuard,
   type ToolNamespaceRegistration,
   type ToolPreparation,
+  TOOL_ATTACHMENT_LIMIT_V1,
   type ToolRegistrationOptions,
   type ToolSchema,
   type TurnTypeV1,
@@ -911,13 +912,22 @@ export class ToolRegistry implements ToolExecution {
       .flat()
       .sort((left, right) => left.index - right.index);
     const failed = results.filter(({ result }) => result.isError).length;
-    const attachments = results.flatMap(
-      ({ result }) => result.attachments ?? [],
-    );
+    const produced = results.flatMap(({ result }) => result.attachments ?? []);
+    const attachments = produced.slice(0, TOOL_ATTACHMENT_LIMIT_V1);
     return {
       content: JSON.stringify({
         ran: results.length,
         failed,
+        ...(produced.length > attachments.length
+          ? {
+              attachments: {
+                produced: produced.length,
+                carried: attachments.length,
+                dropped: produced.length - attachments.length,
+                note: `One tool result may carry at most ${TOOL_ATTACHMENT_LIMIT_V1} attachments, so only the first ${attachments.length} in declared call order are attached; the rest were dropped. Each result's content still names where its output lives. Ask for at most ${TOOL_ATTACHMENT_LIMIT_V1} attachment-producing calls per batch.`,
+              },
+            }
+          : {}),
         results: results.map(({ index, tool, result }) => ({
           index,
           tool,

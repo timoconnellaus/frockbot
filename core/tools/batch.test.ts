@@ -1,8 +1,13 @@
 // The `batch` meta-tool: what it dispatches, what it keys each call on, and
 // what it refuses.
 import { describe, expect, test } from "bun:test";
-import { LoopHookListV1 } from "@frockbot/core/contracts";
+import {
+  decodeSessionEvent,
+  LoopHookListV1,
+  TOOL_ATTACHMENT_LIMIT_V1,
+} from "@frockbot/core/contracts";
 import type {
+  ToolAttachmentV1,
   ToolDefinition,
   ToolExecutionContext,
   ToolExecutionResult,
@@ -41,6 +46,25 @@ async function runBatch(
   const preparation = await tools.prepare(call, context);
   if (preparation.kind === "denied") return preparation.result;
   return tools.executePrepared(preparation, { ...context, toolCall: call });
+}
+
+/** One image reference, named by the call that produced it. */
+function attachmentFor(shot: number): ToolAttachmentV1 {
+  return {
+    kind: "image",
+    mediaType: "image/png",
+    workspacePath: {
+      root: {
+        kind: "package-declared",
+        userId: "user-1",
+        packageId: "computer",
+        rootId: "screenshots",
+      },
+      path: `bot-1/shot-${shot}.png`,
+    },
+    contentHash: `${shot}`.padStart(64, "a"),
+    bytes: 2048,
+  };
 }
 
 /** A tool that records the effect id every call ran under. */
@@ -479,5 +503,64 @@ describe("batch ordering", () => {
         content: "Cancelled before tool execution started.",
       },
     ]);
+  });
+  test("carries at most the durable attachment limit, in declared order, and says so", async () => {
+    // A batch of screenshot calls produces one attachment each. The aggregate
+    // has to fit what a tool/result may durably carry, or the Session that
+    // tried to persist it wedges on every later flush.
+    const capture: ToolDefinition = {
+      name: "capture",
+      description: "capture fixture.",
+      inputSchema: { type: "object" },
+      execute: (input) => {
+        const { shot } = input as { shot: number };
+        return Promise.resolve({
+          content: `captured ${shot}`,
+          isError: false,
+          attachments: [attachmentFor(shot)],
+        });
+      },
+    };
+    const tools = registry(capture);
+    const shots = TOOL_ATTACHMENT_LIMIT_V1 + 3;
+
+    const result = await runBatch(
+      tools,
+      Array.from({ length: shots }, (_unused, shot) => ({
+        tool: "capture",
+        arguments: { shot },
+      })),
+    );
+
+    expect(result.attachments).toEqual(
+      Array.from({ length: TOOL_ATTACHMENT_LIMIT_V1 }, (_unused, shot) =>
+        attachmentFor(shot),
+      ),
+    );
+    expect(JSON.parse(result.content as string)).toMatchObject({
+      ran: shots,
+      failed: 0,
+      attachments: {
+        produced: shots,
+        carried: TOOL_ATTACHMENT_LIMIT_V1,
+        dropped: shots - TOOL_ATTACHMENT_LIMIT_V1,
+        note: expect.stringContaining(`${TOOL_ATTACHMENT_LIMIT_V1}`),
+      },
+    });
+    expect(() =>
+      decodeSessionEvent({
+        type: "tool/result",
+        seq: 0,
+        timestamp: "2026-09-16T00:00:00.000Z",
+        turn: 1,
+        step: 1,
+        occurrenceId: "1:1:0",
+        name: BATCH_TOOL_NAME,
+        content: result.content,
+        isError: false,
+        status: "completed",
+        attachments: result.attachments,
+      }),
+    ).not.toThrow();
   });
 });
