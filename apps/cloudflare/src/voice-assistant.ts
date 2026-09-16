@@ -37,6 +37,7 @@ import {
   runVoiceTurnV1,
   voiceAgePlacedV1,
   VOICE_PROMPT_HISTORY_MESSAGES_V1,
+  VOICE_PROMPT_MAX_UNSPOKEN_V1,
   type VoiceAssistantHostV1,
   type VoiceAssistantPromptInputV1,
   type VoiceBotSummaryV1,
@@ -2384,6 +2385,28 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   /**
+   * The request an answer is placed under, in the person's own words.
+   *
+   * A delegation records the assistant's paraphrase to the Bot ("Tim is asking
+   * what the weather is. Please check…"), which is the right thing to hand a
+   * Bot and the wrong thing to read back to the person who said "can you ask
+   * Bob what the weather is?". The spoken turn keeps their words for as long
+   * as the delegation is kept, so the paraphrase is only the fallback.
+   *
+   * When one turn asked several Bots, each answer is placed under the whole
+   * sentence the person said, and the Bot's name says which request it answers.
+   */
+  private async delegationQuestion(
+    ledger: VoiceLedgerV1,
+    delegation: VoiceDelegationRecordV1,
+  ): Promise<string> {
+    const turn = await ledger
+      .readTurn(delegation.turnId)
+      .catch(() => undefined);
+    return turn?.transcript.trim() || delegation.text;
+  }
+
+  /**
    * The sentence that reads one answer back, bought at most once.
    *
    * Putting an answer into the assistant's own voice is a model call, so it
@@ -2400,7 +2423,7 @@ export class VoiceAssistant extends VoiceAgentBase<
   ): Promise<string> {
     const result = {
       botName: delegation.botName,
-      question: delegation.text,
+      question: await this.delegationQuestion(ledger, delegation),
       askedAt: new Date(delegation.admittedAt),
       ...(delegation.answer ? { answer: delegation.answer } : {}),
       ...(delegation.failure ? { failure: delegation.failure } : {}),
@@ -2924,6 +2947,17 @@ export class VoiceAssistant extends VoiceAgentBase<
       this.userTimezone(userId),
       this.sessionMemoryContext(),
     ]);
+    const ledger = this.ledger();
+    const placedUnspoken = await Promise.all(
+      unspoken
+        .slice(0, VOICE_PROMPT_MAX_UNSPOKEN_V1)
+        .map(async (delegation) => ({
+          botName: delegation.botName,
+          question: await this.delegationQuestion(ledger, delegation),
+          text: delegation.answer ?? delegation.failure ?? "",
+          askedAt: new Date(delegation.admittedAt),
+        })),
+    );
     return {
       bots,
       timezone,
@@ -2932,12 +2966,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         ...(memory ? { user: memory } : {}),
         logDays: VOICE_ASSISTANT_MEMORY_LOG_DAYS,
       },
-      unspoken: unspoken.map((delegation) => ({
-        botName: delegation.botName,
-        question: delegation.text,
-        text: delegation.answer ?? delegation.failure ?? "",
-        askedAt: new Date(delegation.admittedAt),
-      })),
+      unspoken: placedUnspoken,
     };
   }
 }

@@ -740,21 +740,32 @@ describe("the system prompt", () => {
 
   test("an answer heard on a later call is placed by its request and its age", () => {
     const askedAt = new Date("2026-09-16T12:18:00.000Z");
-    const result = { botName: "Bob", question: "the weather today", askedAt };
+    const result = {
+      botName: "Bob",
+      question: "what's the weather today?",
+      askedAt,
+    };
     expect(
       renderVoiceDelegationLeadInV1(
         result,
         new Date("2026-09-16T13:32:00.000Z"),
       ),
     ).toBe(
-      "Earlier, about an hour ago, you asked Bob about the weather today. ",
+      "Earlier, about an hour ago, you asked Bob: what's the weather today? ",
     );
     expect(
       renderVoiceDelegationLeadInV1(
         result,
         new Date("2026-09-16T12:23:00.000Z"),
       ),
-    ).toBe("Earlier, 5 minutes ago, you asked Bob about the weather today. ");
+    ).toBe("Earlier, 5 minutes ago, you asked Bob: what's the weather today? ");
+    // A paraphrase, or words with no closing mark, get a full stop.
+    expect(
+      renderVoiceDelegationLeadInV1(
+        { ...result, question: "the weather today" },
+        new Date("2026-09-16T12:23:00.000Z"),
+      ),
+    ).toBe("Earlier, 5 minutes ago, you asked Bob: the weather today. ");
 
     const at = (minutes: number) =>
       new Date(askedAt.getTime() + minutes * 60_000);
@@ -782,7 +793,7 @@ describe("the system prompt", () => {
     // The plain read-out drops the question once the lead-in has said it.
     const answered = { ...result, answer: "Sunny." };
     expect(renderVoiceDelegationReadOutV1(answered)).toBe(
-      "Bob answered about the weather today: Sunny.",
+      "You asked Bob: what's the weather today? Bob answered: Sunny.",
     );
     expect(renderVoiceDelegationReadOutV1(answered, { placed: true })).toBe(
       "Bob answered: Sunny.",
@@ -795,7 +806,9 @@ describe("the system prompt", () => {
     ).toBe("Bob could not finish: it stopped.");
     expect(
       renderVoiceDelegationReadOutV1({ ...result, failure: "it stopped" }),
-    ).toBe("Bob could not finish the weather today: it stopped.");
+    ).toBe(
+      "You asked Bob: what's the weather today? Bob could not finish: it stopped.",
+    );
   });
 
   test("a composition the model does not produce is nothing, not a read-out", async () => {

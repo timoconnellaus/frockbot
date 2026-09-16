@@ -1666,7 +1666,7 @@ describe("the voice session object", () => {
         // The exact minute count is whatever the clock says by the time this
         // is spoken; what is asserted is that the request and its age are
         // spoken in front of the cached sentence.
-        /^Earlier, \d+ minutes ago, you asked Workerd Bot about is the launch ready\. /.test(
+        /^Earlier, \d+ minutes ago, you asked Workerd Bot: is the launch ready\. /.test(
           String(f.text),
         ),
       "the cached answer placed under its request",
@@ -1709,6 +1709,19 @@ describe("the voice session object", () => {
       speech: "Workerd Bot says the launch is ready.",
       speechState: "composed",
     });
+    // The spoken turn is still retained, so the placement uses what the
+    // person actually said rather than the paraphrase handed to the Bot.
+    await stub.probePutStorage("voice:turn:earlier-call:1", {
+      schemaVersion: 1,
+      turnId: "earlier-call:1",
+      callId: "earlier-call",
+      key: "earlier-call:1",
+      transcript: "Hey, is the launch ready?",
+      admittedAt: at,
+      state: "answered",
+      answer: "I'll ask.",
+      delegations: 1,
+    });
     const next = await open(userId);
     const speaker = playsAnswers(next);
     await startCall(next);
@@ -1716,7 +1729,7 @@ describe("the voice session object", () => {
       (f) =>
         f.type === "transcript_end" &&
         String(f.text).startsWith(
-          "Earlier, a moment ago, you asked Workerd Bot about is the launch ready. ",
+          "Earlier, a moment ago, you asked Workerd Bot: Hey, is the launch ready? ",
         ),
       "the young answer placed under its request on a later call",
     );
@@ -1731,6 +1744,56 @@ describe("the voice session object", () => {
     expect(speaker.played).toEqual([heard.deliveryId]);
     expect(await stub.probeComposed()).toBe(0);
     next.socket.close();
+  });
+
+  test("the prompt carries an unheard answer under what the person said, not the paraphrase", async () => {
+    const userId = `voice-answers-prompt-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const runId = `voice-${"a".repeat(32)}`;
+    const at = new Date().toISOString();
+    // A settled answer nobody has heard, from a call that is over. `text` is
+    // the paraphrase the assistant handed the Bot; the retained turn holds
+    // what the person actually said.
+    await stub.probePutStorage(`voice:delegation:${runId}`, {
+      schemaVersion: 1,
+      runId,
+      turnId: "earlier-call:1",
+      callId: "earlier-call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "Tim is asking whether the launch is ready. Please check.",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+      speech: "Workerd Bot says the launch is ready.",
+      speechState: "composed",
+    });
+    await stub.probePutStorage("voice:turn:earlier-call:1", {
+      schemaVersion: 1,
+      turnId: "earlier-call:1",
+      callId: "earlier-call",
+      key: "earlier-call:1",
+      transcript: "Hey, is the launch ready?",
+      admittedAt: at,
+      state: "answered",
+      answer: "I'll ask.",
+      delegations: 1,
+    });
+    const opened = await open(userId);
+    playsAnswers(opened);
+    await startCall(opened);
+    await stub.probeUtterance("hello again");
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" && !String(f.text).includes("Earlier,"),
+      "the spoken reply",
+    );
+    const prompt = (await stub.probeSystemPrompts()).at(-1)!;
+    expect(prompt).toContain('about "Hey, is the launch ready?"');
+    expect(prompt).not.toContain("Tim is asking whether the launch is ready");
+    opened.socket.close();
   });
 
   test("a Bot answer waits for ordinary speech still being synthesized after the model has finished", async () => {
@@ -2536,7 +2599,7 @@ describe("the voice session object", () => {
       20_000,
     );
     expect(String(spoken.text)).toMatch(
-      /^[^.]+ could not finish plan the launch: .+\.$/,
+      /^You asked [^:]+: plan the launch\. [^.]+ could not finish: .+\.$/,
     );
     expect(String(spoken.text)).not.toContain("Earlier,");
     const heard = await eventually(

@@ -85,6 +85,7 @@ export const VOICE_PROMPT_MAX_LOG_FACTS_V1 = 30;
 export const VOICE_PROMPT_MAX_FACT_CHARS_V1 = 240;
 export const VOICE_PROMPT_MAX_BOTS_V1 = 32;
 export const VOICE_PROMPT_HISTORY_MESSAGES_V1 = 12;
+export const VOICE_PROMPT_MAX_UNSPOKEN_V1 = 5;
 export const VOICE_TURN_MAX_STEPS_V1 = 4;
 export const VOICE_TURN_MAX_TOKENS_V1 = 400;
 export const VOICE_ANSWER_MAX_CHARS_V1 = 1_200;
@@ -279,7 +280,10 @@ export function renderVoiceSystemPromptV1(
     lines.push(
       "Bot answers to earlier requests that the person has not heard yet. They are read out to the person separately, so do not repeat them unprompted, and never present one as the answer to what the person asks now. If the person asks what a Bot said, this is it:",
     );
-    for (const answer of input.unspoken.slice(0, 5)) {
+    for (const answer of input.unspoken.slice(
+      0,
+      VOICE_PROMPT_MAX_UNSPOKEN_V1,
+    )) {
       lines.push(
         `- ${escapeTag(clip(answer.botName, 60))}, asked ${describeVoiceAgeV1(answer.askedAt, input.now)} about "${escapeTag(clip(answer.question, 120))}": ${escapeTag(clip(answer.text, 400))}`,
       );
@@ -355,7 +359,22 @@ export function renderVoiceDelegationLeadInV1(
   result: Pick<VoiceDelegationResultV1, "botName" | "question" | "askedAt">,
   now: Date,
 ): string {
-  return `Earlier, ${describeVoiceAgeV1(result.askedAt, now)}, you asked ${result.botName} about ${clip(result.question, 120)}. `;
+  return `Earlier, ${describeVoiceAgeV1(result.askedAt, now)}, you ${renderVoiceAskedV1(result)} `;
+}
+
+/**
+ * "asked Bob: can you ask Bob what the weather is?" — the request as the
+ * person put it. `question` is what they said, in their words, while the
+ * spoken turn is retained, and the assistant's paraphrase to the Bot only when
+ * it is not. Their own words end how they ended them. The clause carries no
+ * pronoun, so each caller opens its own sentence.
+ */
+function renderVoiceAskedV1(
+  result: Pick<VoiceDelegationResultV1, "botName" | "question">,
+): string {
+  const said = clip(result.question, 120);
+  const stop = /[.!?\u2026]$/.test(said) ? "" : ".";
+  return `asked ${result.botName}: ${said}${stop}`;
 }
 
 /**
@@ -368,13 +387,11 @@ export function renderVoiceDelegationReadOutV1(
   result: VoiceDelegationResultV1,
   options?: { placed?: boolean },
 ): string {
-  const question = options?.placed ? "" : clip(result.question, 120);
+  const asked = options?.placed ? "" : `You ${renderVoiceAskedV1(result)} `;
   if (result.answer) {
-    const about = question ? ` about ${question}` : "";
-    return `${result.botName} answered${about}: ${clip(result.answer, 600)}`;
+    return `${asked}${result.botName} answered: ${clip(result.answer, 600)}`;
   }
-  const what = question ? ` ${question}` : "";
-  return `${result.botName} could not finish${what}: ${clip(result.failure ?? "it stopped", 200)}.`;
+  return `${asked}${result.botName} could not finish: ${clip(result.failure ?? "it stopped", 200)}.`;
 }
 
 /**

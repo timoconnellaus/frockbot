@@ -64,8 +64,9 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
    notification; when Remy finishes, the answer is read out. Close the tab
    before Remy finishes, reopen and start voice again: the answer is read out
    first, and because it is being heard on a different call it opens with the
-   plain lead-in that places it — "Earlier, <however long ago>, you asked Remy
-   about plan my week" — before Remy's answer.
+   plain lead-in that places it, in your own words rather than the assistant's
+   paraphrase to Remy — "Earlier, <however long ago>, you asked Remy: ask Remy
+   to plan my week." — before Remy's answer.
 5. Stay silent for 25 s. Expect: `voice/state` reports `asleep` (visible in
    the network tab), no audio frames go up, the footer keeps animating from the
    microphone. Speak: the first syllable is transcribed (pre-roll).
