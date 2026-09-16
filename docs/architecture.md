@@ -1047,7 +1047,7 @@ Applets are off for every account until an admin turns them on. The switch is th
 3. **Workerd, integration** — `apps/cloudflare/vitest.integration.config.ts`, `test/integration/**/*.integration.ts`, entry `./src/index.ts`, with the real gateway, the built artifact and D1 migrations via `readD1Migrations`.
 4. **Computer host** — `apps/computer-host/vitest.config.ts` plus `bun test src container`. Opt-in live suites `test:live` and `test:live:desktop` are not run by CI.
 5. **Playwright** — `apps/cloudflare/e2e/playwright.config.ts`, `**/*.e2e.ts`, `fullyParallel: false`, `workers: 1`, 240 s timeout, 4-way CI sharding through `balanced-shard-reporter.ts`, `webServer` of `bun e2e/serve.ts`. Roughly 28 spec files.
-6. **Flutter** — `apps/native/test/*.dart` (14 files) plus `integration_test/settings_screens.dart`, which is a screenshot runner.
+6. **Flutter** — `apps/native/test/*.dart` plus `integration_test/settings_screens.dart`, which is a screenshot runner.
 7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-layer-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-assets.ts --check` (the Applet and Plugin SDK scaffolds, the Applets and Plugins Skills and the two page HTMLs, as strings the Worker bundle can carry), then `scripts/typecheck.ts`.
 
 ### Local validation and PR CI
