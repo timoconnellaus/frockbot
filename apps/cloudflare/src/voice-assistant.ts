@@ -125,6 +125,7 @@ import { createDurableWorkspaceFilesV1 } from "./workspace.js";
 import { rpcJsonSnapshotV1 } from "./durable-rpc.js";
 import {
   userTimezoneV1,
+  type BotSettingsViewV1,
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
 
@@ -1942,7 +1943,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         const runs = await this.recentRuns(userId, botId);
         return renderVoiceBotStatusV1({
           botId,
-          botName: bot.initialName,
+          botName: bot.name,
           runs,
         });
       },
@@ -1954,7 +1955,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         );
         return {
           botId,
-          botName: bot.initialName,
+          botName: bot.name,
           runs,
           hasMore: page.page.truncated || page.runs.length > runs.length,
         };
@@ -1987,7 +1988,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         );
         return {
           botId,
-          botName: bot.initialName,
+          botName: bot.name,
           results,
           runs: lookups.flatMap((lookup) =>
             lookup.state === "not-admitted" ? [] : [lookup.run],
@@ -2005,14 +2006,14 @@ export class VoiceAssistant extends VoiceAgentBase<
         const admission = await this.ledger().admitDelegation({
           turnId,
           botId,
-          botName: bot.initialName,
+          botName: bot.name,
           text: message,
           at: this.now(),
         });
         if (admission.status === "refused")
           return `Refused: ${admission.reason}`;
         if (admission.status === "duplicate") {
-          return `${bot.initialName} was already asked this; its answer will be read out when it settles.`;
+          return `${bot.name} was already asked this; its answer will be read out when it settles.`;
         }
         this.dispatchDelegation(userId, admission.delegation);
         await this.scheduleDelegationCheck(admission.delegation.runId, 0);
@@ -2020,14 +2021,14 @@ export class VoiceAssistant extends VoiceAgentBase<
         // what it is already doing, and saying otherwise would be a claim the
         // person could watch turn out to be false.
         return busy
-          ? `Asked ${bot.initialName}. It is busy with something else right now, so this is queued behind it; you will hear the answer when it gets to it.`
-          : `Asked ${bot.initialName}. It is working on it in its own conversation; you will hear the answer when it settles.`;
+          ? `Asked ${bot.name}. It is busy with something else right now, so this is queued behind it; you will hear the answer when it gets to it.`
+          : `Asked ${bot.name}. It is working on it in its own conversation; you will hear the answer when it settles.`;
       },
       cancelBot: async (botId) => {
         const bot = await this.ownedBot(userId, botId);
         const runs = await this.recentRuns(userId, botId);
         const running = runs.find((run) => run.status === "running");
-        if (!running) return `${bot.initialName} is not running anything.`;
+        if (!running) return `${bot.name} is not running anything.`;
         const receipt = await this.botDoor(userId, botId).stopRun({
           schemaVersion: 1,
           action: "stop",
@@ -2035,7 +2036,7 @@ export class VoiceAssistant extends VoiceAgentBase<
           runId: running.runId,
         });
         void receipt;
-        return `Asked ${bot.initialName} to stop.`;
+        return `Asked ${bot.name} to stop.`;
       },
       recallProject: async (projectId) => {
         if (!isMemoryProjectIdV1(projectId)) return "That is not a Project id.";
@@ -2643,8 +2644,13 @@ export class VoiceAssistant extends VoiceAgentBase<
       lookupRun(input: unknown): Promise<unknown>;
       listRuns(input: unknown): Promise<unknown>;
       stopRun(input: unknown): Promise<unknown>;
+      readConfiguration(input: unknown): Promise<unknown>;
     };
     return {
+      readConfiguration: async () =>
+        rpcJsonSnapshotV1(
+          await rpc.readConfiguration({ schemaVersion: 1, userId, botId }),
+        ) as BotSettingsViewV1,
       runVoice: (command: {
         runId: string;
         sessionId: string;
@@ -2688,41 +2694,65 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   /**
-   * Every Bot with what it is doing now. The activity look-ups go to each
-   * Bot's own object, so they go out together: a person with a dozen Bots
-   * waits one round trip, not twelve, before the first turn can start.
+   * What a Bot is called *now*. The registration seed in the User object is
+   * immutable, so a Bot the person has since renamed or re-described would be
+   * announced under a name they no longer use. Its own object owns the
+   * editable profile, and that is what the assistant speaks and prompts with.
+   * An unreadable profile is a failed read, never permission to revive stale
+   * identity from the seed.
+   */
+  private async botIdentity(
+    userId: string,
+    botId: string,
+  ): Promise<{ botId: string; name: string; description?: string }> {
+    const { profile } = await this.botDoor(userId, botId).readConfiguration();
+    return {
+      botId,
+      name: profile.name,
+      ...(profile.description ? { description: profile.description } : {}),
+    };
+  }
+
+  /**
+   * Every Bot, as it is named today, with what it is doing now. The identity
+   * and activity look-ups go to each Bot's own object, so they go out
+   * together: a person with a dozen Bots waits one round trip, not twelve,
+   * before the first turn can start.
    */
   protected async listBots(userId: string): Promise<VoiceBotSummaryV1[]> {
     const directory = await this.directory(userId);
     return Promise.all(
       directory.bots.map(async (bot): Promise<VoiceBotSummaryV1> => {
-        let activity: VoiceBotSummaryV1["activity"];
-        try {
-          const runs = await this.recentRuns(userId, bot.botId);
-          activity = runs.some((run) => run.status === "running")
-            ? "working"
-            : "idle";
-        } catch {
-          activity = undefined;
-        }
+        const [identity, activity] = await Promise.all([
+          this.botIdentity(userId, bot.botId),
+          (async (): Promise<VoiceBotSummaryV1["activity"]> => {
+            try {
+              const runs = await this.recentRuns(userId, bot.botId);
+              return runs.some((run) => run.status === "running")
+                ? "working"
+                : "idle";
+            } catch {
+              return undefined;
+            }
+          })(),
+        ]);
         return {
-          botId: bot.botId,
-          name: bot.initialName,
-          ...(bot.initialDescription
-            ? { description: bot.initialDescription }
-            : {}),
+          ...identity,
           ...(activity ? { activity } : {}),
         };
       }),
     );
   }
 
-  /** The account's directory is the authority on membership: one round trip. */
+  /**
+   * The account's directory is the authority on membership; the Bot's own
+   * object is the authority on what it is called.
+   */
   private async ownedBot(userId: string, botId: string) {
     const directory = await this.directory(userId);
     const bot = directory.bots.find((entry) => entry.botId === botId);
     if (!bot) throw new Error("that Bot is not in this account");
-    return bot;
+    return this.botIdentity(userId, botId);
   }
 
   private async recentRuns(
