@@ -24,6 +24,7 @@ import 'client/identity.dart';
 import 'client/plain_store.dart';
 import 'client/transport.dart';
 import 'connections/document.dart' show connectReturns, isConnectReturnV1;
+import 'flock/avatar.dart' show riveRuntimeReady;
 import 'orientation.dart';
 import 'shell/app_shell.dart';
 import 'theme/frock_theme.dart';
@@ -34,14 +35,19 @@ import 'protocol/client_wire.generated.dart' as wire;
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
   // Rive's animated characters need their runtime, but the app is not their
-  // waiting room. On the web the loader appends a `<script>` and awaits its
-  // `load` event, which a Content-Security-Policy refusal or a 404 never
-  // fires — so without a deadline `init()` never settles and nobody ever sees
-  // a frame. Past it the characters fall back to their stills, which is a far
-  // smaller loss than a blank window.
-  await RiveNative.init().timeout(
-    const Duration(seconds: 10),
-    onTimeout: () => false,
+  // waiting room: the first frame does not wait for it. Every avatar begins
+  // as its checked-in still and swaps to the artboard when the runtime lands.
+  // On the web the loader appends a `<script>` and awaits its `load` event,
+  // which a Content-Security-Policy refusal or a 404 never fires — so the
+  // deadline is what settles it then, and the stills simply stay. The outcome
+  // is recorded rather than dropped: a renderer asked for while the runtime
+  // is absent throws from inside `build`, and a thrown avatar is an empty
+  // slot with an error where the still should be.
+  unawaited(
+    RiveNative.init()
+        .timeout(const Duration(seconds: 10), onTimeout: () => false)
+        .catchError((Object _) => false)
+        .then((ready) => riveRuntimeReady.value = ready),
   );
   await setMobileOrientation();
   // The browser draws to a canvas, so the accessibility tree is the only DOM

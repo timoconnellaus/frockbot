@@ -529,8 +529,11 @@ export async function openApplication(
   userId: string,
 ): Promise<void> {
   await page.goto(`/?as_user=${userId}`);
+  // `.first()`: at the phone tier the toggle and the sidebar it opens can both
+  // be on screen for a frame, and `.or()` with two matches is a strict-mode
+  // violation rather than a pass.
   await expect(
-    sem(page, "shell-sidebar").or(sem(page, "sidebar-toggle")),
+    sem(page, "shell-sidebar").or(sem(page, "sidebar-toggle")).first(),
   ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
 }
 

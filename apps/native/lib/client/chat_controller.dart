@@ -201,7 +201,10 @@ class ChatController extends ChangeNotifier {
     if (value['version'] != 1 || value['draft'] is! String) {
       throw const FormatException('Invalid draft');
     }
-    draft = value['draft'] as String;
+    // Words typed while the restore was still in flight are newer than
+    // anything the store holds; the mirror in the composer would otherwise
+    // replace them with the stored draft the moment this lands.
+    if (draft.isEmpty) draft = value['draft'] as String;
     pending = [
       for (final entry in (value['pending'] as List? ?? const []))
         ?PendingSend.decode(entry),

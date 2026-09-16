@@ -96,7 +96,7 @@ test("Bot settings follows the GrokBot order and keeps extras under Advanced", a
 
   // The Flock owns what a Bot looks like, so the panel offers the gesture and
   // nothing else: no upload, no crop, no file picker.
-  await expect(sem(page, "bot-avatar")).toContainText("Change colour");
+  await expect(sem(page, "bot-avatar")).toContainText("Change character");
   await expect(panel.getByText(/upload/iu)).toHaveCount(0);
 
   const name = field(page, "bot-name");

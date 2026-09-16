@@ -30,7 +30,8 @@ class FrockEmptyState extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (icon == null)
-              const CharacterAvatar(size: 64)
+              // At rest: an empty state can be on screen indefinitely.
+              const CharacterAvatar(size: 64, motion: CharacterMotion.quiet)
             else
               Icon(
                 icon,
