@@ -715,12 +715,7 @@ describe("batch ordering", () => {
     expect(run.report).toMatchObject({
       ran: shots,
       failed: 0,
-      attachments: {
-        produced: shots,
-        carried: TOOL_ATTACHMENT_LIMIT_V1,
-        dropped: shots - TOOL_ATTACHMENT_LIMIT_V1,
-        note: expect.stringContaining(`${TOOL_ATTACHMENT_LIMIT_V1}`),
-      },
+      attachments: `${TOOL_ATTACHMENT_LIMIT_V1} of ${shots} attachments carried, in declared call order; ${shots - TOOL_ATTACHMENT_LIMIT_V1} dropped.`,
     });
     // The aggregate the loop journalled is one the durable decoder accepts.
     expect(() =>

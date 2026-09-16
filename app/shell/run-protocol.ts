@@ -1,6 +1,7 @@
 import { sentTextV1 } from "./sent-text.js";
 import {
   APPLET_ID_V1,
+  BATCH_TOOL_NAME,
   decodeSendToUserPayloadV1,
   decodeSkillRefsV1,
   type SendToUserPayloadV1,
@@ -739,17 +740,43 @@ function decodeDynamicToolCallInput(
   };
 }
 
+/**
+ * The `batch` occurrences whose own call and result the transcript omits.
+ *
+ * A batch that dispatched is drawn as the calls it made: each sub-call
+ * journals its own `tool/call` and `tool/result`, so those rows already say
+ * everything the envelope would, and drawing the envelope too shows the same
+ * work — and the same attachments — a second time. A batch refused before
+ * dispatch has no sub-call rows to stand in for it, so its own refusal is the
+ * only record that anything was attempted, and it stays.
+ */
+function expandedBatchOccurrencesV1(
+  events: readonly SessionEvent[],
+): ReadonlySet<string> {
+  const batches = new Set<string>();
+  const dispatched = new Set<string>();
+  for (const event of events) {
+    if (event.type !== "tool/call") continue;
+    if (event.name === BATCH_TOOL_NAME) batches.add(event.occurrenceId);
+    const dot = event.occurrenceId.lastIndexOf(".");
+    if (dot > 0) dispatched.add(event.occurrenceId.slice(0, dot));
+  }
+  return new Set([...batches].filter((id) => dispatched.has(id)));
+}
+
 function projectionUnits(
   events: readonly SessionEvent[],
   status: ClientRunStatusV1,
 ): ProjectionUnitV1[] {
   const units: ProjectionUnitV1[] = [];
   const byOccurrence = new Map<string, ProjectionUnitV1>();
+  const expanded = expandedBatchOccurrencesV1(events);
   let callCount = 0;
   let sendCount = 0;
   let projectedIncompleteSync = false;
   for (const event of events) {
     if (event.type === "tool/call") {
+      if (expanded.has(event.occurrenceId)) continue;
       if (byOccurrence.has(event.occurrenceId)) {
         throw new Error(
           `tool occurrence "${event.occurrenceId}" has duplicate intent`,
@@ -772,6 +799,7 @@ function projectionUnits(
       units.push(unit);
       byOccurrence.set(event.occurrenceId, unit);
     } else if (event.type === "tool/result") {
+      if (expanded.has(event.occurrenceId)) continue;
       const unit = byOccurrence.get(event.occurrenceId);
       if (!unit) {
         throw new Error(

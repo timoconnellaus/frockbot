@@ -2357,3 +2357,135 @@ describe("message identity across retry pages", () => {
     ).toThrow(/itself/);
   });
 });
+
+describe("a batch in the run projection", () => {
+  function batchCall(occurrenceId: string, seq: number): SessionEvent {
+    return event({
+      type: "tool/call",
+      seq,
+      timestamp,
+      turn: 1,
+      step: 1,
+      occurrenceId,
+      name: "batch",
+      input: {
+        calls: [
+          { tool: "send_to_user", arguments: { text: "one" } },
+          { tool: "send_to_user", arguments: { text: "two" } },
+        ],
+      },
+    });
+  }
+
+  test("a dispatched batch draws its sub-calls and not its envelope", () => {
+    const projected = projectClientRunV1(
+      storedRun([
+        batchCall("tool:1:1:0", 0),
+        event({
+          type: "tool/call",
+          seq: 1,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.0",
+          name: "send_to_user",
+          input: {},
+        }),
+        event({
+          type: "tool/result",
+          seq: 2,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.0",
+          name: "send_to_user",
+          content: "sent one",
+          isError: false,
+          status: "completed",
+        }),
+        event({
+          type: "tool/call",
+          seq: 3,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.1",
+          name: "send_to_user",
+          input: {},
+        }),
+        event({
+          type: "tool/result",
+          seq: 4,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.1",
+          name: "send_to_user",
+          content: "sent two",
+          isError: false,
+          status: "completed",
+        }),
+        event({
+          type: "tool/result",
+          seq: 5,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "batch",
+          content: JSON.stringify({ ran: 2, failed: 0 }),
+          isError: false,
+          status: "completed",
+        }),
+      ]),
+    );
+
+    // Indistinguishable from the same two calls issued across separate steps.
+    expect(projected.events).toEqual([
+      { type: "tool/call", call: { id: "tool-1", name: "send_to_user" } },
+      {
+        type: "tool/result",
+        callId: "tool-1",
+        content: "sent one",
+        isError: false,
+      },
+      { type: "tool/call", call: { id: "tool-2", name: "send_to_user" } },
+      {
+        type: "tool/result",
+        callId: "tool-2",
+        content: "sent two",
+        isError: false,
+      },
+    ]);
+  });
+
+  test("a batch refused before dispatch still draws its refusal", () => {
+    const projected = projectClientRunV1(
+      storedRun([
+        batchCall("tool:1:1:0", 0),
+        event({
+          type: "tool/result",
+          seq: 1,
+          timestamp,
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "batch",
+          content: "batch was refused: batch requires a non-empty calls array",
+          isError: true,
+          status: "completed",
+        }),
+      ]),
+    );
+
+    expect(projected.events).toEqual([
+      { type: "tool/call", call: { id: "tool-1", name: "batch" } },
+      {
+        type: "tool/result",
+        callId: "tool-1",
+        content: "batch was refused: batch requires a non-empty calls array",
+        isError: true,
+      },
+    ]);
+  });
+});

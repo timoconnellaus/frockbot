@@ -299,12 +299,7 @@ async function runBatchV1(
       failed,
       ...(produced.length > attachments.length
         ? {
-            attachments: {
-              produced: produced.length,
-              carried: attachments.length,
-              dropped: produced.length - attachments.length,
-              note: `One tool result may carry at most ${TOOL_ATTACHMENT_LIMIT_V1} attachments, so only the first ${attachments.length} in declared call order are attached; the rest were dropped. Each result's content still names where its output lives. Ask for at most ${TOOL_ATTACHMENT_LIMIT_V1} attachment-producing calls per batch.`,
-            },
+            attachments: `${attachments.length} of ${produced.length} attachments carried, in declared call order; ${produced.length - attachments.length} dropped.`,
           }
         : {}),
       results: results.map(({ index, tool, isError, content }) => ({
