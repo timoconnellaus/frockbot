@@ -368,11 +368,13 @@ export function renderVoiceDelegationReadOutV1(
   result: VoiceDelegationResultV1,
   options?: { placed?: boolean },
 ): string {
-  const about = options?.placed ? "" : ` about ${clip(result.question, 120)}`;
+  const question = options?.placed ? "" : clip(result.question, 120);
   if (result.answer) {
+    const about = question ? ` about ${question}` : "";
     return `${result.botName} answered${about}: ${clip(result.answer, 600)}`;
   }
-  return `${result.botName} could not finish${about}: ${clip(result.failure ?? "it stopped", 200)}.`;
+  const what = question ? ` ${question}` : "";
+  return `${result.botName} could not finish${what}: ${clip(result.failure ?? "it stopped", 200)}.`;
 }
 
 /**

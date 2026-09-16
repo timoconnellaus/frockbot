@@ -793,6 +793,9 @@ describe("the system prompt", () => {
         { placed: true },
       ),
     ).toBe("Bob could not finish: it stopped.");
+    expect(
+      renderVoiceDelegationReadOutV1({ ...result, failure: "it stopped" }),
+    ).toBe("Bob could not finish the weather today: it stopped.");
   });
 
   test("a composition the model does not produce is nothing, not a read-out", async () => {
