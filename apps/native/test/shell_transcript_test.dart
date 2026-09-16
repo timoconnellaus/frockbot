@@ -84,7 +84,10 @@ void main() {
           id: 'run-old:send:0',
           runId: 'run-old',
           role: LineRole.assistant,
-          text: 'Old',
+          // Tall enough to fill the viewport on its own, so the far end of the
+          // thread is genuinely a screen with no newest message on it rather
+          // than one that depends on a line's rendered height.
+          text: List.filled(400, 'Old').join(' '),
           status: LineStatus.completed,
         ),
         TranscriptLine(
