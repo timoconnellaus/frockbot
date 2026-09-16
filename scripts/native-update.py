@@ -43,6 +43,10 @@ SHOREBIRD_YAML = NATIVE / "shorebird.yaml"
 APK_OUTPUT = NATIVE / "build/app/outputs/flutter-apk/app-release.apk"
 EMBEDDED_YAML = "assets/flutter_assets/shorebird.yaml"
 VERSION_FLOOR_ENV = "FROCKBOT_ANDROID_VERSION_FLOOR"
+# Gradle builds the production identity only for a build that asks for it here. A stock
+# `flutter build apk` gets the isolated `.dev` app, so it can never replace the phone's
+# patchable install with one the updater cannot reach.
+RELEASE_IDENTITY_ENV = "FROCKBOT_ANDROID_RELEASE_IDENTITY"
 FORBIDDEN_PATCH_FLAGS = ("--allow-native-diffs", "--allow-asset-diffs")
 UNPATCHABLE_MESSAGES = ("Your app contains native changes", "Your app contains asset changes")
 FULL_RELEASE_REQUIRED_STATUS = 3
@@ -366,7 +370,7 @@ def release(floor=0, build_number=None):
             "intentCreatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **current_source,
         }
         write_atomic(pending, json.dumps(intent, indent=2) + "\n")
-    env = {**os.environ, VERSION_FLOOR_ENV: str(floor)}
+    env = {**os.environ, VERSION_FLOOR_ENV: str(floor), RELEASE_IDENTITY_ENV: "true"}
     subprocess.run(args, cwd=NATIVE, env=env, check=True)
     inspect_release(APK_OUTPUT, der)
     metadata = inspect_apk(APK_OUTPUT)
@@ -422,7 +426,7 @@ def patch(track="staging", baseline_source="local", result=None):
     if any(flag in arg for arg in args for flag in FORBIDDEN_PATCH_FLAGS):
         raise RuntimeError("A patch never overrides native or asset diffs; ship a full release instead.")
     # The release was built one above its floor; the same floor makes Gradle emit the same versionCode.
-    env = {**os.environ, VERSION_FLOOR_ENV: str(base["buildNumber"] - 1)}
+    env = {**os.environ, VERSION_FLOOR_ENV: str(base["buildNumber"] - 1), RELEASE_IDENTITY_ENV: "true"}
     write_atomic(pending, json.dumps({"releaseVersion": base["releaseVersion"], "track": track, **current_source}, indent=2) + "\n")
     status, output = stream(args, cwd=NATIVE, env=env)
     if status != 0:

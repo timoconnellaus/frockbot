@@ -27,6 +27,8 @@ This speaker changes Android native code and removes a native plugin dependency.
 
 Use `scripts/native-acceptance.sh inventory` to record the installed version and certificate, then follow the Shorebird release procedure below. Phone upgrades use `adb install -r` with the exact published APK; never uninstall or clear app data. The acceptance runner’s stock-Flutter build is for qualification, not routine phone delivery.
 
+Only a build that asks for it carries the production identity: Gradle reads `FROCKBOT_ANDROID_RELEASE_IDENTITY=true`, which `scripts/native-update.py`, `scripts/native-acceptance.py install` and the emulator stack in `scripts/native-dev.ts` set. Every other build — a hand-run `flutter build apk` included — is `com.frockbot.mobile.dev`, labelled `FrockBot (Dev)`, and installs beside the phone's real app instead of replacing it. That is the whole point: a stock build carries no Shorebird engine, so one installed over the phone silently ends that install's patch channel, and only a fresh release restores it. `native-acceptance.sh install` does replace it on purpose and now requires `--replace-production` to say so.
+
 ## Shorebird releases and patches
 
 `scripts/native-update.py` ships the phone app. A **release** is a full Shorebird APK build; a **patch** is a signed Dart code push against that release. Native code, assets, native plugin dependencies, the engine, the Shorebird `app_id` or the patch key all need a release. Pure-Dart dependency changes may be patched if Shorebird accepts the resulting diff. Shorebird detects native and asset differences and the script never passes `--allow-native-diffs` or `--allow-asset-diffs`.
@@ -46,7 +48,7 @@ baseline. This repository still has no iOS Runner, so an eventual iOS target
 must configure `RestartAppPlugin.configureEngineRestart` in its AppDelegate
 and qualify the new-engine path before claiming iOS delivery.
 
-The Shorebird CLI (1.6.120, logged in to Tim's account) comes from `NATIVE_SHOREBIRD` or `PATH`. The script fails rather than falling back to stock Flutter: a stock build carries no patch key and can never be patched. Shorebird builds with its own Flutter `3.47.0`; the stock development pin above is unchanged. The Android SDK needs command-line tools with `apkanalyzer` even for an APK artifact, plus build-tools: the script inspects the built APK with the newest `aapt`/`apksigner` under `ANDROID_HOME`, and names the missing tool rather than guessing when there are none. Gradle takes the version floor from `FROCKBOT_ANDROID_VERSION_FLOOR`, which the script sets for every build.
+The Shorebird CLI (1.6.120, logged in to Tim's account) comes from `NATIVE_SHOREBIRD` or `PATH`. The script fails rather than falling back to stock Flutter: a stock build carries no patch key and can never be patched. Shorebird builds with its own Flutter `3.47.0`; the stock development pin above is unchanged. The Android SDK needs command-line tools with `apkanalyzer` even for an APK artifact, plus build-tools: the script inspects the built APK with the newest `aapt`/`apksigner` under `ANDROID_HOME`, and names the missing tool rather than guessing when there are none. Gradle takes the version floor from `FROCKBOT_ANDROID_VERSION_FLOOR` and the production application ID from `FROCKBOT_ANDROID_RELEASE_IDENTITY`, both of which the script sets for every release and patch build.
 
 Keys: `apps/native/shorebird-public-key.pem` is baked into every release. The matching RSA private key lives at ignored `.native-build/updates/shorebird-private.pem` or wherever `NATIVE_SHOREBIRD_PRIVATE_KEY` points; it is never committed. The APK signer is the existing debug keystore the installed app already trusts. Before uploading a patch the script confirms with `openssl` that the two keys are a pair.
 
@@ -62,7 +64,7 @@ bun run native:release --build-number <code>     # retry one uncertain upload at
 
 This runs `shorebird release android --flutter-version=3.47.0 --artifact=apk --target-platform=android-arm64 --build-name=<pubspec version> --build-number=<code> --public-key-path=apps/native/shorebird-public-key.pem`. The code is the larger of the epoch and one above the published/known installed floor, so it always advances. The intent records the release identity before upload. A failed run keeps it and retries that code. If the APK was published but saving `baseline.json` failed, the next run verifies the published APK and metadata against the intent and restores the baseline without another upload. A mismatch stops for reconciliation and preserves the intent. Only after Shorebird’s release list confirms an unresolved upload never reached the service should `pending-release.json` be deleted. The built APK must carry the normal package, the existing signer, the production `app_id` and this repository's public key inside `assets/flutter_assets/shorebird.yaml`; otherwise nothing is published. Publication and the baseline follow.
 
-Install that exact release once on the phone with `adb install -r .native-build/updates/<file>` (same signer, login and history preserved) or from the download link. That first install is what enables patching; the stock `native-acceptance.sh install` build carries no patch key and does not count.
+Install that exact release once on the phone with `adb install -r .native-build/updates/<file>` (same signer, login and history preserved) or from the download link. That first install is what enables patching; the stock `native-acceptance.sh install --replace-production` build carries no patch key, does not count, and ends patching until the next release is installed.
 
 Patch, after `flutter analyze` and `flutter test` pass on the change:
 
@@ -163,7 +165,7 @@ Physical cookie/token/bridge/network isolation, real Applet publication and pers
 
 ```sh
 scripts/native-acceptance.sh inventory
-scripts/native-acceptance.sh install
+scripts/native-acceptance.sh install --replace-production
 scripts/native-acceptance.sh flow --bot-name 'Fixture Bot' --applet-name 'Fixture Counter'
 scripts/native-acceptance.sh measure
 ```
@@ -173,5 +175,7 @@ Google's system-browser consent is a supervised User step. The runner does not e
 `--dart-define=FROCKBOT_APP_VERSION=<name>+<code>` is what the foot of the Profile page shows as the running version, with the booted Shorebird patch number beside it on Android. The release, patch, macOS and web builds all pass it from `pubspec.yaml`; a plain `flutter run` carries none and shows "Development build".
 
 `--dart-define=FROCKBOT_ORIGIN=<origin>` names the deployment this build talks to. The client carries no host of its own: `scripts/native-update.py`, `scripts/native-desktop-update.py`, `scripts/native-acceptance.py` and `release.yml`'s macOS build all read it from `deployments/hosted.json`, so a release and the patches that follow it cannot disagree about which server they reach ([ADR 0028](../../docs/adr/0028-open-deployment.md)). Android's App Link host and the notification tap target are the same value, read by `android/app/build.gradle.kts`. A build that passes neither this nor `FROCKBOT_LOCAL_DEV=true` claims no App Link and refuses its first request rather than guessing an origin; the web build needs none, since the browser serves it from the origin it talks to.
+
+The environment variable `FROCKBOT_ANDROID_RELEASE_IDENTITY=true`, not a define, is what makes an Android build the shipped `com.frockbot.mobile` app with its production Firebase registration; without it the build is the isolated `.dev` app, including a build you make against your own deployment (see [Android upgrade](#android-upgrade)).
 
 `--dart-define=NATIVE_ACCEPTANCE=true` enables bounded frame/input telemetry containing no text or identifiers. Normal builds create no telemetry timer or output. `appInputToFrameMs` excludes hardware/compositor latency. The advisory CI workflow runs analysis/tests only when the exact SDK is already installed, and visibly reports a skip otherwise.

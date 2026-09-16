@@ -264,6 +264,7 @@ class ReleaseTest(ShorebirdHarness):
             f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}"])
         self.assertEqual(kwargs["cwd"], updates.NATIVE)
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], "0")
+        self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_RELEASE_IDENTITY"], "true")
         self.assertTrue(kwargs["check"])
         self.assertEqual(record["releaseVersion"], f"{BUILD_NAME}+{NOW}")
         self.assertEqual(record["appId"], APP_ID)
@@ -302,6 +303,7 @@ class ReleaseTest(ShorebirdHarness):
         (args, kwargs), = self.shorebird()
         self.assertIn(f"--build-number={NOW + 6}", args)
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], str(NOW + 5))
+        self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_RELEASE_IDENTITY"], "true")
         self.assertEqual(self.baseline()["versionFloor"], NOW + 5)
 
     def test_failed_release_keeps_its_intent_and_retries_the_same_version(self):
@@ -525,6 +527,7 @@ class PatchTest(ShorebirdHarness):
             f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}"])
         self.assertEqual(kwargs["cwd"], updates.NATIVE)
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], str(NOW - 1))
+        self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_RELEASE_IDENTITY"], "true")
         self.assertEqual(record["track"], "staging")
         self.assertEqual(record["number"], 2)
         self.assertEqual(record["gitHead"], self.head)
@@ -655,6 +658,7 @@ class PipelinePatchTest(ShorebirdHarness):
             f"--public-key-path={self.public}", "--", "--target-platform=android-arm64", ORIGIN_DEFINE,
             f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW + 9}"])
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], str(NOW + 8))
+        self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_RELEASE_IDENTITY"], "true")
         self.assertEqual(record["number"], 2)
         self.assertFalse((self.state / "baseline.json").exists())
         self.assertFalse((self.state / "pending-patch.json").exists())

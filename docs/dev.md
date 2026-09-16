@@ -53,7 +53,7 @@ same-origin and needs none.
 
 ## Iterating
 
-- Hot reload: `adb reverse tcp:8797 tcp:8797 && cd apps/native && flutter run -d <emulator> --dart-define=FROCKBOT_ORIGIN=http://127.0.0.1:8797 --dart-define=FROCKBOT_DEV_AUTH=true`
+- Hot reload: `adb reverse tcp:8797 tcp:8797 && cd apps/native && FROCKBOT_ANDROID_RELEASE_IDENTITY=true flutter run -d <emulator> --dart-define=FROCKBOT_ORIGIN=http://127.0.0.1:8797 --dart-define=FROCKBOT_DEV_AUTH=true` — the emulator serial keeps that opt-in off any phone, and it is what makes hot reload replace the app the stack installed rather than a second `.dev` one
 - Worker code reloads on save under `wrangler dev`; `bun scripts/native-dev.ts serve` restarts the Workers without rebuilding, `app` rebuilds and reinstalls the app alone.
 - The emulator loses its `adb reverse` on reboot; `up`, `app` and `smoke` all reapply it.
 - Logs: `.native-dev/logs/` (or `$CLAUDE_JOB_DIR/tmp/native-dev/` in a job).

@@ -3,8 +3,11 @@
 `FrockBot (Dev)` is the native renderer installed as `com.frockbot.mobile.dev`.
 It has separate Android storage and does not replace `com.frockbot.mobile`.
 The single compile-time `FROCKBOT_LOCAL_DEV=true` switch selects that identity,
-label, local transport and automatic `development` identity. Normal builds retain
-production authentication, HTTPS and the production app identity.
+label, local transport and automatic `development` identity. The production app
+identity is the opt-in one: Gradle emits `com.frockbot.mobile` only when the build
+sets `FROCKBOT_ANDROID_RELEASE_IDENTITY=true`, which the release, patch, acceptance
+and emulator scripts do. Any other build lands on the `.dev` package, so nothing
+hand-built can replace the phone's patchable app.
 
 From a checkout with locked dependencies installed:
 
