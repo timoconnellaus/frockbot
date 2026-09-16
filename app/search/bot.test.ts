@@ -202,7 +202,6 @@ describe("the settled-run projection", () => {
           {
             type: "message/to-bot",
             callId: "tool-1",
-            botId: "xero-books",
             text: "What is overdue?",
           },
           {
