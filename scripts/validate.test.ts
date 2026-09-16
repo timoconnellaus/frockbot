@@ -1,10 +1,17 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   categories,
   ignoredWorkingPath,
+  inputFingerprint,
   prePushCategories,
   pushCommits,
   requireLinearBranch,
@@ -28,6 +35,13 @@ function fixture() {
   git(root, "config", "core.hooksPath", "/dev/null");
   writeFileSync(join(root, ".gitignore"), ".local-validation/\n");
   writeFileSync(join(root, "source.ts"), "export {};\n");
+  // The shapes the input fingerprints discriminate between: documentation no
+  // category reads, and the Flutter client only some of them do.
+  writeFileSync(join(root, "README.md"), "# fixture\n");
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "docs", "plan.md"), "plan\n");
+  mkdirSync(join(root, "apps", "native"), { recursive: true });
+  writeFileSync(join(root, "apps", "native", "main.dart"), "void main() {}\n");
   git(root, "add", ".");
   git(root, "commit", "-qm", "fixture");
   return root;
@@ -101,28 +115,72 @@ test("a category runs under the shell's environment, not git's hook environment"
   );
 });
 
-test("success is reused per category and commit, while forced failure removes it", async () => {
+/** How many times the counting probe has actually run in `root`. */
+function probeRuns(root: string): string {
+  return readFileSync(join(root, ".local-validation/count"), "utf8");
+}
+const countingProbe = [
+  process.execPath,
+  "-e",
+  'const p=".local-validation/count"; await Bun.write(p,String(Number(await Bun.file(p).exists()?await Bun.file(p).text():0)+1))',
+];
+
+test("success is reused while a category's inputs are unchanged, and a forced failure removes it", async () => {
   const root = fixture();
-  categories.probe = [
-    [
-      process.execPath,
-      "-e",
-      'const p=".local-validation/count"; await Bun.write(p,String(Number(await Bun.file(p).exists()?await Bun.file(p).text():0)+1))',
-    ],
-  ];
+  categories.probe = [countingProbe];
   await validate(root, ["probe"]);
   await validate(root, ["probe"]);
-  expect(readFileSync(join(root, ".local-validation/count"), "utf8")).toBe("1");
+  expect(probeRuns(root)).toBe("1");
+  // A new commit that changes nothing the category reads is not a reason to
+  // re-run it: the receipt is keyed on content, not on the commit carrying it.
   git(root, "commit", "--allow-empty", "-qm", "new commit");
   await validate(root, ["probe"]);
-  expect(readFileSync(join(root, ".local-validation/count"), "utf8")).toBe("2");
+  expect(probeRuns(root)).toBe("1");
+  // Changed source is.
+  writeFileSync(join(root, "source.ts"), "export const changed = 1;\n");
+  git(root, "add", ".");
+  git(root, "commit", "-qm", "change source");
+  await validate(root, ["probe"]);
+  expect(probeRuns(root)).toBe("2");
+  // `--force` disregards a receipt that still stands.
+  await validate(root, ["probe"], true);
+  expect(probeRuns(root)).toBe("3");
+  // A failure is never recorded, so a second run re-earns it rather than
+  // reading a receipt the first run had no right to write.
   categories.probe = [[process.execPath, "-e", "process.exit(1)"]];
-  await expect(validate(root, ["probe"], true)).rejects.toThrow("failed");
-  expect(
-    await Bun.file(
-      join(root, ".local-validation", snapshot(root), "probe.json"),
-    ).exists(),
-  ).toBe(false);
+  await expect(validate(root, ["probe"])).rejects.toThrow("failed");
+  await expect(validate(root, ["probe"])).rejects.toThrow("failed");
+});
+
+// Not named for what it is about: the hook test above selects by
+// `-t "^documentation"` and counts the tests that match.
+test("no category treats prose as an input", async () => {
+  const root = fixture();
+  categories.probe = [countingProbe];
+  await validate(root, ["probe"]);
+  expect(probeRuns(root)).toBe("1");
+  writeFileSync(join(root, "README.md"), "# changed\n");
+  writeFileSync(join(root, "docs", "plan.md"), "changed\n");
+  git(root, "add", ".");
+  git(root, "commit", "-qm", "documentation only");
+  await validate(root, ["probe"]);
+  expect(probeRuns(root)).toBe("1");
+});
+
+test("the workerd suite does not read the Flutter client, and the rest do", () => {
+  const root = fixture();
+  const before = {
+    runtime: inputFingerprint(root, "runtime"),
+    unit: inputFingerprint(root, "unit"),
+  };
+  writeFileSync(
+    join(root, "apps", "native", "main.dart"),
+    "void main() { print('changed'); }\n",
+  );
+  git(root, "add", ".");
+  git(root, "commit", "-qm", "client only");
+  expect(inputFingerprint(root, "runtime")).toBe(before.runtime);
+  expect(inputFingerprint(root, "unit")).not.toBe(before.unit);
 });
 
 test("commands that dirty source never earn a receipt", async () => {

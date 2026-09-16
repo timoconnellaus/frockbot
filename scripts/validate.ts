@@ -2,9 +2,12 @@ import { createHash } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
+  utimesSync,
 } from "node:fs";
 import { resolve, join } from "node:path";
 
@@ -22,6 +25,14 @@ export const categories: Record<string, string[][]> = {
   integration: [
     ["bun", "run", "--filter", "@frockbot/cloudflare", "test:integration"],
   ],
+  // Worker count and retries belong to `e2e/playwright.config.ts`, which
+  // chooses both per environment and explains each: files share nothing a run
+  // can see, so locally the parallelism is between workers rather than between
+  // CI runners, and locally "a failure should stay failed". Overriding them to
+  // `--workers=1 --retries=2` here contradicted both and made the slowest
+  // category run on one core while hiding the flake it then retried.
+  // `--forbid-only` stays: the config only forbids `.only` under CI, and a
+  // push is the other place it must not leave the machine.
   e2e: [
     [
       "bun",
@@ -30,8 +41,6 @@ export const categories: Record<string, string[][]> = {
       "@frockbot/cloudflare",
       "test:e2e",
       "--forbid-only",
-      "--workers=1",
-      "--retries=2",
     ],
   ],
   build: [["bun", "run", "build"]],
@@ -45,6 +54,75 @@ export const categories: Record<string, string[][]> = {
  * it.
  */
 export const prePushCategories = ["format", "typecheck", "unit"];
+
+/**
+ * Git pathspecs naming what a category's result depends on. A receipt is keyed
+ * on the content at these paths, not on the commit that carried it, so
+ * amending a message, reordering commits, or rebasing onto a base that touched
+ * nothing a category reads all reuse the previous run.
+ *
+ * `DEFAULT_INPUTS` is everything `ignoredWorkingPath` does not ignore, and it
+ * is what a category gets when it names nothing here. That direction matters:
+ * a new category, or a new top-level directory, re-runs until someone proves
+ * it can be excluded, rather than being silently skipped.
+ */
+const DEFAULT_INPUTS = [
+  ".",
+  ":(exclude)docs/",
+  // Root-level Markdown only, matching `ignoredWorkingPath`. The two magic
+  // words share one set — `:(exclude):(glob)` is two pathspecs, and the second
+  // silently fails to exclude anything. `glob` stops `*` from crossing a
+  // slash, so a Package's `apps/x/skill.md` stays an input: Markdown outside
+  // `docs/` is code here.
+  ":(exclude,glob)*.md",
+];
+
+/**
+ * `runtime` is the one category narrower than the default, and only because
+ * two independent things say so: nothing under `apps/cloudflare`, `core`,
+ * `app` or `providers` imports these directories, and `main.yml` says of the
+ * same suite that it "never needs Flutter". The Flutter client reaches the
+ * other slow categories through the built artifact — `test:integration` reads
+ * `../native/lib` directly — so none of them may borrow this list.
+ */
+const CATEGORY_INPUTS: Record<string, string[]> = {
+  runtime: [
+    ...DEFAULT_INPUTS,
+    ":(exclude)apps/native/",
+    ":(exclude)apps/marketing/",
+    ":(exclude)apps/admin-portal/",
+  ],
+};
+
+/**
+ * Categories that build the deployable artifact, and so cannot run beside each
+ * other: `test:integration` and `build` both reach `artifact:build`, and the
+ * end-to-end web server builds the same tree. They write one
+ * `apps/cloudflare/dist`, so two of them at once race on its contents. They
+ * run in order, as a group, beside everything else.
+ */
+const SHARED_ARTIFACT = new Set(["integration", "e2e", "build"]);
+
+/** How long an unwanted receipt survives before the sweep takes it. */
+const RECEIPT_LIFETIME_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * The content of everything `name` reads, as one hash. `snapshot` has already
+ * proven the work tree matches `HEAD` everywhere that is not ignored, so the
+ * committed tree is the thing being validated.
+ */
+export function inputFingerprint(root: string, name: string): string {
+  const paths = CATEGORY_INPUTS[name] ?? DEFAULT_INPUTS;
+  // `ls-files -s`, not `ls-tree`: only the pathspec machinery behind
+  // `ls-files` understands `:(exclude)`, and `ls-tree` rejects it outright.
+  // It reads the index, which `snapshot` has just proven matches `HEAD`
+  // everywhere `ignoredWorkingPath` does not ignore — and those paths are
+  // excluded here anyway. Each line carries the blob's object id, so this
+  // hashes content rather than names.
+  return createHash("sha256")
+    .update(git(root, "ls-files", "-s", "--", ...paths))
+    .digest("hex");
+}
 
 export function ignoredWorkingPath(path: string): boolean {
   return (
@@ -96,8 +174,26 @@ export async function validate(
     if (!Object.hasOwn(categories, name))
       throw new Error(`Unknown category: ${name}`);
   const sha = snapshot(root);
-  const cache = join(root, ".local-validation", sha);
+  // Receipts are addressed by what they validated, not by the commit that
+  // carried it, so this directory is shared across commits rather than being
+  // one per `sha`. A receipt names its own key, so two commits with identical
+  // inputs land on the same file and the second reuses the first.
+  const cache = join(root, ".local-validation", "receipts");
   mkdirSync(cache, { recursive: true });
+  // Addressing a receipt by content means a new one appears for every distinct
+  // input state rather than replacing the last, so they would otherwise
+  // accumulate for the life of the checkout. A reused receipt is touched below,
+  // which makes this a least-recently-used sweep rather than an age limit: what
+  // goes is what no run has wanted in a fortnight.
+  for (const entry of readdirSync(cache)) {
+    const path = join(cache, entry);
+    try {
+      if (Date.now() - statSync(path).mtimeMs > RECEIPT_LIFETIME_MS)
+        rmSync(path, { force: true });
+    } catch {
+      /* A receipt another run is replacing right now is not ours to sweep. */
+    }
+  }
   // A per-checkout lock prevents one run from reusing a receipt while another
   // is replacing it. An interrupted process leaves an explicit recovery step.
   const lock = join(root, ".local-validation", "running");
@@ -108,38 +204,57 @@ export async function validate(
       `Validation already running. If interrupted, remove ${lock} and retry.`,
     );
   }
-  const registry = mkdtempSync(join(cache, "registry-"));
-  try {
-    for (const name of names) {
-      if (snapshot(root) !== sha)
-        throw new Error("Commit changed during validation");
-      const key = createHash("sha256")
-        .update(
-          JSON.stringify({
-            sha,
-            commands: categories[name],
-            bun: Bun.version,
-            node: Bun.spawnSync(["node", "--version"]).stdout.toString().trim(),
-            platform: process.platform,
-            arch: process.arch,
-            validator: readFileSync(import.meta.path, "utf8"),
-          }),
-        )
-        .digest("hex");
-      const receipt = join(cache, `${name}.json`);
-      let passed = false;
+  // Beside the receipts rather than among them: this is scratch for one run,
+  // and the receipt directory is now long-lived.
+  const registry = mkdtempSync(join(root, ".local-validation", "registry-"));
+  /**
+   * One category: decide whether its receipt still stands, run its commands if
+   * not, and record the result. Commands within a category are independent by
+   * construction — `runtime`'s three are separate packages with separate
+   * outputs, and every other category holds one — so they run together.
+   *
+   * Output is captured rather than inherited: several categories now run at
+   * once, and interleaving their streams onto one terminal makes a failure
+   * unreadable. Each command's output is printed as one block when it ends.
+   */
+  const runCategory = async (name: string): Promise<void> => {
+    if (snapshot(root) !== sha)
+      throw new Error("Commit changed during validation");
+    const key = createHash("sha256")
+      .update(
+        JSON.stringify({
+          inputs: inputFingerprint(root, name),
+          commands: categories[name],
+          bun: Bun.version,
+          node: Bun.spawnSync(["node", "--version"]).stdout.toString().trim(),
+          platform: process.platform,
+          arch: process.arch,
+          validator: readFileSync(import.meta.path, "utf8"),
+        }),
+      )
+      .digest("hex");
+    const receipt = join(cache, `${name}-${key}.json`);
+    let passed = false;
+    try {
+      passed = JSON.parse(readFileSync(receipt, "utf8")).key === key;
+    } catch {
+      /* Missing or damaged receipts require validation. */
+    }
+    if (passed && !force) {
+      // Mark it wanted, so the sweep measures disuse rather than age.
       try {
-        passed = JSON.parse(readFileSync(receipt, "utf8")).key === key;
+        const now = new Date();
+        utimesSync(receipt, now, now);
       } catch {
-        /* Missing or damaged receipts require validation. */
+        /* Losing a touch costs an early sweep and one re-run, nothing more. */
       }
-      if (passed && !force) {
-        console.log(`validate: ${name} cached (${sha.slice(0, 8)})`);
-        continue;
-      }
-      rmSync(receipt, { force: true });
-      console.log(`validate: running ${name}`);
-      for (const command of categories[name]!) {
+      console.log(`validate: ${name} cached (inputs ${key.slice(0, 8)})`);
+      return;
+    }
+    rmSync(receipt, { force: true });
+    console.log(`validate: running ${name}`);
+    await Promise.all(
+      categories[name]!.map(async (command) => {
         const child = Bun.spawn(command, {
           cwd: root,
           env: {
@@ -148,28 +263,49 @@ export async function validate(
             WRANGLER_REGISTRY_PATH: registry,
           },
           stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
+          stdout: "pipe",
+          stderr: "pipe",
         });
-        if ((await child.exited) !== 0)
-          throw new Error(`${name} failed; no success recorded`);
-      }
-      if (snapshot(root) !== sha)
-        throw new Error(
-          "Commit changed during validation; no success recorded",
-        );
-      const temp = `${receipt}.${process.pid}.tmp`;
-      await Bun.write(
-        temp,
-        JSON.stringify({
-          key,
-          sha,
-          category: name,
-          completedAt: new Date().toISOString(),
-        }) + "\n",
-      );
-      renameSync(temp, receipt);
-    }
+        const [stdout, stderr, code] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ]);
+        const output = stdout + stderr;
+        if (output.trim())
+          console.log(
+            `\n--- ${name}: ${command.join(" ")} ---\n${output.trimEnd()}`,
+          );
+        if (code !== 0) throw new Error(`${name} failed; no success recorded`);
+      }),
+    );
+    if (snapshot(root) !== sha)
+      throw new Error("Commit changed during validation; no success recorded");
+    const temp = `${receipt}.${process.pid}.tmp`;
+    await Bun.write(
+      temp,
+      JSON.stringify({
+        key,
+        sha,
+        category: name,
+        completedAt: new Date().toISOString(),
+      }) + "\n",
+    );
+    renameSync(temp, receipt);
+  };
+
+  try {
+    // Everything that does not build the artifact runs at once; the artifact
+    // builders run in order beside them. A single machine has been running
+    // these one after another on one core of many.
+    const parallel = names.filter((name) => !SHARED_ARTIFACT.has(name));
+    const serial = names.filter((name) => SHARED_ARTIFACT.has(name));
+    await Promise.all([
+      ...parallel.map((name) => runCategory(name)),
+      (async () => {
+        for (const name of serial) await runCategory(name);
+      })(),
+    ]);
     if (snapshot(root) !== sha)
       throw new Error("Commit changed during validation");
   } finally {
