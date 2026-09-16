@@ -674,6 +674,16 @@ const sidebarSwipeHideFraction = 0.6;
 /// The share of the row the Hide button takes when the swipe rests on it.
 const sidebarSwipeRevealFraction = 0.22;
 
+/// The share of the row the read mark takes when the swipe rests on it. A
+/// touch wider than the Hide button, because 'Unread' is the longer word.
+const sidebarSwipeReadRevealFraction = 0.26;
+
+/// The inset a phone's row sits at inside the list, and the radius of its
+/// corners. The row's own card, its ink and the clip the swipe panes slide
+/// behind all take these, so what slides is exactly the pill that moves.
+const sidebarCardInset = EdgeInsets.fromLTRB(8, 2, 8, 2);
+const sidebarCardRadius = Radius.circular(10);
+
 /// A phone's row, and the two things a thumb can do to it without opening it.
 ///
 /// Both are the swipe rows have on a phone since Mail had them, and the
@@ -716,7 +726,7 @@ class _SwipeRow extends StatelessWidget {
             ? null
             : ActionPane(
                 motion: const StretchMotion(),
-                extentRatio: 0.26,
+                extentRatio: sidebarSwipeReadRevealFraction,
                 dismissible: DismissiblePane(
                   dismissThreshold: sidebarSwipeReadFraction,
                   closeOnCancel: true,
@@ -896,14 +906,20 @@ class _SwipeActionState extends State<_SwipeAction> {
   }
 }
 
-/// The row's own pill: inset 8 from the list on each side, corners of 10.
+/// The row's own pill, taken from [sidebarCardInset] and
+/// [sidebarCardRadius] so it cannot drift from the card it clips to.
 class _RowShape extends CustomClipper<RRect> {
   const _RowShape();
 
   @override
   RRect getClip(Size size) => RRect.fromRectAndRadius(
-    Rect.fromLTWH(8, 2, size.width - 16, size.height - 4),
-    const Radius.circular(10),
+    Rect.fromLTWH(
+      sidebarCardInset.left,
+      sidebarCardInset.top,
+      size.width - sidebarCardInset.horizontal,
+      size.height - sidebarCardInset.vertical,
+    ),
+    sidebarCardRadius,
   );
 
   @override
@@ -986,14 +1002,14 @@ class _BotRowState extends State<_BotRow> {
             : selected
             ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
             : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: const BorderRadius.all(sidebarCardRadius),
         child: InkWell(
           onTap: widget.onTap,
           onLongPress: onActions == null ? null : () => onActions(),
           onSecondaryTapUp: onActions == null
               ? null
               : (details) => onActions(position: details.globalPosition),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: const BorderRadius.all(sidebarCardRadius),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
             child: Opacity(
@@ -1065,7 +1081,7 @@ class _BotRowState extends State<_BotRow> {
     );
     return Padding(
       padding: widget.card
-          ? const EdgeInsets.fromLTRB(8, 2, 8, 2)
+          ? sidebarCardInset
           : const EdgeInsets.symmetric(horizontal: 8),
       // Hover and focus are the row's and its control's together, so moving
       // onto the control or tabbing to it keeps it on screen.
