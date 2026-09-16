@@ -855,6 +855,16 @@ jobs:
           security cms -D -i "$app/Contents/embedded.provisionprofile" > "$embedded_profile"
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$embedded_profile")" == "$PROFILE_UUID" ]]
           codesign --verify --deep --strict --verbose=2 "$app"
+          # Rive Native is statically linked and Dart resolves its C entry points
+          # by name at runtime (`DynamicLibrary.process()`). An archive build
+          # strips them unless `STRIP_STYLE = non-global` holds in
+          # `macos/Runner/Configs/Release.xcconfig`; v0.7.87 shipped without them
+          # and every Bot avatar surface drew Flutter's grey error box.
+          for arch in arm64 x86_64; do
+            symbols="$(nm -gU -arch "$arch" "$app/Contents/MacOS/FrockBot")"
+            grep -q ' _makeRenderer$' <<< "$symbols" \
+              || { echo "The $arch executable lost Rive Native's exported symbols (makeRenderer); the archive stripped them." >&2; exit 1; }
+          done
           details="$(codesign --display --verbose=4 "$app" 2>&1)"
           grep -F "Authority=$SIGNING_IDENTITY" <<< "$details"
           grep -F "TeamIdentifier=Q444L76529" <<< "$details"
