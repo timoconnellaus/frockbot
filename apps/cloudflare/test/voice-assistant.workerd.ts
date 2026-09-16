@@ -2496,6 +2496,61 @@ describe("the voice session object", () => {
     next.socket.close();
   });
 
+  test("a failure the model cannot write a sentence for is read out plainly, under its own question", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-plain-failure-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    // The gateway that writes the read-out sentence is down, so what the
+    // person hears is the plain read-out. It is spoken on the call the
+    // request was made on, moments after it was made, so nothing places it
+    // and the question has to be in the sentence itself.
+    await stub.probeSetScript({
+      delegateWord: "plan",
+      botId: identity.botId,
+      composeFails: true,
+    });
+    await stub.probeDropDispatches(1_000);
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("plan the launch")).toBe(true);
+    await opened.waitFor(
+      (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
+      "acknowledged",
+    );
+    const speaker = playsAnswers(opened);
+    const key = Object.keys(await stub.probeStorage("voice:delegation:"))[0]!;
+    const record = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    await stub.probePutStorage(key, { ...record, attempts: 39 });
+    const spoken = await opened.waitFor(
+      (frame) =>
+        frame.type === "transcript_end" &&
+        String(frame.text).includes("could not finish"),
+      "the plain failure read out",
+      20_000,
+    );
+    expect(String(spoken.text)).toMatch(
+      /^[^.]+ could not finish plan the launch: .+\.$/,
+    );
+    expect(String(spoken.text)).not.toContain("Earlier,");
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the failure to be heard",
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    opened.socket.close();
+  });
+
   test("a delegation no Bot ever accepts is settled as a failure the person hears", async () => {
     const suffix = crypto.randomUUID();
     const identity = {

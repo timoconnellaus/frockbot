@@ -504,10 +504,11 @@ abandoned rather than paid for again; a composition that has not answered
 within eight seconds is dropped and a correlated plain read-out supplies the
 fallback. Only a composed sentence is cached: a read-out is written for the
 moment it is spoken, so a dropped composition stores nothing and the next
-read-out is written again against the age it has then. The answer remains `settled` until the correct client playback
-acknowledgment changes it to `spoken`. A sentence is composed once but may be
-spoken much later — composing and speaking are separate moments and either can
-be retried — so the composer is told never to say when the request was made.
+read-out is written again against the age it has then. The answer remains
+`settled` until the correct client playback acknowledgment changes it to
+`spoken`. A sentence is composed once but may be spoken much later —
+composing and speaking are separate moments and either can be retried — so
+the composer is told never to say when the request was made.
 Placing is one mechanism, decided at speak time on either of two conditions:
 `voiceAgePlacedV1` holds for the age right then, or the answer is being heard
 on a call other than the one the question was asked on. On either, every
@@ -877,9 +878,10 @@ Mac and want them there to answer the approval card; `bot-messaging`, which is
 a Bot writing to another Bot from the thread; and `bot-template-export`, which
 stages a template for the person to look at and publish. Before that admission
 existed a Bot on a call was refused its own apps and told the caller the app
-had been disconnected. The
-prompt says to say the answer once and not to write it, or a version of it,
-into the conversation as well; `send_to_user` on such a Turn is for a brief
+had been disconnected. Subagent dispatch is the one work tool deliberately
+left at `chat` and `automation`, which is what bounds the tree to depth one.
+The prompt says to say the answer once and not to write it, or a version of
+it, into the conversation as well; `send_to_user` on such a Turn is for a brief
 progress note on work longer than a minute and for material that cannot be
 spoken (a link, a table, code). A send the Bot makes anyway still lands in
 the thread and counts as unread, but carries `notify: false`

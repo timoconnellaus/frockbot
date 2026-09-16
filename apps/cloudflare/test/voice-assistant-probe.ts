@@ -32,6 +32,11 @@ export interface VoiceProbeScript {
   botId?: string;
   /** The whole model reply, so a test can choose its sentences. */
   reply?: string;
+  /**
+   * The read-out composition request throws, as an unreachable model gateway
+   * does, so the plain read-out is what the person hears.
+   */
+  composeFails?: boolean;
   /** The speech provider answers every sentence with nothing, as a refused key does. */
   silentTts?: boolean;
   failTts?: boolean;
@@ -282,6 +287,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     if (system?.content.includes(VOICE_RESULT_PROMPT_MARKER_V1)) {
       this.#composed += 1;
       if (this.#composeHeld) await this.#composeHeld;
+      if (this.#script.composeFails) throw new Error("gateway down");
       // The read-out request, which is not a spoken turn. A real model writes
       // a sentence of its own from the Bot, the question and the answer; this
       // one repeats the answer it was given, so a test can tell whether the

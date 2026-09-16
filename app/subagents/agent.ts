@@ -9,7 +9,10 @@
 //
 // Depth is one, and it is not a counter. `Task` declares
 // `admission: {turnTypes: ["chat", "automation"]}`, so a `subagent` Turn is
-// never offered the tool and there is no grandchild to bound.
+// never offered the tool and there is no grandchild to bound. Unlike the other
+// work tools it is deliberately not widened to `agent`, the Turn a Bot runs for
+// the voice session or for another Bot: that Turn is already a delegation, and
+// the same bound keeps it from opening a tree underneath one.
 //
 // Nothing here is authority. The tool decodes the model's words, resolves a
 // slug against the catalog this Turn was offered, and calls the host seam the

@@ -180,7 +180,11 @@ describe("machine tool admission", () => {
       for (const tool of CONTROL_TOOLS) {
         expect(await names("chat")).toContain(tool);
         // Row 49 ships `partial`: an automation Turn has no voice to ask an
-        // approval with, so it does not get a tool that needs one.
+        // approval with, so it does not get a tool that needs one. Neither
+        // does a question handed over by the voice session or another Bot,
+        // which gets the rest of the work tools but has nobody to show an
+        // approval card to.
+        expect(await names("agent")).not.toContain(tool);
         expect(await names("automation")).not.toContain(tool);
         expect(await names("subagent")).not.toContain(tool);
       }
