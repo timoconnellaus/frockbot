@@ -513,13 +513,20 @@ Placing is one mechanism, decided at speak time on either of two conditions:
 `voiceAgePlacedV1` holds for the age right then, or the answer is being heard
 on a call other than the one the question was asked on. On either, every
 read-out (cached, freshly composed, or the plain fallback) is preceded by a
-plain lead-in naming the request, in the person's own words from the retained
-spoken turn (the paraphrase handed to the Bot only when that turn is gone),
-and its age — "Earlier, about an hour ago, you asked Bob: can you ask Bob
-what the weather is?" The lead-in is not recorded with the sentence,
-so a later replay says the age it has then. The prompt's `<answers>` block
-carries each unheard answer under its request and age with the instruction
-that it is read out separately and is never the answer to what is being asked
+plain lead-in naming the request and its age — "Earlier, about an hour ago,
+you asked Bob: can you ask Bob what the weather is?" The request is the
+person's own words, read from the retained spoken turn; the paraphrase the
+assistant handed the Bot ("Tim is asking what the weather is. Please check…")
+is the fallback only when that turn is gone or cannot be read, and only it
+gets a closing full stop added. One clause names the request wherever it
+appears: the lead-in, an unplaced plain read-out ("You asked Bob: … Bob
+answered: …" / "… Bob could not finish: …"), the composer prompt, and the
+prompt's `<answers>` block. A turn that asked several Bots places every one
+of its answers under that whole sentence, and the Bot's name says which
+request each answers. The lead-in is not recorded with the sentence, so a
+later replay says the age it has then. The `<answers>` block carries the five
+oldest unheard answers under their request and age with the instruction that
+they are read out separately and are never the answer to what is being asked
 now. Without both, an answer that settled after one call ended was heard at
 the start of the next as if it answered the question just asked.
 

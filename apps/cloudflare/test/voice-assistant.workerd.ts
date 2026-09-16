@@ -1746,6 +1746,57 @@ describe("the voice session object", () => {
     next.socket.close();
   });
 
+  test("the prompt carries an unheard answer under what the person said, not the paraphrase", async () => {
+    const userId = `voice-answers-prompt-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const runId = `voice-${"a".repeat(32)}`;
+    const at = new Date().toISOString();
+    // A settled answer nobody has heard, from a call that is over. `text` is
+    // the paraphrase the assistant handed the Bot; the retained turn holds
+    // what the person actually said.
+    await stub.probePutStorage(`voice:delegation:${runId}`, {
+      schemaVersion: 1,
+      runId,
+      turnId: "earlier-call:1",
+      callId: "earlier-call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "Tim is asking whether the launch is ready. Please check.",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+      speech: "Workerd Bot says the launch is ready.",
+      speechState: "composed",
+    });
+    await stub.probePutStorage("voice:turn:earlier-call:1", {
+      schemaVersion: 1,
+      turnId: "earlier-call:1",
+      callId: "earlier-call",
+      key: "earlier-call:1",
+      transcript: "Hey, is the launch ready?",
+      admittedAt: at,
+      state: "answered",
+      answer: "I'll ask.",
+      delegations: 1,
+    });
+    const opened = await open(userId);
+    playsAnswers(opened);
+    await startCall(opened);
+    await stub.probeUtterance("hello again");
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" &&
+        !String(f.text).includes("Earlier,"),
+      "the spoken reply",
+    );
+    const prompt = (await stub.probeSystemPrompts()).at(-1)!;
+    expect(prompt).toContain('about "Hey, is the launch ready?"');
+    expect(prompt).not.toContain("Tim is asking whether the launch is ready");
+    opened.socket.close();
+  });
+
   test("a Bot answer waits for ordinary speech still being synthesized after the model has finished", async () => {
     const userId = `voice-ordinary-tts-${crypto.randomUUID()}`;
     const stub = assistant(userId);
