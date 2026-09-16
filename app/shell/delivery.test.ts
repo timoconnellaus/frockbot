@@ -12,20 +12,24 @@ import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
 import { shellAgentFeature } from "./agent.js";
 import type { StoredRun } from "./backend-contracts.js";
 import { projectClientRunV1 } from "./run-protocol.js";
-import { createReplyToRequestToolV1 } from "./reply-to-caller.js";
+import {
+  REPLY_TO_REQUEST_MAX_CHARS_V1,
+  type ReplyCallerV1,
+  createReplyToRequestToolV1,
+} from "./reply-to-caller.js";
 
 async function run(
   provider: LlmProvider,
   turnType: TurnTypeV1 = "chat",
   initial?: SessionEvent[],
-  voice = false,
+  caller?: ReplyCallerV1,
 ) {
   const root = createAgentRuntimeHarness(
     initial ? { sessions: { initialSessions: { "user:test": initial } } } : {},
   );
   await root.mount(shellAgentFeature);
-  if (voice)
-    root.tools.register(createReplyToRequestToolV1("voice", root.sessions));
+  if (caller)
+    root.tools.register(createReplyToRequestToolV1(caller, root.sessions));
   root.tools.register(
     createWebFetchToolDefinitionV1({
       fetch: async () =>
@@ -94,7 +98,7 @@ test("a User-directed finish does not settle the answer owed to voice", async ()
     },
     "agent",
     undefined,
-    true,
+    "voice",
   );
   expect(calls).toBe(2);
   expect(events.filter((event) => event.type === "send/to-user")).toHaveLength(
@@ -132,7 +136,7 @@ test("an undelivered voice answer is repaired through the caller tool", async ()
     },
     "agent",
     undefined,
-    true,
+    "voice",
   );
   expect(requests).toHaveLength(2);
   expect(events.filter((event) => event.type === "send/to-user")).toHaveLength(
@@ -672,6 +676,95 @@ test("specialist schemas are disclosed on demand and interim work reaches a fina
   });
   expect(requests).toBe(3);
   expect(events.filter((e) => e.type === "send/to-user")).toHaveLength(2);
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
+for (const caller of ["voice", "bot"] as const) {
+  test(`a ${caller} caller's answer is bounded at ${REPLY_TO_REQUEST_MAX_CHARS_V1[caller]} characters`, async () => {
+    const long = "R".repeat(REPLY_TO_REQUEST_MAX_CHARS_V1[caller] + 1);
+    let calls = 0;
+    const events = await run(
+      {
+        id: "test",
+        async *stream() {
+          calls++;
+          yield {
+            type: "tool-call",
+            call: {
+              id: `answer-${calls}`,
+              name: "reply_to_request",
+              input: { answer: calls === 1 ? long : "The short version." },
+            },
+          };
+          yield { type: "finish", reason: "tool-calls" };
+        },
+      },
+      "agent",
+      undefined,
+      caller,
+    );
+    expect(calls).toBe(2);
+    expect(
+      events
+        .filter(
+          (event) =>
+            event.type === "tool/result" && event.name === "reply_to_request",
+        )
+        .map((event) =>
+          event.type === "tool/result"
+            ? { content: event.content, isError: event.isError }
+            : null,
+        ),
+    ).toEqual([
+      {
+        content: `reply_to_request was refused: answer is longer than ${REPLY_TO_REQUEST_MAX_CHARS_V1[caller]} characters. ${
+          caller === "voice"
+            ? "Say the short version."
+            : "Send the essential answer."
+        }`,
+        isError: true,
+      },
+      {
+        content:
+          caller === "voice"
+            ? "Answer recorded for the voice session."
+            : "Answer recorded for the asking Bot.",
+        isError: false,
+      },
+    ]);
+    expect(
+      events.filter((event) => event.type === "reply/to-caller"),
+    ).toMatchObject([{ caller, text: "The short version." }]);
+  });
+}
+
+test("a Bot caller's answer carries the whole report a spoken one could not", async () => {
+  const report = "R".repeat(REPLY_TO_REQUEST_MAX_CHARS_V1.voice + 2_000);
+  const events = await run(
+    {
+      id: "test",
+      async *stream() {
+        yield {
+          type: "tool-call",
+          call: {
+            id: "answer",
+            name: "reply_to_request",
+            input: { answer: report },
+          },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      },
+    },
+    "agent",
+    undefined,
+    "bot",
+  );
+  expect(
+    events.filter((event) => event.type === "reply/to-caller"),
+  ).toMatchObject([{ caller: "bot", text: report }]);
   expect(events.at(-1)).toMatchObject({
     type: "turn/end",
     outcome: "completed",

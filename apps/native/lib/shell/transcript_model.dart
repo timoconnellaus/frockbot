@@ -122,10 +122,12 @@ class Exchange {
     this.at,
   });
 
-  /// What the status says beside the marker, or nothing once it is answered.
+  /// What the status says beside the marker, or nothing when the thread
+  /// already says it: a running Turn has its own working row, and an answered
+  /// exchange has nothing left to report.
   String? get statusLabel => switch (status) {
     ExchangeStatus.queued => 'queued',
-    ExchangeStatus.working => 'working',
+    ExchangeStatus.working => null,
     ExchangeStatus.answered => null,
     ExchangeStatus.stopped => 'stopped',
     ExchangeStatus.failed => 'couldn’t answer',

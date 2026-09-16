@@ -11,10 +11,22 @@ import { openStepPositionV1 } from "./agent.js";
 
 export const REPLY_TO_REQUEST_TOOL_V1 = "reply_to_request";
 
-/** Keep a complete caller answer bounded; the voice assistant can shorten it. */
-export const REPLY_TO_REQUEST_MAX_CHARS_V1 = 4_000;
-
 export type ReplyCallerV1 = "voice" | "bot";
+
+/**
+ * Each caller's bound on a complete answer. Voice is spoken, so it stays
+ * short; a Bot reads its answer as a tool result, so it gets the whole wire
+ * event bound.
+ */
+export const REPLY_TO_REQUEST_MAX_CHARS_V1: Record<ReplyCallerV1, number> = {
+  voice: 4_000,
+  bot: 32_000,
+};
+
+const TOO_LONG: Record<ReplyCallerV1, string> = {
+  voice: "Say the short version.",
+  bot: "Send the essential answer.",
+};
 
 const DESCRIPTIONS: Record<ReplyCallerV1, string> = {
   voice:
@@ -27,19 +39,21 @@ const RECORDED: Record<ReplyCallerV1, string> = {
   bot: "Answer recorded for the asking Bot.",
 };
 
-const INPUT_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  properties: {
-    answer: {
-      type: "string",
-      minLength: 1,
-      maxLength: REPLY_TO_REQUEST_MAX_CHARS_V1,
-      description: "The answer, in full.",
+function inputSchema(caller: ReplyCallerV1): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      answer: {
+        type: "string",
+        minLength: 1,
+        maxLength: REPLY_TO_REQUEST_MAX_CHARS_V1[caller],
+        description: "The answer, in full.",
+      },
     },
-  },
-  required: ["answer"],
-  additionalProperties: false,
-};
+    required: ["answer"],
+    additionalProperties: false,
+  };
+}
 
 function refusal(reason: string): ToolExecutionResult {
   return { content: reason, isError: true };
@@ -58,7 +72,7 @@ export function createReplyToRequestToolV1(
   return {
     name: REPLY_TO_REQUEST_TOOL_V1,
     description: DESCRIPTIONS[caller],
-    inputSchema: structuredClone(INPUT_SCHEMA),
+    inputSchema: inputSchema(caller),
     // Only ever offered on the lane a caller can reach, and only mounted at
     // all when this Turn actually has one.
     admission: { turnTypes: ["agent"] },
@@ -78,9 +92,9 @@ export function createReplyToRequestToolV1(
           `${REPLY_TO_REQUEST_TOOL_V1} requires answer: the complete answer to the question you were asked.`,
         );
       }
-      if (answer.length > REPLY_TO_REQUEST_MAX_CHARS_V1) {
+      if (answer.length > REPLY_TO_REQUEST_MAX_CHARS_V1[caller]) {
         return refusal(
-          `${REPLY_TO_REQUEST_TOOL_V1} was refused: answer is longer than ${REPLY_TO_REQUEST_MAX_CHARS_V1} characters. Say the short version.`,
+          `${REPLY_TO_REQUEST_TOOL_V1} was refused: answer is longer than ${REPLY_TO_REQUEST_MAX_CHARS_V1[caller]} characters. ${TOO_LONG[caller]}`,
         );
       }
       const session = sessions.get(context.sessionId);

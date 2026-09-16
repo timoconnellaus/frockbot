@@ -212,7 +212,7 @@ The occurrences of a step run one after another. Per occurrence: validate the jo
 - `batch` spends one inference on several independent calls. It is registered so the catalog offers it, but it is never dispatched as a tool: the loop expands it into the occurrences it declares (`core/contracts/batch.ts`) and runs each one through the registry's own `prepare`/`executePrepared`, so admission, guards, hooks and one `tool/call`–`tool/result` pair per effect hold inside a batch exactly as outside one. A call whose tool declares `orderedEffect` — its effect occupies a position in the conversation, like a `send_to_user` bubble or a `wake_parent` hand-off — runs in declared order against the other ordered calls, so landing order is declared order and the wire ordinal, the rendered order and the unread boundary keep reading the log the one way they always have; every other call is dispatched at once. One refused or failing call does not abort the rest, `endsTurn` is the OR of the sub-results, and `batch` cannot call itself. At most 25 calls, and a batch needing more effect admissions than the run's record can still hold is refused whole — never truncated — with the number that would fit. The transcript draws the declared calls rather than the envelope, so a batched reply is indistinguishable from the same calls issued across separate steps; only a batch refused before any call was declared draws its own row.
 - `send_to_user` requires `disposition: "finish" | "continue"`. Each call delivers one separate message. Use `continue` when there is more to say or do, including another part of the answer, and `finish` on the last message to end the Turn. A `continue` send leaves a final reply owed. Widgets and approvals always end the Turn. The Shell derives completion from the durable tool input and matching send occurrence, including after eviction.
 - The conversation prompt defaults to plain paragraphs, one thought and a line or two per message. Simple answers use one message; distinct parts can use two to four, keeping the whole reply concise, and the parts the model already knows go in one `batch` — arriving as separate messages in written order, `finish` on the last — rather than spending an inference per bubble. Headings, bold labels, lists and tables are reserved for requested structured output; links and necessary code remain available, and a request for detail gets it.
-- Chat/agent requests expose only `send_to_user` and the three meta-tools — `batch`, `get_dynamic_tools` and `call_dynamic_tool`, listed after the tools they operate on — initially. Specialist first-party tools live in the `frockbot` namespace: names are listed in the prompt, schemas are read on demand, and execution retains the same admission and authority checks. Background Turns expose `wake_parent` in place of user delivery.
+- Chat/agent requests expose only `send_to_user` and the three meta-tools — `batch`, `get_dynamic_tools` and `call_dynamic_tool`, listed after the tools they operate on — initially, plus `reply_to_request` on an agent Turn that has a caller (the voice session or another Bot), which is where its answer goes. Specialist first-party tools live in the `frockbot` namespace: names are listed in the prompt, schemas are read on demand, and execution retains the same admission and authority checks. Background Turns expose `wake_parent` in place of user delivery.
 - A provider that emits private text instead of a final send gets one bounded delivery-repair step. No provider-specific forced-tool option is assumed.
 
 ### Usage accounting
@@ -673,8 +673,10 @@ Bot messages have no avatar or tool-count row; the in-chat avatar is reserved
 for the working indicator and its typing badge. A message that crossed to or
 from a counterpart — another of the User's Bots, or the voice session — is one
 centred marker in the thread, "Messaged 🐑 Codex Watch" or "Message from 🐑
-Xero Books", wearing the counterpart's own sheep and, while unsettled, its
-status. The words are never in the thread: the marker opens a view-only chat,
+Xero Books", wearing the counterpart's own sheep and, while queued, stopped
+or unanswered, its status; a running exchange says nothing there, because the
+Bot's own working row already says it. The words are never in the thread: the
+marker opens a view-only chat,
 "General ⇄ Xero Books", that lists every exchange between the two in both
 directions, each request under the name that sent it and each answer under
 the name that gave it, with a lock footer saying it is view-only. The history
@@ -687,8 +689,9 @@ wire, a `bot_message` call is projected as `message/to-bot` in place of its
 `tool/call`, named by the target's id alone (the client's directory names
 it), and a Bot caller's answer is a `reply/to-caller` with `caller: "bot"` —
 the same delivery voice uses, so a Bot's answer to another Bot mints no User
-message, badge or notification. The marker's long-press still opens Work
-details. Message long-press opens work
+message, badge or notification. A spoken answer stays bounded at 4,000
+characters; a Bot's answer is bounded by the wire event instead, at 32,000.
+The marker's long-press still opens Work details. Message long-press opens work
 details or records “Mark unread from here”. That boundary names a validated
 chat message in the Bot-owned unread record, is included in the command
 fingerprint and receipt, and is projected to the native transcript after

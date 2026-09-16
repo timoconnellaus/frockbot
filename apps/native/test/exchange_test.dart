@@ -316,6 +316,21 @@ void main() {
     );
   });
 
+  test('a running exchange says nothing the working row already says', () {
+    String? labelOf(ExchangeStatus status) => Exchange(
+      id: 'x',
+      counterpart: const ExchangeCounterpart.voice(),
+      direction: ExchangeDirection.inbound,
+      request: 'Now?',
+      status: status,
+    ).statusLabel;
+    expect(labelOf(ExchangeStatus.working), isNull);
+    expect(labelOf(ExchangeStatus.answered), isNull);
+    expect(labelOf(ExchangeStatus.queued), 'queued');
+    expect(labelOf(ExchangeStatus.stopped), 'stopped');
+    expect(labelOf(ExchangeStatus.failed), 'couldn\u2019t answer');
+  });
+
   test('a message to another Bot sits among the sends in order', () {
     final lines = projectRuns([generalRuns()[3]]);
     final ids = lines.map((line) => line.id).toList();
@@ -517,7 +532,7 @@ void main() {
         expect(find.text('Message from'), findsNWidgets(5));
         expect(find.text('Codex Watch'), findsOneWidget);
         expect(find.text('Voice'), findsOneWidget);
-        expect(find.text('· working'), findsOneWidget);
+        expect(find.textContaining('· working'), findsNothing);
         expect(find.textContaining('Private scratch'), findsNothing);
         expect(
           find.descendant(
