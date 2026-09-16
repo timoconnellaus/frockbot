@@ -325,17 +325,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// At the widest tier the right panel and the run view are a third column:
   /// the conversation keeps its own, so a person with Work open is reading the
   /// thread as plainly as one with nothing open. Narrower, the same panel is a
-  /// drawer over the conversation and a run is a page, and then the chat is
-  /// covered.
+  /// drawer over the conversation, and then the chat is covered.
   ///
-  /// The distinction is what the flag cannot carry on its own. `panelOpen`
-  /// latches: at the widest tier the header's switch collapses the column and
-  /// leaves it set, and only the panel's own close clears it. Reading it as
-  /// "covered" at every tier therefore stopped the read receipt for the rest
-  /// of the session, and let the badge climb on a chat in plain sight.
+  /// The drawer is the one thing drawn over the conversation below the widest
+  /// tier, and `panelOpen` is what draws it, so it is the whole question. A
+  /// run is not a second one: at the widest tier it is the third column, at
+  /// the dual tier it reaches the screen only through that same drawer, and on
+  /// a phone it is a pushed page the route check already answers. Read on its
+  /// own it latched — `openRun` survives the drawer being switched off — and
+  /// took the read receipt with it for the rest of the session.
   bool get _conversationCovered =>
       shellTierForWidth(MediaQuery.sizeOf(context).width) != ShellTier.triple &&
-      (panelOpen || openRun != null);
+      panelOpen;
 
   void _readLatest(String botId, String? messageId) {
     if (!mounted) return;
