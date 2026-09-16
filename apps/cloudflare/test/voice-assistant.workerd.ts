@@ -1606,6 +1606,9 @@ describe("the voice session object", () => {
     await opened.waitFor(state("awake"), "awake");
     const runId = `voice-${"f".repeat(32)}`;
     const at = new Date().toISOString();
+    // Asked five minutes ago, so by the time it is finally heard the person
+    // no longer has it in mind and it has to be placed.
+    const askedAt = new Date(Date.now() - 5 * 60_000).toISOString();
     const key = `voice:delegation:${runId}`;
     await stub.probePutStorage(key, {
       schemaVersion: 1,
@@ -1615,7 +1618,7 @@ describe("the voice session object", () => {
       botId: "bot",
       botName: "Workerd Bot",
       text: "is the launch ready",
-      admittedAt: at,
+      admittedAt: askedAt,
       state: "settled",
       attempts: 0,
       answer: "The launch is ready.",
@@ -1653,6 +1656,21 @@ describe("the voice session object", () => {
     const next = await open(userId);
     const speaker = playsAnswers(next);
     await startCall(next);
+    // The sentence was composed before this call and says nothing about when
+    // the request was made, so the age is spoken here, in front of it: the
+    // person hears which request this answers and that it is not an answer to
+    // anything they just said.
+    await next.waitFor(
+      (f) =>
+        f.type === "transcript_end" &&
+        // The exact minute count is whatever the clock says by the time this
+        // is spoken; what is asserted is that the request and its age are
+        // spoken in front of the cached sentence.
+        /^Earlier, \d+ minutes ago, you asked Workerd Bot about is the launch ready\. /.test(
+          String(f.text),
+        ),
+      "the cached answer placed under its request",
+    );
     const heard = await eventually(
       async () =>
         (await stub.probeStorage("voice:delegation:"))[
@@ -1663,6 +1681,55 @@ describe("the voice session object", () => {
     );
     expect(speaker.played).toEqual([heard.deliveryId]);
     expect(await stub.probeComposed()).toBe(1);
+    next.socket.close();
+  });
+
+  test("an answer heard on a call other than the one it was asked on is placed under its request", async () => {
+    const userId = `voice-cross-call-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const runId = `voice-${"c".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    const at = new Date().toISOString();
+    // Asked seconds ago, but on a call that is over: the person hung up and
+    // called back, so nothing on the call they are on now led up to this and
+    // the read-out has to say which request it answers.
+    await stub.probePutStorage(key, {
+      schemaVersion: 1,
+      runId,
+      turnId: "earlier-call:1",
+      callId: "earlier-call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+      speech: "Workerd Bot says the launch is ready.",
+      speechState: "composed",
+    });
+    const next = await open(userId);
+    const speaker = playsAnswers(next);
+    await startCall(next);
+    await next.waitFor(
+      (f) =>
+        f.type === "transcript_end" &&
+        String(f.text).startsWith(
+          "Earlier, a moment ago, you asked Workerd Bot about is the launch ready. ",
+        ),
+      "the young answer placed under its request on a later call",
+    );
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the placed answer read out on the later call",
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    expect(await stub.probeComposed()).toBe(0);
     next.socket.close();
   });
 
@@ -2427,6 +2494,61 @@ describe("the voice session object", () => {
     );
     expect(typeof settled.answer).toBe("string");
     next.socket.close();
+  });
+
+  test("a failure the model cannot write a sentence for is read out plainly, under its own question", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-plain-failure-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    // The gateway that writes the read-out sentence is down, so what the
+    // person hears is the plain read-out. It is spoken on the call the
+    // request was made on, moments after it was made, so nothing places it
+    // and the question has to be in the sentence itself.
+    await stub.probeSetScript({
+      delegateWord: "plan",
+      botId: identity.botId,
+      composeFails: true,
+    });
+    await stub.probeDropDispatches(1_000);
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("plan the launch")).toBe(true);
+    await opened.waitFor(
+      (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
+      "acknowledged",
+    );
+    const speaker = playsAnswers(opened);
+    const key = Object.keys(await stub.probeStorage("voice:delegation:"))[0]!;
+    const record = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    await stub.probePutStorage(key, { ...record, attempts: 39 });
+    const spoken = await opened.waitFor(
+      (frame) =>
+        frame.type === "transcript_end" &&
+        String(frame.text).includes("could not finish"),
+      "the plain failure read out",
+      20_000,
+    );
+    expect(String(spoken.text)).toMatch(
+      /^[^.]+ could not finish plan the launch: .+\.$/,
+    );
+    expect(String(spoken.text)).not.toContain("Earlier,");
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the failure to be heard",
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    opened.socket.close();
   });
 
   test("a delegation no Bot ever accepts is settled as a failure the person hears", async () => {

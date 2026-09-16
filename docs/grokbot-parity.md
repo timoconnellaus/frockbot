@@ -1050,7 +1050,8 @@ than a silent absence. Row 44 is the only one.
   Capability of `providers/ollama-cloud` (`src/web-search.ts`,
   `POST {apiBaseUrl}/api/web_search`, the same key and the same resolved
   endpoint root as chat) and `web_fetch` is the `plugin-web` Package
-  (`src/agent.ts`, `src/ssrf.ts`). Both are work tools on all three turn types,
+  (`src/agent.ts`, `src/ssrf.ts`). Both are work tools on every working turn
+  type (row 57; the rule is in `docs/architecture.md` §4, tool exposure),
   both declare `idempotent: true`, and both emit stable JSON into `tool/result`
   rather than prose. `generate_image` is the `plugin-image` Package: it renders
   on the Workers AI binding through `plugin-shell/src/backend-image.ts`

@@ -168,14 +168,23 @@ describe("machine tool admission", () => {
         (await discoverFrockbotTools(harness.runtime.tools, { turnType })).map(
           (tool) => tool.name,
         );
-      for (const turnType of ["chat", "automation", "subagent"] as const) {
+      for (const turnType of [
+        "chat",
+        "agent",
+        "automation",
+        "subagent",
+      ] as const) {
         expect(await names(turnType)).toContain(MACHINE_LIST_TOOL_V1);
         expect(await names(turnType)).toContain(MACHINE_COMMAND_CHECK_TOOL_V1);
       }
       for (const tool of CONTROL_TOOLS) {
         expect(await names("chat")).toContain(tool);
         // Row 49 ships `partial`: an automation Turn has no voice to ask an
-        // approval with, so it does not get a tool that needs one.
+        // approval with, so it does not get a tool that needs one. Neither
+        // does a question handed over by the voice session or another Bot,
+        // which gets the rest of the work tools but has nobody to show an
+        // approval card to.
+        expect(await names("agent")).not.toContain(tool);
         expect(await names("automation")).not.toContain(tool);
         expect(await names("subagent")).not.toContain(tool);
       }
@@ -187,6 +196,7 @@ describe("machine tool admission", () => {
   test("the ceiling is read out of the manifest, not restated", () => {
     expect(machineAdmissionCeilingV1(MACHINE_REGISTRY_CAPABILITY_V1)).toEqual([
       "chat",
+      "agent",
       "automation",
       "subagent",
     ]);

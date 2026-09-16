@@ -27,8 +27,10 @@
 // The two read tools (`machine_list`, `machine_command_check`) take no card:
 // they are the registry projection and the answer to a command already
 // approved, so they are admitted on every turn type. The four effectful ones
-// are chat-only, because the approval that gates them is a chat-only payload —
-// an automation Turn has no voice to ask with. Row 49 therefore ships
+// are chat-only, because the approval that gates them is a chat-only payload:
+// no other turn type has a card to ask with, including an `agent` Turn, where
+// a question asked on a voice call or by another Bot is waiting on an answer
+// rather than on the person. Row 49 therefore ships
 // `partial`; see the plan's open decision 3.
 import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {

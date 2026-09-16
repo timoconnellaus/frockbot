@@ -242,7 +242,7 @@ export function createOllamaWebSearchFeature(
       new ConnectionBackedWebSearch(config, runtime.credentials, client),
     );
     return runtime.tools.register(definition, {
-      admissionCeiling: ["chat", "automation", "subagent"],
+      admissionCeiling: ["chat", "agent", "automation", "subagent"],
       subagentRoleCeiling: ["executor"],
     });
   };

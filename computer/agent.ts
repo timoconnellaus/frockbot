@@ -713,7 +713,7 @@ export function createComputerAgentFeature(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       idempotent: config.idempotentEffects === true,
@@ -1211,7 +1211,7 @@ export function createComputerAgentFeature(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       idempotent: true,
@@ -1411,7 +1411,7 @@ export function createComputerAgentFeature(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       description:
@@ -1484,7 +1484,7 @@ export function createComputerAgentFeature(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       description:
@@ -1515,7 +1515,7 @@ export function createComputerAgentFeature(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       description:
@@ -1554,7 +1554,7 @@ export function createComputerAgentFeature(
       // and not the box, and never to the two video roles, which have no
       // Computer at all.
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
         subagentRoles: ["executor", "computerUse"],
       },
       idempotent: config.idempotentEffects === true,
@@ -1580,7 +1580,7 @@ export function createComputerAgentFeature(
       namespace: "frockbot",
       // Page-level browser control, which `browserUse` exists for.
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
         subagentRoles: ["executor", "browserUse", "computerUse"],
       },
       idempotent: config.idempotentEffects === true,

@@ -319,7 +319,12 @@ describe("the Ollama Cloud web_search Capability", () => {
     const { root } = await mount({
       respond: () => Response.json({ results: [] }),
     });
-    for (const turnType of ["chat", "automation", "subagent"] as const) {
+    for (const turnType of [
+      "chat",
+      "agent",
+      "automation",
+      "subagent",
+    ] as const) {
       expect({
         turnType,
         names: (await discoverFrockbotTools(root.tools, { turnType })).map(

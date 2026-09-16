@@ -9,7 +9,7 @@ export const providerFlockAiDefinitionV1: PackageDefinitionV1 = {
       kind: "model",
       connectionTypes: ["flock-ai-account"],
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
       },
     },
   ],

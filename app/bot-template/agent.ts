@@ -3,9 +3,9 @@
 // GATE. Register line 446: `create_bot_share_json` is gated by `gates.botShare`
 // — a turn-type gate. The manifest Capability declares `turnTypes: ["chat"]`,
 // and the registration reads that ceiling back out of the manifest rather than
-// restating it, so an automation or subagent Turn is never offered
-// this tool. Packing a Bot into a shareable recipe is a thing a User is in the
-// room for.
+// restating it, so no other Turn type — `agent`, `automation` or `subagent` —
+// is ever offered this tool. Packing a Bot into a shareable recipe is a thing a
+// User is in the room for.
 //
 // AUTHORITY. The tool *stages*, and staging is always `visibility: "private"`.
 // "Publication beyond the authoring User is a User action": choosing `link` or

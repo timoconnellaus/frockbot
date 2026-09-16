@@ -123,8 +123,10 @@ a person spoke on a call are readable:
   run (read it with `run`), `answer`/`failure` is what settled, and `state`
   says whether it was ever heard. `settled` means the answer arrived but the
   phone never acknowledged playing it, so it is still owed: **the next call
-  reads it out first**, before anything the person says. That is what "the
-  assistant answered an earlier question" looks like from the ledger.
+  reads it out first**, before anything the person says. Heard on a later call
+  it is spoken behind a lead-in naming the request and its age ("Earlier,
+  about an hour ago, you asked Bob about …", `docs/voice.md`), so an owed
+  answer should never sound like the answer to what was just asked.
 - `unspoken[]` — the run ids of those owed answers, oldest first.
 - `memoryJobs[]` — the per-call memory finalizations owed or done.
 

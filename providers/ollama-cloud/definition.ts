@@ -24,7 +24,7 @@ export const providerOllamaCloudDefinitionV1: PackageDefinitionV1 = {
       kind: "model",
       connectionTypes: ["ollama-cloud-account"],
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
       },
     },
     {
@@ -32,7 +32,7 @@ export const providerOllamaCloudDefinitionV1: PackageDefinitionV1 = {
       kind: "tool",
       connectionTypes: ["ollama-cloud-account"],
       admission: {
-        turnTypes: ["chat", "automation", "subagent"],
+        turnTypes: ["chat", "agent", "automation", "subagent"],
         subagentRoles: ["executor"],
       },
     },

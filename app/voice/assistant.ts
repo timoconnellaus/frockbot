@@ -62,8 +62,19 @@ export interface VoiceAssistantPromptInputV1 {
   memory: VoiceAssistantMemoryContextV1;
   /** What this session remembers of its own previous conversations. */
   session?: VoiceSessionMemoryContextV1;
-  /** Answers from Bots that settled while nobody was listening. */
-  unspoken: readonly { botName: string; text: string }[];
+  /**
+   * Answers from Bots that settled while nobody was listening, each with the
+   * request it answers and when that was made. The voice object reads them
+   * out itself, first thing; the prompt carries them so the assistant can
+   * answer "what did Bob say?" and can tell an old answer from the question
+   * being asked now — never so it repeats them.
+   */
+  unspoken: readonly {
+    botName: string;
+    question: string;
+    text: string;
+    askedAt: Date;
+  }[];
   now: Date;
   timezone?: string;
 }
@@ -266,11 +277,11 @@ export function renderVoiceSystemPromptV1(
   if (input.unspoken.length > 0) {
     lines.push("<answers>");
     lines.push(
-      "These Bot answers arrived while the person was away. Mention them first, briefly:",
+      "Bot answers to earlier requests that the person has not heard yet. They are read out to the person separately, so do not repeat them unprompted, and never present one as the answer to what the person asks now. If the person asks what a Bot said, this is it:",
     );
     for (const answer of input.unspoken.slice(0, 5)) {
       lines.push(
-        `- ${escapeTag(clip(answer.botName, 60))}: ${escapeTag(clip(answer.text, 400))}`,
+        `- ${escapeTag(clip(answer.botName, 60))}, asked ${describeVoiceAgeV1(answer.askedAt, input.now)} about "${escapeTag(clip(answer.question, 120))}": ${escapeTag(clip(answer.text, 400))}`,
       );
     }
     lines.push("</answers>");
@@ -305,6 +316,49 @@ export const VOICE_RESULT_QUESTION_CHARS_V1 = 400;
 export const VOICE_RESULT_ANSWER_CHARS_V1 = 2_000;
 
 /**
+ * How long ago something was asked, in the words a person would use aloud.
+ * Under two minutes is "a moment ago"; the person still has it in mind.
+ */
+const VOICE_AGE_RECENT_MINUTES_V1 = 2;
+
+function voiceAgeMinutesV1(askedAt: Date, now: Date): number {
+  return Math.round(Math.max(0, now.getTime() - askedAt.getTime()) / 60_000);
+}
+
+/**
+ * Whether an answer needs placing when it is spoken: the person no longer has
+ * the request in mind, so the read-out has to say which one it answers. The
+ * predicate, not the wording, is what a read-out branches on.
+ */
+export function voiceAgePlacedV1(askedAt: Date, now: Date): boolean {
+  return voiceAgeMinutesV1(askedAt, now) >= VOICE_AGE_RECENT_MINUTES_V1;
+}
+
+export function describeVoiceAgeV1(askedAt: Date, now: Date): string {
+  const minutes = voiceAgeMinutesV1(askedAt, now);
+  if (minutes < VOICE_AGE_RECENT_MINUTES_V1) return "a moment ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  return hours === 1 ? "about an hour ago" : `about ${hours} hours ago`;
+}
+
+/**
+ * The sentence that places an answer the person did not hear when they asked.
+ *
+ * A read-out sentence is composed once and may be spoken much later — the
+ * composition and the speaking are separate moments, and either can be
+ * retried. So the composer never says when the request was made; this lead-in
+ * is the one place an age is spoken, and it is written at speak time from the
+ * age right then, so the person hears an old answer as one.
+ */
+export function renderVoiceDelegationLeadInV1(
+  result: Pick<VoiceDelegationResultV1, "botName" | "question" | "askedAt">,
+  now: Date,
+): string {
+  return `Earlier, ${describeVoiceAgeV1(result.askedAt, now)}, you asked ${result.botName} about ${clip(result.question, 120)}. `;
+}
+
+/**
  * The plain read-out: the Bot's own words under the question they answer.
  *
  * This is what the person hears when the model cannot be reached, so it has to
@@ -312,12 +366,15 @@ export const VOICE_RESULT_ANSWER_CHARS_V1 = 2_000;
  */
 export function renderVoiceDelegationReadOutV1(
   result: VoiceDelegationResultV1,
+  options?: { placed?: boolean },
 ): string {
-  const about = clip(result.question, 120);
+  const question = options?.placed ? "" : clip(result.question, 120);
   if (result.answer) {
-    return `${result.botName} answered about ${about}: ${clip(result.answer, 600)}`;
+    const about = question ? ` about ${question}` : "";
+    return `${result.botName} answered${about}: ${clip(result.answer, 600)}`;
   }
-  return `${result.botName} could not finish ${about}: ${clip(result.failure ?? "it stopped", 200)}.`;
+  const what = question ? ` ${question}` : "";
+  return `${result.botName} could not finish${what}: ${clip(result.failure ?? "it stopped", 200)}.`;
 }
 
 /**
@@ -329,10 +386,10 @@ export const VOICE_RESULT_PROMPT_MARKER_V1 = "<bot-answer-read-out>";
 /** What the assistant is asked, to say a Bot's answer in its own voice. */
 export function renderVoiceDelegationPromptV1(
   result: VoiceDelegationResultV1,
-  now: Date,
-): { system: string; user: string } {
-  const waited = Math.max(0, now.getTime() - result.askedAt.getTime());
-  const minutes = Math.round(waited / 60_000);
+): {
+  system: string;
+  user: string;
+} {
   return {
     system: [
       VOICE_RESULT_PROMPT_MARKER_V1,
@@ -342,9 +399,7 @@ export function renderVoiceDelegationPromptV1(
       "- Say who answered, then the answer, in one to three short spoken sentences. No markdown, no lists, no code.",
       "- The answer below is the Bot's, about the question below and nothing else. Do not add facts, do not guess at what it meant, and do not answer the question yourself.",
       "- If the Bot could not finish, say so plainly and say what it said went wrong.",
-      minutes >= 2
-        ? `- This was asked about ${minutes} minutes ago, so open by placing it: name what it was about.`
-        : "- This was asked a moment ago, so the person still has it in mind; do not restate the whole question.",
+      "- Never say when the request was made, and do not restate the whole question: when the person needs placing, that is said before your sentence.",
     ].join("\n"),
     user: [
       `Bot: ${clip(result.botName, 60)}`,
@@ -357,19 +412,20 @@ export function renderVoiceDelegationPromptV1(
 }
 
 /**
- * The sentence to speak, composed by the model when it can be, and the plain
- * read-out when it cannot. Either way the person hears the Bot's own answer;
- * the model call only changes how naturally it lands.
+ * The composed sentence, or nothing when the model could not produce one.
+ *
+ * Nothing is returned rather than a plain read-out because only a composed
+ * sentence is worth keeping: a read-out is written for the moment it is
+ * spoken, so the caller renders it then, against the age it has then, and
+ * does not store it in place of a composition it never got.
  */
 export async function composeVoiceDelegationSpeechV1(
   host: Pick<VoiceAssistantHostV1, "chat">,
   result: VoiceDelegationResultV1,
-  now: Date,
   signal: AbortSignal,
-): Promise<string> {
-  const fallback = renderVoiceDelegationReadOutV1(result);
+): Promise<string | undefined> {
   try {
-    const prompt = renderVoiceDelegationPromptV1(result, now);
+    const prompt = renderVoiceDelegationPromptV1(result);
     const stream = await host.chat(
       {
         messages: [
@@ -388,9 +444,9 @@ export async function composeVoiceDelegationSpeechV1(
       if (event.type === "text") spoken += event.text;
       if (spoken.length > VOICE_ANSWER_MAX_CHARS_V1) break;
     }
-    return spoken.trim() || fallback;
+    return spoken.trim() || undefined;
   } catch {
-    return fallback;
+    return undefined;
   }
 }
 

@@ -153,7 +153,7 @@ export function createConnectFeature(
               }),
           },
           {
-            admissionCeiling: ["chat", "automation", "subagent"],
+            admissionCeiling: ["chat", "agent", "automation", "subagent"],
             subagentRoleCeiling: ["executor"],
           },
         ),

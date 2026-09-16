@@ -502,8 +502,24 @@ intent, consumes the daily model-turn allowance once, and caches its result
 for playback retries. An admitted composition whose result was lost is
 abandoned rather than paid for again; a composition that has not answered
 within eight seconds is dropped and a correlated plain read-out supplies the
-fallback. The answer remains `settled` until the correct client playback
-acknowledgment changes it to `spoken`.
+fallback. Only a composed sentence is cached: a read-out is written for the
+moment it is spoken, so a dropped composition stores nothing and the next
+read-out is written again against the age it has then. The answer remains
+`settled` until the correct client playback acknowledgment changes it to
+`spoken`. A sentence is composed once but may be spoken much later —
+composing and speaking are separate moments and either can be retried — so
+the composer is told never to say when the request was made.
+Placing is one mechanism, decided at speak time on either of two conditions:
+`voiceAgePlacedV1` holds for the age right then, or the answer is being heard
+on a call other than the one the question was asked on. On either, every
+read-out (cached, freshly composed, or the plain fallback) is preceded by a
+plain lead-in naming the request and its age — "Earlier, about an hour ago,
+you asked Bob about the weather." The lead-in is not recorded with the sentence,
+so a later replay says the age it has then. The prompt's `<answers>` block
+carries each unheard answer under its request and age with the instruction
+that it is read out separately and is never the answer to what is being asked
+now. Without both, an answer that settled after one call ended was heard at
+the start of the next as if it answered the question just asked.
 
 Conversation context is bounded and **call-scoped**: the prompt carries the
 newest 12 messages of _this call_, built from the ledger's own `turn:` records
@@ -851,9 +867,13 @@ matters.
 
 **A Bot answering a voice request.** The Turn is admitted with a `voice`
 origin and gets `reply_to_request`, which is the one answer the call is owed:
-it goes back to the voice object, mints no message and wakes no device. The
-prompt says to say the answer once and not to write it, or a version of it,
-into the conversation as well; `send_to_user` on such a Turn is for a brief
+it goes back to the voice object, mints no message and wakes no device. It is
+an `agent` Turn, the same kind a Bot-to-Bot question runs as, and which tools
+an `agent` Turn admits is the kernel's rule, in `docs/architecture.md` §4
+(tool exposure). Before that admission existed a Bot on a call was refused its
+own apps and told the caller the app had been disconnected.
+The prompt says to say the answer once and not to write it, or a version of
+it, into the conversation as well; `send_to_user` on such a Turn is for a brief
 progress note on work longer than a minute and for material that cannot be
 spoken (a link, a table, code). A send the Bot makes anyway still lands in
 the thread and counts as unread, but carries `notify: false`

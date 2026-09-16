@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+  composeVoiceDelegationSpeechV1,
+  describeVoiceAgeV1,
   parseChatCompletionStreamV1,
+  renderVoiceDelegationLeadInV1,
+  renderVoiceDelegationPromptV1,
+  renderVoiceDelegationReadOutV1,
   renderVoiceSystemPromptV1,
   runVoiceTurnV1,
   VOICE_ANSWER_MAX_CHARS_V1,
@@ -703,7 +708,14 @@ describe("the system prompt", () => {
         },
       ],
       memory: { user: tier(facts), logDays: 30 },
-      unspoken: [{ botName: "Remy", text: "Your week is planned." }],
+      unspoken: [
+        {
+          botName: "Remy",
+          question: "plan my week",
+          text: "Your week is planned.",
+          askedAt: new Date(now.getTime() - 3 * 60_000),
+        },
+      ],
       now,
     });
     expect(prompt).toContain("- remy: Remy &lt;x&gt; — planner (working)");
@@ -712,8 +724,115 @@ describe("the system prompt", () => {
     expect(prompt.match(/Recent \d+/g)).toHaveLength(
       VOICE_PROMPT_MAX_LOG_FACTS_V1,
     );
-    expect(prompt).toContain("Your week is planned.");
+    // An unheard answer is placed under its own request and age, and the
+    // assistant is told it is read out separately: on the call where this
+    // went wrong, "mention them first" had the assistant answer a new question
+    // with an hour-old answer to a different one.
+    expect(prompt).toContain(
+      '- Remy, asked 3 minutes ago about "plan my week": Your week is planned.',
+    );
+    expect(prompt).toContain(
+      "never present one as the answer to what the person asks now",
+    );
+    expect(prompt).not.toContain("Mention them first");
     expect(prompt).toContain("2026-09-10");
+  });
+
+  test("an answer heard on a later call is placed by its request and its age", () => {
+    const askedAt = new Date("2026-09-16T12:18:00.000Z");
+    const result = { botName: "Bob", question: "the weather today", askedAt };
+    expect(
+      renderVoiceDelegationLeadInV1(
+        result,
+        new Date("2026-09-16T13:32:00.000Z"),
+      ),
+    ).toBe(
+      "Earlier, about an hour ago, you asked Bob about the weather today. ",
+    );
+    expect(
+      renderVoiceDelegationLeadInV1(
+        result,
+        new Date("2026-09-16T12:23:00.000Z"),
+      ),
+    ).toBe("Earlier, 5 minutes ago, you asked Bob about the weather today. ");
+
+    const at = (minutes: number) =>
+      new Date(askedAt.getTime() + minutes * 60_000);
+    expect(describeVoiceAgeV1(askedAt, at(0))).toBe("a moment ago");
+    expect(describeVoiceAgeV1(askedAt, at(1))).toBe("a moment ago");
+    expect(describeVoiceAgeV1(askedAt, at(2))).toBe("2 minutes ago");
+    expect(describeVoiceAgeV1(askedAt, at(59))).toBe("59 minutes ago");
+    expect(describeVoiceAgeV1(askedAt, at(80))).toBe("about an hour ago");
+    expect(describeVoiceAgeV1(askedAt, at(23 * 60))).toBe("about 23 hours ago");
+    // A clock that runs behind the ledger is not a negative age.
+    expect(describeVoiceAgeV1(askedAt, at(-5))).toBe("a moment ago");
+
+    // Placing is the lead-in's job alone: the composer is never told an age,
+    // so a sentence composed once and spoken an hour later cannot contradict
+    // the lead-in spoken in front of it.
+    const prompt = renderVoiceDelegationPromptV1({
+      ...result,
+      answer: "Sunny.",
+    });
+    expect(prompt.system).not.toContain("ago");
+    expect(prompt.system).toContain(
+      "Never say when the request was made, and do not restate the whole question",
+    );
+
+    // The plain read-out drops the question once the lead-in has said it.
+    const answered = { ...result, answer: "Sunny." };
+    expect(renderVoiceDelegationReadOutV1(answered)).toBe(
+      "Bob answered about the weather today: Sunny.",
+    );
+    expect(renderVoiceDelegationReadOutV1(answered, { placed: true })).toBe(
+      "Bob answered: Sunny.",
+    );
+    expect(
+      renderVoiceDelegationReadOutV1(
+        { ...result, failure: "it stopped" },
+        { placed: true },
+      ),
+    ).toBe("Bob could not finish: it stopped.");
+    expect(
+      renderVoiceDelegationReadOutV1({ ...result, failure: "it stopped" }),
+    ).toBe("Bob could not finish the weather today: it stopped.");
+  });
+
+  test("a composition the model does not produce is nothing, not a read-out", async () => {
+    const result = {
+      botName: "Bob",
+      question: "the weather today",
+      askedAt: new Date("2026-09-16T12:18:00.000Z"),
+      answer: "Sunny.",
+    };
+    const signal = new AbortController().signal;
+    const composed = await composeVoiceDelegationSpeechV1(
+      host([() => [text("Bob says it is sunny.")]]),
+      result,
+      signal,
+    );
+    expect(composed).toBe("Bob says it is sunny.");
+    // Nothing composed means nothing to keep: the caller speaks a read-out
+    // written for the moment it speaks, so a stored sentence can never carry
+    // a restatement of the question behind a lead-in that already said it.
+    expect(
+      await composeVoiceDelegationSpeechV1(
+        host([], {
+          chat: async () => {
+            throw new Error("gateway down");
+          },
+        }),
+        result,
+        signal,
+      ),
+    ).toBeUndefined();
+    expect(
+      await composeVoiceDelegationSpeechV1(
+        host([() => [text("   ")]]),
+        result,
+        signal,
+      ),
+    ).toBeUndefined();
   });
 
   test("says when memory could not be read rather than pretending it is empty", () => {
