@@ -929,7 +929,7 @@ function moment(at: string, stamp: VoiceMemoryStampV1): string {
 export function renderVoiceMemoryInstructionV1(input: {
   turns: readonly VoiceMemorySourceTurnV1[];
   record: VoiceMemoryRecordV1;
-  progress: { from: number; total: number };
+  progress: { from: number; to: number; total: number };
 }): string {
   const lines = [
     "[end of conversation]",
@@ -998,11 +998,11 @@ export function renderVoiceMemoryInstructionV1(input: {
       `- ${turn.id} [${moment(turn.at, { sequence: turn.sequence, turn: turn.ordinal })}]: ${clip(turn.said, 160)}`,
     );
   }
-  if (input.progress.total > input.turns.length) {
+  if (input.progress.from > 0 || input.progress.to < input.progress.total) {
     lines.push(
       `(This is part of a longer conversation: turns ${
         input.progress.from + 1
-      }–${input.progress.from + input.turns.length} of ${
+      }–${input.progress.to} of ${
         input.progress.total
       }. The rest is read separately; record only what these turns hold.)`,
     );
@@ -1024,7 +1024,7 @@ export function renderVoiceMemoryRequestMessagesV1(input: {
   system?: string;
   turns: readonly VoiceMemorySourceTurnV1[];
   record: VoiceMemoryRecordV1;
-  progress: { from: number; total: number };
+  progress: { from: number; to: number; total: number };
 }): { role: "system" | "user" | "assistant"; content: string }[] {
   const messages: { role: "system" | "user" | "assistant"; content: string }[] =
     [];

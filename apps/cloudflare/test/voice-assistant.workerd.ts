@@ -1555,8 +1555,15 @@ describe("the voice session object", () => {
           String(f.text).startsWith("Workerd Bot"),
       ),
     ).toBe(false);
+    // One answer, one event turn: the delegation is marked spoken as soon as
+    // the turn is admitted, so nothing is announced a second time.
+    const events = Object.values(await stub.probeStorage("voice:turn:")).filter(
+      (record) => (record as VoiceTurnRecordV1).event?.kind === "bot-answer",
+    );
+    expect(events).toHaveLength(1);
     // The call still knows the Bot answered: a later turn asking about it
-    // carries the event message in its history, so nobody is asked twice.
+    // carries the event message once in its history, so nobody is asked twice
+    // and no copy crowds out the real conversation.
     expect(await stub.probeUtterance("what did Bob say?")).toBe(true);
     await opened.waitFor(
       (f) =>
@@ -1566,12 +1573,12 @@ describe("the voice session object", () => {
     );
     const messages = (await stub.probeChatMessages()).at(-1)!;
     expect(
-      messages.some(
+      messages.filter(
         (message) =>
           message.role === "user" &&
           message.content.startsWith(VOICE_BOT_ANSWER_MARKER_V1),
       ),
-    ).toBe(true);
+    ).toHaveLength(1);
     opened.socket.close();
   });
 

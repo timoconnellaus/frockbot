@@ -507,14 +507,18 @@ asked earlier in this conversation about "can you ask Bob what the weather
 is?", has answered, in its own words: …" — so the assistant can say "about the
 weather" rather than recite its own paraphrase. The Bot's words are quoted as
 data, said so in the message itself and in the system prompt, and the event
-turn runs with no tools at all, so a Bot's answer can reach nothing durable.
-The system prompt says what such a message is and that saying nothing is a
+turn itself runs with no tools at all. The message is still part of this
+call's history, so the person's later turns — which do carry the tools — see
+it; the quoted-data marking, not the missing tools, is what keeps a Bot's
+words from being read as instructions. The system prompt says what such a message is and that saying nothing is a
 choice it may make. No bridge fills the
 silence, because nobody asked a question just now. What it says is spoken
 once it is whole; a person who starts talking meanwhile aborts it and their
-turn takes the floor. The delegation is marked `spoken` the moment the turn
-is admitted — told once, whatever is then said — and the turn record keeps
-what was said, or that nothing was. An answer with no call to be told on
+turn takes the floor. The delegation is marked `spoken` the moment the turn is
+admitted — told once, whatever is then said, and never re-announced, so an
+aborted answer is the one and only event turn for that answer and its message
+stays once in the history — and the turn record keeps what was said, or that
+nothing was. An answer with no call to be told on
 (the call ended, or the day's turns are spent) is dropped: `cancelled` in the
 ledger, on record in the Bot's own conversation. Nothing is composed ahead of
 time, cached, or acknowledged by the phone: the old read-out queue, its

@@ -937,7 +937,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       ...(chunk.job.system ? { system: chunk.job.system } : {}),
       turns: chunk.turns,
       record: await this.memory().read(),
-      progress: { from: chunk.from, total: chunk.total },
+      progress: { from: chunk.from, to: chunk.to, total: chunk.total },
     });
     const abort = new AbortController();
     const deadline = setTimeout(() => abort.abort(), MEMORY_UPDATE_DEADLINE_MS);
@@ -2324,12 +2324,6 @@ export class VoiceAssistant extends VoiceAgentBase<
         ...(delegation.answer ? { answer: delegation.answer } : {}),
         ...(delegation.failure ? { failure: delegation.failure } : {}),
       });
-      if (controller.signal.aborted) {
-        // The person took the floor while the request was being read. Nothing
-        // has been admitted or marked, so the answer simply waits its turn.
-        await this.scheduleAnnounce(delegation.runId);
-        return;
-      }
       const admitted = await ledger.admitTurn({
         connectionId: connection.id,
         transcript,
@@ -2356,16 +2350,10 @@ export class VoiceAssistant extends VoiceAgentBase<
         return;
       }
       const turnId = admitted.turn.turnId;
-      if (controller.signal.aborted) {
-        // Aborted before the delegation was marked: the turn is admitted, so it
-        // is settled here rather than left open for `recover`, and the answer is
-        // still owed — it waits for the call to be quiet again.
-        await ledger.settleTurn(turnId, { failure: "aborted" });
-        await this.scheduleAnnounce(delegation.runId);
-        return;
-      }
       // Told once: the event turn is durable before the model is asked, so an
       // eviction in between leaves a turn the history shows and no second one.
+      // The mark comes before any abort check, so a person who takes the floor
+      // in this window leaves one event turn and never a second admission.
       if (
         !(await ledger.markDelegationSpoken(
           delegation.runId,
