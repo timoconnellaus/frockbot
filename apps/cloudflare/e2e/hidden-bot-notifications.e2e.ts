@@ -183,8 +183,11 @@ test.describe("a hide whose answer never arrives", () => {
     });
     await page.route("**/api/bots/*/settings", async (route) => {
       if (route.request().method() !== "POST") return route.fallback();
-      await commitAndLoseTheAnswer(route);
-      served();
+      try {
+        await commitAndLoseTheAnswer(route);
+      } finally {
+        served();
+      }
     });
     await hidden.click();
     await page
