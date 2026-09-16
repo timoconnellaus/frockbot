@@ -430,8 +430,6 @@ export class ToolRegistry implements ToolExecution {
       idempotent: true,
       execute: (input, context) => this.discover(input, context),
     });
-    // Successful calls are rewritten to the inner definition during prepare;
-    // this body exists only to keep the registered definition total.
     // Registered so the catalog offers it and nothing else may claim the name.
     // A batch is never dispatched as a tool: the loop expands it into the
     // occurrences it declares and runs each of them through this registry, so
@@ -445,6 +443,8 @@ export class ToolRegistry implements ToolExecution {
           isError: true,
         }),
     });
+    // Successful calls are rewritten to the inner definition during prepare;
+    // this body exists only to keep the registered definition total.
     this.installMetaTool({
       ...CALL_DYNAMIC_TOOL_SCHEMA,
       validate: validCallDynamicToolInput,
