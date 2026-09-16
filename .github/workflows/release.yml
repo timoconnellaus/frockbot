@@ -349,7 +349,26 @@ jobs:
           git clone --quiet --depth 1 --branch "v$version" \
             https://github.com/shorebirdtech/shorebird.git "$RUNNER_TEMP/shorebird"
           echo "$RUNNER_TEMP/shorebird/bin" >> "$GITHUB_PATH"
+          # Bootstraps the bundled Flutter into `bin/cache` as a side effect,
+          # which the next lines reach into.
           "$RUNNER_TEMP/shorebird/bin/shorebird" --version
+
+          # A Gradle build can shell out to `dart`: `rive_native`'s
+          # `runRiveNativeSetup` task fetches its prebuilt `.so` files with
+          # `sh -c "dart run rive_native:setup ..."`, and the CLI keeps its
+          # Flutter to itself, so `dart` is otherwise absent and the Android
+          # build dies with `sh: 1: dart: not found`. Put the CLI's own
+          # Flutter on `PATH` rather than installing a second one: the patch
+          # must be built with the tooling the release was qualified with,
+          # and this is that exact SDK.
+          revision="$(cat "$RUNNER_TEMP/shorebird/bin/internal/flutter.version")"
+          flutter_bin="$RUNNER_TEMP/shorebird/bin/cache/flutter/$revision/bin"
+          if [[ ! -x "$flutter_bin/dart" ]]; then
+            printf 'Shorebird bootstrapped no Flutter SDK at %s\n' "$flutter_bin" >&2
+            exit 1
+          fi
+          echo "$flutter_bin" >> "$GITHUB_PATH"
+          "$flutter_bin/dart" --version
 
       - name: Cut the patch to the staging track
         if: steps.change.outputs.changed == 'true'
