@@ -1,2 +1,11 @@
 #include "../../Flutter/Flutter-Release.xcconfig"
 #include "Warnings.xcconfig"
+
+// Rive Native is a static library whose C entry points Dart resolves by name
+// through `DynamicLibrary.process()` at runtime. Nothing in the executable
+// references them, so the `strip` that an archive (install) build runs with
+// the default "all" style removes them, and every Rive widget then throws
+// ("Failed to lookup symbol"). `flutter build` and `xcodebuild build` never
+// strip, which is why the defect only reached the notarized release
+// (v0.7.87). Keep global symbols.
+STRIP_STYLE = non-global
