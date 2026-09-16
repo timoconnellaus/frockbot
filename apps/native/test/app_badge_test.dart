@@ -660,6 +660,85 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
+    // Only the dual tier draws a drawer over the conversation. On a phone the
+    // panel is a page of its own, so `panelOpen` there is nothing but state
+    // carried across the change of width — and reading it as "covered"
+    // latched the same way one tier up: the person narrows the window onto a
+    // full-screen chat with nothing over it and the count keeps climbing.
+    testWidgets('and a panel flag carried onto a phone covers nothing', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('com.frockbot/badge'), (
+            call,
+          ) async {
+            calls.add(call);
+            return null;
+          });
+
+      final store = MemoryStore();
+      final fanOut = Completer<Object?>()
+        ..complete({
+          'schemaVersion': 1,
+          'unread': [
+            view('alpha', count: 2).toJson(),
+            view('beta', count: 3).toJson(),
+          ],
+        });
+      final api = _ShellApi(store, [
+        registration('alpha', 'Alpha'),
+        registration('beta', 'Beta'),
+      ], fanOut);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Opening Beta from the list is what puts its conversation up, which is
+      // the page the phone width then shows whole.
+      await tester.tap(identifiedBy(ShellIds.sidebarBot('beta')));
+      await tester.pumpAndSettle();
+      expect((calls.last.arguments as Map)['label'], '2');
+
+      // The drawer, which does cover the conversation at this width.
+      await tester.tap(identifiedBy(ShellIds.botPanelToggle));
+      await tester.pumpAndSettle();
+      expect((calls.last.arguments as Map)['label'], '5');
+
+      // Narrowing to a phone: the drawer is not drawn at all here, the
+      // conversation is the whole screen, and the flag is only left over.
+      tester.view.physicalSize = const Size(600, 900);
+      await tester.pumpAndSettle();
+      expect(identifiedBy(ShellIds.conversation).hitTestable(), findsOneWidget);
+      expect(identifiedBy(ShellIds.rightPanel), findsNothing);
+      expect((calls.last.arguments as Map)['label'], '2');
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      sessions.clear();
+      links.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+    });
+
     testWidgets('and keeping it quiet while the directory is unknown', (
       tester,
     ) async {

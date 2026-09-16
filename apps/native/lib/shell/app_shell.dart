@@ -322,20 +322,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// Whether the panel is over the conversation rather than beside it.
   ///
+  /// The dual tier is the only one that draws anything over the conversation.
   /// At the widest tier the right panel and the run view are a third column:
   /// the conversation keeps its own, so a person with Work open is reading the
-  /// thread as plainly as one with nothing open. Narrower, the same panel is a
-  /// drawer over the conversation, and then the chat is covered.
+  /// thread as plainly as one with nothing open. On a phone the panel and a
+  /// run are pushed pages, which the route check answers, and `panelOpen`
+  /// there is only state carried across a change of width. In between the
+  /// same panel is a drawer over the conversation, and `panelOpen` is what
+  /// draws it — so it is the whole question, asked at that one tier.
   ///
-  /// The drawer is the one thing drawn over the conversation below the widest
-  /// tier, and `panelOpen` is what draws it, so it is the whole question. A
-  /// run is not a second one: at the widest tier it is the third column, at
-  /// the dual tier it reaches the screen only through that same drawer, and on
-  /// a phone it is a pushed page the route check already answers. Read on its
-  /// own it latched — `openRun` survives the drawer being switched off — and
-  /// took the read receipt with it for the rest of the session.
+  /// A run is not a second question: at the widest tier it is the third
+  /// column, at the dual tier it reaches the screen only through that same
+  /// drawer, and on a phone it is a pushed page. Read on its own it latched
+  /// — `openRun` survives the drawer being switched off — and took the read
+  /// receipt with it for the rest of the session.
   bool get _conversationCovered =>
-      shellTierForWidth(MediaQuery.sizeOf(context).width) != ShellTier.triple &&
+      shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.dual &&
       panelOpen;
 
   void _readLatest(String botId, String? messageId) {

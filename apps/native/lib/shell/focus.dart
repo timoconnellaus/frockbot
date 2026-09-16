@@ -12,10 +12,10 @@
 ///
 /// "Covering" is a question about the tier, not about a flag. At the widest
 /// tier the right panel and the run view are a third column beside the
-/// conversation, which stays in plain sight; narrower, the same panel is the
-/// drawer over it, and below that a pushed page the route check answers. The
-/// drawer being open is the whole of it: a run reaches the screen through the
-/// column, that drawer or a page, never on its own.
+/// conversation, which stays in plain sight; on a phone they are pushed pages
+/// the route check answers. Only the tier in between draws a drawer over the
+/// conversation, and that drawer being open is the whole of it: a run reaches
+/// the screen through the column, that drawer or a page, never on its own.
 ///
 /// The Bot Durable Object counts every settled Turn, because it cannot know
 /// which chat is on screen; the read receipt that clears the count is a round
