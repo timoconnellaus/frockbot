@@ -2384,16 +2384,6 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   /**
-   * The sentence that reads one answer back, bought at most once.
-   *
-   * Putting an answer into the assistant's own voice is a model call, so it
-   * follows the rule every model call here follows: durable intent and the
-   * day's meter first, the result recorded after, and never repeated for a
-   * call that was admitted and whose outcome is unknown. The plain read-out is
-   * the fallback in every refused case — the person is owed the answer, not a
-   * nicer phrasing of it, and it says the same thing the Bot said.
-   */
-  /**
    * The request an answer is placed under, in the person's own words.
    *
    * A delegation records the assistant's paraphrase to the Bot ("Tim is asking
@@ -2410,6 +2400,16 @@ export class VoiceAssistant extends VoiceAgentBase<
     return turn?.transcript.trim() || delegation.text;
   }
 
+  /**
+   * The sentence that reads one answer back, bought at most once.
+   *
+   * Putting an answer into the assistant's own voice is a model call, so it
+   * follows the rule every model call here follows: durable intent and the
+   * day's meter first, the result recorded after, and never repeated for a
+   * call that was admitted and whose outcome is unknown. The plain read-out is
+   * the fallback in every refused case — the person is owed the answer, not a
+   * nicer phrasing of it, and it says the same thing the Bot said.
+   */
   private async delegationSpeech(
     ledger: VoiceLedgerV1,
     delegation: VoiceDelegationRecordV1,
@@ -2942,8 +2942,13 @@ export class VoiceAssistant extends VoiceAgentBase<
       this.sessionMemoryContext(),
     ]);
     const ledger = this.ledger();
-    const questions = await Promise.all(
-      unspoken.map((delegation) => this.delegationQuestion(ledger, delegation)),
+    const placedUnspoken = await Promise.all(
+      unspoken.map(async (delegation) => ({
+        botName: delegation.botName,
+        question: await this.delegationQuestion(ledger, delegation),
+        text: delegation.answer ?? delegation.failure ?? "",
+        askedAt: new Date(delegation.admittedAt),
+      })),
     );
     return {
       bots,
@@ -2953,12 +2958,7 @@ export class VoiceAssistant extends VoiceAgentBase<
         ...(memory ? { user: memory } : {}),
         logDays: VOICE_ASSISTANT_MEMORY_LOG_DAYS,
       },
-      unspoken: unspoken.map((delegation, index) => ({
-        botName: delegation.botName,
-        question: questions[index] ?? delegation.text,
-        text: delegation.answer ?? delegation.failure ?? "",
-        askedAt: new Date(delegation.admittedAt),
-      })),
+      unspoken: placedUnspoken,
     };
   }
 }
