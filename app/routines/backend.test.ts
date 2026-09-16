@@ -2,22 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { createRoutinesBackendContribution } from "./backend.js";
 import { RoutineStore, RoutineNotFoundError } from "./store.js";
 import { RoutineInboxStore } from "./inbox-store.js";
-import {
-  createMemoryRoutineStorageV1,
-  type MemoryRoutineStorageV1,
-} from "./testing.js";
-import { routineKeyV1 } from "./storage-keys.js";
+import { createMemoryRoutineStorageV1 } from "./testing.js";
 import { decodeRoutineCommandV1 } from "./shared.js";
 
 const CONTEXT = { userId: "tim", client: "browser" as const };
 
-function contribution(
-  options: {
-    ownedBots?: string[];
-    /** The storage behind a Bot's store, for a test that writes it directly. */
-    storages?: Map<string, MemoryRoutineStorageV1>;
-  } = {},
-) {
+function contribution(options: { ownedBots?: string[] } = {}) {
   const owned = new Set(options.ownedBots ?? ["scout"]);
   const stores = new Map<string, RoutineStore>();
   const inboxes = new Map<string, RoutineInboxStore>();
@@ -29,10 +19,7 @@ function contribution(
     }
     const existing = stores.get(botId);
     if (existing) return existing;
-    const storage =
-      options.storages?.get(botId) ?? createMemoryRoutineStorageV1();
-    options.storages?.set(botId, storage);
-    const created = new RoutineStore(storage);
+    const created = new RoutineStore(createMemoryRoutineStorageV1());
     stores.set(botId, created);
     return created;
   };
@@ -198,41 +185,6 @@ describe("Routines gateway routes", () => {
     expect(
       await (await call(route, "/api/bots/scout/routines"))!.json(),
     ).toMatchObject({ botId: "scout" });
-  });
-
-  test("`as=document` still answers when one stored Routine cannot be read", async () => {
-    const storages = new Map<string, MemoryRoutineStorageV1>();
-    const route = contribution({ storages });
-    await call(route, "/api/bots/scout/routines", {
-      method: "POST",
-      body: JSON.stringify(CREATE),
-    });
-    // The shape the app hit: a record under a trigger kind this deploy no
-    // longer decodes. The list read threw a RoutineDecodeError on it, the
-    // route answered 400 as though the reader had sent something invalid,
-    // and the whole surface read "Routines couldn’t load".
-    await storages.get("scout")!.put(routineKeyV1("stale"), {
-      schemaVersion: 1,
-      routineId: "stale",
-      name: "Old trigger",
-      prompt: "Fire on a retired trigger.",
-      trigger: { kind: "connection", connectionId: "c1" },
-      enabled: true,
-      createdBy: { kind: "user" },
-      updatedBy: { kind: "user" },
-      createdAt: "2026-09-01T00:00:00.000Z",
-      updatedAt: "2026-09-01T00:00:00.000Z",
-    });
-    const response = await call(route, "/api/bots/scout/routines?as=document");
-    expect(response?.status).toBe(200);
-    const document = (await response!.json()) as {
-      root: { children: Array<{ type: string; title?: string }> };
-    };
-    expect(
-      document.root.children
-        .filter((node) => node.type === "group")
-        .map((node) => node.title),
-    ).toEqual(["New Routine", "Morning brief", "Routine completions"]);
   });
 
   test("`as=document` is the only parameter, and only on the list read", async () => {

@@ -1094,7 +1094,11 @@
                 "type": "group",
                 "orientation": "column",
                 "children": [
-                  { "type": "text", "text": "Inbound leads", "style": "status" },
+                  {
+                    "type": "text",
+                    "text": "Inbound leads",
+                    "style": "status"
+                  },
                   { "type": "text", "text": "Lead triaged." }
                 ]
               },

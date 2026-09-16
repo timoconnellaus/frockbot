@@ -186,17 +186,20 @@ void main() {
   });
 
   group('orderSidebarBots', () {
-    test('draws numbered Bots first, lowest first, then the rest as they came', () {
-      final ordered = orderSidebarBots(
-        ['a', 'b', 'c', 'd'],
-        (id) => id,
-        const {
-          'b': SidebarProfile(sidebarOrder: 10),
-          'd': SidebarProfile(sidebarOrder: -5),
-        },
-      );
-      expect(ordered, ['d', 'b', 'a', 'c']);
-    });
+    test(
+      'draws numbered Bots first, lowest first, then the rest as they came',
+      () {
+        final ordered = orderSidebarBots(
+          ['a', 'b', 'c', 'd'],
+          (id) => id,
+          const {
+            'b': SidebarProfile(sidebarOrder: 10),
+            'd': SidebarProfile(sidebarOrder: -5),
+          },
+        );
+        expect(ordered, ['d', 'b', 'a', 'c']);
+      },
+    );
 
     test('is stable across equal numbers', () {
       final ordered = orderSidebarBots(
@@ -212,15 +215,23 @@ void main() {
     });
   });
 
-  test('a profile patch is drawn over the profile the way the authority reads it', () {
-    const before = SidebarProfile(name: 'Scout', label: 'Work', sidebarOrder: 3);
-    expect(before.patched({'label': '', 'sidebarOrder': 9}).label, '');
-    expect(before.patched({'label': '', 'sidebarOrder': 9}).sidebarOrder, 9);
-    expect(before.patched({'pinnedAt': 'x'}).sidebarOrder, 3);
-    expect(before.patched({'pinnedAt': 'x'}).name, 'Scout');
-    expect(
-      SidebarProfile.decode({'name': 'Scout', 'sidebarOrder': 4})?.sidebarOrder,
-      4,
-    );
-  });
+  test(
+    'a profile patch is drawn over the profile the way the authority reads it',
+    () {
+      const before = SidebarProfile(
+        name: 'Scout',
+        label: 'Work',
+        sidebarOrder: 3,
+      );
+      expect(before.patched({'label': '', 'sidebarOrder': 9}).label, '');
+      expect(before.patched({'label': '', 'sidebarOrder': 9}).sidebarOrder, 9);
+      expect(before.patched({'pinnedAt': 'x'}).sidebarOrder, 3);
+      expect(before.patched({'pinnedAt': 'x'}).name, 'Scout');
+      expect(
+        SidebarProfile.decode({'name': 'Scout', 'sidebarOrder': 4})
+            ?.sidebarOrder,
+        4,
+      );
+    },
+  );
 }

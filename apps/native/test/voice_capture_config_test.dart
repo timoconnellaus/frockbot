@@ -19,23 +19,26 @@ void main() {
       TargetPlatform.windows,
       TargetPlatform.linux,
     ]) {
-      test('opens a plain microphone on $platform, for a call and for dictation', () {
-        for (final profile in VoiceCaptureProfile.values) {
-          final config = voiceRecordConfigV1(
-            profile: profile,
-            platform: platform,
-            sampleRate: 16000,
-            web: false,
-            streamBufferSize: 1280,
-          );
-          expect(config.echoCancel, isFalse, reason: '$profile echoCancel');
-          expect(config.noiseSuppress, isFalse, reason: '$profile noise');
-          expect(config.autoGain, isFalse, reason: '$profile gain');
-          expect(config.encoder, AudioEncoder.pcm16bits);
-          expect(config.numChannels, 1);
-          expect(config.sampleRate, 16000);
-        }
-      });
+      test(
+        'opens a plain microphone on $platform, for a call and for dictation',
+        () {
+          for (final profile in VoiceCaptureProfile.values) {
+            final config = voiceRecordConfigV1(
+              profile: profile,
+              platform: platform,
+              sampleRate: 16000,
+              web: false,
+              streamBufferSize: 1280,
+            );
+            expect(config.echoCancel, isFalse, reason: '$profile echoCancel');
+            expect(config.noiseSuppress, isFalse, reason: '$profile noise');
+            expect(config.autoGain, isFalse, reason: '$profile gain');
+            expect(config.encoder, AudioEncoder.pcm16bits);
+            expect(config.numChannels, 1);
+            expect(config.sampleRate, 16000);
+          }
+        },
+      );
     }
 
     for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
@@ -75,7 +78,10 @@ void main() {
       );
       expect(config.audioInterruption, AudioInterruptionMode.none);
       expect(config.streamBufferSize, 1920);
-      expect(config.androidConfig.audioManagerMode, AudioManagerMode.modeNormal);
+      expect(
+        config.androidConfig.audioManagerMode,
+        AudioManagerMode.modeNormal,
+      );
       expect(config.androidConfig.manageBluetooth, isFalse);
       expect(
         config.androidConfig.audioSource,

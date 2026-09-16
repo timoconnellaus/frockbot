@@ -308,7 +308,8 @@ void main() {
         builder: (context) => TextButton(
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) => SettingsPage(api: api, store: store, userId: 'tim'),
+              builder: (_) =>
+                  SettingsPage(api: api, store: store, userId: 'tim'),
             ),
           ),
           child: const Text('open'),
@@ -320,7 +321,6 @@ void main() {
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final store = MemoryStore();
       final api = SettingsApi(store, (path, body) async => document());
       await tester.pumpWidget(app(store, api));
@@ -338,11 +338,11 @@ void main() {
           greaterThanOrEqualTo(desktopTitleBarInset),
         );
       }
+      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets('adds nothing on a phone', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final store = MemoryStore();
       final api = SettingsApi(store, (path, body) async => document());
       await tester.pumpWidget(app(store, api));
@@ -352,6 +352,7 @@ void main() {
         tester.getTopLeft(find.byType(BackButton)).dy,
         lessThan(desktopTitleBarInset),
       );
+      debugDefaultTargetPlatformOverride = null;
     });
   });
 

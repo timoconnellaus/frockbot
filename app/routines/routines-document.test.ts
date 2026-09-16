@@ -100,7 +100,9 @@ test("the projection is the document the shared fixture pins for the app", () =>
       editing: morning,
     }),
   );
-  expect({ ...document, revision: 0 }).toEqual(fixture?.value);
+  expect({ ...document, revision: 0 } as unknown).toEqual(
+    fixture?.value as unknown,
+  );
 });
 
 test("a Routine says what it fires on and when it last did and next will", () => {

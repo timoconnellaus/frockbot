@@ -54,7 +54,6 @@ void main() {
     'on a Mac the strip spans the window, moves it on a drag and zooms it on a double-click',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final calls = listen(tester);
       var refreshed = 0;
       await tester.pumpWidget(page(() => refreshed++));
@@ -101,12 +100,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(refreshed, 1);
       expect(calls, ['zoom', 'startDrag']);
+      debugDefaultTargetPlatformOverride = null;
     },
   );
 
   testWidgets('a phone has no strip and no inset', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final calls = listen(tester);
     var refreshed = 0;
     await tester.pumpWidget(page(() => refreshed++));
@@ -124,5 +123,6 @@ void main() {
     await tester.tap(find.byTooltip('Refresh settings'));
     await tester.pump();
     expect(refreshed, 1);
+    debugDefaultTargetPlatformOverride = null;
   });
 }

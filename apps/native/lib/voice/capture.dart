@@ -120,10 +120,12 @@ int pcmFrameBytes(int sampleRate, Duration frame) =>
 bool voiceCaptureProcessingV1(TargetPlatform platform, {bool web = kIsWeb}) =>
     web ||
     switch (platform) {
-      TargetPlatform.android || TargetPlatform.iOS || TargetPlatform.fuchsia =>
-        true,
-      TargetPlatform.macOS || TargetPlatform.windows || TargetPlatform.linux =>
-        false,
+      TargetPlatform.android ||
+      TargetPlatform.iOS ||
+      TargetPlatform.fuchsia => true,
+      TargetPlatform.macOS ||
+      TargetPlatform.windows ||
+      TargetPlatform.linux => false,
     };
 
 /// The recorder's configuration for one [profile] on one [platform].

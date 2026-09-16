@@ -561,7 +561,6 @@ void main() {
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final drops = <SidebarDrop>[];
       await tester.pumpWidget(
         host(
@@ -603,13 +602,13 @@ void main() {
         byIdentifier(ShellIds.sidebarBot('rosemary')),
       );
       expect(settled.top - scout.bottom, 4);
+      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets('dropping a row on a heading moves it into that label', (
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final drops = <SidebarDrop>[];
       await tester.pumpWidget(
         host(
@@ -646,13 +645,13 @@ void main() {
           group: ['scout'],
         ),
       ]);
+      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets(
       'a finger holds a row to lift it, and let go in place opens its actions',
       (tester) async {
         debugDefaultTargetPlatformOverride = TargetPlatform.android;
-        addTearDown(() => debugDefaultTargetPlatformOverride = null);
         final drops = <SidebarDrop>[];
         final opened = <String>[];
         await tester.pumpWidget(
@@ -691,6 +690,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(opened, ['rosemary']);
         expect(drops, hasLength(1));
+        debugDefaultTargetPlatformOverride = null;
       },
     );
 
@@ -698,7 +698,6 @@ void main() {
       'on a Mac the strip is one inset at a desk and the page inset in one column',
       (tester) async {
         debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-        addTearDown(() => debugDefaultTargetPlatformOverride = null);
         Widget layout() => MaterialApp(
           theme: FrockTheme.theme(Brightness.dark),
           builder: (context, child) => DesktopTitleBarPadding(child: child!),
@@ -707,8 +706,14 @@ void main() {
             onDismiss: () {},
             conversationOpen: true,
             onBack: () {},
-            sidebar: const Text('bots'),
-            conversation: const Text('thread'),
+            sidebar: const Align(
+              alignment: Alignment.topLeft,
+              child: Text('bots'),
+            ),
+            conversation: const Align(
+              alignment: Alignment.topLeft,
+              child: Text('thread'),
+            ),
             rightPanel: null,
           ),
         );
@@ -721,14 +726,8 @@ void main() {
         await tester.pumpAndSettle();
         // Every column starts under the strip, once, and the strip itself
         // runs the whole width of the window above them.
-        expect(
-          tester.getTopLeft(byIdentifier(ShellIds.sidebar)).dy,
-          desktopTitleBarInset,
-        );
-        expect(
-          tester.getTopLeft(byIdentifier(ShellIds.conversation)).dy,
-          desktopTitleBarInset,
-        );
+        expect(tester.getTopLeft(find.text('bots')).dy, desktopTitleBarInset);
+        expect(tester.getTopLeft(find.text('thread')).dy, desktopTitleBarInset);
         expect(
           tester.getRect(find.byType(DesktopTitleStrip)),
           const Rect.fromLTWH(0, 0, 1440, desktopTitleBarInset),
@@ -738,10 +737,8 @@ void main() {
         await tester.pumpWidget(layout());
         await tester.pumpAndSettle();
         // One column: the conversation's page is under the traffic lights.
-        expect(
-          tester.getTopLeft(byIdentifier(ShellIds.conversation)).dy,
-          desktopTitleBarInset,
-        );
+        expect(tester.getTopLeft(find.text('thread')).dy, desktopTitleBarInset);
+        debugDefaultTargetPlatformOverride = null;
       },
     );
 
@@ -749,7 +746,6 @@ void main() {
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final drops = <SidebarDrop>[];
       await tester.pumpWidget(
         host(
@@ -804,6 +800,7 @@ void main() {
       await gesture.up();
       await tester.pumpAndSettle();
       expect(drops, isEmpty);
+      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets('carries a stable identifier per Bot and per group', (

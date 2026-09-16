@@ -712,7 +712,8 @@ class ShellSidebar extends StatelessWidget {
             onHeldInPlace: actions == null ? null : () => actions(),
             ghost: _DragGhost(
               name: _name(bot),
-              background: bot.sheep.background,
+              characterId: bot.avatar.characterId,
+              primary: bot.avatar.primary,
             ),
             child: row,
           );
@@ -777,8 +778,13 @@ const double _dropLineHeight = 2;
 /// the row so the list beneath it stays legible.
 class _DragGhost extends StatelessWidget {
   final String name;
-  final String background;
-  const _DragGhost({required this.name, required this.background});
+  final String characterId;
+  final String primary;
+  const _DragGhost({
+    required this.name,
+    required this.characterId,
+    required this.primary,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -797,7 +803,12 @@ class _DragGhost extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SheepAvatar(size: 28, background: background),
+              CharacterAvatar(
+                size: 28,
+                characterId: characterId,
+                primary: primary,
+                motion: CharacterMotion.quiet,
+              ),
               const SizedBox(width: 10),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 180),
