@@ -74,10 +74,15 @@ async function journalIntentV1(
   });
   await session.flush();
   if (signal.aborted) {
-    await settleV1(runtime, occurrence, {
-      content: "Cancelled before tool execution started.",
-      isError: true,
-    });
+    await settleV1(
+      runtime,
+      occurrence,
+      {
+        content: "Cancelled before tool execution started.",
+        isError: true,
+      },
+      "interrupted",
+    );
     signal.throwIfAborted();
   }
 }
@@ -86,7 +91,7 @@ async function settleV1(
   runtime: LoopRuntime,
   occurrence: ToolCallOccurrence,
   result: ToolExecutionResult,
-  status: "completed" | "interrupted" = "completed",
+  status: "completed" | "interrupted",
 ): Promise<void> {
   const { turn, step, occurrenceId, call } = occurrence;
   runtime.session.append({
@@ -178,7 +183,7 @@ async function runOccurrenceV1(
       };
     }
   }
-  await settleV1(runtime, occurrence, result);
+  await settleV1(runtime, occurrence, result, "completed");
   return result;
 }
 
@@ -197,7 +202,7 @@ async function refuseSubCallV1(
   const existing = journalEntryV1(runtime, occurrence.occurrenceId);
   if (existing?.result) return undefined;
   await journalIntentV1(runtime, occurrence, existing, signal);
-  await settleV1(runtime, occurrence, { content, isError: true });
+  await settleV1(runtime, occurrence, { content, isError: true }, "completed");
   return undefined;
 }
 
@@ -256,7 +261,7 @@ async function runBatchV1(
       content: `batch was refused: ${decoded}`,
       isError: true,
     };
-    await settleV1(runtime, occurrence, refusal);
+    await settleV1(runtime, occurrence, refusal, "completed");
     return refusal;
   }
   const subs = batchSubOccurrencesV1(occurrence);
@@ -354,6 +359,6 @@ async function runBatchV1(
       : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
   };
-  await settleV1(runtime, occurrence, result);
+  await settleV1(runtime, occurrence, result, "completed");
   return result;
 }

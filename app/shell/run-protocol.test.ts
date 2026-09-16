@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type SessionEvent } from "@frockbot/core/contracts";
 import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
+import { CONVERSATION_POSITIONED_EVENTS_V1 } from "@frockbot/app/testkit";
 import type { StoredRun } from "./backend-contracts.js";
 import { planBotRunRecovery } from "./backend-recovery.js";
 import {
@@ -90,6 +91,57 @@ function storedRun(
 }
 
 describe("client run protocol v1", () => {
+  test("draws every conversation-positioned event as its own row, in log order", () => {
+    // What the enumeration the tool harness guards actually means: each of
+    // these takes a position in the conversation, so the order the log holds
+    // them in is the order a person reads them in.
+    const position = { turn: 1, step: 1, timestamp };
+    const events: SessionEvent[] = [
+      {
+        type: "send/to-user",
+        ...position,
+        seq: 0,
+        occurrenceId: "tool:1:1:0",
+        payload: { type: "text", text: "A bubble." },
+      },
+      {
+        type: "reply/to-caller",
+        ...position,
+        seq: 1,
+        occurrenceId: "tool:1:1:1",
+        caller: "voice",
+        text: "An answer.",
+      },
+      {
+        type: "wake/parent",
+        ...position,
+        seq: 2,
+        occurrenceId: "tool:1:1:2",
+        message: "A hand-off.",
+      },
+      {
+        type: "task/dispatched",
+        ...position,
+        seq: 3,
+        occurrenceId: "tool:1:1:3",
+        taskId: "tk-1",
+        taskType: "general",
+        description: "A dispatch.",
+        model: "test-model",
+        background: false,
+      },
+    ];
+    expect(
+      projectClientRunV1(storedRun(events))
+        .events.map((event) => event.type)
+        .filter((type) =>
+          (CONVERSATION_POSITIONED_EVENTS_V1 as readonly string[]).includes(
+            type,
+          ),
+        ),
+    ).toEqual([...CONVERSATION_POSITIONED_EVENTS_V1]);
+  });
+
   test("projects an agent Turn with its Bot origin marker", () => {
     const agent = {
       ...storedRun([]),

@@ -129,6 +129,16 @@ describe("projecting a settled run", () => {
     expect(await outcomes({ status: "interrupted", content: "" })).toBe(
       "interrupted",
     );
+    // A Stop that landed before the effect was dispatched. The text carries no
+    // word of refusal and the result is flagged an error, so `status` is the
+    // only thing standing between a cancelled effect and an `error` row.
+    expect(
+      await outcomes({
+        status: "interrupted",
+        isError: true,
+        content: "Cancelled before tool execution started.",
+      }),
+    ).toBe("interrupted");
     // No result at all is `unknown`, never `error`: the durable log does not
     // know how the effect ended, and inventing an answer is what the
     // reconciliation rule forbids.
