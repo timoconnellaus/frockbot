@@ -16,6 +16,7 @@ import {
   TOOL_ATTACHMENT_LIMIT_V1,
   type ToolAttachmentV1,
   type ToolDefinition,
+  validateSettledToolOccurrenceJournal,
 } from "@frockbot/core/contracts";
 import { LlmRegistry } from "@frockbot/core/models";
 import { SystemPromptRegistry } from "@frockbot/core/prompt";
@@ -560,8 +561,8 @@ describe("batch", () => {
   test("refuses a batch the run cannot admit, naming what is left", async () => {
     // Each call inside a batch takes its own durable admission, and a run's
     // record holds a bounded number of them. A batch that does not fit is
-    // refused whole, before anything is journalled, rather than overflowing
-    // the record partway through and failing the Turn on a decoder error.
+    // refused whole, rather than overflowing the record partway through and
+    // failing the Turn on a decoder error.
     const effects: string[] = [];
     const turn = await runTurn(
       [recorder("alpha", effects)],
@@ -582,12 +583,124 @@ describe("batch", () => {
       `${2 - BATCH_ADMISSION_RESERVE_V1} more tool call(s)`,
     );
     expect(result.content).toContain("3");
-    // Nothing was truncated to what fit, and no sub-call was journalled or
-    // ran: the envelope is the only row the refused batch leaves.
+    // Nothing was truncated to what fit and nothing ran.
     expect(effects).toEqual([]);
+    // The journal derives a step's occurrences from the assistant message, so
+    // every declared call is already an occurrence whatever dispatch chose to
+    // do. Refusing without settling them left the step — and every later Turn
+    // in the conversation — permanently invalid.
     expect(
       toolEvents(turn.events, "tool/call").map((event) => event.occurrenceId),
-    ).toEqual(["tool:1:1:0"]);
+    ).toEqual(["tool:1:1:0", "tool:1:1:0.0", "tool:1:1:0.1", "tool:1:1:0.2"]);
+    expect(
+      toolEvents(turn.events, "tool/result").map((event) => event.occurrenceId),
+    ).toEqual(["tool:1:1:0.0", "tool:1:1:0.1", "tool:1:1:0.2", "tool:1:1:0"]);
+    // Each declared call reads as asked for, not run, and why.
+    for (const index of [0, 1, 2]) {
+      const settled = turn.events.find(
+        (event) =>
+          event.type === "tool/result" &&
+          event.occurrenceId === `tool:1:1:0.${index}`,
+      );
+      expect(settled).toMatchObject({
+        isError: true,
+        content: expect.stringContaining(
+          `batch call ${index} was not run: this run can still take ${
+            2 - BATCH_ADMISSION_RESERVE_V1
+          } more tool call(s)`,
+        ),
+      });
+    }
+    // The Turn continued past the refusal, which it can only do over a journal
+    // that holds a settled pair for every occurrence it knows about.
+    expect(() =>
+      validateSettledToolOccurrenceJournal(turn.events),
+    ).not.toThrow();
+  });
+
+  test("runs a resumed batch whose calls the run already admitted", async () => {
+    // An admission is keyed by effect id and spent once, permanently. Charging
+    // the budget again on resume refused a batch for a budget its own earlier
+    // execution had consumed — and its effects had already reached the user,
+    // so the model would read that none of them landed and re-issue them.
+    const effects: string[] = [];
+    const timestamp = "2026-09-16T00:00:00.000Z";
+    const calls = [
+      { tool: "send_email", arguments: { to: "ada" } },
+      { tool: "send_email", arguments: { to: "bob" } },
+    ];
+    const interrupted = (
+      [
+        { type: "session/created", createdAt: timestamp },
+        { type: "turn/start", turn: 1 },
+        { type: "step/start", turn: 1, step: 1 },
+        {
+          type: "model/request",
+          turn: 1,
+          step: 1,
+          request: {
+            requestId: "batch-request",
+            provider: "batch-provider",
+            model: "test-model",
+            system: "",
+            messages: [],
+            tools: [],
+          },
+        },
+        {
+          type: "assistant/message",
+          turn: 1,
+          step: 1,
+          requestId: "batch-request",
+          text: "",
+          toolCalls: [
+            { id: "provider-call", name: BATCH_TOOL_NAME, input: { calls } },
+          ],
+        },
+        {
+          type: "tool/call",
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: BATCH_TOOL_NAME,
+          input: { calls },
+        },
+        {
+          type: "tool/call",
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.0",
+          name: "send_email",
+          input: { to: "ada" },
+        },
+        {
+          type: "tool/result",
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0.0",
+          name: "send_email",
+          content: "sent",
+          isError: false,
+          status: "completed",
+        },
+      ] as const
+    ).map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+
+    // Two declared calls, but the first already holds its admission and its
+    // result. Only the second still needs one, and one is what is left after
+    // the reservation.
+    const run = await runBatch([recorder("send_email", effects)], calls, {
+      resume: { batch: interrupted },
+      remainingEffectAdmissions: () =>
+        Promise.resolve(1 + BATCH_ADMISSION_RESERVE_V1),
+    });
+
+    expect(run.result.isError).toBe(false);
+    expect(run.report.results.map((entry) => entry.content)).toEqual([
+      "sent",
+      'send_email:{"to":"bob"}',
+    ]);
+    expect(effects).toEqual(["tool:1:1:0.1"]);
   });
 
   test("runs a batch that fits the remaining admissions less the reserve", async () => {

@@ -269,30 +269,52 @@ async function runBatchV1(
     await settleV1(runtime, occurrence, refusal, "completed");
     return refusal;
   }
+  const subs = batchSubOccurrencesV1(occurrence);
   // A batch spends one durable admission per call, and a run's record holds a
-  // bounded number of them. Asked for before anything is journalled or
-  // admitted, so a batch that cannot fit is refused whole — the envelope is
-  // the only row it leaves — rather than overflowing the record partway
-  // through and failing the Turn. The budget is not spent to the brim: the
-  // step that reads the batch's result needs an admission of its own, so
-  // `BATCH_ADMISSION_RESERVE_V1` is held back and the refusal names the number
-  // that is true after the reservation — a batch the model can act on. It is
-  // never silently truncated, because a model that asked for twelve calls and
-  // got eight asked for effects it did not get.
+  // bounded number of them, so a batch that cannot fit is refused whole rather
+  // than overflowing the record partway through and failing the Turn. The
+  // budget is not spent to the brim: the step that reads the batch's result
+  // needs an admission of its own, so `BATCH_ADMISSION_RESERVE_V1` is held
+  // back and the refusal names the number that is true after the reservation —
+  // a batch the model can act on. It is never silently truncated, because a
+  // model that asked for twelve calls and got eight asked for effects it did
+  // not get.
+  //
+  // What is weighed is what still needs an admission, not what was declared.
+  // An admission is keyed by effect id and spent once, so a resume of a batch
+  // whose calls were already journalled — and therefore already admitted — must
+  // not be charged a second time for work the run has already paid for and
+  // performed. A structurally invalid call is not weighed either: it reaches no
+  // tool and takes no admission.
+  const needed = decoded.filter(
+    (sub, index) =>
+      sub.kind === "call" &&
+      !journalEntryV1(runtime, subs[index]!.occurrenceId)?.intent,
+  ).length;
   const remaining = await runtime.options.remainingEffectAdmissions?.();
   const fits =
     remaining === undefined
       ? undefined
       : Math.max(remaining - BATCH_ADMISSION_RESERVE_V1, 0);
-  if (fits !== undefined && decoded.length > fits) {
-    const refusal = {
-      content: `batch was refused: this run can still take ${fits} more tool call(s) and this batch declared ${decoded.length}; issue fewer calls per batch across several steps.`,
-      isError: true,
-    };
+  if (fits !== undefined && needed > fits) {
+    const reason = `this run can still take ${fits} more tool call(s) and this batch needs ${needed}; issue fewer calls per batch across several steps.`;
+    // Every declared call is already an occurrence of this step — the journal
+    // derives them from the assistant message, not from what dispatch chose to
+    // run — so each one is settled with the reason none of them ran. Refusing
+    // to dispatch is the point; leaving the occurrences open would invalidate
+    // the step and every later Turn in the conversation.
+    for (const [index, sub] of subs.entries()) {
+      await refuseSubCallV1(
+        runtime,
+        sub,
+        `batch call ${index} was not run: ${reason}`,
+        signal,
+      );
+    }
+    const refusal = { content: `batch was refused: ${reason}`, isError: true };
     await settleV1(runtime, occurrence, refusal, "completed");
     return refusal;
   }
-  const subs = batchSubOccurrencesV1(occurrence);
   // Every declared call's intent is journalled here, in declared order, before
   // any of them is prepared, admitted or dispatched. That is why the log holds
   // one row per declared call in declared order: row order is declared order by
