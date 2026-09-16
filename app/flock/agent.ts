@@ -551,8 +551,8 @@ async function applySelfProfileV1(
 
 export function createBotCreateTool(
   host: FlockSelfRuntimeHostV1,
+  flock: TurnBotDirectoryV1,
   random?: () => number,
-  flock?: TurnBotDirectoryV1,
 ): ToolDefinition {
   return {
     name: "bot_create",
@@ -618,7 +618,7 @@ export function createBotCreateTool(
             }
             // The flock this Turn has already named in its prompt is now out
             // of date by exactly this Bot.
-            flock?.invalidate();
+            flock.invalidate();
             return {
               content: `Created Bot "${decoded.name}" as ${botId}. It follows your User's default model and holds no capabilities of its own.`,
               isError: false,
@@ -732,14 +732,14 @@ export function createTurnBotDirectoryV1(
 
 export function createTeammatesPromptSectionV1(
   host: FlockSelfRuntimeHostV1,
-  directory?: TurnBotDirectoryV1,
+  directory: TurnBotDirectoryV1,
 ): PromptSection {
   return {
     id: TEAMMATES_PROMPT_SECTION_V1,
     order: 92,
     render: async (context) => {
       if (context.turnType !== "chat") return "";
-      const view = await (directory ? directory.read() : host.listBots());
+      const view = await directory.read();
       const teammates = view.bots.filter(
         (bot) => bot.botId !== host.owner.botId,
       );
@@ -808,9 +808,7 @@ export function createFlockRuntimeFeature(
           ]
         : []),
       runtime.tools.register(createBotUpdateTool(host)),
-      runtime.tools.register(
-        createBotCreateTool(host, undefined, turnDirectory),
-      ),
+      runtime.tools.register(createBotCreateTool(host, turnDirectory)),
       runtime.tools.register(
         createBotMessageTool(host),
         messagingCeiling ? { admissionCeiling: messagingCeiling } : undefined,

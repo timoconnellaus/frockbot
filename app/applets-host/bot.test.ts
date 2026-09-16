@@ -6,6 +6,10 @@ import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { PACKAGE_IFRAME_FOCUS_TOOL_V2 } from "@frockbot/core/contracts";
 import { listPackageUi } from "@frockbot/app/skills/bot";
 import {
+  userAccountFeaturesReaderV1,
+  type UserAccountFeaturesReadV1,
+} from "@frockbot/app/settings/bot";
+import {
   appletsRuntimeHost,
   readFocusedApplet,
   resolveAppletComposition,
@@ -270,19 +274,28 @@ function gatedHarness(options: {
   return { state, proposed, directoryReads: () => directoryReads };
 }
 
+/** The one account-features reader a runtime mount makes for its gates. */
+function features(state: ShellBotStateV1): UserAccountFeaturesReadV1 {
+  return userAccountFeaturesReaderV1(state, IDENTITY);
+}
+
 describe("the account's Applets switch", () => {
   test("the tools are mounted only when the switch is on", async () => {
     const on = gatedHarness({ applets: true });
-    expect(await appletsRuntimeHost(on.state, IDENTITY, TURN)).toMatchObject({
-      turn: TURN,
-    });
+    expect(
+      await appletsRuntimeHost(on.state, IDENTITY, TURN, features(on.state)),
+    ).toMatchObject({ turn: TURN });
     const off = gatedHarness({ applets: false });
-    expect(await appletsRuntimeHost(off.state, IDENTITY, TURN)).toBeUndefined();
+    expect(
+      await appletsRuntimeHost(off.state, IDENTITY, TURN, features(off.state)),
+    ).toBeUndefined();
   });
 
   test("a switch that cannot be read mounts nothing for the Turn", async () => {
     const { state } = gatedHarness({ applets: "unreachable" });
-    expect(await appletsRuntimeHost(state, IDENTITY, TURN)).toBeUndefined();
+    expect(
+      await appletsRuntimeHost(state, IDENTITY, TURN, features(state)),
+    ).toBeUndefined();
   });
 
   test("with the switch off, a Composition holding Applets resolves to none", async () => {

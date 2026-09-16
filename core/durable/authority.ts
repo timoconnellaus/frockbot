@@ -1692,17 +1692,12 @@ export class BotDurableAuthority<Snapshot> {
       const run = await this.readRunFrom(transaction, runId);
       if (!run) throw new Error(`run "${runId}" was not accepted`);
       const eventLog = new SessionEventLog(transaction);
-      // The guard needs the log's length, not its contents. Reading the log
-      // here hydrated every retained model request, on every flush — and a
-      // Turn's preamble flushes about eight times.
-      const persisted = await eventLog.count(run.sessionId);
-      for (const [index, event] of durableEvents.entries()) {
-        if (event.seq !== persisted + index) {
-          throw new Error(
-            "Bot session persistence received non-contiguous events",
-          );
-        }
-      }
+      // `append` owns the contiguity guard: it checks the same thing this
+      // method used to pre-check, against the same index, before it writes
+      // anything, and the whole body runs in one transaction. It goes first
+      // so that a batch which does not continue the log is still refused for
+      // that reason rather than by the run record's own range check.
+      await eventLog.append(run.sessionId, durableEvents);
       const next = this.codec.require({
         ...run,
         ...storedRunEventFieldsV2(run.previousEventCount, [
@@ -1710,7 +1705,6 @@ export class BotDurableAuthority<Snapshot> {
           ...durableEvents,
         ]),
       } satisfies StoredRunV1<Snapshot>);
-      await eventLog.append(run.sessionId, durableEvents);
       const records = await this.hooks.eventRecords?.({
         run: next,
         events: durableEvents,

@@ -364,10 +364,10 @@ describe("bot_create", () => {
   test("registers one Bot in the User's flock with its description", async () => {
     const test1 = harness();
 
-    const result = await createBotCreateTool(test1.host).execute(
-      { name: "Budget", description: "Watches the money." },
-      CONTEXT,
-    );
+    const result = await createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    ).execute({ name: "Budget", description: "Watches the money." }, CONTEXT);
 
     expect(result.isError).toBe(false);
     const directory = await test1.host.listBots();
@@ -387,14 +387,20 @@ describe("bot_create", () => {
   test("records the creating Bot and Turn on the registration", async () => {
     const test1 = harness();
 
-    await createBotCreateTool(test1.host).execute({ name: "Budget" }, CONTEXT);
+    await createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    ).execute({ name: "Budget" }, CONTEXT);
 
     expect((await test1.host.listBots()).bots[0]!.createdBy).toEqual(WRITER);
   });
 
   test("a replay after eviction creates exactly one Bot", async () => {
     const test1 = harness();
-    const tool = createBotCreateTool(test1.host);
+    const tool = createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    );
     expect(tool.idempotent).toBe(true);
 
     const first = await tool.execute({ name: "Budget" }, CONTEXT);
@@ -408,7 +414,10 @@ describe("bot_create", () => {
 
   test("a different occurrence creates a distinct Bot", async () => {
     const test1 = harness();
-    const tool = createBotCreateTool(test1.host);
+    const tool = createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    );
 
     await tool.execute({ name: "Budget" }, CONTEXT);
     await tool.execute(
@@ -421,7 +430,8 @@ describe("bot_create", () => {
   });
 
   test("refuses a nameless call and an unknown field", async () => {
-    const tool = createBotCreateTool(harness().host);
+    const host = harness().host;
+    const tool = createBotCreateTool(host, createTurnBotDirectoryV1(host));
 
     expect(tool.validate?.({})).toBe(false);
     expect(tool.validate?.({ name: "Budget", model: "glm" })).toBe(false);
@@ -434,7 +444,9 @@ describe("the self-management seam", () => {
     const host = harness().host;
 
     expect(createBotUpdateTool(host).admission).toBeUndefined();
-    expect(createBotCreateTool(host).admission).toBeUndefined();
+    expect(
+      createBotCreateTool(host, createTurnBotDirectoryV1(host)).admission,
+    ).toBeUndefined();
   });
 });
 
@@ -452,11 +464,17 @@ describe("bot_message", () => {
 
   test("the teammates section names the other Bots and their descriptions", async () => {
     const test1 = harness();
-    await createBotCreateTool(test1.host).execute(
+    await createBotCreateTool(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    ).execute(
       { name: "Researcher", description: "Finds primary sources." },
       CONTEXT,
     );
-    const prompt = await createTeammatesPromptSectionV1(test1.host).render({
+    const prompt = await createTeammatesPromptSectionV1(
+      test1.host,
+      createTurnBotDirectoryV1(test1.host),
+    ).render({
       sessionId: "user-1:bot-1",
       provider: "test",
       model: "test",
@@ -493,7 +511,7 @@ describe("bot_message", () => {
 
     expect(calls).toBe(1);
 
-    await createBotCreateTool(host, undefined, flock).execute(
+    await createBotCreateTool(host, flock).execute(
       { name: "Researcher", description: "Finds primary sources." },
       CONTEXT,
     );

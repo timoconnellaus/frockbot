@@ -29,6 +29,7 @@ import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
 } from "@frockbot/core/contracts";
+import { createConcurrencyLimiterV1 } from "@frockbot/app/concurrency";
 import { createMemoryEmbedder } from "./embeddings.js";
 import {
   readAllMemoryDocumentsV1,
@@ -262,12 +263,16 @@ export class MemoryProjection {
     const { own, user, projects, unavailable } = await this.roots();
     // The tiers are independent roots; reading them one after another turned
     // N round trips to object storage into N × RTT on the turn-start critical
-    // path for no reason. The results are still assembled in tier order.
+    // path for no reason. The results are still assembled in tier order, and
+    // a Bot in many Projects still starts a bounded number of reads at once.
+    const inFlight = createConcurrencyLimiterV1();
     const [ownTier, userTier, ...projectReads] = await Promise.all([
-      store.read(own),
-      store.read(user),
+      inFlight(() => store.read(own)),
+      inFlight(() => store.read(user)),
       ...projects.map((project) =>
-        store.read(projectMemoryRootV1(owner, project.projectId)),
+        inFlight(() =>
+          store.read(projectMemoryRootV1(owner, project.projectId)),
+        ),
       ),
     ]);
     const projectTiers: MemoryProjectTierV1[] = projects.map(

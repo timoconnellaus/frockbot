@@ -37,6 +37,7 @@ import {
   type MemoryFactV1,
   type SourcedMemoryFactV1,
 } from "./facts.js";
+import { createConcurrencyLimiterV1 } from "@frockbot/app/concurrency";
 import type { MemoryDocumentV1 } from "./documents.js";
 import {
   memoryFileKindV1,
@@ -321,12 +322,14 @@ export class MemoryStore {
     // of them, and reading them one at a time made a tier cost N round trips
     // where it needs about one. The results are consumed below in listing
     // order, so what is injected, what is indexed and which files are named
-    // unreadable are all exactly what the serial read produced.
+    // unreadable are all exactly what the serial read produced; the bound is
+    // on how many reads are outstanding, not on which reads happen.
+    const inFlight = createConcurrencyLimiterV1();
     const reads = await Promise.all(
       files.map(({ entry }) =>
         entry.generation.size > MEMORY_MAX_FILE_BYTES
           ? undefined
-          : this.#files.read(entry.path),
+          : inFlight(() => this.#files.read(entry.path)),
       ),
     );
     for (const [index, { entry, classified }] of files.entries()) {
