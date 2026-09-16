@@ -12,7 +12,7 @@ import {
 
 useApplicationArtifact();
 
-it("a greeting exposes three schemas, sends once, and finishes after one provider call", async () => {
+it("a greeting exposes four schemas, sends once, and finishes after one provider call", async () => {
   const userId = freshUserId("reply-latency");
   const botId = "reply-latency-bot";
   await provisionThroughGateway({ userId, botId });
@@ -41,6 +41,7 @@ it("a greeting exposes three schemas, sends once, and finishes after one provide
   expect(requests).toHaveLength(1);
   expect(requests[0]?.request.tools.map((t) => t.name)).toEqual([
     "send_to_user",
+    "batch",
     "get_dynamic_tools",
     "call_dynamic_tool",
   ]);
