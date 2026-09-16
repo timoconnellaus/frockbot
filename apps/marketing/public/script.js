@@ -20,14 +20,11 @@ const heroFlock = document.querySelector(".hero-flock");
 let heroVisible = true;
 
 const updateHeroMotion = () => {
-  if (!(heroFlock instanceof HTMLObjectElement)) return;
-  heroFlock.contentDocument?.documentElement.classList.toggle(
-    "paused",
-    document.hidden || !heroVisible,
-  );
+  if (!(heroFlock instanceof SVGSVGElement)) return;
+  heroFlock.classList.toggle("paused", document.hidden || !heroVisible);
 };
 
-heroFlock?.addEventListener("load", updateHeroMotion);
+updateHeroMotion();
 document.addEventListener("visibilitychange", updateHeroMotion);
 
 if (heroFlock && "IntersectionObserver" in window) {
