@@ -303,7 +303,7 @@
   .button-mac:hover {
     background: #000;
   }
-  .button svg {
+  .button-mac svg {
     flex: none;
     width: 18px;
     height: 18px;
@@ -319,34 +319,36 @@
     background: var(--cream);
   }
 
-  .hero {
-    position: relative;
-    overflow: clip;
-    background: var(--paper);
-  }
-  .hero-option-tag {
-    position: absolute;
-    z-index: 5;
-    top: 14px;
-    left: 24px;
-    padding: 5px 11px;
-    border-radius: 999px;
-    background: var(--pink);
+  .site-header-dark {
+    background: var(--ink);
     color: #fff;
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
   }
-  .hero-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: end;
-    gap: 32px;
-    padding-top: 72px;
+  .site-header-dark .menu-button {
+    border-color: var(--product-border-strong);
+    background: transparent;
+  }
+  .site-header-dark .menu-button > span:not(.sr-only) {
+    background: #fff;
+  }
+  .site-header-dark .site-nav > a.github-logo-link {
+    color: #fff;
+  }
+  .site-header-dark .site-nav > a.github-logo-link:hover,
+  .site-header-dark .site-nav > a.github-logo-link:focus-visible {
+    background: var(--product-raised);
+    color: #fff;
+  }
+
+  .hero {
+    overflow: clip;
+    background: var(--ink);
+    color: #fff;
   }
   .hero-copy {
-    padding-bottom: 88px;
+    max-width: 780px;
+    margin-inline: auto;
+    padding-top: 88px;
+    text-align: center;
   }
   .hero h1 {
     font-family: "Archivo Black", "Arial Black", sans-serif;
@@ -360,8 +362,8 @@
   }
   .hero-summary {
     max-width: 34rem;
-    margin-top: 24px;
-    color: #4f4c56;
+    margin: 24px auto 0;
+    color: #bebbc5;
     font-size: 1.15rem;
     line-height: 1.55;
   }
@@ -369,194 +371,26 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: center;
     gap: 14px;
     margin-top: 30px;
   }
+  .hero .button-mac {
+    background: #fff;
+    color: var(--pink-dark);
+    box-shadow: none;
+  }
+  .hero .button-mac:hover {
+    background: var(--cream);
+  }
   .hero-note {
     margin-top: 22px;
-    color: var(--muted);
+    color: #8d8896;
     font-size: 0.8rem;
     font-weight: 700;
   }
-
-  /* The cast stands on the proof bar's top border: the shell aligns to the
-     section's bottom edge and the images carry no bottom margin. */
-  .hero-cast {
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    padding-inline: 8px;
-  }
-  .hero-character {
-    position: relative;
-    width: 26%;
-    height: auto;
-    margin-inline: -3%;
-    filter: drop-shadow(0 14px 14px rgb(31 27 35 / 14%));
-    transform-origin: 50% 100%;
-    transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  .hero-character-lead {
-    z-index: 2;
-    width: 36%;
-    animation: character-breathe 4.8s ease-in-out infinite;
-  }
-  .hero-character-small {
-    width: 20%;
-    margin-bottom: 4px;
-  }
-  .hero-character:nth-child(1) {
-    rotate: -4deg;
-  }
-  .hero-character:nth-child(2) {
-    rotate: 2deg;
-  }
-  .hero-character:nth-child(4) {
-    rotate: 3deg;
-  }
-  .hero-character:nth-child(5) {
-    rotate: 6deg;
-  }
-  .hero-character:hover {
-    z-index: 3;
-    transform: translateY(-10px);
-  }
-
-  .hero-poster-shell {
-    display: grid;
-    justify-items: center;
-    gap: 40px;
-    padding-top: 80px;
-    text-align: center;
-  }
-  .hero-poster .hero-copy,
-  .hero-dark .hero-copy {
-    max-width: 780px;
-    padding-bottom: 0;
-  }
-  .hero-poster .hero-summary,
-  .hero-dark .hero-summary {
-    margin-inline: auto;
-  }
-  .hero-poster .hero-actions,
-  .hero-dark .hero-actions {
-    justify-content: center;
-  }
-  .hero-cast-wide {
-    width: min(100%, 1060px);
-  }
-  .hero-cast-wide .hero-character {
-    width: 15%;
-    margin-inline: -1%;
-  }
-  .hero-cast-wide .hero-character-lead {
-    width: 21%;
-  }
-  .hero-cast-wide .hero-character-small {
-    width: 12%;
-  }
-  .hero-cast-wide .hero-character:nth-child(3) {
-    rotate: -2deg;
-  }
-  .hero-cast-wide .hero-character:nth-child(6) {
-    rotate: -3deg;
-  }
-  .hero-cast-wide .hero-character:nth-child(7) {
-    rotate: 5deg;
-  }
-
-  .hero-roster .hero-shell {
-    align-items: center;
-    padding-block: 72px 96px;
-  }
-  .hero-roster .hero-copy {
-    padding-bottom: 0;
-  }
-  .roster {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin: 0;
-    padding: 0 0 26px;
-    list-style: none;
-  }
-  .roster-card {
-    display: grid;
-    grid-template-columns: 62px minmax(0, 1fr);
-    grid-template-rows: auto auto auto;
-    align-content: center;
-    column-gap: 16px;
-    padding: 20px 18px 20px 16px;
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    background: #fff;
-    box-shadow: 0 14px 34px rgb(30 29 39 / 6%);
-    transition: transform 220ms ease;
-  }
-  .roster-card:nth-child(even) {
-    translate: 0 26px;
-  }
-  .roster-card:nth-child(2) {
-    border-color: transparent;
-    background: var(--blush);
-  }
-  .roster-card:nth-child(3) {
-    border-color: transparent;
-    background: #f0eee9;
-  }
-  .roster-card:hover {
-    transform: translateY(-4px);
-  }
-  .roster-card img {
-    grid-row: 1 / 4;
-    width: 62px;
-    height: auto;
-    object-fit: contain;
-    filter: drop-shadow(0 8px 8px rgb(31 27 35 / 12%));
-  }
-  .roster-card strong {
-    font-size: 1.02rem;
-    letter-spacing: -0.01em;
-  }
-  .roster-card span {
-    color: var(--muted);
-    font-size: 0.82rem;
-  }
-  .roster-card small {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin-top: 8px;
-    color: var(--pink-dark);
-    font-size: 0.66rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .roster-card small::before {
-    content: "";
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--pink);
-  }
-
-  .hero-dark {
-    overflow: hidden;
-    background: var(--ink);
-    color: #fff;
-  }
-  .hero-dark .hero-copy {
-    margin-inline: auto;
-    padding-top: 88px;
-    text-align: center;
-  }
-  .hero-dark .hero-summary {
-    color: #bebbc5;
-  }
-  .hero-dark .hero-note {
-    color: #8d8896;
-  }
+  /* The flock peeks over the bottom edge: the strip is shorter than the
+     artwork and the section clips whatever hangs below it. */
   .hero-peek {
     display: flex;
     align-items: flex-end;
@@ -1062,18 +896,6 @@
   .cta-flock img:nth-child(3n) {
     transform: translateY(-6px) rotate(-3deg);
   }
-  @keyframes character-breathe {
-    0%,
-    100% {
-      translate: 0 0;
-    }
-    46% {
-      translate: 0 -3px;
-    }
-    53% {
-      translate: 0 -6px;
-    }
-  }
   .cta-action small {
     color: #ffd3df;
   }
@@ -1357,9 +1179,6 @@
     .brand-note {
       display: none;
     }
-    .hero-shell {
-      gap: 28px;
-    }
     .proof-list {
       overflow-x: auto;
       justify-content: flex-start;
@@ -1416,36 +1235,19 @@
     .site-nav .button {
       margin-top: 4px;
     }
-    .hero-shell {
-      grid-template-columns: 1fr;
-      gap: 0;
-      padding-top: 48px;
+    .site-header-dark .site-nav {
+      border-color: var(--product-border);
+      background: var(--product-window);
+      box-shadow: 0 20px 50px rgb(0 0 0 / 35%);
     }
     .hero-copy {
-      padding-bottom: 0;
-    }
-    .hero-cast {
-      width: min(100%, 620px);
-      margin: 44px auto 0;
-    }
-    .hero-cast-wide {
-      width: 100%;
+      padding-top: 56px;
     }
     .hero h1 {
       font-size: clamp(3.3rem, 11vw, 4.5rem);
     }
     .hero-summary {
       font-size: 1rem;
-    }
-    .hero-roster .hero-shell {
-      padding-block: 48px 64px;
-    }
-    .roster {
-      margin-top: 40px;
-      padding-bottom: 0;
-    }
-    .roster-card:nth-child(even) {
-      translate: 0 0;
     }
     .hero-peek {
       height: 150px;
@@ -1525,24 +1327,6 @@
     }
     .brand-name {
       font-size: 1.25rem;
-    }
-    .hero-cast {
-      width: calc(100% + 24px);
-      margin-inline: -12px;
-      padding-inline: 0;
-    }
-    .hero-cast-wide .hero-character:first-child,
-    .hero-cast-wide .hero-character:nth-child(6) {
-      display: none;
-    }
-    .hero-cast-wide .hero-character {
-      width: 21%;
-    }
-    .hero-cast-wide .hero-character-lead {
-      width: 30%;
-    }
-    .roster {
-      grid-template-columns: 1fr;
     }
     .hero-peek {
       height: 118px;
