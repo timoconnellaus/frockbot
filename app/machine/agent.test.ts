@@ -205,6 +205,7 @@ describe("machine tool admission", () => {
       expect(names).toEqual([
         MACHINE_COMMAND_CHECK_TOOL_V1,
         MACHINE_LIST_TOOL_V1,
+        "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);

@@ -1,6 +1,7 @@
 import {
   admittedSubagentRolesV1,
   admittedTurnTypesV1,
+  batchToolOccurrenceId,
   isSubagentRoleAdmittedV1,
   type LoopHookListV1,
   type PromptSectionRegistration,
@@ -19,6 +20,9 @@ import {
 
 export const GET_DYNAMIC_TOOLS_NAME = "get_dynamic_tools";
 export const CALL_DYNAMIC_TOOL_NAME = "call_dynamic_tool";
+export const BATCH_TOOL_NAME = "batch";
+/** Most calls one `batch` may carry. */
+export const BATCH_MAX_CALLS_V1 = 25;
 export const FROCKBOT_TOOL_NAMESPACE = "frockbot";
 
 const CATALOG_DESCRIPTION_MAX_CHARS = 200;
@@ -96,6 +100,72 @@ const CALL_DYNAMIC_TOOL_SCHEMA: ToolSchema = {
     required: ["namespace", "toolName"],
   },
 };
+
+const BATCH_DESCRIPTION = [
+  `Run up to ${BATCH_MAX_CALLS_V1} independent tool calls in one step, together.`,
+  "Each call runs on its own: one failing does not stop the others, and each gets its own result.",
+  "Use it only when no call depends on another call's result. Dependent calls stay in separate steps.",
+  "The calls run in the order you declare them, whatever order they finish in, so several send_to_user calls arrive as separate messages in the order written here.",
+  "batch cannot call itself.",
+].join(" ");
+
+const BATCH_SCHEMA: ToolSchema = {
+  name: BATCH_TOOL_NAME,
+  description: BATCH_DESCRIPTION,
+  inputSchema: {
+    type: "object",
+    properties: {
+      calls: {
+        type: "array",
+        description: "The calls to run, in the order they should take effect.",
+        minItems: 1,
+        maxItems: BATCH_MAX_CALLS_V1,
+        items: {
+          type: "object",
+          properties: {
+            tool: {
+              type: "string",
+              description: "The name of the tool to call.",
+            },
+            arguments: {
+              type: "object",
+              description: "That tool's own input.",
+            },
+          },
+          required: ["tool"],
+        },
+      },
+    },
+    required: ["calls"],
+  },
+};
+
+interface BatchSubCallV1 {
+  tool: string;
+  arguments: unknown;
+}
+
+function decodeBatchCallsV1(input: unknown): BatchSubCallV1[] | string {
+  if (!isRecord(input)) return "batch requires an object with a calls array";
+  const calls = input.calls;
+  if (!Array.isArray(calls) || calls.length === 0) {
+    return "batch requires a non-empty calls array";
+  }
+  if (calls.length > BATCH_MAX_CALLS_V1) {
+    return `batch carries at most ${BATCH_MAX_CALLS_V1} calls; this one carried ${calls.length}`;
+  }
+  const decoded: BatchSubCallV1[] = [];
+  for (const [index, call] of calls.entries()) {
+    if (!isRecord(call) || typeof call.tool !== "string" || !call.tool) {
+      return `batch call ${index} needs a tool name`;
+    }
+    if (call.arguments !== undefined && !isRecord(call.arguments)) {
+      return `batch call ${index} arguments must be an object`;
+    }
+    decoded.push({ tool: call.tool, arguments: call.arguments ?? {} });
+  }
+  return decoded;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -389,6 +459,18 @@ export class ToolRegistry implements ToolExecution {
     // Successful calls are rewritten to the inner definition during prepare;
     // this body exists only to keep the registered definition total.
     this.installMetaTool({
+      ...BATCH_SCHEMA,
+      // Structural only. A batch that overshoots the bound, or names a tool
+      // that is not there, is told exactly what was wrong by `execute`; the
+      // registry's refusal for invalid input is the same sentence for every
+      // tool, and the model cannot correct itself from it.
+      validate: (input) => isRecord(input) && Array.isArray(input.calls),
+      // Idempotency is the sub-calls', not the batch's: each carries its own
+      // effect id, and a re-issued batch re-issues them under the same ids.
+      idempotent: false,
+      execute: (input, context) => this.runBatch(input, context),
+    });
+    this.installMetaTool({
       ...CALL_DYNAMIC_TOOL_SCHEMA,
       validate: validCallDynamicToolInput,
       execute: () =>
@@ -511,6 +593,9 @@ export class ToolRegistry implements ToolExecution {
         (registered) =>
           registered.definition.name !== GET_DYNAMIC_TOOLS_NAME &&
           registered.definition.name !== CALL_DYNAMIC_TOOL_NAME &&
+          // The meta-tools are listed together, after the tools they operate
+          // on, rather than first because the constructor installed them.
+          registered.definition.name !== BATCH_TOOL_NAME &&
           registered.admitted.includes(admission.turnType) &&
           isSubagentRoleAdmittedV1(
             registered.admittedRoles,
@@ -524,7 +609,7 @@ export class ToolRegistry implements ToolExecution {
       }));
     return [
       exposed,
-      [GET_DYNAMIC_TOOLS_SCHEMA, CALL_DYNAMIC_TOOL_SCHEMA],
+      [BATCH_SCHEMA, GET_DYNAMIC_TOOLS_SCHEMA, CALL_DYNAMIC_TOOL_SCHEMA],
     ].flat();
   }
 
@@ -714,6 +799,106 @@ export class ToolRegistry implements ToolExecution {
     return this.hooks.toolResult(preparation.call, initial, context, () =>
       Promise.resolve(initial),
     );
+  }
+
+  /**
+   * Runs the calls of one `batch`, together, and reports each result.
+   *
+   * Every sub-call goes through this same registry - `prepare` then
+   * `executePrepared` - so admission, guards, namespace readiness and the
+   * `tools/pre-execute` and `tools/execute` hooks apply to a call inside a
+   * batch exactly as they do to one the model issued on its own. What differs
+   * is the effect id: each sub-call gets the batch's id plus its declared
+   * position, so tools that dedupe on `context.effectId` treat the calls in
+   * one batch as the distinct effects they are.
+   *
+   * One failure does not abort the rest: the batch exists so the model can
+   * spend one inference on several calls, and collapsing the whole batch
+   * because the third call was refused would cost it the other two as well.
+   *
+   * `endsTurn` is the OR of the sub-results. A `send_to_user` with
+   * disposition "finish", a widget, or an approval inside a batch ends the
+   * Turn exactly as it would outside one; without this it would have silently
+   * failed to.
+   *
+   * Admission fencing is the batch's: the loop admitted this one effect, and
+   * a Stop reaches the sub-calls through `context.signal` rather than through
+   * a second admission per call.
+   */
+  private async runBatch(
+    input: unknown,
+    context: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> {
+    const decoded = decodeBatchCallsV1(input);
+    if (typeof decoded === "string") {
+      return { content: `batch was refused: ${decoded}`, isError: true };
+    }
+    const results = await Promise.all(
+      decoded.map(async (sub, index) => {
+        if (sub.tool === BATCH_TOOL_NAME) {
+          return {
+            index,
+            tool: sub.tool,
+            result: {
+              content: "batch cannot call itself",
+              isError: true,
+            } satisfies ToolExecutionResult,
+          };
+        }
+        const call: ToolCall = {
+          id: `${context.toolCall?.id ?? context.effectId}.${index}`,
+          name: sub.tool,
+          input: sub.arguments,
+        };
+        const subContext: ToolExecutionContext = {
+          ...context,
+          effectId: batchToolOccurrenceId(context.effectId, index),
+          toolCall: call,
+        };
+        try {
+          const preparation = await this.prepare(call, subContext);
+          const result =
+            preparation.kind === "denied"
+              ? preparation.result
+              : await this.executePrepared(preparation, subContext);
+          return { index, tool: sub.tool, result };
+        } catch (error) {
+          return {
+            index,
+            tool: sub.tool,
+            result: {
+              content:
+                error instanceof Error
+                  ? error.message
+                  : `batch call ${index} failed`,
+              isError: true,
+            } satisfies ToolExecutionResult,
+          };
+        }
+      }),
+    );
+    const failed = results.filter(({ result }) => result.isError).length;
+    const attachments = results.flatMap(
+      ({ result }) => result.attachments ?? [],
+    );
+    return {
+      content: JSON.stringify({
+        ran: results.length,
+        failed,
+        results: results.map(({ index, tool, result }) => ({
+          index,
+          tool,
+          isError: result.isError,
+          content: result.content,
+        })),
+      }),
+      // A batch reports every result; the model reads which of them failed.
+      isError: false,
+      ...(results.some(({ result }) => result.endsTurn === true)
+        ? { endsTurn: true }
+        : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
+    };
   }
 
   private resolveDynamicCall(

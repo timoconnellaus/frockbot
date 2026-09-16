@@ -48,6 +48,51 @@ export function toolOccurrenceId(
   return `tool:${turn}:${step}:${ordinal}`;
 }
 
+/**
+ * The occurrence id of one call inside a batch: the batch's own id, a dot, and
+ * the call's declared position in the batch.
+ *
+ * A dot rather than a colon, because an approval id may not carry a colon —
+ * see `app/plugins/approval.ts`. The separator is the only thing that
+ * distinguishes a sub-occurrence from a top-level one, and everything
+ * downstream that keys on an effect id — the tool journal's "already has a
+ * result" check, and every tool that dedupes its own effect on
+ * `context.effectId` — needs the calls in one batch to be distinct. Sharing
+ * one id collapsed three sends into one.
+ */
+export function batchToolOccurrenceId(
+  occurrenceId: string,
+  subIndex: number,
+): string {
+  if (!Number.isSafeInteger(subIndex) || subIndex < 0) {
+    throw new Error("batch sub-call index is invalid");
+  }
+  return `${occurrenceId}.${subIndex}`;
+}
+
+/**
+ * Where one occurrence id sits in the Turn, for ordering side effects by the
+ * position they were *declared* at rather than the moment they arrived.
+ *
+ * `subIndex` is -1 for a top-level call, so a batch's own occurrence sorts
+ * ahead of the calls inside it on the same coordinates. Returns undefined for
+ * anything that is not an occurrence id this module minted.
+ */
+export function parseToolOccurrenceIdV1(
+  occurrenceId: string,
+):
+  | { turn: number; step: number; ordinal: number; subIndex: number }
+  | undefined {
+  const match = /^tool:(\d+):(\d+):(\d+)(?:\.(\d+))?$/.exec(occurrenceId);
+  if (!match) return undefined;
+  return {
+    turn: Number(match[1]),
+    step: Number(match[2]),
+    ordinal: Number(match[3]),
+    subIndex: match[4] === undefined ? -1 : Number(match[4]),
+  };
+}
+
 export function toolCallOccurrences(
   turn: number,
   step: number,

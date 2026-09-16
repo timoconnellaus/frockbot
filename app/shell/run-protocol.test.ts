@@ -1242,6 +1242,45 @@ describe("client run protocol v1", () => {
     ).toEqual(projected.events);
   });
 
+  test("names a batch's sends by where they were declared, not when they landed", () => {
+    // Three sends issued by one batch. The middle one finished first, so the
+    // durable log holds them out of order — which is exactly what Promise.all
+    // makes possible, and what a replay may do differently.
+    const landed = ["tool:1:1:0.1", "tool:1:1:0.0", "tool:1:1:0.2"];
+    const projected = projectClientRunV1(
+      storedRun(
+        landed.map((occurrenceId, seq) =>
+          event({
+            type: "send/to-user",
+            seq,
+            timestamp,
+            turn: 1,
+            step: 1,
+            occurrenceId,
+            payload: { type: "text", text: occurrenceId },
+          }),
+        ),
+      ),
+    );
+
+    // The ordinal is the message's identity — "The message the cloud names is
+    // `<runId>:send:<ordinal>`" — so it has to come from the declared
+    // position. Counting appends would have given the same payload a
+    // different id on a replay that scheduled the calls differently.
+    expect(
+      projected.events
+        .filter((entry) => entry.type === "send/to-user")
+        .map((entry) => [
+          entry.payload.type === "text" ? entry.payload.text : "",
+          entry.ordinal,
+        ]),
+    ).toEqual([
+      ["tool:1:1:0.1", 1],
+      ["tool:1:1:0.0", 0],
+      ["tool:1:1:0.2", 2],
+    ]);
+  });
+
   test("truncates sends alongside tool interactions, oldest first", () => {
     const sends = Array.from({ length: 600 }, (_, index) =>
       event({

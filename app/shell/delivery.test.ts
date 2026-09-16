@@ -364,6 +364,7 @@ test("a final greeting completes in one model call even if the model would repea
       requests++;
       expect(request.tools.map((tool) => tool.name)).toEqual([
         "send_to_user",
+        "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);
@@ -491,6 +492,7 @@ test("a repaired interim update restores the full toolset for the rest of the Tu
       }
       expect(request.tools.map((tool) => tool.name)).toEqual([
         "send_to_user",
+        "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);
@@ -599,6 +601,7 @@ test("specialist schemas are disclosed on demand and interim work reaches a fina
       requests++;
       expect(request.tools.map((t) => t.name)).toEqual([
         "send_to_user",
+        "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);

@@ -101,11 +101,13 @@ describe("the Shell's tool admission", () => {
       expect(agent).not.toContain(WAKE_PARENT_TOOL_V1);
       expect(automation).toEqual([
         WAKE_PARENT_TOOL_V1,
+        "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);
       expect(subagent).toEqual([
         WAKE_PARENT_TOOL_V1,
+        "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
       ]);
@@ -133,6 +135,7 @@ describe("the Shell's tool admission", () => {
         expect(names).not.toContain(SEND_TO_USER_TOOL_V1);
         expect(names).toEqual([
           WAKE_PARENT_TOOL_V1,
+          "batch",
           "get_dynamic_tools",
           "call_dynamic_tool",
         ]);

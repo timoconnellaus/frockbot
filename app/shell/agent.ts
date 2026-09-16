@@ -201,6 +201,11 @@ export const CONVERSATION_PROMPT_TEXT_V1 = [
   'Use disposition:"continue" when you have more to say, including another part of the answer. When the reply is finished, call send_to_user with disposition:"finish" and the result itself. For a greeting, immediately call send_to_user({"disposition":"finish","payload":{"type":"text","text":"Hi! How can I help?"}}). Even a greeting must be a tool call, never a plain assistant reply. Finish ends the Turn immediately; never send another reply for the same result.',
   "Keep every message short — a line or two of plain prose about one thought, no preamble and no sign-off. Headings, bold labels, lists and tables are only for structured output the user asked for; give more detail when they ask for it.",
   "One message is enough for a simple answer. When an answer has distinct parts, send each part in its own call — two to four short messages; separate paragraphs in one call still make one bubble.",
+  // Each of those bubbles used to cost its own inference: three consecutive
+  // steps whose only tool call was a send, with no assistant text and a tool
+  // result that took no time at all. The model already knows what all three
+  // say by the time it writes the first.
+  'When you already know every part, put those `send_to_user` calls in one `batch` call instead of one per step. They arrive as separate messages, in the order you write them. Keep `disposition:"finish"` on the last one.',
   "Don't say the same thing twice or close with a summary of the answer.",
 ].join("\n");
 

@@ -327,7 +327,12 @@ describe("the Ollama Cloud web_search Capability", () => {
         ),
       }).toEqual({
         turnType,
-        names: ["web_search", "get_dynamic_tools", "call_dynamic_tool"],
+        names: [
+          "web_search",
+          "batch",
+          "get_dynamic_tools",
+          "call_dynamic_tool",
+        ],
       });
     }
     await root.dispose();

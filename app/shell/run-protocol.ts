@@ -3,6 +3,7 @@ import {
   APPLET_ID_V1,
   decodeSendToUserPayloadV1,
   decodeSkillRefsV1,
+  parseToolOccurrenceIdV1,
   type SendToUserPayloadV1,
   type SessionEvent,
   type SkillRefV1,
@@ -739,6 +740,39 @@ function decodeDynamicToolCallInput(
   };
 }
 
+/**
+ * Each send's ordinal, keyed by the occurrence that made it, in the order the
+ * calls were declared in.
+ *
+ * Every send this system records is keyed by a tool occurrence id — it is the
+ * sending tool's own `context.effectId`. A log holding a send keyed by
+ * anything else is one this function will not reorder at all: it returns
+ * nothing, and the caller falls back to counting in log order, which is what
+ * every send got before a batch could issue several of them at once.
+ */
+function sendOrdinalsV1(events: readonly SessionEvent[]): Map<string, number> {
+  const declared: Array<{
+    occurrenceId: string;
+    at: { turn: number; step: number; ordinal: number; subIndex: number };
+  }> = [];
+  for (const event of events) {
+    if (event.type !== "send/to-user") continue;
+    const at = parseToolOccurrenceIdV1(event.occurrenceId);
+    if (!at) return new Map();
+    declared.push({ occurrenceId: event.occurrenceId, at });
+  }
+  declared.sort(
+    (left, right) =>
+      left.at.turn - right.at.turn ||
+      left.at.step - right.at.step ||
+      left.at.ordinal - right.at.ordinal ||
+      left.at.subIndex - right.at.subIndex,
+  );
+  return new Map(
+    declared.map(({ occurrenceId }, ordinal) => [occurrenceId, ordinal]),
+  );
+}
+
 function projectionUnits(
   events: readonly SessionEvent[],
   status: ClientRunStatusV1,
@@ -746,6 +780,18 @@ function projectionUnits(
   const units: ProjectionUnitV1[] = [];
   const byOccurrence = new Map<string, ProjectionUnitV1>();
   let callCount = 0;
+  // A send's ordinal is its identity, not a sort hint: "The message the cloud
+  // names is `<runId>:send:<ordinal>`". Counting appends in log order made
+  // that identity depend on the order the sends happened to finish in, which
+  // is not fixed once a batch dispatches several of them at once - replaying
+  // the same batch under different scheduling would hand the same payload a
+  // different message id, and the log durably records whatever order
+  // happened, so nothing heals it.
+  //
+  // So the ordinal comes from where the call was *declared*: the Turn, the
+  // step, the call's ordinal in that step, and its position inside a batch.
+  // Execution order and replay order cannot move it.
+  const sendOrdinals = sendOrdinalsV1(events);
   let sendCount = 0;
   let projectedIncompleteSync = false;
   for (const event of events) {
@@ -806,7 +852,11 @@ function projectionUnits(
     } else if (event.type === "send/to-user") {
       units.push({
         events: [
-          { type: "send/to-user", payload: event.payload, ordinal: sendCount },
+          {
+            type: "send/to-user",
+            payload: event.payload,
+            ordinal: sendOrdinals.get(event.occurrenceId) ?? sendCount,
+          },
         ],
         droppable: true,
       });

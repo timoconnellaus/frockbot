@@ -654,6 +654,7 @@ describe("AgentLoop", () => {
     if (request?.type !== "model/request") throw new Error("request missing");
     expect(request.request.tools.map((schema) => schema.name)).toEqual([
       "work",
+      "batch",
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);
@@ -700,6 +701,7 @@ describe("AgentLoop", () => {
     if (request?.type !== "model/request") throw new Error("request missing");
     expect(request.request.tools.map((schema) => schema.name)).toEqual([
       "send_to_user",
+      "batch",
       "get_dynamic_tools",
       "call_dynamic_tool",
     ]);
