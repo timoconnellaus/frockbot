@@ -54,11 +54,27 @@ void main() {
     expect(_cursorOffset(tester), closeTo(-1, 0.01));
   });
 
-  testWidgets('a platform without the nudge is left alone', (tester) async {
+  testWidgets('a platform without the nudge keeps its own pixel ratio', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 2;
+    tester.view.physicalSize = const Size(1600, 1600);
+    addTearDown(tester.view.reset);
+    late double ratio;
     await tester.pumpWidget(
-      _app(const SteadyCaret(child: TextField()), TargetPlatform.android),
+      _app(
+        SteadyCaret(
+          child: Builder(
+            builder: (context) {
+              ratio = MediaQuery.devicePixelRatioOf(context);
+              return const TextField();
+            },
+          ),
+        ),
+        TargetPlatform.android,
+      ),
     );
-    expect(find.byType(MediaQuery), findsWidgets);
+    expect(ratio, 2);
     expect(_cursorOffset(tester), 0.0);
   });
 }
