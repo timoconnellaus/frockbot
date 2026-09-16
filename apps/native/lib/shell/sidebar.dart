@@ -3,7 +3,8 @@
 /// Every row also offers its Bot's quick actions — the list of them is
 /// `bot_actions.dart`'s — reached the way each tier reaches a row: a phone
 /// long-presses it, or swipes it (towards the trailing edge to mark it read
-/// or unread, towards the leading edge to reveal Hide); a desktop
+/// or unread, towards the leading edge to reveal Hide, or all the way to
+/// hide) the way Mail's rows swipe, through `flutter_slidable`; a desktop
 /// secondary-clicks it, or presses the control the row grows under the
 /// pointer and on focus.
 ///
@@ -15,6 +16,8 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 
 import '../flock/sheep.dart';
 import '../protocol/client_wire.generated.dart' as wire;
@@ -382,125 +385,132 @@ class ShellSidebar extends StatelessWidget {
             ),
           ),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.only(bottom: 12),
-            children: [
-              // An unreadable list is not an empty one, and it is not a
-              // loading one either. Offering to add a first Bot to someone
-              // whose Bots simply did not load is the worst thing this column
-              // can say, so the failure takes the slot first and offers the
-              // read again.
-              if (error != null && bots.isEmpty)
-                _Error(message: error!, onRetry: onRetry)
-              else if (!loaded)
-                const _Skeleton()
-              else if (bots.isEmpty)
-                const _NoBots()
-              else ...[
-                if (partitioned.pinned.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
-                    child: Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: [
-                        for (final bot in partitioned.pinned)
-                          identified(
-                            ShellIds.sidebarPinned(_id(bot)),
-                            _PinnedTile(
-                              name: _name(bot),
-                              background: bot.sheep.background,
-                              active: _id(bot) == activeBotId,
-                              unread: _unread(_id(bot)).unread,
-                              working: _working(bot),
-                              onTap: () => onSelect(_id(bot)),
-                              onActions: onActions == null
-                                  ? null
-                                  : ({Offset? position}) => onActions!(
-                                      _id(bot),
-                                      position: position,
-                                    ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                for (final group in grouped.groups)
-                  identified(
-                    ShellIds.sidebarGroup(group.key),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (grouped.showHeadings && group.label.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 14, 16, 4),
-                            child: Text(
-                              group.label.toUpperCase(),
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant
-                                    .withValues(alpha: 0.85),
+          // One row is slid open at a time: opening a second closes the
+          // first, and a scroll closes whichever it was.
+          child: SlidableAutoCloseBehavior(
+            child: ListView(
+              padding: const EdgeInsets.only(bottom: 12),
+              children: [
+                // An unreadable list is not an empty one, and it is not a
+                // loading one either. Offering to add a first Bot to someone
+                // whose Bots simply did not load is the worst thing this column
+                // can say, so the failure takes the slot first and offers the
+                // read again.
+                if (error != null && bots.isEmpty)
+                  _Error(message: error!, onRetry: onRetry)
+                else if (!loaded)
+                  const _Skeleton()
+                else if (bots.isEmpty)
+                  const _NoBots()
+                else ...[
+                  if (partitioned.pinned.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
+                      child: Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: [
+                          for (final bot in partitioned.pinned)
+                            identified(
+                              ShellIds.sidebarPinned(_id(bot)),
+                              _PinnedTile(
+                                name: _name(bot),
+                                background: bot.sheep.background,
+                                active: _id(bot) == activeBotId,
+                                unread: _unread(_id(bot)).unread,
+                                working: _working(bot),
+                                onTap: () => onSelect(_id(bot)),
+                                onActions: onActions == null
+                                    ? null
+                                    : ({Offset? position}) => onActions!(
+                                        _id(bot),
+                                        position: position,
+                                      ),
                               ),
                             ),
+                        ],
+                      ),
+                    ),
+                  for (final group in grouped.groups)
+                    identified(
+                      ShellIds.sidebarGroup(group.key),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (grouped.showHeadings && group.label.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 14, 16, 4),
+                              child: Text(
+                                group.label.toUpperCase(),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.85),
+                                ),
+                              ),
+                            ),
+                          for (final bot in group.bots) _row(context, bot),
+                        ],
+                      ),
+                    ),
+                  if (hidden.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: identified(
+                          ShellIds.sidebarHiddenToggle,
+                          TextButton(
+                            onPressed: onToggleHidden,
+                            style: TextButton.styleFrom(
+                              foregroundColor:
+                                  theme.colorScheme.onSurfaceVariant,
+                              minimumSize: const Size(0, 32),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              textStyle: theme.textTheme.labelMedium,
+                            ),
+                            child: Text(
+                              showHidden
+                                  ? 'Hide ${hidden.length} hidden'
+                                  : 'Show ${hidden.length} hidden'
+                                        '${hiddenUnread > 0 ? ' ($hiddenUnread)' : ''}',
+                            ),
                           ),
-                        for (final bot in group.bots) _row(context, bot),
+                        ),
+                      ),
+                    ),
+                  if (showHidden)
+                    for (final bot in hidden) _row(context, bot),
+                ],
+                // The same failure over a list that still has rows: a banner,
+                // not a replacement, because what is on screen is still the last
+                // thing known.
+                if (error != null && bots.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.cloud_off_rounded,
+                          size: 16,
+                          color: theme.colorScheme.error.withValues(alpha: 0.9),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            error!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                if (hidden.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: identified(
-                        ShellIds.sidebarHiddenToggle,
-                        TextButton(
-                          onPressed: onToggleHidden,
-                          style: TextButton.styleFrom(
-                            foregroundColor: theme.colorScheme.onSurfaceVariant,
-                            minimumSize: const Size(0, 32),
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            textStyle: theme.textTheme.labelMedium,
-                          ),
-                          child: Text(
-                            showHidden
-                                ? 'Hide ${hidden.length} hidden'
-                                : 'Show ${hidden.length} hidden'
-                                      '${hiddenUnread > 0 ? ' ($hiddenUnread)' : ''}',
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                if (showHidden)
-                  for (final bot in hidden) _row(context, bot),
               ],
-              // The same failure over a list that still has rows: a banner,
-              // not a replacement, because what is on screen is still the last
-              // thing known.
-              if (error != null && bots.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.cloud_off_rounded,
-                        size: 16,
-                        color: theme.colorScheme.error.withValues(alpha: 0.9),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          error!,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
+            ),
           ),
         ),
         if (!phone) _Foot(onMarketplace: onMarketplace),
@@ -640,30 +650,31 @@ class _RowControl extends StatelessWidget {
 /// need not cross the screen.
 const sidebarSwipeReadFraction = 0.34;
 
-/// The width of the Hide button a swipe towards the leading edge reveals.
-const sidebarSwipeRevealWidth = 88.0;
+/// How far, as a share of the row's width, a swipe towards the leading edge
+/// travels before letting go hides the Bot outright, the way Mail's long
+/// swipe archives. Short of it the swipe only reveals the button.
+const sidebarSwipeHideFraction = 0.6;
 
-/// What letting go of a swipe at [dx] does, for a row [width] wide. Positive
-/// [dx] is towards the trailing edge.
-enum SidebarSwipeOutcome { read, reveal, close }
-
-SidebarSwipeOutcome sidebarSwipeOutcomeV1(double dx, double width) {
-  if (dx >= width * sidebarSwipeReadFraction) return SidebarSwipeOutcome.read;
-  if (dx <= -sidebarSwipeRevealWidth / 2) return SidebarSwipeOutcome.reveal;
-  return SidebarSwipeOutcome.close;
-}
+/// The share of the row the Hide button takes when the swipe rests on it.
+const sidebarSwipeRevealFraction = 0.22;
 
 /// A phone's row, and the two things a thumb can do to it without opening it.
 ///
-/// Towards the trailing edge, the row slides over a read mark and letting go
-/// past the threshold marks it; the row always comes back, because marking
-/// read removes nothing. Towards the leading edge, the row slides over a Hide
-/// button and stays there: hiding is a second, deliberate tap, not the swipe
-/// itself, since a hidden Bot leaves the list. A tap on the slid row closes
-/// it rather than opening the Bot.
-class _SwipeRow extends StatefulWidget {
+/// Both are the swipe rows have on a phone since Mail had them, and the
+/// package that carries that behaviour for Flutter carries it here: the
+/// action slides in with the row and stretches as the swipe goes on. Towards
+/// the trailing edge, letting go past a third of the row marks the Bot, and
+/// the row springs back, because marking read removes nothing. Towards the
+/// leading edge, a short swipe rests on a Hide button for a tap; a long
+/// swipe, past most of the row, hides without the tap, and the button says so
+/// by changing colour before the finger lets go. Crossing either line ticks
+/// under the thumb.
+class _SwipeRow extends StatelessWidget {
   final String botId;
   final bool unread;
+
+  /// Null where the side has nothing to do: no cursor to mark up to, or a
+  /// Bot already hidden. That side then does not slide at all.
   final VoidCallback? onRead;
   final VoidCallback? onHide;
   final Widget child;
@@ -677,160 +688,210 @@ class _SwipeRow extends StatefulWidget {
   });
 
   @override
-  State<_SwipeRow> createState() => _SwipeRowState();
-}
-
-class _SwipeRowState extends State<_SwipeRow>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _slide = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 180),
-    lowerBound: -sidebarSwipeRevealWidth,
-    upperBound: 480,
-    value: 0,
-  );
-  bool get _open => _slide.value <= -sidebarSwipeRevealWidth + 0.5;
-
-  double get _width => context.size?.width ?? 360;
-
-  @override
-  void dispose() {
-    _slide.dispose();
-    super.dispose();
-  }
-
-  void _drag(DragUpdateDetails details) {
-    final limit = widget.onRead == null
-        ? 0.0
-        : _width * sidebarSwipeReadFraction + 24;
-    _slide.value = (_slide.value + details.delta.dx).clamp(
-      widget.onHide == null ? 0.0 : -sidebarSwipeRevealWidth,
-      limit,
+  Widget build(BuildContext context) {
+    final onRead = this.onRead;
+    final onHide = this.onHide;
+    return ClipRRect(
+      clipper: const _RowShape(),
+      child: Slidable(
+        key: ValueKey('slidable-$botId'),
+        groupTag: 'bots',
+        startActionPane: onRead == null
+            ? null
+            : ActionPane(
+                motion: const StretchMotion(),
+                extentRatio: 0.26,
+                dismissible: DismissiblePane(
+                  dismissThreshold: sidebarSwipeReadFraction,
+                  closeOnCancel: true,
+                  // The full swipe performs the action and keeps the row:
+                  // the veto is what brings it back.
+                  confirmDismiss: () async {
+                    HapticFeedback.lightImpact();
+                    onRead();
+                    return false;
+                  },
+                  onDismissed: () {},
+                ),
+                children: [
+                  _SwipeAction(
+                    icon: unread
+                        ? Icons.mark_chat_read_outlined
+                        : Icons.mark_chat_unread_outlined,
+                    label: unread ? 'Read' : 'Unread',
+                    threshold: sidebarSwipeReadFraction,
+                    accent: true,
+                    onPressed: onRead,
+                    alignment: AlignmentDirectional.centerEnd,
+                    padding: const EdgeInsetsDirectional.only(
+                      start: 8,
+                      end: 18,
+                    ),
+                  ),
+                ],
+              ),
+        endActionPane: onHide == null
+            ? null
+            : ActionPane(
+                motion: const StretchMotion(),
+                extentRatio: sidebarSwipeRevealFraction,
+                dismissible: DismissiblePane(
+                  dismissThreshold: sidebarSwipeHideFraction,
+                  onDismissed: () {
+                    HapticFeedback.mediumImpact();
+                    onHide();
+                  },
+                ),
+                children: [
+                  _SwipeAction(
+                    identifier: BotActionIds.swipeHide(botId),
+                    icon: Icons.visibility_off_outlined,
+                    label: 'Hide',
+                    threshold: sidebarSwipeHideFraction,
+                    accent: false,
+                    onPressed: onHide,
+                    alignment: AlignmentDirectional.centerEnd,
+                    padding: const EdgeInsetsDirectional.only(
+                      start: 8,
+                      end: 18,
+                    ),
+                  ),
+                ],
+              ),
+        child: child,
+      ),
     );
   }
+}
 
-  void _release(DragEndDetails _) {
-    switch (sidebarSwipeOutcomeV1(_slide.value, _width)) {
-      case SidebarSwipeOutcome.read:
-        widget.onRead?.call();
-        _slide.animateTo(0, curve: Curves.easeOut);
-      case SidebarSwipeOutcome.reveal:
-        _slide.animateTo(-sidebarSwipeRevealWidth, curve: Curves.easeOut);
-      case SidebarSwipeOutcome.close:
-        _slide.animateTo(0, curve: Curves.easeOut);
+/// One swipe action: its glyph and word anchored at the row's outer edge
+/// while the pane stretches behind them, quiet until the swipe crosses
+/// [threshold] — the line past which letting go performs it — and the
+/// accent from there, with a tick under the thumb on the way over.
+class _SwipeAction extends StatefulWidget {
+  /// The name the browser specs select on, where one does.
+  final String? identifier;
+  final IconData icon;
+  final String label;
+  final double threshold;
+
+  /// Whether the pane wears the accent from the start (the read mark) or
+  /// only once the swipe means it (Hide, which removes the row).
+  final bool accent;
+  final VoidCallback onPressed;
+  final AlignmentGeometry alignment;
+  final EdgeInsetsGeometry padding;
+  const _SwipeAction({
+    this.identifier,
+    required this.icon,
+    required this.label,
+    required this.threshold,
+    required this.accent,
+    required this.onPressed,
+    required this.alignment,
+    required this.padding,
+  });
+
+  @override
+  State<_SwipeAction> createState() => _SwipeActionState();
+}
+
+class _SwipeActionState extends State<_SwipeAction> {
+  SlidableController? _controller;
+  bool _past = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final controller = Slidable.of(context);
+    if (controller != _controller) {
+      _controller?.animation.removeListener(_moved);
+      _controller = controller;
+      _controller?.animation.addListener(_moved);
     }
   }
 
-  void _close() => _slide.animateTo(0, curve: Curves.easeOut);
+  @override
+  void dispose() {
+    _controller?.animation.removeListener(_moved);
+    super.dispose();
+  }
+
+  void _moved() {
+    final past = (_controller?.ratio.abs() ?? 0) >= widget.threshold;
+    if (past == _past) return;
+    _past = past;
+    if (past) HapticFeedback.selectionClick();
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return AnimatedBuilder(
-      animation: _slide,
-      builder: (context, child) {
-        final dx = _slide.value;
-        final open = _open;
-        // The slid row stops at its own edge rather than painting over the
-        // list's margin.
-        return GestureDetector(
-          onHorizontalDragUpdate: _drag,
-          onHorizontalDragEnd: _release,
-          child: ClipRect(
-            child: Stack(
-              children: [
-                if (dx > 0)
-                  Positioned.fill(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: scheme.primary.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Align(
-                          alignment: AlignmentDirectional.centerStart,
-                          child: Padding(
-                            padding: const EdgeInsetsDirectional.only(
-                              start: 22,
-                            ),
-                            child: Icon(
-                              widget.unread
-                                  ? Icons.mark_chat_read_outlined
-                                  : Icons.mark_chat_unread_outlined,
-                              color: scheme.primary,
-                              size: 22,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                if (dx < 0)
-                  Positioned.fill(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: identified(
-                          BotActionIds.swipeHide(widget.botId),
-                          Material(
-                            color: scheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(10),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(10),
-                              onTap: () {
-                                _close();
-                                widget.onHide?.call();
-                              },
-                              child: SizedBox(
-                                width: sidebarSwipeRevealWidth - 8,
-                                height: double.infinity,
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.visibility_off_outlined,
-                                      size: 20,
-                                      color: scheme.onSurfaceVariant,
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      'Hide',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            color: scheme.onSurfaceVariant,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final lit = widget.accent || _past;
+    final ink = lit ? scheme.primary : scheme.onSurfaceVariant;
+    // The pane lays its actions out as a Flex, so this stays its direct
+    // child and the name goes inside.
+    final identifier = widget.identifier;
+    Widget named(Widget child) =>
+        identifier == null ? child : identified(identifier, child);
+    return Expanded(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        color: lit
+            ? scheme.primary.withValues(alpha: _past ? 0.28 : 0.16)
+            : scheme.surfaceContainerHighest,
+        child: named(
+          Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: () {
+                _controller?.close();
+                widget.onPressed();
+              },
+              child: Align(
+                alignment: widget.alignment,
+                child: Padding(
+                  padding: widget.padding,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(widget.icon, size: 20, color: ink),
+                      const SizedBox(height: 3),
+                      Text(
+                        widget.label,
+                        softWrap: false,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: ink,
+                          fontWeight: _past ? FontWeight.w600 : FontWeight.w500,
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                Transform.translate(
-                  offset: Offset(dx, 0),
-                  child: open
-                      ? GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: _close,
-                          child: AbsorbPointer(child: child),
-                        )
-                      : child,
                 ),
-              ],
+              ),
             ),
           ),
-        );
-      },
-      child: widget.child,
+        ),
+      ),
     );
   }
+}
+
+/// The row's own pill: inset 8 from the list on each side, corners of 10.
+class _RowShape extends CustomClipper<RRect> {
+  const _RowShape();
+
+  @override
+  RRect getClip(Size size) => RRect.fromRectAndRadius(
+    Rect.fromLTWH(8, 0, size.width - 16, size.height),
+    const Radius.circular(10),
+  );
+
+  @override
+  bool shouldReclip(_RowShape oldClipper) => false;
 }
 
 /// One Bot in the list: the face, the name and the last thing said, in a row
