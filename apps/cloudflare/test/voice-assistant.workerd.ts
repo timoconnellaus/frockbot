@@ -1829,6 +1829,97 @@ describe("what the session remembers between calls", () => {
     return callId;
   }
 
+  // A Bot answer is a turn of the call the ledger counts but the memory source
+  // leaves out. The ordinal a memory write carries has to be the ledger's own
+  // either way: an in-call write and the end-of-call source that reads the same
+  // turn must stamp the same number, or the later write is judged the older one.
+  test("a memory write after a Bot answer is stamped with the turn the finalization reads", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-memory-ordinal-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({
+      delegateWord: "plan",
+      botId: identity.botId,
+      answerReply: "",
+    });
+    await stub.probeDropDispatches(1_000);
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+
+    // Turn one: the Bot is asked.
+    expect(await stub.probeUtterance("plan the launch")).toBe(true);
+    await opened.waitFor(
+      (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
+      "acknowledged",
+    );
+    const key = Object.keys(await stub.probeStorage("voice:delegation:"))[0]!;
+    const record = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    await stub.probePutStorage(key, { ...record, attempts: 39 });
+    // Turn two: the answer arrives as an event turn, and is not said.
+    const told = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (one) => one.state === "spoken",
+      "the answer told as an event turn",
+      20_000,
+    );
+    const callId = told.callId;
+    expect(told.spokenTurnId).toBe(`${callId}:2`);
+
+    // Turn three: the person asks for something to be remembered.
+    await stub.probeSetScript({
+      rememberWord: "remember",
+      remember: { text: "Keep answers to one sentence.", kind: "preference" },
+    });
+    expect(
+      await stub.probeUtterance("remember to keep your answers short"),
+    ).toBe(true);
+    const inCall = await eventually(
+      async () => (await stub.probeMemory()).durable[0],
+      (entry) => Boolean(entry),
+      "the in-call memory write",
+    );
+    expect(inCall).toMatchObject({
+      sourceTurnId: `${callId}:3`,
+      stamp: { turn: 3 },
+    });
+
+    // The end-of-call pass reads the same turn and writes the same fact
+    // again. It is only allowed to land if its ordinal matches the in-call
+    // one; a renumbered source would make it look older and be skipped.
+    await stub.probeSetScript({
+      memory: {
+        operations: [
+          {
+            kind: "durable/add",
+            id: inCall.id,
+            text: "Keep answers to two sentences.",
+            source: `${callId}:3`,
+          },
+        ],
+      },
+    });
+    await hangUpAndFinalize(stub, opened);
+    const remembered = (await stub.probeMemory()).durable;
+    expect(remembered).toHaveLength(1);
+    expect(remembered[0]).toMatchObject({
+      id: inCall.id,
+      text: "Keep answers to two sentences.",
+      sourceTurnId: `${callId}:3`,
+      stamp: { turn: 3 },
+    });
+    expect(await stub.probeMemoryJobs()).toMatchObject([{ state: "applied" }]);
+  });
+
   test("a preference said in one call is in the next call's prompt", async () => {
     const userId = `voice-memory-across-${crypto.randomUUID()}`;
     const stub = assistant(userId);

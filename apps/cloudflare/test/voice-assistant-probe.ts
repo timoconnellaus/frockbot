@@ -38,8 +38,6 @@ export interface VoiceProbeScript {
    * deciding the answer is not worth saying.
    */
   answerReply?: string;
-  /** The Bot-answer turn's model request throws, as an unreachable gateway does. */
-  answerFails?: boolean;
   /** The speech provider answers every sentence with nothing, as a refused key does. */
   silentTts?: boolean;
   failTts?: boolean;
@@ -296,7 +294,6 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
       // or says what the script tells it to, which may be nothing.
       this.#announced += 1;
       if (this.#announceHeld) await this.#announceHeld;
-      if (this.#script.answerFails) throw new Error("gateway down");
       const reply =
         this.#script.answerReply ??
         (() => {

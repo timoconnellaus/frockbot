@@ -217,11 +217,25 @@ export function voiceMeterDayV1(at: Date): string {
   return at.toISOString().slice(0, 10);
 }
 
+/**
+ * A turn id is `<callId>:<sequence>`; the sequence is its order in the call,
+ * from one. It is the only ordinal a turn has: an in-call memory write and the
+ * end-of-call source both stamp this number, so they order against each other.
+ */
+export function voiceTurnOrdinalV1(turnId: string): number {
+  const sequence = Number.parseInt(
+    turnId.slice(turnId.lastIndexOf(":") + 1),
+    10,
+  );
+  return Number.isFinite(sequence) && sequence > 0 ? sequence : 1;
+}
+
 /** `voice-<32 hex>`: a public identifier the Bot's run door accepts. */
 export async function voiceDelegationRunIdV1(parts: readonly string[]) {
+  // The separator is NUL so the hashed tuple stays unambiguous across parts.
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(parts.join("")),
+    new TextEncoder().encode(parts.join("\0")),
   );
   const hex = [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -923,11 +937,8 @@ export class VoiceLedgerV1 {
   }
 }
 
-/** A turn id is `<callId>:<sequence>`; the sequence is its order in the call. */
 function turnSequence(turn: VoiceTurnRecordV1): number {
-  const tail = turn.turnId.slice(turn.turnId.lastIndexOf(":") + 1);
-  const sequence = Number.parseInt(tail, 10);
-  return Number.isFinite(sequence) ? sequence : 0;
+  return voiceTurnOrdinalV1(turn.turnId);
 }
 
 function turnKey(turnId: string): string {

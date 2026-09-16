@@ -427,7 +427,7 @@ export function decodeVoiceMemoryUpdateV1(raw: string): VoiceMemoryUpdateV1 {
 export interface VoiceMemorySourceTurnV1 {
   /** The ledger's turn id; what an operation's `source` must name. */
   id: string;
-  /** Its place in its call, from one: half of the ordering stamp. */
+  /** The ledger's own turn sequence in its call: half of the ordering stamp. */
   ordinal: number;
   /** The call it belongs to, which is not always the call being summarised. */
   callId: string;
@@ -459,6 +459,11 @@ export interface VoiceMemoryApplyResultV1 {
   skipped: string[];
   /** Operations that changed the record. */
   changed: number;
+}
+
+/** How far a call's source reaches, in the ordinals the cursor is kept in. */
+function reachOf(turns: readonly VoiceMemorySourceTurnV1[]): number {
+  return turns.reduce((reach, turn) => Math.max(reach, turn.ordinal), 0);
 }
 
 function stampOf(turn: VoiceMemorySourceTurnV1): VoiceMemoryStampV1 {
@@ -1062,7 +1067,11 @@ export interface VoiceMemoryJobV1 {
   sequence: number;
   createdAt: string;
   state: VoiceMemoryJobStateV1;
-  /** Turns of this call already folded into memory; the rest are still owed. */
+  /**
+   * The highest turn ordinal of this call already folded into memory; turns
+   * above it are still owed. An ordinal, not a count: the source skips the
+   * call's event turns, so the two are not the same number.
+   */
   cursor: number;
   /** Attempts at the chunk that starts at `cursor`. */
   attempts: number;
@@ -1081,8 +1090,8 @@ export interface VoiceMemoryChunkV1 {
   to: number;
   total: number;
   /**
-   * How many turns each call in this window has altogether, its own and every
-   * carried one. A carried call is only finished when its cursor reaches its
+   * How far each call in this window reaches altogether — its own and every
+   * carried one — as the highest ordinal its source holds. A carried call is only finished when its cursor reaches its
    * own total — a long one read forty turns at a time is resumed, not retired
    * because a later call happened to read its opening.
    */
@@ -1287,7 +1296,7 @@ export class VoiceMemoryLedgerV1 {
       if (!job || job.state !== "pending") return undefined;
       if (job.attempts >= VOICE_MEMORY_MAX_ATTEMPTS_V1) return undefined;
       const own = await input.read(job.callId);
-      const totals = [{ callId: job.callId, total: own.length }];
+      const totals = [{ callId: job.callId, total: reachOf(own) }];
       // Earlier calls nobody finished are read with this one — the newest of
       // them first, since a call that finishes leaves the `failed` set and the
       // backlog still drains completely. Within the window that is read, the
@@ -1306,15 +1315,18 @@ export class VoiceMemoryLedgerV1 {
         .slice(-VOICE_MEMORY_MAX_CARRIED_CALLS_V1);
       for (const other of earlier) {
         const turns = await input.read(other.callId);
-        totals.push({ callId: other.callId, total: turns.length });
-        carried.push(...turns.slice(other.cursor));
+        totals.push({ callId: other.callId, total: reachOf(turns) });
+        carried.push(...turns.filter((item) => item.ordinal > other.cursor));
       }
-      const turns = [...carried, ...own.slice(job.cursor)];
+      const turns = [
+        ...carried,
+        ...own.filter((turn) => turn.ordinal > job.cursor),
+      ];
       if (turns.length === 0) {
         await this.storage.put(jobKey(input.callId), {
           ...job,
           state: "applied",
-          cursor: own.length,
+          cursor: reachOf(own),
           settledAt: input.at.toISOString(),
         });
         return undefined;
@@ -1338,7 +1350,7 @@ export class VoiceMemoryLedgerV1 {
           ownRead.length > 0
             ? Math.max(...ownRead.map((turn) => turn.ordinal))
             : job.cursor,
-        total: own.length,
+        total: reachOf(own),
         totals,
       };
     });
@@ -1518,7 +1530,9 @@ export class VoiceMemoryLedgerV1 {
     const newestJob = (await this.unsummarisedJobs()).at(-1);
     if (!newestJob) return [];
     const turns = await read(newestJob.callId);
-    return turns.slice(newestJob.cursor).slice(-limit);
+    return turns
+      .filter((turn) => turn.ordinal > newestJob.cursor)
+      .slice(-limit);
   }
 
   /**

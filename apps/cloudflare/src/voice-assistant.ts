@@ -41,6 +41,7 @@ import {
 import {
   VoiceLedgerV1,
   voiceCallIsStaleV1,
+  voiceTurnOrdinalV1,
   type VoiceCallRecordV1,
   type VoiceDelegationRecordV1,
   type VoiceLedgerDebugSnapshotV1,
@@ -734,9 +735,12 @@ export class VoiceAssistant extends VoiceAgentBase<
         // assistant made of it, if it spoke, is not theirs either.
         (turn) => !turn.event,
       );
-      return turns.map((turn, index) => ({
+      return turns.map((turn) => ({
         id: turn.turnId,
-        ordinal: index + 1,
+        // The ledger's own turn sequence, not a place in this filtered list:
+        // an in-call memory write stamps the same number, and the two must
+        // order against each other.
+        ordinal: voiceTurnOrdinalV1(turn.turnId),
         callId,
         sequence,
         at: turn.admittedAt,
@@ -1565,8 +1569,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     call.turnTranscript = transcript;
     // `<callId>:<sequence>`: the ledger's own count of this call's turns, and
     // half of the stamp that orders every memory write against every other.
-    call.turnOrdinal =
-      Number.parseInt(turnId.slice(turnId.lastIndexOf(":") + 1), 10) || 1;
+    call.turnOrdinal = voiceTurnOrdinalV1(turnId);
     call.turnStartedAt = startedAt;
     call.turnSettledAt = undefined;
     this.trace(connection, "turn", {
@@ -2349,6 +2352,11 @@ export class VoiceAssistant extends VoiceAgentBase<
           run: delegation.runId,
           reason: "quota",
         });
+        this.sendDelegationState(
+          delegation.botId,
+          delegation.botName,
+          "finished",
+        );
         return;
       }
       const turnId = admitted.turn.turnId;
@@ -2373,10 +2381,20 @@ export class VoiceAssistant extends VoiceAgentBase<
         // was cancelled with it. The turn is settled rather than left admitted
         // and metered against a call nobody is on.
         await ledger.settleTurn(turnId, { failure: "the call ended" });
+        this.sendDelegationState(
+          delegation.botId,
+          delegation.botName,
+          "finished",
+        );
         return;
       }
       if (controller.signal.aborted) {
         await ledger.settleTurn(turnId, { failure: "aborted" });
+        this.sendDelegationState(
+          delegation.botId,
+          delegation.botName,
+          "finished",
+        );
         return;
       }
       const generation = call.speechGeneration;
@@ -2384,8 +2402,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       call.turnId = turnId;
       call.turnAdmittedAt = admitted.turn.admittedAt;
       call.turnTranscript = transcript;
-      call.turnOrdinal =
-        Number.parseInt(turnId.slice(turnId.lastIndexOf(":") + 1), 10) || 1;
+      call.turnOrdinal = voiceTurnOrdinalV1(turnId);
       call.turnStartedAt = startedAt;
       call.turnSettledAt = undefined;
       this.sendDelegationState(
