@@ -40,7 +40,7 @@ A true cloud zero, including for the focused Bot, removes the stored cloud count
 
 ## Configuration
 
-The Android configuration is `apps/native/android/app/google-services.json`, for Firebase project `frock-bot` and package `com.frockbot.mobile`. It contains Firebase's public app configuration. The release workflow requires `FCM_SERVICE_ACCOUNT` in GitHub Actions and forwards it to the production Worker. The server's dedicated `frockbot-push` service account has the Firebase Cloud Messaging role. Its private JSON credential belongs only in the Cloudflare Worker secret `FCM_SERVICE_ACCOUNT`, never in the APK or repository.
+The Android configuration is `apps/native/android/app/google-services.json`, for Firebase project `frock-bot` and package `com.frockbot.mobile`. It contains Firebase's public app configuration. Gradle applies it only to a build that opts into that production identity (`apps/native/README.md`, Android upgrade); the isolated `.dev` package every other build produces carries no Firebase registration and receives no push. The release workflow requires `FCM_SERVICE_ACCOUNT` in GitHub Actions and forwards it to the production Worker. The server's dedicated `frockbot-push` service account has the Firebase Cloud Messaging role. Its private JSON credential belongs only in the Cloudflare Worker secret `FCM_SERVICE_ACCOUNT`, never in the APK or repository.
 
 The authenticated `/api/push/device` endpoint registers tokens, renews focused-viewer presence, and removes an installation. The User identity comes from gateway authentication, not request JSON.
 
