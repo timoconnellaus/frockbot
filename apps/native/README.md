@@ -143,6 +143,12 @@ flutter build web --release \
   --dart-define=FROCKBOT_DEV_AUTH=true
 ```
 
+That bare command leaves Rive Native fetching its WebAssembly runtime from
+jsdelivr, which the app origin's own Content-Security-Policy refuses; only the
+staging build serves that runtime from the origin and passes the
+`RIVE_NATIVE_WASM_HOST` define that names it. How and why is
+[the web build](../../docs/architecture.md#served-on-the-web).
+
 `dart:io` is confined to `lib/**/*_io.dart`, which a test enforces. Four seams choose an implementation by conditional import: the HTTP client and the state-channel socket (`client/transport_io.dart`, `client/transport_web.dart`), the credential (`client/credential_*.dart`), the sign-in door (`client/auth_*.dart`) and the durable store (`client/plain_store_*.dart`).
 
 The phone holds a PKCE bearer token in the platform keystore and sends it as a header. The browser holds nothing: `withCredentials` carries the ambient better-auth cookie, sign-in navigates to better-auth's Google door, and everything that is not a secret lives in `localStorage`. A cookie is invisible to script, so the account is read off the `<body>` attributes the Worker stamped on the document (`lib/client/identity_web.dart`) and the shell paints before `/api/identity` confirms it.
