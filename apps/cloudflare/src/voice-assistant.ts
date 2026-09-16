@@ -2396,6 +2396,7 @@ export class VoiceAssistant extends VoiceAgentBase<
   private async delegationSpeech(
     ledger: VoiceLedgerV1,
     delegation: VoiceDelegationRecordV1,
+    callId: string,
   ): Promise<string> {
     const result = {
       botName: delegation.botName,
@@ -2407,9 +2408,13 @@ export class VoiceAssistant extends VoiceAgentBase<
     // A sentence is composed once but may be spoken much later, so how long
     // ago the request was made is decided here, at the moment it is spoken,
     // and never by the composer. The lead-in is not recorded with the
-    // sentence: a replay later still says the age it has then.
+    // sentence: a replay later still says the age it has then. An answer
+    // heard on a call other than the one it was asked on is placed however
+    // young it is: the person has since hung up and come back, so nothing on
+    // this call led up to it.
     const now = this.now();
-    const placed = voiceAgePlacedV1(result.askedAt, now);
+    const placed =
+      voiceAgePlacedV1(result.askedAt, now) || delegation.callId !== callId;
     const leadIn = placed ? renderVoiceDelegationLeadInV1(result, now) : "";
     const admission = await ledger.admitDelegationSpeech(delegation.runId, now);
     if (admission.status === "cached") {
@@ -2480,7 +2485,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       // call that can take seconds and the call is free to change under it.
       // Nothing durable about the read-out is written until after it.
       generation = call.speechGeneration;
-      const text = await this.delegationSpeech(ledger, delegation);
+      const text = await this.delegationSpeech(ledger, delegation, call.callId);
       // The call as it is *now*. A new utterance, a reply that started, or a
       // socket that went, all happened while the sentence was being written,
       // and speaking into any of them would cut off the person's own turn or

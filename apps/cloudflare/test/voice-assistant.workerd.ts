@@ -1684,6 +1684,55 @@ describe("the voice session object", () => {
     next.socket.close();
   });
 
+  test("an answer heard on a call other than the one it was asked on is placed under its request", async () => {
+    const userId = `voice-cross-call-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const runId = `voice-${"c".repeat(32)}`;
+    const key = `voice:delegation:${runId}`;
+    const at = new Date().toISOString();
+    // Asked seconds ago, but on a call that is over: the person hung up and
+    // called back, so nothing on the call they are on now led up to this and
+    // the read-out has to say which request it answers.
+    await stub.probePutStorage(key, {
+      schemaVersion: 1,
+      runId,
+      turnId: "earlier-call:1",
+      callId: "earlier-call",
+      botId: "bot",
+      botName: "Workerd Bot",
+      text: "is the launch ready",
+      admittedAt: at,
+      state: "settled",
+      attempts: 0,
+      answer: "The launch is ready.",
+      settledAt: at,
+      speech: "Workerd Bot says the launch is ready.",
+      speechState: "composed",
+    });
+    const next = await open(userId);
+    const speaker = playsAnswers(next);
+    await startCall(next);
+    await next.waitFor(
+      (f) =>
+        f.type === "transcript_end" &&
+        String(f.text).startsWith(
+          "Earlier, a moment ago, you asked Workerd Bot about is the launch ready. ",
+        ),
+      "the young answer placed under its request on a later call",
+    );
+    const heard = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (record) => record.state === "spoken",
+      "the placed answer read out on the later call",
+    );
+    expect(speaker.played).toEqual([heard.deliveryId]);
+    expect(await stub.probeComposed()).toBe(0);
+    next.socket.close();
+  });
+
   test("a Bot answer waits for ordinary speech still being synthesized after the model has finished", async () => {
     const userId = `voice-ordinary-tts-${crypto.randomUUID()}`;
     const stub = assistant(userId);
