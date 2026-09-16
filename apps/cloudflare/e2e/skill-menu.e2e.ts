@@ -42,13 +42,19 @@ async function expectHighlighted(
  * every step then has one bounded auto-wait of its own.
  */
 async function openPopover(page: Page): Promise<void> {
-  await sem(page, "chat-composer").click();
   const composer = composerInput(page);
-  await expect(composer).toBeFocused();
-  await composer.press("ControlOrMeta+a");
-  await composer.pressSequentially("/");
-  await expect(composer).toHaveValue("/");
-  await expect(sem(page, "skill-menu")).toBeVisible();
+  // The popover is the client's word that the keystroke reached it: a key
+  // sent to a fresh editing element before the engine has attached to it
+  // lands in the DOM alone, reads back as "/" here, and opens nothing. On a
+  // miss the gesture is repeated from the tap.
+  await expect(async () => {
+    await sem(page, "chat-composer").click();
+    await expect(composer).toBeFocused();
+    await composer.press("ControlOrMeta+a");
+    await composer.pressSequentially("/");
+    await expect(composer).toHaveValue("/");
+    await expect(sem(page, "skill-menu")).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 60_000 });
 }
 
 test("the Skill popover keeps the highlight the arrow keys put on it", async ({

@@ -106,6 +106,10 @@ test("uses dark product surfaces with the FrockBot pink action", async ({
   await sem(page, "sidebar-create-bot").click();
   await expect(sem(page, "flock-create")).toBeVisible();
   await field(page, "flock-create-name").fill("Swatch");
+  // The sheet grew a character picker above the name, so at the default
+  // window height the action sits below the fold; a pixel sampled off the
+  // bottom of the screenshot is black, whatever the button's colour.
+  await sem(page, "flock-create-submit").scrollIntoViewIfNeeded();
   const submit = await sem(page, "flock-create-submit").boundingBox();
   expect(submit, "the create action has no box").not.toBeNull();
   if (!submit) return;

@@ -15,6 +15,15 @@ bool get _isFlutterTest => WidgetsBinding.instance.runtimeType
     .toString()
     .contains('TestWidgetsFlutterBinding');
 
+/// Whether `RiveNative.init()` has settled successfully.
+///
+/// `main()` starts the runtime without waiting for it and sets this when it
+/// lands; every avatar draws its still until then and rebuilds on the flip.
+/// Without the runtime a renderer factory cannot be asked for — on the web it
+/// reads a field the loader never initialised and throws from `build` — so a
+/// runtime that never arrives leaves the stills in place.
+final ValueNotifier<bool> riveRuntimeReady = ValueNotifier<bool>(false);
+
 enum CharacterActivity {
   idle,
   thinking,
@@ -221,6 +230,10 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   rive.RiveLoaded? _loaded;
   Timer? _quietTimer;
   Timer? _settleTimer;
+  Timer? _restTimer;
+
+  /// The last state the ticker was woken for; see `_sync`.
+  String? _synced;
   bool _localHovered = false;
   bool _twitching = false;
 
@@ -233,20 +246,29 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     _characterId,
     () => rive.FileLoader.fromAsset(
       'assets/characters/$_characterId.riv',
-      riveFactory: rive.Factory.rive,
+      riveFactory: rive.Factory.flutter,
     ),
   );
 
   @override
   void initState() {
     super.initState();
+    riveRuntimeReady.addListener(_runtimeChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleQuietTwitch());
+  }
+
+  /// The runtime landed (or gave up) after this avatar first drew its still.
+  void _runtimeChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void didUpdateWidget(CharacterAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.characterId != widget.characterId) _loaded = null;
+    if (oldWidget.characterId != widget.characterId) {
+      _loaded = null;
+      _synced = null;
+    }
     _scheduleQuietTwitch();
     _sync();
   }
@@ -294,11 +316,37 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
             !_twitching &&
             !_localHovered &&
             !inheritedHover);
-    loaded.controller.active = TickerMode.valuesOf(context).enabled;
-    final model = loaded.viewModelInstance;
-    if (model == null) return;
+    // A resting artboard is not advanced. The state machine's reduced-motion
+    // pose is a still, but the widget's ticker would go on asking it for a
+    // frame sixty times a second — for every Bot in the sidebar at once —
+    // which is where a chat tab's whole CPU core went. The ticker runs for a
+    // moment after each change so data binding and the transition back to
+    // rest are drawn, then stops until the next hover or twitch wakes it.
     final definition = characterCatalogV1[_characterId]!;
     final primary = characterColourV1(widget.primary, _characterId);
+    final run = TickerMode.valuesOf(context).enabled && !reduce;
+    // Only a change wakes a resting artboard. `_sync` runs on every rebuild
+    // of the surface around it — the composer rebuilds on each keystroke —
+    // and a wake per rebuild kept the companion animating for as long as
+    // anyone typed.
+    final signature =
+        '$run:${widget.activity}:${widget.emotion}:$primary:'
+        '${_localHovered || inheritedHover || _twitching}';
+    if (signature != _synced) {
+      _synced = signature;
+      _restTimer?.cancel();
+      if (run) {
+        loaded.controller.active = true;
+      } else {
+        loaded.controller.active = TickerMode.valuesOf(context).enabled;
+        _restTimer = Timer(const Duration(milliseconds: 700), () {
+          if (!mounted) return;
+          _loaded?.controller.active = false;
+        });
+      }
+    }
+    final model = loaded.viewModelInstance;
+    if (model == null) return;
     final hsl = HSLColor.fromColor(primary);
     final shade = hsl
         .withLightness((hsl.lightness * 0.72).clamp(0.12, 0.65))
@@ -331,7 +379,14 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   Widget build(BuildContext context) {
     final avatar = SizedBox.square(
       dimension: widget.size,
-      child: _isFlutterTest
+      // `still` is the checked-in picture, not a paused artboard: a live
+      // artboard beside the composer — even one holding its rest pose — cost
+      // keystrokes typed right after a tap on the field, and the picture is
+      // what the design shows at rest anyway.
+      child:
+          _isFlutterTest ||
+              !riveRuntimeReady.value ||
+              widget.motion == CharacterMotion.still
           ? Image.asset(
               'assets/characters/$_characterId.png',
               fit: BoxFit.contain,
@@ -343,13 +398,20 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
               dataBind: rive.DataBind.auto(),
               onLoaded: (loaded) {
                 _loaded = loaded;
+                _synced = null;
                 _sync();
               },
               builder: (context, state) => switch (state) {
-                rive.RiveLoaded() => rive.RiveWidget(
-                  controller: state.controller,
-                  fit: rive.Fit.contain,
-                  hitTestBehavior: rive.RiveHitTestBehavior.none,
+                // Decoration only: the artboard takes no pointer and holds no
+                // focus. Hover and gaze belong to the MouseRegion around it.
+                rive.RiveLoaded() => ExcludeFocus(
+                  child: IgnorePointer(
+                    child: rive.RiveWidget(
+                      controller: state.controller,
+                      fit: rive.Fit.contain,
+                      hitTestBehavior: rive.RiveHitTestBehavior.none,
+                    ),
+                  ),
                 ),
                 // A runtime that never arrives — a script the CSP refuses, a
                 // request that hangs — leaves the loader in `RiveLoading`
@@ -376,7 +438,9 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
         _sync();
       },
       onHover: _look,
-      child: avatar,
+      // Its own layer: a frame the artboard redraws is then the artboard's
+      // picture alone, not the composer, the thread and the sidebar with it.
+      child: RepaintBoundary(child: avatar),
     );
     Widget result = widget.workingRing
         ? Container(
@@ -408,18 +472,37 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
         ],
       );
     }
+    // An unlabelled avatar is decoration and leaves nothing in the tree — not
+    // even an empty image node. One of those beside the working row's label
+    // made that row a branch rather than a leaf, and the words the row spoke
+    // ("Stopping the previous reply…") moved from its text into an aria-label
+    // nothing reading the transcript's text could see.
+    if (widget.semanticsLabel == null) return ExcludeSemantics(child: result);
     return Semantics(
+      // A labelled image is a node of its own. Left as an annotation it merged
+      // into the nearest ancestor node — the conversation pane's, once the
+      // companion sat beside the composer — and the web engine's image
+      // handling then dropped that node's identifier, so `shell-conversation`
+      // vanished from the accessibility tree while its contents stayed.
+      container: true,
       image: true,
       label: widget.semanticsLabel,
-      excludeSemantics: widget.semanticsLabel == null,
+      // Excluded below the label: the artboard publishes semantic nodes of
+      // its own, with focus handling, and beside the composer those took the
+      // keyboard focus the text field had — every keystroke after a tap on
+      // the composer was lost. The character is one image to a screen reader,
+      // not a set of controls.
+      excludeSemantics: true,
       child: result,
     );
   }
 
   @override
   void dispose() {
+    riveRuntimeReady.removeListener(_runtimeChanged);
     _quietTimer?.cancel();
     _settleTimer?.cancel();
+    _restTimer?.cancel();
     super.dispose();
   }
 }

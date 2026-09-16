@@ -18,7 +18,7 @@ const RIVE_RUNTIME =
 
 async function shellIsPainted(page: Parameters<typeof openApplication>[0]) {
   await expect(
-    sem(page, "shell-sidebar").or(sem(page, "sidebar-toggle")),
+    sem(page, "shell-sidebar").or(sem(page, "sidebar-toggle")).first(),
   ).toBeVisible();
 }
 

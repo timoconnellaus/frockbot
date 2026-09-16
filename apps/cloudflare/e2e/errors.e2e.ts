@@ -148,9 +148,20 @@ test.describe("failed requests", () => {
     // the engine holds an editing session on it, so a value written straight
     // onto the element is read back by the spec and ignored by the client —
     // and Send stays disabled over a composer that looks full.
-    await composer.click();
-    await composer.pressSequentially("does this survive");
-    await expect(composer).toHaveValue("does this survive");
+    //
+    // And the session is confirmed, not assumed: `expectReadyToSend` just tore
+    // the editing element down, and keys sent to the fresh element before the
+    // engine has attached to it land in the DOM alone — the spec reads them
+    // back, the client never saw them, and the engine's next sync wipes them.
+    // Send appearing is the client's word that the text reached it.
+    await expect(async () => {
+      await composer.click();
+      await expect(composer).toBeFocused();
+      await composer.press("ControlOrMeta+a");
+      await composer.pressSequentially("does this survive");
+      await expect(composer).toHaveValue("does this survive");
+      await expect(sem(page, "send-button")).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 60_000 });
     await press(sem(page, "send-button"));
 
     // One line, in the product's own words, and no bubble at all: the Turn

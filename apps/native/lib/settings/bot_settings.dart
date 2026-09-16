@@ -622,6 +622,9 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                           size: 76,
                           characterId: widget.background,
                           primary: widget.primary,
+                          // A preview at rest; the panel can stay open for
+                          // an hour and an idle loop here repaints the window.
+                          motion: CharacterMotion.quiet,
                         ),
                         const SizedBox(height: 10),
                         Text(
