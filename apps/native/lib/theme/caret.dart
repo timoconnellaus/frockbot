@@ -13,9 +13,15 @@ import 'package:flutter/material.dart';
 /// is unreadable while it is being typed.
 ///
 /// The nudge is `-2 / devicePixelRatio` and [TextField] offers no way to set
-/// it, so the field is handed a ratio the nudge rounds away in. Nothing under
-/// a text field reads the ratio for anything else, and on a platform without
-/// the nudge this is not in the tree at all.
+/// it, so the field is handed a ratio the nudge rounds away in. On a platform
+/// without the nudge this is not in the tree at all.
+///
+/// The ratio is not free: `RenderEditable` snaps the caret onto the physical
+/// pixel grid using the same value, so inside a wrapped field the caret is no
+/// longer snapped and its edges antialias. That costs under half a device
+/// pixel of softness on a Retina screen, where the glyphs beside it are
+/// unsnapped anyway, and it buys a caret that is not drawn through the last
+/// letter.
 class SteadyCaret extends StatelessWidget {
   final Widget child;
   const SteadyCaret({super.key, required this.child});
