@@ -70,17 +70,61 @@ enum LineStatus { streaming, completed, aborted, error }
 /// again, or opening Billing when the account could not pay for the reply.
 enum LineRetry { resendTurn, openBilling }
 
-enum VoiceExchangeStatus { queued, working, answered, stopped, failed }
+enum ExchangeStatus { queued, working, answered, stopped, failed }
 
-class VoiceExchange {
+/// Whether this Bot asked or was asked.
+enum ExchangeDirection { inbound, outbound }
+
+/// Who the Bot exchanged messages with: another Bot of the same User, or the
+/// account's voice session. A Bot is named by the id the wire carried, and the
+/// name recorded at the time — a Bot since renamed or deleted still reads as
+/// who it was when it spoke.
+class ExchangeCounterpart {
+  final String kind;
+  final String? botId;
+  final String? name;
+  const ExchangeCounterpart.bot({required this.botId, required this.name})
+    : kind = 'bot';
+  const ExchangeCounterpart.voice() : kind = 'voice', botId = null, name = null;
+  bool get isVoice => kind == 'voice';
+
+  /// What the thread calls the counterpart.
+  String get label => isVoice ? 'Voice' : (name ?? 'a Bot');
+
+  /// The same party, whatever name it carried at the time.
+  bool same(ExchangeCounterpart other) =>
+      kind == other.kind && botId == other.botId;
+}
+
+/// One question and its answer between this Bot and a counterpart. Inbound,
+/// the request is the counterpart's and the reply is this Bot's; outbound the
+/// other way round.
+class Exchange {
+  final ExchangeCounterpart counterpart;
+  final ExchangeDirection direction;
   final String request;
   final String? reply;
-  final VoiceExchangeStatus status;
-  const VoiceExchange({
+  final ExchangeStatus status;
+
+  /// When the request was admitted, ISO-8601, when the projection knows.
+  final String? at;
+  const Exchange({
+    required this.counterpart,
+    required this.direction,
     required this.request,
     required this.status,
     this.reply,
+    this.at,
   });
+
+  /// What the status says beside the marker, or nothing once it is answered.
+  String? get statusLabel => switch (status) {
+    ExchangeStatus.queued => 'queued',
+    ExchangeStatus.working => 'working',
+    ExchangeStatus.answered => null,
+    ExchangeStatus.stopped => 'stopped',
+    ExchangeStatus.failed => 'couldn’t answer',
+  };
 }
 
 class TranscriptLine {
@@ -112,7 +156,7 @@ class TranscriptLine {
   final List<ToolActivity> tools;
   final List<SendPayloadLine> sends;
   final List<PluginModelCall> pluginCalls;
-  final VoiceExchange? voiceExchange;
+  final Exchange? exchange;
   const TranscriptLine({
     required this.id,
     required this.runId,
@@ -129,7 +173,7 @@ class TranscriptLine {
     this.tools = const [],
     this.sends = const [],
     this.pluginCalls = const [],
-    this.voiceExchange,
+    this.exchange,
   });
 
   bool get empty =>
@@ -137,7 +181,7 @@ class TranscriptLine {
       notice == null &&
       sends.isEmpty &&
       retry == null &&
-      voiceExchange == null;
+      exchange == null;
 }
 
 /// Where each Turn sits in the conversation: the timestamp of the message the
@@ -214,7 +258,7 @@ SupersedeDrainState supersedeDrainState(
 ) {
   TranscriptLine? waiting;
   for (final line in lines) {
-    if (line.voiceExchange == null &&
+    if (line.exchange == null &&
         line.role == LineRole.assistant &&
         line.status == LineStatus.streaming &&
         line.pending) {
@@ -307,36 +351,6 @@ const billingFailureCopy = <String>{
       : (notice: copy, action: null);
 }
 
-/// Each send with the ordinal the cloud names it by.
-///
-/// The ordinal counts the Turn's durable sends, and the projection drops old
-/// ones when a Turn outgrows the wire budget, so the position in this list is
-/// not the message's identity. A read the cloud can match has to carry the
-/// ordinal the cloud minted.
-List<({SendPayloadLine send, int ordinal})> _sendsFrom(List<Object?> events) {
-  final sends = <({SendPayloadLine send, int ordinal})>[];
-  for (final event in events) {
-    if (event is! Map || event['type'] != 'send/to-user') continue;
-    final payload = event['payload'];
-    final ordinal = event['ordinal'];
-    // The ordinal is the message's durable identity, and the wire gate makes
-    // every server that can reach this build emit it. A send without one is
-    // unidentifiable — it cannot be read, marked unread, or matched to a
-    // notification — so it is dropped rather than given a position that shifts
-    // under it the moment the page it sits on changes.
-    if (ordinal is! int || ordinal < 0) continue;
-    sends.add((
-      send: SendPayloadLine(
-        payload is Map && payload['type'] is String
-            ? Map<String, Object?>.from(payload)
-            : null,
-      ),
-      ordinal: ordinal,
-    ));
-  }
-  return sends;
-}
-
 /// What a tool call is called on the Work view.
 ///
 /// A dynamic call is a wrapper around the tool the Bot actually reached, and
@@ -417,12 +431,167 @@ List<PluginModelCall> _pluginCallsFrom(List<Object?> events) {
   return calls;
 }
 
+/// Who asked for a Turn, read off its `via` marker; null for the person.
+ExchangeCounterpart? _counterpartOf(Map<String, dynamic> run) {
+  final via = run['via'];
+  if (via is! Map) return null;
+  if (via['kind'] == 'voice') return const ExchangeCounterpart.voice();
+  if (via['kind'] == 'bot' && via['botId'] is String) {
+    return ExchangeCounterpart.bot(
+      botId: via['botId'] as String,
+      name: via['name'] is String ? via['name'] as String : null,
+    );
+  }
+  return null;
+}
+
+ExchangeStatus _exchangeStatus({
+  required bool answered,
+  required String? status,
+  required bool queued,
+}) => answered
+    ? ExchangeStatus.answered
+    : status == 'running'
+    ? (queued ? ExchangeStatus.queued : ExchangeStatus.working)
+    : status == 'cancelled' || status == 'superseded'
+    ? ExchangeStatus.stopped
+    : ExchangeStatus.failed;
+
+/// The Turn's answer to the caller that asked for it, when it has one.
+String? _callerReply(List<Object?> events, ExchangeCounterpart counterpart) {
+  String? reply;
+  for (final event in events) {
+    if (event is Map &&
+        event['type'] == 'reply/to-caller' &&
+        event['caller'] == counterpart.kind &&
+        event['text'] is String) {
+      reply = event['text'] as String;
+    }
+  }
+  return reply;
+}
+
+/// A Turn asked for by a counterpart, as one exchange: their request, this
+/// Bot's addressed answer, and where it stands.
+Exchange? inboundExchange(Map<String, dynamic> run) {
+  final counterpart = _counterpartOf(run);
+  if (counterpart == null) return null;
+  final events = (run['events'] as List?) ?? const [];
+  final reply = _callerReply(events, counterpart);
+  return Exchange(
+    counterpart: counterpart,
+    direction: ExchangeDirection.inbound,
+    request: (run['input'] as String?) ?? '',
+    reply: reply,
+    at: run['messageAdmittedAt'] as String? ?? run['admittedAt'] as String?,
+    status: _exchangeStatus(
+      answered: reply != null,
+      status: run['status'] as String?,
+      queued: run['queued'] == true,
+    ),
+  );
+}
+
+/// The Turn's own words and questions, in the order it said them: each
+/// `send_to_user` as a line, and each message to another Bot as an exchange
+/// line with the answer that came back on its call.
+List<TranscriptLine> _spokenLines(
+  Map<String, dynamic> run,
+  List<Object?> events,
+) {
+  final runId = run['runId'] as String;
+  final at =
+      run['messageAdmittedAt'] as String? ?? run['admittedAt'] as String?;
+  final results = <String, Map>{};
+  for (final event in events) {
+    if (event is Map &&
+        event['type'] == 'tool/result' &&
+        event['callId'] is String) {
+      results[event['callId'] as String] = event;
+    }
+  }
+  final lines = <TranscriptLine>[];
+  for (final event in events) {
+    if (event is! Map) continue;
+    if (event['type'] == 'send/to-user') {
+      final payload = event['payload'];
+      final ordinal = event['ordinal'];
+      // The ordinal is the message's durable identity, and the wire gate
+      // makes every server that can reach this build emit it. A send without
+      // one cannot be read, marked unread, or matched to a notification, so
+      // it is dropped rather than given a position that shifts under it.
+      if (ordinal is! int || ordinal < 0) continue;
+      lines.add(
+        TranscriptLine(
+          id: '$runId:send:$ordinal',
+          runId: runId,
+          role: LineRole.assistant,
+          text: '',
+          at: at,
+          readAt: run['admittedAt'] as String?,
+          status: LineStatus.completed,
+          sends: [
+            SendPayloadLine(
+              payload is Map && payload['type'] is String
+                  ? Map<String, Object?>.from(payload)
+                  : null,
+            ),
+          ],
+        ),
+      );
+    } else if (event['type'] == 'message/to-bot' &&
+        event['callId'] is String &&
+        event['botId'] is String &&
+        event['text'] is String) {
+      final callId = event['callId'] as String;
+      final result = results[callId];
+      final answered = result != null && result['isError'] != true;
+      lines.add(
+        TranscriptLine(
+          id: '$runId:exchange:$callId',
+          runId: runId,
+          role: LineRole.assistant,
+          text: '',
+          at: at,
+          status: LineStatus.completed,
+          exchange: Exchange(
+            // Named by id alone: the wire does not carry the target's name,
+            // and the client's directory does.
+            counterpart: ExchangeCounterpart.bot(
+              botId: event['botId'] as String,
+              name: null,
+            ),
+            direction: ExchangeDirection.outbound,
+            request: event['text'] as String,
+            reply: answered ? result['content'] as String? : null,
+            at: at,
+            status: result == null
+                ? _exchangeStatus(
+                    answered: false,
+                    status: run['status'] as String?,
+                    queued: false,
+                  )
+                : answered
+                ? ExchangeStatus.answered
+                : ExchangeStatus.failed,
+          ),
+        ),
+      );
+    }
+  }
+  return lines;
+}
+
 /// Projects durable runs into the lines the thread draws.
 ///
 /// One line per `send_to_user` in the order the Bot sent them, then the Turn's
 /// own closing line under them. A bubble is never edited once it is in the
 /// transcript: a later send appends, it does not replace. Retry attempts share
 /// one user bubble, whose status comes from the most recent attempt.
+///
+/// A Turn another party asked for — a Bot, or the voice session — opens with
+/// an exchange marker in place of a user bubble: nobody typed it, and the
+/// request and its answer are read on the exchange view, not in the thread.
 List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
   final latest = <String, Map<String, dynamic>>{};
   for (final run in runs) {
@@ -447,65 +616,25 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     final admittedAt =
         run['messageAdmittedAt'] as String? ?? run['admittedAt'] as String?;
     final messageId = run['messageRunId'] as String? ?? runId;
-    final input = (run['input'] as String?) ?? '';
-    final via = run['via'];
-    if (via is Map && via['kind'] == 'voice') {
-      String? reply;
-      for (final event in events) {
-        if (event is Map &&
-            event['type'] == 'reply/to-caller' &&
-            event['caller'] == 'voice' &&
-            event['text'] is String) {
-          reply = event['text'] as String;
-        }
-      }
+    final inbound = inboundExchange(run);
+    // A Routine's Turn is projected with no input at all: nobody typed it. A
+    // chat Turn cannot be admitted empty, so an empty input means there is no
+    // person's message to draw above the Bot's — not an empty one. A Turn a
+    // counterpart asked for has input, but it is theirs, not the person's.
+    final input = inbound == null ? (run['input'] as String?) ?? '' : '';
+    if (inbound != null) {
       lines.add(
         TranscriptLine(
-          id: '$runId:voice',
+          id: '$runId:exchange',
           runId: runId,
           role: LineRole.assistant,
           text: '',
           at: admittedAt,
-          status: status == 'running'
-              ? LineStatus.streaming
-              : LineStatus.completed,
-          pending: queued,
-          tools: _toolsFrom(events),
-          pluginCalls: _pluginCallsFrom(events),
-          voiceExchange: VoiceExchange(
-            request: input,
-            reply: reply,
-            status: reply != null
-                ? VoiceExchangeStatus.answered
-                : status == 'running'
-                ? (queued
-                      ? VoiceExchangeStatus.queued
-                      : VoiceExchangeStatus.working)
-                : status == 'cancelled' || status == 'superseded'
-                ? VoiceExchangeStatus.stopped
-                : VoiceExchangeStatus.failed,
-          ),
+          status: LineStatus.completed,
+          exchange: inbound,
         ),
       );
-      // Explicit messages to the User still belong to the ordinary conversation.
-      for (final send in _sendsFrom(events)) {
-        lines.add(
-          TranscriptLine(
-            id: '$runId:send:${send.ordinal}',
-            runId: runId,
-            role: LineRole.assistant,
-            text: '',
-            at: admittedAt,
-            status: LineStatus.completed,
-            sends: [send.send],
-          ),
-        );
-      }
-      continue;
     }
-    // A Routine's Turn is projected with no input at all: nobody typed it. A
-    // chat Turn cannot be admitted empty, so an empty input means there is no
-    // person's message to draw above the Bot's — not an empty one.
     if (input.isNotEmpty && emitted.add(messageId)) {
       final current = latest[messageId]!;
       final currentId = current['runId'] as String;
@@ -536,21 +665,9 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
         ),
       );
     }
-    final sends = _sendsFrom(events);
-    for (var index = 0; index < sends.length; index++) {
-      lines.add(
-        TranscriptLine(
-          id: '$runId:send:${sends[index].ordinal}',
-          runId: runId,
-          role: LineRole.assistant,
-          text: '',
-          at: admittedAt,
-          readAt: run['admittedAt'] as String?,
-          status: LineStatus.completed,
-          sends: [sends[index].send],
-        ),
-      );
-    }
+    final spoken = _spokenLines(run, events);
+    lines.addAll(spoken);
+    final sends = [for (final line in spoken) ...line.sends];
     final tools = _toolsFrom(events);
     final pluginCalls = _pluginCallsFrom(events);
     // Only explicit sends carry the Bot's voice; outcome text is private.
@@ -560,11 +677,13 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     // firing that broke or was stopped before it could speak is told as an
     // ordinary message, and the cloud projects that message onto the run and
     // makes the outcome say the same words; drawing them again as a notice
-    // underneath would be the one event said twice.
+    // underneath would be the one event said twice. An exchange's ending is
+    // already on its marker, so it is not said under it either.
     final outcomeMessage = outcome?['message'];
-    final spoken =
+    final told =
+        inbound != null ||
         outcomeMessage is String &&
-        sends.any((send) => send.send.payload?['text'] == outcomeMessage);
+            sends.any((send) => send.payload?['text'] == outcomeMessage);
     switch (status) {
       case 'running':
         lines.add(
@@ -577,8 +696,10 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             readAt: run['admittedAt'] as String?,
             status: LineStatus.streaming,
             // A Turn that has not started shows nothing of its own: the greyed
-            // user message is the whole of what the thread says about it.
-            pending: queued,
+            // user message is the whole of what the thread says about it. A
+            // queued exchange says so on its marker instead, and is not a
+            // supersede the thread should report as draining.
+            pending: queued && inbound == null,
             stopRequested: run['stopRequestedAt'] != null,
             tools: tools,
             pluginCalls: pluginCalls,
@@ -611,7 +732,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             at: admittedAt,
             readAt: run['admittedAt'] as String?,
             status: LineStatus.aborted,
-            notice: spoken ? null : 'You stopped this.',
+            notice: told ? null : 'You stopped this.',
             tools: tools,
             pluginCalls: pluginCalls,
           ),
@@ -643,10 +764,10 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             readAt: run['admittedAt'] as String?,
             status: LineStatus.error,
             failureMessageId: run['retriedBy'] != null ? '$runId:failed' : null,
-            notice: input.isNotEmpty || spoken ? null : failure.notice,
+            notice: input.isNotEmpty || told ? null : failure.notice,
             retry:
                 input.isNotEmpty ||
-                    spoken ||
+                    told ||
                     (failure.action == LineRetry.resendTurn &&
                         run['canRetry'] != true)
                 ? null
@@ -672,6 +793,77 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     }
   }
   return lines;
+}
+
+/// Every exchange between this Bot and one counterpart, oldest first, read
+/// off the same runs the thread draws. A Bot's own runs hold both directions
+/// of its pairs: what it asked, and what it was asked.
+List<Exchange> projectExchanges(
+  List<Map<String, dynamic>> runs,
+  ExchangeCounterpart counterpart,
+) {
+  final exchanges = <Exchange>[];
+  for (final run in runs) {
+    final inbound = inboundExchange(run);
+    if (inbound != null && inbound.counterpart.same(counterpart)) {
+      exchanges.add(inbound);
+    }
+    for (final line in _spokenLines(
+      run,
+      (run['events'] as List?) ?? const [],
+    )) {
+      final exchange = line.exchange;
+      if (exchange != null && exchange.counterpart.same(counterpart)) {
+        exchanges.add(exchange);
+      }
+    }
+  }
+  exchanges.sort((a, b) => (a.at ?? '').compareTo(b.at ?? ''));
+  return exchanges;
+}
+
+/// When an exchange happened, for the view: the time today, the weekday and
+/// time inside the last week, the date and time beyond it.
+String formatExchangeTime(String? at, [DateTime? clock]) {
+  final message = at == null ? null : DateTime.tryParse(at)?.toLocal();
+  if (message == null) return '';
+  final now = clock ?? DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final tomorrow = today.add(const Duration(days: 1));
+  final hour = message.hour % 12 == 0 ? 12 : message.hour % 12;
+  final minute = message.minute.toString().padLeft(2, '0');
+  final time = '$hour:$minute ${message.hour < 12 ? 'am' : 'pm'}';
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  if (!message.isBefore(today) && message.isBefore(tomorrow)) {
+    return 'Today $time';
+  }
+  if (!message.isBefore(today.subtract(const Duration(days: 1))) &&
+      message.isBefore(today)) {
+    return 'Yesterday $time';
+  }
+  final day = days[message.weekday - 1];
+  final date = '${months[message.month - 1]} ${message.day}';
+  if (!message.isBefore(today.subtract(const Duration(days: 6))) &&
+      message.isBefore(tomorrow)) {
+    return '$day $time';
+  }
+  return message.year == now.year
+      ? '$day, $date $time'
+      : '$date, ${message.year} $time';
 }
 
 /// What a compaction says. The summary itself is deliberately not on the wire:

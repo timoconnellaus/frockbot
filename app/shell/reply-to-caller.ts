@@ -1,5 +1,6 @@
-// Replies to voice are durable caller deliveries, separate from User messages.
-// The host fixes the caller from admission; the model cannot change it.
+// Replies to a caller — the voice session, or another Bot — are durable
+// caller deliveries, separate from User messages. The host fixes the caller
+// from admission; the model cannot change it.
 import type {
   Session,
   ToolDefinition,
@@ -13,8 +14,18 @@ export const REPLY_TO_REQUEST_TOOL_V1 = "reply_to_request";
 /** Keep a complete caller answer bounded; the voice assistant can shorten it. */
 export const REPLY_TO_REQUEST_MAX_CHARS_V1 = 4_000;
 
-const DESCRIPTION =
-  "Answer the voice session that asked you the current question. What you write here is read back to the person aloud and ends this Turn, so keep it short and speakable: a few sentences, no markdown, no lists, no code. This is not a message in your conversation with your User — use send_to_user for those, including interim updates while you work.";
+export type ReplyCallerV1 = "voice" | "bot";
+
+const DESCRIPTIONS: Record<ReplyCallerV1, string> = {
+  voice:
+    "Answer the voice session that asked you the current question. What you write here is read back to the person aloud and ends this Turn, so keep it short and speakable: a few sentences, no markdown, no lists, no code. This is not a message in your conversation with your User — use send_to_user for those, including interim updates while you work.",
+  bot: "Answer the Bot that asked you the current question. What you write here is returned to that Bot as its tool result and ends this Turn, so make it the complete answer it can act on. This is not a message in your conversation with your User — use send_to_user for those, only when the person should hear about it directly.",
+};
+
+const RECORDED: Record<ReplyCallerV1, string> = {
+  voice: "Answer recorded for the voice session.",
+  bot: "Answer recorded for the asking Bot.",
+};
 
 const INPUT_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -23,7 +34,7 @@ const INPUT_SCHEMA: Record<string, unknown> = {
       type: "string",
       minLength: 1,
       maxLength: REPLY_TO_REQUEST_MAX_CHARS_V1,
-      description: "The answer, in full, as it will be spoken.",
+      description: "The answer, in full.",
     },
   },
   required: ["answer"],
@@ -41,12 +52,12 @@ function refusal(reason: string): ToolExecutionResult {
  * cannot address an answer anywhere the host did not already decide it goes.
  */
 export function createReplyToRequestToolV1(
-  caller: "voice",
+  caller: ReplyCallerV1,
   sessions: { get(sessionId: string): Session | undefined },
 ): ToolDefinition {
   return {
     name: REPLY_TO_REQUEST_TOOL_V1,
-    description: DESCRIPTION,
+    description: DESCRIPTIONS[caller],
     inputSchema: structuredClone(INPUT_SCHEMA),
     // Only ever offered on the lane a caller can reach, and only mounted at
     // all when this Turn actually has one.
@@ -69,7 +80,7 @@ export function createReplyToRequestToolV1(
       }
       if (answer.length > REPLY_TO_REQUEST_MAX_CHARS_V1) {
         return refusal(
-          `${REPLY_TO_REQUEST_TOOL_V1} was refused: answer is longer than ${REPLY_TO_REQUEST_MAX_CHARS_V1} characters. It is read aloud; say the short version.`,
+          `${REPLY_TO_REQUEST_TOOL_V1} was refused: answer is longer than ${REPLY_TO_REQUEST_MAX_CHARS_V1} characters. Say the short version.`,
         );
       }
       const session = sessions.get(context.sessionId);
@@ -107,7 +118,7 @@ export function createReplyToRequestToolV1(
         await session.flush();
       }
       return {
-        content: "Answer recorded for the voice session.",
+        content: RECORDED[caller],
         isError: false,
         endsTurn: true,
       };

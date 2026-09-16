@@ -42,6 +42,14 @@ class ChatPane extends StatefulWidget {
   /// Opens the run view. The shell decides whether that is the right panel or
   /// a page, because that is a layout question and not this pane's.
   final void Function(TranscriptLine line)? onOpenRun;
+
+  /// Opens the view-only chat behind an exchange marker. Layout is the
+  /// shell's call, as it is for the run view.
+  final void Function(TranscriptLine line)? onOpenExchange;
+
+  /// Another Bot's sheep and current name, for the marker that names it.
+  final String? Function(String botId)? backgroundOf;
+  final String? Function(String botId)? nameOf;
   final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
@@ -73,6 +81,9 @@ class ChatPane extends StatefulWidget {
     this.approvals,
     this.skills,
     this.onOpenRun,
+    this.onOpenExchange,
+    this.backgroundOf,
+    this.nameOf,
     this.onOpenSettings,
     this.onMessageActions,
     this.unreadFromMessageId,
@@ -268,6 +279,9 @@ class _ChatPaneState extends State<ChatPane> {
             focusRunId: c.focusRunId,
             onRefresh: _refresh,
             onOpenRun: widget.onOpenRun ?? (_) {},
+            onOpenExchange: widget.onOpenExchange,
+            backgroundOf: widget.backgroundOf,
+            nameOf: widget.nameOf,
             onRetryTurn: c.canSend ? _retry : null,
             onOpenBilling: widget.onOpenBilling,
             onOpenSettings: widget.onOpenSettings,
@@ -376,6 +390,9 @@ class ConversationView extends StatefulWidget {
   final String userId;
   final String botId;
   final void Function(TranscriptLine line) onOpenRun;
+  final void Function(TranscriptLine line)? onOpenExchange;
+  final String? Function(String botId)? backgroundOf;
+  final String? Function(String botId)? nameOf;
   final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
@@ -402,6 +419,9 @@ class ConversationView extends StatefulWidget {
     required this.userId,
     required this.botId,
     required this.onOpenRun,
+    this.onOpenExchange,
+    this.backgroundOf,
+    this.nameOf,
     this.onOpenSettings,
     this.onMessageActions,
     this.unreadFromMessageId,
@@ -514,6 +534,9 @@ class _ConversationViewState extends State<ConversationView>
       approvals: approvals,
       skills: skills,
       onOpenRun: widget.onOpenRun,
+      onOpenExchange: widget.onOpenExchange,
+      backgroundOf: widget.backgroundOf,
+      nameOf: widget.nameOf,
       onOpenSettings: widget.onOpenSettings,
       onMessageActions: widget.onMessageActions,
       unreadFromMessageId: widget.unreadFromMessageId,

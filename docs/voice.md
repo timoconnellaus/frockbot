@@ -472,10 +472,11 @@ records intent before sending its authenticated stop command.
 The Bot receives `reply_to_request`, whose `reply/to-caller` event addresses
 this voice request. This is a separate delivery from `send_to_user`: an
 explicit message to the User may still be sent, but cannot substitute for
-the required caller reply. The transcript groups the voice request and its
-answer in a blue waveform-marked exchange, separate from ordinary chat
-bubbles. The reply itself creates no ordinary User message or notification.
-Private model text is never used as the answer.
+the required caller reply. The thread marks the request with one centred
+"Message from Voice" line rather than a user bubble, and the request and its
+answer are read on the exchange view that line opens — the same convention a
+message from another Bot follows. The reply itself creates no ordinary User
+message or notification. Private model text is never used as the answer.
 
 A terminal Bot Turn records a completion outbox entry in the same durable
 transaction. That wake tells the owning voice object which request to look

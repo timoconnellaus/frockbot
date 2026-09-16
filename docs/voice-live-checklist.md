@@ -58,10 +58,10 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
    the assistant listens; a cough or a door closing does not stop it.
 4. Ask a Bot to do something substantial ("ask Remy to plan my week").
    Expect: the assistant says it has asked; the request appears in Remy's own
-   thread as a blue waveform-marked Voice session exchange rather than an
-   ordinary user message, and Remy's reply to the voice session is grouped
-   into that same exchange with no ordinary user notification; when Remy
-   finishes, the answer is read out. Close the tab before Remy finishes,
+   thread as a centred "Message from Voice" marker rather than an ordinary
+   user message, and tapping it opens the view-only "Remy ⇄ Voice" chat with
+   the request and, once given, Remy's reply, with no ordinary user
+   notification; when Remy finishes, the answer is read out. Close the tab before Remy finishes,
    reopen and start voice again: the answer is read out first.
 5. Stay silent for 25 s. Expect: `voice/state` reports `asleep` (visible in
    the network tab), no audio frames go up, the footer keeps animating from the

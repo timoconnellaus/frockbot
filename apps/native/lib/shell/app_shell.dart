@@ -21,6 +21,7 @@ import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart' show ChatController, ConnectionState;
+import '../client/exchange_controller.dart';
 import '../client/transport.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
@@ -65,6 +66,7 @@ import 'chat_header.dart';
 import 'desktop_layout.dart';
 import 'lifecycle.dart';
 import 'message_actions.dart';
+import 'exchange_view.dart';
 import 'run_view.dart';
 import 'semantics.dart';
 import 'focus.dart' show sidebarUnreadFor;
@@ -246,6 +248,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool footerExiting = false;
   bool showHidden = false;
   TranscriptLine? openRun;
+
+  /// The exchange chat the right panel holds, while it holds one.
+  ExchangeController? exchangeController;
 
   /// What the account can spend, from `/api/billing`. Null until read, and
   /// null on a deployment that does not meter: then credit means nothing and
@@ -797,6 +802,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (switching) selectedConnection = ConnectionState.initializing;
       conversationOpen = true;
       _leaveRun();
+      exchangeController?.dispose();
+      exchangeController = null;
       panelOpen = false;
     });
     _adoptBotPanels(botId);
@@ -1125,6 +1132,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     setState(() {
       conversationOpen = false;
       _leaveRun();
+      exchangeController?.dispose();
+      exchangeController = null;
       panelOpen = false;
     });
   }
@@ -1138,6 +1147,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     setState(() {
       if (panelCollapsed) runBorrowedPanel = true;
       openRun = line;
+      exchangeController?.dispose();
+      exchangeController = null;
       panelOpen = true;
       // Opening a run is a request to see it: a collapsed panel column would
       // otherwise swallow the run view and leave the tap with no answer.
@@ -1153,6 +1164,76 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     runBorrowedPanel = false;
   }
 
+  /// The view-only chat behind an exchange marker: this Bot and the marker's
+  /// counterpart, every exchange between them — the cloud's filtered pages
+  /// for the history, the loaded thread for whatever is in flight.
+  void _openExchange(TranscriptLine line) {
+    final exchange = line.exchange;
+    final bot = selected;
+    if (exchange == null || bot == null) return;
+    final counterpart = exchange.counterpart.isVoice
+        ? const ExchangeCounterpart.voice()
+        : ExchangeCounterpart.bot(
+            botId: exchange.counterpart.botId,
+            name:
+                _botNameOf(exchange.counterpart.botId!) ??
+                exchange.counterpart.name,
+          );
+    final controller = ExchangeController(
+      transport: BackendExchangeTransport(widget.api),
+      botId: bot.botId.value,
+      counterpart: counterpart,
+    );
+    unawaited(controller.load());
+    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+        ShellTier.single) {
+      _push(
+        _ExchangeScreen(
+          controller: controller,
+          self: _selfParty()!,
+          counterpartBackground: _counterpartBackground(counterpart),
+          liveRuns: () => widget.sessions
+              .open(widget.userId, bot.botId.value)
+              .controller
+              .runs,
+        ),
+      );
+      return;
+    }
+    exchangeController?.dispose();
+    setState(() {
+      if (panelCollapsed) runBorrowedPanel = true;
+      openRun = null;
+      exchangeController = controller;
+      panelOpen = true;
+      // Same as a run: the tap asked to see the exchange, so a collapsed
+      // column gives way to it and is handed back on the way out.
+      panelCollapsed = false;
+    });
+  }
+
+  ExchangeParty? _selfParty() {
+    final bot = selected;
+    if (bot == null) return null;
+    return ExchangeParty(
+      name: _name(bot),
+      background: _background(bot.botId.value),
+    );
+  }
+
+  String? _counterpartBackground(ExchangeCounterpart counterpart) =>
+      counterpart.botId == null ? null : _background(counterpart.botId!);
+
+  void _closeExchange() {
+    exchangeController?.dispose();
+    setState(() {
+      exchangeController = null;
+      if (runBorrowedPanel) panelCollapsed = true;
+      runBorrowedPanel = false;
+      panelOpen = false;
+    });
+  }
+
   Widget? _rightPanel() {
     final line = openRun;
     if (line != null) {
@@ -1160,8 +1241,34 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         line: line,
         onClose: () => setState(() {
           _leaveRun();
+          exchangeController?.dispose();
+          exchangeController = null;
           panelOpen = false;
         }),
+      );
+    }
+    final exchange = exchangeController;
+    final self = _selfParty();
+    final bot = selected;
+    if (exchange != null && self != null && bot != null) {
+      return ListenableBuilder(
+        listenable: exchange,
+        builder: (context, _) => ExchangeView(
+          self: self,
+          counterpart: exchange.counterpart,
+          counterpartBackground: _counterpartBackground(exchange.counterpart),
+          exchanges: exchange.exchanges(
+            widget.sessions
+                .open(widget.userId, bot.botId.value)
+                .controller
+                .runs,
+          ),
+          hasEarlier: exchange.before != null,
+          loading: exchange.loading,
+          error: exchange.error,
+          onOlder: () => unawaited(exchange.load(older: true)),
+          onClose: _closeExchange,
+        ),
       );
     }
     final keys = slots.keys(ShellSlot.rightPanel);
@@ -1239,6 +1346,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     setState(() {
       openRun = null;
       runBorrowedPanel = false;
+      exchangeController?.dispose();
+      exchangeController = null;
       panelKey = key;
       panelOpen = true;
       panelCollapsed = false;
@@ -1789,6 +1898,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       workingRunId = null;
       openRun = null;
       runBorrowedPanel = false;
+      exchangeController?.dispose();
+      exchangeController = null;
       conversationOpen = false;
       panelOpen = false;
       panelCollapsed = true;
@@ -1985,6 +2096,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             general: bot.botId.value == generalBotId,
                             featuresRevision: featuresRevision,
                             onOpenRun: _openRun,
+                            onOpenExchange: _openExchange,
+                            backgroundOf: _background,
+                            nameOf: _botNameOf,
                             onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,
                             onOpenBilling: () => unawaited(_openBilling()),
@@ -2616,4 +2730,57 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     voiceProbe.dispose();
     super.dispose();
   }
+}
+
+/// The exchange chat as a page: the controller lives as long as the page.
+class _ExchangeScreen extends StatefulWidget {
+  final ExchangeController controller;
+  final ExchangeParty self;
+  final String? counterpartBackground;
+  final List<Map<String, dynamic>> Function() liveRuns;
+  const _ExchangeScreen({
+    required this.controller,
+    required this.self,
+    required this.counterpartBackground,
+    required this.liveRuns,
+  });
+
+  @override
+  State<_ExchangeScreen> createState() => _ExchangeScreenState();
+}
+
+class _ExchangeScreenState extends State<_ExchangeScreen> {
+  @override
+  void dispose() {
+    widget.controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      titleSpacing: 0,
+      title: ExchangeTitle(
+        self: widget.self,
+        counterpart: widget.controller.counterpart,
+        counterpartBackground: widget.counterpartBackground,
+      ),
+    ),
+    body: SafeArea(
+      child: ListenableBuilder(
+        listenable: widget.controller,
+        builder: (context, _) => ExchangeView(
+          self: widget.self,
+          counterpart: widget.controller.counterpart,
+          counterpartBackground: widget.counterpartBackground,
+          exchanges: widget.controller.exchanges(widget.liveRuns()),
+          hasEarlier: widget.controller.before != null,
+          loading: widget.controller.loading,
+          error: widget.controller.error,
+          onOlder: () => unawaited(widget.controller.load(older: true)),
+          header: false,
+        ),
+      ),
+    ),
+  );
 }

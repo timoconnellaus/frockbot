@@ -936,10 +936,40 @@
         },
         "before": {
           "$ref": "#/$defs/RunCursor"
+        },
+        "counterpart": {
+          "$ref": "#/$defs/ExchangeCounterpart"
         }
       },
       "required": ["schemaVersion"],
       "additionalProperties": false
+    },
+    "ExchangeCounterpart": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "bot"
+            },
+            "botId": {
+              "$ref": "#/$defs/BotId"
+            }
+          },
+          "required": ["kind", "botId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "voice"
+            }
+          },
+          "required": ["kind"],
+          "additionalProperties": false
+        }
+      ]
     },
     "SendPayload": {
       "oneOf": [
@@ -1270,7 +1300,7 @@
               "const": "reply/to-caller"
             },
             "caller": {
-              "const": "voice"
+              "enum": ["voice", "bot"]
             },
             "text": {
               "type": "string",
@@ -1279,6 +1309,29 @@
             }
           },
           "required": ["type", "caller", "text"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "message/to-bot"
+            },
+            "callId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "botId": {
+              "$ref": "#/$defs/BotId"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32000
+            }
+          },
+          "required": ["type", "callId", "botId", "text"],
           "additionalProperties": false
         },
         {

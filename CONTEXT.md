@@ -35,8 +35,12 @@ The queue a turn is admitted on. `user` is the conversation and may supersede wh
 : A non-user conversational Turn admitted by another Bot. It runs in the target Bot Durable Object on the `agent` lane, is visible in that Bot's thread with its origin, and answers its caller through `send_to_user`.
 
 **Bot message**
-: A same-User question sent with the Flock Package's `bot_message` tool. It is not a Channel: the target Bot's answer returns as the asking Turn's tool result, while the target's own Session records the exchange.
+: A same-User question sent with the Flock Package's `bot_message` tool. It is not a Channel: the target Bot answers with `reply_to_request`, that answer returns as the asking Turn's tool result, and the target's own Session records the exchange.
 _Avoid_: Priority, queue, channel
+
+**Exchange**
+: One request and its answer between a Bot and a counterpart — another of the User's Bots, or the voice session — as the clients read it: a centred marker in the thread ("Messaged Codex Watch", "Message from Voice") that opens a view-only chat of every exchange between the two. Never a bubble in the conversation, and never typed into.
+_Avoid_: DM, room, channel, thread
 
 **Supersede**:
 A user message sent mid-turn taking the place of the running turn: the running turn is interrupted and reaches the terminal state `superseded`, and the message becomes a new turn. Never an injection into the model request already in flight, and never a stop — the bot's background work carries on.

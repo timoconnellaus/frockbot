@@ -249,6 +249,39 @@ abstract interface class ChatTransport {
   Future<Map<String, dynamic>> stop(String botId, String id, String commandId);
 }
 
+/// The exchange view's read: the Turns of one Bot that crossed to or from a
+/// counterpart, paged the same way the conversation is.
+abstract interface class ExchangeTransport {
+  /// [counterpart] is the wire's spelling: `voice`, or `bot:<id>`.
+  Future<Map<String, dynamic>> exchanges(
+    String botId,
+    String counterpart, {
+    String? before,
+  });
+}
+
+class BackendExchangeTransport implements ExchangeTransport {
+  final NativeApi api;
+  BackendExchangeTransport(this.api);
+
+  @override
+  Future<Map<String, dynamic>> exchanges(
+    String botId,
+    String counterpart, {
+    String? before,
+  }) async {
+    final query = Uri(queryParameters: {'with': counterpart, 'before': ?before})
+        .query;
+    return wire.ConversationProjection.fromJson(
+          await api.request(
+            '/api/bots/${Uri.encodeComponent(botId)}/turns?$query',
+            limit: 2000000,
+          ),
+        ).toJson()
+        as Map<String, dynamic>;
+  }
+}
+
 class BackendChatTransport implements ChatTransport {
   final NativeApi api;
   BackendChatTransport(this.api);

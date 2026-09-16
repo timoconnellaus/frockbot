@@ -53,6 +53,12 @@ abstract final class ShellIds {
   /// The banner over a conversation whose account cannot spend.
   static const outOfCredit = 'out-of-credit';
   static String openRun(String runId) => 'open-run-$runId';
+
+  /// The marker in the thread for a message to or from a counterpart, and the
+  /// view-only chat it opens.
+  static String exchange(String lineId) => 'exchange-$lineId';
+  static const exchangeView = 'exchange-view';
+  static const exchangeViewClose = 'exchange-view-close';
   static String approve(String approvalId) => 'approval-approve-$approvalId';
   static String deny(String approvalId) => 'approval-deny-$approvalId';
   static String skillOption(String ref) => 'skill-option-$ref';
