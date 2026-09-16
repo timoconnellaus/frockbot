@@ -36,7 +36,7 @@ import {
   createShellCompositionHost,
 } from "@frockbot/app/shell/backend-composition";
 import { executeBotTurn } from "@frockbot/app/shell/backend-runner";
-import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
+import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
 import {
   createClientRunStopReceiptV1,
   decodeClientRunLookupV1,
@@ -590,7 +590,7 @@ class MemoryConfiguration
         botId,
         registeredAt: "2026-08-29T00:00:00.000Z",
         initialName: botId,
-        sheep: randomSheepRecipeV1(() => 0),
+        avatar: randomAvatarAppearanceV1(() => 0),
       })),
     });
   }
@@ -645,7 +645,7 @@ class MemoryConfiguration
       botId: request.botId,
       registeredAt: "2026-08-29T00:00:00.000Z",
       initialName: request.botId,
-      sheep: randomSheepRecipeV1(() => 0),
+      avatar: randomAvatarAppearanceV1(() => 0),
     });
   }
   hasBot(request: Parameters<UserConfigurationBinding["hasBot"]>[0]) {
@@ -670,15 +670,17 @@ class MemoryConfiguration
   executeTemplateImport(): never {
     throw new Error("template imports are not exercised here");
   }
-  readSheep(request: Parameters<BotConfigurationBinding["readSheep"]>[0]) {
+  readAvatar(request: Parameters<BotConfigurationBinding["readAvatar"]>[0]) {
     return Promise.resolve({
       schemaVersion: 1 as const,
       botId: request.botId,
       revision: 0,
-      sheep: randomSheepRecipeV1(() => 0),
+      avatar: randomAvatarAppearanceV1(() => 0),
     });
   }
-  updateSheep(request: Parameters<BotConfigurationBinding["updateSheep"]>[0]) {
+  updateAvatar(
+    request: Parameters<BotConfigurationBinding["updateAvatar"]>[0],
+  ) {
     return Promise.resolve({
       schemaVersion: 1 as const,
       commandId: request.command.commandId,
@@ -1052,14 +1054,14 @@ function createTestGateway(
             userId,
             command,
           }),
-        readSheep: (userId, botId) =>
-          configurationFor(userId).readSheep({
+        readAvatar: (userId, botId) =>
+          configurationFor(userId).readAvatar({
             schemaVersion: 1,
             userId,
             botId,
           }),
-        updateSheep: (userId, botId, command) =>
-          configurationFor(userId).updateSheep({
+        updateAvatar: (userId, botId, command) =>
+          configurationFor(userId).updateAvatar({
             schemaVersion: 1,
             userId,
             botId,

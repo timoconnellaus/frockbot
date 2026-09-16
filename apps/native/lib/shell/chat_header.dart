@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart' hide ConnectionState;
 
 import '../client/chat_controller.dart';
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import 'semantics.dart';
 import 'chat_icons.dart';
 
@@ -23,6 +23,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
   final String? background;
+  final String? primary;
 
   /// Back to the Bot list. The phone's, where the conversation is a page.
   final VoidCallback? onBack;
@@ -56,6 +57,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     required this.name,
     this.textScale = 1,
     this.background,
+    this.primary,
     this.onBack,
     this.onOpenBot,
     this.onSettings,
@@ -83,7 +85,12 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
         Stack(
           clipBehavior: Clip.none,
           children: [
-            SheepAvatar(size: 24, background: background),
+            CharacterAvatar(
+              size: 28,
+              characterId: background,
+              primary: primary,
+              motion: CharacterMotion.quiet,
+            ),
             if (connection == ConnectionState.reconnecting)
               const Positioned(
                 right: -2,
@@ -212,7 +219,9 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   }) => Builder(
     builder: (context) {
       // A phone keeps 44-point targets; a desk packs the doors closer.
-      final target = chatDesktopChrome ? const Size(36, 40) : const Size(44, 46);
+      final target = chatDesktopChrome
+          ? const Size(36, 40)
+          : const Size(44, 46);
       return IconButton(
         tooltip: label,
         color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,

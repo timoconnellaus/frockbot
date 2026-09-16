@@ -90,6 +90,10 @@ class AssistantSessionController extends ChangeNotifier {
   double _micLevel = 0;
   String? _notice;
   Timer? _noticeTimer;
+  String? _delegatedBotId;
+  String? _delegatedBotName;
+  VoiceDelegationStateV1? _delegationState;
+  Timer? _delegationTimer;
 
   /// How long a notice about the last reply stays on the footer.
   static const noticeDuration = Duration(seconds: 4);
@@ -125,6 +129,9 @@ class AssistantSessionController extends ChangeNotifier {
 
   /// A sentence about the last reply, shown for [noticeDuration].
   String? get notice => _notice;
+  String? get delegatedBotId => _delegatedBotId;
+  String? get delegatedBotName => _delegatedBotName;
+  VoiceDelegationStateV1? get delegationState => _delegationState;
 
   /// Whether the reply is being heard: the server says it is speaking, or the
   /// speaker still has audio to play after the server moved on.
@@ -184,6 +191,7 @@ class AssistantSessionController extends ChangeNotifier {
     _openingBytes = 0;
     _held.clear();
     _clearNotice();
+    _clearDelegation();
     _set(VoiceSessionPhase.connecting);
     player.addListener(_onPlayback);
     final connecting = _connect(generation);
@@ -458,6 +466,20 @@ class AssistantSessionController extends ChangeNotifier {
         // produced it are this client's and are not overwritten by it.
         _upstream = upstream;
         _notify();
+      case AssistantDelegationV1(:final botId, :final botName, :final state):
+        _delegationTimer?.cancel();
+        _delegatedBotId = botId;
+        _delegatedBotName = botName;
+        _delegationState = state;
+        if (state == VoiceDelegationStateV1.finished) {
+          _delegationTimer = Timer(const Duration(milliseconds: 1200), () {
+            _delegatedBotId = null;
+            _delegatedBotName = null;
+            _delegationState = null;
+            _notify();
+          });
+        }
+        _notify();
       case AssistantRefusalV1(:final code):
         unawaited(_fail(voiceRefusalMessage(code)));
       case AssistantErrorV1(:final code):
@@ -654,6 +676,7 @@ class AssistantSessionController extends ChangeNotifier {
     _startTimer?.cancel();
     _startTimer = null;
     _clearNotice();
+    _clearDelegation();
     _held.clear();
     await _settled(_closeCapture);
     final inbound = _inbound;
@@ -693,8 +716,17 @@ class AssistantSessionController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  void _clearDelegation() {
+    _delegationTimer?.cancel();
+    _delegationTimer = null;
+    _delegatedBotId = null;
+    _delegatedBotName = null;
+    _delegationState = null;
+  }
+
   @override
   void dispose() {
+    _clearDelegation();
     _disposed = true;
     _generation++;
     unawaited(_teardown(code: voiceCloseDisposedV1, reason: 'disposed'));

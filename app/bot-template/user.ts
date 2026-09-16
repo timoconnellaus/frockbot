@@ -35,7 +35,7 @@ import {
   templateShareIdV1,
   TemplateDecodeError,
   type TemplateShareRecordV1,
-  type TemplateSheepRecipeV1,
+  type TemplateAvatarAppearanceV1,
 } from "@frockbot/core/template";
 import {
   buildBotTemplateV1,
@@ -111,8 +111,11 @@ export interface TemplateBlobStoreV1 {
  */
 export interface TemplateBotReaderV1 {
   readSettings(userId: string, botId: string): Promise<BotSettingsViewV1>;
-  /** This Bot's own generated sheep avatar (D1). */
-  readSheep(userId: string, botId: string): Promise<TemplateSheepRecipeV1>;
+  /** This Bot's own generated avatar avatar (D1). */
+  readAvatar(
+    userId: string,
+    botId: string,
+  ): Promise<TemplateAvatarAppearanceV1>;
   /** Own-root Skills, bodies included. Managed and plugin Skills never appear. */
   readSkills(
     userId: string,
@@ -142,7 +145,7 @@ export interface TemplateImportWriterV1 {
     botId: string;
     name: string;
     description?: string;
-    sheep: TemplateSheepRecipeV1;
+    avatar: TemplateAvatarAppearanceV1;
   }): Promise<{ status: "applied" | "rejected"; failure?: string }>;
   installPackage(input: {
     userId: string;
@@ -401,8 +404,8 @@ export class BotTemplateUserBackendContribution {
     summary: TemplateExportSummaryV1;
   }> {
     const settings = await this.host.bots.readSettings(userId, botId);
-    const [sheep, skills, routines] = await Promise.all([
-      this.host.bots.readSheep(userId, botId),
+    const [avatar, skills, routines] = await Promise.all([
+      this.host.bots.readAvatar(userId, botId),
       this.host.bots.readSkills(userId, botId),
       this.host.bots.readRoutines(userId, botId),
     ]);
@@ -426,7 +429,7 @@ export class BotTemplateUserBackendContribution {
           ? {}
           : { description: settings.profile.description }),
       },
-      sheep,
+      avatar,
       skills,
       routines,
       packages,
@@ -707,7 +710,7 @@ export class BotTemplateUserBackendContribution {
           ...(plan.profile.description === undefined
             ? {}
             : { description: plan.profile.description }),
-          sheep: plan.sheep,
+          avatar: plan.avatar,
         });
         if (receipt.status === "rejected") {
           throw new Error(receipt.failure ?? "the Flock refused bot/create");

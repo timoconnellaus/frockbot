@@ -1,0 +1,116 @@
+{
+  "scope": "Native Rive rendering. Agreement measures converted Rive against the separated SVG, not likeness to concept art. Flutter device integration has not been tested.",
+  "characters": {
+    "guardian": {
+      "restingSvgRgbAgreement": 99.8197,
+      "combinationsRendered": 32,
+      "idleChangedPixels": 18359,
+      "gazeChangedPixels": 3630,
+      "hoverChangedPixels": 16019,
+      "paletteChangedPixels": 88330,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 83308,
+      "passed": true
+    },
+    "sunny": {
+      "restingSvgRgbAgreement": 99.8294,
+      "combinationsRendered": 32,
+      "idleChangedPixels": 15989,
+      "gazeChangedPixels": 3258,
+      "hoverChangedPixels": 15069,
+      "paletteChangedPixels": 96244,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 82475,
+      "passed": true
+    },
+    "chill": {
+      "restingSvgRgbAgreement": 99.8198,
+      "combinationsRendered": 32,
+      "idleChangedPixels": 16217,
+      "gazeChangedPixels": 4288,
+      "hoverChangedPixels": 19498,
+      "paletteChangedPixels": 94286,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 67009,
+      "passed": true
+    },
+    "nudge": {
+      "restingSvgRgbAgreement": 99.8272,
+      "combinationsRendered": 32,
+      "idleChangedPixels": 13943,
+      "gazeChangedPixels": 3742,
+      "hoverChangedPixels": 18601,
+      "paletteChangedPixels": 92989,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 67131,
+      "passed": true
+    },
+    "fox": {
+      "restingSvgRgbAgreement": 99.7459,
+      "combinationsRendered": 32,
+      "idleChangedPixels": 21727,
+      "gazeChangedPixels": 3670,
+      "hoverChangedPixels": 18729,
+      "paletteChangedPixels": 59782,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 55975,
+      "passed": true
+    },
+    "dog": {
+      "restingSvgRgbAgreement": 99.7592,
+      "sourceSvgSha256": "6303a751109d305d7a5d347e4a64cdcfc2cd92a90b13907c143097bf81038a9e",
+      "combinationsRendered": 32,
+      "idleChangedPixels": 16682,
+      "gazeChangedPixels": 6100,
+      "hoverChangedPixels": 18182,
+      "paletteChangedPixels": 57900,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 46580,
+      "passed": true
+    },
+    "goat": {
+      "restingSvgRgbAgreement": 99.5919,
+      "combinationsRendered": 32,
+      "idleChangedPixels": 17798,
+      "gazeChangedPixels": 3364,
+      "hoverChangedPixels": 18795,
+      "paletteChangedPixels": 57236,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 56415,
+      "passed": true
+    },
+    "cow": {
+      "restingSvgRgbAgreement": 99.2596,
+      "combinationsRendered": 32,
+      "idleChangedPixels": 13763,
+      "gazeChangedPixels": 3464,
+      "hoverChangedPixels": 13029,
+      "paletteChangedPixels": 57949,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 45632,
+      "passed": true
+    },
+    "cat": {
+      "restingSvgRgbAgreement": 99.7559,
+      "combinationsRendered": 32,
+      "idleChangedPixels": 25530,
+      "gazeChangedPixels": 4402,
+      "hoverChangedPixels": 15645,
+      "paletteChangedPixels": 91008,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 53994,
+      "passed": true
+    },
+    "rabbit": {
+      "restingSvgRgbAgreement": 99.6995,
+      "combinationsRendered": 32,
+      "idleChangedPixels": 16806,
+      "gazeChangedPixels": 3322,
+      "hoverChangedPixels": 19325,
+      "paletteChangedPixels": 84174,
+      "stillModeIdenticalFrames": true,
+      "successChangedPixels": 55709,
+      "passed": true
+    }
+  }
+}

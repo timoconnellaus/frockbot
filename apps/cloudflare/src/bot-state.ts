@@ -19,6 +19,7 @@ import {
 } from "@frockbot/app/shell/unread";
 import type { PushUpdate } from "./push.js";
 import { cleanIncidentTestChatsV1 } from "./test-chat-cleanup.js";
+import { cleanBotAvatarTestState } from "./avatar-state-cleanup.js";
 import { DurableObject } from "cloudflare:workers";
 import {
   BotStateChannel,
@@ -145,7 +146,7 @@ import { decodeComputerCommandV1 } from "@frockbot/computer/protocol";
 import {
   decodeBotLifecycleCommandV1,
   decodeBotRegistrationV1,
-  decodeUpdateSheepCommandV1,
+  decodeUpdateAvatarCommandV1,
   type BotLifecycleCommandV1,
   type BotRegistrationV1,
 } from "@frockbot/app/flock/shared";
@@ -550,6 +551,7 @@ export class BotState extends DurableObject<BotStateEnv> {
       await cleanIncidentTestChatsV1(this.ctx.storage);
       await cleanNotificationTestState(this.ctx.storage);
       await cleanHiddenBotNotifications(this.ctx.storage);
+      await cleanBotAvatarTestState(this.ctx.storage);
     });
     this.outboundFetch = dependencies.outboundFetch;
     // The surfaces are built per identity in `bindSurfaces`, not here: they
@@ -1230,17 +1232,17 @@ export class BotState extends DurableObject<BotStateEnv> {
     return computer.execute(identity.userId, identity.botId, command);
   }
 
-  async readSheep(input: unknown) {
+  async readAvatar(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { flock, registration } = await this.materialized(identity);
     return flock.read(registration, identity.userId);
   }
 
-  async updateSheep(input: unknown) {
+  async updateAvatar(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       botId: rpcBotId,
-      command: rpcDecoded(decodeUpdateSheepCommandV1),
+      command: rpcDecoded(decodeUpdateAvatarCommandV1),
     });
     const identity = {
       userId: request.userId as string,
@@ -1250,7 +1252,7 @@ export class BotState extends DurableObject<BotStateEnv> {
     return flock.update(
       registration,
       identity.userId,
-      request.command as ReturnType<typeof decodeUpdateSheepCommandV1>,
+      request.command as ReturnType<typeof decodeUpdateAvatarCommandV1>,
     );
   }
 

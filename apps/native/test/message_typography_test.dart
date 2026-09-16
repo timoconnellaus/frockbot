@@ -32,32 +32,28 @@ Map<String, TextStyle> leafStyles(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets(
-    'a Bot message is lighter at a desk and unchanged on a phone',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: const Scaffold(
-            body: ShellMarkdown(text: 'Plain **strong**'),
-          ),
-        ),
-      );
-      final styles = leafStyles(tester);
-      final desktop = desktops.contains(defaultTargetPlatform);
+  testWidgets('a Bot message is lighter at a desk and unchanged on a phone', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: const Scaffold(body: ShellMarkdown(text: 'Plain **strong**')),
+      ),
+    );
+    final styles = leafStyles(tester);
+    final desktop = desktops.contains(defaultTargetPlatform);
 
-      expect(styles['Plain ']!.fontFamily, 'Inter');
-      expect(styles['Plain ']!.fontWeight, FontWeight.w400);
-      expect(styles['Plain ']!.height, 1.5);
-      expect(styles['Plain ']!.fontSize, desktop ? 14 : 15);
-      expect(styles['strong']!.fontSize, desktop ? 14 : 15);
-      expect(
-        styles['strong']!.fontWeight,
-        desktop ? FontWeight.w500 : FontWeight.w600,
-      );
-    },
-    variant: TargetPlatformVariant.all(),
-  );
+    expect(styles['Plain ']!.fontFamily, 'Inter');
+    expect(styles['Plain ']!.fontWeight, FontWeight.w400);
+    expect(styles['Plain ']!.height, 1.5);
+    expect(styles['Plain ']!.fontSize, desktop ? 14 : 15);
+    expect(styles['strong']!.fontSize, desktop ? 14 : 15);
+    expect(
+      styles['strong']!.fontWeight,
+      desktop ? FontWeight.w500 : FontWeight.w600,
+    );
+  }, variant: TargetPlatformVariant.all());
 
   testWidgets(
     'the message style is the theme body on a phone, a point smaller at a desk',

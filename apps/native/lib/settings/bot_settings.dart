@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../shell/sidebar.dart' show SidebarProfile;
@@ -360,8 +360,9 @@ class BotSettingsView extends StatefulWidget {
   /// phone, the rows for its Routines, its Applets and its Package pages.
   final List<Widget> sections;
 
-  /// This Bot's sheep, so the avatar here is the one the sidebar draws.
+  /// This Bot's avatar, so the avatar here is the one the sidebar draws.
   final String? background;
+  final String? primary;
 
   /// Opens the colour sheet. The Flock owns what a Bot looks like, so the
   /// settings surface offers the gesture and nothing else.
@@ -378,6 +379,7 @@ class BotSettingsView extends StatefulWidget {
     this.onSaved,
     this.onPredict,
     this.background,
+    this.primary,
     this.onEditAvatar,
     this.dangerZone,
     this.sections = const [],
@@ -616,12 +618,16 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     child: Column(
                       children: [
-                        SheepAvatar(size: 76, background: widget.background),
+                        CharacterAvatar(
+                          size: 76,
+                          characterId: widget.background,
+                          primary: widget.primary,
+                        ),
                         const SizedBox(height: 10),
                         Text(
                           widget.onEditAvatar == null
                               ? '${state.name.isEmpty ? 'This Bot' : state.name} avatar'
-                              : 'Change colour',
+                              : 'Change character',
                           style: type.labelMedium?.copyWith(
                             color: widget.onEditAvatar == null
                                 ? Theme.of(context).colorScheme.onSurfaceVariant

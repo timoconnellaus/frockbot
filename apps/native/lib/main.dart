@@ -13,6 +13,7 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart' hide ConnectionState;
+import 'package:rive/rive.dart' show RiveNative;
 
 import 'acceptance_metrics.dart';
 import 'activity/controller.dart';
@@ -32,6 +33,7 @@ import 'protocol/client_wire.generated.dart' as wire;
 
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
+  await RiveNative.init();
   await setMobileOrientation();
   // The browser draws to a canvas, so the accessibility tree is the only DOM
   // there is: without it a screen reader sees an empty page and a browser test

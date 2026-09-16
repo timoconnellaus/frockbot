@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flock · Parts workshop</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f6f4ee;
+        color: #242625;
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1550px;
+        margin: auto;
+        padding: 28px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 30px;
+      }
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.17em;
+        color: #86546e;
+      }
+      h1 {
+        font-size: 34px;
+        margin: 5px 0;
+        letter-spacing: -0.04em;
+      }
+      p {
+        color: #686966;
+        margin: 5px 0;
+      }
+      a {
+        color: #854567;
+      }
+      button,
+      select,
+      .button {
+        border: 1px solid #d7d8d0;
+        border-radius: 8px;
+        padding: 9px 12px;
+        background: white;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      button[aria-pressed="true"] {
+        background: #242826;
+        color: white;
+      }
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      a:focus-visible {
+        outline: 3px solid #ba6492;
+        outline-offset: 3px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 24px 0;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .workspace {
+        display: grid;
+        grid-template-columns: 240px minmax(0, 1fr) minmax(0, 1fr);
+        gap: 18px;
+      }
+      .panel {
+        background: white;
+        border: 1px solid #dddcd5;
+        border-radius: 13px;
+        overflow: hidden;
+      }
+      .panel h2 {
+        font-size: 16px;
+        margin: 0;
+        padding: 14px 16px;
+        border-bottom: 1px solid #eeeee9;
+      }
+      .list {
+        padding: 8px;
+        max-height: 610px;
+        overflow: auto;
+      }
+      .part-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 3px 0;
+        border-radius: 7px;
+      }
+      .part-row.active {
+        background: #f5ddea;
+      }
+      .part-row input {
+        margin-left: 8px;
+        accent-color: #a0497a;
+      }
+      .part-row button {
+        flex: 1;
+        text-align: left;
+        border: 0;
+        background: transparent;
+        padding: 7px 8px;
+        font-size: 13px;
+      }
+      .part-row small {
+        color: #979b95;
+      }
+      .stage {
+        position: relative;
+        height: 540px;
+        display: grid;
+        place-items: center;
+        background: repeating-conic-gradient(#fafaf6 0% 25%, #eff0eb 0% 50%)
+          50%/18px 18px;
+      }
+      .stage img,
+      .stage > svg {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        object-fit: contain;
+        overflow: hidden;
+      }
+      .stage.focus {
+        height: 290px;
+      }
+      .stage.focus > svg {
+        padding: 18px;
+      }
+      .caption {
+        padding: 12px 16px;
+        color: #6f716e;
+        font-size: 12px;
+        border-top: 1px solid #eeeee9;
+      }
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .panel-head h2 {
+        border: 0;
+      }
+      .pill {
+        border-radius: 20px;
+        background: #e4ecdf;
+        color: #416842;
+        padding: 5px 10px;
+        font-size: 12px;
+        margin: 8px;
+      }
+      .below {
+        display: grid;
+        grid-template-columns: 240px 1fr 1fr;
+        gap: 18px;
+        margin: 18px 0;
+      }
+      .info {
+        padding: 16px;
+      }
+      dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        font-size: 12px;
+      }
+      dt {
+        color: #6c706b;
+      }
+      dd {
+        margin: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .focus-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        padding: 14px 16px;
+        border-top: 1px solid #eeeee9;
+      }
+      .pivot {
+        pointer-events: none;
+      }
+      .notes {
+        padding: 18px;
+        font-size: 13px;
+      }
+      .notes ul {
+        padding-left: 20px;
+      }
+      .badge {
+        background: #e7e3db;
+        border-radius: 20px;
+        padding: 7px 12px;
+        font-size: 12px;
+      }
+      .part-selected > g[clip-path],
+      .part-selected > path {
+        filter: drop-shadow(0 0 2px #b33481);
+      }
+      #status {
+        font-size: 12px;
+        margin: 12px 0;
+      }
+      .legend {
+        font-size: 12px;
+        color: #797d75;
+      }
+      .hidden-part {
+        display: none !important;
+      }
+      @media (max-width: 1050px) {
+        .workspace {
+          grid-template-columns: 210px 1fr;
+        }
+        .original-panel {
+          display: none;
+        }
+        .below {
+          grid-template-columns: 210px 1fr;
+        }
+        .notes-panel {
+          grid-column: 1/-1;
+        }
+        .stage {
+          height: 500px;
+        }
+      }
+      @media (max-width: 650px) {
+        main {
+          padding: 14px;
+        }
+        .workspace,
+        .below {
+          grid-template-columns: 1fr;
+        }
+        .list {
+          max-height: 230px;
+        }
+        .stage {
+          height: 440px;
+        }
+        header {
+          align-items: start;
+        }
+        .badge {
+          display: none;
+        }
+      }
+      .asset-panel {
+        margin-top: 20px;
+      }
+      .asset-gallery {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 10px;
+        padding: 16px;
+      }
+      .asset-card {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        background: #efeee8;
+        padding: 12px 6px;
+        border: 1px solid #dddcd4;
+        border-radius: 12px;
+      }
+      .asset-card.active {
+        border-color: #9b3775;
+        background: #f5e8f0;
+      }
+      .asset-card svg {
+        width: 100%;
+        height: 150px;
+      }
+      .asset-card span {
+        font-size: 12px;
+      }
+      @media (max-width: 900px) {
+        .asset-gallery {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">FROCKBOT / BOLD STICKER / PARTS</div>
+          <h1>The parts workshop.</h1>
+          <p>
+            Seven complete pieces. Clean outlines and hidden roots. No animation
+            yet.
+          </p>
+        </div>
+        <span class="badge">Checkpoint · ad85697c70</span>
+      </header>
+      <div class="toolbar">
+        <label for="character">Character</label
+        ><select id="character">
+          <option value="pixel">Pixel</option>
+          <option value="guardian">Guardian</option>
+          <option value="sunny">Sunny</option></select
+        ><button id="explode" aria-pressed="false">Separate pieces</button
+        ><button id="pivots" aria-pressed="false">Show pivots</button
+        ><button id="highlight" aria-pressed="false">Highlight selected</button
+        ><button id="hidden-legs" aria-pressed="false">See hidden legs</button>
+        <button id="reset">Reset view</button><span class="spacer"></span
+        ><a class="button" href="index.html">Likeness lab ↗</a
+        ><a class="button" id="download" download>Download split SVG</a>
+        <a class="button" href="flock-split-parts.zip" download>All assets ↓</a>
+      </div>
+      <p id="status" role="status">Loading parts…</p>
+      <div class="workspace">
+        <section class="panel">
+          <h2>Parts <span id="count"></span></h2>
+          <div class="list" id="list"></div>
+          <div class="caption">
+            Checkboxes show or hide pieces. Select a name to inspect it. Left
+            and right mean your left and right.
+          </div>
+        </section>
+        <section class="panel original-panel">
+          <h2>Checkpoint artwork</h2>
+          <div class="stage">
+            <img id="original" alt="Original unsplit character" />
+          </div>
+          <div class="caption">
+            The committed SVG is the fixed reference for this split.
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Assembled parts</h2>
+            <span class="pill" id="match">Checking…</span>
+          </div>
+          <div class="stage" id="assembly"></div>
+          <div class="caption">
+            Static inspection only. “See hidden legs” fades the fur to reveal
+            the leg length and overlap.
+          </div>
+        </section>
+      </div>
+      <section class="panel asset-panel">
+        <h2>
+          All seven pieces
+          <span class="legend">Each shown on its own · click to inspect</span>
+        </h2>
+        <div id="asset-gallery" class="asset-gallery"></div>
+      </section>
+      <div class="below">
+        <section class="panel">
+          <h2>Resting comparison</h2>
+          <div class="info"><dl id="metrics"></dl></div>
+          <div class="caption">
+            Measured with all parts visible at their original positions. These
+            scores do not change when you inspect or hide pieces.
+          </div>
+        </section>
+        <section class="panel">
+          <h2 id="selected-title">Selected part</h2>
+          <div class="stage focus" id="isolated"></div>
+          <div class="focus-info">
+            <div id="part-detail"></div>
+            <button id="only">Only this part</button>
+            <a id="download-part" class="button" download
+              >Download this piece</a
+            >
+          </div>
+        </section>
+        <section class="panel notes-panel">
+          <h2>How the split is organised</h2>
+          <div class="notes">
+            <ul>
+              <li>
+                Exactly seven controls: two eyes, two ears, two feet, and one
+                fur/body group.
+              </li>
+              <li>
+                The face and Guardian’s horns stay with the fur/body. Hair and
+                wool are continuous.
+              </li>
+              <li>
+                Ears and feet are complete closed shapes. The legs extend far
+                inside the fur, with their pivots at the buried upper ends.
+              </li>
+              <li>
+                Eyes are smooth capsules. Hiding them reveals a solid face;
+                hiding Sunny’s ears reveals continuous yellow wool.
+              </li>
+              <li>
+                Every asset is an editable vector. No clipping masks, raster
+                patches, or animation.
+              </li>
+            </ul>
+            <p class="legend">
+              The leg roots remain covered in nine static poses per leg: up to
+              12° each way and 20 units up or down. This checks overlap; no
+              animation has been added.
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script src="parts.js"></script>
+  </body>
+</html>

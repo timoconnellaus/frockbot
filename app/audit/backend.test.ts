@@ -113,12 +113,10 @@ function host(
           botId: "foreman",
           registeredAt: "2026-08-31T00:00:00.000Z",
           initialName: "Foreman",
-          sheep: {
+          avatar: {
             schemaVersion: 1 as const,
-            background: "b",
-            upper: "u",
-            middle: "m",
-            lower: "l",
+            characterId: "pixel",
+            primary: "#fc85ae",
           },
         },
       ],

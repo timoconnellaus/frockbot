@@ -1,0 +1,29 @@
+{
+  "purpose": "Tests of the metric using intentionally altered rendered images; these are not SVG candidate revisions.",
+  "results": {
+    "perfect-reference": {
+      "score": 100.0,
+      "color": 100.0,
+      "ssim": 100.0,
+      "edge": 100.0
+    },
+    "blank": {
+      "score": 0.0,
+      "color": 57.46702,
+      "ssim": 46.74435,
+      "edge": 0.0
+    },
+    "shifted-12px": {
+      "score": 28.76332,
+      "color": 77.65872,
+      "ssim": 35.43899,
+      "edge": 28.76332
+    },
+    "recolored": {
+      "score": 71.56368,
+      "color": 71.56368,
+      "ssim": 72.47426,
+      "edge": 99.81218
+    }
+  }
+}

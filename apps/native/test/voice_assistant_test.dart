@@ -233,6 +233,44 @@ void main() {
     harness.controller.dispose();
   });
 
+  test('a delegated Bot stays on the voice bar through its answer', () async {
+    final harness = Harness();
+    await harness.live();
+    harness.socket.deliver(
+      jsonEncode({
+        'schemaVersion': 1,
+        'type': 'voice/delegation',
+        'botId': 'researcher',
+        'botName': 'Scout',
+        'state': 'asked',
+      }),
+    );
+    await settle();
+    expect(harness.controller.delegatedBotId, 'researcher');
+    expect(harness.controller.delegatedBotName, 'Scout');
+    expect(harness.controller.delegationState, VoiceDelegationStateV1.asked);
+
+    harness.socket.deliver(
+      jsonEncode({
+        'schemaVersion': 1,
+        'type': 'voice/delegation',
+        'botId': 'researcher',
+        'botName': 'Scout',
+        'state': 'answering',
+      }),
+    );
+    await settle();
+    expect(
+      harness.controller.delegationState,
+      VoiceDelegationStateV1.answering,
+    );
+
+    await harness.controller.end(reason: 'end-button');
+    expect(harness.controller.delegatedBotId, isNull);
+    expect(harness.controller.delegationState, isNull);
+    harness.controller.dispose();
+  });
+
   test('a call the server has already ended is not a notice', () async {
     final harness = Harness();
     await harness.live();

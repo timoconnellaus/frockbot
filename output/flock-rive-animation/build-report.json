@@ -1,0 +1,62 @@
+{
+  "guardian": {
+    "parts": 7,
+    "profile": "grounded",
+    "problems": [],
+    "bytes": 56253
+  },
+  "sunny": {
+    "parts": 7,
+    "profile": "sunshine",
+    "problems": [],
+    "bytes": 44348
+  },
+  "chill": {
+    "parts": 5,
+    "profile": "flow",
+    "problems": [],
+    "bytes": 22148
+  },
+  "nudge": {
+    "parts": 5,
+    "profile": "bounce",
+    "problems": [],
+    "bytes": 23674
+  },
+  "fox": {
+    "parts": 11,
+    "profile": "seated-alert",
+    "problems": [],
+    "bytes": 32582
+  },
+  "dog": {
+    "parts": 11,
+    "profile": "seated-terrier",
+    "problems": [],
+    "bytes": 38907
+  },
+  "goat": {
+    "parts": 9,
+    "profile": "standing",
+    "problems": [],
+    "bytes": 31654
+  },
+  "cow": {
+    "parts": 11,
+    "profile": "standing-heavy",
+    "problems": [],
+    "bytes": 29703
+  },
+  "cat": {
+    "parts": 10,
+    "profile": "seated-slinky",
+    "problems": [],
+    "bytes": 29626
+  },
+  "rabbit": {
+    "parts": 10,
+    "profile": "seated-tapper",
+    "problems": [],
+    "bytes": 29408
+  }
+}

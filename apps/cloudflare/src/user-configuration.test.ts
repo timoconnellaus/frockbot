@@ -11,7 +11,7 @@ import {
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
 import type { WorkerLoader } from "./contracts.js";
-import { randomSheepRecipeV1 } from "@frockbot/app/flock/shared";
+import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
 import {
   LEGACY_DEFAULT_PACKAGES_MARKER_KEY,
   LEGACY_OLLAMA_CONNECTION_ID,
@@ -75,8 +75,22 @@ class MemoryStorage {
     return Promise.resolve();
   }
 
-  delete(key: string): Promise<boolean> {
-    return Promise.resolve(this.values.delete(key));
+  delete(key: string | string[]): Promise<boolean | number> {
+    if (typeof key === "string")
+      return Promise.resolve(this.values.delete(key));
+    let deleted = 0;
+    for (const entry of key) if (this.values.delete(entry)) deleted += 1;
+    return Promise.resolve(deleted);
+  }
+
+  list({ prefix, limit = 1000 }: { prefix: string; limit?: number }) {
+    return Promise.resolve(
+      new Map(
+        [...this.values]
+          .filter(([key]) => key.startsWith(prefix))
+          .slice(0, limit),
+      ),
+    );
   }
 
   transaction<T>(callback: (storage: MemoryStorage) => Promise<T>): Promise<T> {
@@ -120,7 +134,11 @@ function identity(userId: string): {
       ({
         storage,
         id: idFor(userId),
-        blockConcurrencyWhile: () => Promise.resolve(),
+        blockConcurrencyWhile: (body: () => Promise<unknown>) =>
+          typeof (storage as { transaction?: unknown }).transaction ===
+          "function"
+            ? body()
+            : Promise.resolve(),
       }) as unknown as DurableObjectState,
     env: {
       USER_CONFIGURATIONS: {
@@ -175,7 +193,7 @@ describe("UserConfiguration Connection routing", () => {
           botId: "scout",
           registeredAt: "2026-09-10T00:00:00.000Z",
           initialName: "Scout",
-          sheep: randomSheepRecipeV1(() => 0),
+          avatar: randomAvatarAppearanceV1(() => 0),
         },
       ],
     });
@@ -235,7 +253,7 @@ describe("UserConfiguration Connection routing", () => {
           botId: "scout",
           registeredAt: "2026-09-10T00:00:00.000Z",
           initialName: "Scout",
-          sheep: randomSheepRecipeV1(() => 0),
+          avatar: randomAvatarAppearanceV1(() => 0),
         },
       ],
     });

@@ -1,8 +1,9 @@
 /// Adding a Bot to the flock, and changing how one looks.
 ///
-/// Two halves: a name, the sheep, and — because a new Bot with nothing to do
+/// Two halves: a name, the avatar, and — because a new Bot with nothing to do
 /// is a blank screen — the first thing to say to it; and, from Bot settings,
-/// the same sheep again for a Bot that already exists. The wardrobe's other three selects are in neither:
+/// the same avatar again for a Bot that already exists. Character and colour
+/// are the whole appearance:
 /// wearables are deferred (`docs/plan.md`), so the background is the whole of
 /// the choice and every band stays at the catalogue's neutral root.
 ///
@@ -10,7 +11,7 @@
 /// cleared only once the authority has answered it, which is what makes a lost
 /// reply a retry of the same `commandId` rather than a second Bot. Changing a
 /// colour needs none of that: it is one small idempotent write, fenced on the
-/// Bot's own sheep revision, and losing it costs a person one more tap.
+/// Bot's own avatar revision, and losing it costs a person one more tap.
 library;
 
 import 'dart:async';
@@ -24,7 +25,7 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../templates/page.dart';
 
-import 'sheep.dart';
+import 'avatar.dart';
 
 /// A Bot id from the name a person typed, with a suffix so two Bots called the
 /// same thing are two Bots. The rule is `FlockOverlay`'s, minus its Unicode
@@ -41,6 +42,25 @@ String botIdFromNameV1(String name, {String? suffix}) {
 
 /// What a finished create hands back: the Bot, and what to say to it first.
 typedef CreatedBotV1 = ({String botId, String firstMessage});
+typedef AvatarSelection = ({String characterId, String primary});
+
+const avatarColourChoicesV1 = <String>[
+  '#fc85ae',
+  '#ff6b57',
+  '#ff9c35',
+  '#ffd43b',
+  '#58c98b',
+  '#59c7ff',
+  '#6578ee',
+  '#9a72dd',
+];
+
+String _characterHex(String id) {
+  final colour =
+      characterCatalogV1[id]?.primary ??
+      characterCatalogV1[defaultCharacterIdV1]!.primary;
+  return '#${colour.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+}
 
 class CreateBotController extends ChangeNotifier {
   final NativeApi api;
@@ -50,7 +70,8 @@ class CreateBotController extends ChangeNotifier {
 
   String name = '';
   String firstMessage = '';
-  String background = defaultSheepBackgroundV1;
+  String background = defaultCharacterIdV1;
+  String primary = _characterHex(defaultCharacterIdV1);
   bool busy = false;
   String? message;
   bool _closed = false;
@@ -66,10 +87,13 @@ class CreateBotController extends ChangeNotifier {
     _changed();
   }
 
-  /// A different sheep, from the backgrounds this build carries.
+  /// A different avatar, from the backgrounds this build carries.
   void reroll() {
-    final ids = sheepBackgroundsV1.keys.toList();
-    edit(() => background = ids[Random().nextInt(ids.length)]);
+    final ids = characterCatalogV1.keys.toList();
+    edit(() {
+      background = ids[Random().nextInt(ids.length)];
+      primary = _characterHex(background);
+    });
   }
 
   /// Restores a create whose reply never arrived, so the person is offered the
@@ -82,7 +106,9 @@ class CreateBotController extends ChangeNotifier {
     edit(() {
       name = command['name']! as String;
       background =
-          ((command['sheep'] as Map?)?['background'] as String?) ?? background;
+          ((command['avatar'] as Map?)?['characterId'] as String?) ??
+          background;
+      primary = ((command['avatar'] as Map?)?['primary'] as String?) ?? primary;
       message = 'This Bot was already asked for. Create it again to finish.';
     });
   }
@@ -108,7 +134,10 @@ class CreateBotController extends ChangeNotifier {
               'expectedRevision': await _revision(),
               'botId': botIdFromNameV1(name.trim()),
               'name': name.trim(),
-              'sheep': defaultSheepRecipeV1(background),
+              'avatar': defaultAvatarAppearanceV1(
+                background,
+                characterColourV1(primary, background),
+              ),
             }
           : (jsonDecode(saved) as Map).cast<String, Object?>();
       wire.BotCreateCommand.fromJson(command);
@@ -172,7 +201,7 @@ class CreateBotController extends ChangeNotifier {
   }
 }
 
-/// The create sheet. A sheep, a name, and the first thing to say.
+/// The create sheet. An avatar, a name, and the first thing to say.
 class CreateBotSheet extends StatefulWidget {
   final CreateBotController controller;
   const CreateBotSheet({super.key, required this.controller});
@@ -231,12 +260,16 @@ class _CreateBotSheetState extends State<CreateBotSheet> {
                   Center(
                     child: Column(
                       children: [
-                        SheepAvatar(size: 96, background: state.background),
+                        CharacterAvatar(
+                          size: 96,
+                          characterId: state.background,
+                          primary: state.primary,
+                        ),
                         const SizedBox(height: 12),
                         Semantics(
                           header: true,
                           child: Text(
-                            'Meet your sheep',
+                            'Meet your avatar',
                             style: type.titleLarge,
                           ),
                         ),
@@ -276,21 +309,31 @@ class _CreateBotSheetState extends State<CreateBotSheet> {
                           spacing: 10,
                           runSpacing: 10,
                           children: [
-                            for (final entry in sheepBackgroundsV1.entries)
+                            for (final entry in characterCatalogV1.entries)
                               _Swatch(
                                 id: entry.key,
-                                label: entry.value,
+                                label: entry.value.label,
                                 chosen: entry.key == state.background,
                                 onTap: state.busy
                                     ? null
-                                    : () => state.edit(
-                                        () => state.background = entry.key,
-                                      ),
+                                    : () => state.edit(() {
+                                        state.background = entry.key;
+                                        state.primary = _characterHex(
+                                          entry.key,
+                                        );
+                                      }),
                               ),
                           ],
                         ),
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  _ColourChoices(
+                    selected: state.primary,
+                    onChoose: state.busy
+                        ? null
+                        : (colour) => state.edit(() => state.primary = colour),
                   ),
                   const SizedBox(height: 8),
                   Center(
@@ -367,8 +410,8 @@ class _CreateBotSheetState extends State<CreateBotSheet> {
 /// The one thing the edit half still does under the single-default-avatar
 /// rule. It is fenced on the revision the read just
 /// reported rather than on one held since the sheet opened, because the sheet
-/// is open for as long as somebody is looking at six sheep.
-class SheepColourSheet extends StatefulWidget {
+/// is open for as long as somebody is looking at six avatar.
+class AvatarPickerSheet extends StatefulWidget {
   final NativeApi api;
   final String botId;
   final String botName;
@@ -376,83 +419,97 @@ class SheepColourSheet extends StatefulWidget {
   /// The colour the Bot wears now, so the sheet opens with it marked rather
   /// than with six colours and no answer to "which one am I?".
   final String? background;
-  const SheepColourSheet({
+  final String? primary;
+  const AvatarPickerSheet({
     super.key,
     required this.api,
     required this.botId,
     required this.botName,
     this.background,
+    this.primary,
   });
 
   /// Opens the sheet and answers with the colour that was saved, or nothing.
-  static Future<String?> show(
+  static Future<AvatarSelection?> show(
     BuildContext context, {
     required NativeApi api,
     required String botId,
     required String botName,
     String? background,
-  }) => showModalBottomSheet<String>(
+    String? primary,
+  }) => showModalBottomSheet<AvatarSelection>(
     context: context,
     showDragHandle: true,
-    builder: (sheet) => SheepColourSheet(
+    isScrollControlled: true,
+    builder: (sheet) => AvatarPickerSheet(
       api: api,
       botId: botId,
       botName: botName,
       background: background,
+      primary: primary,
     ),
   );
 
   @override
-  State<SheepColourSheet> createState() => _SheepColourSheetState();
+  State<AvatarPickerSheet> createState() => _AvatarPickerSheetState();
 }
 
-class _SheepColourSheetState extends State<SheepColourSheet> {
+class _AvatarPickerSheetState extends State<AvatarPickerSheet> {
   bool busy = false;
   String? message;
 
   /// The colour under the finger. Marking it the moment it is tapped is what
   /// says the tap landed; the sheet closes when the write does, and a refusal
   /// takes the mark back.
-  late String? chosen = widget.background;
+  late String chosen = characterCatalogV1.containsKey(widget.background)
+      ? widget.background!
+      : defaultCharacterIdV1;
+  late String primary = widget.primary ?? _characterHex(chosen);
 
-  String get _path => '/api/bots/${Uri.encodeComponent(widget.botId)}/sheep';
+  String get _path => '/api/bots/${Uri.encodeComponent(widget.botId)}/avatar';
 
-  Future<void> _choose(String background) async {
+  Future<void> _save() async {
     if (busy) return;
     setState(() {
       busy = true;
-      chosen = background;
       message = null;
     });
     try {
-      final current = wire.SheepIdentity.fromJson(
+      final current = wire.AvatarIdentity.fromJson(
         await widget.api.request(_path),
       );
       final receipt = wire.FlockReceipt.fromJson(
         await widget.api.request(
           _path,
-          body: wire.BotSheepCommand.fromJson({
+          body: wire.BotAvatarCommand.fromJson({
             'schemaVersion': 1,
-            'type': 'bot/update-sheep',
+            'type': 'bot/update-avatar',
             'commandId': randomId(),
             'expectedRevision': current.revision,
             'botId': widget.botId,
-            'sheep': defaultSheepRecipeV1(background),
+            'avatar': defaultAvatarAppearanceV1(
+              chosen,
+              characterColourV1(primary, chosen),
+            ),
           }).toJson(),
         ),
       );
       if (receipt.status != 'applied') {
         throw FormatException(receipt.failure ?? 'refused');
       }
-      if (mounted) Navigator.of(context).pop(background);
+      if (mounted) {
+        Navigator.of(context).pop((characterId: chosen, primary: primary));
+      }
     } on RequestFailure catch (failure) {
       setState(() {
-        chosen = widget.background;
+        chosen = widget.background ?? defaultCharacterIdV1;
+        primary = widget.primary ?? _characterHex(chosen);
         message = failure.message;
       });
     } catch (_) {
       setState(() {
-        chosen = widget.background;
+        chosen = widget.background ?? defaultCharacterIdV1;
+        primary = widget.primary ?? _characterHex(chosen);
         message = 'Couldn’t change this Bot’s colour. Try again.';
       });
     } finally {
@@ -464,15 +521,20 @@ class _SheepColourSheetState extends State<SheepColourSheet> {
   Widget build(BuildContext context) => identified(
     FlockIds.colourSheet,
     SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          0,
+          20,
+          24 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Semantics(
               header: true,
               child: Text(
-                '${widget.botName}’s colour',
+                '${widget.botName}’s character',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
             ),
@@ -484,15 +546,33 @@ class _SheepColourSheetState extends State<SheepColourSheet> {
                 spacing: 10,
                 runSpacing: 10,
                 children: [
-                  for (final entry in sheepBackgroundsV1.entries)
+                  for (final entry in characterCatalogV1.entries)
                     _Swatch(
                       id: entry.key,
-                      label: entry.value,
+                      label: entry.value.label,
                       chosen: entry.key == chosen,
-                      onTap: busy ? null : () => unawaited(_choose(entry.key)),
+                      primary: entry.key == chosen ? primary : null,
+                      onTap: busy
+                          ? null
+                          : () => setState(() {
+                              chosen = entry.key;
+                              primary = _characterHex(entry.key);
+                            }),
                     ),
                 ],
               ),
+            ),
+            const SizedBox(height: 14),
+            _ColourChoices(
+              selected: primary,
+              onChoose: busy
+                  ? null
+                  : (value) => setState(() => primary = value),
+            ),
+            const SizedBox(height: 18),
+            FilledButton(
+              onPressed: busy ? null : _save,
+              child: Text(busy ? 'Saving…' : 'Save character'),
             ),
             if (message != null)
               Padding(
@@ -506,17 +586,19 @@ class _SheepColourSheetState extends State<SheepColourSheet> {
   );
 }
 
-/// One background, shown as the sheep wearing it rather than as a colour chip:
+/// One background, shown as the avatar wearing it rather than as a colour chip:
 /// a person choosing an avatar should see the avatar.
 class _Swatch extends StatelessWidget {
   final String id;
   final String label;
   final bool chosen;
+  final String? primary;
   final VoidCallback? onTap;
   const _Swatch({
     required this.id,
     required this.label,
     required this.chosen,
+    this.primary,
     this.onTap,
   });
 
@@ -542,9 +624,59 @@ class _Swatch extends StatelessWidget {
                   : Colors.transparent,
             ),
           ),
-          child: SheepAvatar(size: 58, background: id),
+          child: CharacterAvatar(
+            size: 58,
+            characterId: id,
+            primary: primary,
+            motion: CharacterMotion.quiet,
+          ),
         ),
       ),
     ),
+  );
+}
+
+class _ColourChoices extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String>? onChoose;
+  const _ColourChoices({required this.selected, required this.onChoose});
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    alignment: WrapAlignment.center,
+    spacing: 9,
+    runSpacing: 9,
+    children: [
+      for (final value in avatarColourChoicesV1)
+        Semantics(
+          button: true,
+          selected: value == selected,
+          label: 'Character colour $value',
+          child: InkWell(
+            onTap: onChoose == null ? null : () => onChoose!(value),
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: 34,
+              height: 34,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  width: 2,
+                  color: value == selected
+                      ? Theme.of(context).colorScheme.onSurface
+                      : Colors.transparent,
+                ),
+              ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: characterColourV1(value, defaultCharacterIdV1),
+                ),
+              ),
+            ),
+          ),
+        ),
+    ],
   );
 }

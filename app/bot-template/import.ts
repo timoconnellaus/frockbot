@@ -16,7 +16,7 @@
 // what they would have to connect themselves.
 import type {
   BotTemplateV1,
-  TemplateSheepRecipeV1,
+  TemplateAvatarAppearanceV1,
   TemplateSkillV1,
   TemplateRoutineV1,
 } from "@frockbot/core/template";
@@ -55,7 +55,7 @@ export interface TemplateImportPlanV1 {
   /** The Bot this import would create. Derived, so a replay asks for the same. */
   botId: string;
   profile: { name: string; title?: string; description?: string };
-  sheep: TemplateSheepRecipeV1;
+  avatar: TemplateAvatarAppearanceV1;
   skills: TemplateSkillV1[];
   routines: TemplateRoutineV1[];
   packages: TemplateImportPackageLineV1[];
@@ -168,7 +168,7 @@ export function planBotTemplateImportV1(
         ? {}
         : { description: input.template.profile.description }),
     },
-    sheep: input.template.profile.avatar.recipe,
+    avatar: input.template.profile.avatar.recipe,
     skills: input.template.skills,
     routines: input.template.routines,
     packages,

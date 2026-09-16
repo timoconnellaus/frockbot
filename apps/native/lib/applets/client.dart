@@ -249,12 +249,11 @@ class AppletsApi {
     );
   }
 
-  Future<AppletUi> ui(String botId, String appletId) async =>
-      AppletUi.fromJson(
-        await api.request(
-          '/api/bots/${_bot(botId)}/applets/${_applet(appletId)}/ui',
-        ),
-      );
+  Future<AppletUi> ui(String botId, String appletId) async => AppletUi.fromJson(
+    await api.request(
+      '/api/bots/${_bot(botId)}/applets/${_applet(appletId)}/ui',
+    ),
+  );
 
   Future<wire.AppletViewerToken> token(String botId, String appletId) async =>
       wire.AppletViewerToken.fromJson(

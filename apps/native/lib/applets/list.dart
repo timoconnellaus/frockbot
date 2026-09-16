@@ -253,9 +253,8 @@ class _AppletListState extends State<AppletList> {
       children: [
         Text(
           'Couldn’t load this Bot’s Applets.',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 10),
         identified(

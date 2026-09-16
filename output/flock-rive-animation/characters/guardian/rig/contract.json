@@ -1,0 +1,78 @@
+{
+  "name": "guardian",
+  "profile": "grounded",
+  "artboard": "Guardian",
+  "stateMachine": "Guardian",
+  "viewModel": "Guardian",
+  "activities": {
+    "0": "Idle",
+    "1": "Thinking",
+    "2": "Working",
+    "3": "Needs attention",
+    "4": "Success",
+    "5": "Still"
+  },
+  "emotions": {
+    "0": "Neutral",
+    "1": "Excited",
+    "2": "Sad",
+    "3": "Tired",
+    "4": "Curious",
+    "5": "Content",
+    "6": "Surprised",
+    "7": "Uncertain"
+  },
+  "properties": {
+    "activity": {
+      "type": "Number",
+      "default": 0
+    },
+    "emotion": {
+      "type": "Number",
+      "default": 0
+    },
+    "hovered": {
+      "type": "Boolean",
+      "default": "false"
+    },
+    "lookX": {
+      "type": "Number",
+      "default": 0
+    },
+    "lookY": {
+      "type": "Number",
+      "default": 0
+    },
+    "primary": {
+      "type": "Color",
+      "default": "FF424242"
+    },
+    "shade": {
+      "type": "Color",
+      "default": "FF736F62"
+    },
+    "eyeColor": {
+      "type": "Color",
+      "default": "FFFCF6E3"
+    },
+    "reducedMotion": {
+      "type": "Boolean",
+      "default": "false"
+    }
+  },
+  "palette": {
+    "primary": "#424242",
+    "shade": "#736f62",
+    "eyeColor": "#fcf6e3"
+  },
+  "parts": [
+    "foot-left",
+    "foot-right",
+    "ear-left",
+    "ear-right",
+    "fur",
+    "eye-left",
+    "eye-right"
+  ],
+  "sourceSvgSha256": "2af9ece65ccebf61a0ede373cfe613b0e0e242a8260572e187670eb1fca12e05"
+}

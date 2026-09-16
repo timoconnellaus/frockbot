@@ -1,13 +1,13 @@
 # @frockbot/app/flock
 
-Built-in Package for durable Bot registration and composable sheep identity.
+Built-in Package for durable Bot registration and character identity.
 
-- Gateway Contribution: authenticated exact v1 Bot directory and sheep routes.
+- Gateway Contribution: authenticated exact v1 Bot directory and avatar routes.
 - User Contribution: bounded directory, immutable registration seeds, optimistic revision, durable create receipts, and [General bootstrap](#general-bootstrap).
-- Bot Contribution: idempotent materialization and durable sheep update receipts.
-- Hosted client Contribution: Bot list/create/switch and responsive sheep picker in generic shell outlets.
+- Bot Contribution: idempotent materialization and durable avatar update receipts.
+- Hosted client Contribution: Bot list/create/switch and responsive character picker in generic shell outlets.
 
-The production asset manifest contains one canonical sheep, six backgrounds, and 43 approved wearable layers at 256×256. Runtime code never reads from `artifacts/`; Vite inlines the package-owned WebPs into the immutable hosted stylesheet.
+The native client bundles eleven approved Rive characters with neutral PNG fallbacks. Appearance is a character id plus a validated primary colour.
 
 ## General bootstrap
 

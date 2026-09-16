@@ -50,8 +50,10 @@ class TranscriptView extends StatefulWidget {
   /// not here, and the thread says nothing rather than pretending to scroll.
   final String? focusRunId;
 
-  /// The Bot's sheep background. Every avatar in the thread is this Bot's.
+  /// The Bot's character and chosen colour. Every live avatar in the thread
+  /// uses the same appearance as the sidebar and composer companion.
   final String? background;
+  final String? primary;
 
   /// Drawn under the empty thread's greeting, and gone with the first row.
   final Widget? starters;
@@ -75,6 +77,7 @@ class TranscriptView extends StatefulWidget {
     this.onReadLatest,
     this.focusRunId,
     this.background,
+    this.primary,
     this.starters,
   });
 
@@ -383,6 +386,7 @@ class _TranscriptViewState extends State<TranscriptView> {
         child: WorkingIndicator(
           line: line,
           background: widget.background,
+          primary: widget.primary,
           label: line.stopRequested
               ? 'Stopping…'
               : line.pending

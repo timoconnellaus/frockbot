@@ -5,7 +5,7 @@ import {
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleViewV1,
   decodeBotRegistrationV1,
-  decodeSheepIdentityViewV1,
+  decodeAvatarIdentityViewV1,
   decodeStoredBotLifecycleReceiptV1,
   decodeStoredFlockReceiptV1,
   flockCommandFingerprint,
@@ -14,13 +14,13 @@ import {
   type BotLifecycleViewV1,
   type BotRegistrationV1,
   type FlockReceiptV1,
-  type SheepIdentityViewV1,
-  type UpdateSheepCommandV1,
+  type AvatarIdentityViewV1,
+  type UpdateAvatarCommandV1,
 } from "./shared.js";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 
-const IDENTITY_KEY = "flock:sheep:v1";
-const RECEIPT_PREFIX = "flock:sheep-receipt:";
+const IDENTITY_KEY = "flock:avatar:v1";
+const RECEIPT_PREFIX = "flock:avatar-receipt:";
 const LIFECYCLE_KEY = "flock:lifecycle:v1";
 const LIFECYCLE_RECEIPT_PREFIX = "flock:lifecycle-receipt:";
 export interface FlockBotTransaction {
@@ -83,7 +83,7 @@ export class FlockBotBackendContribution {
   async materialize(
     registrationInput: BotRegistrationV1,
     userId: string,
-  ): Promise<SheepIdentityViewV1> {
+  ): Promise<AvatarIdentityViewV1> {
     const registration = decodeBotRegistrationV1(registrationInput);
     // A tombstone is checked before anything is written back: materializing a
     // deleted Bot would recreate the very rows the delete removed.
@@ -107,10 +107,10 @@ export class FlockBotBackendContribution {
       const existing =
         existingValue === undefined
           ? undefined
-          : decodeSheepIdentityViewV1(existingValue);
+          : decodeAvatarIdentityViewV1(existingValue);
       if (existing) {
         if (existing.botId !== registration.botId)
-          throw new Error("sheep identity does not match Bot registration");
+          throw new Error("avatar identity does not match Bot registration");
         if (lifecycleValue === undefined)
           await storage.put(LIFECYCLE_KEY, lifecycle);
         return existing;
@@ -119,8 +119,8 @@ export class FlockBotBackendContribution {
         schemaVersion: 1,
         botId: registration.botId,
         revision: 0,
-        sheep: structuredClone(registration.sheep),
-      } satisfies SheepIdentityViewV1;
+        avatar: structuredClone(registration.avatar),
+      } satisfies AvatarIdentityViewV1;
       await storage.put({
         [IDENTITY_KEY]: initial,
         [LIFECYCLE_KEY]: lifecycle,
@@ -132,17 +132,17 @@ export class FlockBotBackendContribution {
   async read(
     registration: BotRegistrationV1,
     userId: string,
-  ): Promise<SheepIdentityViewV1> {
+  ): Promise<AvatarIdentityViewV1> {
     return structuredClone(await this.materialize(registration, userId));
   }
 
   async update(
     registration: BotRegistrationV1,
     userId: string,
-    command: UpdateSheepCommandV1,
+    command: UpdateAvatarCommandV1,
   ): Promise<FlockReceiptV1> {
     if (registration.botId !== command.botId)
-      throw new Error("sheep command does not match Bot registration");
+      throw new Error("avatar command does not match Bot registration");
     await this.materialize(registration, userId);
     const fingerprint = flockCommandFingerprint(command);
     return this.host.storage.transaction(async (storage) => {
@@ -162,15 +162,15 @@ export class FlockBotBackendContribution {
       }
       const currentValue = await storage.get<unknown>(IDENTITY_KEY);
       if (currentValue === undefined)
-        throw new Error("sheep identity was not materialized");
-      const current = decodeSheepIdentityViewV1(currentValue);
+        throw new Error("avatar identity was not materialized");
+      const current = decodeAvatarIdentityViewV1(currentValue);
       if (current.revision !== command.expectedRevision)
         throw new FlockConflictError(current.revision);
       const next = {
         ...current,
         revision: current.revision + 1,
-        sheep: structuredClone(command.sheep),
-      } satisfies SheepIdentityViewV1;
+        avatar: structuredClone(command.avatar),
+      } satisfies AvatarIdentityViewV1;
       const receipt = {
         schemaVersion: 1,
         commandId: command.commandId,

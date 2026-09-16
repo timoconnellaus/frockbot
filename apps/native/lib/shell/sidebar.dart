@@ -19,7 +19,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 
-import '../flock/sheep.dart';
+import '../flock/avatar.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/frock_theme.dart';
 import '../update/desktop_update.dart';
@@ -419,7 +419,8 @@ class ShellSidebar extends StatelessWidget {
                               ShellIds.sidebarPinned(_id(bot)),
                               _PinnedTile(
                                 name: _name(bot),
-                                background: bot.sheep.background,
+                                background: bot.avatar.characterId,
+                                primary: bot.avatar.primary,
                                 active: _id(bot) == activeBotId,
                                 unread: _unread(_id(bot)).unread,
                                 working: _working(bot),
@@ -553,9 +554,14 @@ class ShellSidebar extends StatelessWidget {
               _RowControl(onPressed: (at) => actions(position: at)),
             )
           : null,
-      avatar: SheepAvatar(
+      avatar: CharacterAvatar(
         size: 36,
-        background: bot.sheep.background,
+        characterId: bot.avatar.characterId,
+        primary: bot.avatar.primary,
+        motion: CharacterMotion.quiet,
+        activity: _working(bot)
+            ? CharacterActivity.working
+            : CharacterActivity.idle,
         working: _working(bot),
       ),
       name: _name(bot),
@@ -1088,16 +1094,19 @@ class _BotRowState extends State<_BotRow> {
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
-        child: Focus(
-          canRequestFocus: false,
-          skipTraversal: true,
-          onFocusChange: (has) => setState(() => _focused = has),
-          child: Stack(
-            children: [
-              row,
-              if (showControl)
-                Positioned(top: 8, right: 12, child: widget.control!),
-            ],
+        child: CharacterHoverScope(
+          hovered: _hovered,
+          child: Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            onFocusChange: (has) => setState(() => _focused = has),
+            child: Stack(
+              children: [
+                row,
+                if (showControl)
+                  Positioned(top: 8, right: 12, child: widget.control!),
+              ],
+            ),
           ),
         ),
       ),
@@ -1256,7 +1265,7 @@ class _Header extends StatelessWidget {
           identified(
             ShellIds.sidebarCreateBot,
             IconButton(
-              tooltip: 'Add a sheep',
+              tooltip: 'Add a Bot',
               onPressed: onCreateBot,
               style: active,
               icon: const Icon(Icons.add_rounded),
@@ -1330,9 +1339,10 @@ class _Foot extends StatelessWidget {
   }
 }
 
-class _PinnedTile extends StatelessWidget {
+class _PinnedTile extends StatefulWidget {
   final String name;
   final String background;
+  final String primary;
   final bool active;
   final bool unread;
   final bool working;
@@ -1341,6 +1351,7 @@ class _PinnedTile extends StatelessWidget {
   const _PinnedTile({
     required this.name,
     required this.background,
+    required this.primary,
     required this.active,
     required this.unread,
     required this.working,
@@ -1349,67 +1360,91 @@ class _PinnedTile extends StatelessWidget {
   });
 
   @override
+  State<_PinnedTile> createState() => _PinnedTileState();
+}
+
+class _PinnedTileState extends State<_PinnedTile> {
+  bool hovered = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Material(
-      color: active
-          ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onActions == null ? null : () => onActions!(),
-        onSecondaryTapUp: onActions == null
-            ? null
-            : (details) => onActions!(position: details.globalPosition),
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          width: 66,
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Stack(
-                clipBehavior: Clip.none,
+    return MouseRegion(
+      onEnter: (_) => setState(() => hovered = true),
+      onExit: (_) => setState(() => hovered = false),
+      child: CharacterHoverScope(
+        hovered: hovered,
+        child: Material(
+          color: widget.active
+              ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: widget.onTap,
+            onLongPress: widget.onActions == null
+                ? null
+                : () => widget.onActions!(),
+            onSecondaryTapUp: widget.onActions == null
+                ? null
+                : (details) =>
+                      widget.onActions!(position: details.globalPosition),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              width: 66,
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  SheepAvatar(
-                    size: 40,
-                    background: background,
-                    working: working,
-                  ),
-                  if (unread)
-                    Positioned(
-                      right: -3,
-                      top: -3,
-                      child: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primary,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: theme.colorScheme.surface,
-                            width: 2,
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      CharacterAvatar(
+                        size: 40,
+                        characterId: widget.background,
+                        primary: widget.primary,
+                        motion: CharacterMotion.quiet,
+                        activity: widget.working
+                            ? CharacterActivity.working
+                            : CharacterActivity.idle,
+                        working: widget.working,
+                      ),
+                      if (widget.unread)
+                        Positioned(
+                          right: -3,
+                          top: -3,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: theme.colorScheme.surface,
+                                width: 2,
+                              ),
+                            ),
                           ),
                         ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    widget.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 11.5,
+                      fontWeight: widget.unread
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                      color: theme.colorScheme.onSurface.withValues(
+                        alpha: widget.unread ? 1 : 0.85,
                       ),
                     ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 5),
-              Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontSize: 11.5,
-                  fontWeight: unread ? FontWeight.w600 : FontWeight.w500,
-                  color: theme.colorScheme.onSurface.withValues(
-                    alpha: unread ? 1 : 0.85,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -1493,7 +1528,7 @@ class _NoBots extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
     child: Text(
-      'No Bots yet. Add your first sheep.',
+      'No Bots yet. Add your first Bot.',
       style: Theme.of(context).textTheme.bodyMedium
           ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
     ),

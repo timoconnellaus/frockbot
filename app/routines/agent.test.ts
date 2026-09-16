@@ -189,7 +189,7 @@ describe("routine_manage", () => {
   });
 });
 
-// A Bot paused a User's Routine in a Turn about sheep farming: no approval, no
+// A Bot paused a User's Routine in a Turn about avatar farming: no approval, no
 // confirmation, nothing in the transcript. A Routine the User made is theirs.
 describe("a Routine the User created", () => {
   async function seeded() {

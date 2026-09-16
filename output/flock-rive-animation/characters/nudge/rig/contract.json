@@ -1,0 +1,70 @@
+{
+  "name": "nudge",
+  "profile": "bounce",
+  "artboard": "Nudge",
+  "stateMachine": "Nudge",
+  "viewModel": "Nudge",
+  "activities": {
+    "0": "Idle",
+    "1": "Thinking",
+    "2": "Working",
+    "3": "Needs attention",
+    "4": "Success",
+    "5": "Still"
+  },
+  "emotions": {
+    "0": "Neutral",
+    "1": "Excited",
+    "2": "Sad",
+    "3": "Tired",
+    "4": "Curious",
+    "5": "Content",
+    "6": "Surprised",
+    "7": "Uncertain"
+  },
+  "properties": {
+    "activity": {
+      "type": "Number",
+      "default": 0
+    },
+    "emotion": {
+      "type": "Number",
+      "default": 0
+    },
+    "hovered": {
+      "type": "Boolean",
+      "default": "false"
+    },
+    "lookX": {
+      "type": "Number",
+      "default": 0
+    },
+    "lookY": {
+      "type": "Number",
+      "default": 0
+    },
+    "primary": {
+      "type": "Color",
+      "default": "FFFFAD32"
+    },
+    "shade": {
+      "type": "Color",
+      "default": "FFFFAD32"
+    },
+    "eyeColor": {
+      "type": "Color",
+      "default": "FFFCF6E3"
+    },
+    "reducedMotion": {
+      "type": "Boolean",
+      "default": "false"
+    }
+  },
+  "palette": {
+    "primary": "#ffad32",
+    "shade": "#ffad32",
+    "eyeColor": "#fcf6e3"
+  },
+  "parts": ["foot-left", "foot-right", "fur", "eye-left", "eye-right"],
+  "sourceSvgSha256": "fd3ecf5e679b6ac3e83afc1b292c824a5889c83ef2ec7280769b7147781a92d7"
+}

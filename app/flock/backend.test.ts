@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createFlockBackendContribution } from "./backend.js";
-import { randomSheepRecipeV1 } from "./shared.js";
+import { randomAvatarAppearanceV1 } from "./shared.js";
 
-const sheep = randomSheepRecipeV1(() => 0);
+const avatar = randomAvatarAppearanceV1(() => 0);
 function request(path: string, body?: unknown) {
   return new Request(`https://bot.example${path}`, {
     method: body ? "POST" : "GET",
@@ -23,8 +23,8 @@ describe("Flock gateway Contribution", () => {
       readFlockBootstrap: () =>
         Promise.resolve({ schemaVersion: 1, generalBotId: null }),
       executeBotLifecycle: () => Promise.reject(new Error("not used")),
-      readSheep: () => Promise.reject(new Error("not used")),
-      updateSheep: () => Promise.reject(new Error("not used")),
+      readAvatar: () => Promise.reject(new Error("not used")),
+      updateAvatar: () => Promise.reject(new Error("not used")),
       listBotIdentities: () =>
         Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
       listBotUnread: () =>
@@ -41,7 +41,7 @@ describe("Flock gateway Contribution", () => {
         expectedRevision: 0,
         botId: "alpha",
         name: "Alpha",
-        sheep,
+        avatar,
       }),
       new URL("https://bot.example/api/bots"),
       { userId: "user-1", client: "browser" },
@@ -87,9 +87,9 @@ describe("Flock gateway Contribution", () => {
             revision: 1,
           },
         }),
-      readSheep: (_user, botId) =>
-        Promise.resolve({ schemaVersion: 1, botId, revision: 0, sheep }),
-      updateSheep: (_user, _bot, command) =>
+      readAvatar: (_user, botId) =>
+        Promise.resolve({ schemaVersion: 1, botId, revision: 0, avatar }),
+      updateAvatar: (_user, _bot, command) =>
         Promise.resolve({
           schemaVersion: 1,
           commandId: command.commandId,
@@ -155,7 +155,7 @@ describe("Flock gateway Contribution", () => {
       expectedRevision: 0,
       botId: "alpha",
       name: "Alpha",
-      sheep,
+      avatar,
     };
     expect(
       (
@@ -249,8 +249,8 @@ describe("Flock gateway Contribution", () => {
           },
         });
       },
-      readSheep: () => Promise.reject(new Error("not used")),
-      updateSheep: () => Promise.reject(new Error("not used")),
+      readAvatar: () => Promise.reject(new Error("not used")),
+      updateAvatar: () => Promise.reject(new Error("not used")),
       listBotIdentities: () =>
         Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
       listBotUnread: () =>

@@ -220,8 +220,8 @@ describe("foundation application", () => {
         Promise.resolve({ schemaVersion: 1 as const, generalBotId: null }),
       executeBotLifecycle: () =>
         Promise.reject(new Error("not used while composing")),
-      readSheep: () => Promise.reject(new Error("not used while composing")),
-      updateSheep: () => Promise.reject(new Error("not used while composing")),
+      readAvatar: () => Promise.reject(new Error("not used while composing")),
+      updateAvatar: () => Promise.reject(new Error("not used while composing")),
       listBotIdentities: () =>
         Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
       readComputer: () =>

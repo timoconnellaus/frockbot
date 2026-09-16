@@ -26,7 +26,7 @@ import {
   decodeFlockBootstrapViewV1,
   type FlockBootstrapViewV1,
   decodeFlockReceiptV1,
-  decodeSheepIdentityViewV1,
+  decodeAvatarIdentityViewV1,
   BotNotFoundError,
   decodeBotIdentityDirectoryViewV1,
   FLOCK_DIRECTORY_LIMIT,
@@ -499,8 +499,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
         botId,
         command,
       }),
-    readSheep: (request) => rpc.readSheep(request),
-    updateSheep: (request) => rpc.updateSheep(request),
+    readAvatar: (request) => rpc.readAvatar(request),
+    updateAvatar: (request) => rpc.updateAvatar(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     readBotPluginsFrame: (request) => rpc.readBotPluginsFrame(request),
@@ -2096,10 +2096,10 @@ const createGatewayBackendContributions = (env: Env) =>
       botId: string,
       command: BotUnreadCommandV1,
     ) => executeBotUnreadCommand(env, userId, botId, command),
-    readSheep: async (userId, botId) =>
-      decodeSheepIdentityViewV1(
+    readAvatar: async (userId, botId) =>
+      decodeAvatarIdentityViewV1(
         rpcJsonSnapshot(
-          await botStateStub(env, userId, botId).readSheep({
+          await botStateStub(env, userId, botId).readAvatar({
             schemaVersion: 1,
             userId,
             botId,
@@ -2353,10 +2353,10 @@ const createGatewayBackendContributions = (env: Env) =>
           command,
         }),
       ),
-    updateSheep: async (userId, botId, command) =>
+    updateAvatar: async (userId, botId, command) =>
       decodeFlockReceiptV1(
         rpcJsonSnapshot(
-          await botStateStub(env, userId, botId).updateSheep({
+          await botStateStub(env, userId, botId).updateAvatar({
             schemaVersion: 1,
             userId,
             botId,

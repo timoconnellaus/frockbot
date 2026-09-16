@@ -1,0 +1,30 @@
+{
+  "checkpoint": "ad85697c70",
+  "reference": "Committed smooth SVG masters",
+  "characters": {
+    "guardian": {
+      "score": 99.122725,
+      "color": 99.638497,
+      "ssim": 99.122725,
+      "edge": 99.419201,
+      "alpha": 99.679068,
+      "parts": 7
+    },
+    "pixel": {
+      "score": 99.455669,
+      "color": 99.678988,
+      "ssim": 99.455669,
+      "edge": 99.766291,
+      "alpha": 99.691999,
+      "parts": 7
+    },
+    "sunny": {
+      "score": 99.36276,
+      "color": 99.794088,
+      "ssim": 99.36276,
+      "edge": 99.90237,
+      "alpha": 99.882049,
+      "parts": 7
+    }
+  }
+}

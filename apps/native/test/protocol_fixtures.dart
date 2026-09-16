@@ -36,8 +36,7 @@ void main() {
   var count = 0;
   for (final validity in ['valid', 'invalid']) {
     final rows = jsonDecode(
-      File('core/protocol-schemas/fixtures/$validity.json')
-          .readAsStringSync(),
+      File('core/protocol-schemas/fixtures/$validity.json').readAsStringSync(),
     ) as List;
     for (final row in rows) {
       final actual = isProtocolValue(row['schema'] as String, row['value']);

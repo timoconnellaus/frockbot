@@ -208,7 +208,11 @@ Map<String, Object?> _saveCommandV1(
     'name': name,
     'prompt': prompt,
     if (plugin)
-      'trigger': {'kind': 'plugin', 'pluginId': pluginId, 'trigger': pluginTrigger}
+      'trigger': {
+        'kind': 'plugin',
+        'pluginId': pluginId,
+        'trigger': pluginTrigger,
+      }
     else if (webhook)
       'trigger': {'kind': 'webhook'}
     else

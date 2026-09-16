@@ -22,6 +22,7 @@ import {
 } from "./push.js";
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { DurableObject } from "cloudflare:workers";
+import { cleanUserAvatarTestState } from "./avatar-state-cleanup.js";
 import {
   decodeNativeSessionOperation,
   nativeSessionOperation,
@@ -64,7 +65,7 @@ import {
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleViewV1,
   decodeCreateBotCommandV1,
-  decodeSheepIdentityViewV1,
+  decodeAvatarIdentityViewV1,
   BotNotFoundError,
 } from "@frockbot/app/flock/shared";
 import {
@@ -228,6 +229,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     // Before any request or alarm can read an Applet entry of the old shape.
     this.ctx.blockConcurrencyWhile(async () => {
       await cleanAppletTestStateV1(this.ctx.storage);
+      await cleanUserAvatarTestState(this.ctx.storage);
       if (
         (
           await this.ctx.storage.list({
@@ -1998,7 +2000,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
       return this.env.BOT_STATES.get(id) as unknown as {
         readConfiguration(input: unknown): Promise<unknown>;
-        readSheep(input: unknown): Promise<unknown>;
+        readAvatar(input: unknown): Promise<unknown>;
         listOwnSkillDocuments(input: unknown): Promise<unknown>;
         listRoutines(input: unknown): Promise<unknown>;
       };
@@ -2014,16 +2016,16 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             }),
           ),
         ),
-      readSheep: async (userId, botId) =>
-        decodeSheepIdentityViewV1(
+      readAvatar: async (userId, botId) =>
+        decodeAvatarIdentityViewV1(
           rpcJsonSnapshotV1(
-            await botState(userId, botId).readSheep({
+            await botState(userId, botId).readAvatar({
               schemaVersion: 1,
               userId,
               botId,
             }),
           ),
-        ).sheep,
+        ).avatar,
       readSkills: async (userId, botId) => {
         const documents = rpcJsonSnapshotV1(
           await botState(userId, botId).listOwnSkillDocuments({
@@ -2113,7 +2115,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           ...(command.description === undefined
             ? {}
             : { description: command.description }),
-          sheep: command.sheep,
+          avatar: command.avatar,
         });
         return receipt.status === "applied"
           ? { status: "applied" as const }

@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/flock/create.dart';
 import 'package:frockbot_native/flock/lifecycle.dart';
-import 'package:frockbot_native/flock/sheep.dart';
+import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
@@ -64,11 +64,13 @@ Map<String, Object?> receipt(
 
 void main() {
   test('a Bot id is the name, slugged, with a suffix so two are two', () {
-    expect(botIdFromNameV1('Night shift', suffix: 'abcd1234'),
-        'night-shift-abcd1234');
+    expect(
+      botIdFromNameV1('Night shift', suffix: 'abcd1234'),
+      'night-shift-abcd1234',
+    );
     expect(botIdFromNameV1('  ~~~  ', suffix: 'abcd1234'), 'bot-abcd1234');
     // A letter outside a-z is dropped rather than folded onto one: an id is
-            // opaque and the name is what a person reads.
+    // opaque and the name is what a person reads.
     expect(
       botIdFromNameV1('Ünïcode & things!', suffix: 'abcd1234'),
       'n-code-things-abcd1234',
@@ -79,58 +81,61 @@ void main() {
     );
   });
 
-  test('the sheep is the background plus the canonical, and nothing else', () {
-    // The wardrobe's three bands stay at the catalogue's neutral roots:
-    // wearables are deferred, and a Bot this app makes must still be one a
-    // wardrobe can dress when they return.
-    expect(defaultSheepRecipeV1('hot-pink'), {
+  test('the avatar is one character plus its chosen colour', () {
+    expect(defaultAvatarAppearanceV1('pixel'), {
       'schemaVersion': 1,
-      'background': 'hot-pink',
-      'upper': 'upper-neutral',
-      'middle': 'middle-neutral',
-      'lower': 'lower-neutral',
+      'characterId': 'pixel',
+      'primary': '#fc85ae',
     });
-    // A colour this build does not carry is not a hole where a face should be.
+    expect(defaultAvatarAppearanceV1('pixel', const Color(0xff123456)), {
+      'schemaVersion': 1,
+      'characterId': 'pixel',
+      'primary': '#123456',
+    });
+    // An unknown character falls back to Pixel rather than leaving a hole.
     expect(
-      defaultSheepRecipeV1('chartreuse')['background'],
-      defaultSheepBackgroundV1,
+      defaultAvatarAppearanceV1('chartreuse')['characterId'],
+      defaultCharacterIdV1,
     );
   });
 
-  test('a create is one command, kept until the authority answers it', () async {
-    final store = MemoryStore();
-    final sent = <Map<String, Object?>>[];
-    var lost = true;
-    final api = SettingsApi(store, (path, body) async {
-      if (body == null) return directory(3);
-      final command = (body as Map).cast<String, Object?>();
-      sent.add(command);
-      if (lost) {
-        lost = false;
-        throw const RequestFailure('lost', null);
-      }
-      return receipt(command['commandId']);
-    });
-    final first = CreateBotController(api, store, 'tim');
-    first.name = 'Night shift';
-    first.background = 'lime-green';
-    expect(await first.create(), isNull);
-    // The command is on disk before it is sent, so the next attempt finishes
-    // the Bot that was already asked for rather than making a second one.
-    expect(store.values.containsKey('bot-create.tim'), isTrue);
-    first.dispose();
+  test(
+    'a create is one command, kept until the authority answers it',
+    () async {
+      final store = MemoryStore();
+      final sent = <Map<String, Object?>>[];
+      var lost = true;
+      final api = SettingsApi(store, (path, body) async {
+        if (body == null) return directory(3);
+        final command = (body as Map).cast<String, Object?>();
+        sent.add(command);
+        if (lost) {
+          lost = false;
+          throw const RequestFailure('lost', null);
+        }
+        return receipt(command['commandId']);
+      });
+      final first = CreateBotController(api, store, 'tim');
+      first.name = 'Night shift';
+      first.background = 'guardian';
+      expect(await first.create(), isNull);
+      // The command is on disk before it is sent, so the next attempt finishes
+      // the Bot that was already asked for rather than making a second one.
+      expect(store.values.containsKey('bot-create.tim'), isTrue);
+      first.dispose();
 
-    final next = CreateBotController(api, store, 'tim');
-    await next.restore();
-    expect(next.name, 'Night shift');
-    expect(next.background, 'lime-green');
-    final made = await next.create();
-    expect(made?.botId, sent.first['botId']);
-    expect(sent[1]['commandId'], sent[0]['commandId']);
-    expect(store.values.containsKey('bot-create.tim'), isFalse);
-    next.dispose();
-    api.close();
-  });
+      final next = CreateBotController(api, store, 'tim');
+      await next.restore();
+      expect(next.name, 'Night shift');
+      expect(next.background, 'guardian');
+      final made = await next.create();
+      expect(made?.botId, sent.first['botId']);
+      expect(sent[1]['commandId'], sent[0]['commandId']);
+      expect(store.values.containsKey('bot-create.tim'), isFalse);
+      next.dispose();
+      api.close();
+    },
+  );
 
   test('a create re-fences on the revision a conflict reported', () async {
     final store = MemoryStore();
@@ -174,35 +179,36 @@ void main() {
     api.close();
   });
 
-  testWidgets('the create sheet asks for a sheep, a name and a first message', (
-    tester,
-  ) async {
-    final store = MemoryStore();
-    final api = SettingsApi(store, (path, body) async => directory(0));
-    final controller = CreateBotController(api, store, 'tim');
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: Scaffold(body: CreateBotSheet(controller: controller)),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('Meet your sheep'), findsOneWidget);
-    expect(find.text('Bot name'), findsOneWidget);
-    expect(find.text('First message'), findsOneWidget);
-    // Six colours, and no wardrobe: the deferred bands have no control.
-    expect(find.byTooltip('Hot pink'), findsOneWidget);
-    expect(find.text('Headwear'), findsNothing);
+  testWidgets(
+    'the create sheet asks for a avatar, a name and a first message',
+    (tester) async {
+      final store = MemoryStore();
+      final api = SettingsApi(store, (path, body) async => directory(0));
+      final controller = CreateBotController(api, store, 'tim');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(body: CreateBotSheet(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Meet your avatar'), findsOneWidget);
+      expect(find.text('Bot name'), findsOneWidget);
+      expect(find.text('First message'), findsOneWidget);
+      // The approved character cast is here, with no retired wardrobe bands.
+      expect(find.byTooltip('Pixel'), findsOneWidget);
+      expect(find.text('Headwear'), findsNothing);
 
-    // A nameless Bot is refused where the press was, before anything is sent.
-    await tester.ensureVisible(find.text('Create Bot'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Create Bot'));
-    await tester.pumpAndSettle();
-    expect(find.text('Give this Bot a name.'), findsOneWidget);
-    controller.dispose();
-    api.close();
-  });
+      // A nameless Bot is refused where the press was, before anything is sent.
+      await tester.ensureVisible(find.text('Create Bot'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create Bot'));
+      await tester.pumpAndSettle();
+      expect(find.text('Give this Bot a name.'), findsOneWidget);
+      controller.dispose();
+      api.close();
+    },
+  );
 
   testWidgets('a Bot’s colour changes, fenced on the revision just read', (
     tester,
@@ -215,26 +221,25 @@ void main() {
           'schemaVersion': 1,
           'botId': 'alpha',
           'revision': 4,
-          'sheep': defaultSheepRecipeV1('electric-blue'),
+          'avatar': defaultAvatarAppearanceV1('pixel'),
         };
       }
       sent.add((body as Map).cast<String, Object?>());
       return receipt(body['commandId']);
     });
-    String? chosen;
+    AvatarSelection? chosen;
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),
         home: Scaffold(
           body: Builder(
             builder: (context) => TextButton(
-              onPressed: () async =>
-                  chosen = await SheepColourSheet.show(
-                    context,
-                    api: api,
-                    botId: 'alpha',
-                    botName: 'Alpha',
-                  ),
+              onPressed: () async => chosen = await AvatarPickerSheet.show(
+                context,
+                api: api,
+                botId: 'alpha',
+                botName: 'Alpha',
+              ),
               child: const Text('open'),
             ),
           ),
@@ -243,20 +248,17 @@ void main() {
     );
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
-    expect(find.text('Alpha’s colour'), findsOneWidget);
-    // No wardrobe here either: six colours and nothing else.
-    expect(find.byTooltip('Hot pink'), findsOneWidget);
-    await tester.tap(find.byTooltip('Hot pink'));
+    expect(find.text('Alpha’s character'), findsOneWidget);
+    expect(find.byTooltip('Dog'), findsOneWidget);
+    await tester.tap(find.byTooltip('Dog'));
+    await tester.tap(find.text('Save character'));
     await tester.pumpAndSettle();
-    expect(chosen, 'hot-pink');
-    expect(sent.single['type'], 'bot/update-sheep');
+    expect(chosen?.characterId, 'dog');
+    expect(sent.single['type'], 'bot/update-avatar');
     // The fence is the revision the read just reported, not one held since the
     // sheet opened.
     expect(sent.single['expectedRevision'], 4);
-    expect(
-      (sent.single['sheep']! as Map)['background'],
-      'hot-pink',
-    );
+    expect((sent.single['avatar']! as Map)['characterId'], 'dog');
     await tester.pumpWidget(const SizedBox());
     api.close();
   });
@@ -452,7 +454,9 @@ void main() {
       await tester.tap(find.text('Archive Bot'));
       await tester.pumpAndSettle();
       expect(
-        find.textContaining('unavailable to every Bot until this Bot is restored'),
+        find.textContaining(
+          'unavailable to every Bot until this Bot is restored',
+        ),
         findsOneWidget,
       );
       expect(find.textContaining('• Weekly Todos'), findsOneWidget);
@@ -538,7 +542,9 @@ void main() {
       expect(reads, 2);
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(
-        find.textContaining('This Bot’s Applets changed. Review them and try again.'),
+        find.textContaining(
+          'This Bot’s Applets changed. Review them and try again.',
+        ),
         findsWidgets,
       );
       expect(
@@ -560,32 +566,39 @@ void main() {
       api.close();
     });
 
-    test('a retry re-sends the fingerprint the command was issued with', () async {
-      final store = MemoryStore();
-      final sent = <Map<String, Object?>>[];
-      var lost = true;
-      final api = SettingsApi(store, (path, body) async {
-        final command = (body! as Map).cast<String, Object?>();
-        sent.add(command);
-        if (lost) {
-          lost = false;
-          throw const RequestFailure('lost');
-        }
-        return lifecycleReceipt(command['commandId'], 'deleted');
-      });
-      final first = BotLifecycleCommands(api, store, 'tim');
-      expect(
-        await first.change('alpha', 'bot/delete', appletImpact: '0123456789abcdef'),
-        isFalse,
-      );
-      first.dispose();
-      final next = BotLifecycleCommands(api, store, 'tim');
-      await next.restore();
-      expect(await next.retry(), isTrue);
-      expect(sent[1], sent[0]);
-      expect(sent[1]['appletImpact'], '0123456789abcdef');
-      next.dispose();
-      api.close();
-    });
+    test(
+      'a retry re-sends the fingerprint the command was issued with',
+      () async {
+        final store = MemoryStore();
+        final sent = <Map<String, Object?>>[];
+        var lost = true;
+        final api = SettingsApi(store, (path, body) async {
+          final command = (body! as Map).cast<String, Object?>();
+          sent.add(command);
+          if (lost) {
+            lost = false;
+            throw const RequestFailure('lost');
+          }
+          return lifecycleReceipt(command['commandId'], 'deleted');
+        });
+        final first = BotLifecycleCommands(api, store, 'tim');
+        expect(
+          await first.change(
+            'alpha',
+            'bot/delete',
+            appletImpact: '0123456789abcdef',
+          ),
+          isFalse,
+        );
+        first.dispose();
+        final next = BotLifecycleCommands(api, store, 'tim');
+        await next.restore();
+        expect(await next.retry(), isTrue);
+        expect(sent[1], sent[0]);
+        expect(sent[1]['appletImpact'], '0123456789abcdef');
+        next.dispose();
+        api.close();
+      },
+    );
   });
 }

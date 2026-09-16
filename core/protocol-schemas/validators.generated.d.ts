@@ -30,7 +30,9 @@ declare const validators: {
   isSessionRevokeCommand(
     value: unknown,
   ): value is ProtocolTypes["SessionRevokeCommand"];
-  isSheepRecipe(value: unknown): value is ProtocolTypes["SheepRecipe"];
+  isAvatarAppearance(
+    value: unknown,
+  ): value is ProtocolTypes["AvatarAppearance"];
   isBotRegistration(value: unknown): value is ProtocolTypes["BotRegistration"];
   isBotDirectory(value: unknown): value is ProtocolTypes["BotDirectory"];
   isBotLifecycle(value: unknown): value is ProtocolTypes["BotLifecycle"];
@@ -47,8 +49,10 @@ declare const validators: {
   isBotLifecycleReceipt(
     value: unknown,
   ): value is ProtocolTypes["BotLifecycleReceipt"];
-  isSheepIdentity(value: unknown): value is ProtocolTypes["SheepIdentity"];
-  isBotSheepCommand(value: unknown): value is ProtocolTypes["BotSheepCommand"];
+  isAvatarIdentity(value: unknown): value is ProtocolTypes["AvatarIdentity"];
+  isBotAvatarCommand(
+    value: unknown,
+  ): value is ProtocolTypes["BotAvatarCommand"];
   isFlockReceipt(value: unknown): value is ProtocolTypes["FlockReceipt"];
   isSkillRef(value: unknown): value is ProtocolTypes["SkillRef"];
   isTurnCommand(value: unknown): value is ProtocolTypes["TurnCommand"];

@@ -787,18 +787,19 @@ void main() {
       return controller;
     }
 
-    testWidgets('a shared Applet is its page alone, with no code to switch to', (
-      tester,
-    ) async {
-      final controller = await openShared(tester, published: true);
-      expect(find.byType(AppletViewerFrame), findsOneWidget);
-      expect(find.byTooltip('Code'), findsNothing);
-      expect(find.byTooltip('App'), findsNothing);
-      // The source is the owner's, so it is never asked for.
-      expect(requested, ['/api/bots/bot-1/applets/open']);
-      controller.dispose();
-      await tester.pumpWidget(const SizedBox());
-    });
+    testWidgets(
+      'a shared Applet is its page alone, with no code to switch to',
+      (tester) async {
+        final controller = await openShared(tester, published: true);
+        expect(find.byType(AppletViewerFrame), findsOneWidget);
+        expect(find.byTooltip('Code'), findsNothing);
+        expect(find.byTooltip('App'), findsNothing);
+        // The source is the owner's, so it is never asked for.
+        expect(requested, ['/api/bots/bot-1/applets/open']);
+        controller.dispose();
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
 
     testWidgets('a shared draft says it is being built and reads no code', (
       tester,

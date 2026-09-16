@@ -1,0 +1,81 @@
+{
+  "name": "guardian",
+  "width": 527,
+  "height": 615,
+  "source": "svg/guardian.svg",
+  "sourceSha256": "e17586f0c8e9011785af86a43d0b43719d0fa4617bebe3a16f274ccef0aff9fc",
+  "parts": [
+    {
+      "id": "foot-left",
+      "label": "Left foot",
+      "pivot": [193, 475],
+      "offset": [-45, 85],
+      "bounds": [144.657, 451.664, 219.746, 596.684],
+      "parent": "character",
+      "hasCompletion": true,
+      "file": "guardian/foot-left.svg"
+    },
+    {
+      "id": "foot-right",
+      "label": "Right foot",
+      "pivot": [343, 475],
+      "offset": [45, 85],
+      "bounds": [319.389, 444.033, 397.18, 596.504],
+      "parent": "character",
+      "hasCompletion": true,
+      "file": "guardian/foot-right.svg"
+    },
+    {
+      "id": "ear-left",
+      "label": "Left ear",
+      "pivot": [148, 197],
+      "offset": [-110, -10],
+      "bounds": [107.999, 160.928, 176.001, 224.643],
+      "parent": "character",
+      "hasCompletion": true,
+      "file": "guardian/ear-left.svg"
+    },
+    {
+      "id": "ear-right",
+      "label": "Right ear",
+      "pivot": [394, 197],
+      "offset": [110, -10],
+      "bounds": [369.999, 160.928, 438.001, 224.643],
+      "parent": "character",
+      "hasCompletion": true,
+      "file": "guardian/ear-right.svg"
+    },
+    {
+      "id": "fur",
+      "label": "Fur / body",
+      "pivot": [263.5, 390],
+      "offset": [0, 20],
+      "bounds": [19.848, 42.232, 523.145, 567.0],
+      "parent": "character",
+      "hasCompletion": true,
+      "file": "guardian/fur.svg"
+    },
+    {
+      "id": "eye-left",
+      "label": "Left eye",
+      "pivot": [240, 319],
+      "offset": [-65, -30],
+      "bounds": [230.0, 287.0, 250.0, 351.0],
+      "parent": "character",
+      "hasCompletion": true,
+      "file": "guardian/eye-left.svg"
+    },
+    {
+      "id": "eye-right",
+      "label": "Right eye",
+      "pivot": [311, 319],
+      "offset": [65, -30],
+      "bounds": [301.0, 287.0, 321.0, 351.0],
+      "parent": "character",
+      "hasCompletion": true,
+      "file": "guardian/eye-right.svg"
+    }
+  ],
+  "convention": "Viewer left/right. Seven controls. Face and horns remain fixed in the fur/body group.",
+  "revision": "clean-roots-long-legs"
+}

@@ -97,7 +97,10 @@ void main() {
     store.values['directory/test-user'] = jsonEncode({
       'schemaVersion': 1,
       'revision': 1,
-      'bots': [registration('bot-1', 'Builder'), registration('bot-2', 'Scout')],
+      'bots': [
+        registration('bot-1', 'Builder'),
+        registration('bot-2', 'Scout'),
+      ],
     });
     final api = AppletListApi(store, onDelete: onDelete);
     final sessions = BotSessions(api: api, store: store);
@@ -184,10 +187,7 @@ void main() {
     await tester.tap(identifiedBy(AppletIds.row('todo.applet')));
     await tester.pumpAndSettle();
     expect(identifiedBy(AppletIds.canvas), findsOneWidget);
-    expect(
-      desk.api.requested,
-      contains('/api/bots/bot-1/applets/focus'),
-    );
+    expect(desk.api.requested, contains('/api/bots/bot-1/applets/focus'));
     await desk.stop();
   });
 
@@ -266,7 +266,9 @@ void main() {
         if (path.endsWith('/applets/open')) {
           return {
             'schemaVersion': 1,
-            'applets': [if (!deleted) summaryJson('todo.applet', 'Weekly Todos')],
+            'applets': [
+              if (!deleted) summaryJson('todo.applet', 'Weekly Todos'),
+            ],
           };
         }
         if (path == '/api/bots/bot-1/applets/todo.applet/delete') {
@@ -305,14 +307,19 @@ void main() {
         if (path.endsWith('/applets/open')) {
           return {
             'schemaVersion': 1,
-            'applets': [if (!deleted) summaryJson('todo.applet', 'Weekly Todos')],
+            'applets': [
+              if (!deleted) summaryJson('todo.applet', 'Weekly Todos'),
+            ],
           };
         }
         if (path.endsWith('/delete')) {
           // Another window already deleted it, so the route answers with the
           // settled truth that there is no such Applet.
           deleted = true;
-          throw const RequestFailure('Applet "todo.applet" is unavailable', 404);
+          throw const RequestFailure(
+            'Applet "todo.applet" is unavailable',
+            404,
+          );
         }
         throw StateError(path);
       });

@@ -113,13 +113,7 @@ Map<String, dynamic> registration(String botId, String name) => {
   'botId': botId,
   'registeredAt': '2026-09-05T00:00:00.000Z',
   'initialName': name,
-  'sheep': {
-    'schemaVersion': 1,
-    'background': 'a',
-    'upper': 'b',
-    'middle': 'c',
-    'lower': 'd',
-  },
+  'avatar': {'schemaVersion': 1, 'characterId': 'pixel', 'primary': '#fc85ae'},
 };
 
 void main() {

@@ -1,0 +1,21 @@
+{
+  "source": "output/flock-svg-style-cards/04-expanded-flock-distinct-silhouettes.png",
+  "sha256": "1a564e235a96d4650643073f80c97a2ec223176478c55142578d863f3316cf39",
+  "crops": {
+    "chill": [25, 56, 361, 456],
+    "nudge": [385, 106, 748, 456],
+    "fox": [783, 66, 1140, 456],
+    "goat": [25, 512, 359, 919],
+    "cow": [390, 550, 764, 919],
+    "cat": [822, 566, 1129, 920],
+    "rabbit": [1200, 510, 1468, 920]
+  },
+  "overrides": {
+    "dog": {
+      "source": "output/flock-svg-style-cards/dog-explorations/02-eyes-only.png",
+      "sha256": "6c2bc60b781326f5654f3f96fb1aa3690ab8224e843c5fa2f83bbaf2b8b8eed8",
+      "crop": [750, 650, 1140, 1178],
+      "choice": "D \u2014 one ear up, eyes-only face"
+    }
+  }
+}
