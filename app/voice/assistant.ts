@@ -355,21 +355,22 @@ export function renderVoiceDelegationLeadInV1(
   result: Pick<VoiceDelegationResultV1, "botName" | "question" | "askedAt">,
   now: Date,
 ): string {
-  return `Earlier, ${describeVoiceAgeV1(result.askedAt, now)}, ${renderVoiceAskedV1(result)} `;
+  return `Earlier, ${describeVoiceAgeV1(result.askedAt, now)}, you ${renderVoiceAskedV1(result)} `;
 }
 
 /**
- * "you asked Bob: can you ask Bob what the weather is?" — the request as the
+ * "asked Bob: can you ask Bob what the weather is?" — the request as the
  * person put it. `question` is what they said, in their words, while the
  * spoken turn is retained, and the assistant's paraphrase to the Bot only when
- * it is not. Their own words end how they ended them.
+ * it is not. Their own words end how they ended them. The clause carries no
+ * pronoun, so each caller opens its own sentence.
  */
 function renderVoiceAskedV1(
   result: Pick<VoiceDelegationResultV1, "botName" | "question">,
 ): string {
   const said = clip(result.question, 120);
   const stop = /[.!?\u2026]$/.test(said) ? "" : ".";
-  return `you asked ${result.botName}: ${said}${stop}`;
+  return `asked ${result.botName}: ${said}${stop}`;
 }
 
 /**
@@ -382,9 +383,7 @@ export function renderVoiceDelegationReadOutV1(
   result: VoiceDelegationResultV1,
   options?: { placed?: boolean },
 ): string {
-  const asked = options?.placed
-    ? ""
-    : `You ${renderVoiceAskedV1(result).slice("you ".length)} `;
+  const asked = options?.placed ? "" : `You ${renderVoiceAskedV1(result)} `;
   if (result.answer) {
     return `${asked}${result.botName} answered: ${clip(result.answer, 600)}`;
   }
