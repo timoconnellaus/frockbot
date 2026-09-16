@@ -1663,8 +1663,11 @@ describe("the voice session object", () => {
     await next.waitFor(
       (f) =>
         f.type === "transcript_end" &&
-        String(f.text).startsWith(
-          "Earlier, 5 minutes ago, you asked Workerd Bot about is the launch ready. ",
+        // The exact minute count is whatever the clock says by the time this
+        // is spoken; what is asserted is that the request and its age are
+        // spoken in front of the cached sentence.
+        /^Earlier, \d+ minutes ago, you asked Workerd Bot about is the launch ready\. /.test(
+          String(f.text),
         ),
       "the cached answer placed under its request",
     );

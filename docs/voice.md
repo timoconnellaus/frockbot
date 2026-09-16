@@ -502,7 +502,9 @@ intent, consumes the daily model-turn allowance once, and caches its result
 for playback retries. An admitted composition whose result was lost is
 abandoned rather than paid for again; a composition that has not answered
 within eight seconds is dropped and a correlated plain read-out supplies the
-fallback. The answer remains `settled` until the correct client playback
+fallback. Only a composed sentence is cached: a read-out is written for the
+moment it is spoken, so a dropped composition stores nothing and the next
+read-out is written again against the age it has then. The answer remains `settled` until the correct client playback
 acknowledgment changes it to `spoken`. A sentence is composed once but may be
 spoken much later — composing and speaking are separate moments and either can
 be retried — so the composer is told never to say when the request was made.

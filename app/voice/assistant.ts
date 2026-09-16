@@ -325,6 +325,15 @@ function voiceAgeMinutesV1(askedAt: Date, now: Date): number {
   return Math.round(Math.max(0, now.getTime() - askedAt.getTime()) / 60_000);
 }
 
+/**
+ * Whether an answer needs placing when it is spoken: the person no longer has
+ * the request in mind, so the read-out has to say which one it answers. The
+ * predicate, not the wording, is what a read-out branches on.
+ */
+export function voiceAgePlacedV1(askedAt: Date, now: Date): boolean {
+  return voiceAgeMinutesV1(askedAt, now) >= VOICE_AGE_RECENT_MINUTES_V1;
+}
+
 export function describeVoiceAgeV1(askedAt: Date, now: Date): string {
   const minutes = voiceAgeMinutesV1(askedAt, now);
   if (minutes < VOICE_AGE_RECENT_MINUTES_V1) return "a moment ago";
@@ -401,16 +410,18 @@ export function renderVoiceDelegationPromptV1(
 }
 
 /**
- * The sentence to speak, composed by the model when it can be, and the plain
- * read-out when it cannot. Either way the person hears the Bot's own answer;
- * the model call only changes how naturally it lands.
+ * The composed sentence, or nothing when the model could not produce one.
+ *
+ * Nothing is returned rather than a plain read-out because only a composed
+ * sentence is worth keeping: a read-out is written for the moment it is
+ * spoken, so the caller renders it then, against the age it has then, and
+ * does not store it in place of a composition it never got.
  */
 export async function composeVoiceDelegationSpeechV1(
   host: Pick<VoiceAssistantHostV1, "chat">,
   result: VoiceDelegationResultV1,
   signal: AbortSignal,
-): Promise<string> {
-  const fallback = renderVoiceDelegationReadOutV1(result);
+): Promise<string | undefined> {
   try {
     const prompt = renderVoiceDelegationPromptV1(result);
     const stream = await host.chat(
@@ -431,9 +442,9 @@ export async function composeVoiceDelegationSpeechV1(
       if (event.type === "text") spoken += event.text;
       if (spoken.length > VOICE_ANSWER_MAX_CHARS_V1) break;
     }
-    return spoken.trim() || fallback;
+    return spoken.trim() || undefined;
   } catch {
-    return fallback;
+    return undefined;
   }
 }
 

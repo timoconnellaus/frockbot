@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  composeVoiceDelegationSpeechV1,
   describeVoiceAgeV1,
   parseChatCompletionStreamV1,
   renderVoiceDelegationLeadInV1,
@@ -792,6 +793,43 @@ describe("the system prompt", () => {
         { placed: true },
       ),
     ).toBe("Bob could not finish: it stopped.");
+  });
+
+  test("a composition the model does not produce is nothing, not a read-out", async () => {
+    const result = {
+      botName: "Bob",
+      question: "the weather today",
+      askedAt: new Date("2026-09-16T12:18:00.000Z"),
+      answer: "Sunny.",
+    };
+    const signal = new AbortController().signal;
+    const composed = await composeVoiceDelegationSpeechV1(
+      host([() => [text("Bob says it is sunny.")]]),
+      result,
+      signal,
+    );
+    expect(composed).toBe("Bob says it is sunny.");
+    // Nothing composed means nothing to keep: the caller speaks a read-out
+    // written for the moment it speaks, so a stored sentence can never carry
+    // a restatement of the question behind a lead-in that already said it.
+    expect(
+      await composeVoiceDelegationSpeechV1(
+        host([], {
+          chat: async () => {
+            throw new Error("gateway down");
+          },
+        }),
+        result,
+        signal,
+      ),
+    ).toBeUndefined();
+    expect(
+      await composeVoiceDelegationSpeechV1(
+        host([() => [text("   ")]]),
+        result,
+        signal,
+      ),
+    ).toBeUndefined();
   });
 
   test("says when memory could not be read rather than pretending it is empty", () => {

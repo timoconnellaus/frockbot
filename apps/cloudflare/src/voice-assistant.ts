@@ -29,13 +29,13 @@ import {
 import { ElevenLabsSTT, ElevenLabsTTS } from "@cloudflare/voice-elevenlabs";
 import {
   composeVoiceDelegationSpeechV1,
-  describeVoiceAgeV1,
   parseChatCompletionStreamV1,
   renderVoiceDelegationLeadInV1,
   renderVoiceDelegationReadOutV1,
   renderVoiceSystemPromptV1,
   pickVoiceBridgeV1,
   runVoiceTurnV1,
+  voiceAgePlacedV1,
   VOICE_PROMPT_HISTORY_MESSAGES_V1,
   type VoiceAssistantHostV1,
   type VoiceAssistantPromptInputV1,
@@ -2409,7 +2409,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     // and never by the composer. The lead-in is not recorded with the
     // sentence: a replay later still says the age it has then.
     const now = this.now();
-    const placed = describeVoiceAgeV1(result.askedAt, now) !== "a moment ago";
+    const placed = voiceAgePlacedV1(result.askedAt, now);
     const leadIn = placed ? renderVoiceDelegationLeadInV1(result, now) : "";
     const admission = await ledger.admitDelegationSpeech(delegation.runId, now);
     if (admission.status === "cached") {
@@ -2418,15 +2418,18 @@ export class VoiceAssistant extends VoiceAgentBase<
     if (admission.status === "refused") {
       return leadIn + renderVoiceDelegationReadOutV1(result, { placed });
     }
-    const spoken = await composeVoiceDelegationSpeechV1(
+    const composed = await composeVoiceDelegationSpeechV1(
       { chat: (body, signal) => this.chatCompletion(body, signal) },
       result,
       AbortSignal.timeout(VOICE_RESULT_COMPOSE_TIMEOUT_MS),
     );
+    if (!composed) {
+      return leadIn + renderVoiceDelegationReadOutV1(result, { placed });
+    }
     // Durable before the audio: an eviction between here and the speaker
     // loses the read-out, never the sentence it was going to say.
-    await ledger.recordDelegationSpeech(delegation.runId, spoken);
-    return leadIn + spoken;
+    await ledger.recordDelegationSpeech(delegation.runId, composed);
+    return leadIn + composed;
   }
 
   /**
