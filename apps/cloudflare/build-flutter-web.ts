@@ -114,14 +114,13 @@ async function riveWasmVersion(): Promise<string> {
   const entry = packageConfig.packages?.find(
     (candidate) => candidate.name === "rive_native",
   );
-  if (!entry?.rootUri) {
+  if (!entry?.rootUri?.startsWith("file:")) {
     throw new Error(
-      "apps/native/.dart_tool/package_config.json does not resolve rive_native.",
+      "apps/native/.dart_tool/package_config.json does not resolve rive_native " +
+        "to a file: root.",
     );
   }
-  const packageRoot = entry.rootUri.startsWith("file:")
-    ? fileURLToPath(entry.rootUri)
-    : resolve(nativeRoot, ".dart_tool", entry.rootUri);
+  const packageRoot = fileURLToPath(entry.rootUri);
   const source = await readFile(
     resolve(packageRoot, "lib/src/wasm_version.dart"),
     "utf8",
@@ -265,15 +264,29 @@ async function stagedIsCurrent(fingerprint: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Run a `flutter` subcommand, and fail the build if it did.
+ *
+ * A failed command leaves whatever the last successful one wrote in place —
+ * a stale `package_config.json`, a stale `build/web` — so an unread exit code
+ * is how a build that never happened gets staged and announced as one.
+ */
+function flutter(...args: string[]): void {
+  const run = Bun.spawnSync({
+    cmd: ["flutter", ...args],
+    cwd: nativeRoot,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  if (run.exitCode !== 0) {
+    throw new Error(`\`flutter ${args.join(" ")}\` exited ${run.exitCode}.`);
+  }
+}
+
 // `flutter build` resolves the pub dependencies itself, but the wasm version
 // has to be read out of the resolved `rive_native` before the build, because
 // the build is what carries the URL it produces.
-Bun.spawnSync({
-  cmd: ["flutter", "pub", "get"],
-  cwd: nativeRoot,
-  stdout: "inherit",
-  stderr: "inherit",
-});
+flutter("pub", "get");
 const riveVersion = await riveWasmVersion();
 const riveHostDefine = `--dart-define=RIVE_NATIVE_WASM_HOST=/rive/${riveVersion}/`;
 
@@ -288,19 +301,13 @@ if (await stagedIsCurrent(fingerprint)) {
   process.exit(0);
 }
 
-Bun.spawnSync({
-  cmd: [
-    "flutter",
-    "build",
-    "web",
-    ...BUILD_FLAGS,
-    await appVersionDefine(),
-    riveHostDefine,
-  ],
-  cwd: nativeRoot,
-  stdout: "inherit",
-  stderr: "inherit",
-});
+flutter(
+  "build",
+  "web",
+  ...BUILD_FLAGS,
+  await appVersionDefine(),
+  riveHostDefine,
+);
 
 const files = await emittedFiles(flutterOut);
 if (
