@@ -66,6 +66,7 @@
     "./flock/definition": "./flock/definition.ts",
     "./flock/quota": "./flock/quota.ts",
     "./flock/shared": "./flock/shared.ts",
+    "./flock/subagent": "./flock/subagent.ts",
     "./flock/user": "./flock/user.ts",
     "./identity": "./identity/index.ts",
     "./identity/agent": "./identity/agent.ts",

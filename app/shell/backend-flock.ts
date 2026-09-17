@@ -48,6 +48,12 @@ export interface BotSelfManagementTurn {
   /** This Turn's pinned profile name, stable across effect recovery. */
   fromBotName: string;
   inboundAgent?: FlockSelfRuntimeHostV1["inboundAgent"];
+  /**
+   * How many `subagent` hand-offs deep this Turn is, off its own admission
+   * record. Absent means none, which is every Turn a person or a Routine
+   * started.
+   */
+  handoffDepth?: number;
 }
 
 /**
@@ -102,6 +108,49 @@ export interface BotSelfManagementAuthorities {
       };
     };
   }): Promise<{ text: string }>;
+  /**
+   * Admits one Turn on *this* Bot's own agent lane and returns as soon as it
+   * has been asked for, never when it finishes: the Turn that called
+   * `subagent` is the Turn the hand-off queues behind, so waiting here would
+   * wait on itself. Optional — a host with no way to admit its own Turn
+   * offers no hand-off tool.
+   */
+  spawnSubagent?(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: {
+      runId: string;
+      sessionId: string;
+      acceptedAt: string;
+      text: string;
+      /** An ordinary Turn, on the lane a Bot's delegated work queues on. */
+      turnType: "agent";
+      lane: "agent";
+      origin: { kind: "handoff"; parentRunId: string; depth: number };
+    };
+  }): Promise<{ status: "started" | "already-started" }>;
+}
+
+/**
+ * The run id one `subagent` occurrence asks for.
+ *
+ * Derived from the Bot and the durable tool-call occurrence, exactly as
+ * `bot_message`'s is, so a replay after eviction asks for the Turn it already
+ * admitted instead of handing the same work off twice.
+ */
+export async function handoffRunIdV1(
+  identity: BotSelfManagementIdentity,
+  effectId: string,
+): Promise<string> {
+  const bytes = new TextEncoder().encode(
+    `${identity.userId}\u0000${identity.botId}\u0000handoff\u0000${effectId}`,
+  );
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hex = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `handoff-${hex.slice(0, 32)}`;
 }
 
 async function agentRunIdV1(
@@ -180,6 +229,43 @@ export function createBotSelfManagementHost(
       );
     },
     ...(turn.inboundAgent ? { inboundAgent: turn.inboundAgent } : {}),
+    ...(authorities.spawnSubagent
+      ? {
+          subagent: {
+            handoffDepth: turn.handoffDepth ?? 0,
+            spawn: async (request) => {
+              const runId = await handoffRunIdV1(identity, request.effectId);
+              // The depth the hand-off records is this Turn's plus one. The
+              // tool refuses above zero, so the only value ever written is 1 —
+              // but the arithmetic, not the constant, is what says why.
+              const outcome = await authorities.spawnSubagent!({
+                schemaVersion: 1,
+                userId: identity.userId,
+                botId: identity.botId,
+                command: {
+                  runId,
+                  // The Bot's own conversation, so what the hand-off says lands
+                  // in the thread the person is already reading.
+                  sessionId: turn.sessionId,
+                  acceptedAt: new Date().toISOString(),
+                  text: request.task,
+                  // The lane is the whole reason this is safe to start from
+                  // inside a running Turn: it queues behind the conversation
+                  // instead of superseding it.
+                  turnType: "agent",
+                  lane: "agent",
+                  origin: {
+                    kind: "handoff",
+                    parentRunId: turn.runId,
+                    depth: (turn.handoffDepth ?? 0) + 1,
+                  },
+                },
+              });
+              return { runId, status: outcome.status };
+            },
+          },
+        }
+      : {}),
     messageBot: async (request): Promise<BotMessageOutcomeV1> => {
       if (request.targetBotId === identity.botId) {
         throw new Error("a Bot cannot message itself");

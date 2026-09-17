@@ -9,6 +9,14 @@ Built-in Package for durable Bot registration and character identity.
 
 The native client bundles eleven approved Rive characters with neutral PNG fallbacks. Appearance is a character id plus a validated primary colour.
 
+## The `subagent` hand-off
+
+`subagent` ([ADR 0031](../../docs/adr/0031-voice-gemini-live.md)) lets a Bot hand work to itself and answer now. It admits one Turn on _this_ Bot's `agent` lane — the same admission `bot_message` makes, pointed at the Bot that called it — and returns `{runId, status: "started"}` without waiting: the hand-off queues behind the Turn that asked for it and starts once that Turn settles. There is no result channel. The hand-off is an ordinary Turn with this Bot's tools and Session, so what it has to say it says with `send_to_user`, in the thread, in the Bot's own words.
+
+Nothing here classifies what is long; the model does. Two fences keep it from opening a tree: the manifest offers the Capability on `chat` alone, so the `agent` Turn a hand-off runs as is never handed the tool, and the `handoff` origin on the admitted Turn carries the depth, which the tool refuses above zero. A Turn may hand off four times.
+
+The Bot Durable Object's half — the occurrence-derived run id, the origin, the admission that is never awaited — is in [`app/shell/backend-flock.ts`](../shell/backend-flock.ts) and [`app/shell/runtime-mount.ts`](../shell/runtime-mount.ts). Like a Routine firing, a hand-off is admitted inside the object rather than through the Bot's RPC door, so it is not projected into the User's search index or the audit sink; both are derived and rebuildable from the run records this object owns.
+
 ## The avatar mirror
 
 The Bot Durable Object is the authority on a Bot's avatar: it holds the identity, and an update command is fenced on that identity's revision. But every list of Bots draws its appearance from the User's directory registration, so a change that lived in the Bot alone came back undone on the next directory read. A change therefore goes through the User's `updateBotAvatar`, which calls the Bot's `updateAvatar` and, once the Bot reports the command applied, mirrors the appearance into the registration with `mirrorAvatar` — one directory revision, a no-op when the appearance is unchanged or the Bot is no longer listed. A registration's `avatar` is therefore the Bot's current appearance, not a creation-time seed like `initialName` and `initialDescription`.

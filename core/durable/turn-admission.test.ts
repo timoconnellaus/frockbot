@@ -37,6 +37,16 @@ const SUBAGENT_ORIGIN: StoredRunOriginV1 = {
   parentRunId: "run-parent",
 };
 
+/**
+ * A hand-off's origin: the Turn a `subagent` call admitted on this same Bot's
+ * agent lane, naming the run that asked and how deep the chain is.
+ */
+const HANDOFF_ORIGIN: StoredRunOriginV1 = {
+  kind: "handoff",
+  parentRunId: "run-parent",
+  depth: 1,
+};
+
 const BOT_ORIGIN: StoredRunOriginV1 = {
   kind: "bot",
   fromBotId: "researcher",
@@ -207,6 +217,35 @@ describe("the admission record names what produced the Turn", () => {
     expect(decoded.admission?.origin).toEqual(VOICE_ORIGIN);
     expect(storedRunTurnTypeV1(decoded)).toBe("agent");
     expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+  });
+
+  test("round-trips a hand-off and refuses a depth it never wrote", () => {
+    const withOrigin = (origin: unknown) =>
+      legacyRun({
+        admission: {
+          schemaVersion: 1,
+          turnType: "agent",
+          lane: "agent",
+          origin,
+        },
+      } as never);
+    const decoded = codec.require(withOrigin(HANDOFF_ORIGIN));
+
+    expect(decoded.admission?.origin).toEqual(HANDOFF_ORIGIN);
+    expect(storedRunTurnTypeV1(decoded)).toBe("agent");
+    expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+
+    // Depth is the recursion bound, so a record claiming a level the tool
+    // cannot produce is not a record this codec wrote.
+    expect(() =>
+      codec.require(withOrigin({ ...HANDOFF_ORIGIN, depth: 2 })),
+    ).toThrow(/invalid admission origin depth/);
+    expect(() =>
+      codec.require(withOrigin({ ...HANDOFF_ORIGIN, depth: 0 })),
+    ).toThrow(/invalid admission origin depth/);
+    expect(() =>
+      codec.require(withOrigin({ kind: "handoff", parentRunId: "run-parent" })),
+    ).toThrow(/invalid admission origin fields/);
   });
 
   test("a voice origin cannot borrow another origin's fields", () => {

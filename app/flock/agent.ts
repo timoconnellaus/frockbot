@@ -83,7 +83,13 @@ import {
   type VoiceDeliveryV1,
 } from "@frockbot/app/voice/appearance";
 import { flockDefinitionV1 } from "./definition.js";
+import {
+  createSubagentTool,
+  subagentHandoffAdmissionCeilingV1,
+  type SubagentHandoffHostV1,
+} from "./subagent.js";
 export { BOT_MESSAGE_TOOL_V1 } from "./shared.js";
+export type { SubagentHandoffHostV1 } from "./subagent.js";
 export type {
   BotDirectoryViewV1,
   CreateBotCommandV1,
@@ -142,6 +148,12 @@ export interface FlockSelfRuntimeHostV1 {
    */
   inboundAgent?:
     { kind: "bot"; fromBotId: string; fromBotName: string } | { kind: "voice" };
+  /**
+   * Handing work off to this same Bot. Optional because it is a seam a host
+   * may not have bound — a host with no way to admit a Turn on its own agent
+   * lane simply does not offer the tool.
+   */
+  subagent?: SubagentHandoffHostV1;
 }
 
 export interface BotMessageRequestV1 {
@@ -985,6 +997,7 @@ export function createFlockRuntimeFeature(
     const messagingCeiling = flockAdmissionCeilingV1(
       BOT_MESSAGING_CAPABILITY_V1,
     );
+    const handoffCeiling = subagentHandoffAdmissionCeilingV1();
     const turnDirectory = createTurnBotDirectoryV1(host);
     const disposers = [
       runtime.systemPrompt.register(
@@ -1010,6 +1023,17 @@ export function createFlockRuntimeFeature(
         createBotMessageTool(host),
         messagingCeiling ? { admissionCeiling: messagingCeiling } : undefined,
       ),
+      // Offered wherever the host bound the seam, and bounded by the manifest
+      // to the conversation: a hand-off runs on the agent lane and must not be
+      // handed the tool that put it there.
+      ...(host.subagent
+        ? [
+            runtime.tools.register(
+              createSubagentTool(host.subagent),
+              handoffCeiling ? { admissionCeiling: handoffCeiling } : undefined,
+            ),
+          ]
+        : []),
     ];
     return () => {
       for (const dispose of disposers.toReversed()) dispose();

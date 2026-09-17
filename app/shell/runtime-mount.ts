@@ -33,6 +33,7 @@ import type {
   RuntimeModelSelection,
 } from "@frockbot/app/agent-runtime";
 import { appletsRuntimeHost } from "@frockbot/app/applets-host/bot";
+import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { pluginAuthoringRuntimeHost } from "@frockbot/app/plugins/authoring-bot";
 import { decodeAgentTurnSlotReceiptV1 } from "@frockbot/app/flock/quota";
 import {
@@ -113,6 +114,8 @@ export async function agentRuntime(
     subagentRole?: string;
     /** The task a child Turn is running, in a Subagent Durable Object. */
     subagentTaskId?: string;
+    /** How many `subagent` hand-offs deep this Turn is; absent means none. */
+    handoffDepth?: number;
   },
 ): Promise<{
   agentPackages: FoundationAgentPackage[];
@@ -332,6 +335,36 @@ export async function agentRuntime(
                 return {
                   text: sentText ?? completed.text,
                 };
+              },
+              // The same admission `runAgent` makes, without the hop: the
+              // target is the object this Turn is already running in, so a
+              // Durable Object stub aimed at ourselves would be a loopback
+              // with nothing to gain and a deadlock to lose.
+              //
+              // Nothing awaits the Turn. It is admitted on the agent lane,
+              // queues behind the Turn that asked for it, and starts when that
+              // one settles; `waitUntil` is what keeps the object alive long
+              // enough to promote it, and the recovery alarm is what promotes
+              // it if this isolate goes away first.
+              spawnSubagent: async (request) => {
+                const command = {
+                  userId: request.userId,
+                  botId: request.botId,
+                  ...request.command,
+                };
+                // A replay of the same tool call asks for the same run id, and
+                // finding it already admitted is the whole of the fence.
+                const existing = await state.authority
+                  .readStoredRun(command.runId)
+                  .catch(() => undefined);
+                if (existing) return { status: "already-started" as const };
+                state.ctx.waitUntil(
+                  admitTurnV1(state, command).then(
+                    () => undefined,
+                    () => undefined,
+                  ),
+                );
+                return { status: "started" as const };
               },
             }),
           }
