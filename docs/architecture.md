@@ -1128,10 +1128,25 @@ Five workflows live in `.github/workflows/`:
   suites) beside Dart analysis, the Flutter tests and the Android badge unit
   test. It needs no secret, so a fork's pull request runs it.
 - `main.yml` — everything a landed change owes, on the merge commit: the fast
-  tier again, then the Cloudflare workerd and integration suites, the real
-  build, and the browser suite across four runners. Green deploys staging when
+  tier again, plus the marketing and admin-portal bundles, then — when the
+  `Scope` job says the change could have affected them — the Flutter suite, the
+  Cloudflare workerd and integration suites, the application build, and the
+  browser suite across four runners. Green deploys staging when
   `DEPLOY_STAGING` is `true`, cuts the next patch tag and starts `release.yml`
   for it. A push touching only `docs/**` and root Markdown starts no run.
+  `Scope` (`scripts/ci-change-scope.ts`) measures from the newest release tag
+  rather than from the previous push, because a tag is only cut after a run
+  concluded, so everything since one is exactly what no run has yet accepted —
+  a burst of merges that the concurrency group cancels cannot slip through. It
+  excuses the slow tier only when every path in that range is under
+  `apps/marketing/`, `apps/admin-portal/` or `docs/`, or is root Markdown;
+  anything else, an empty range and an unreadable one all oblige the full
+  tier. The two site bundles live in the unskippable job for that reason: they
+  are the only build of those Workers, and the pushes that touch only them are
+  exactly the ones that skip everything else. `deploy-staging` and `release`
+  require `Scope` itself to have succeeded and each slow job to have succeeded
+  or been skipped, so a failed `Scope` — whose dependents all skip — cannot
+  read as permission to ship.
 - `release.yml` — the production pipeline for a `v*.*.*` tag, below.
 - `native.yml` — manual-only native qualification.
 - `mac-release.yml` — the Mac desktop app's own qualification and tag.

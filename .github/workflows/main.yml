@@ -51,6 +51,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  scope:
+    name: Scope
+    # What this push obliges the rest of the run to do. Seconds, and every
+    # slow job waits on it, which is the trade: one checkout against eleven
+    # minutes of suites for a push that cannot have affected them.
+    #
+    # The decision itself is `scripts/ci-change-scope.ts`, not a condition
+    # written here, because it is a rule worth testing and a workflow
+    # expression cannot be. It defaults to obliging everything, so a path
+    # nobody has classified — and a change set that could not be read at all —
+    # runs the full tier.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      slow-tier: ${{ steps.decide.outputs.slow-tier }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The range back to the last released commit has to be readable, and
+          # that means the tags as well as the history they point into.
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      # Resolving the base, reading the range and classifying it all live in
+      # the script, so a test can drive the whole decision against a real
+      # repository. This step carries no logic of its own; the script writes
+      # `slow-tier` to `GITHUB_OUTPUT` itself.
+      - name: Decide what this push obliges
+        id: decide
+        run: bun scripts/ci-change-scope.ts
+
   validate:
     name: Validate
     runs-on: ubuntu-latest
@@ -79,6 +118,16 @@ jobs:
       - name: Test
         run: bun test
 
+      # `wrangler deploy --dry-run` for each: a real bundle plus the Worker
+      # configuration it would deploy with. Both are quick, and both belong to
+      # a job nothing can skip, so a push that touches only one of these two
+      # sites is still bundled before anything tags it.
+      - name: Build the marketing site
+        run: bun run build:marketing
+
+      - name: Build the admin portal
+        run: bun run build:admin-portal
+
   # The Flutter client's own analysis and tests. `apps/native` is the phone
   # app, the macOS app and the web client at once, and neither `bun test` nor
   # `flutter build web` reads its `test/` directory, so without this a change
@@ -89,6 +138,8 @@ jobs:
   # than after it.
   flutter:
     name: Flutter
+    needs: scope
+    if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -169,6 +220,8 @@ jobs:
 
   runtime:
     name: Cloudflare runtime
+    needs: scope
+    if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -193,6 +246,8 @@ jobs:
 
   integration:
     name: Cloudflare integration
+    needs: scope
+    if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -243,18 +298,25 @@ jobs:
         # authentication uses the development identity, so this needs no secret.
         run: bun run --filter @frockbot/cloudflare test:integration
 
-      - name: Build
+      - name: Build the Worker
         # Here rather than in `Validate` because it shares the Flutter client
-        # the integration suite just built.
-        run: bun run build
+        # the integration suite just built. The marketing site and the admin
+        # portal are bundled by `Validate`, which owes every push: they are
+        # separate Workers that share nothing with this one, and a build of
+        # theirs that only ran when the slow tier did would be missing for
+        # exactly the pushes that only touch them.
+        run: bun run build:cloudflare
 
   e2e:
     name: Browser end-to-end (${{ matrix.shard }}/${{ strategy.job-total }})
-    # Deliberately no `needs`. This job shares nothing with the others — it
-    # installs its own dependencies and the harness builds the artifact itself
-    # — so gating it behind them only made a two-minute job wait minutes for
-    # an answer it never reads. `deploy-staging` below is where they are all
-    # required to agree.
+    # `scope` and nothing else. This job shares nothing with the rest of the
+    # tier — it installs its own dependencies and the harness builds the
+    # artifact itself — so gating it behind them only made a long job wait
+    # minutes for an answer it never reads. It waits on `scope` because that
+    # job decides whether it should run at all, and that answer takes seconds.
+    # `deploy-staging` below is where the tier is required to agree.
+    needs: scope
+    if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     # Twenty was one crash short: a shard that lost `wrangler dev` twice and
     # then spent two four-minute test timeouts was cancelled at the limit,
@@ -461,8 +523,20 @@ jobs:
     # Opt-in through the repository variable `DEPLOY_STAGING`: the job is
     # skipped, not failed, while the environment is unconfigured, so
     # `release` below still cuts the tag.
-    needs: [validate, flutter, runtime, integration, e2e]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_STAGING == 'true'
+    # Same skip tolerance, and the same reason for requiring `scope` itself:
+    # a slow-tier job may be absent because `scope` said so, never because
+    # `scope` failed.
+    needs: [scope, validate, flutter, runtime, integration, e2e]
+    if: >-
+      !cancelled()
+      && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && vars.DEPLOY_STAGING == 'true'
+      && needs.scope.result == 'success'
+      && needs.validate.result == 'success'
+      && (needs.flutter.result == 'success' || needs.flutter.result == 'skipped')
+      && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped')
+      && (needs.integration.result == 'success' || needs.integration.result == 'skipped')
+      && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -751,15 +825,22 @@ jobs:
     # Runs after a skipped staging deploy as well as a successful one, never
     # after a failed one: `!cancelled()` keeps the job eligible when
     # `deploy-staging` was skipped, and the result checks do the gating.
-    needs: [validate, flutter, runtime, integration, e2e, deploy-staging]
+    #
+    # A skipped slow-tier job is acceptable here only because `scope` decided
+    # it, so `scope` itself is required to have succeeded. Without that, a
+    # `scope` that failed would skip the whole tier — a failed job's dependents
+    # do not run — and this condition would read four skips as permission to
+    # ship on the fast tier alone.
+    needs: [scope, validate, flutter, runtime, integration, e2e, deploy-staging]
     if: >-
       !cancelled()
       && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.scope.result == 'success'
       && needs.validate.result == 'success'
-      && needs.flutter.result == 'success'
-      && needs.runtime.result == 'success'
-      && needs.integration.result == 'success'
-      && needs.e2e.result == 'success'
+      && (needs.flutter.result == 'success' || needs.flutter.result == 'skipped')
+      && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped')
+      && (needs.integration.result == 'success' || needs.integration.result == 'skipped')
+      && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
       && (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
