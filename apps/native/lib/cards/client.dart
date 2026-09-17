@@ -13,6 +13,7 @@
 library;
 
 import '../client/transport.dart';
+import 'json.dart';
 
 String _bot(String botId) => Uri.encodeComponent(botId);
 String _surface(String surfaceId) => Uri.encodeComponent(surfaceId);
@@ -45,6 +46,12 @@ class CardView {
   /// Why the last fold changed nothing — a budget, or a Session with no slot
   /// left. A card carrying one is never drawn: the host says so instead.
   final String? refusal;
+
+  /// The record exactly as it arrived. Kept so that two records can be asked
+  /// whether they are the same record without that question having to be
+  /// re-answered every time the shell grows a field — a field this decoder has
+  /// no use for can still be the reason a card must be redrawn.
+  final Map<String, Object?> source;
   const CardView({
     required this.surfaceId,
     required this.revision,
@@ -57,7 +64,18 @@ class CardView {
     this.surfaceProperties,
     this.deleted = false,
     this.refusal,
+    this.source = const {},
   });
+
+  /// Whether this is the same record. Not the same revision: the shell writes
+  /// a refusal onto a record without folding it, so a card that has stopped
+  /// updating comes back at the revision already drawn.
+  @override
+  bool operator ==(Object other) =>
+      other is CardView && sameJsonV1(other.source, source);
+
+  @override
+  int get hashCode => Object.hash(surfaceId, revision);
 
   factory CardView.fromJson(Object? value) {
     if (value is! Map) throw const FormatException('Invalid card');
@@ -88,6 +106,7 @@ class CardView {
           ?.cast<String, Object?>(),
       deleted: json['deleted'] == true,
       refusal: json['refusal'] as String?,
+      source: json,
     );
   }
 }

@@ -31,6 +31,7 @@ import 'dart:convert';
 
 import 'catalog.dart';
 import 'client.dart';
+import 'json.dart';
 import 'frock_catalog/schemas.dart';
 
 /// The bounds, from `A2UI_LIMITS_V1`. The module comment says why they are
@@ -159,7 +160,13 @@ List<Map<String, Object?>> cardMessagesV1(CardView card) {
     },
     {
       'version': a2uiRendererVersionV09,
-      'updateDataModel': {'surfaceId': card.surfaceId, 'value': card.dataModel},
+      // The renderer writes what a person types straight into the data model
+      // it was handed, so it is handed a copy: the record is what was read and
+      // has to keep saying so.
+      'updateDataModel': {
+        'surfaceId': card.surfaceId,
+        'value': copyJsonV1(card.dataModel),
+      },
     },
   ];
 }

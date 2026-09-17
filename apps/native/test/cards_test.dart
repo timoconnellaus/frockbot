@@ -740,6 +740,75 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('a receipt carrying the record back unchanged frees the card', (
+      tester,
+    ) async {
+      final posts = <Map<String, Object?>>[];
+      var held = Completer<Object?>();
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body == null) return cardJson();
+        posts.add((body as Map).cast<String, Object?>());
+        // Deciding an approval never folds the card, so the route answers with
+        // the record exactly as it was drawn. Held open so that the card is
+        // actually drawn frozen before the receipt lands.
+        await held.future;
+        return {'schemaVersion': 1, 'routed': 'approval', 'card': cardJson()};
+      });
+      await tester.pumpWidget(host(api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(posts, hasLength(1));
+      expect(find.text('Working\u2026'), findsOneWidget);
+      held.complete();
+      await tester.pumpAndSettle();
+      // The card is given back to the person rather than left dimmed and
+      // deaf: the buttons say what they are, and answer.
+      expect(find.text('Working\u2026'), findsNothing);
+      held = Completer<Object?>()..complete();
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(posts, hasLength(2));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a refusal at the drawn revision still stops the card', (
+      tester,
+    ) async {
+      String? refused;
+      final invalidations = ValueNotifier<int>(0);
+      addTearDown(invalidations.dispose);
+      final api = SettingsApi(
+        MemoryStore(),
+        (path, body) async => cardJson(refusal: refused),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: CardChatScope(
+              api: api,
+              botId: 'bot-1',
+              invalidations: invalidations,
+              child: const CardChatCard(surfaceId: 'draft-1'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Ready to send'), findsOneWidget);
+      // The shell writes a refusal onto the record without folding it, so it
+      // comes back at the revision already drawn. A card that has stopped
+      // updating still has to say so.
+      refused = 'the card exceeds 128 components';
+      invalidations.value++;
+      await tester.pumpAndSettle();
+      expect(find.text('Ready to send'), findsNothing);
+      expect(find.byType(ViewRegion), findsOneWidget);
+      expect(find.text('the card exceeds 128 components'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('a read still in flight never redraws over a receipt', (
       tester,
     ) async {

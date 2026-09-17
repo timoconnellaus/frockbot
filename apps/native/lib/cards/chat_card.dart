@@ -170,31 +170,34 @@ class _CardChatCardState extends State<CardChatCard>
   /// the later truth about the surface whatever order the answers land in, so
   /// a read still in flight must not redraw over it.
   ///
-  /// A record at the revision already drawn is the record already drawn: every
-  /// fold bumps the revision (`app/shell/cards.ts`), so the surface cannot
-  /// have moved without it. That record keeps its renderer rather than getting
-  /// a new one, because the renderer holds what the record does not — text a
-  /// person has typed, a disclosure they opened — and a notice about some
-  /// other durable state must not cost them it.
+  /// An admitted record that is the record already drawn keeps its renderer
+  /// rather than getting a new one, because the renderer holds what the record
+  /// does not — text a person has typed, a disclosure they opened — and a
+  /// notice about some other durable state must not cost them it. The record
+  /// has to be the same whole record and not merely the same revision: the
+  /// shell writes a refusal onto a record without folding it, so a card that
+  /// has stopped updating comes back at the revision already drawn and must
+  /// still be refused. Admission decides that before the renderer is reused.
+  ///
+  /// Whichever way that goes, the card settles here in one `setState`: the
+  /// press path leans on adopting a record to put the surface back in the
+  /// person's hands, so a path that skipped it would leave the card dimmed and
+  /// unanswerable.
   void adopt(CardView answer) {
     epoch++;
     final drawn = card;
-    if (drawn != null &&
-        controller != null &&
-        drawn.surfaceId == answer.surfaceId &&
-        drawn.revision == answer.revision) {
-      if (failure != null) setState(() => failure = null);
-      return;
-    }
-    final previous = controller;
-    final previousInteractions = interactions;
+    final live = controller;
     SurfaceController? next;
     String? said;
     try {
       admitCardV1(answer);
-      next = SurfaceController(catalogs: [cardCatalogV1]);
-      for (final message in cardMessagesV1(answer)) {
-        next.handleMessage(core.A2uiMessage.fromJson(message));
+      if (drawn == answer && live != null) {
+        next = live;
+      } else {
+        next = SurfaceController(catalogs: [cardCatalogV1]);
+        for (final message in cardMessagesV1(answer)) {
+          next.handleMessage(core.A2uiMessage.fromJson(message));
+        }
       }
     } on CardRefusal catch (refused) {
       said = refused.message;
@@ -203,8 +206,11 @@ class _CardChatCardState extends State<CardChatCard>
       // the host says it cannot draw this, rather than drawing part of it.
       said = 'This card can’t be drawn by this app.';
     }
-    unawaited(previousInteractions?.cancel());
-    interactions = next?.onSubmit.listen(_interaction);
+    final replaced = !identical(next, live);
+    if (replaced) {
+      unawaited(interactions?.cancel());
+      interactions = next?.onSubmit.listen(_interaction);
+    }
     if (retryCommandId != null && answer.revision != retryRevision) {
       retryCommandId = null;
       retryPress = null;
@@ -216,7 +222,7 @@ class _CardChatCardState extends State<CardChatCard>
       failure = null;
       controller = next;
     });
-    previous?.dispose();
+    if (replaced) live?.dispose();
   }
 
   /// What the renderer sends back: a press, or its own refusal to draw.
@@ -290,12 +296,14 @@ class _CardChatCardState extends State<CardChatCard>
         commandId: commandId,
       );
       if (!mounted) return;
-      pending = null;
-      if (retryCommandId == commandId) {
-        retryCommandId = null;
-        retryPress = null;
-        retryRevision = null;
-      }
+      setState(() {
+        pending = null;
+        if (retryCommandId == commandId) {
+          retryCommandId = null;
+          retryPress = null;
+          retryRevision = null;
+        }
+      });
       adopt(receipt.card);
       if (receipt.failure != null) {
         setState(() => failure = receipt.failure);

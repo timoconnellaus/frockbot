@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import 'json.dart';
+
 /// The press this card is waiting on, as the host knows it.
 ///
 /// A component that draws its own controls needs more than the action name to
@@ -21,40 +23,26 @@ class CardPress {
   final Map<String, Object?>? context;
   const CardPress({required this.name, this.componentId, this.context});
 
-  /// Two presses are the same press when everything the POST would carry is
-  /// the same. The kernel dedupes an input-routed press by its command id, so
-  /// a retry may only reuse an id when the press being made is identical to
-  /// the one whose answer was lost — the same control carrying the same
-  /// values. A control pressed again with a different data model behind it is
-  /// a new press and mints a new id.
+  /// A press is the control that was pressed: its action name, the component
+  /// that raised it, and the context that control sent. The kernel dedupes an
+  /// input-routed press by its command id, so a retry may only reuse an id
+  /// when the press being made is that same control again.
+  ///
+  /// The data model is deliberately not part of this. It is not the control's
+  /// — it is the whole surface's, and the renderer holds it, so a person
+  /// typing anywhere on the card would otherwise make every control a new
+  /// press. Nothing that reads a command id reads the data model: the input
+  /// route dedupes on the id alone and enqueues only the surface, the name and
+  /// the context, and the approval and Plugin routes ignore the id entirely.
   @override
   bool operator ==(Object other) =>
       other is CardPress &&
       other.name == name &&
       other.componentId == componentId &&
-      _sameJson(other.context, context);
+      sameJsonV1(other.context, context);
 
   @override
   int get hashCode => Object.hash(name, componentId);
-}
-
-bool _sameJson(Object? a, Object? b) {
-  if (identical(a, b)) return true;
-  if (a is Map && b is Map) {
-    if (a.length != b.length) return false;
-    for (final key in a.keys) {
-      if (!b.containsKey(key) || !_sameJson(a[key], b[key])) return false;
-    }
-    return true;
-  }
-  if (a is List && b is List) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (!_sameJson(a[i], b[i])) return false;
-    }
-    return true;
-  }
-  return a == b;
 }
 
 /// Which press this card is waiting on, for the components that can say so.
