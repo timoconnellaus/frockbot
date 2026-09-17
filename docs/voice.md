@@ -75,8 +75,14 @@ read-out belongs to another Bot — and one provider is made and kept per voice
 the object has spoken as.
 
 A Bot's own stored `voiceId` override is not built yet; `resolveVoiceIdV1`
-takes it and nothing writes it. The ids in that file are ElevenLabs' public
-premade voices and have not been played against this account.
+takes it and nothing writes it.
+
+Every id in that file was read back from this deployment's ElevenLabs account
+on 2026-09-17. That check is not ceremony: most of the provider's well-known
+"premade" ids are absent from this account, and an id the account cannot reach
+does not fail loudly — the sentence simply never becomes sound. A voice that
+is verified to exist has still not been listened to, so re-verify and audition
+after editing the list.
 
 ## Capabilities
 

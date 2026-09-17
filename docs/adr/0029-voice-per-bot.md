@@ -15,9 +15,9 @@ the voice control while the Bot page becomes a focused voice mode.
   its character and the resolution path takes a per-Bot override, but the
   stored choice and its picker are not built. `resolveVoiceIdV1`'s
   `chosen` argument is the seam.
-- The curated voice ids in `app/voice/voices.ts` are ElevenLabs' public
-  premade voices and have **not been played against this account**. They
-  need listening to before a release ships them.
+- The curated voice ids in `app/voice/voices.ts` exist on this account —
+  each was read back from it on 2026-09-17 — but have **not been listened
+  to**. They need auditioning before a person hears one chosen for them.
 - Decision 7's **enlarged character and on-page mute**, and with them the
   retirement of the account-wide footer. The footer still carries mute,
   End and the meter.
