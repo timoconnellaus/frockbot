@@ -62,6 +62,11 @@ const modules: Module[] = [
       "@frockbot/frock-compose/",
       "@frockbot/providers/",
     ],
+    // A seeded Plugin's source is Plugin code, not app code: it is written
+    // against the Plugin SDK and built into an artifact, exactly as a Plugin
+    // a Bot writes is. The whole directory is left to the Plugin build, whose
+    // bundler refuses an import this checker would not have liked either.
+    skip: ["plugins/seeded/"],
   },
 ];
 

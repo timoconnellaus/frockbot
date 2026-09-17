@@ -112,6 +112,23 @@ interface FeaturesRpc {
 
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
+  listCards(input: unknown): Promise<{
+    cards: Array<{
+      surfaceId: string;
+      revision: number;
+      components: Array<Record<string, unknown>>;
+      dataModel: Record<string, unknown>;
+    }>;
+  }>;
+  cardAction(input: unknown): Promise<{
+    routed: string;
+    failure?: string;
+    card: {
+      surfaceId: string;
+      revision: number;
+      components: Array<Record<string, unknown>>;
+    };
+  }>;
   listCompositionGenerations(input: unknown): Promise<{
     botId: string;
     currentGenerationId: string;
@@ -600,6 +617,44 @@ async function callPluginTool(
   return JSON.parse(
     typeof outer.content === "string" ? outer.content : raw,
   ) as Record<string, unknown>;
+}
+
+/** One Plugin tool run as a real Turn, answered with the text the Bot read. */
+async function callPluginToolRaw(
+  identity: { userId: string; botId: string },
+  runId: string,
+  namespace: string,
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<string> {
+  await bot(identity).run({
+    schemaVersion: 1,
+    ...identity,
+    command: {
+      runId,
+      sessionId: `${identity.userId}:${identity.botId}`,
+      acceptedAt: new Date().toISOString(),
+      text: toolCallTriggerPrompt([
+        "call_dynamic_tool",
+        dynamicToolInputV1({ namespace, toolName, input }),
+      ]),
+    },
+  });
+  const runs = await runInDurableObject(
+    env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`),
+    (_instance, state) =>
+      hydratedStoredRunsV1<{
+        runId: string;
+        sessionId: string;
+        events: Array<{ type: string; content?: string }>;
+      }>(state.storage),
+  );
+  const run = runs.find((candidate) => candidate.runId === runId);
+  const results = (run?.events ?? [])
+    .filter((event) => event.type === "tool/result")
+    .map((event) => event.content ?? "");
+  expect(results.length, JSON.stringify(results)).toBeGreaterThan(0);
+  return results.join("\n");
 }
 
 /** What any Plugin storage key holds in a Bot's own Durable Object. */
@@ -2268,6 +2323,204 @@ export const views = {
       status: "rejected",
       failure: '"Counter" has no "counter_other" control',
     });
+  });
+
+  // ADR 0030 step 6: a Plugin that declares a card is offered one tool per
+  // card, the kernel mints the surface and records the Approval the card asks
+  // for, and a press the renderer names `plugin/<id>/<action>` reaches the
+  // Plugin's own handler and redraws the card without costing a Turn.
+  test("a Plugin's card tool draws a surface, mints its Approval, and its own action redraws it", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+
+    const CARD_PLUGIN_ID = "probe-card";
+    const CARD_PLUGIN_SOURCE = `
+export const tools = [];
+export async function execute(tool) {
+  throw new Error("unknown tool " + tool);
+}
+function components(subject, expanded) {
+  return [
+    { id: "root", component: "Column", children: ["rows", "more", "actions"] },
+    {
+      id: "rows",
+      component: "KeyValueRows",
+      rows: expanded
+        ? [{ label: "Subject", value: subject }, { label: "Detail", value: "everything" }]
+        : [{ label: "Subject", value: subject }],
+    },
+    {
+      id: "more",
+      component: "Button",
+      label: "More",
+      action: { name: "plugin/probe-card/details", context: { expanded: true } },
+    },
+    {
+      id: "actions",
+      component: "ApprovalActions",
+      approvalId: "not-the-kernels",
+      approveLabel: "Send",
+      declineLabel: "Discard",
+      action: "Send the draft",
+      risk: "medium",
+    },
+  ];
+}
+export const cards = {
+  draft: {
+    render: async function (payload, ctx) {
+      await ctx.storage.put({ key: "subject:" + payload.surfaceId, value: payload.data.subject });
+      return [
+        {
+          version: "v1.0",
+          createSurface: {
+            surfaceId: payload.surfaceId,
+            components: components(payload.data.subject, false),
+          },
+        },
+      ];
+    },
+    actions: {
+      details: async function (press, ctx) {
+        const stored = await ctx.storage.get({ key: "subject:" + press.surfaceId });
+        return {
+          messages: [
+            {
+              version: "v1.0",
+              updateComponents: {
+                surfaceId: press.surfaceId,
+                components: components(String(stored.value), press.context.expanded === true),
+              },
+            },
+          ],
+          input: "The person opened the draft's details.",
+        };
+      },
+    },
+  },
+};
+`;
+    const descriptor = decodePluginDescriptorV1({
+      id: CARD_PLUGIN_ID,
+      displayName: "Card probe",
+      version: "0.0.1",
+      contractVersion: 4,
+      tools: [],
+      hooks: [],
+      grants: ["storage"],
+      cards: [
+        {
+          id: "draft",
+          displayName: "Draft",
+          description: "Shows a draft and asks the person to decide.",
+          dataSchema: {
+            type: "object",
+            properties: { subject: { type: "string" } },
+            required: ["subject"],
+            additionalProperties: false,
+          },
+          actions: [{ name: "details", description: "Show the rest." }],
+        },
+      ],
+      contextKeys: ["user", "bot", "session"],
+    });
+    await pinGeneration(userId, [
+      {
+        id: CARD_PLUGIN_ID,
+        source: CARD_PLUGIN_SOURCE,
+        descriptor,
+      },
+    ]);
+    await switchPlugin(identity, CARD_PLUGIN_ID, true);
+
+    // The Bot calls the card's own tool with the values, and nothing else.
+    await callPluginToolRaw(
+      identity,
+      "run-card-1",
+      CARD_PLUGIN_ID,
+      "probe_card_draft",
+      { data: { subject: "Hello" } },
+    );
+
+    const listed = await bot(identity).listCards({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(listed.cards).toHaveLength(1);
+    const card = listed.cards[0]!;
+    // The kernel minted the surface, so the Plugin never named one.
+    expect(card.surfaceId.startsWith(`${CARD_PLUGIN_ID}-draft-`)).toBe(true);
+    const actions = card.components.find((part) => part.id === "actions")!;
+    // Trust chrome is bound to an id only the kernel issues: whatever the
+    // Plugin wrote is gone.
+    expect(actions.approvalId).not.toBe("not-the-kernels");
+    expect(String(actions.approvalId)).toMatch(/^card-approval-/);
+
+    // And the Approval behind it is a real one, recorded on this Turn.
+    const approvals = await bot(identity).listApprovals({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(
+      approvals.approvals.map((approval) => approval.approvalId),
+    ).toContain(actions.approvalId);
+
+    // A press the renderer named for this Plugin reaches its handler, which
+    // redraws the card in place. The revision moves; no Turn was spent.
+    const pressed = await bot(identity).cardAction({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        surfaceId: card.surfaceId,
+        revision: card.revision,
+        commandId: "press-1",
+        event: {
+          name: `plugin/${CARD_PLUGIN_ID}/details`,
+          context: { expanded: true },
+        },
+      },
+    });
+    expect(pressed.failure).toBeUndefined();
+    expect(pressed.routed).toBe("plugin");
+    expect(pressed.card.revision).toBeGreaterThan(card.revision);
+    expect(
+      (
+        pressed.card.components.find((part) => part.id === "rows")?.rows as
+          unknown[] | undefined
+      )?.length,
+    ).toBe(2);
+
+    // The line the handler left for the Bot is waiting as durable input.
+    const pending = await runInDurableObject(
+      env.BOT_STATES.getByName(`${userId}:bot-1`),
+      (_instance, state) =>
+        state.storage.list<{ kind?: string; context?: string }>({
+          prefix: "routine-wake:",
+        }),
+    );
+    expect(
+      [...pending.values()].some(
+        (input) =>
+          input.kind === "card-action" &&
+          input.context === "The person opened the draft's details.",
+      ),
+    ).toBe(true);
+
+    // A card tool whose values do not fit the declared schema draws nothing.
+    const refused = await callPluginToolRaw(
+      identity,
+      "run-card-2",
+      CARD_PLUGIN_ID,
+      "probe_card_draft",
+      { data: { subject: 7 } },
+    );
+    expect(refused).toMatch(/refused/);
+    expect(
+      (await bot(identity).listCards({ schemaVersion: 1, ...identity })).cards,
+    ).toHaveLength(1);
   });
 
   test("a Plugin whose module does not parse leaves the page and its switch standing", async () => {

@@ -205,6 +205,12 @@ interface UserConfigurationEnv extends BillingEnv {
   APPLET_STATES?: DurableObjectNamespace<AppletState>;
   /** The bucket behind durable roots, where a deleted Applet's source is removed. */
   MEMORY_FILES?: R2Bucket;
+  /**
+   * The Plugin worker loader. The User object never loads anything with it;
+   * it reads it to know whether this deployment can run a Plugin at all,
+   * which is what decides whether the seeded catalog is reconciled in.
+   */
+  BOT_PACKAGES?: WorkerLoader;
 }
 
 /** The page of a Bot's projected rows a rebuild pulls, one Bot at a time. */
@@ -743,7 +749,12 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       { ctx: this.ctx },
       {
         userId,
-        catalog: DEPLOYMENT_PLUGIN_CATALOG_V1,
+        // A deployment with no Worker Loader cannot mount a Plugin at all, so
+        // it seeds none: a member nothing can mount would fail every Turn of
+        // every Bot on the account rather than the one Plugin.
+        catalog: this.env.BOT_PACKAGES
+          ? DEPLOYMENT_PLUGIN_CATALOG_V1
+          : ([] as typeof DEPLOYMENT_PLUGIN_CATALOG_V1),
         adminOpened: features.plugins,
       },
     );

@@ -275,6 +275,10 @@ export function pluginManifestDisagreementV1(
   if (!sameNames(views, manifest.views)) {
     return `plugin.json declares views [${views.join(", ")}] but plugin.ts exports views [${manifest.views.join(", ")}]`;
   }
+  const cards = (descriptor.cards ?? []).map((card) => card.id);
+  if (!sameNames(cards, manifest.cards ?? [])) {
+    return `plugin.json declares cards [${cards.join(", ")}] but plugin.ts exports cards [${(manifest.cards ?? []).join(", ")}]`;
+  }
   return undefined;
 }
 

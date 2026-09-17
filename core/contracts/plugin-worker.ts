@@ -38,6 +38,10 @@ const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 const PLUGIN_SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 /** Views one Plugin may export, matching the descriptor's bound. */
 const MAX_PLUGIN_VIEWS_V1 = 16;
+/** Cards one Plugin may export, matching the descriptor's bound. */
+const MAX_PLUGIN_CARDS_V1 = 16;
+/** A card id, as the descriptor bounds it. */
+const PLUGIN_CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
 /** A rendered view, serialized. A card, not a page. */
 export const MAX_PLUGIN_VIEW_DOCUMENT_BYTES_V1 = 256_000;
 const MAX_PLUGINS_V1 = 64;
@@ -133,6 +137,8 @@ export interface PluginWorkerPluginHealthV1 {
   triggers: string[];
   /** The surfaces the module renders, by id; the descriptor's `views` must match. */
   views: string[];
+  /** The cards the module draws, by id; the descriptor's `cards` must match. */
+  cards: string[];
 }
 
 export interface PluginWorkerHealthV1 {
@@ -221,8 +227,49 @@ export interface PluginWorkerCardActionInvocationV1 {
  * The handler's answer: A2UI messages the kernel folds into the Card, carried
  * opaque and bounded, or a drop with its reason. A handler that throws or
  * overruns is a drop, and the Card is left exactly as it was.
+ *
+ * `input` is the one thing a handler may say to the Bot rather than to the
+ * card: a line the kernel enqueues as the next user-lane Turn's pending
+ * input, the way a conversation action on a Card is. A handler that only
+ * redraws the surface costs no Turn, which is the point of the route.
  */
 export type PluginWorkerCardActionResultV1 =
+  | { schemaVersion: 1; status: "drop"; reason?: string }
+  | {
+      schemaVersion: 1;
+      status: "rendered";
+      messages: Record<string, unknown>[];
+      input?: string;
+    };
+
+/**
+ * One Card a Plugin draws from the values the Bot sent (ADR 0030). The
+ * surface id is the kernel's — minted when the Bot named none — so a Plugin
+ * can never draw over a surface it was not handed, and `data` has already
+ * been validated against the card's declared `dataSchema`.
+ */
+export interface PluginWorkerRenderCardInvocationV1 {
+  schemaVersion: 1;
+  pluginId: string;
+  /** The `id` of one of the Plugin's declared cards. */
+  cardId: string;
+  surfaceId: string;
+  data: Record<string, unknown>;
+  botId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  generationId: string;
+  deadlineMs: number;
+}
+
+/**
+ * What `renderCard` answers with: the same two shapes a Card action answers
+ * with, for the same reason. The messages are carried opaque and decoded as
+ * A2UI where the Card's own budgets are, and anything else is a refusal the
+ * Bot reads in the tool result.
+ */
+export type PluginWorkerRenderCardResultV1 =
   | { schemaVersion: 1; status: "drop"; reason?: string }
   | {
       schemaVersion: 1;
@@ -257,6 +304,9 @@ export interface PluginWorkerEntrypoint {
   cardAction(
     invocation: PluginWorkerCardActionInvocationV1,
   ): Promise<PluginWorkerCardActionResultV1>;
+  renderCard(
+    invocation: PluginWorkerRenderCardInvocationV1,
+  ): Promise<PluginWorkerRenderCardResultV1>;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -438,6 +488,7 @@ export function decodePluginWorkerHealthV1(
           consumes: [],
           triggers: [],
           views: [],
+          cards: [],
         });
       }
     }
@@ -486,6 +537,7 @@ function decodePluginHealthEntryV1(
       "consumes",
       "triggers",
       "views",
+      "cards",
     ],
     itemLabel,
     ["reason"],
@@ -546,8 +598,25 @@ function decodePluginHealthEntryV1(
   if (new Set(views).size !== views.length) {
     throw new Error(`${itemLabel}.views contains duplicates`);
   }
+  if (
+    !Array.isArray(plugin.cards) ||
+    plugin.cards.length > MAX_PLUGIN_CARDS_V1
+  ) {
+    throw new Error(`${itemLabel}.cards must be a bounded array`);
+  }
+  const cards = plugin.cards.map((card, cardIndex) => {
+    const cardId = boundedString(card, `${itemLabel}.cards[${cardIndex}]`, 32);
+    if (!PLUGIN_CARD_ID.test(cardId)) {
+      throw new Error(`${itemLabel}.cards[${cardIndex}] is invalid`);
+    }
+    return cardId;
+  });
+  if (new Set(cards).size !== cards.length) {
+    throw new Error(`${itemLabel}.cards contains duplicates`);
+  }
   return {
     views,
+    cards,
     pluginId: pluginId(plugin.pluginId, `${itemLabel}.pluginId`),
     ok: plugin.ok,
     ...(plugin.reason === undefined
@@ -721,6 +790,11 @@ export function decodePluginWorkerTriggerResultV1(
 export const MAX_PLUGIN_CARD_ACTION_MESSAGES_V1 = 16;
 /** The handler's whole answer, serialized. A card, not a page. */
 export const MAX_PLUGIN_CARD_ACTION_BYTES_V1 = 256_000;
+/**
+ * The line a handler may leave for the Bot's next Turn. The pending-input
+ * record it becomes holds a card action's context to the same bound.
+ */
+export const MAX_PLUGIN_CARD_ACTION_INPUT_V1 = 4_000;
 
 export function decodePluginWorkerCardActionResultV1(
   input: unknown,
@@ -746,20 +820,45 @@ export function decodePluginWorkerCardActionResultV1(
           }),
     };
   }
-  exactKeys(value, ["schemaVersion", "status", "messages"], label);
+  exactKeys(value, ["schemaVersion", "status", "messages"], label, ["input"]);
   if (value.status !== "rendered") {
     throw new Error(`${label}.status is invalid`);
   }
+  return {
+    schemaVersion: 1,
+    status: "rendered",
+    messages: decodeCardMessagesV1(value.messages, label),
+    ...(value.input === undefined
+      ? {}
+      : {
+          input: boundedString(
+            value.input,
+            `${label}.input`,
+            MAX_PLUGIN_CARD_ACTION_INPUT_V1,
+          ),
+        }),
+  };
+}
+
+/**
+ * The A2UI messages either card call answers with, held to one bound. They
+ * are carried opaque here and decoded as A2UI at the fold, which is where the
+ * Card's own budgets are.
+ */
+function decodeCardMessagesV1(
+  input: unknown,
+  label: string,
+): Record<string, unknown>[] {
   if (
-    !Array.isArray(value.messages) ||
-    value.messages.length === 0 ||
-    value.messages.length > MAX_PLUGIN_CARD_ACTION_MESSAGES_V1
+    !Array.isArray(input) ||
+    input.length === 0 ||
+    input.length > MAX_PLUGIN_CARD_ACTION_MESSAGES_V1
   ) {
     throw new Error(
       `${label}.messages must hold 1 to ${MAX_PLUGIN_CARD_ACTION_MESSAGES_V1} entries`,
     );
   }
-  const messages = value.messages.map((message, index) =>
+  const messages = input.map((message, index) =>
     record(message, `${label}.messages[${index}]`),
   );
   let serialized: string;
@@ -776,11 +875,41 @@ export function decodePluginWorkerCardActionResultV1(
       `${label}.messages exceeds ${MAX_PLUGIN_CARD_ACTION_BYTES_V1} bytes`,
     );
   }
-  // Decoded as A2UI at the fold, which is where the Card's own budgets are.
+  return JSON.parse(serialized) as Record<string, unknown>[];
+}
+
+export function decodePluginWorkerRenderCardResultV1(
+  input: unknown,
+  label = "plugin worker render card result",
+): PluginWorkerRenderCardResultV1 {
+  const value = record(input, label);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (value.status === "drop") {
+    exactKeys(value, ["schemaVersion", "status"], label, ["reason"]);
+    return {
+      schemaVersion: 1,
+      status: "drop",
+      ...(value.reason === undefined
+        ? {}
+        : {
+            reason: boundedString(
+              value.reason,
+              `${label}.reason`,
+              MAX_FAILURE_REASON_V1,
+            ),
+          }),
+    };
+  }
+  exactKeys(value, ["schemaVersion", "status", "messages"], label);
+  if (value.status !== "rendered") {
+    throw new Error(`${label}.status is invalid`);
+  }
   return {
     schemaVersion: 1,
     status: "rendered",
-    messages: JSON.parse(serialized) as Record<string, unknown>[],
+    messages: decodeCardMessagesV1(value.messages, label),
   };
 }
 

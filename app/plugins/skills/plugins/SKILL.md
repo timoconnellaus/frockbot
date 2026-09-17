@@ -120,7 +120,10 @@ export const hooks: PluginHooks = {
   skipped for the Turn; three failures in a row take the Plugin out of this
   Bot until a person turns it back on.
 - Network: with the `http` grant, `fetch` reaches only the hosts
-  `plugin.json` declares. Every other host is refused at the edge.
+  `plugin.json` declares. Every other host is refused at the edge. The same
+  grant gives you `ctx.email(...)`, which asks this deployment's own sender to
+  send one plain-text message for this Bot — you hold no credential and name no
+  provider, and a deployment that has bound no sender answers unavailable.
 
 ## `plugin.json`
 
@@ -129,7 +132,7 @@ export const hooks: PluginHooks = {
   "id": "notes",
   "displayName": "Notes",
   "version": "1",
-  "contractVersion": 4,
+  "contractVersion": 5,
   "tools": [
     {
       "name": "note_add",
@@ -147,8 +150,8 @@ export const hooks: PluginHooks = {
 - `version` is a string you bump when you publish a change. A publish with
   the version already live is still a new generation — the User approves the
   code, not the number — but bumping it is how you both tell versions apart.
-- `tools`, `hooks`, `triggers` and `views` must match the module's exports,
-  name for name. A mismatch is refused at publish with both lists.
+- `tools`, `hooks`, `triggers`, `views` and `cards` must match the module's
+  exports, name for name. A mismatch is refused at publish with both lists.
 - `grants` is what the module may use, from `storage`, `http`, `schedule`,
   `ai`, `memory`, `workspace`. With `http`, add `"network": { "hosts": ["api.example.com"] }`
   (a leading `*.` matches one subdomain label), or `"network": { "open": true }`
@@ -242,6 +245,89 @@ says so instead of the section.
 A section runs with the same `ctx` a tool call gets and is drawn only while
 the Plugin is on for that Bot. Outside a Turn — a section, a control, a
 trigger — `ctx.schedule` answers unavailable; everything else works.
+
+## Cards
+
+A Plugin can put a rich card in the conversation — a thing, some controls, and
+a settled state — instead of a wall of text. You declare the card in
+`plugin.json` and export its `render` in `plugin.ts`; the Bot sends the values
+and your code composes the surface.
+
+```json
+"cards": [
+  {
+    "id": "draft",
+    "displayName": "Email draft",
+    "description": "Show a drafted email and ask the person to send or discard it.",
+    "dataSchema": {
+      "type": "object",
+      "properties": { "subject": { "type": "string" } },
+      "required": ["subject"],
+      "additionalProperties": false
+    },
+    "actions": [{ "name": "details", "description": "Show the rest." }]
+  }
+]
+```
+
+```ts
+import type { PluginCard } from "@frockbot/applet-sdk/plugin";
+
+export const cards: Record<string, PluginCard> = {
+  draft: {
+    render: ({ surfaceId, data }, ctx) => [
+      {
+        version: "v1.0",
+        createSurface: {
+          surfaceId,
+          components: [
+            { id: "root", component: "Column", children: ["title", "more"] },
+            { id: "title", component: "Text", text: String(data.subject) },
+            {
+              id: "more",
+              component: "Button",
+              label: "More",
+              action: { name: "plugin/<your plugin id>/details" },
+            },
+          ],
+        },
+      },
+    ],
+    actions: {
+      details: ({ surfaceId }) => [
+        {
+          version: "v1.0",
+          updateComponents: { surfaceId, components: [] },
+        },
+      ],
+    },
+  },
+};
+```
+
+- Each card is a tool the Bot calls: `<pluginId>_<cardId>`, taking
+  `{ "data": … }` and optionally the `surfaceId` of a card it already drew, to
+  update it in place. Declaring a tool of that name is refused at publish.
+- The kernel validates `data` against your `dataSchema` before you see it, and
+  refuses a schema using a keyword it cannot enforce — keep to `type`,
+  `properties`, `required`, `additionalProperties`, `items`, `enum`, lengths,
+  counts and ranges.
+- You never choose a `surfaceId`: the kernel mints it and hands it to `render`,
+  which is what stops one Plugin drawing over another's card.
+- `render` returns the A2UI messages for the surface — an array, or
+  `{ messages }`. Return `{ drop: true, reason }` to draw nothing.
+- Components come from the catalogs the client compiled in. You ship no code
+  and no markup; a component the client does not know refuses the whole card.
+- An `ApprovalActions` component is the person's decision. Write
+  `"approvalId": "pending"`: the kernel overwrites it with an Approval it
+  records, and its `action` and `risk` are the words that Approval is recorded
+  with. Drawing one ends the Turn; the decision arrives as durable input later.
+- `actions` are your own handlers, one per name declared in `plugin.json` and
+  reached as `plugin/<pluginId>/<action>` from a component's `action` property.
+  A press runs the handler with the Bot's authority and redraws the card — it
+  costs no Turn. Return `{ messages, input }` to also leave one line for the
+  Bot's next Turn. Action names are the Plugin's, so two cards may not share
+  one, and a handler that throws or overruns leaves the card exactly as it was.
 
 ## What you cannot do
 

@@ -166,7 +166,7 @@ describe("isolate health v1", () => {
 
   test("rejects an unsupported contract version", () => {
     expect(() =>
-      decodeIsolateHealthV1({ ...health, contractVersion: 5 }),
+      decodeIsolateHealthV1({ ...health, contractVersion: 6 }),
     ).toThrow(/contractVersion is unsupported/);
     expect(() =>
       decodeIsolateHealthV1({ ...health, contractVersion: 0 }),

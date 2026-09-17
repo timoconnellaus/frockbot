@@ -1162,3 +1162,84 @@ export function decodeCardActionReceiptV1(
         }),
   };
 }
+
+/**
+ * The Frock catalog component the host draws for a decision, and the props
+ * the kernel reads off it. The renderer draws the two labels; `action`,
+ * `risk` and `rationale` are the words the Approval is *recorded* with, and
+ * a component that carries none of them is recorded with the card's own name.
+ */
+export const CARD_APPROVAL_COMPONENT_V1 = "ApprovalActions";
+
+/** One Approval a Card asked for, as the kernel recorded it. */
+export interface CardApprovalBindingV1 {
+  approvalId: string;
+  action: string;
+  risk: "low" | "medium" | "high";
+  rationale?: string;
+}
+
+/**
+ * Binds every `ApprovalActions` on a Card to an Approval the kernel issues.
+ *
+ * "Trust chrome is a component only the host draws, bound to an id only the
+ * kernel issues" (ADR 0030) is this function. Whatever `approvalId` the
+ * author wrote is overwritten with a minted one before the send is recorded,
+ * so a Card can never point its decision at an Approval it did not ask for,
+ * and the returned bindings are the Approvals the caller records beside the
+ * Card. A redraw carrying the component again asks for a new decision: the
+ * old one stays where it is, decided or expiring on its own terms.
+ */
+export function bindCardApprovalsV1(
+  messages: readonly A2uiAgentMessageV1[],
+  mint: () => string,
+  fallbackAction: string,
+): { messages: A2uiAgentMessageV1[]; approvals: CardApprovalBindingV1[] } {
+  const approvals: CardApprovalBindingV1[] = [];
+  const bindComponent = (component: A2uiComponentV1): A2uiComponentV1 => {
+    if (component.component !== CARD_APPROVAL_COMPONENT_V1) return component;
+    const approvalId = mint();
+    const risk =
+      component.risk === "low" || component.risk === "high"
+        ? component.risk
+        : "medium";
+    approvals.push({
+      approvalId,
+      action:
+        typeof component.action === "string" && component.action.length > 0
+          ? component.action.slice(0, 512)
+          : fallbackAction,
+      risk,
+      ...(typeof component.rationale === "string" &&
+      component.rationale.length > 0
+        ? { rationale: component.rationale.slice(0, 2_000) }
+        : {}),
+    });
+    return { ...component, approvalId };
+  };
+  const bound = messages.map((message) => {
+    if ("createSurface" in message) {
+      const components = message.createSurface.components;
+      return components === undefined
+        ? message
+        : {
+            ...message,
+            createSurface: {
+              ...message.createSurface,
+              components: components.map(bindComponent),
+            },
+          };
+    }
+    if ("updateComponents" in message) {
+      return {
+        ...message,
+        updateComponents: {
+          ...message.updateComponents,
+          components: message.updateComponents.components.map(bindComponent),
+        },
+      };
+    }
+    return message;
+  });
+  return { messages: bound, approvals };
+}

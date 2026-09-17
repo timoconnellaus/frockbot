@@ -261,6 +261,19 @@ export interface PluginContext {
   readonly connection?: (
     connectionId: string,
   ) => Promise<ConnectionLease | CapabilityFailure>;
+  /**
+   * The `http` grant, second half: the deployment's own sender, sending for
+   * this Bot. The Plugin holds no credential and names no provider; a
+   * deployment that has bound no sender answers unavailable.
+   */
+  readonly email?: (request: {
+    to: string[];
+    cc?: string[];
+    subject: string;
+    body: string;
+    /** The `Message-Id` this answers, when it answers one. */
+    inReplyTo?: string;
+  }) => Promise<{ status: "sent"; messageId: string } | CapabilityFailure>;
   /** The `schedule` grant: a durable Routine operation attributed to this call. */
   readonly schedule?: (request: {
     callId: string;
@@ -430,6 +443,74 @@ export type PluginView = (
   | void;
 
 /**
+ * One A2UI message a Card is made of: the envelope plus exactly one of
+ * `createSurface`, `updateComponents`, `updateDataModel` or `deleteSurface`.
+ * The kernel decodes and bounds it, so it is carried loosely here.
+ */
+export interface CardMessage {
+  version: "v1.0";
+  [key: string]: unknown;
+}
+
+/** What a card's `render` is handed: the surface the kernel minted and the Bot's values. */
+export interface PluginCardRender {
+  /** The kernel's own surface id. A Plugin never chooses one. */
+  surfaceId: string;
+  /** The values the Bot sent, already validated against the card's `dataSchema`. */
+  data: { [key: string]: unknown };
+}
+
+/** What a card action handler is handed: the press, as the person made it. */
+export interface PluginCardPress {
+  surfaceId: string;
+  /** The `<action>` half of the `plugin/<pluginId>/<action>` that was pressed. */
+  action: string;
+  context?: { [key: string]: unknown };
+  /** The surface's data model, when the surface was created asking for it. */
+  dataModel?: { [key: string]: unknown };
+}
+
+/** A card handler's refusal: the Card is left exactly as it was. */
+export interface PluginCardDrop {
+  drop: true;
+  reason?: string;
+}
+
+/**
+ * What a card handler answers with: the messages the kernel folds into the
+ * Card, on their own or with `input` — one line for the Bot's next Turn, the
+ * only thing a press may say to the Bot rather than to the card. `render`
+ * never carries `input`; a draw is not a press.
+ */
+export type PluginCardAnswer =
+  | CardMessage[]
+  | { messages: CardMessage[]; input?: string }
+  | PluginCardDrop
+  | undefined
+  | void;
+
+/**
+ * One Card the Plugin draws (ADR 0030). `render` composes the surface from
+ * the catalogs the client compiled in; `actions` are the handlers behind the
+ * names the surface's components raise. An action name is the Plugin's, not
+ * one card's — the namespace is `plugin/<pluginId>/<action>` — so two cards
+ * may not declare the same one.
+ */
+export interface PluginCard {
+  render(
+    payload: PluginCardRender,
+    ctx: PluginContext,
+  ): Promise<PluginCardAnswer> | PluginCardAnswer;
+  actions?: Record<
+    string,
+    (
+      press: PluginCardPress,
+      ctx: PluginContext,
+    ) => Promise<PluginCardAnswer> | PluginCardAnswer
+  >;
+}
+
+/**
  * A tool call's answer. A string is handed to the Bot as it is; anything else
  * is JSON-serialized. Throw to answer with an error the Bot can read — the
  * wrapper turns a thrown `Error` into an error result with its message.
@@ -464,4 +545,10 @@ export interface PluginModule {
    * with slot `settings.sections`: a section drawn on this Plugin's card.
    */
   views?: Record<string, PluginView>;
+  /**
+   * One entry per card id declared under `cards` in `plugin.json`. The Bot
+   * calls the card's tool with the values, the kernel validates them against
+   * the card's `dataSchema` and `render` answers with the surface.
+   */
+  cards?: Record<string, PluginCard>;
 }

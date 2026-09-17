@@ -12,6 +12,7 @@ import type {
   IsolateConnectionOutcomeV1,
   IsolateMemoryOutcomeV1,
   IsolateModelOutcomeV1,
+  IsolateEmailOutcomeV1,
   IsolateScheduleOutcomeV1,
   IsolateScopeV1,
   IsolateSettingsOutcomeV1,
@@ -24,6 +25,7 @@ import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateModelInvocationV1,
+  decodeIsolateEmailRequestV1,
   decodeIsolateScheduleRequestV1,
   decodeIsolateScopeV1,
   decodeIsolateStorageDeleteRequestV1,
@@ -65,6 +67,7 @@ interface BotIsolateRpc {
   isolateWorkspaceDelete(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
   isolateConnection(input: unknown): Promise<IsolateConnectionOutcomeV1>;
   isolateSchedule(input: unknown): Promise<IsolateScheduleOutcomeV1>;
+  isolateEmail(input: unknown): Promise<IsolateEmailOutcomeV1>;
   isolateStorageGet(input: unknown): Promise<IsolateStorageOutcomeV1>;
   isolateStoragePut(input: unknown): Promise<IsolateStorageOutcomeV1>;
   isolateStorageDelete(input: unknown): Promise<IsolateStorageOutcomeV1>;
@@ -274,6 +277,21 @@ export class BotCapabilities extends WorkerEntrypoint<
       return await rpc.isolateConnection(envelope);
     } catch {
       return unavailable("the Connection is unavailable");
+    }
+  }
+
+  async sendEmail(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateEmailOutcomeV1> {
+    try {
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateEmailRequestV1(request),
+      );
+      return await rpc.isolateEmail(envelope);
+    } catch {
+      return unavailable("sending email is unavailable");
     }
   }
 

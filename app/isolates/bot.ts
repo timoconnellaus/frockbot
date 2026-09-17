@@ -14,6 +14,7 @@ import type {
 import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
+  decodeIsolateEmailRequestV1,
   decodeIsolateScheduleRequestV1,
   decodeIsolateStorageDeleteRequestV1,
   decodeIsolateStorageGetRequestV1,
@@ -32,6 +33,7 @@ import {
   type IsolateConnectionV1,
   type IsolateMemoryOutcomeV1,
   type IsolateModelInvocationV1,
+  type IsolateEmailOutcomeV1,
   type IsolateScheduleOutcomeV1,
   type IsolateSettingsOutcomeV1,
   type IsolateStorageListOutcomeV1,
@@ -836,6 +838,28 @@ export async function isolateConnection(
     generation: connection.generation,
     expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
   };
+}
+
+/**
+ * One email, sent by the deployment for the Bot that asked (ADR 0030).
+ *
+ * The plugin holds no credential and names no provider: it hands over a
+ * message and learns whether it went. The send is attributed to the Bot whose
+ * Turn asked for it, which is why the call is admitted like every other
+ * grant before the sender is reached at all.
+ */
+export async function isolateEmail(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<IsolateEmailOutcomeV1> {
+  const sender = state.env.EMAIL_SENDER;
+  if (!isolateCallAdmittedV1(state, input) || !sender) {
+    return {
+      status: "unavailable",
+      reason: "this deployment has no sender bound, so it sends no email",
+    };
+  }
+  return sender.send(decodeIsolateEmailRequestV1(input.request));
 }
 
 export async function isolateSchedule(

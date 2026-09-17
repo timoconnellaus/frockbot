@@ -8,7 +8,7 @@ import {
   type CompositionOriginV1,
 } from "@frockbot/core/durable";
 import { MemoryStorage } from "@frockbot/core/durable/testing";
-import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "@frockbot/app/plugins/catalog";
+import type { SeededPluginV1 } from "@frockbot/app/plugins/catalog";
 import {
   readUserCompositionV1,
   userCompositionFailuresV1,
@@ -16,20 +16,26 @@ import {
   type UserCompositionRpcV1,
 } from "./user.js";
 
+/**
+ * The catalog defaults to empty rather than to the deployment's: an in-memory
+ * harness has no Worker Loader, and a seeded Plugin nothing can mount would
+ * fail every Turn it reconciles into rather than failing alone. A test about
+ * seeding passes its own.
+ */
 export function memoryUserCompositionV1(
   storage: MemoryStorage = new MemoryStorage(),
+  catalog: readonly SeededPluginV1[] = [],
 ): UserCompositionRpcV1 & { storage: MemoryStorage } {
   const state = { ctx: { storage } as unknown as DurableObjectState };
   const store = () => userCompositionStoreV1(state);
   const failures = () => userCompositionFailuresV1(state);
   return {
     storage,
-    // The unit harness reconciles against the deployment catalog with no
-    // admin-opened Plugins, the way a fresh account reads.
+    // Reconciled with no admin-opened Plugins, the way a fresh account reads.
     readComposition: (request) =>
       readUserCompositionV1(state, {
         userId: request.userId,
-        catalog: DEPLOYMENT_PLUGIN_CATALOG_V1,
+        catalog,
         adminOpened: [],
       }),
     readCompositionGeneration: (request) => store().read(request.generationId),

@@ -80,6 +80,53 @@ export function openStepPositionV1(
   return { turn: started.turn, step: started.step };
 }
 
+/**
+ * Puts one payload on the Turn's log, exactly where `send_to_user` puts one.
+ *
+ * `send_to_user` is not the only thing that sends: a Plugin's card tool draws
+ * a Card, and the Card it draws is the same event in the same place. The
+ * occurrence id is what makes a retried call the same send, so a caller
+ * recording two payloads in one tool call gives each its own.
+ */
+export async function recordSendToUserV1(
+  sessions: { get(sessionId: string): Session | undefined },
+  payload: SendToUserPayloadV1,
+  where: { sessionId: string; occurrenceId: string; tool: string },
+): Promise<{ status: "sent" } | { status: "refused"; reason: string }> {
+  const session = sessions.get(where.sessionId);
+  if (!session) {
+    return {
+      status: "refused",
+      reason: `session "${where.sessionId}" is unavailable, so the send cannot be recorded`,
+    };
+  }
+  let position: { turn: number; step: number };
+  try {
+    position = openStepPositionV1(session, where.tool);
+  } catch (error) {
+    return {
+      status: "refused",
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (
+    !session.events.some(
+      (event) =>
+        event.type === "send/to-user" &&
+        event.occurrenceId === where.occurrenceId,
+    )
+  ) {
+    session.append({
+      type: "send/to-user",
+      ...position,
+      occurrenceId: where.occurrenceId,
+      payload,
+    });
+    await session.flush();
+  }
+  return { status: "sent" };
+}
+
 /** What a recorded send tells the model it did. */
 function sendAcknowledgement(payload: SendToUserPayloadV1): string {
   switch (payload.type) {
@@ -416,34 +463,13 @@ function createSendToUserTool(
           `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      const session = sessions.get(context.sessionId);
-      if (!session) {
-        return refusal(
-          `${name} was refused: session "${context.sessionId}" is unavailable, so the send cannot be recorded`,
-        );
-      }
-      let position: { turn: number; step: number };
-      try {
-        position = openStepPositionV1(session, name);
-      } catch (error) {
-        return refusal(
-          `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      if (
-        !session.events.some(
-          (event) =>
-            event.type === "send/to-user" &&
-            event.occurrenceId === context.effectId,
-        )
-      ) {
-        session.append({
-          type: "send/to-user",
-          ...position,
-          occurrenceId: context.effectId,
-          payload,
-        });
-        await session.flush();
+      const recorded = await recordSendToUserV1(sessions, payload, {
+        sessionId: context.sessionId,
+        occurrenceId: context.effectId,
+        tool: name,
+      });
+      if (recorded.status !== "sent") {
+        return refusal(`${name} was refused: ${recorded.reason}`);
       }
       return {
         content: sendAcknowledgement(payload),

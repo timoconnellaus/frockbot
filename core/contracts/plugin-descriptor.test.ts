@@ -3,6 +3,7 @@ import { ISOLATE_CONTRACT_VERSION } from "./isolate.js";
 import {
   decodePluginDescriptorV1,
   PLUGIN_SLOTS_V1,
+  pluginCardToolNameV1,
   pluginNetworkAdmitsHostV1,
   servedPluginContractVersionsV1,
 } from "./plugin-descriptor.js";
@@ -373,6 +374,90 @@ describe("a plugin's services, triggers and settings", () => {
       ],
     });
     expect(admitted.skills?.[0]?.references).toHaveLength(1);
+  });
+
+  // ADR 0030: a card declares the values the Bot sends and the names the
+  // surface may press, and nothing about how it looks.
+  test("cards are bounded, uniquely named, and never shadow a declared tool", () => {
+    const card = (overrides: Record<string, unknown> = {}) => ({
+      id: "draft",
+      displayName: "Draft",
+      description: "Shows a draft.",
+      dataSchema: { type: "object", properties: {} },
+      actions: [{ name: "details", description: "Show the rest." }],
+      ...overrides,
+    });
+    const decoded = decodePluginDescriptorV1({ ...base, cards: [card()] });
+    expect(decoded.cards?.[0]?.actions).toEqual([
+      { name: "details", description: "Show the rest." },
+    ]);
+    expect(pluginCardToolNameV1(base.id, "draft")).toBe("weather_draft");
+
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        cards: Array.from({ length: 17 }, (_entry, index) =>
+          card({ id: `draft_${index}` }),
+        ),
+      }),
+    ).toThrow(/bounded array/);
+    expect(() =>
+      decodePluginDescriptorV1({ ...base, cards: [card(), card()] }),
+    ).toThrow(/duplicate ids/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        cards: [card(), card({ id: "reply" })],
+      }),
+    ).toThrow(/one action name on two cards/);
+    expect(() =>
+      decodePluginDescriptorV1({ ...base, cards: [card({ id: "Draft" })] }),
+    ).toThrow(/id is invalid/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        cards: [card({ dataSchema: { type: "string" } })],
+      }),
+    ).toThrow(/must describe an object/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        cards: [
+          card({
+            dataSchema: { type: "object", description: "x".repeat(70_000) },
+          }),
+        ],
+      }),
+    ).toThrow(/exceeds its bound/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        cards: [
+          card({
+            actions: Array.from({ length: 17 }, (_entry, index) => ({
+              name: `press_${index}`,
+              description: "Press.",
+            })),
+          }),
+        ],
+      }),
+    ).toThrow(/bounded array/);
+
+    // The card's tool is offered under the name below, so a tool of the same
+    // name would be two tools with one name.
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        tools: [
+          {
+            name: "weather_draft",
+            description: "Drafts",
+            inputSchema: { type: "object" },
+          },
+        ],
+        cards: [card()],
+      }),
+    ).toThrow(/a card of the same name/);
   });
 
   test("a settings schema describes an object and is bounded", () => {

@@ -19,6 +19,7 @@ import {
   decodePluginWorkerHookResultV1,
   decodePluginWorkerTriggerResultV1,
   decodePluginWorkerCardActionResultV1,
+  decodePluginWorkerRenderCardResultV1,
   decodePluginWorkerViewResultV1,
   isolateToolSchemaV1,
   ISOLATE_CONTRACT_VERSION,
@@ -48,6 +49,7 @@ import {
   type PluginWorkerTriggerResultV1,
   type PluginWorkerCardActionInvocationV1,
   type PluginWorkerCardActionResultV1,
+  type PluginWorkerRenderCardInvocationV1,
   type PluginWorkerViewInvocationV1,
   type PluginWorkerViewResultV1,
   type ToolDefinition,
@@ -57,6 +59,9 @@ import {
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
 import {
+  pluginCardToolNameV1,
+  validateAgainstJsonSchemaV1,
+  type PluginCardV1,
   type PluginDescriptorV1,
   type PluginGrantV1,
   type PluginSlotV1,
@@ -88,6 +93,25 @@ export interface BotIsolateMemberV1 {
  * `computer` are named in the vocabulary and wait on their hosts; a Plugin
  * declaring one is refused at resolve rather than mounted inert.
  */
+/** The `Identifier` a surface id is, as the Card seam bounds one. */
+const CARD_SURFACE_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+/** What that `Identifier` may weigh, which the minted id has to fit inside. */
+const CARD_SURFACE_ID_MAX_V1 = 128;
+
+/**
+ * The surface id one card draw is minted under. It names the Plugin and the
+ * card so a person reading durable state can tell what drew it, and the
+ * random half is what makes it new; a Plugin id long enough to crowd the
+ * bound loses the readable half rather than the uniqueness.
+ */
+function mintedCardSurfaceIdV1(pluginId: string, cardId: string): string {
+  const unique = crypto.randomUUID();
+  const prefix = `${pluginId}-${cardId}-`;
+  return prefix.length + unique.length <= CARD_SURFACE_ID_MAX_V1
+    ? `${prefix}${unique}`
+    : `card-${unique}`;
+}
+
 const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
   "http",
   "schedule",
@@ -177,6 +201,13 @@ export interface PluginWorkerHostOptions {
   /** Durably records a hook the worker skipped, before the loop continues. */
   recordHookFailure(failure: IsolateHookFailureV1): Promise<void>;
   /**
+   * Puts one Card on the Turn's log, exactly as `send_to_user` would. The
+   * host has the Plugin worker and the app has the Session, so the send is
+   * the app's to record; a host without one registers no card tools, which
+   * is what a standalone mount is.
+   */
+  sendCard?(send: PluginCardSendV1): Promise<PluginCardSendOutcomeV1>;
+  /**
    * The loopback `CAPABILITIES` binding, minted by the Bot's Durable Object
    * for this User. Per User, never per Turn: every call carries its scope.
    */
@@ -206,6 +237,24 @@ export interface PluginWorkerHostOptions {
    */
   enabled?: readonly string[];
 }
+
+/** One Card a Plugin's card tool asks the app to record on the Turn's log. */
+export interface PluginCardSendV1 {
+  pluginId: string;
+  cardId: string;
+  surfaceId: string;
+  /** The A2UI messages the Plugin drew, still undecoded. */
+  messages: Record<string, unknown>[];
+  context: ToolExecutionContext;
+}
+
+/**
+ * Whether the send landed. A refusal is the tool result the Bot reads, and
+ * `approvals` is how many decisions the Card asked the kernel to record: a
+ * Card that asks for one ends the Turn, exactly as an approval send does.
+ */
+export type PluginCardSendOutcomeV1 =
+  { status: "sent"; approvals: number } | { status: "refused"; reason: string };
 
 export const BOT_ISOLATE_DEFAULT_LIMITS: BotIsolateLimits = {
   cpuMs: 5_000,
@@ -668,6 +717,17 @@ export class PluginWorkerHost {
               ),
             );
           }
+          // One tool per declared card, in the same namespace as the Plugin's
+          // own tools: a card is something the Bot asks this Plugin to draw.
+          for (const card of member.descriptor.cards ?? []) {
+            const definition = this.cardDefinition(
+              member.packageId,
+              entrypoint,
+              card,
+            );
+            if (definition)
+              registered.push(this.options.tools.register(definition));
+          }
         }
         const declaring = new Map<BotIsolateHookEventNameV1, string[]>();
         for (const { member, health: plugin } of running) {
@@ -926,6 +986,16 @@ export class PluginWorkerHost {
       declaredTriggers.some((name, index) => name !== reportedTriggers[index])
     ) {
       return `plugin "${pluginId}" triggers do not match its declared triggers (declared:${declaredTriggers.join(",")} reported:${reportedTriggers.join(",")})`;
+    }
+    const declaredCards = (descriptor.cards ?? [])
+      .map((card) => card.id)
+      .toSorted();
+    const reportedCards = [...reported.cards].toSorted();
+    if (
+      declaredCards.length !== reportedCards.length ||
+      declaredCards.some((name, index) => name !== reportedCards[index])
+    ) {
+      return `plugin "${pluginId}" cards do not match its declared cards (declared:${declaredCards.join(",")} reported:${reportedCards.join(",")})`;
     }
     const declaredViews = (descriptor.views ?? [])
       .map((view) => view.surfaceId)
@@ -1203,6 +1273,138 @@ export class PluginWorkerHost {
       // the Turn's verdict and not a recording failure at all.
       if (error instanceof PluginFatalFailureError) throw error;
     }
+  }
+
+  /**
+   * One card's tool. The Bot sends the values; the kernel validates them
+   * against the card's declared schema, mints the surface id unless the Bot
+   * is updating a surface it already drew, has the Plugin draw the surface,
+   * and records the send on the Turn's log. The Plugin never names a surface,
+   * which is what stops one Plugin's card drawing over another's.
+   */
+  private cardDefinition(
+    pluginId: string,
+    entrypoint: PluginWorkerEntrypoint,
+    card: PluginCardV1,
+  ): ToolDefinition | undefined {
+    const sendCard = this.options.sendCard;
+    if (!sendCard) return undefined;
+    const deadlineMs = Math.min(
+      this.options.deadlineMs ?? BOT_ISOLATE_DEFAULT_DEADLINE_MS,
+      ISOLATE_MAX_DEADLINE_MS,
+    );
+    const options = this.options;
+    const name = pluginCardToolNameV1(pluginId, card.id);
+    return {
+      name,
+      description: `${card.description} Draws the "${card.displayName}" card in the conversation. Pass the surfaceId of a card you already drew to update it in place; leave it out to draw a new one.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          data: structuredClone(card.dataSchema),
+          surfaceId: {
+            type: "string",
+            description:
+              "The surface of a card you already drew, to update it in place.",
+          },
+        },
+        required: ["data"],
+        additionalProperties: false,
+      },
+      namespace: pluginId,
+      // A card is a bubble in the conversation, and two of them are read in
+      // the order they landed in.
+      orderedEffect: true,
+      execute: async (
+        input: unknown,
+        context: ToolExecutionContext,
+      ): Promise<ToolExecutionResult> => {
+        const request = (input ?? {}) as {
+          data?: unknown;
+          surfaceId?: unknown;
+        };
+        try {
+          validateAgainstJsonSchemaV1(request.data, card.dataSchema, "data");
+        } catch (error) {
+          return {
+            content: `${name} was refused: ${errorMessage(error)}`,
+            isError: true,
+          };
+        }
+        if (
+          request.surfaceId !== undefined &&
+          (typeof request.surfaceId !== "string" ||
+            !CARD_SURFACE_ID_V1.test(request.surfaceId))
+        ) {
+          return {
+            content: `${name} was refused: surfaceId is not a surface this Bot could have drawn`,
+            isError: true,
+          };
+        }
+        const surfaceId =
+          (request.surfaceId as string | undefined) ??
+          mintedCardSurfaceIdV1(pluginId, card.id);
+        const invocation: PluginWorkerRenderCardInvocationV1 = {
+          schemaVersion: 1,
+          pluginId,
+          cardId: card.id,
+          surfaceId,
+          data: request.data as Record<string, unknown>,
+          botId: options.botId,
+          sessionId: context.sessionId,
+          runId: options.runId,
+          turnId: options.turnId,
+          generationId: context.compositionGenerationId,
+          deadlineMs,
+        };
+        let rendered;
+        try {
+          rendered = decodePluginWorkerRenderCardResultV1(
+            await raceDeadline(
+              () => entrypoint.renderCard(invocation),
+              deadlineMs,
+              context.signal,
+            ),
+            `plugin "${pluginId}" render card result`,
+          );
+        } catch (error) {
+          return {
+            content: `${name} failed in its plugin: ${errorMessage(error)}`,
+            isError: true,
+          };
+        }
+        if (rendered.status !== "rendered") {
+          return {
+            content: `${name} drew nothing: ${rendered.reason ?? "the plugin refused"}`,
+            isError: true,
+          };
+        }
+        const outcome = await sendCard({
+          pluginId,
+          cardId: card.id,
+          surfaceId,
+          messages: rendered.messages,
+          context,
+        });
+        if (outcome.status !== "sent") {
+          return {
+            content: `${name} was refused: ${outcome.reason}`,
+            isError: true,
+          };
+        }
+        if (outcome.approvals > 0) {
+          return {
+            content: `The "${card.displayName}" card is in the conversation as surface "${surfaceId}", asking the user to decide. This Turn is over; their decision arrives as input on a later Turn.`,
+            isError: false,
+            endsTurn: true,
+          };
+        }
+        return {
+          content: `The "${card.displayName}" card is in the conversation as surface "${surfaceId}". Call ${name} again with that surfaceId to update it.`,
+          isError: false,
+        };
+      },
+    };
   }
 
   private definition(

@@ -70,6 +70,7 @@ function member(
     grants?: PluginGrantV1[];
     slots?: string[];
     views?: { slot: string; surfaceId: string }[];
+    cards?: { id: string; actions: string[] }[];
     tools?: string[];
     provides?: { name: string; version: number }[];
     consumes?: { name: string; version: number }[];
@@ -96,6 +97,25 @@ function member(
       ...(overrides.provides ? { provides: overrides.provides } : {}),
       ...(overrides.consumes ? { consumes: overrides.consumes } : {}),
       ...(overrides.views ? { views: overrides.views } : {}),
+      ...(overrides.cards
+        ? {
+            cards: overrides.cards.map((card) => ({
+              id: card.id,
+              displayName: card.id,
+              description: `The ${card.id} card.`,
+              dataSchema: {
+                type: "object",
+                properties: { subject: { type: "string" } },
+                required: ["subject"],
+                additionalProperties: false,
+              },
+              actions: card.actions.map((name) => ({
+                name,
+                description: name,
+              })),
+            })),
+          }
+        : {}),
       ...(overrides.slots ? { slots: overrides.slots } : {}),
       contextKeys: ["user", "bot", "session"],
     }),
@@ -122,6 +142,7 @@ function healthy(
     consumes: [],
     triggers: [],
     views: [],
+    cards: [],
     ...overrides,
   };
 }
@@ -150,6 +171,8 @@ function harness(
     receiveTrigger?: PluginWorkerEntrypoint["receiveTrigger"];
     view?: PluginWorkerEntrypoint["view"];
     cardAction?: PluginWorkerEntrypoint["cardAction"];
+    renderCard?: PluginWorkerEntrypoint["renderCard"];
+    sendCard?: PluginWorkerHostOptions["sendCard"];
     healthThrows?: string;
     deadlineMs?: number;
     artifacts?: Record<string, string>;
@@ -209,6 +232,13 @@ function harness(
         status: "drop" as const,
         reason: "this fake runs no card handlers",
       }),
+    renderCard: (invocation) =>
+      input.renderCard?.(invocation) ??
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        status: "drop" as const,
+        reason: "this fake draws no cards",
+      }),
     receiveTrigger: (invocation) => {
       triggerInvocations.push(invocation);
       if (input.receiveTrigger) return input.receiveTrigger(invocation);
@@ -255,6 +285,7 @@ function harness(
     turnId: "turn-1",
     generationId: "gen-1",
     turnType: "chat",
+    ...(input.sendCard === undefined ? {} : { sendCard: input.sendCard }),
     recordHookFailure: (failure) => {
       hookFailures.push(failure);
       return input.recordHookFailure?.(failure) ?? Promise.resolve();
@@ -1454,5 +1485,210 @@ describe("the Durable Object side of the deadline", () => {
     await expect(
       raceDeadline(() => Promise.resolve(1), 60_001),
     ).rejects.toThrow(/out of range/);
+  });
+});
+
+describe("a Plugin's cards", () => {
+  const messages = [
+    {
+      version: "v1.0",
+      createSurface: { surfaceId: "mail-draft-1", components: [] },
+    },
+  ];
+
+  function cardHarness(
+    input: {
+      renderCard?: PluginWorkerEntrypoint["renderCard"];
+      sendCard?: PluginWorkerHostOptions["sendCard"];
+    } = {},
+  ) {
+    const sends: unknown[] = [];
+    const subject = harness({
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) =>
+            healthy(pluginId, { cards: ["draft"] }),
+          ),
+        }) as never,
+      ...(input.renderCard ? { renderCard: input.renderCard } : {}),
+      sendCard:
+        input.sendCard ??
+        ((send) => {
+          sends.push(send);
+          return Promise.resolve({ status: "sent" as const, approvals: 0 });
+        }),
+    });
+    return { ...subject, sends };
+  }
+
+  const cardMember = () =>
+    member("mail", { cards: [{ id: "draft", actions: ["details"] }] });
+
+  test("one tool per card, in the Plugin's own namespace", async () => {
+    const subject = cardHarness();
+    await (await subject.host.mount([cardMember()])).commit();
+    const tool = subject.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    );
+    expect(tool?.namespace).toBe("mail");
+    expect(
+      (tool?.inputSchema as { required?: string[] } | undefined)?.required,
+    ).toEqual(["data"]);
+  });
+
+  test("the values are validated against the card's schema before the Plugin sees them", async () => {
+    const rendered: unknown[] = [];
+    const subject = cardHarness({
+      renderCard: (invocation) => {
+        rendered.push(invocation);
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          messages,
+        });
+      },
+    });
+    await (await subject.host.mount([cardMember()])).commit();
+    const tool = subject.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!;
+    const refused = await tool.execute!(
+      { data: { subject: 7 } },
+      executionContext(),
+    );
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toMatch(/must be a string/);
+    expect(rendered).toHaveLength(0);
+    expect(subject.sends).toHaveLength(0);
+  });
+
+  test("the kernel mints the surface, and the Bot may name one it already drew", async () => {
+    const subject = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          messages,
+        }),
+    });
+    await (await subject.host.mount([cardMember()])).commit();
+    const tool = subject.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!;
+    const drawn = await tool.execute!(
+      { data: { subject: "Hello" } },
+      executionContext(),
+    );
+    expect(drawn.isError).toBe(false);
+    const send = subject.sends[0] as { surfaceId: string; cardId: string };
+    expect(send.cardId).toBe("draft");
+    expect(send.surfaceId).toMatch(/^mail-draft-/);
+    expect(drawn.content).toContain(send.surfaceId);
+
+    await tool.execute!(
+      { data: { subject: "Hello" }, surfaceId: "mail-draft-1" },
+      executionContext(),
+    );
+    expect((subject.sends[1] as { surfaceId: string }).surfaceId).toBe(
+      "mail-draft-1",
+    );
+    const refused = await tool.execute!(
+      { data: { subject: "Hello" }, surfaceId: "not a surface" },
+      executionContext(),
+    );
+    expect(refused.isError).toBe(true);
+    expect(subject.sends).toHaveLength(2);
+  });
+
+  test("a card the Plugin refused, and a send the app refused, are the Bot's answer", async () => {
+    const refusing = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "drop" as const,
+          reason: "no draft to draw",
+        }),
+    });
+    await (await refusing.host.mount([cardMember()])).commit();
+    const drop = await refusing.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(drop).toMatchObject({ isError: true });
+    expect(drop.content).toMatch(/no draft to draw/);
+
+    const unrecorded = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          messages,
+        }),
+      sendCard: () =>
+        Promise.resolve({
+          status: "refused" as const,
+          reason: "the session is unavailable",
+        }),
+    });
+    await (await unrecorded.host.mount([cardMember()])).commit();
+    const refused = await unrecorded.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(refused).toMatchObject({ isError: true });
+    expect(refused.content).toMatch(/session is unavailable/);
+  });
+
+  // A Card that asks the person to decide is a question, so it ends the Turn
+  // the way an approval send does.
+  test("a card that asked for a decision ends the Turn", async () => {
+    const subject = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          messages,
+        }),
+      sendCard: () =>
+        Promise.resolve({ status: "sent" as const, approvals: 1 }),
+    });
+    await (await subject.host.mount([cardMember()])).commit();
+    const drawn = await subject.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(drawn.endsTurn).toBe(true);
+  });
+
+  test("a report whose cards differ from the descriptor fails that Plugin alone", async () => {
+    const subject = harness({
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) => healthy(pluginId)),
+        }) as never,
+      sendCard: () =>
+        Promise.resolve({ status: "sent" as const, approvals: 0 }),
+    });
+    const prepared = await subject.host.mount([cardMember()]);
+    expect(prepared.mounted).toEqual([]);
+    expect(prepared.failures[0]?.message).toMatch(/cards do not match/);
+  });
+
+  test("a host with no way to record a send registers no card tools", async () => {
+    const subject = harness({
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) =>
+            healthy(pluginId, { cards: ["draft"] }),
+          ),
+        }) as never,
+    });
+    await (await subject.host.mount([cardMember()])).commit();
+    expect(
+      subject.definitions.map((definition) => definition.name),
+    ).not.toContain("mail_draft");
   });
 });

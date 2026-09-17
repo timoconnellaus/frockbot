@@ -95,6 +95,38 @@ export interface PluginSkillV1 {
   references?: { path: string; text: string }[];
 }
 
+/**
+ * One Card a plugin declares (ADR 0030): the values the Bot sends and the
+ * names a person may press on the surface those values are drawn as.
+ *
+ * The surface itself is deliberately not here. A plugin's card may look one
+ * way with an approval pending and another once it has settled, so the
+ * components are what `renderCard` answers with — the descriptor declares
+ * only what the Bot must fill in and what the card may ask for back.
+ */
+export interface PluginCardV1 {
+  id: string;
+  displayName: string;
+  description: string;
+  /** A JSON Schema for the values the Bot sends; the kernel validates against it. */
+  dataSchema: Record<string, unknown>;
+  /** The `<action>` half of every `plugin/<pluginId>/<action>` this card may raise. */
+  actions: { name: string; description: string }[];
+}
+
+/**
+ * The tool one card is offered to the Bot as. Plugin tools are registered in
+ * the plugin's own Tool Namespace, so the id is qualified rather than
+ * prefixed: `email_draft`, not `card_email_draft`.
+ *
+ * A plugin id may hold a dash and a tool name may not, so the dashes become
+ * underscores. Nothing collides: a plugin id holds no underscore, so the two
+ * spellings cannot both exist.
+ */
+export function pluginCardToolNameV1(pluginId: string, cardId: string): string {
+  return `${pluginId.replaceAll("-", "_")}_${cardId}`;
+}
+
 /** One kind of event a plugin can receive through the app-owned hooks route. */
 export interface PluginTriggerV1 {
   name: string;
@@ -120,6 +152,8 @@ export interface PluginDescriptorV1 {
   triggers?: PluginTriggerV1[];
   /** Offered to a Bot with this plugin enabled, as `plugin/<id>/<slug>`. */
   skills?: PluginSkillV1[];
+  /** The Cards the plugin draws, one Bot-facing tool each. */
+  cards?: PluginCardV1[];
   slots?: PluginSlotV1[];
   views?: PluginViewV1[];
   /** Always all three: a plugin sees the whole context or none of it. */
@@ -130,6 +164,9 @@ const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const PLUGIN_SERVICE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+/** A card id, short enough that `<pluginId>_<cardId>` is still a tool name. */
+const PLUGIN_CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
+const PLUGIN_CARD_ACTION_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 /** A lowercase hostname, optionally with one leading wildcard label. */
 const PLUGIN_HOST =
   /^(\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -154,6 +191,9 @@ const MAX_PLUGIN_SKILL_BYTES_V1 = 65_536;
  */
 const MAX_PLUGIN_SKILLS_TOTAL_BYTES_V1 = 262_144;
 const MAX_PLUGIN_SETTINGS_SCHEMA_BYTES_V1 = 65_536;
+const MAX_PLUGIN_CARDS_V1 = 16;
+const MAX_PLUGIN_CARD_ACTIONS_V1 = 16;
+const MAX_PLUGIN_CARD_SCHEMA_BYTES_V1 = 65_536;
 
 /**
  * The contract versions this deployment serves: the current one and the one
@@ -437,6 +477,86 @@ function decodePluginSkillsV1(input: unknown, label: string): PluginSkillV1[] {
   return skills;
 }
 
+function decodePluginCardsV1(input: unknown, label: string): PluginCardV1[] {
+  const cards = boundedArray(input, label, MAX_PLUGIN_CARDS_V1).map(
+    (card, index) => {
+      const itemLabel = `${label}[${index}]`;
+      const value = record(card, itemLabel);
+      exactKeys(
+        value,
+        ["id", "displayName", "description", "dataSchema", "actions"],
+        [],
+        itemLabel,
+      );
+      const id = boundedString(value.id, `${itemLabel}.id`, 32);
+      if (!PLUGIN_CARD_ID.test(id))
+        throw new Error(`${itemLabel}.id is invalid`);
+      const dataSchema = record(value.dataSchema, `${itemLabel}.dataSchema`);
+      if (dataSchema.type !== "object") {
+        throw new Error(`${itemLabel}.dataSchema must describe an object`);
+      }
+      const schemaText = JSON.stringify(dataSchema);
+      if (schemaText.length > MAX_PLUGIN_CARD_SCHEMA_BYTES_V1) {
+        throw new Error(`${itemLabel}.dataSchema exceeds its bound`);
+      }
+      const actions = boundedArray(
+        value.actions,
+        `${itemLabel}.actions`,
+        MAX_PLUGIN_CARD_ACTIONS_V1,
+      ).map((action, position) => {
+        const actionLabel = `${itemLabel}.actions[${position}]`;
+        const entry = record(action, actionLabel);
+        exactKeys(entry, ["name", "description"], [], actionLabel);
+        const name = boundedString(entry.name, `${actionLabel}.name`, 64);
+        if (!PLUGIN_CARD_ACTION_NAME.test(name)) {
+          throw new Error(`${actionLabel}.name is invalid`);
+        }
+        return {
+          name,
+          description: boundedString(
+            entry.description,
+            `${actionLabel}.description`,
+            1_024,
+          ),
+        };
+      });
+      if (
+        new Set(actions.map((action) => action.name)).size !== actions.length
+      ) {
+        throw new Error(`${itemLabel}.actions contains duplicate names`);
+      }
+      return {
+        id,
+        displayName: boundedString(
+          value.displayName,
+          `${itemLabel}.displayName`,
+          128,
+        ),
+        description: boundedString(
+          value.description,
+          `${itemLabel}.description`,
+          1_024,
+        ),
+        dataSchema: JSON.parse(schemaText) as Record<string, unknown>,
+        actions,
+      };
+    },
+  );
+  if (new Set(cards.map((card) => card.id)).size !== cards.length) {
+    throw new Error(`${label} contains duplicate ids`);
+  }
+  // The action namespace is `plugin/<pluginId>/<action>` and has no card in
+  // it, so an action name is the plugin's, not one card's: two cards claiming
+  // one name would be two handlers behind one press.
+  const actionNames = cards.flatMap((card) =>
+    card.actions.map((action) => action.name),
+  );
+  if (new Set(actionNames).size !== actionNames.length) {
+    throw new Error(`${label} declares one action name on two cards`);
+  }
+  return cards;
+}
+
 function decodePluginSettingsSchemaV1(
   input: unknown,
   label: string,
@@ -476,6 +596,7 @@ export function decodePluginDescriptorV1(
       "consumes",
       "triggers",
       "skills",
+      "cards",
       "slots",
       "views",
     ],
@@ -549,6 +670,29 @@ export function decodePluginDescriptorV1(
     value.skills === undefined
       ? undefined
       : decodePluginSkillsV1(value.skills, `${label}.skills`);
+  const cards =
+    value.cards === undefined
+      ? undefined
+      : decodePluginCardsV1(value.cards, `${label}.cards`);
+  // A card is offered as a tool of its own in the plugin's namespace, so a
+  // declared tool of that name would be two tools with one name — and a card
+  // whose tool name would not be a tool name at all is refused here rather
+  // than mounted as a card nothing can call.
+  const cardTools = (cards ?? []).map((card) => {
+    const toolName = pluginCardToolNameV1(id, card.id);
+    if (!PLUGIN_TOOL_NAME.test(toolName)) {
+      throw new Error(
+        `${label}.cards names a card whose tool "${toolName}" is not a tool name`,
+      );
+    }
+    return toolName;
+  });
+  const shadowed = tools.find((tool) => cardTools.includes(tool.name));
+  if (shadowed) {
+    throw new Error(
+      `${label}.tools declares "${shadowed.name}", which a card of the same name is offered as`,
+    );
+  }
   const slots =
     value.slots === undefined
       ? undefined
@@ -583,6 +727,7 @@ export function decodePluginDescriptorV1(
     ...(consumes === undefined ? {} : { consumes }),
     ...(triggers === undefined ? {} : { triggers }),
     ...(skills === undefined ? {} : { skills }),
+    ...(cards === undefined ? {} : { cards }),
     ...(slots === undefined ? {} : { slots }),
     ...(views === undefined ? {} : { views }),
     contextKeys: [...PLUGIN_CONTEXT_KEYS_V1],

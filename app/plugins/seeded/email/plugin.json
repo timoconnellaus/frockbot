@@ -1,0 +1,64 @@
+{
+  "id": "email",
+  "displayName": "Email",
+  "version": "1",
+  "contractVersion": 5,
+  "tools": [
+    {
+      "name": "email_send",
+      "description": "Send the email a draft card is showing, after the person approved it. Takes the card's surfaceId.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "surfaceId": { "type": "string" } },
+        "required": ["surfaceId"]
+      }
+    },
+    {
+      "name": "email_discard",
+      "description": "Discard the email a draft card is showing, after the person declined it. Takes the card's surfaceId.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "surfaceId": { "type": "string" } },
+        "required": ["surfaceId"]
+      }
+    }
+  ],
+  "hooks": [],
+  "grants": ["http", "storage"],
+  "network": { "hosts": ["api.cloudflare.com"] },
+  "cards": [
+    {
+      "id": "draft",
+      "displayName": "Email draft",
+      "description": "Show the person an email you have drafted and ask them to send or discard it.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "maxItems": 16
+          },
+          "cc": {
+            "type": "array",
+            "items": { "type": "string" },
+            "maxItems": 16
+          },
+          "subject": { "type": "string", "maxLength": 512 },
+          "inReplyTo": { "type": "string", "maxLength": 512 },
+          "body": { "type": "string", "maxLength": 64000 }
+        },
+        "required": ["to", "subject", "body"],
+        "additionalProperties": false
+      },
+      "actions": [
+        {
+          "name": "details",
+          "description": "Show or hide the rest of the draft's headers, without costing a Turn."
+        }
+      ]
+    }
+  ],
+  "contextKeys": ["user", "bot", "session"]
+}

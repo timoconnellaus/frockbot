@@ -26,6 +26,7 @@ import {
   readBotPluginRosterV1,
   withPluginWorkerV1,
 } from "@frockbot/app/plugins/worker-bot";
+import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
 import {
   cardActionRouteV1,
   cardKeyV1,
@@ -270,6 +271,24 @@ export async function cardAction(
   }
   if (route.kind === "plugin") {
     const runId = `card-action:${command.surfaceId}:${card.revision}`;
+    /**
+     * A handler that threw, overran or answered with something the Card
+     * cannot take is charged to its Plugin, the way a hook failure is (ADR
+     * 0030): three in a row and the Plugin is off for this Bot. The verdict
+     * is not acted on here — a press is not a Turn, and there is nothing to
+     * fail — but the count and the notice are the same ones.
+     */
+    const chargeFailure = async (reason: string): Promise<void> => {
+      try {
+        await notePluginFailureV1(
+          state,
+          { runId, generationId: card.runId },
+          { pluginId: route.pluginId, phase: "hook", message: reason },
+        );
+      } catch {
+        // Recording a failure must not be what fails the press.
+      }
+    };
     // A Plugin that cannot be reached at all is the same answer as one whose
     // handler threw: the Card is left exactly as it was and the person is
     // told why. A press on a card must not be able to fail a read of it.
@@ -281,23 +300,27 @@ export async function cardAction(
         runId,
       });
     } catch (error) {
+      const failure = cardFailureV1(
+        error instanceof Error ? error.message : "the plugin was unavailable",
+      );
+      await chargeFailure(failure);
       return {
         schemaVersion: 1,
         routed: "plugin",
         card: projectCardV1(card),
-        failure: cardFailureV1(
-          error instanceof Error ? error.message : "the plugin was unavailable",
-        ),
+        failure,
       };
     }
     if (outcome.status !== "rendered") {
+      const failure = cardFailureV1(
+        outcome.reason ?? "the plugin handler changed nothing",
+      );
+      await chargeFailure(failure);
       return {
         schemaVersion: 1,
         routed: "plugin",
         card: projectCardV1(card),
-        failure: cardFailureV1(
-          outcome.reason ?? "the plugin handler changed nothing",
-        ),
+        failure,
       };
     }
     const folded = await foldHandlerMessages(
@@ -306,6 +329,24 @@ export async function cardAction(
       runId,
       outcome.messages,
     );
+    // The one thing a handler may say to the Bot rather than to the card.
+    // Queued only when the fold landed: a Card the person is not looking at
+    // must not put words in front of the Bot about a change nobody saw.
+    if (outcome.input !== undefined && folded.failure === undefined) {
+      await state.ctx.storage.transaction(async (transaction) => {
+        await enqueuePendingBotInputV1(transaction, {
+          schemaVersion: 1,
+          kind: "card-action",
+          pressId: `${command.commandId ?? runId}:${route.action}`,
+          surfaceId: command.surfaceId,
+          name: command.event.name,
+          context: outcome.input!.slice(0, CARD_ACTION_CONTEXT_MAX_V1),
+          createdAt: new Date().toISOString(),
+        });
+      });
+    }
+    // A fold the Card's own budgets refused is the handler's doing too.
+    if (folded.failure !== undefined) await chargeFailure(folded.failure);
     return {
       schemaVersion: 1,
       routed: "plugin",

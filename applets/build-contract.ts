@@ -74,6 +74,8 @@ export const APPLET_BUILD_LIMITS = {
   services: 32,
   triggers: 16,
   views: 16,
+  /** Cards one Plugin may draw, matching the descriptor's bound. */
+  cards: 16,
   /** Diagnostics one failure may carry. */
   diagnostics: 200,
   /** Failure text on a diagnostic or a problem response. */
@@ -89,6 +91,8 @@ const SERVICE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 const TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 /** The `Identifier` a `ViewDocument.surfaceId` accepts; matches the Plugin descriptor. */
 const SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+/** A card id, as the Plugin descriptor bounds one. */
+const CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
 /** The loop events a Plugin may hook, as `BOT_ISOLATE_HOOK_EVENTS_V1` lists them. */
 export const PLUGIN_BUILD_HOOK_EVENTS_V1 = [
   "system-prompt/assemble",
@@ -196,6 +200,8 @@ export interface PluginBuildManifestV1 {
   triggers: string[];
   /** The surface ids the module exports a view for, one function each. */
   views: string[];
+  /** The card ids the module draws, one `render` each (ADR 0030). */
+  cards: string[];
   hashes: { module: string };
 }
 
@@ -649,7 +655,16 @@ export function decodePluginBuildManifestV1(
   const value = object(input, label);
   exactly(
     value,
-    ["contract", "tools", "hooks", "services", "triggers", "views", "hashes"],
+    [
+      "contract",
+      "tools",
+      "hooks",
+      "services",
+      "triggers",
+      "views",
+      "cards",
+      "hashes",
+    ],
     label,
   );
   if (value.contract !== 1) fail(`${label} contract is not 1`);
@@ -697,6 +712,14 @@ export function decodePluginBuildManifestV1(
       SURFACE_ID,
       APPLET_BUILD_LIMITS.views,
       `${label} views`,
+    ),
+    // A build that predates cards reports none, which is what a Plugin that
+    // draws none also reports.
+    cards: boundedNames(
+      value.cards ?? [],
+      CARD_ID,
+      APPLET_BUILD_LIMITS.cards,
+      `${label} cards`,
     ),
     hashes: { module: hash(hashes.module, `${label} module hash`) },
   };

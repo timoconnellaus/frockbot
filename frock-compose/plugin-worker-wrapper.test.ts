@@ -8,6 +8,7 @@ import {
   BOT_ISOLATE_ERROR_TEXT_SOURCE,
   BOT_ISOLATE_HOOK_CHAIN_SOURCE,
   BOT_ISOLATE_HOOK_VALUE_KEYS_V1,
+  BOT_ISOLATE_CARD_SOURCE,
   BOT_ISOLATE_DECLARATION_SOURCE,
   BOT_ISOLATE_INVOCATION_SOURCE,
   BOT_ISOLATE_MODEL_SOURCE,
@@ -43,6 +44,9 @@ const decodeTriggerInvocation = new Function(
 const decodeCardActionInvocation = new Function(
   `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeCardActionInvocation;`,
 )() as Decode;
+const decodeRenderCardInvocation = new Function(
+  `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeRenderCardInvocation;`,
+)() as Decode;
 
 type NarrowContext = (
   env: Record<string, unknown>,
@@ -56,13 +60,14 @@ const narrowContext = new Function(
 )() as NarrowContext;
 
 const declarations = new Function(
-  `${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_DECLARATION_SOURCE}\nreturn { declaredTools, declaredHooks, declaredServices, declaredTriggers, declaredViews };`,
+  `${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_DECLARATION_SOURCE}\nreturn { declaredTools, declaredHooks, declaredServices, declaredTriggers, declaredViews, declaredCards };`,
 )() as {
   declaredTools: (module: unknown, pluginId: string) => unknown[];
   declaredHooks: (module: unknown, pluginId: string) => string[];
   declaredServices: (module: unknown, pluginId: string) => unknown;
   declaredTriggers: (module: unknown, pluginId: string) => string[];
   declaredViews: (module: unknown, pluginId: string) => string[];
+  declaredCards: (module: unknown, pluginId: string) => string[];
 };
 
 function invocation(overrides: Record<string, unknown> = {}) {
@@ -939,5 +944,245 @@ describe("the generated wrapper's view rendering", () => {
     );
     expect(late.status).toBe("drop");
     expect(late.reason).toMatch(/exceeded its deadline of 25ms/);
+  });
+});
+
+type CardRun = (
+  invocation: Record<string, unknown>,
+  resolve: (pluginId: string) => unknown,
+  contextFor: (
+    identity: Record<string, unknown>,
+    plugin: unknown,
+    deadlineMs: number,
+  ) => unknown,
+) => Promise<{
+  schemaVersion: number;
+  status: string;
+  reason?: string;
+  messages?: unknown[];
+  input?: string;
+}>;
+
+const { runRenderCard, runCardAction } = new Function(
+  `${BOT_ISOLATE_DEADLINE_SOURCE}\n${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_ERROR_TEXT_SOURCE}\n${BOT_ISOLATE_CARD_SOURCE}\nreturn { runRenderCard, runCardAction };`,
+)() as { runRenderCard: CardRun; runCardAction: CardRun };
+
+describe("the generated wrapper's card handlers", () => {
+  const messages = [{ version: "v1.0", createSurface: { surfaceId: "s-1" } }];
+
+  function cardPlugin(
+    card: Record<string, unknown>,
+    cards: string[] = ["draft"],
+  ) {
+    return { pluginId: "mail", cards, module: { cards: { draft: card } } };
+  }
+
+  function renderInvocation(overrides: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: 1,
+      pluginId: "mail",
+      cardId: "draft",
+      surfaceId: "mail-draft-1",
+      data: { subject: "Hello" },
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "run-1",
+      turnId: "run-1",
+      generationId: "gen-1",
+      deadlineMs: 1_000,
+      ...overrides,
+    };
+  }
+
+  function pressInvocation(overrides: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: 1,
+      pluginId: "mail",
+      surfaceId: "mail-draft-1",
+      action: "details",
+      context: { expanded: true },
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "card-action:mail-draft-1:1",
+      turnId: "card-action:mail-draft-1:1",
+      generationId: "gen-1",
+      deadlineMs: 1_000,
+      ...overrides,
+    };
+  }
+
+  const contextFor = (
+    _identity: Record<string, unknown>,
+    _plugin: unknown,
+    deadlineMs: number,
+  ) => ({ deadlineMs });
+
+  test("a render is handed the kernel's surface and the Bot's values", async () => {
+    const seen: unknown[] = [];
+    expect(
+      await runRenderCard(
+        renderInvocation(),
+        () =>
+          cardPlugin({
+            render: (payload: unknown) => {
+              seen.push(payload);
+              return messages;
+            },
+          }),
+        contextFor,
+      ),
+    ).toEqual({ schemaVersion: 1, status: "rendered", messages });
+    expect(seen).toEqual([
+      { surfaceId: "mail-draft-1", data: { subject: "Hello" } },
+    ]);
+  });
+
+  test("a render never carries the line a press may leave for the Bot", async () => {
+    expect(
+      await runRenderCard(
+        renderInvocation(),
+        () => cardPlugin({ render: () => ({ messages, input: "read me" }) }),
+        contextFor,
+      ),
+    ).toEqual({ schemaVersion: 1, status: "rendered", messages });
+  });
+
+  test("an undeclared card, nothing, a throw and an overrun all drop", async () => {
+    expect(
+      await runRenderCard(
+        renderInvocation(),
+        () => cardPlugin({ render: () => messages }, ["other"]),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: 'plugin "mail" did not declare card "draft"',
+    });
+    expect(
+      await runRenderCard(
+        renderInvocation(),
+        () => cardPlugin({ render: () => undefined }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "the card handler drew nothing",
+    });
+    expect(
+      await runRenderCard(
+        renderInvocation(),
+        () =>
+          cardPlugin({
+            render: () => {
+              throw new Error("no draft today");
+            },
+          }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "no draft today",
+    });
+    const late = await runRenderCard(
+      renderInvocation({ deadlineMs: 25 }),
+      () => cardPlugin({ render: () => never() }),
+      contextFor,
+    );
+    expect(late.status).toBe("drop");
+    expect(late.reason).toMatch(/exceeded its deadline of 25ms/);
+  });
+
+  test("a press finds its handler by name, and may leave one line for the Bot", async () => {
+    const presses: unknown[] = [];
+    expect(
+      await runCardAction(
+        pressInvocation(),
+        () =>
+          cardPlugin({
+            render: () => messages,
+            actions: {
+              details: (press: unknown) => {
+                presses.push(press);
+                return { messages, input: "they opened it" };
+              },
+            },
+          }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "rendered",
+      messages,
+      input: "they opened it",
+    });
+    expect(presses).toEqual([
+      {
+        surfaceId: "mail-draft-1",
+        action: "details",
+        context: { expanded: true },
+        dataModel: undefined,
+      },
+    ]);
+  });
+
+  test("a press at a name no card declares is a drop, and the Card is left alone", async () => {
+    expect(
+      await runCardAction(
+        pressInvocation({ action: "send" }),
+        () =>
+          cardPlugin({
+            render: () => messages,
+            actions: { details: () => messages },
+          }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: 'plugin "mail" declares no card action "send"',
+    });
+  });
+
+  test("a card must export a render function, and its id must be one", () => {
+    expect(
+      declarations.declaredCards(
+        { cards: { draft: { render: () => undefined } } },
+        "mail",
+      ),
+    ).toEqual(["draft"]);
+    expect(declarations.declaredCards({}, "mail")).toEqual([]);
+    expect(() =>
+      declarations.declaredCards({ cards: { draft: {} } }, "mail"),
+    ).toThrow(/must export a render function/);
+    expect(() =>
+      declarations.declaredCards(
+        { cards: { Draft: { render: () => undefined } } },
+        "mail",
+      ),
+    ).toThrow(/invalid id/);
+    expect(() =>
+      declarations.declaredCards(
+        { cards: { draft: { render: () => undefined, actions: { go: 1 } } } },
+        "mail",
+      ),
+    ).toThrow(/must be a function/);
+  });
+
+  test("a render invocation is decoded on the way in", () => {
+    expect(decodeRenderCardInvocation(renderInvocation())).toMatchObject({
+      cardId: "draft",
+    });
+    expect(() =>
+      decodeRenderCardInvocation(renderInvocation({ cardId: "Draft" })),
+    ).toThrow(/cardId is invalid/);
+    expect(() =>
+      decodeRenderCardInvocation(renderInvocation({ data: "values" })),
+    ).toThrow(/data is invalid/);
+    expect(() =>
+      decodeRenderCardInvocation(renderInvocation({ extra: 1 })),
+    ).toThrow(/invalid fields/);
   });
 });

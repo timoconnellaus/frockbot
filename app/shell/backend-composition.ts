@@ -30,11 +30,14 @@ import {
   type BotIsolateLoader,
 } from "@frockbot/frock-compose";
 import {
+  decodeSendToUserPayloadV1,
   type BotCapabilitiesStub,
   type PersistSessionEvents,
   type SessionEvent,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+import { recordSendToUserV1 } from "./agent.js";
+import { bindCardApprovalsV1 } from "./cards.js";
 
 /**
  * The generation a Bot starts on: empty.
@@ -239,6 +242,80 @@ export function createShellCompositionHost(
               ...(options.subagentRole === undefined
                 ? {}
                 : { subagentRole: options.subagentRole }),
+              // A Plugin's card tool draws a Card the same way the Bot's own
+              // `send_to_user` does: the messages are decoded at the seam
+              // every payload is decoded at, the Approvals the surface asks
+              // for are minted here rather than by the Plugin, and both land
+              // on this Turn's log.
+              sendCard: async (send) => {
+                let payload;
+                try {
+                  payload = decodeSendToUserPayloadV1(
+                    {
+                      type: "card",
+                      surfaceId: send.surfaceId,
+                      messages: send.messages,
+                    },
+                    `plugin "${send.pluginId}" card`,
+                  );
+                } catch (error) {
+                  return {
+                    status: "refused" as const,
+                    reason:
+                      error instanceof Error ? error.message : String(error),
+                  };
+                }
+                if (payload.type !== "card") {
+                  return { status: "refused" as const, reason: "not a card" };
+                }
+                const bound = bindCardApprovalsV1(
+                  payload.messages,
+                  () => `card-approval-${crypto.randomUUID()}`,
+                  `${send.pluginId}: ${send.cardId}`,
+                );
+                const tool = `${send.pluginId}_${send.cardId}`;
+                const recorded = await recordSendToUserV1(
+                  runtime.services.sessions,
+                  { ...payload, messages: bound.messages },
+                  {
+                    sessionId: send.context.sessionId,
+                    occurrenceId: send.context.effectId,
+                    tool,
+                  },
+                );
+                if (recorded.status !== "sent") {
+                  return {
+                    status: "refused" as const,
+                    reason: recorded.reason,
+                  };
+                }
+                for (const [index, approval] of bound.approvals.entries()) {
+                  const asked = await recordSendToUserV1(
+                    runtime.services.sessions,
+                    // Decoded like any other payload before it reaches the
+                    // log: the words came off a component a Plugin wrote.
+                    decodeSendToUserPayloadV1(
+                      { type: "approval", ...approval },
+                      `plugin "${send.pluginId}" card approval`,
+                    ),
+                    {
+                      sessionId: send.context.sessionId,
+                      // Its own occurrence: one tool call records the Card and
+                      // the decisions it asks for, and a retry must be the
+                      // same send of each rather than the same send of one.
+                      occurrenceId: `${send.context.effectId}:approval:${index}`,
+                      tool,
+                    },
+                  );
+                  if (asked.status !== "sent") {
+                    return { status: "refused" as const, reason: asked.reason };
+                  }
+                }
+                return {
+                  status: "sent" as const,
+                  approvals: bound.approvals.length,
+                };
+              },
               recordHookFailure: async (failure) => {
                 const session = runtime.services.sessions.get(
                   options.sessionId,

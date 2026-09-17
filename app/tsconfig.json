@@ -11,5 +11,6 @@
     "types": ["bun", "node", "@cloudflare/workers-types"]
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "//": "A seeded Plugin's source is not app code: it is written against `@frockbot/applet-sdk/plugin` and type-checked by the Plugin build, exactly as an authored Plugin's is. Its generated artifact beside it is app code and stays in.",
+  "exclude": ["node_modules", "dist", "plugins/seeded/*/plugin.ts"]
 }
