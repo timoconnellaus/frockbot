@@ -114,6 +114,7 @@ describe("the object-storage Workspace store in Workerd", () => {
     // turns it on, and the Skill goes where the `applet_*` tools go.
     expect(payload.skills.map((skill) => skill.path)).toEqual([
       SKILL_PATH,
+      "managed/a2ui/SKILL.md",
       "managed/add-connector/SKILL.md",
       "managed/export-bot-template/SKILL.md",
       "managed/import-bot-template/SKILL.md",
