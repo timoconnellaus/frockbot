@@ -368,7 +368,12 @@ interface LiveCall {
    * tearing the session down mid-turn would cut whichever came second.
    */
   pendingSwitch?: { botId: string; name: string };
-  /** Delegations this call has admitted, so the burst cap can bite. */
+  /**
+   * Hand-offs admitted in the model's current turn, so the burst cap bites on
+   * a model that calls `subagent` in a loop and not on a long conversation
+   * that hands off now and then. Reset when the turn ends; the day's own cap
+   * is the ledger's.
+   */
   delegations: number;
   /** The newest run the host admitted, so its function call can be recorded. */
   lastDelegationRunId?: string;
@@ -2031,9 +2036,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         );
       }
       // The next turn is the next thing the person says, so what they said
-      // for this one is spent.
+      // for this one is spent, and so is this turn's hand-off burst.
       call.transcript = "";
       call.dropping = false;
+      call.delegations = 0;
       const spokenText = spoken;
       if (spokenText) {
         this.sendRaw(connection, { type: "transcript_end", text: spokenText });
