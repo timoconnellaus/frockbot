@@ -870,14 +870,11 @@ export async function openBotSettings(page: Page): Promise<void> {
 /**
  * Turn a Package on from its Plugins row.
  *
- * The wheel is the only way down a Flutter list: it is a canvas, so there is
- * nothing for `scrollIntoView` to scroll. The loop stops on the control
- * *existing* rather than on its box reaching a coordinate — a row that is off
- * screen is not in the accessibility tree at all, so presence is the signal,
- * and once the node exists Playwright's own scroll-into-view covers the last
- * few pixels of the press. Steering by a measured gap does not converge: the
- * semantics boxes are rebuilt behind the paint, so each correction is computed
- * from a stale position and the list oscillates past the row forever.
+ * The search box, not a scroll: a Flutter list publishes semantics only for
+ * the rows at or near the viewport, so a row further down the catalogue has no
+ * node at all — nothing to locate and nothing for `scrollIntoView` to take
+ * hold of. Filtering brings the one row this wants to the top of a short list,
+ * which takes the scroll out of the path entirely.
  */
 export async function enablePackage(page: Page, title: string): Promise<void> {
   if (title === "Ollama Cloud") {
@@ -1063,14 +1060,18 @@ export async function provisionThroughUi(
     perBotModels?: boolean;
   },
 ): Promise<void> {
-  // Provisioned in a window tall enough that a Plugins row is on screen
-  // without scrolling, and restored afterwards. Steering a Flutter list by the
-  // wheel is not something to build a suite on: the engine drops a row out of
-  // the accessibility tree as the list moves and does not reliably put it
-  // back, so a row can be absent for a dozen consecutive scroll steps while
-  // its neighbours are present throughout. Nothing about turning a Package on
-  // is a claim about the size of the window, so the size a spec means is the
-  // one it set, and this is not it.
+  // Provisioned in a window tall enough that the rows this path presses are on
+  // screen without scrolling, and restored afterwards. Steering a Flutter list
+  // by the wheel is not something to build a suite on: the engine drops a row
+  // out of the accessibility tree as the list moves and does not reliably put
+  // it back, so a row can be absent for a dozen consecutive scroll steps while
+  // its neighbours are present throughout. Nothing about provisioning is a
+  // claim about the size of the window, so the size a spec means is the one it
+  // set, and this is not it. The height is empirical rather than counted off a
+  // row: 1800px is what this path is known to clear today — the rows the
+  // provider and default-model steps press, each in the tree when it is
+  // pressed. A step that adds rows to either of those lists means measuring
+  // again here, not assuming there is headroom left.
   const viewport = page.viewportSize();
   await page.setViewportSize({ width: 1280, height: 1800 });
   await openApplication(page, options.userId);

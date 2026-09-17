@@ -34,7 +34,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 15. ~~**The `genui` / `a2ui_core` dependency is inert.**~~ **Fixed.** The A2UI path is gone: both packages, the vendored `0.9.1` schemas, the catalog adapter, `FormPreview`, the three `A2ui*` wire types and the qualification-form route the preview posted to. The `ViewNode` renderer (`apps/native/lib/view/`) replaces it. A2UI is back as of ADR 0030, this time with a caller: `genui` draws Cards in the transcript (`apps/native/lib/cards/`), and `ViewNode` keeps the settings pages.
 
-16. ~~**The dynamic Package system has no dynamic member.**~~ **Fixed.** Bot authoring landed with [ADR 0026](adr/0026-plugins.md) step 7: a Bot publishes a Plugin, the User approves the card, and the generation the User Durable Object records carries a member with an `artifact` ([architecture.md, "Built-in versus dynamic"](architecture.md#built-in-versus-dynamic)). The deployment catalog is still empty, so seeded Plugins produce none.
+16. ~~**The dynamic Package system has no dynamic member.**~~ **Fixed.** Bot authoring landed with [ADR 0026](adr/0026-plugins.md) step 7: a Bot publishes a Plugin, the User approves the card, and the generation the User Durable Object records carries a member with an `artifact` ([architecture.md, "Built-in versus dynamic"](architecture.md#built-in-versus-dynamic)). The deployment catalog is no longer empty either: step 6 seeds the `email` Plugin ([architecture.md, §5 Composition](architecture.md#5-composition)).
 
 17. **Applet members carry a `provenance: PackageProvenanceV1` field** (`core/durable/composition/generation.ts`) whose variants describe Packages, two lines below a comment stating that an Applet is not a Package member.
 

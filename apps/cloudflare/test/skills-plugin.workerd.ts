@@ -12,7 +12,10 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
+import {
+  ISOLATE_CONTRACT_VERSION,
+  decodePluginDescriptorV1,
+} from "@frockbot/core/contracts";
 import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
@@ -41,7 +44,7 @@ const PLUGIN_DESCRIPTOR = decodePluginDescriptorV1({
   id: PLUGIN_ID,
   displayName: "Probe weather",
   version: "0.0.1",
-  contractVersion: 4,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   tools: [
     {
       name: "weather_report",

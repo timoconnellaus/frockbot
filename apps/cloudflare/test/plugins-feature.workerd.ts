@@ -96,7 +96,8 @@ describe("the Plugin authoring switch inside a real Bot", () => {
 
     const listed = await callTool(identity, `run-list-${id}`, "plugin_list");
     expect(listed.isError).toBe(false);
-    expect(listed.content).toContain("plugin_create");
+    expect(listed.content).toContain("Email (email)");
+    expect(listed.content).toContain("off for this Bot");
 
     const created = await callTool(
       identity,
@@ -111,7 +112,7 @@ describe("the Plugin authoring switch inside a real Bot", () => {
 
     // The scaffold is source, not a Plugin yet: `plugin_files` reads it back
     // off the Workspace root, while `plugin_list` — which lists the account's
-    // Composition — still has nothing, because only a publish the User
+    // Composition — still does not name it, because only a publish the User
     // approves puts a Plugin there.
     const files = await callTool(identity, `run-files-${id}`, "plugin_files", {
       pluginId: "notes",
@@ -121,7 +122,9 @@ describe("the Plugin authoring switch inside a real Bot", () => {
     expect(files.content).toContain("plugin.json");
 
     const again = await callTool(identity, `run-relist-${id}`, "plugin_list");
-    expect(again.content).toContain("no Plugins yet");
+    expect(again.isError).toBe(false);
+    expect(again.content).toContain("Email (email)");
+    expect(again.content).not.toContain("notes");
 
     expect(await skillRefs(identity)).toContain("managed/plugins");
   });

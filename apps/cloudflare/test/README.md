@@ -103,7 +103,9 @@ Run the whole suite with `bun run test:e2e`, one file with
 adding `--headed`. Locally it runs four workers at once; `--workers 1` puts it
 back to one file at a time when a failure needs reading.
 
-Three things keep that parallelism honest, and a new spec inherits all three:
+Four conventions carry across the layer, and a new spec inherits all four —
+three of them keep that parallelism honest, and the fourth keeps a spec from
+resting on a row a long list may never have published:
 
 - Every test takes a fresh `?as_user=` identity, so no two ever meet in one
   User Durable Object.
@@ -117,6 +119,25 @@ Three things keep that parallelism honest, and a new spec inherits all three:
   tests, and still fails each test on the console errors reported while it ran.
   `chat.e2e.ts` is the worked example — every test in it makes a Bot of its own
   and shares everything above that.
+- A Flutter list publishes semantics only for the rows at or near the
+  viewport: a row beyond that window is not hidden, it is absent from the tree,
+  so there is no node to locate and none for `scrollIntoView` to take hold of.
+  Scrolling is not the way back to one either — the engine drops a row out of
+  the tree as the list moves and does not reliably put it back, so a row can be
+  absent for a dozen consecutive scroll steps while its neighbours are present
+  throughout. A spec that may be reading a row a long list never published
+  therefore takes the scroll out of the path and brings what it asserts on into
+  the window instead: `provisionThroughUi` and `bot-plugins.e2e.ts` set a window
+  tall enough to hold every row they read, saying in a comment what the height
+  stands on — the cards `bot-plugins.e2e.ts` counts, the rows
+  `provisionThroughUi` is known to clear — and `enablePackage` filters the
+  catalogue with its search box so the row it presses is at the top of a short
+  list. The rule is about reaching a node that is not in the tree, not about
+  scrolling as such: when what you need is already there, scrolling to it is
+  fine, and two specs do it — `profile.e2e.ts` asserts the `Africa / Abidjan`
+  entry visible and then scrolls it into view, and `theme.e2e.ts` scrolls the
+  create sheet's submit so a screenshot's pixel sample lands inside a target
+  that exists.
 
 `e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`,
 seeds `dist/artifacts/foundation-v1.mjs` into the local

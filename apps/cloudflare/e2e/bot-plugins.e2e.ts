@@ -51,6 +51,16 @@ function cardSwitch(page: Page, title: string): Locator {
   return page.getByRole("switch", { name: title, exact: true }).first();
 }
 
+// Read in a window tall enough to hold every card at once, the way
+// `provisionThroughUi` does: a Flutter list publishes semantics only for the
+// rows at or near the viewport, and the engine drops a row back out as the list
+// moves without reliably putting it back, so scrolling a long list is not
+// something to rest assertions on. The height is what this page holds: six
+// cards — the five first-party features and the deployment's seeded Plugin —
+// under the page's header, all of them in the tree at 1600px. A seventh card is
+// a taller window here, not a scroll.
+test.use({ viewport: { width: 1280, height: 1600 } });
+
 async function openBotPlugins(page: Page): Promise<void> {
   // The Bot's own door: the Plugins row in its Settings, which is one level
   // under its page — the panel's root beside the conversation at this width.
