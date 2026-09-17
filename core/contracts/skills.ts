@@ -38,13 +38,33 @@ export interface SkillRefV1 {
 /** Most Skills one Turn may invoke. */
 export const MAX_INVOKED_SKILLS_V1 = 3;
 
+/** The file name that marks a directory as a Skill. */
+export const SKILL_DOCUMENT_FILE_NAME_V1 = "SKILL.md";
+
 const SKILL_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** The descriptor's own Plugin id rule; a ref names a Plugin the same way. */
 const SKILL_PLUGIN_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
+const SKILL_REFERENCE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\.md$/;
 
 /** True when a slug is well formed. Total; never throws. */
 export function isSkillRefSlugV1(value: unknown): value is string {
   return typeof value === "string" && SKILL_SLUG_PATTERN.test(value);
+}
+
+/**
+ * True when a name is one a reference may carry: a single Markdown file,
+ * never a path. The charset admits no separator and no leading dot, so a
+ * reference can only ever name a file inside its own Skill's directory.
+ *
+ * `SKILL.md` is excluded because any path ending in it reads as a Skill: a
+ * reference by that name would load as a second Skill of its own.
+ */
+export function isSkillReferenceNameV1(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    SKILL_REFERENCE_NAME_PATTERN.test(value) &&
+    value !== SKILL_DOCUMENT_FILE_NAME_V1
+  );
 }
 
 /** The canonical string form: `bot/<slug>`, or `plugin/<pluginId>/<slug>`. */

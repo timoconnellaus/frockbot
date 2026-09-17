@@ -155,6 +155,29 @@ async function enabledPluginSkillsV1(
 }
 
 /**
+ * The two gates a catalog reads before it is assembled: which managed Skills
+ * this account is withheld, and which Plugins this Bot runs.
+ *
+ * Resolved together, for the reason `loadFullSkillCatalogV1` lists its two
+ * roots together: both are round trips off the Bot, and the turn-start path
+ * pays them once in parallel rather than one after the other.
+ */
+async function botSkillGatesV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  features: UserAccountFeaturesReadV1,
+): Promise<{
+  withheldManagedSlugs: readonly string[];
+  pluginSkills: PluginSkillContributionV1[];
+}> {
+  const [withheldManagedSlugs, pluginSkills] = await Promise.all([
+    withheldManagedSkillSlugs(state, features),
+    enabledPluginSkillsV1(state, identity),
+  ]);
+  return { withheldManagedSlugs, pluginSkills };
+}
+
+/**
  * The Skills seam one admitted Turn runs under, or `undefined` when the Bot's
  * Workspace file surface is unavailable.
  */
@@ -179,8 +202,7 @@ export async function createBotSkillsHost(
       turnId: turn.turnId,
       runId: turn.runId,
     },
-    withheldManagedSlugs: await withheldManagedSkillSlugs(state, features),
-    pluginSkills: await enabledPluginSkillsV1(state, identity),
+    ...(await botSkillGatesV1(state, identity, features)),
   };
 }
 
@@ -262,15 +284,13 @@ export async function listSkills(
   const catalog = await loadFullSkillCatalogV1(
     reads,
     { userId: identity.userId, botId: identity.botId },
-    {
-      withheldManagedSlugs: await withheldManagedSkillSlugs(
-        state,
-        userAccountFeaturesReaderV1(state, identity),
-      ),
-      // And the same Plugin roster, so the popover offers exactly the Skills
-      // the Turn would load and never one from a Plugin this Bot has off.
-      pluginSkills: await enabledPluginSkillsV1(state, identity),
-    },
+    // And the same Plugin roster, so the popover offers exactly the Skills
+    // the Turn would load and never one from a Plugin this Bot has off.
+    await botSkillGatesV1(
+      state,
+      identity,
+      userAccountFeaturesReaderV1(state, identity),
+    ),
   );
   const entries: ClientSkillCatalogEntryV1[] = [];
   for (const skill of catalog.skills) {

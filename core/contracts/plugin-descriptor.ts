@@ -16,6 +16,7 @@ import {
   ISOLATE_CONTRACT_VERSION,
   type IsolateContractVersion,
 } from "./isolate.js";
+import { isSkillReferenceNameV1, isSkillRefSlugV1 } from "./skills.js";
 
 /** Authority a plugin may hold. */
 export const PLUGIN_GRANTS_V1 = [
@@ -129,9 +130,6 @@ const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const PLUGIN_SERVICE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
-/** The Skill slug rule, and the one file name a reference may carry. */
-const PLUGIN_SKILL_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const PLUGIN_SKILL_REFERENCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\.md$/;
 /** A lowercase hostname, optionally with one leading wildcard label. */
 const PLUGIN_HOST =
   /^(\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -369,7 +367,7 @@ function decodePluginSkillsV1(input: unknown, label: string): PluginSkillV1[] {
       const value = record(skill, itemLabel);
       exactKeys(value, ["slug", "text"], ["references"], itemLabel);
       const slug = boundedString(value.slug, `${itemLabel}.slug`, 64);
-      if (!PLUGIN_SKILL_SLUG.test(slug)) {
+      if (!isSkillRefSlugV1(slug)) {
         throw new Error(`${itemLabel}.slug is invalid`);
       }
       const text = boundedString(
@@ -387,7 +385,7 @@ function decodePluginSkillsV1(input: unknown, label: string): PluginSkillV1[] {
         const entry = record(reference, referenceLabel);
         exactKeys(entry, ["path", "text"], [], referenceLabel);
         const path = boundedString(entry.path, `${referenceLabel}.path`, 64);
-        if (!PLUGIN_SKILL_REFERENCE_NAME.test(path)) {
+        if (!isSkillReferenceNameV1(path)) {
           throw new Error(`${referenceLabel}.path is invalid`);
         }
         return {

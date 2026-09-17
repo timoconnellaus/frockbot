@@ -700,8 +700,9 @@ function orderingKeyOf(skill: LoadedSkillV1): string {
 /**
  * Assembles one Turn's catalog from its sources.
  *
- * Ordering is `bot` → `user` → `managed`, then by ref within a source, and it is a *deterministic ordering only*: refs are globally unique,
- * so nothing here shadows anything. Two Skills may share a name; the rendered
+ * Ordering is `bot` → `user` → `managed` → `plugin`, then by ref within a
+ * source, and it is a *deterministic ordering only*: refs are globally
+ * unique, so nothing here shadows anything. Two Skills may share a name; the rendered
  * block disambiguates those by ref, which is what makes a User's edit visible
  * on every Bot instead of silently losing to a same-named local one.
  */

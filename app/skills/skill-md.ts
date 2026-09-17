@@ -11,6 +11,15 @@
 // lines, one per line, optionally quoted, no nesting, no anchors, no aliases,
 // no multi-line scalars. Anything else is a refusal, never a partial parse.
 
+import {
+  isSkillReferenceNameV1,
+  isSkillRefSlugV1,
+  SKILL_DOCUMENT_FILE_NAME_V1,
+} from "@frockbot/core/contracts";
+
+/** The kernel owns both name rules; the Package reads them, never a copy. */
+export { isSkillReferenceNameV1 };
+
 /** Longest `SKILL.md` accepted, in bytes. Well under `WORKSPACE_MAX_FILE_BYTES`. */
 export const SKILL_MAX_FILE_BYTES = 65_536;
 /** Longest `name`, matching the Agent Skills standard. */
@@ -20,27 +29,13 @@ export const SKILL_MAX_DESCRIPTION_LENGTH = 1_024;
 /** Most frontmatter keys read before the file is refused as malformed. */
 export const SKILL_MAX_FRONTMATTER_KEYS = 32;
 /** The file name that marks a directory as a Skill. */
-export const SKILL_FILE_NAME = "SKILL.md";
+export const SKILL_FILE_NAME = SKILL_DOCUMENT_FILE_NAME_V1;
 /** The directory, relative to the instruction root, a written Skill lands in. */
 export const SKILL_DIRECTORY = "skills";
 /** The directory, inside a Skill's own, holding its references (ADR 0030). */
 export const SKILL_REFERENCES_DIRECTORY = "references";
 /** Most references one Skill may carry; past it the Skill is refused whole. */
 export const SKILL_MAX_REFERENCES = 32;
-
-const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
-/** A reference's file name: one Markdown file, never a path. */
-const REFERENCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\.md$/;
-
-/*
- * `SKILL.md` is excluded because `isSkillDocumentPathV1` reads any path ending
- * in it as a Skill: a reference by that name would load as a second Skill,
- * slugged from `references/`, and collide on that ref with every other Skill
- * carrying one.
- */
-function isReferenceName(name: string): boolean {
-  return REFERENCE_NAME.test(name) && name !== SKILL_FILE_NAME;
-}
 
 /** One parsed `SKILL.md`. `body` is the markdown recipe after the frontmatter. */
 export interface SkillDocumentV1 {
@@ -155,19 +150,10 @@ export function isSkillDocumentPathV1(path: string): boolean {
 
 /** The relative path a Skill with this slug occupies inside the instruction root. */
 export function skillDocumentPathV1(slug: string): string {
-  if (!SLUG.test(slug)) {
+  if (!isSkillRefSlugV1(slug)) {
     throw new Error("skill slug must be lowercase letters, digits, or hyphens");
   }
   return `${SKILL_DIRECTORY}/${slug}/${SKILL_FILE_NAME}`;
-}
-
-/**
- * True when a name is one a reference may carry: a single Markdown file, never
- * a path. The charset admits no separator and no leading dot, so a reference
- * can only ever name a file inside its own Skill's `references/` directory.
- */
-export function isSkillReferenceNameV1(name: unknown): name is string {
-  return typeof name === "string" && isReferenceName(name);
 }
 
 /**
@@ -191,7 +177,7 @@ export function skillReferencePathForV1(
   name: string,
 ): string {
   const prefix = skillReferencesPrefixV1(documentPath);
-  if (!isReferenceName(name)) {
+  if (!isSkillReferenceNameV1(name)) {
     throw new Error("skill reference must be a single .md file name");
   }
   return `${prefix}${name}`;
@@ -218,12 +204,12 @@ export function skillReferenceNameForV1(
   const prefix = skillReferencesPrefixV1(documentPath);
   if (!candidatePath.startsWith(prefix)) return undefined;
   const name = candidatePath.slice(prefix.length);
-  return isReferenceName(name) ? name : undefined;
+  return isSkillReferenceNameV1(name) ? name : undefined;
 }
 
 /** True when a slug is well formed. Total; never throws. */
 export function isSkillSlugV1(slug: unknown): slug is string {
-  return typeof slug === "string" && SLUG.test(slug);
+  return isSkillRefSlugV1(slug);
 }
 
 /** Derives a slug from a Skill name, for a `skill_write` that omits one. */
@@ -234,5 +220,5 @@ export function skillSlugFromNameV1(name: string): string | undefined {
     .replace(/^-+|-+$/g, "")
     .slice(0, 64)
     .replace(/-+$/g, "");
-  return SLUG.test(slug) ? slug : undefined;
+  return isSkillRefSlugV1(slug) ? slug : undefined;
 }
