@@ -215,10 +215,11 @@ Five layers, each answering a different question. The first four run in CI; the 
 
 Root `bun test` covers unit tests; runtime, integration and browser tests use
 separate suffixes and commands. Pre-commit formats staged files. Pre-push runs
-the fast tier — `bun run validate format typecheck unit` — reusing successful
-categories for the exact commit and a clean code checkout; the slow tier runs
-on `main` after the merge. Run `bun run validate` for everything, or
-`bun run validate unit integration` to populate selected receipts while working.
+the fast tier — `bun run validate format typecheck unit` — reusing a
+category's last pass whenever nothing it reads has changed, with a clean code
+checkout; the slow tier runs on `main` after the merge. Run
+`bun run validate` for everything, or `bun run validate unit integration` to
+populate selected receipts while working.
 [Local validation](docs/local-validation.md) explains the cache rules, worktree
 isolation, and the GitHub configuration the pipeline depends on.
 
