@@ -148,6 +148,58 @@ describe("folding a surface", () => {
     expect(card.dataModel).toEqual({ keep: 1 });
   });
 
+  test("a fold that changed nothing keeps the revision and the timestamp", () => {
+    const drawn = foldCardMessagesV1(
+      undefined,
+      [
+        created([{ id: "root", component: "Text", text: "Ready" }], {
+          keep: 1,
+        }),
+      ],
+      CONTEXT,
+    );
+    expect(drawn.revision).toBe(1);
+    const later = {
+      surfaceId: SURFACE,
+      runId: "run-2",
+      sessionId: "user-1:bot-1",
+      now: "2026-09-17T12:00:00.000Z",
+    };
+    // A delete at a member that is not there — the single-token pointer, so
+    // the walk before the leaf never runs — leaves the surface where it was.
+    const deleted = foldCardMessagesV1(
+      drawn,
+      [
+        message({
+          version: "v1.0",
+          updateDataModel: { surfaceId: SURFACE, path: "/gone", value: null },
+        }),
+      ],
+      later,
+    );
+    expect(deleted.dataModel).toEqual({ keep: 1 });
+    expect(deleted.revision).toBe(1);
+    expect(deleted.updatedAt).toBe(NOW);
+    // And so does folding the same components onto them a second time: a
+    // press drawn against revision 1 is still answerable.
+    const again = foldCardMessagesV1(
+      drawn,
+      [
+        message({
+          version: "v1.0",
+          updateComponents: {
+            surfaceId: SURFACE,
+            components: [{ id: "root", component: "Text", text: "Ready" }],
+          },
+        }),
+      ],
+      later,
+    );
+    expect(again.revision).toBe(1);
+    expect(again.updatedAt).toBe(NOW);
+    expect(again.components).toEqual(drawn.components);
+  });
+
   test("a pointer with no path replaces the whole model", () => {
     const card = foldCardMessagesV1(
       undefined,
@@ -678,6 +730,21 @@ describe("what one settled Turn writes", () => {
     // is the bound — no longer lists it, so drawing it again is a new surface.
     const evictedIndex = surfaces.filter((surfaceId) => surfaceId !== "s0");
     evictedIndex.push("one-too-many");
+    // `s1` is the oldest surface the index still lists, so it is the one
+    // making room costs. An indexed surface always has its record.
+    const neighbour = foldCardMessagesV1(
+      undefined,
+      [
+        message({
+          version: "v1.0",
+          createSurface: {
+            surfaceId: "s1",
+            components: [{ id: "root", component: "Text", text: "Older" }],
+          },
+        }),
+      ],
+      { surfaceId: "s1", runId: "run-1", sessionId: "user-1:bot-1", now: NOW },
+    );
     const records = await cardTerminalRecordsV1({
       run: {
         runId: "run-3",
@@ -698,6 +765,7 @@ describe("what one settled Turn writes", () => {
       read: reader({
         [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces: evictedIndex },
         [cardKeyV1("s0")]: tombstone,
+        [cardKeyV1("s1")]: neighbour,
       }),
     });
     const revived = decodeCardRecordV1(records[cardKeyV1("s0")]);
@@ -887,6 +955,73 @@ describe("what one settled Turn writes", () => {
     );
     expect(revived.deleted).toBeUndefined();
     expect(revived.components).toHaveLength(1);
+  });
+
+  test("a send a full Session can only refuse costs no card its life", async () => {
+    const surfaces = Array.from(
+      { length: A2UI_LIMITS_V1.surfacesPerSession },
+      (_, index) => `s${index}`,
+    );
+    // `gone` was evicted earlier: its tombstone is in storage, the index no
+    // longer lists it, and an update onto a tombstone can only be refused.
+    const tombstone: CardRecordV1 = {
+      schemaVersion: 1,
+      surfaceId: "gone",
+      runId: "run-1",
+      foldedRunId: "run-1",
+      sessionId: "user-1:bot-1",
+      components: [],
+      dataModel: {},
+      revision: 2,
+      createdAt: NOW,
+      updatedAt: NOW,
+      deleted: true,
+      refusal: "the card was dropped to make room for a newer card",
+    };
+    const oldest = foldCardMessagesV1(
+      undefined,
+      [
+        message({
+          version: "v1.0",
+          createSurface: {
+            surfaceId: "s0",
+            components: [{ id: "root", component: "Text", text: "Alive" }],
+          },
+        }),
+      ],
+      { surfaceId: "s0", runId: "run-1", sessionId: "user-1:bot-1", now: NOW },
+    );
+    const records = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-2",
+        sessionId: "user-1:bot-1",
+        events: [
+          sendEvent("gone", [
+            {
+              version: "v1.0",
+              updateComponents: {
+                surfaceId: "gone",
+                components: [{ id: "root", component: "Text", text: "Back" }],
+              },
+            },
+          ]),
+        ],
+      },
+      now: "2026-09-17T11:00:00.000Z",
+      read: reader({
+        [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces },
+        [cardKeyV1("gone")]: tombstone,
+        [cardKeyV1("s0")]: oldest,
+      }),
+    });
+    // The refusal is recorded on the card it could not change, and the oldest
+    // live surface is neither tombstoned nor taken out of the index.
+    const refused = decodeCardRecordV1(records[cardKeyV1("gone")]);
+    expect(refused.deleted).toBe(true);
+    expect(refused.refusal).toMatch(/deleted/);
+    expect(refused.revision).toBe(2);
+    expect(records[cardKeyV1("s0")]).toBeUndefined();
+    expect(records[CARD_INDEX_KEY]).toBeUndefined();
   });
 
   test("a first send refused by a budget still leaves a card to draw", async () => {

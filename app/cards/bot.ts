@@ -29,11 +29,14 @@ import {
 import {
   cardActionRouteV1,
   cardKeyV1,
+  decodeCardIndexV1,
   CardBudgetError,
   CardDecodeError,
   decodeCardRecordV1,
   foldCardMessagesV1,
   projectCardV1,
+  trimmableCardKeysV1,
+  CARD_INDEX_KEY,
   CARD_PREFIX,
   CARD_REFUSAL_MAX_V1,
   type CardActionCommandV1,
@@ -85,6 +88,12 @@ function cardFailureV1(reason: string): string {
  * is never quietly told it has them all. A card the listing left out is read
  * by its id with `readCard`, so every surface a Session holds stays readable
  * whatever the budget cut.
+ *
+ * This is also where the Session's card records are bounded. The index caps
+ * the live surfaces; the tombstones evicted surfaces leave behind are capped
+ * here, on read, because the transaction that settles a Turn cannot list. Past
+ * `cardsRetained` the stalest records the index no longer lists are deleted,
+ * and a surface it still lists never is.
  */
 export async function listCards(
   state: ShellBotStateV1,
@@ -92,8 +101,18 @@ export async function listCards(
 ): Promise<CardListViewV1> {
   await state.authority.validateIdentity(identity);
   const stored = await state.ctx.storage.list<unknown>({ prefix: CARD_PREFIX });
-  const records = [...stored.values()]
-    .map((value) => decodeCardRecordV1(value))
+  let records = [...stored.values()].map((value) => decodeCardRecordV1(value));
+  // Retention is enforced on read rather than in the settling transaction,
+  // which cannot list. Only tombstones the index no longer lists are dropped,
+  // and trimming loses a row and never a fact: the send that drew the card is
+  // still on the durable log of the Turn that made it.
+  const indexed = await state.ctx.storage.get<unknown>(CARD_INDEX_KEY);
+  const surfaces =
+    indexed === undefined ? [] : decodeCardIndexV1(indexed).surfaces;
+  const trimmable = new Set(trimmableCardKeysV1(records, surfaces));
+  for (const key of trimmable) await state.ctx.storage.delete(key);
+  records = records
+    .filter((card) => !trimmable.has(cardKeyV1(card.surfaceId)))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   const cards: CardViewV1[] = [];
   let bytes = 0;

@@ -22,9 +22,13 @@
  *    the record rather than removing it, because the send that drew the card
  *    is still on the Turn's log and the transcript still has to say something.
  *
- *  * **Every fold bumps the revision.** An action names the revision it was
- *    drawn against; a stale one is refused, so nobody answers a card that has
- *    moved under them.
+ *  * **Every fold that changes the surface bumps the revision.** An action
+ *    names the revision it was drawn against; a stale one is refused, so
+ *    nobody answers a card that has moved under them. A fold that leaves the
+ *    components, the data model and the tombstone exactly as they were — a
+ *    delete at a member that is not there, a component set folded twice —
+ *    moved nothing, so it keeps the revision and the `updatedAt` it found and
+ *    never refuses a press somebody has in flight.
  *
  *  * **The Session's surfaces are bounded.** Cards do not tear down, so the
  *    index caps how many a Session may hold. A fold past a surface budget is
@@ -38,7 +42,12 @@
  *    saying it made room, and the new card is written and indexed normally —
  *    trimming loses a row and never a fact, because the send that drew the
  *    trimmed card is still on its Turn's log. So no card send ever leaves no
- *    trace, not even a Turn drawing more surfaces than a Session may hold.
+ *    trace, not even a Turn drawing more surfaces than a Session may hold. A
+ *    send that can only be refused takes no slot and evicts nothing: the fold
+ *    is decided before the index is touched. The records eviction leaves
+ *    behind are bounded too, by `trimmableCardKeysV1` on read — a Session
+ *    naming a fresh surface every Turn would otherwise pile up records the
+ *    index never bounded.
  */
 import {
   A2UI_IDENTIFIER_V1,
@@ -418,8 +427,9 @@ function deleteMember(
 
 /**
  * Write `value` at `path` in `model`. `null` deletes the member, as the
- * specification says, and a delete through a member that is not there leaves
- * the model exactly as it was; a numeric token against a list indexes it, and `-` at
+ * specification says, and a delete of — or through — a member that is not
+ * there leaves the model exactly as it was, creating nothing and changing
+ * nothing; a numeric token against a list indexes it, and `-` at
  * the leaf appends. A pointer through a scalar is a write with nowhere to
  * land, and is refused rather than made to fit.
  */
@@ -464,8 +474,10 @@ function writeAtPointer(
     cursor = copied;
   }
   const leaf = tokens.at(-1)!;
-  if (value === null) deleteMember(cursor, leaf, path);
-  else writeMember(cursor, leaf, value, path);
+  if (value === null) {
+    if (!Array.isArray(cursor) && !Object.hasOwn(cursor, leaf)) return model;
+    deleteMember(cursor, leaf, path);
+  } else writeMember(cursor, leaf, value, path);
   return next as A2uiJsonObjectV1;
 }
 
@@ -597,7 +609,31 @@ export function foldCardMessagesV1(
     card = { ...card, components: [], dataModel: {}, deleted: true as const };
   }
   assertSurfaceBudgets(card);
+  if (current !== undefined && sameSurfaceStateV1(card, current)) {
+    const kept: CardRecordV1 = { ...current, runId: context.runId };
+    delete kept.refusal;
+    return kept;
+  }
   return { ...card, revision: card.revision + 1 };
+}
+
+/**
+ * Whether a fold left the surface where it found it. Only what a client sees
+ * counts: the components, the data model and the tombstone. A fold that
+ * changed none of the three moved nothing, so it keeps its revision and its
+ * `updatedAt` — nobody is told a card moved when it did not, and a press in
+ * flight is not refused by a fold that did nothing.
+ */
+function sameSurfaceStateV1(left: CardRecordV1, right: CardRecordV1): boolean {
+  return (
+    left.deleted === right.deleted &&
+    JSON.stringify(left.components) === JSON.stringify(right.components) &&
+    JSON.stringify(left.dataModel) === JSON.stringify(right.dataModel) &&
+    JSON.stringify(left.surfaceProperties) ===
+      JSON.stringify(right.surfaceProperties) &&
+    left.catalogId === right.catalogId &&
+    left.sendDataModel === right.sendDataModel
+  );
 }
 
 /** One card send that a settled Turn made, in the order it made them. */
@@ -673,53 +709,14 @@ export async function cardTerminalRecordsV1(
     const current =
       existing === undefined ? undefined : decodeCardRecordV1(existing);
     if (current?.foldedRunId === input.run.runId) continue;
-    // The index is the bound, not whether a record happens to still be in
-    // storage: a surface evicted earlier is as new to the Session as one never
-    // drawn, tombstone and all, and is admitted the same way.
-    const indexed = surfaces.includes(send.surfaceId);
-    if (!indexed && surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession) {
-      const evicted = surfaces.shift()!;
-      const evictedKey = cardKeyV1(evicted);
-      const staged = records[evictedKey] as CardRecordV1 | undefined;
-      const storedEvicted = await input.read<unknown>(evictedKey);
-      const evictedCard =
-        staged ??
-        (storedEvicted === undefined
-          ? undefined
-          : decodeCardRecordV1(storedEvicted));
-      const tombstone: CardRecordV1 = evictedCard
-        ? {
-            ...evictedCard,
-            runId: input.run.runId,
-            components: [],
-            dataModel: {},
-            revision: evictedCard.revision + 1,
-            updatedAt: input.now,
-            deleted: true,
-            refusal: "the card was dropped to make room for a newer card",
-          }
-        : {
-            schemaVersion: 1,
-            surfaceId: evicted,
-            runId: input.run.runId,
-            sessionId: input.run.sessionId,
-            components: [],
-            dataModel: {},
-            revision: 1,
-            createdAt: input.now,
-            updatedAt: input.now,
-            deleted: true,
-            refusal: "the card was dropped to make room for a newer card",
-          };
-      records[evictedKey] = tombstone;
-      movedIndex = true;
-    }
     const context = {
       surfaceId: send.surfaceId,
       runId: input.run.runId,
       sessionId: input.run.sessionId,
       now: input.now,
     };
+    // The fold decides first and the index second: a send that can only be
+    // refused writes its refusal and costs no other card its slot.
     let folded: CardRecordV1;
     try {
       folded = foldCardMessagesV1(current, send.messages, context);
@@ -748,17 +745,53 @@ export async function cardTerminalRecordsV1(
               refusal,
               foldedRunId: input.run.runId,
             } satisfies CardRecordV1);
-      if (!indexed) {
+      // A refused send takes a slot only if one is free: it never costs
+      // another card its life, because the card it could not change is
+      // already in storage saying why.
+      if (
+        !surfaces.includes(send.surfaceId) &&
+        surfaces.length < A2UI_LIMITS_V1.surfacesPerSession
+      ) {
         surfaces.push(send.surfaceId);
         movedIndex = true;
       }
       continue;
     }
-    records[key] = { ...folded, foldedRunId: input.run.runId };
-    if (!indexed) {
+    // The index is the bound, not whether a record happens to still be in
+    // storage: a surface evicted earlier is as new to the Session as one never
+    // drawn, tombstone and all, and is admitted the same way.
+    if (!surfaces.includes(send.surfaceId)) {
+      if (surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession) {
+        const evicted = surfaces.shift()!;
+        const evictedKey = cardKeyV1(evicted);
+        const staged = records[evictedKey] as CardRecordV1 | undefined;
+        const storedEvicted = await input.read<unknown>(evictedKey);
+        // An indexed surface always has its record, written by the same
+        // terminal-record set that indexed it. If somehow it does not, there
+        // is nothing to tombstone: taking it out of the index is the whole
+        // eviction.
+        const evictedCard =
+          staged ??
+          (storedEvicted === undefined
+            ? undefined
+            : decodeCardRecordV1(storedEvicted));
+        if (evictedCard !== undefined) {
+          records[evictedKey] = {
+            ...evictedCard,
+            runId: input.run.runId,
+            components: [],
+            dataModel: {},
+            revision: evictedCard.revision + 1,
+            updatedAt: input.now,
+            deleted: true,
+            refusal: "the card was dropped to make room for a newer card",
+          } satisfies CardRecordV1;
+        }
+      }
       surfaces.push(send.surfaceId);
       movedIndex = true;
     }
+    records[key] = { ...folded, foldedRunId: input.run.runId };
   }
   if (movedIndex) {
     records[CARD_INDEX_KEY] = {
@@ -767,6 +800,34 @@ export async function cardTerminalRecordsV1(
     } satisfies CardIndexV1;
   }
   return records;
+}
+
+/**
+ * The card records a listing may drop, stalest first.
+ *
+ * The index bounds the live surfaces of a Session; this bounds the records
+ * they leave behind, which a Session naming a fresh surface every Turn would
+ * otherwise pile up without end. Only a record the index no longer lists is a
+ * candidate — an evicted surface's tombstone, or a card a full Session could
+ * only refuse — so a surface a Bot can still update is never trimmed, and the
+ * stalest go first. Retention is enforced on read rather than in the settling
+ * transaction, which cannot list. Trimming loses a row and never a fact: the
+ * send that drew the card is still on the durable log of the Turn that made
+ * it.
+ */
+export function trimmableCardKeysV1(
+  records: readonly CardRecordV1[],
+  indexed: readonly string[],
+  limit = A2UI_LIMITS_V1.cardsRetained,
+): string[] {
+  const excess = records.length - limit;
+  if (excess <= 0) return [];
+  const live = new Set(indexed);
+  return records
+    .filter((card) => !live.has(card.surfaceId))
+    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+    .slice(0, excess)
+    .map((card) => cardKeyV1(card.surfaceId));
 }
 
 /** One Card, as the client is told it. */

@@ -8,6 +8,8 @@ import { approvalKeyV1 } from "@frockbot/app/shell/approvals";
 import {
   cardKeyV1,
   decodeCardActionReceiptV1,
+  CARD_INDEX_KEY,
+  CARD_PREFIX,
   CARD_REFUSAL_MAX_V1,
   type CardRecordV1,
 } from "@frockbot/app/shell/cards";
@@ -130,6 +132,55 @@ describe("reading a Bot's Cards", () => {
     expect(
       listed.cards.reduce((total, entry) => total + a2uiByteLengthV1(entry), 0),
     ).toBeLessThanOrEqual(A2UI_LIMITS_V1.cardListBytes);
+  });
+
+  test("a Session that has evicted many surfaces stops accumulating records", async () => {
+    const values = new Map<string, unknown>();
+    const stamp = (minute: number) =>
+      `2026-09-17T${(10 + Math.floor(minute / 60)).toString().padStart(2, "0")}:${(minute % 60).toString().padStart(2, "0")}:00.000Z`;
+    // What a long Session naming a fresh surface every Turn leaves behind:
+    // one tombstone per evicted surface, stalest first.
+    const evicted = A2UI_LIMITS_V1.cardsRetained + 40;
+    for (let index = 0; index < evicted; index += 1) {
+      const surfaceId = `gone-${index.toString().padStart(3, "0")}`;
+      values.set(
+        cardKeyV1(surfaceId),
+        card({
+          surfaceId,
+          components: [],
+          dataModel: {},
+          deleted: true,
+          refusal: "the card was dropped to make room for a newer card",
+          updatedAt: stamp(index),
+        }),
+      );
+    }
+    // Beside them, the surfaces the index still lists — the newest drawn.
+    const live = Array.from(
+      { length: A2UI_LIMITS_V1.surfacesPerSession },
+      (_, index) => `live-${index.toString().padStart(3, "0")}`,
+    );
+    for (const surfaceId of live) {
+      values.set(cardKeyV1(surfaceId), card({ surfaceId, updatedAt: NOW }));
+    }
+    values.set(CARD_INDEX_KEY, { schemaVersion: 1, surfaces: live });
+    const listed = await listCards(harness(values).state, IDENTITY);
+    const kept = [...values.keys()].filter((key) =>
+      key.startsWith(CARD_PREFIX),
+    );
+    expect(kept).toHaveLength(A2UI_LIMITS_V1.cardsRetained);
+    // Every surface the index still lists survived; the stalest tombstones did
+    // not, and the listing no longer carries them either.
+    for (const surfaceId of live) {
+      expect(kept).toContain(cardKeyV1(surfaceId));
+    }
+    expect(kept).not.toContain(cardKeyV1("gone-000"));
+    expect(kept).toContain(
+      cardKeyV1(`gone-${(evicted - 1).toString().padStart(3, "0")}`),
+    );
+    expect(listed.cards.some((entry) => entry.surfaceId === "gone-000")).toBe(
+      false,
+    );
   });
 });
 
