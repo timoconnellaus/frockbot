@@ -337,7 +337,8 @@ async function build(): Promise<Map<string, string>> {
   const commons: Record<string, JsonSchema> = {};
   for (const catalog of [basic, frock]) {
     const common = catalog.$defs?.CatalogComponentCommon ?? {};
-    for (const entry of Object.keys(catalog.components)) commons[entry] = common;
+    for (const entry of Object.keys(catalog.components))
+      commons[entry] = common;
   }
 
   const names = readdirSync(templates)
