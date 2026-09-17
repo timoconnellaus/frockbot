@@ -1,12 +1,15 @@
 // The account-wide voice session: one Durable Object per User.
 //
-// This is the one place the Cloudflare Agents SDK is used. `withVoice` gives
-// the object its wire protocol, the per-call transcriber session, sentence
-// chunking and streaming TTS; everything FrockBot cares about — who may
-// connect, what costs money, what a Bot was asked to do — is decided here and
-// recorded in the ledger before anything external runs. The Bot runtime is
-// unchanged: voice requests use its existing agent lane and never supersede
-// a User turn or routine.
+// Since ADR 0031 a call is one Gemini Live session and nothing else. The
+// phone's PCM goes up as `realtimeInput`, the model's own audio comes back
+// down the same socket, and the model calls our functions while it carries on
+// talking. This object is the bridge and the bookkeeper — who may connect,
+// what costs money, what a Bot was asked to do — and it records each of those
+// in the ledger before anything external runs.
+//
+// The client wire did not change with the model behind it: everything the
+// Cloudflare voice SDK used to write is written here instead, frame for frame
+// as `docs/voice.md` "Assistant protocol (v1)" describes it.
 //
 // Nothing durable lives only in this object's memory. A call is a ledger row,
 // a delegation is a ledger row plus a scheduled look-up, and an eviction
@@ -18,28 +21,35 @@ import {
   type WSMessage,
 } from "agents";
 import {
-  withVoice,
-  type Transcriber,
-  type TranscriberSession,
-  type TTSProvider,
-  type StreamingTTSProvider,
-  type TextSource,
-  type VoiceTurnContext,
-} from "@cloudflare/voice";
-import { ElevenLabsSTT, ElevenLabsTTS } from "@cloudflare/voice-elevenlabs";
-import {
   parseChatCompletionStreamV1,
-  renderVoiceBotAnswerEventV1,
+  renderVoiceSubagentResultV1,
   renderVoiceSystemPromptV1,
-  pickVoiceBridgeV1,
-  runVoiceTurnV1,
+  runVoiceToolV1,
+  voiceToolResponseV1,
+  VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1,
+  VOICE_FUNCTION_DECLARATIONS_V1,
   VOICE_PROMPT_HISTORY_MESSAGES_V1,
   type VoiceAssistantHostV1,
   type VoiceAssistantPromptInputV1,
   type VoiceBotSummaryV1,
   type VoiceCurrentBotV1,
 } from "@frockbot/app/voice/assistant";
-import { resolveVoiceIdV1 } from "@frockbot/app/voice/voices";
+import {
+  buildGeminiLiveSetupV1,
+  decodeGeminiServerFrameV1,
+  encodeGeminiAudioFrameV1,
+  encodeGeminiTextTurnV1,
+  encodeGeminiToolResponseV1,
+  geminiLiveUrlV1,
+  GEMINI_LIVE_ENDPOINT_V1,
+  GEMINI_LIVE_UNKNOWN_HANDLE_CLOSE_V1,
+  type GeminiFunctionCallV1,
+  type GeminiServerEventV1,
+} from "@frockbot/app/voice/gemini-live";
+import {
+  resolveBotVoiceV1,
+  type BotVoiceAppearanceV1,
+} from "@frockbot/app/voice/appearance";
 import {
   VoiceLedgerV1,
   voiceCallIsStaleV1,
@@ -75,34 +85,20 @@ import {
   type VoiceMemorySourceTurnV1,
 } from "@frockbot/app/voice/memory";
 import { refuseMemorySecretV1 } from "@frockbot/app/memory/secrets";
-import { VOICE_REALTIME_TRANSCRIPTION_URL_V1 } from "@frockbot/app/voice/openai-realtime";
-import {
-  createOpenAiTranscriberV1,
-  type VoiceRealtimeSocketV1,
-} from "@frockbot/app/voice/openai-transcriber";
-import {
-  createSleepingTranscriberV1,
-  type SleepingTranscriberSessionV1,
-  type VoiceTranscriberV1,
-} from "@frockbot/app/voice/sleeping-transcriber";
-import { guardSpeechProviderV1 } from "@frockbot/app/voice/tts-guard";
-import {
-  VOICE_ASSISTANT_SCRIBE_OPTIONS_V1,
-  voiceAssistantSttKeyV1,
-  voiceAssistantSttProviderV1,
-  type VoiceAssistantSttEnvV1,
-} from "@frockbot/app/voice/scribe-transcriber";
 import {
   decodeVoiceAssistantClientMessageV1,
+  VOICE_ASSISTANT_INPUT_BYTES_PER_SECOND_V1,
+  VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1,
+  VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1,
   VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1,
-  VOICE_ASSISTANT_SERVER_IDLE_SLEEP_MS_V1,
-  VOICE_ASSISTANT_STT_RESERVE_SECONDS_V1,
-  VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1,
   VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1,
+  VOICE_ASSISTANT_SERVER_IDLE_SLEEP_MS_V1,
   VOICE_DICTATION_LEASE_RENEW_MS_V1,
   VOICE_DICTATION_RESERVE_SECONDS_V1,
+  type VoiceAssistantClientMessageV1,
   type VoiceAssistantRefusalCodeV1,
   type VoiceAssistantServerMessageV1,
+  type VoiceAssistantStatusV1,
   type VoiceAssistantUpstreamStateV1,
 } from "@frockbot/app/voice/shared";
 import { MemoryStore } from "@frockbot/app/memory/store";
@@ -223,42 +219,39 @@ function decodeVoiceReplyDeliveryV1(input: unknown): VoiceReplyDeliveryV1 {
 export const VOICE_ASSISTANT_USER_HEADER = "x-frockbot-user-id";
 export const VOICE_ASSISTANT_DEVICE_HEADER = "x-frockbot-voice-device";
 
-/** The default ElevenLabs voice, "George", when the deployment names none. */
-export const VOICE_ASSISTANT_DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
-export const VOICE_ASSISTANT_TTS_MODEL = "eleven_flash_v2_5";
 /** How far back the User Memory log is read at call start. */
 export const VOICE_ASSISTANT_MEMORY_LOG_DAYS = 30;
-/** Pending audio held while a slept transcriber reopens: 10 s at 16 kHz. */
+/**
+ * How long a model turn may produce no audio before the person is told.
+ *
+ * A turn that says nothing at all — a refused key, a session that accepted the
+ * setup and then broke — used to be invisible: the call looked live and simply
+ * never spoke. This is the guard the ElevenLabs TTS wrapper used to be, moved
+ * to the one place that can still see it.
+ */
+const MODEL_SILENCE_TIMEOUT_MS = 8_000;
+/** Audio held while a session is opening, and replayed in order: 10 s at 16 kHz. */
 const PENDING_AUDIO_BYTES = 10 * 16_000 * 2;
 /** How long a delegation look-up waits before the first check, and its ceiling. */
 const DELEGATION_FIRST_CHECK_SECONDS = 8;
 const DELEGATION_MAX_CHECK_SECONDS = 5 * 60;
-/**
- * How long after a turn settles its speech is assumed to still be draining.
- * The SDK's `speak` aborts whatever reply is in flight, and it has no hook
- * for the moment the last chunk leaves, so a Bot answer that lands inside
- * this window is held rather than read out over the reply it would cut.
- */
-const REPLY_DRAIN_QUIET_MS = 6_000;
-/**
- * How long a Bot answer's event turn may take before it is abandoned. It
- * holds the announce floor while it runs, and a request that never comes back
- * would hold it for the rest of the call: every later answer would be held,
- * and nothing would ever be told. Generous enough for a slow model, finite
- * because the floor must always come back.
- */
-const BOT_ANSWER_TURN_DEADLINE_MS = 20_000;
+/** How long a settled answer waits for the session to be there to tell it to. */
+const ANSWER_RETRY_SECONDS = 5;
+
 export interface VoiceAssistantEnv {
   AI?: Ai;
   OPENAI_API_KEY?: string;
-  ELEVENLABS_API_KEY?: string;
-  ELEVENLABS_VOICE_ID?: string;
-  /** `scribe` (default) or `openai`: which provider the assistant listens through. */
-  VOICE_ASSISTANT_STT?: string;
+  /** The Live session's key. Without it there is no voice session at all. */
+  GEMINI_API_KEY?: string;
   /**
-   * A gateway model to answer voice turns with, e.g.
-   * `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` or
-   * `openai/gpt-5-mini`; unset, turns go to the platform's Auto route.
+   * A stand-in Live endpoint, for tests only. Production never sets it, and
+   * `production-secrets.ts` refuses a deployment that does.
+   */
+  VOICE_ASSISTANT_UPSTREAM_URL?: string;
+  /**
+   * A gateway model for the end-of-call memory update, e.g.
+   * `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`; unset, it takes the
+   * platform's Auto route. The call itself never goes near a chat model.
    */
   VOICE_ASSISTANT_MODEL?: string;
   USER_CONFIGURATIONS: DurableObjectNamespace;
@@ -274,20 +267,40 @@ export interface VoiceAssistantEnv {
   FLOCK_AI_GATEWAY_TOKEN?: string;
 }
 
-/** True when the deployment can run the assistant at all. */
-export function voiceAssistantConfiguredV1(
-  env: { AI?: unknown } & VoiceAssistantSttEnvV1,
-): boolean {
-  return (
-    Boolean(env.AI) &&
-    Boolean(voiceAssistantSttKeyV1(env)) &&
-    Boolean(env.ELEVENLABS_API_KEY?.trim())
+/**
+ * True when the deployment can run the assistant at all.
+ *
+ * One key now: the session is the model, the ears and the mouth. The `AI`
+ * binding is still wanted for the end-of-call memory update, but a deployment
+ * without it can hold a conversation, so it does not gate the control.
+ */
+export function voiceAssistantConfiguredV1(env: {
+  GEMINI_API_KEY?: string;
+  VOICE_ASSISTANT_UPSTREAM_URL?: string;
+}): boolean {
+  return Boolean(
+    env.GEMINI_API_KEY?.trim() || env.VOICE_ASSISTANT_UPSTREAM_URL?.trim(),
   );
 }
 
 interface ConnectionIdentity {
   userId: string;
   deviceKey: string;
+}
+
+/**
+ * The Bot's chosen voice, off the account directory's registration.
+ *
+ * Slice B of ADR 0031 adds `voice?: BotVoiceAppearanceV1` to
+ * `BotRegistrationV1`; until those two halves meet the decoder does not carry
+ * the field and this answers undefined, which resolves to the character's
+ * default. The cast goes away with the merge.
+ */
+function botVoiceOfRegistrationV1(
+  entry: unknown,
+): BotVoiceAppearanceV1 | undefined {
+  const voice = (entry as { voice?: BotVoiceAppearanceV1 } | undefined)?.voice;
+  return voice && voice.schemaVersion === 1 ? voice : undefined;
 }
 
 interface LiveCall {
@@ -297,18 +310,12 @@ interface LiveCall {
   /**
    * The Bot this call is talking to (ADR 0029): who the voice layer is
    * wearing, whose tools the narrowed ones mean, and whose voice speaks.
-   * `switch_bot` moves both of these and the durable record together.
+   * `switch_bot` moves all of it and the durable record together.
    */
   botId: string;
   botName: string;
-  /** The voice this call's Bot speaks in; the deployment's when it has none. */
-  voiceId?: string;
-  /**
-   * The voice the next sentence is in, when it is not the call's own: a Bot
-   * answer read out on behalf of the Bot that answered it. Cleared as soon as
-   * that read-out is done, so the call goes back to its own voice.
-   */
-  speakingVoiceId?: string;
+  /** How this Bot sounds: the session's voice name and its delivery prose. */
+  voice: BotVoiceAppearanceV1;
   /** When the call was admitted, so every later line can say how far in. */
   startedAt: number;
   /**
@@ -318,56 +325,72 @@ interface LiveCall {
    */
   sequence: number;
   promptContext: Promise<Omit<VoiceAssistantPromptInputV1, "now">>;
-  session?: SleepingTranscriberSessionV1;
-  /** Awake seconds already reconciled against the meter. */
-  lastAwakeSeconds: number;
-  /** Seconds booked for the window the upstream is currently in. */
-  reservedSeconds: number;
-  renewTimer?: ReturnType<typeof setTimeout>;
+  session?: GeminiSessionV1;
+  /**
+   * The newest resumption handle the session was given. Sleep keeps it, and
+   * wake offers it back; a handle the server has forgotten closes the socket
+   * with 1008, which is when the call reopens fresh with a handover instead.
+   */
+  resumptionHandle?: string;
   muted: boolean;
-  /** The last filler this call spoke, so the next one is a different one. */
-  lastBridge?: string;
-  /** The day's transcription allowance ran out; the upstream stays shut. */
+  /** The day's audio allowance ran out; the session stays shut. */
   exhausted: boolean;
+  quotaSaid: boolean;
+  /** What the client last saw, so a status frame is sent only on a change. */
+  status: VoiceAssistantStatusV1;
   turnId?: string;
   /** The current turn's durable admission time: what a fact it produces is dated by. */
   turnAdmittedAt?: string;
-  /** The current turn's words, so a `remember` can be grounded in them. */
-  turnTranscript?: string;
   /** Its place in the call, from one: the other half of the ordering stamp. */
   turnOrdinal?: number;
+  /** When the current turn began, so its lines can say how long it took. */
+  turnStartedAt?: number;
+  /** What the person said, as the session transcribes it. */
+  transcript: string;
+  /** What the model has said this turn, from its own output transcription. */
+  answer: string;
+  /** Audio bridged down this turn, so a turn that never spoke is on record. */
+  turnAudioBytes: number;
+  /** Fires when a turn has gone this long without a sound. */
+  silenceTimer?: ReturnType<typeof setTimeout>;
+  /** The guard already told the client about this turn. */
+  silenceSaid: boolean;
+  /**
+   * The person talked over the reply and their client stopped its own player.
+   * The model's VAD will notice in its own time; until it does, the rest of
+   * this turn's audio is dropped rather than played into a moment that has
+   * passed.
+   */
+  dropping: boolean;
+  /**
+   * The hand-over the model asked for, held until its turn ends (ADR 0031):
+   * the model may say its sign-off before or after calling the tool, and
+   * tearing the session down mid-turn would cut whichever came second.
+   */
+  pendingSwitch?: { botId: string; name: string };
+  /** Delegations this call has admitted, so the burst cap can bite. */
+  delegations: number;
+  /** The newest run the host admitted, so its function call can be recorded. */
+  lastDelegationRunId?: string;
+  /**
+   * The function call each subagent request came from, so its result goes
+   * back as that call's own late response. In memory only: a session that has
+   * gone cannot be answered, and the answer then waits for the ledger.
+   */
+  subagentCalls: Map<string, { id: string; name: string }>;
+  /** Calls the model withdrew; their results are dropped rather than sent. */
+  cancelledCalls: Set<string>;
+  /** Bytes bridged but not yet written to the meter, each way. */
+  meterInBytes: number;
+  meterOutBytes: number;
+  /** No audio from the client for this long and the server sleeps the session. */
+  idleTimer?: ReturnType<typeof setTimeout>;
   /**
    * The system message the call last actually sent. Kept here rather than
    * written per turn, and persisted once when the call ends, so the memory
    * request can repeat it without a storage write for every utterance.
    */
   lastSystem?: string;
-  /** When the current or last turn began, so its lines can say how long it took. */
-  turnStartedAt?: number;
-  /** When that turn's model finished; unset while it is in flight. */
-  turnSettledAt?: number;
-  /**
-   * When the client last reported its own speaker as playing, unset once it
-   * reports quiet. A stamp rather than a flag because a report that is never
-   * withdrawn — a device whose completion never came back — must not hold
-   * every Bot answer back for the rest of the call.
-   */
-  playingSince?: number;
-  synthesizing: number;
-  /**
-   * Bumped every time what this call is saying changes: a new spoken turn, an
-   * interruption. A Bot answer whose words were being written when it changed
-   * is stale — the person has moved on — and is dropped rather than spoken
-   * into what is happening now.
-   */
-  speechGeneration: number;
-  /**
-   * The Bot-answer turn in flight, if one is: aborted when the person speaks,
-   * interrupts, or hangs up, because an answer being put into words for a
-   * moment that has passed is not worth finishing.
-   */
-  announcing?: AbortController;
-  quotaSaid: boolean;
 }
 
 interface AnnounceDelegationPayload {
@@ -414,65 +437,177 @@ const MEMORY_UPDATE_MAX_TOKENS = Math.ceil(
 const MEMORY_UPDATE_DEADLINE_MS = 60_000;
 
 /**
- * Presents the transcription upstream, opened with the `fetch` upgrade the
- * dictation relay already owns, as the plain socket the adapter drives.
+ * One Gemini Live session, as the object drives it.
+ *
+ * It owns exactly one socket and the audio waiting for it to be ready. Every
+ * decision — what the setup says, what to do with a frame, when to sleep —
+ * belongs to the call above; this is the transport and the buffer.
  */
-async function openVoiceUpstreamSocket(
-  url: string,
-  headers: Record<string, string>,
-): Promise<VoiceRealtimeSocketV1> {
-  const socket = await fetchVoiceUpstreamSocketV1(url, headers);
-  return {
-    send: (data: string) => socket.send(data),
-    close: () => {
+class GeminiSessionV1 {
+  state: VoiceAssistantUpstreamStateV1 = "starting";
+  private socket: WebSocket | undefined;
+  private ready = false;
+  private closedByUs = false;
+  private pending: Uint8Array[] = [];
+  private pendingBytes = 0;
+
+  constructor(
+    private readonly options: {
+      url: string;
+      setup: Record<string, unknown>;
+      onEvent: (event: GeminiServerEventV1) => void;
+      onClosed: (code: number, reason: string) => void;
+      open: (url: string) => Promise<WebSocket>;
+    },
+  ) {}
+
+  async start(): Promise<void> {
+    const socket = await this.options.open(this.options.url);
+    if (this.closedByUs) {
       try {
         socket.close();
       } catch {
-        // Already gone; there is nothing to close.
+        // Already gone.
       }
-    },
-    onMessage: (handler: (raw: string) => void) => {
-      socket.addEventListener("message", (event: MessageEvent) => {
-        if (typeof event.data === "string") handler(event.data);
-      });
-    },
-    onClose: (handler: (reason: string) => void) => {
-      socket.addEventListener("close", (event: CloseEvent) => {
-        handler(event.reason ?? "");
-      });
-      socket.addEventListener("error", () => {
-        handler("the speech service connection failed");
-      });
-    },
-  };
+      return;
+    }
+    this.socket = socket;
+    socket.addEventListener("message", (event: MessageEvent) => {
+      const raw =
+        typeof event.data === "string"
+          ? event.data
+          : new TextDecoder().decode(event.data as ArrayBuffer);
+      for (const decoded of decodeGeminiServerFrameV1(raw)) {
+        if (decoded.kind === "setup-complete") {
+          this.ready = true;
+          this.state = "awake";
+          this.drain();
+        }
+        this.options.onEvent(decoded);
+      }
+    });
+    socket.addEventListener("close", (event: CloseEvent) => {
+      this.state = "asleep";
+      this.socket = undefined;
+      if (!this.closedByUs) {
+        this.options.onClosed(event.code, event.reason ?? "");
+      }
+    });
+    socket.addEventListener("error", () => {
+      if (this.closedByUs) return;
+      this.state = "asleep";
+      this.options.onClosed(1006, "the voice service connection failed");
+    });
+    this.send(this.options.setup);
+  }
+
+  send(frame: Record<string, unknown>): void {
+    if (!this.socket) return;
+    try {
+      this.socket.send(JSON.stringify(frame));
+    } catch {
+      // A socket that has gone is handled by its own close event.
+    }
+  }
+
+  /**
+   * The person's microphone. Audio that arrives before `setupComplete` is
+   * held in order and sent the moment the session is ready, so the first
+   * syllable after a wake is not the one that goes missing.
+   */
+  sendAudio(pcm: Uint8Array): void {
+    if (!this.ready) {
+      this.pending.push(pcm);
+      this.pendingBytes += pcm.byteLength;
+      while (
+        this.pendingBytes > PENDING_AUDIO_BYTES &&
+        this.pending.length > 0
+      ) {
+        this.pendingBytes -= this.pending.shift()!.byteLength;
+      }
+      return;
+    }
+    this.send(encodeGeminiAudioFrameV1(pcm));
+  }
+
+  private drain(): void {
+    const held = this.pending;
+    this.pending = [];
+    this.pendingBytes = 0;
+    for (const chunk of held) this.send(encodeGeminiAudioFrameV1(chunk));
+  }
+
+  isOpen(): boolean {
+    return this.ready && Boolean(this.socket);
+  }
+
+  close(): void {
+    this.closedByUs = true;
+    this.state = "asleep";
+    this.ready = false;
+    this.pending = [];
+    this.pendingBytes = 0;
+    const socket = this.socket;
+    this.socket = undefined;
+    try {
+      socket?.close();
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
-const VoiceAgentBase = withVoice(Agent, {
-  audioFormat: "pcm16",
-  sampleRate: VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1,
-  historyLimit: 12,
-  maxMessageCount: 40,
-});
+/** What a client may say, beside the custom `voice/*` messages. */
+type VoiceClientFrameV1 =
+  | { type: "hello" }
+  | { type: "start_call" }
+  | { type: "end_call" }
+  | { type: "interrupt" }
+  | { type: "text_message"; text: string };
+
+/**
+ * Sorts one JSON frame from a client. Unknown types answer undefined rather
+ * than throwing: a client a release ahead may send something this object has
+ * no opinion about, and that is not a reason to drop a call.
+ */
+function decodeVoiceClientFrameV1(
+  value: Record<string, unknown>,
+): VoiceClientFrameV1 | undefined {
+  switch (value.type) {
+    case "hello":
+      return { type: "hello" };
+    case "start_call":
+      return { type: "start_call" };
+    case "end_call":
+      return { type: "end_call" };
+    case "interrupt":
+      return { type: "interrupt" };
+    case "text_message":
+      return typeof value.text === "string" && value.text.trim()
+        ? { type: "text_message", text: value.text.trim() }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
 
 // `Cloudflare.Env` is what a test harness augments with its own bindings;
 // intersecting it keeps this class valid under both the Worker's and the
 // suite's declarations.
-export class VoiceAssistant extends VoiceAgentBase<
-  Cloudflare.Env & VoiceAssistantEnv
-> {
+export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   #calls = new Map<string, LiveCall>();
   /**
    * The Bot a socket asked for before its call was admitted (ADR 0029).
    *
-   * The SDK's `start_call` frame carries only a preferred format, so the
-   * target arrives as its own message just before it. Held per connection
-   * until the call is admitted, then it lives in the call record.
+   * The `start_call` frame carries only a preferred format, so the target
+   * arrives as its own message just before it. Held per connection until the
+   * call is admitted, then it lives in the call record.
    */
   #targets = new Map<string, string>();
   /**
-   * Answers being handed to the assistant right now, by run id. Two signals
-   * for one answer — the Bot's wake and the scheduled look-up — arrive
-   * together; the second finds the first here and does nothing.
+   * Answers being handed to the session right now, by run id. Two signals for
+   * one answer — the Bot's wake and the scheduled look-up — arrive together;
+   * the second finds the first here and does nothing.
    */
   #announcing = new Set<string>();
 
@@ -487,222 +622,33 @@ export class VoiceAssistant extends VoiceAgentBase<
     {
       callId: string;
       startedAt: number;
-      /** Synthesized audio handed down this socket, so silence has a number. */
+      /** Audio handed down this socket, so silence has a number. */
       audioChunks: number;
       audioBytes: number;
-      sentencesSpoken: number;
-      /**
-       * Sentences accepted for synthesis whose first chunk has not arrived,
-       * counted per sentence: the SDK pumps several sentences at once, so
-       * their chunks interleave and the previous chunk's text says nothing
-       * about which sentence this one starts.
-       */
-      awaitingFirstChunk: Map<string, number>;
+      turns: number;
     }
   >();
-
-  tts: (TTSProvider & Partial<StreamingTTSProvider>) | undefined =
-    this.guardTts(this.speakingTts());
-
-  /**
-   * One provider per voice this object has spoken as (ADR 0029).
-   *
-   * A call speaks in its Bot's voice, and a Bot's answer arriving from a
-   * delegation is read out in the answering Bot's, so one object can need
-   * several. Each is a cheap object over the same key; the first sentence in
-   * a new voice may pay a connection, which the bridge covers.
-   */
-  #ttsByVoice = new Map<
-    string,
-    (TTSProvider & Partial<StreamingTTSProvider>) | undefined
-  >();
-
-  /**
-   * The provider the SDK holds: one object that picks the voice per sentence.
-   *
-   * The SDK reads `tts` once and speaks every sentence through it, so the
-   * choice cannot be made by handing it a different provider. It is made here
-   * instead, from the call that is speaking, which is also the only place
-   * that knows a read-out belongs to another Bot.
-   */
-  private speakingTts():
-    (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
-    // A deployment with no speech provider at all has no voices either; the
-    // seam is asked once so a test subclass can refuse the same way. What it
-    // answers with also says whether this deployment's provider streams: the
-    // SDK reads `synthesizeStream` off this object before any call exists, so
-    // the capability cannot be discovered per sentence, and every voice is the
-    // same provider class over a different id.
-    const probe = this.createTts();
-    if (!probe) return undefined;
-    const self = this;
-    const speaking: TTSProvider & Partial<StreamingTTSProvider> = {
-      async synthesize(text, signal) {
-        const voice = self.ttsForVoice(self.speakingVoiceId());
-        if (!voice) return null;
-        return voice.synthesize(text, signal);
-      },
-    };
-    if (probe.synthesizeStream)
-      speaking.synthesizeStream = async function* (text, signal) {
-        const voice = self.ttsForVoice(self.speakingVoiceId());
-        if (!voice) return;
-        // A voice whose provider cannot stream still speaks, in one piece.
-        if (!voice.synthesizeStream) {
-          const audio = await voice.synthesize(text, signal);
-          if (audio) yield audio;
-          return;
-        }
-        yield* voice.synthesizeStream(text, signal);
-      };
-    return speaking;
-  }
-
-  /** The provider for one voice, made once and kept. */
-  private ttsForVoice(
-    voiceId: string | undefined,
-  ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
-    const key = voiceId ?? "";
-    if (this.#ttsByVoice.has(key)) return this.#ttsByVoice.get(key);
-    const made = this.createTts(voiceId);
-    this.#ttsByVoice.set(key, made);
-    return made;
-  }
-
-  /**
-   * Whose voice the next sentence is in.
-   *
-   * The live call's Bot, unless something is being read out on behalf of
-   * another Bot — an answer that settled while this call was talking to
-   * somebody else — in which case it is that Bot's, so the person hears who
-   * is actually answering.
-   */
-  private speakingVoiceId(): string | undefined {
-    for (const call of this.#calls.values()) {
-      return call.speakingVoiceId ?? call.voiceId;
-    }
-    return undefined;
-  }
-
-  /**
-   * The provider never answers with silence: a sentence that produces no
-   * audio throws, the SDK tells the client and moves to the next sentence,
-   * and the line below names the sentence that went unheard.
-   */
-  private guardTts(
-    inner: (TTSProvider & Partial<StreamingTTSProvider>) | undefined,
-  ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
-    if (!inner) return undefined;
-    const guarded = guardSpeechProviderV1(inner, (text) =>
-      this.synthesisFailed(text),
-    );
-    const self = this;
-    const wrapped: TTSProvider & Partial<StreamingTTSProvider> = {
-      async synthesize(text, signal) {
-        const finish = self.beginSpeechSynthesis(text);
-        try {
-          return await guarded.synthesize(text, signal);
-        } catch (error) {
-          if (!signal?.aborted) self.synthesisFailed(text);
-          throw error;
-        } finally {
-          finish();
-        }
-      },
-    };
-    const stream = guarded.synthesizeStream;
-    if (stream)
-      wrapped.synthesizeStream = async function* (text, signal) {
-        const finish = self.beginSpeechSynthesis(text);
-        try {
-          yield* stream(text, signal);
-        } catch (error) {
-          if (!signal?.aborted) self.synthesisFailed(text);
-          throw error;
-        } finally {
-          finish();
-        }
-      };
-    return wrapped;
-  }
-
-  private beginSpeechSynthesis(text: string): () => void {
-    for (const [connectionId, call] of this.#calls) {
-      if (!this.#traced.get(connectionId)?.awaitingFirstChunk.has(text))
-        continue;
-      const generation = call.speechGeneration;
-      call.synthesizing += 1;
-      return () => {
-        if (
-          this.#calls.get(connectionId) !== call ||
-          call.speechGeneration !== generation
-        )
-          return;
-        call.synthesizing -= 1;
-        // Cover the handoff from the last PCM chunk to the client's playing report.
-        if (call.turnSettledAt !== undefined) call.turnSettledAt = Date.now();
-      };
-    }
-    return () => undefined;
-  }
-
-  private synthesisFailed(text: string): void {
-    for (const connection of this.getConnections()) {
-      const traced = this.#traced.get(connection.id);
-      const awaiting = traced?.awaitingFirstChunk.get(text) ?? 0;
-      if (!traced || awaiting === 0) continue;
-      if (awaiting > 1) traced.awaitingFirstChunk.set(text, awaiting - 1);
-      else traced.awaitingFirstChunk.delete(text);
-      this.trace(connection, "tts-failed", { chars: text.length });
-      return;
-    }
-  }
 
   // -- seams a test subclass overrides ---------------------------------------
 
   /**
-   * One speech provider, in one voice.
+   * The Live endpoint, with this deployment's key on it.
    *
-   * Takes the voice rather than reading it from the environment, because a
-   * call speaks as its Bot (ADR 0029) and one object may hold several. An
-   * absent voice is the deployment's own, which is what an account with no
-   * per-Bot voices chosen still sounds like.
+   * `VOICE_ASSISTANT_UPSTREAM_URL` points the session at a fake, which is what
+   * the workerd suite drives: the object's own behaviour is the thing under
+   * test, and Google answering is not.
    */
-  protected createTts(
-    voiceId?: string,
-  ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
-    const apiKey = this.env.ELEVENLABS_API_KEY?.trim();
-    if (!apiKey) return undefined;
-    return new ElevenLabsTTS({
-      apiKey,
-      voiceId:
-        voiceId?.trim() ||
-        this.env.ELEVENLABS_VOICE_ID?.trim() ||
-        VOICE_ASSISTANT_DEFAULT_VOICE_ID,
-      modelId: VOICE_ASSISTANT_TTS_MODEL,
-      // Raw PCM at the rate the client is told in `audio_config`, so both
-      // clients play it with no decoder and can measure what they play.
-      outputFormat: `pcm_${VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1}`,
-    });
+  protected geminiUrl(): string | undefined {
+    const stand = this.env.VOICE_ASSISTANT_UPSTREAM_URL?.trim();
+    if (stand)
+      return geminiLiveUrlV1(this.env.GEMINI_API_KEY?.trim() ?? "", stand);
+    const key = this.env.GEMINI_API_KEY?.trim();
+    return key ? geminiLiveUrlV1(key, GEMINI_LIVE_ENDPOINT_V1) : undefined;
   }
 
-  protected createInnerTranscriber(): VoiceTranscriberV1 | undefined {
-    const apiKey = voiceAssistantSttKeyV1(this.env);
-    if (!apiKey) return undefined;
-    if (voiceAssistantSttProviderV1(this.env) === "openai") {
-      return createOpenAiTranscriberV1({
-        openSocket: () =>
-          openVoiceUpstreamSocket(VOICE_REALTIME_TRANSCRIPTION_URL_V1, {
-            authorization: `Bearer ${apiKey}`,
-          }),
-      });
-    }
-    // The SDK's `Transcriber` and this module's `VoiceTranscriberV1` are the
-    // same shape; the adapter opens its own socket with a `fetch` upgrade.
-    return new ElevenLabsSTT({
-      apiKey,
-      ...VOICE_ASSISTANT_SCRIBE_OPTIONS_V1,
-    }) as VoiceTranscriberV1;
+  /** Opens the upstream socket. One seam, so a test can refuse or script it. */
+  protected openGeminiSocket(url: string): Promise<WebSocket> {
+    return fetchVoiceUpstreamSocketV1(url, {});
   }
 
   protected async chatCompletion(
@@ -733,10 +679,9 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   /**
-   * The model pinned for voice turns, if the deployment pinned one. A voice
-   * turn wants a fast first token above all, which the platform's Auto route
-   * does not promise; the pin is a Worker var so it can follow what the
-   * `model-first-text` lines show without a code change.
+   * The model the end-of-call memory update is asked. The call itself has no
+   * chat model any more, so this pins one request a call rather than every
+   * turn of it.
    */
   protected voiceModel(): string | undefined {
     const pinned = this.env.VOICE_ASSISTANT_MODEL?.trim();
@@ -747,27 +692,14 @@ export class VoiceAssistant extends VoiceAgentBase<
     return new Date();
   }
 
-  /** Seconds of transcription booked per window; a test shortens it. */
-  protected sttWindowSeconds(): number {
-    return VOICE_ASSISTANT_STT_RESERVE_SECONDS_V1;
+  /** How long a silent turn is given before the client is told; a test shortens it. */
+  protected modelSilenceTimeoutMs(): number {
+    return MODEL_SILENCE_TIMEOUT_MS;
   }
 
-  /** How long a settled reply is left to finish playing; a test shortens it. */
-  protected replyDrainQuietMs(): number {
-    return REPLY_DRAIN_QUIET_MS;
-  }
-
-  /** How long a Bot answer's event turn may hold the floor; a test shortens it. */
-  protected botAnswerDeadlineMs(): number {
-    return BOT_ANSWER_TURN_DEADLINE_MS;
-  }
-
-  /**
-   * How long an unwithdrawn playback report holds the floor; a test shortens
-   * it. It covers a speaker the client never reported quiet again.
-   */
-  protected playbackAckTimeoutMs(): number {
-    return VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1;
+  /** How long the server waits for audio before sleeping; a test shortens it. */
+  protected serverIdleSleepMs(): number {
+    return VOICE_ASSISTANT_SERVER_IDLE_SLEEP_MS_V1;
   }
 
   private workerVar(name: `FROCK_AI_${string}`): string | undefined {
@@ -865,11 +797,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     return async (callId: string) => {
       const job = await this.memory().readJob(callId);
       const sequence = job?.sequence ?? 0;
-      const turns = (await this.ledger().turnsForCall(callId)).filter(
-        // A Bot's answer arriving is not something the person said; what the
-        // assistant made of it, if it spoke, is not theirs either.
-        (turn) => !turn.event,
-      );
+      const turns = await this.ledger().turnsForCall(callId);
       return turns.map((turn) => ({
         id: turn.turnId,
         // The ledger's own turn sequence, not a place in this filtered list:
@@ -1110,8 +1038,6 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
   }
 
-  // -- connections ----------------------------------------------------------
-
   private identity(connection: Connection): ConnectionIdentity | undefined {
     const state = connection.state as ConnectionIdentity | null;
     return state && typeof state.userId === "string" ? state : undefined;
@@ -1184,6 +1110,10 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
     connection.setState({ userId, deviceKey } satisfies ConnectionIdentity);
     this.trace(connection, "connected");
+    // Protocol v1's opening: the client waits for both of these before it
+    // says `hello`, and nothing about them depends on a call existing.
+    this.sendRaw(connection, { type: "welcome", protocol_version: 1 });
+    this.sendRaw(connection, { type: "status", status: "idle" });
   }
 
   override async onClose(
@@ -1201,13 +1131,11 @@ export class VoiceAssistant extends VoiceAgentBase<
       reason: reason.slice(0, 200),
       wasClean,
     });
-    // A socket going is not the person hanging up. The upstream is closed and
+    // A socket going is not the person hanging up. The session is closed and
     // its meter settled at once, but the call record stays: a client that
     // comes straight back from a network change continues this conversation
     // rather than starting a new one with nothing behind it. The alarm below
-    // is what ends it, and hands it to memory, if nobody comes back — so an
-    // abandoned call always has a scheduled path to being finished, and never
-    // waits for some future request to notice it.
+    // is what ends it, and hands it to memory, if nobody comes back.
     await this.releaseCallResources(connection.id);
     const current = await this.ledger().currentCall();
     if (current && current.connectionId === connection.id) {
@@ -1215,22 +1143,67 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
     this.#traced.delete(connection.id);
     this.#targets.delete(connection.id);
-    await super.onClose?.(connection, code, reason, wasClean);
   }
 
   override async onMessage(
     connection: Connection,
     message: WSMessage,
   ): Promise<void> {
-    if (typeof message !== "string") return;
+    if (typeof message !== "string") {
+      await this.onClientAudio(connection, message);
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(message);
     } catch {
       return;
     }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
     const custom = decodeVoiceAssistantClientMessageV1(parsed);
-    if (!custom) return;
+    if (custom) {
+      await this.onCustomMessage(connection, custom);
+      return;
+    }
+    const frame = decodeVoiceClientFrameV1(parsed as Record<string, unknown>);
+    if (!frame) return;
+    switch (frame.type) {
+      case "hello":
+        // Nothing to answer: the welcome went out on connect, and the call
+        // starts on the frame after this one.
+        return;
+      case "start_call":
+        await this.startCall(connection);
+        return;
+      case "end_call":
+        await this.endCall(connection);
+        return;
+      case "interrupt": {
+        const call = this.#calls.get(connection.id);
+        if (!call) return;
+        // The person talked over the reply. Their own player has already
+        // stopped; the model's voice detector will reach the same conclusion
+        // in its own time, and until it does this call drops what is left of
+        // the turn rather than playing it into a moment that has passed.
+        this.trace(connection, "interrupted", { source: "client" });
+        call.dropping = true;
+        this.setStatus(connection, call, "listening");
+        return;
+      }
+      case "text_message": {
+        const call = this.#calls.get(connection.id);
+        if (!call?.session?.isOpen()) return;
+        call.transcript = frame.text;
+        call.session.send(encodeGeminiTextTurnV1(frame.text));
+        return;
+      }
+    }
+  }
+
+  private async onCustomMessage(
+    connection: Connection,
+    custom: VoiceAssistantClientMessageV1,
+  ): Promise<void> {
     // The target is the one message that arrives before the call exists: the
     // client says who it wants, then `start_call`. Once a call is live the
     // same message is a hand-over the person asked for on the screen rather
@@ -1243,42 +1216,82 @@ export class VoiceAssistant extends VoiceAgentBase<
       }
       const identity = this.identity(connection);
       if (!identity) return;
-      await this.turnHost(
+      const switched = await this.turnHost(
         identity.userId,
         live,
         `target-${crypto.randomUUID()}`,
         undefined,
       ).switchBot(custom.botId);
+      // Asked on the screen rather than in words, so nothing is mid-sentence:
+      // the session moves now instead of waiting for a turn to end.
+      if (switched.status === "switched") {
+        await this.applySwitch(connection, live);
+      }
       return;
     }
     const call = this.#calls.get(connection.id);
     if (!call) return;
     switch (custom.type) {
       case "voice/sleep":
-        call.session?.sleep();
+        await this.sleepSession(connection, call);
         break;
       case "voice/wake":
-        if (!call.muted && !call.exhausted) call.session?.wake();
+        if (!call.muted && !call.exhausted) {
+          await this.wakeSession(connection, call);
+        }
         break;
       case "voice/mute":
         call.muted = custom.muted;
-        if (custom.muted) call.session?.sleep();
+        if (custom.muted) await this.sleepSession(connection, call);
         this.sendState(connection, call);
         break;
       case "voice/speech":
-        // The speaker, as the device knows it. Nothing durable turns on this:
-        // it is only what decides whether now is a pause.
-        call.playingSince = custom.playing ? Date.now() : undefined;
+        // What the speaker is doing, as the device knows it. Since the model
+        // runs its own barge-in there is nothing durable to decide here, and
+        // the report is kept only for the trace.
         break;
     }
   }
 
-  private send(connection: Connection, message: VoiceAssistantServerMessageV1) {
+  // -- frames ---------------------------------------------------------------
+
+  /** One protocol-v1 frame. `send` below is for this object's own messages. */
+  private sendRaw(connection: Connection, message: Record<string, unknown>) {
     try {
       connection.send(JSON.stringify(message));
     } catch {
       // A socket that is already gone is cleaned up by onClose.
     }
+  }
+
+  private send(connection: Connection, message: VoiceAssistantServerMessageV1) {
+    this.sendRaw(connection, message as unknown as Record<string, unknown>);
+  }
+
+  private sendBinary(connection: Connection, audio: Uint8Array) {
+    try {
+      // A copy, not a view: a view over a larger buffer would put whatever
+      // else is in that buffer on the wire.
+      connection.send(
+        audio.buffer.slice(
+          audio.byteOffset,
+          audio.byteOffset + audio.byteLength,
+        ) as ArrayBuffer,
+      );
+    } catch {
+      // A socket that is already gone is cleaned up by onClose.
+    }
+  }
+
+  /** The pipeline status, sent only when it actually changes. */
+  private setStatus(
+    connection: Connection,
+    call: LiveCall,
+    status: VoiceAssistantStatusV1,
+  ) {
+    if (call.status === status) return;
+    call.status = status;
+    this.sendRaw(connection, { type: "status", status });
   }
 
   private refuse(
@@ -1296,108 +1309,19 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   /**
-   * Which Bot a call opens on (ADR 0029).
+   * A sentence the person should see, with the call left open.
    *
-   * The client's choice wins when it names a Bot this account owns. Anything
-   * else — no choice, a deleted Bot, another account's — falls back to the
-   * account's General Bot: a Bot the person never asked for would answer in
-   * its own name, memory and thread with nothing saying it is not the one
-   * they wanted. An account with no General still has Bots — one that owned
-   * Bots before the bootstrap is never given General, and deleting General
-   * does not bring it back — so the directory is asked before a call is
-   * called Bot-less. Only an account with no Bots at all is answered by the
-   * account-wide assistant.
+   * Protocol v1 says an error with no `code` is a turn that failed while the
+   * call goes on; the client shows it for a few seconds and keeps listening.
    */
-  private async resolveCallTarget(
-    userId: string,
-    botId: string | undefined,
-  ): Promise<{ botId: string; name: string; voiceId?: string }> {
-    if (botId) {
-      try {
-        const owned = await this.ownedBot(userId, botId);
-        const voiceId = await this.voiceForBot(userId, owned.botId);
-        return {
-          botId: owned.botId,
-          name: owned.name,
-          ...(voiceId ? { voiceId } : {}),
-        };
-      } catch {
-        // Fall through to the account's default.
-      }
-    }
-    // Which Bot is General is recorded by the flock bootstrap, not spelled by
-    // a display name a person is free to change.
-    const generalBotId = await this.generalBotId(userId);
-    if (generalBotId) {
-      try {
-        const general = await this.ownedBot(userId, generalBotId);
-        const voiceId = await this.voiceForBot(userId, general.botId);
-        return {
-          botId: general.botId,
-          name: general.name,
-          ...(voiceId ? { voiceId } : {}),
-        };
-      } catch {
-        // General has been deleted. The directory below still answers.
-      }
-    }
-    // No General marker does not mean no Bots: an account that already owned
-    // Bots when the bootstrap ran is never given one, and deleting General
-    // does not bring it back. Only the directory can say the account is
-    // empty, and only then is the call Bot-less.
-    try {
-      const directory = await this.directory(userId);
-      for (const entry of directory.bots) {
-        try {
-          const owned = await this.ownedBot(userId, entry.botId);
-          const voiceId = await this.voiceForBot(userId, owned.botId);
-          return {
-            botId: owned.botId,
-            name: owned.name,
-            ...(voiceId ? { voiceId } : {}),
-          };
-        } catch {
-          // That Bot cannot be read; try the next one.
-        }
-      }
-    } catch {
-      // No directory to read: the call opens without a Bot.
-    }
-    return { botId: "", name: "" };
-  }
-
-  /**
-   * The voice a Bot speaks in (ADR 0029, decision 4).
-   *
-   * Its own choice if it has made one, else the voice its character carries,
-   * else the deployment's. The character is read from the account directory's
-   * avatar mirror, which is already the authority for what a Bot wears, so a
-   * Bot that has only ever picked a look already sounds unlike its siblings.
-   */
-  private async voiceForBot(
-    userId: string,
-    botId: string,
-  ): Promise<string | undefined> {
-    let characterId: string | undefined;
-    try {
-      const directory = await this.directory(userId);
-      characterId = directory.bots.find((bot) => bot.botId === botId)?.avatar
-        .characterId;
-    } catch {
-      // No directory, no character: the deployment's voice still answers.
-    }
-    return resolveVoiceIdV1({
-      ...(characterId ? { characterId } : {}),
-      ...(this.env.ELEVENLABS_VOICE_ID
-        ? { fallback: this.env.ELEVENLABS_VOICE_ID }
-        : {}),
-    });
+  private sendError(connection: Connection, message: string) {
+    this.sendRaw(connection, { type: "error", message });
   }
 
   /**
    * Tells the client which Bot it is talking to (ADR 0029).
    *
-   * Sent when a call is admitted and again whenever `switch_bot` moves it,
+   * Sent when a call is admitted and again whenever the call is handed over,
    * so the screen follows the voice rather than the person having to guess
    * who answered.
    */
@@ -1424,7 +1348,14 @@ export class VoiceAssistant extends VoiceAgentBase<
 
   // -- call lifecycle -------------------------------------------------------
 
-  override async beforeCallStart(connection: Connection): Promise<boolean> {
+  /**
+   * `start_call`: admits the call in the ledger, then opens the session.
+   *
+   * Everything durable happens before the socket to Google does, because the
+   * record is what an eviction leaves behind and the socket is not.
+   */
+  private async startCall(connection: Connection): Promise<void> {
+    if (this.#calls.has(connection.id)) return;
     const identity = this.identity(connection);
     if (!identity) {
       this.refuse(
@@ -1432,26 +1363,25 @@ export class VoiceAssistant extends VoiceAgentBase<
         "unconfigured",
         "This voice session is not signed in.",
       );
-      return false;
+      return;
     }
-    if (!this.tts || !this.createInnerTranscriber()) {
+    if (!this.geminiUrl()) {
       this.refuse(
         connection,
         "unconfigured",
         "Voice isn't set up on this deployment yet.",
       );
-      return false;
+      return;
     }
     const ledger = this.ledger();
     const now = this.now();
-    const cap = await ledger.exceededCap(now);
-    if (cap) {
+    if (await ledger.exceededCap(now)) {
       this.refuse(
         connection,
         "quota",
         "Today's voice allowance is used up. It resets at midnight UTC.",
       );
-      return false;
+      return;
     }
     // A call about to be displaced has its memory work recorded *before* the
     // record naming it is replaced. Written the other way round, an eviction
@@ -1482,7 +1412,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     );
     // Whatever this admission displaced — another device's call, or this
     // device's own earlier socket rejoining the same call — is ended now, so
-    // one account never holds two live upstream sessions.
+    // one account never holds two live sessions.
     if (admission.replaced) {
       const replacedId = admission.replaced.connectionId;
       for (const other of this.getConnections()) {
@@ -1495,7 +1425,7 @@ export class VoiceAssistant extends VoiceAgentBase<
             : "Voice continues on a newer connection from this device.",
         );
         await this.releaseCallResources(other.id);
-        this.forceEndCall(other);
+        this.sendRaw(other, { type: "status", status: "idle" });
       }
     }
     const call: LiveCall = {
@@ -1503,17 +1433,24 @@ export class VoiceAssistant extends VoiceAgentBase<
       connectionId: connection.id,
       botId: target.botId,
       botName: target.name,
-      ...(target.voiceId ? { voiceId: target.voiceId } : {}),
+      voice: target.voice,
       startedAt: Date.now(),
       sequence: Date.parse(admission.call.startedAt),
       promptContext: this.buildPromptContext(identity.userId, target.botId),
-      lastAwakeSeconds: 0,
-      reservedSeconds: 0,
       muted: false,
       exhausted: false,
-      synthesizing: 0,
-      speechGeneration: 0,
       quotaSaid: false,
+      status: "idle",
+      transcript: "",
+      answer: "",
+      turnAudioBytes: 0,
+      silenceSaid: false,
+      dropping: false,
+      delegations: 0,
+      subagentCalls: new Map(),
+      cancelledCalls: new Set(),
+      meterInBytes: 0,
+      meterOutBytes: 0,
     };
     this.#calls.set(connection.id, call);
     this.#traced.set(connection.id, {
@@ -1521,223 +1458,247 @@ export class VoiceAssistant extends VoiceAgentBase<
       startedAt: call.startedAt,
       audioChunks: 0,
       audioBytes: 0,
-      sentencesSpoken: 0,
-      awaitingFirstChunk: new Map(),
+      turns: 0,
     });
     this.trace(connection, "call-admitted", {
       admission: admission.status,
       rejoined: admission.status === "admitted" && admission.rejoined,
       replaced: admission.replaced?.connectionId,
       ...(call.botId ? { bot: call.botId } : {}),
+      voice: call.voice.voiceName,
     });
     // The choice is spent: from here the Bot lives in the call record, and a
     // later `voice/target` on this socket is a hand-over, not a preference.
     this.#targets.delete(connection.id);
     if (call.botId) this.sendTarget(connection, call.botId);
-    return true;
-  }
-
-  override createTranscriber(connection: Connection): Transcriber | null {
-    const inner = this.createInnerTranscriber();
-    const call = this.#calls.get(connection.id);
-    if (!inner || !call) return null;
-    const gated: VoiceTranscriberV1 = {
-      createSession: (options = {}) => {
-        if (call.exhausted) {
-          throw new Error("today's transcription allowance is used up");
-        }
-        return inner.createSession(options);
-      },
-    };
-    const sleeping = createSleepingTranscriberV1(gated, {
-      idleSleepMs: VOICE_ASSISTANT_SERVER_IDLE_SLEEP_MS_V1,
-      maxPendingBytes: PENDING_AUDIO_BYTES,
-      onState: (state: VoiceAssistantUpstreamStateV1) => {
-        void this.upstreamChanged(connection, call, state);
-      },
+    // The rate the client will be played at, said once and before any audio.
+    this.sendRaw(connection, {
+      type: "audio_config",
+      format: "pcm16",
+      sampleRate: VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1,
     });
-    // The SDK calls `createSession` once per call; the wrapper session is
-    // what sleep and wake act on.
-    return {
-      createSession: (options = {}) => {
-        const session = sleeping.createSession({
-          ...options,
-          onSpeechStart: () => {
-            // The upstream's own voice detector heard someone. While the
-            // assistant is speaking this is the barge-in that aborts the
-            // reply, so it is the line that says why synthesis stopped.
-            this.trace(connection, "speech-started");
-            options.onSpeechStart?.();
-          },
-          onFatalError: (error) => {
-            // The SDK logs its own record of any transcriber fatal; this one
-            // names it as the assistant's ears and, sitting outside the
-            // sleeping wrapper, also catches an upgrade that never became a
-            // session. Without it a call that loses its ears looks, from
-            // every log, like a person who said nothing.
-            this.trace(connection, "stt-failed", { message: error.message });
-            options.onFatalError?.(error);
-          },
-        });
-        call.session = session;
-        // Open at once: the first words after `listening` must not wait on a
-        // cold upstream. The client's sleep message closes it when the room
-        // goes quiet.
-        session.wake();
-        return session as TranscriberSession;
-      },
-    };
+    await this.openSession(connection, call, {});
   }
 
-  /**
-   * The transcription meter, kept ahead of the upstream.
-   *
-   * A window of seconds is booked the moment the upstream starts opening and
-   * again each time the window runs out while it stays awake; going to sleep
-   * refunds the part of the last window not used. So a call that is evicted
-   * mid-window has already paid for it, a long awake stretch is charged as
-   * it happens, silence costs nothing because a sleeping upstream books
-   * nothing, and a day that runs out shuts the upstream at the next window
-   * rather than at the end of the call.
-   */
-  private async upstreamChanged(
-    connection: Connection,
-    call: LiveCall,
-    state: VoiceAssistantUpstreamStateV1,
-  ): Promise<void> {
-    this.trace(connection, "upstream", { state });
-    this.sendState(connection, call);
-    if (state === "starting") {
-      await this.openSttWindow(connection, call);
-      return;
-    }
-    if (state === "asleep") {
-      await this.closeSttWindow(call);
-    }
-  }
-
-  private async openSttWindow(connection: Connection, call: LiveCall) {
-    const window = this.sttWindowSeconds();
-    const reserved = await this.ledger().reserveSeconds(
-      this.now(),
-      "sttSeconds",
-      window,
-    );
-    if (reserved.status === "refused") {
-      call.exhausted = true;
-      call.session?.sleep();
-      if (!call.quotaSaid) {
-        call.quotaSaid = true;
-        this.refuse(
-          connection,
-          "quota",
-          "Today's voice listening allowance is used up. It resets at midnight UTC.",
-        );
-      }
-      return;
-    }
-    call.reservedSeconds += window;
-    if (call.renewTimer) clearTimeout(call.renewTimer);
-    call.renewTimer = setTimeout(() => {
-      call.renewTimer = undefined;
-      if (!this.#calls.has(connection.id) || call.session?.state !== "awake") {
-        return;
-      }
-      void this.openSttWindow(connection, call);
-    }, window * 1000);
-  }
-
-  private async closeSttWindow(call: LiveCall) {
-    if (call.renewTimer) {
-      clearTimeout(call.renewTimer);
-      call.renewTimer = undefined;
-    }
-    if (!call.session) return;
-    const total = call.session.awakeSeconds();
-    const used = total - call.lastAwakeSeconds;
-    call.lastAwakeSeconds = total;
-    const unused = call.reservedSeconds - Math.max(0, used);
-    call.reservedSeconds = 0;
-    if (unused > 0) {
-      await this.ledger().refundSeconds(this.now(), "sttSeconds", unused);
-    } else if (unused < 0) {
-      // Awake longer than what was booked (a renewal that did not land in
-      // time): charge the difference rather than forget it.
-      await this.ledger().addMeter(this.now(), { sttSeconds: -unused });
-    }
-  }
-
-  override async onCallStart(connection: Connection): Promise<void> {
-    const call = this.#calls.get(connection.id);
-    if (!call) {
-      this.trace(connection, "listening-without-call");
-      return;
-    }
-    this.trace(connection, "listening");
-    this.sendState(connection, call);
-  }
-
-  override async onCallEnd(connection: Connection): Promise<void> {
+  /** `end_call`, and the hang-up's own bookkeeping. */
+  private async endCall(connection: Connection): Promise<void> {
     const traced = this.#traced.get(connection.id);
     this.trace(connection, "call-ended", {
       audioChunks: traced?.audioChunks ?? 0,
       audioBytes: traced?.audioBytes ?? 0,
-      sentencesSpoken: traced?.sentencesSpoken ?? 0,
+      turns: traced?.turns ?? 0,
     });
     await this.releaseCall(connection);
+    this.sendRaw(connection, { type: "status", status: "idle" });
   }
 
   /**
-   * The SDK stopped a reply. It does this for the upstream's own detector
-   * (a `speech-started` line lands just before) and for the phone's local
-   * energy gate sending `interrupt` (no such line: the SDK consumes that
-   * frame before `onMessage`). Between the two the log names which side
-   * cut a reply short.
+   * Opens the session this call talks through.
+   *
+   * The instruction is rendered here rather than per turn, because a Live
+   * session is instructed once: everything the model will need for the whole
+   * call — the Bot, its memory, its thread, the directory, the clock — goes
+   * in now. A wake offers the resumption handle; a wake the server has
+   * forgotten comes back through `onSessionClosed` and reopens with a
+   * handover instead.
    */
-  override onInterrupt(connection: Connection): void {
-    this.trace(connection, "interrupted");
-    const call = this.#calls.get(connection.id);
-    if (!call) return;
-    // The client stops its own player, so the speaker is quiet from here. A
-    // Bot answer being put into words is for a moment that has passed.
-    call.playingSince = undefined;
-    call.speechGeneration += 1;
-    call.synthesizing = 0;
-    this.#traced.get(connection.id)?.awaitingFirstChunk.clear();
-    call.announcing?.abort();
-  }
-
-  /**
-   * Every chunk of synthesized audio on its way down, counted; the first
-   * chunk of each sentence is traced on its own so the tail shows whether
-   * speech ever left the object and how long the first byte took.
-   */
-  override async afterSynthesize(
-    audio: ArrayBuffer,
-    text: string,
+  private async openSession(
     connection: Connection,
-  ): Promise<ArrayBuffer | null> {
-    const traced = this.#traced.get(connection.id);
-    if (!traced) return audio;
-    traced.audioChunks += 1;
-    traced.audioBytes += audio.byteLength;
-    const awaiting = traced.awaitingFirstChunk.get(text) ?? 0;
-    if (awaiting > 0) {
-      if (awaiting > 1) traced.awaitingFirstChunk.set(text, awaiting - 1);
-      else traced.awaitingFirstChunk.delete(text);
-      traced.sentencesSpoken += 1;
-      const call = this.#calls.get(connection.id);
-      this.trace(connection, "audio", {
-        chars: text.length,
-        bytes: audio.byteLength,
-        chunk: traced.audioChunks,
-        ...(call?.turnId ? { turn: call.turnId } : {}),
-        ...(call?.turnStartedAt
-          ? { sinceTurnMs: Math.max(0, Date.now() - call.turnStartedAt) }
-          : {}),
+    call: LiveCall,
+    options: { handle?: string; handover?: boolean },
+  ): Promise<void> {
+    const url = this.geminiUrl();
+    if (!url) return;
+    const context = await call.promptContext;
+    const handover = options.handover
+      ? await this.callHistory(call.callId)
+      : [];
+    const instruction = renderVoiceSystemPromptV1({
+      ...context,
+      session: await this.sessionMemoryContext(),
+      now: this.now(),
+      ...(handover.length > 0 ? { handover } : {}),
+    });
+    // The system message this call actually sent, kept for the end-of-call
+    // request's prefix. In memory only: a storage write per call for a cache
+    // hint would cost more than the hint is worth.
+    call.lastSystem = instruction;
+    const setup = buildGeminiLiveSetupV1({
+      systemInstruction: instruction,
+      voiceName: call.voice.voiceName,
+      functionDeclarations: call.botId
+        ? VOICE_FUNCTION_DECLARATIONS_V1
+        : VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1,
+      googleSearch: true,
+      ...(options.handle ? { resumptionHandle: options.handle } : {}),
+    });
+    const session = new GeminiSessionV1({
+      url,
+      setup,
+      onEvent: (event) => {
+        void this.onSessionEvent(connection.id, call.callId, event);
+      },
+      onClosed: (code, reason) => {
+        void this.onSessionClosed(connection.id, call.callId, code, reason);
+      },
+      open: (target) => this.openGeminiSocket(target),
+    });
+    call.session = session;
+    this.trace(connection, "upstream", {
+      state: "starting",
+      ...(options.handle ? { resumed: true } : {}),
+      ...(handover.length > 0 ? { handover: handover.length } : {}),
+    });
+    this.sendState(connection, call);
+    try {
+      await session.start();
+    } catch (error) {
+      this.trace(connection, "upstream-failed", {
+        message: error instanceof Error ? error.message : String(error),
       });
+      call.session = undefined;
+      this.sendState(connection, call);
+      this.sendError(
+        connection,
+        "The voice service could not be reached. Try again in a moment.",
+      );
+      return;
     }
-    return audio;
+    this.armIdleSleep(connection, call);
+  }
+
+  /** The person's microphone, on its way to the model. */
+  private async onClientAudio(
+    connection: Connection,
+    message: Exclude<WSMessage, string>,
+  ): Promise<void> {
+    const call = this.#calls.get(connection.id);
+    if (!call || call.muted || call.exhausted) return;
+    const session = call.session;
+    if (!session) return;
+    const bytes =
+      message instanceof ArrayBuffer
+        ? new Uint8Array(message)
+        : new Uint8Array(
+            (message as ArrayBufferView).buffer,
+            (message as ArrayBufferView).byteOffset,
+            (message as ArrayBufferView).byteLength,
+          );
+    if (bytes.byteLength === 0) return;
+    session.sendAudio(bytes);
+    this.armIdleSleep(connection, call);
+    await this.meterAudio(connection, call, "in", bytes.byteLength);
+  }
+
+  /**
+   * Counts audio actually bridged, in blocks.
+   *
+   * Every frame written straight through would be a storage write forty times
+   * a second in each direction, so bytes accumulate and the meter is written
+   * a block at a time. A block that takes the day past its cap shuts the
+   * session and tells the client, which is a bound to within one block rather
+   * than to the second — and the block is five seconds.
+   */
+  private async meterAudio(
+    connection: Connection,
+    call: LiveCall,
+    direction: "in" | "out",
+    bytes: number,
+  ): Promise<void> {
+    const perSecond =
+      direction === "in"
+        ? VOICE_ASSISTANT_INPUT_BYTES_PER_SECOND_V1
+        : VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1;
+    const block = VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1 * perSecond;
+    if (direction === "in") call.meterInBytes += bytes;
+    else call.meterOutBytes += bytes;
+    const held = direction === "in" ? call.meterInBytes : call.meterOutBytes;
+    if (held < block) return;
+    const blocks = Math.floor(held / block);
+    const seconds = blocks * VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1;
+    if (direction === "in") call.meterInBytes -= blocks * block;
+    else call.meterOutBytes -= blocks * block;
+    const ledger = this.ledger();
+    await ledger.addMeter(
+      this.now(),
+      direction === "in"
+        ? { audioInSeconds: seconds }
+        : { audioOutSeconds: seconds },
+    );
+    const cap = await ledger.exceededCap(this.now());
+    if (cap !== "audioInSeconds" && cap !== "audioOutSeconds") return;
+    call.exhausted = true;
+    await this.sleepSession(connection, call);
+    if (call.quotaSaid) return;
+    call.quotaSaid = true;
+    this.refuse(
+      connection,
+      "quota",
+      "Today's voice allowance is used up. It resets at midnight UTC.",
+    );
+  }
+
+  /** Writes the part-block each way that the meter has not seen yet. */
+  private async settleMeter(call: LiveCall): Promise<void> {
+    const inSeconds =
+      call.meterInBytes / VOICE_ASSISTANT_INPUT_BYTES_PER_SECOND_V1;
+    const outSeconds =
+      call.meterOutBytes / VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1;
+    call.meterInBytes = 0;
+    call.meterOutBytes = 0;
+    if (inSeconds < 0.5 && outSeconds < 0.5) return;
+    await this.ledger().addMeter(this.now(), {
+      audioInSeconds: Math.round(inSeconds),
+      audioOutSeconds: Math.round(outSeconds),
+    });
+  }
+
+  /**
+   * The server's own sleep. A client that never says `voice/sleep` — an app
+   * killed mid-call, a socket held open by a proxy — still stops the meter.
+   */
+  private armIdleSleep(connection: Connection, call: LiveCall): void {
+    if (call.idleTimer) clearTimeout(call.idleTimer);
+    call.idleTimer = setTimeout(() => {
+      call.idleTimer = undefined;
+      if (this.#calls.get(connection.id) !== call) return;
+      void this.sleepSession(connection, call);
+    }, this.serverIdleSleepMs());
+  }
+
+  /**
+   * Closes the session and keeps the handle (ADR 0031, decision 3).
+   *
+   * Nothing listens and nothing is billed in between. A subagent already
+   * admitted finishes as any Turn would, and its answer waits for the wake.
+   */
+  private async sleepSession(
+    connection: Connection,
+    call: LiveCall,
+  ): Promise<void> {
+    if (call.idleTimer) {
+      clearTimeout(call.idleTimer);
+      call.idleTimer = undefined;
+    }
+    if (!call.session) return;
+    call.session.close();
+    call.session = undefined;
+    this.clearSilenceGuard(call);
+    await this.settleMeter(call);
+    await this.settleOpenTurn(call, { failure: "the call was paused" });
+    this.trace(connection, "upstream", { state: "asleep" });
+    this.sendState(connection, call);
+  }
+
+  /** The other half: reopen, resuming where the conversation was. */
+  private async wakeSession(
+    connection: Connection,
+    call: LiveCall,
+  ): Promise<void> {
+    if (call.session) return;
+    await this.openSession(connection, call, {
+      ...(call.resumptionHandle ? { handle: call.resumptionHandle } : {}),
+    });
   }
 
   /**
@@ -1766,288 +1727,516 @@ export class VoiceAssistant extends VoiceAgentBase<
     this.trace(connection, "call-memory", { call: call.callId });
   }
 
-  /** Closes the upstream and settles its meter; the call record is separate. */
+  /** Closes the session and settles its meters; the call record is separate. */
   private async releaseCallResources(connectionId: string): Promise<void> {
     const call = this.#calls.get(connectionId);
     if (!call) return;
     this.#calls.delete(connectionId);
-    call.announcing?.abort();
-    if (call.session) {
-      await this.closeSttWindow(call);
-      call.session.close();
+    if (call.idleTimer) clearTimeout(call.idleTimer);
+    this.clearSilenceGuard(call);
+    call.session?.close();
+    call.session = undefined;
+    await this.settleOpenTurn(call, { failure: "the call ended" });
+    await this.settleMeter(call);
+  }
+
+  // -- the session's own events ---------------------------------------------
+
+  private live(
+    connectionId: string,
+    callId: string,
+  ): { connection: Connection; call: LiveCall } | undefined {
+    const call = this.#calls.get(connectionId);
+    if (!call || call.callId !== callId) return undefined;
+    const connection = this.connectionFor(connectionId);
+    return connection ? { connection, call } : undefined;
+  }
+
+  /**
+   * One fact off the session's socket.
+   *
+   * Everything the person hears or the ledger records passes through here, so
+   * the order matters: a turn is admitted before the first sound of it
+   * reaches the client, and it is settled before the next one can begin.
+   */
+  private async onSessionEvent(
+    connectionId: string,
+    callId: string,
+    event: GeminiServerEventV1,
+  ): Promise<void> {
+    const live = this.live(connectionId, callId);
+    if (!live) return;
+    const { connection, call } = live;
+    switch (event.kind) {
+      case "setup-complete":
+        this.trace(connection, "upstream", { state: "awake" });
+        this.trace(connection, "listening");
+        this.setStatus(connection, call, "listening");
+        this.sendState(connection, call);
+        return;
+      case "audio": {
+        if (!(await this.ensureTurn(connection, call))) return;
+        if (call.dropping) return;
+        this.clearSilenceGuard(call);
+        this.setStatus(connection, call, "speaking");
+        call.turnAudioBytes += event.pcm.byteLength;
+        const traced = this.#traced.get(connectionId);
+        if (traced) {
+          traced.audioChunks += 1;
+          traced.audioBytes += event.pcm.byteLength;
+        }
+        this.sendBinary(connection, event.pcm);
+        await this.meterAudio(connection, call, "out", event.pcm.byteLength);
+        return;
+      }
+      case "output-transcript":
+        if (!(await this.ensureTurn(connection, call))) return;
+        call.answer += event.text;
+        this.sendRaw(connection, {
+          type: "transcript_delta",
+          text: event.text,
+        });
+        return;
+      case "input-transcript":
+        // What the person said, as the session heard it. It often arrives
+        // after the model has started answering, which is why the turn's
+        // transcript is written again when the turn settles.
+        call.transcript =
+          `${call.transcript}${call.transcript ? " " : ""}${event.text}`.trim();
+        this.sendRaw(connection, {
+          type: "transcript",
+          role: "user",
+          text: event.text,
+        });
+        return;
+      case "interrupted":
+        // The model's own detector heard the person. Everything queued on the
+        // client is for a moment that has passed.
+        this.trace(connection, "interrupted", { source: "model" });
+        call.dropping = true;
+        this.sendRaw(connection, { type: "playback_interrupt" });
+        this.setStatus(connection, call, "listening");
+        return;
+      case "generation-complete":
+      case "turn-complete":
+        await this.finishTurn(connection, call);
+        return;
+      case "tool-call":
+        await this.runToolCalls(connection, call, event.calls);
+        return;
+      case "tool-cancel":
+        for (const id of event.ids) call.cancelledCalls.add(id);
+        this.trace(connection, "tool-cancelled", { calls: event.ids.length });
+        return;
+      case "resumption":
+        if (event.handle) call.resumptionHandle = event.handle;
+        return;
+      case "go-away":
+        // The server is about to close this connection. Reopening with the
+        // handle now keeps the conversation rather than losing it to a close
+        // the person would hear as silence.
+        this.trace(connection, "upstream-goaway", {
+          ...(event.timeLeft ? { timeLeft: event.timeLeft } : {}),
+        });
+        call.session?.close();
+        call.session = undefined;
+        await this.openSession(connection, call, {
+          ...(call.resumptionHandle ? { handle: call.resumptionHandle } : {}),
+        });
+        return;
+      case "usage":
+        this.trace(connection, "usage", {
+          promptTokens: event.usage.promptTokens,
+          responseTokens: event.usage.responseTokens,
+        });
+        return;
     }
+  }
+
+  /**
+   * The session's socket went away on its own.
+   *
+   * A handle the server has forgotten closes with 1008, which is the only
+   * signal that the resumption window has passed: that one reopens fresh with
+   * a handover so the person is not asked to start again. Anything else is a
+   * failure the person is told about, with the call left open.
+   */
+  private async onSessionClosed(
+    connectionId: string,
+    callId: string,
+    code: number,
+    reason: string,
+  ): Promise<void> {
+    const live = this.live(connectionId, callId);
+    if (!live) return;
+    const { connection, call } = live;
+    call.session = undefined;
+    this.clearSilenceGuard(call);
+    await this.settleOpenTurn(call, {
+      failure: `the session closed (${code})`,
+    });
+    this.trace(connection, "upstream-closed", {
+      code,
+      reason: reason.slice(0, 200),
+    });
+    if (call.exhausted || call.muted) {
+      this.sendState(connection, call);
+      return;
+    }
+    if (code === GEMINI_LIVE_UNKNOWN_HANDLE_CLOSE_V1 && call.resumptionHandle) {
+      call.resumptionHandle = undefined;
+      await this.openSession(connection, call, { handover: true });
+      return;
+    }
+    this.sendState(connection, call);
+    this.sendError(
+      connection,
+      "The voice connection dropped. Say that again and I'll pick it up.",
+    );
+    this.setStatus(connection, call, "listening");
   }
 
   // -- turns ----------------------------------------------------------------
 
-  override async afterTranscribe(
-    transcript: string,
-    _connection: Connection,
-  ): Promise<string | null> {
-    // A grunt, a cough, or a fragment the model would answer at length is
-    // not a turn. Nothing shorter than two characters reaches the model.
-    const trimmed = transcript.replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-    const accepted = trimmed.length >= 2;
-    this.trace(_connection, "utterance", {
-      chars: transcript.length,
-      accepted,
-    });
-    return accepted ? transcript.trim() : null;
-  }
-
-  override async beforeSynthesize(
-    text: string,
+  /**
+   * Opens a turn the moment the model starts answering.
+   *
+   * The ledger's turn is what the day's allowance counts and what memory
+   * reads, and it is written before the first sound reaches the client. A
+   * refusal here is the day's cap biting: the session is shut so nothing more
+   * is spent, and the person is told why.
+   */
+  private async ensureTurn(
     connection: Connection,
-  ): Promise<string | null> {
-    const call = this.#calls.get(connection.id);
-    const ledger = this.ledger();
-    const now = this.now();
-    const cap = await ledger.exceededCap(now);
-    if (cap === "ttsCharacters") {
-      this.trace(connection, "speech-suppressed", {
-        cap,
-        chars: text.length,
-      });
-      if (call && !call.quotaSaid) {
-        call.quotaSaid = true;
-        this.refuse(
-          connection,
-          "quota",
-          "Today's speech allowance is used up. Replies continue as text only.",
-        );
-      }
-      return null;
-    }
-    await ledger.addMeter(now, { ttsCharacters: text.length });
-    const traced = this.#traced.get(connection.id);
-    if (traced) {
-      traced.awaitingFirstChunk.set(
-        text,
-        (traced.awaitingFirstChunk.get(text) ?? 0) + 1,
-      );
-    }
-    return text;
-  }
-
-  override async onTurn(
-    transcript: string,
-    context: VoiceTurnContext,
-  ): Promise<TextSource> {
-    const connection = context.connection;
-    const identity = this.identity(connection);
-    const call = this.#calls.get(connection.id);
-    const ledger = this.ledger();
-    if (!identity || !call) {
-      this.trace(connection, "turn-dropped", {
-        reason: identity ? "no-call" : "no-identity",
-      });
-      return "";
-    }
-    const admitted = await ledger.admitTurn({
+    call: LiveCall,
+  ): Promise<boolean> {
+    if (call.turnId) return true;
+    if (call.exhausted) return false;
+    const admitted = await this.ledger().admitTurn({
       connectionId: connection.id,
-      transcript,
+      transcript: call.transcript.trim(),
       at: this.now(),
     });
     if (admitted.status === "refused") {
-      this.refuse(connection, "quota", admitted.reason);
-      return "";
+      call.exhausted = true;
+      await this.sleepSession(connection, call);
+      if (!call.quotaSaid) {
+        call.quotaSaid = true;
+        this.refuse(connection, "quota", admitted.reason);
+      }
+      return false;
     }
     const turnId = admitted.turn.turnId;
-    const startedAt = Date.now();
-    // The person is talking, so anything being composed for them to hear is
-    // already about a moment that has passed.
-    call.speechGeneration += 1;
-    call.synthesizing = 0;
-    this.#traced.get(connection.id)?.awaitingFirstChunk.clear();
-    call.announcing?.abort();
     call.turnId = turnId;
     call.turnAdmittedAt = admitted.turn.admittedAt;
-    call.turnTranscript = transcript;
     // `<callId>:<sequence>`: the ledger's own count of this call's turns, and
     // half of the stamp that orders every memory write against every other.
     call.turnOrdinal = voiceTurnOrdinalV1(turnId);
-    call.turnStartedAt = startedAt;
-    call.turnSettledAt = undefined;
+    call.turnStartedAt = Date.now();
+    call.answer = "";
+    call.turnAudioBytes = 0;
+    call.silenceSaid = false;
+    call.dropping = false;
+    const traced = this.#traced.get(connection.id);
+    if (traced) traced.turns += 1;
+    this.setStatus(connection, call, "thinking");
     this.trace(connection, "turn", {
       turn: turnId,
-      chars: transcript.length,
-      model: this.voiceModel() ?? "auto",
+      chars: call.transcript.length,
     });
-    const system = call.promptContext.then(async (promptContext) => {
-      // The session's own memory is read again for every turn, not once at
-      // the call's start: a `remember` or a `forget` said thirty seconds ago
-      // has to be in front of the model now, long after it has fallen out of
-      // the history window. Everything expensive — the Bot directory, the
-      // account memory, the timezone — stays in the snapshot.
-      const rendered = renderVoiceSystemPromptV1({
-        ...promptContext,
-        session: await this.sessionMemoryContext(),
-        now: this.now(),
+    // A turn that never makes a sound used to be invisible. The guard is what
+    // the speech-provider wrapper was: one sentence to the client, and the
+    // call goes on.
+    call.silenceTimer = setTimeout(() => {
+      call.silenceTimer = undefined;
+      if (this.#calls.get(connection.id) !== call || call.turnId !== turnId) {
+        return;
+      }
+      call.silenceSaid = true;
+      this.trace(connection, "turn-silent", { turn: turnId });
+      this.sendError(
+        connection,
+        "I couldn't get that answer out loud. Say that again?",
+      );
+      this.setStatus(connection, call, "listening");
+    }, this.modelSilenceTimeoutMs());
+    return true;
+  }
+
+  private clearSilenceGuard(call: LiveCall): void {
+    if (!call.silenceTimer) return;
+    clearTimeout(call.silenceTimer);
+    call.silenceTimer = undefined;
+  }
+
+  /** Closes an open turn out without a live socket to say anything on. */
+  private async settleOpenTurn(
+    call: LiveCall,
+    outcome: { answer: string } | { failure: string },
+  ): Promise<void> {
+    const turnId = call.turnId;
+    if (!turnId) return;
+    call.turnId = undefined;
+    await this.ledger().settleTurn(turnId, outcome, call.transcript.trim());
+  }
+
+  /**
+   * The model's turn is over.
+   *
+   * Two frames can say so — `generationComplete` and `turnComplete` — and an
+   * interrupted turn may send neither, so whichever arrives first settles the
+   * turn and the second finds nothing to do. A hand-over waiting on this turn
+   * happens here, which is what ADR 0031 means by honouring `switch_bot`
+   * after the spoken turn ends.
+   */
+  private async finishTurn(
+    connection: Connection,
+    call: LiveCall,
+  ): Promise<void> {
+    const turnId = call.turnId;
+    if (turnId) {
+      this.clearSilenceGuard(call);
+      const spoken = call.answer.trim();
+      const silent = call.turnAudioBytes === 0 && !call.dropping;
+      call.turnId = undefined;
+      await this.ledger().settleTurn(
+        turnId,
+        spoken ? { answer: spoken } : { failure: "no_output" },
+        call.transcript.trim(),
+      );
+      this.trace(connection, "turn-settled", {
+        turn: turnId,
+        ms: Math.max(0, Date.now() - (call.turnStartedAt ?? Date.now())),
+        answerChars: spoken.length,
+        audioBytes: call.turnAudioBytes,
       });
-      // The system message this call actually sent, kept for the end-of-call
-      // request's prefix. In memory only: a storage write per utterance for a
-      // cache hint would cost more than the hint is worth.
-      call.lastSystem = rendered;
-      return rendered;
+      if (silent && !call.silenceSaid) {
+        // The turn finished having made no sound at all. The old TTS guard
+        // caught this; it is still the person's evidence that something went
+        // wrong rather than that nobody answered.
+        this.sendError(
+          connection,
+          "I couldn't get that answer out loud. Say that again?",
+        );
+      }
+      // The next turn is the next thing the person says, so what they said
+      // for this one is spent.
+      call.transcript = "";
+      call.dropping = false;
+      const spokenText = spoken;
+      if (spokenText) {
+        this.sendRaw(connection, { type: "transcript_end", text: spokenText });
+      }
+    }
+    this.setStatus(connection, call, "listening");
+    if (call.pendingSwitch) await this.applySwitch(connection, call);
+  }
+
+  /**
+   * Moves the call to the Bot the person asked to be put through to.
+   *
+   * The ledger record moved when the tool ran; this is the session, which
+   * waits for the model's own turn to end so its sign-off is not cut off. The
+   * new session is fresh — a different Bot, a different instruction and a
+   * different voice — and carries the tail of the call so nothing is lost.
+   */
+  private async applySwitch(
+    connection: Connection,
+    call: LiveCall,
+  ): Promise<void> {
+    const target = call.pendingSwitch;
+    call.pendingSwitch = undefined;
+    call.session?.close();
+    call.session = undefined;
+    // A resumption handle belongs to the session that issued it, and that
+    // session was another Bot. Nothing is resumed across a hand-over.
+    call.resumptionHandle = undefined;
+    this.clearSilenceGuard(call);
+    await this.settleOpenTurn(call, { failure: "the call was handed over" });
+    this.sendTarget(connection, call.botId);
+    this.trace(connection, "call-switched", {
+      bot: call.botId,
+      voice: call.voice.voiceName,
+      ...(target ? { requested: target.botId } : {}),
     });
-    // The conversation is this call's own turns, read from the ledger rather
-    // than the SDK's account-wide message table: a Bot answer that settles
-    // late, or anything said in a previous call, must not arrive in this one
-    // as if it had just been said.
-    const history = await this.callHistory(call.callId, turnId);
+    await this.openSession(connection, call, { handover: true });
+  }
+
+  /**
+   * Runs what the model asked for and answers it.
+   *
+   * Every declaration is non-blocking, so the model is still talking while
+   * this runs and the answer is scheduled `WHEN_IDLE`: it is spoken at the
+   * next pause rather than over whatever is being said now.
+   */
+  private async runToolCalls(
+    connection: Connection,
+    call: LiveCall,
+    calls: readonly GeminiFunctionCallV1[],
+  ): Promise<void> {
+    const identity = this.identity(connection);
+    if (!identity) return;
+    await this.ensureTurn(connection, call);
+    const turnId = call.turnId ?? `${call.callId}:tool`;
     const host = this.turnHost(
       identity.userId,
       call,
       turnId,
       (await call.promptContext).timezone,
     );
-    const self = this;
-    // The SDK consumes this generator sentence by sentence into TTS; the
-    // settlement callback runs when the model is done, whether it spoke or
-    // handed the work on.
-    return (async function* () {
-      let settlement: { answer: string } | { failure: string } = {
-        failure: "no settlement",
-      };
-      let traced: Record<string, string | number> = {
-        failure: "no settlement",
-      };
-      let firstText = true;
-      try {
-        const bridge = pickVoiceBridgeV1(call.lastBridge);
-        for await (const chunk of runVoiceTurnV1(
-          host,
-          {
-            system,
-            history,
-            transcript,
-            signal: context.signal,
-            botId: call.botId,
-            bridge,
-          },
-          (result) => {
-            const spoke =
-              result.outcome === "answered" || result.delegations > 0;
-            settlement = spoke
-              ? { answer: result.answer }
-              : { failure: result.outcome };
-            traced = spoke
-              ? {
-                  outcome: result.outcome,
-                  delegations: result.delegations,
-                  answerChars: result.answer.length,
-                }
-              : { failure: result.outcome };
-          },
-        )) {
-          if (chunk.kind === "bridge") {
-            call.lastBridge = bridge;
-            // The filler, not the model: timed on its own line so the
-            // model's own first word stays one measurement.
-            self.trace(connection, "turn-bridge", {
-              turn: turnId,
-              ms: Date.now() - startedAt,
-            });
-          } else if (firstText) {
-            // The model's first word: everything before it is what the
-            // person waited through in silence.
-            firstText = false;
-            self.trace(connection, "model-first-text", {
-              turn: turnId,
-              ms: Date.now() - startedAt,
-            });
-          }
-          yield chunk.text;
+    for (const request of calls) {
+      this.trace(connection, "tool", { tool: request.name, call: request.id });
+      const outcome = await runVoiceToolV1(
+        host,
+        { name: request.name, args: request.args },
+        { botId: call.botId, delegationsThisCall: call.delegations },
+      );
+      if (outcome.delegated) {
+        call.delegations += 1;
+        // Whatever the host admitted is the newest delegation of this call;
+        // it is answered under this function call's own id when it settles.
+        const latest = call.lastDelegationRunId;
+        call.lastDelegationRunId = undefined;
+        if (latest) {
+          call.subagentCalls.set(latest, {
+            id: request.id,
+            name: request.name,
+          });
         }
-      } catch (error) {
-        settlement = {
-          failure: error instanceof Error ? error.message : String(error),
-        };
-        traced = {
-          failure: "exception",
-          error: error instanceof Error ? error.name : typeof error,
-        };
-        throw error;
-      } finally {
-        if (call.turnId === turnId) call.turnSettledAt = Date.now();
-        // Durable before the generator returns, so the SDK's own history
-        // write and the ledger never disagree about whether this turn ended.
-        await ledger.settleTurn(turnId, settlement);
-        // The trace carries a length or a classification, never the
-        // settlement's own failure sentence: that sentence can be a
-        // provider's echo of the request, and the request carries what the
-        // person said.
-        self.trace(connection, "turn-settled", {
-          turn: turnId,
-          ms: Date.now() - startedAt,
-          ...traced,
-        });
       }
-    })();
+      if (outcome.switchedTo) {
+        // Durable now, spoken later: the session moves when this turn ends.
+        call.pendingSwitch = outcome.switchedTo;
+      }
+      if (call.cancelledCalls.delete(request.id)) continue;
+      call.session?.send(
+        encodeGeminiToolResponseV1([
+          {
+            id: request.id,
+            name: request.name,
+            response: voiceToolResponseV1(outcome),
+            scheduling: "WHEN_IDLE",
+          },
+        ]),
+      );
+    }
   }
 
   /**
-   * This call's conversation so far, newest last, bounded to what the prompt
+   * This call's conversation so far, newest last, bounded to what a handover
    * carries. Built from the ledger's own turn records, which are written
-   * before the model is asked anything, so the history is exactly what this
-   * call admitted — no more, and nothing from any other call.
+   * before the model says anything, so it is exactly what this call admitted
+   * — no more, and nothing from any other call.
    */
   private async callHistory(
     callId: string,
-    currentTurnId: string,
   ): Promise<{ role: "user" | "assistant"; content: string }[]> {
     const turns = await this.ledger().turnsForCall(callId);
     const history: { role: "user" | "assistant"; content: string }[] = [];
     for (const turn of turns) {
-      if (turn.turnId === currentTurnId) continue;
-      history.push({ role: "user", content: turn.transcript });
-      if (turn.answer)
+      if (turn.transcript.trim()) {
+        history.push({ role: "user", content: turn.transcript });
+      }
+      if (turn.answer) {
         history.push({ role: "assistant", content: turn.answer });
+      }
     }
     return history.slice(-VOICE_PROMPT_HISTORY_MESSAGES_V1);
   }
 
   /**
-   * The client says its speaker is playing, recently enough to believe it.
-   * A device whose completion report never comes back — a route change part
-   * way through an answer, a dropped callback — would otherwise hold every
-   * Bot answer for the rest of the call. The bound only frees the floor: it
-   * says nothing about whether anything was heard.
+   * Which Bot a call opens on (ADR 0029).
+   *
+   * The client's choice wins when it names a Bot this account owns. Anything
+   * else — no choice, a deleted Bot, another account's — falls back to the
+   * account's General Bot: a Bot the person never asked for would answer in
+   * its own name, memory and thread with nothing saying it is not the one
+   * they wanted. An account with no General still has Bots — one that owned
+   * Bots before the bootstrap is never given General, and deleting General
+   * does not bring it back — so the directory is asked before a call is
+   * called Bot-less. Only an account with no Bots at all is answered by the
+   * account-wide assistant.
    */
-  private speakerPlaying(call: LiveCall): boolean {
-    return (
-      call.playingSince !== undefined &&
-      Date.now() - call.playingSince < this.playbackAckTimeoutMs()
-    );
+  private async resolveCallTarget(
+    userId: string,
+    botId: string | undefined,
+  ): Promise<{ botId: string; name: string; voice: BotVoiceAppearanceV1 }> {
+    if (botId) {
+      try {
+        const owned = await this.ownedBot(userId, botId);
+        return {
+          botId: owned.botId,
+          name: owned.name,
+          voice: await this.voiceForBot(userId, owned.botId),
+        };
+      } catch {
+        // Fall through to the account's default.
+      }
+    }
+    // Which Bot is General is recorded by the flock bootstrap, not spelled by
+    // a display name a person is free to change.
+    const generalBotId = await this.generalBotId(userId);
+    if (generalBotId) {
+      try {
+        const general = await this.ownedBot(userId, generalBotId);
+        return {
+          botId: general.botId,
+          name: general.name,
+          voice: await this.voiceForBot(userId, general.botId),
+        };
+      } catch {
+        // General has been deleted. The directory below still answers.
+      }
+    }
+    // No General marker does not mean no Bots: an account that already owned
+    // Bots when the bootstrap ran is never given one, and deleting General
+    // does not bring it back. Only the directory can say the account is
+    // empty, and only then is the call Bot-less.
+    try {
+      const directory = await this.directory(userId);
+      for (const entry of directory.bots) {
+        try {
+          const owned = await this.ownedBot(userId, entry.botId);
+          return {
+            botId: owned.botId,
+            name: owned.name,
+            voice: await this.voiceForBot(userId, owned.botId),
+          };
+        } catch {
+          // That Bot cannot be read; try the next one.
+        }
+      }
+    } catch {
+      // No directory to read: the call opens without a Bot.
+    }
+    return { botId: "", name: "", voice: resolveBotVoiceV1({}) };
   }
 
   /**
-   * Whether something is still being said, so a Bot answer would cut it off.
+   * How a Bot sounds (ADR 0031, decision 6).
    *
-   * Two things count. A model still producing a reply is in flight by
-   * definition. A speaker the client reports as playing is in flight because
-   * the person is hearing it — bounded by a clock, because a client that
-   * cannot report the end of a sound must not be able to hold every Bot
-   * answer back for the rest of the call.
+   * Its own stored voice if it has one, else its character's default with no
+   * delivery presets, so a Bot whose owner has only ever picked a look
+   * already sounds unlike its siblings. The character is read from the
+   * account directory's avatar mirror, which is already the authority for
+   * what a Bot wears.
    */
-  private replyInFlight(call: LiveCall): boolean {
-    // A Bot answer already being told is a reply in flight from the moment it
-    // claims the floor, which is before its turn is admitted: two event turns
-    // at once would abort each other, and the one that loses is already
-    // marked spoken, so nobody would ever hear it.
-    if (call.announcing) return true;
-    if (call.turnStartedAt !== undefined && call.turnSettledAt === undefined) {
-      return true;
+  private async voiceForBot(
+    userId: string,
+    botId: string,
+  ): Promise<BotVoiceAppearanceV1> {
+    try {
+      const directory = await this.directory(userId);
+      const entry = directory.bots.find((bot) => bot.botId === botId);
+      const chosen = botVoiceOfRegistrationV1(entry);
+      return resolveBotVoiceV1({
+        ...(chosen ? { chosen } : {}),
+        ...(entry ? { characterId: entry.avatar.characterId } : {}),
+      });
+    } catch {
+      // No directory, no character: the default voice still speaks.
+      return resolveBotVoiceV1({});
     }
-    if (this.speakerPlaying(call) || call.synthesizing > 0) return true;
-    // A settled reply whose audio the client never reported on at all: the
-    // short drain window is the only evidence there is, and it is treated as
-    // exactly that — a guess that keeps two sentences from colliding, not a
-    // claim that anything was heard.
-    return (
-      call.turnSettledAt !== undefined &&
-      Date.now() - call.turnSettledAt < this.replyDrainQuietMs()
-    );
   }
 
   private turnHost(
@@ -2067,7 +2256,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       callId: call.callId,
       sequence: call.sequence,
       at: call.turnAdmittedAt ?? new Date(call.startedAt).toISOString(),
-      said: call.turnTranscript ?? "",
+      said: call.transcript,
     };
     const write = (operations: VoiceMemoryOperationV1[]) =>
       this.memory().apply({
@@ -2163,7 +2352,6 @@ export class VoiceAssistant extends VoiceAgentBase<
         });
         return "Dropped. Acknowledge it plainly and do not do it any more.";
       },
-      chat: (body, signal) => this.chatCompletion(body, signal),
       listBots: () => this.listBots(userId),
       botStatus: async (botId) => {
         const bot = await this.ownedBot(userId, botId);
@@ -2244,6 +2432,9 @@ export class VoiceAssistant extends VoiceAgentBase<
           return `${bot.name} was already asked this; its answer will be read out when it settles.`;
         }
         this.sendDelegationState(botId, bot.name, "asked");
+        // Which function call this answers is decided by the caller, which
+        // holds the id; this is the newest request it admitted.
+        call.lastDelegationRunId = admission.delegation.runId;
         this.dispatchDelegation(userId, admission.delegation);
         await this.scheduleDelegationCheck(admission.delegation.runId, 0);
         // Never a blanket "working". A Bot that is mid-Turn queues this behind
@@ -2301,17 +2492,12 @@ export class VoiceAssistant extends VoiceAgentBase<
         }
         call.botId = bot.botId;
         call.botName = bot.name;
-        // The voice moves with the Bot: from the next sentence the person
+        // The voice moves with the Bot: once the session reopens the person
         // hears somebody else, which is the whole point of the hand-over.
-        call.voiceId = await this.voiceForBot(userId, bot.botId);
+        call.voice = await this.voiceForBot(userId, bot.botId);
         // The Bot's own context is what the next turn wears, so it is read
         // now rather than left to the next turn's critical path.
         call.promptContext = this.buildPromptContext(userId, bot.botId);
-        const connection = this.connectionFor(call.connectionId);
-        if (connection) {
-          this.sendTarget(connection, bot.botId);
-          this.trace(connection, "call-switched", { bot: bot.botId });
-        }
         return {
           status: "switched",
           botId: bot.botId,
@@ -2538,6 +2724,18 @@ export class VoiceAssistant extends VoiceAgentBase<
    * answer is still in the Bot's own conversation for the person to read.
    * Public because the scheduler calls it by name.
    */
+
+  /**
+   * A settled answer, handed back to the session it was asked from.
+   *
+   * It goes as that function call's own late response, scheduled `WHEN_IDLE`,
+   * so the model says it at the next pause and decides for itself whether it
+   * is worth saying at all. With no live session — the call is paused, the
+   * device is away — the answer waits and this runs again; with a different
+   * call it is dropped, because the call that asked is over and the answer is
+   * still in the Bot's own conversation. Public because the scheduler calls
+   * it by name.
+   */
   async announceDelegation(payload: AnnounceDelegationPayload): Promise<void> {
     const { runId } = payload;
     if (this.#announcing.has(runId)) return;
@@ -2561,45 +2759,70 @@ export class VoiceAssistant extends VoiceAgentBase<
         return;
       }
       const live = this.liveCall();
-      if (!live || live.call.callId !== delegation.callId) {
-        // The call is on record but its socket is away: a network change,
-        // inside the rejoin window. The answer waits for the person to come
-        // back to this same conversation; if nobody does, the abandoned-call
-        // alarm ends the call and cancels this with it.
+      if (
+        !live ||
+        live.call.callId !== delegation.callId ||
+        !live.call.session?.isOpen()
+      ) {
+        // The call is on record but nothing is listening: paused, or a socket
+        // away inside the rejoin window. The answer waits; if nobody comes
+        // back the abandoned-call alarm cancels it with the call.
         await this.scheduleAnnounce(runId);
         return;
       }
-      if (this.replyInFlight(live.call)) {
-        this.trace(live.connection, "delegation-held", {
-          reason: this.speakerPlaying(live.call)
-            ? "speaker-playing"
-            : "reply-in-flight",
-        });
-        // A fresh row every hold, never `idempotent`: an idempotent insert
-        // matches on callback and payload alone, so a re-hold from inside
-        // this very wake-up would dedup onto the row being executed, which
-        // the scheduler then deletes — and the answer would never be told.
-        // This method re-reads the record and returns unless it is still
-        // `settled`, so an extra row is a harmless no-op.
-        await this.scheduleAnnounce(runId);
-        return;
+      const { connection, call } = live;
+      if (!(await ledger.markDelegationSpoken(runId, this.now()))) return;
+      const own = delegation.botId === call.botId;
+      const told = renderVoiceSubagentResultV1({
+        botName: delegation.botName,
+        own,
+        ...(delegation.answer ? { answer: delegation.answer } : {}),
+        ...(delegation.failure ? { failure: delegation.failure } : {}),
+      });
+      const asked = call.subagentCalls.get(runId);
+      call.subagentCalls.delete(runId);
+      if (asked) {
+        call.session?.send(
+          encodeGeminiToolResponseV1([
+            {
+              id: asked.id,
+              name: asked.name,
+              response: { result: told },
+              scheduling: "WHEN_IDLE",
+            },
+          ]),
+        );
+      } else {
+        // The session that made the call has been replaced — a wake, a
+        // hand-over — so there is no function call left to answer. The result
+        // goes in as a turn instead; it says in its own words that it is a
+        // Bot's answer quoted as data.
+        call.session?.send(encodeGeminiTextTurnV1(told));
       }
-      await this.tellAssistant(live.connection, live.call, delegation);
+      this.trace(connection, "answer-told", {
+        run: runId,
+        ...(asked ? { call: asked.id } : { asTurn: true }),
+      });
+      this.sendDelegationState(
+        delegation.botId,
+        delegation.botName,
+        "finished",
+      );
     } finally {
       this.#announcing.delete(runId);
     }
   }
 
   /**
-   * Books the next attempt to tell the assistant. A fresh row every time,
-   * never `idempotent`: from inside the callback an idempotent insert would
-   * dedup onto the executing row, which the scheduler then deletes. The
-   * method re-reads the record and stops once it is no longer `settled`, so
-   * an extra row is a harmless no-op and a cancelled answer ends the chain.
+   * Books the next attempt to tell the session. A fresh row every time, never
+   * `idempotent`: from inside the callback an idempotent insert would dedup
+   * onto the executing row, which the scheduler then deletes. The method
+   * re-reads the record and stops once it is no longer `settled`, so an extra
+   * row is a harmless no-op and a cancelled answer ends the chain.
    */
   private async scheduleAnnounce(runId: string): Promise<void> {
     await this.schedule<AnnounceDelegationPayload>(
-      Math.max(1, Math.ceil(this.replyDrainQuietMs() / 1000)),
+      ANSWER_RETRY_SECONDS,
       "announceDelegation",
       { runId },
       { idempotent: false },
@@ -2609,257 +2832,10 @@ export class VoiceAssistant extends VoiceAgentBase<
   /** The connection holding the live call, when one is here. */
   private liveCall(): { connection: Connection; call: LiveCall } | undefined {
     for (const [connectionId, call] of this.#calls) {
-      for (const connection of this.getConnections()) {
-        if (connection.id === connectionId) return { connection, call };
-      }
+      const connection = this.connectionFor(connectionId);
+      if (connection) return { connection, call };
     }
     return undefined;
-  }
-
-  /**
-   * The request an answer is placed under, in the person's own words.
-   *
-   * A delegation records the assistant's paraphrase to the Bot ("Tim is asking
-   * what the weather is. Please check…"), which is the right thing to hand a
-   * Bot and the wrong thing to read back to the person who said "can you ask
-   * Bob what the weather is?". The spoken turn keeps their words for as long
-   * as the delegation is kept, so the paraphrase is only the fallback.
-   *
-   * When one turn asked several Bots, each answer is placed under the whole
-   * sentence the person said, and the Bot's name says which request it answers.
-   */
-  private async delegationQuestion(
-    ledger: VoiceLedgerV1,
-    delegation: VoiceDelegationRecordV1,
-  ): Promise<string> {
-    const turn = await ledger
-      .readTurn(delegation.turnId)
-      .catch(() => undefined);
-    return turn?.transcript.trim() || delegation.text;
-  }
-
-  /**
-   * A Bot's answer, told to the assistant as one turn of the call.
-   *
-   * The same turn a person's utterance is — admitted and metered in the
-   * ledger, the call's own history and memory in front of the model — with
-   * the Bot's answer in the person's seat, marked as what it is. The
-   * assistant decides what to say, and may say nothing. No bridge
-   * fills the silence, because nobody asked a question just now. What it
-   * says is spoken once it is whole; a person who starts talking meanwhile
-   * aborts it, and their turn takes the floor.
-   */
-  private async tellAssistant(
-    connection: Connection,
-    call: LiveCall,
-    delegation: VoiceDelegationRecordV1,
-  ): Promise<void> {
-    const identity = this.identity(connection);
-    if (!identity) return;
-    // The floor is claimed before the first await. Everything that decides
-    // whether now is a quiet moment reads this, and a claim made after the
-    // ledger reads would be judged against a call that has already moved on:
-    // a second answer, or the person's own turn, would have walked in.
-    const controller = new AbortController();
-    call.announcing = controller;
-    const release = () => {
-      if (call.announcing === controller) call.announcing = undefined;
-    };
-    try {
-      const ledger = this.ledger();
-      // ADR 0029: work the current Bot started is its own, and is told in
-      // the first person. Only an answer from a Bot the call has since
-      // handed over from carries a name — and it is spoken in that Bot's
-      // voice, so the person hears who is answering before they are told.
-      const own = delegation.botId === call.botId;
-      const transcript = renderVoiceBotAnswerEventV1({
-        botName: delegation.botName,
-        question: await this.delegationQuestion(ledger, delegation),
-        ...(delegation.answer ? { answer: delegation.answer } : {}),
-        ...(delegation.failure ? { failure: delegation.failure } : {}),
-        ...(own ? { own: true } : {}),
-      });
-      if (!own) {
-        call.speakingVoiceId = await this.voiceForBot(
-          identity.userId,
-          delegation.botId,
-        );
-      }
-      const admitted = await ledger.admitTurn({
-        connectionId: connection.id,
-        transcript,
-        at: this.now(),
-        event: {
-          kind: "bot-answer",
-          botId: delegation.botId,
-          botName: delegation.botName,
-          runId: delegation.runId,
-        },
-      });
-      if (admitted.status === "refused") {
-        // The day's turns are spent. The answer is in the Bot's conversation.
-        await ledger.dropDelegation(delegation.runId);
-        this.trace(connection, "answer-dropped", {
-          run: delegation.runId,
-          reason: "quota",
-        });
-        this.sendDelegationState(
-          delegation.botId,
-          delegation.botName,
-          "finished",
-        );
-        return;
-      }
-      const turnId = admitted.turn.turnId;
-      // Told once: the event turn is durable before the model is asked, so an
-      // eviction in between leaves a turn the history shows and no second one.
-      // The mark comes before any abort check, so a person who takes the floor
-      // in this window leaves one event turn and never a second admission.
-      if (
-        !(await ledger.markDelegationSpoken(
-          delegation.runId,
-          turnId,
-          this.now(),
-        ))
-      ) {
-        // The call ended between the admission and the mark, so the delegation
-        // was cancelled with it. The turn is settled rather than left admitted
-        // and metered against a call nobody is on.
-        await ledger.settleTurn(turnId, { failure: "the call ended" });
-        this.sendDelegationState(
-          delegation.botId,
-          delegation.botName,
-          "finished",
-        );
-        return;
-      }
-      if (controller.signal.aborted) {
-        await ledger.settleTurn(turnId, { failure: "aborted" });
-        this.sendDelegationState(
-          delegation.botId,
-          delegation.botName,
-          "finished",
-        );
-        return;
-      }
-      const generation = call.speechGeneration;
-      const startedAt = Date.now();
-      call.turnId = turnId;
-      call.turnAdmittedAt = admitted.turn.admittedAt;
-      call.turnTranscript = transcript;
-      call.turnOrdinal = voiceTurnOrdinalV1(turnId);
-      call.turnStartedAt = startedAt;
-      call.turnSettledAt = undefined;
-      this.sendDelegationState(
-        delegation.botId,
-        delegation.botName,
-        "answering",
-      );
-      this.trace(connection, "turn", {
-        turn: turnId,
-        event: "bot-answer",
-        run: delegation.runId,
-        chars: transcript.length,
-        model: this.voiceModel() ?? "auto",
-      });
-      const system = call.promptContext.then(async (promptContext) => {
-        const rendered = renderVoiceSystemPromptV1({
-          ...promptContext,
-          session: await this.sessionMemoryContext(),
-          now: this.now(),
-        });
-        call.lastSystem = rendered;
-        return rendered;
-      });
-      const history = await this.callHistory(call.callId, turnId);
-      const host = this.turnHost(
-        identity.userId,
-        call,
-        turnId,
-        (await call.promptContext).timezone,
-      );
-      let settlement: { answer: string } | { failure: string } = {
-        failure: "no settlement",
-      };
-      let text = "";
-      let expired = false;
-      const deadline = setTimeout(() => {
-        expired = true;
-        controller.abort();
-      }, this.botAnswerDeadlineMs());
-      try {
-        for await (const chunk of runVoiceTurnV1(
-          host,
-          {
-            system,
-            history,
-            transcript,
-            signal: controller.signal,
-            botId: call.botId,
-            acknowledge: false,
-            tools: false,
-          },
-          (result) => {
-            // Nothing said is a decision here, not a failure: the assistant
-            // judged the answer not worth interrupting for.
-            settlement =
-              result.outcome === "aborted"
-                ? { failure: "aborted" }
-                : { answer: result.answer };
-          },
-        )) {
-          if (chunk.kind === "text") text += chunk.text;
-        }
-      } catch (error) {
-        settlement = {
-          failure: error instanceof Error ? error.message : String(error),
-        };
-      } finally {
-        clearTimeout(deadline);
-        if (expired) settlement = { failure: "timeout" };
-        if (call.turnId === turnId) call.turnSettledAt = Date.now();
-        release();
-        await ledger.settleTurn(turnId, settlement);
-      }
-      const spoken = text.trim();
-      this.trace(connection, "turn-settled", {
-        turn: turnId,
-        event: "bot-answer",
-        ms: Date.now() - startedAt,
-        ...("failure" in settlement
-          ? { failure: settlement.failure }
-          : {
-              outcome: spoken ? "answered" : "silent",
-              answerChars: spoken.length,
-            }),
-      });
-      this.sendDelegationState(
-        delegation.botId,
-        delegation.botName,
-        "finished",
-      );
-      if (
-        !spoken ||
-        controller.signal.aborted ||
-        this.#calls.get(connection.id) !== call ||
-        call.speechGeneration !== generation
-      ) {
-        return;
-      }
-      try {
-        await this.speak(connection, spoken);
-      } catch {
-        // The audio never left; the words are on record in the turn. The
-        // person can ask, and the Bot's conversation has the answer.
-        this.trace(connection, "answer-unspoken", { turn: turnId });
-      }
-    } finally {
-      release();
-      // The borrowed voice is given back with the floor, once the answer it
-      // was borrowed for has been spoken. Left set, the call would keep
-      // speaking as a Bot it is no longer talking to.
-      call.speakingVoiceId = undefined;
-    }
   }
 
   private sendDelegationState(

@@ -1,10 +1,11 @@
 // The voice wire vocabulary both clients and both Worker adapters speak.
 //
-// Two channels share this file so a frame is spelled once. The dictation
-// channel is FrockBot's own protocol; the assistant channel is the
-// `@cloudflare/voice` protocol version 1 plus the custom messages below,
-// which that SDK hands through untouched. Nothing here imports a Cloudflare
-// SDK or the DOM: it is read by the Worker, the browser and the tests alike.
+// Two channels share this file so a frame is spelled once. Both are
+// FrockBot's own: the assistant channel keeps the frames the Cloudflare voice
+// SDK used to speak — version 1, the same names, the same rates — because the
+// clients implement them directly and ADR 0031 changed what is behind the
+// socket, not what crosses it. Nothing here imports a Cloudflare SDK or the
+// DOM: it is read by the Worker, the browser and the tests alike.
 
 /** `GET /api/voice/capabilities`. */
 export interface VoiceCapabilitiesV1 {
@@ -65,7 +66,7 @@ export const VOICE_DICTATION_DAILY_CLEANUPS_V1 = 400;
 export const VOICE_DICTATION_OPENING_BUFFER_BYTES_V1 =
   30 * VOICE_DICTATION_SAMPLE_RATE_V1 * 2;
 
-/** Quiet this long, with the reply done, and the client sleeps the upstream. */
+/** Quiet this long, with the reply done, and the client sleeps the session. */
 export const VOICE_ASSISTANT_SLEEP_AFTER_MS_V1 = 20_000;
 /** Audio replayed ahead of a wake so the first syllable reaches the model. */
 export const VOICE_ASSISTANT_PREROLL_MS_V1 = 500;
@@ -73,19 +74,45 @@ export const VOICE_ASSISTANT_PREROLL_MS_V1 = 500;
 export const VOICE_ASSISTANT_SERVER_IDLE_SLEEP_MS_V1 = 30_000;
 /**
  * Daily meters, per account, over what actually costs money. A footer left
- * open in silence for hours costs nothing and counts nothing: the upstream
- * sleeps, and only awake STT seconds, synthesized characters, model turns and
- * Bot delegations are counted.
+ * open in silence for hours costs nothing and counts nothing: the Live session
+ * is closed, and only the audio actually bridged each way, the model turns and
+ * the Bot delegations are counted.
+ *
+ * The two audio meters are separate because the two directions are not priced
+ * alike — Gemini Live output costs about 3.6x its input — so a day of being
+ * talked at and a day of being talked to must not spend one allowance. Each
+ * keeps the magnitude the old listening cap had.
  */
-export const VOICE_ASSISTANT_DAILY_STT_SECONDS_V1 = 240 * 60;
-/** Seconds of awake transcription reserved ahead, and renewed, while awake. */
-export const VOICE_ASSISTANT_STT_RESERVE_SECONDS_V1 = 60;
-export const VOICE_ASSISTANT_DAILY_TTS_CHARACTERS_V1 = 200_000;
+export const VOICE_ASSISTANT_DAILY_AUDIO_IN_SECONDS_V1 = 240 * 60;
+export const VOICE_ASSISTANT_DAILY_AUDIO_OUT_SECONDS_V1 = 240 * 60;
+/**
+ * How much bridged audio is counted before the meter is written.
+ *
+ * Every frame is a storage write otherwise, forty times a second in each
+ * direction. Blocks of five seconds keep the day's arithmetic honest and the
+ * cap sharp to within one block.
+ */
+export const VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1 = 5;
+/** PCM16 mono at 16 kHz: what one second of the person costs the meter. */
+export const VOICE_ASSISTANT_INPUT_BYTES_PER_SECOND_V1 =
+  VOICE_ASSISTANT_INPUT_SAMPLE_RATE_V1 * 2;
+/** PCM16 mono at 24 kHz: what one second of the model costs it. */
+export const VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1 =
+  VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1 * 2;
 export const VOICE_ASSISTANT_DAILY_TURNS_V1 = 600;
 export const VOICE_ASSISTANT_DAILY_DELEGATIONS_V1 = 200;
 /** Delegations one spoken turn may admit before the assistant is told to stop. */
 export const VOICE_ASSISTANT_MAX_DELEGATIONS_PER_TURN_V1 = 8;
-/** A socket replaced within this window rejoins the same durable call. */
+/**
+ * A socket replaced within this window rejoins the same durable call.
+ *
+ * Ours, not Google's: the probe found no stated lifetime for a resumption
+ * handle, and a handle the server has forgotten closes the socket with 1008
+ * rather than failing quietly (`docs/voice-gemini-probe.md`). So this stays a
+ * policy about the person's own device coming back, and the 1008 is what
+ * actually decides between resuming a session and opening a fresh one with a
+ * handover.
+ */
 export const VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1 = 60_000;
 
 // ---------------------------------------------------------------------------
@@ -196,9 +223,9 @@ export function decodeVoiceDictationServerFrameV1(
 }
 
 // ---------------------------------------------------------------------------
-// Assistant custom messages (carried beside the `@cloudflare/voice` protocol)
+// Assistant custom messages (carried beside the protocol-v1 frames)
 
-/** The `@cloudflare/voice` pipeline status a client mirrors. */
+/** The pipeline status a client mirrors. */
 export type VoiceAssistantStatusV1 =
   "idle" | "listening" | "thinking" | "speaking";
 
@@ -271,7 +298,11 @@ export type VoiceAssistantServerMessageV1 =
       state: "asked" | "answering" | "finished";
     };
 
-/** Every JSON message a client may see: the SDK's own, or one of ours. */
+/**
+ * Every JSON message a client may see: a protocol-v1 frame, or one of ours.
+ * The last four are diagnostics the Cloudflare voice SDK used to emit; clients
+ * still ignore them by name rather than falling through to an error.
+ */
 export type VoiceAssistantSdkMessageV1 =
   | { type: "welcome"; protocol_version: number }
   | { type: "status"; status: VoiceAssistantStatusV1 }

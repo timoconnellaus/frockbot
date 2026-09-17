@@ -26,18 +26,13 @@ FROCK_AI_GATEWAY_TOKEN=replace-with-ai-gateway-authorization-token
 # key from the Worker (`gpt-live-transcribe`). The client never sees it.
 # Absent, dictation says voice is not set up.
 OPENAI_API_KEY=replace-with-an-openai-api-key
-# The continuous voice session's ears (ElevenLabs Scribe v2 Realtime) and its
-# speech (ElevenLabs Flash v2.5). The key needs speech-to-text as well as
-# text-to-speech permission, and stays server-side.
-ELEVENLABS_API_KEY=replace-with-an-elevenlabs-api-key
-# Optional: listen through OpenAI `gpt-transcribe` (server VAD, no live text)
-# instead of Scribe. Then the session needs OPENAI_API_KEY too.
-# VOICE_ASSISTANT_STT=openai
-# Optional: a gateway model for voice turns instead of the platform's Auto
-# route, when the `model-first-text` trace lines say Auto is slow to start.
+# The continuous voice session: one Gemini Live socket per call, which hears,
+# thinks and speaks. The key goes on the upstream URL from the Worker and
+# never leaves it. Absent, starting a call says voice is not set up.
+GEMINI_API_KEY=replace-with-a-google-ai-studio-api-key
+# Optional: a gateway model for the end-of-call memory update instead of the
+# platform's Auto route. The call itself has no chat model.
 # VOICE_ASSISTANT_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
-# Optional: the ElevenLabs voice id; the default is George.
-# ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
 # Optional: the model that tidies a dictated transcript once the person stops
 # recording, instead of the default route. No `AI` binding means no tidying
 # and the raw transcript stands.

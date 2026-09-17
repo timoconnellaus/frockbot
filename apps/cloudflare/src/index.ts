@@ -284,11 +284,10 @@ interface Env {
   VOICE_ASSISTANTS: DurableObjectNamespace<VoiceAssistant>;
   /** The composer's dictation upstream. Absent closes dictation, visibly. */
   OPENAI_API_KEY?: string;
-  /** The voice session's speech. Absent closes the assistant, visibly. */
-  ELEVENLABS_API_KEY?: string;
-  /** The ElevenLabs voice the assistant speaks with; George when unset. */
-  ELEVENLABS_VOICE_ID?: string;
-  VOICE_ASSISTANT_STT?: string;
+  /** The voice session itself: Gemini Live. Absent closes it, visibly. */
+  GEMINI_API_KEY?: string;
+  /** A local Live stand-in for the test harness; never set in production. */
+  VOICE_ASSISTANT_UPSTREAM_URL?: string;
   VOICE_ASSISTANT_MODEL?: string;
   /**
    * The model that tidies a dictated transcript. Unset takes the ordinary
