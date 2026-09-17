@@ -212,6 +212,17 @@ export const ROUTINE_INBOX_LIMIT = 100;
  */
 export const ROUTINE_PENDING_INPUT_LIMIT = 16;
 
+/**
+ * Most `card-action` presses that may wait at once. Every other pending input
+ * is minted by the kernel and bounded by whatever mints it; a press is minted
+ * by a person tapping a control, as often as they like, so this kind bounds
+ * itself where the press is written rather than where the queue is drained.
+ * Past it the oldest press is dropped, because a person who presses again
+ * means the newest press. Half the drain's own bound, so a burst of presses
+ * can never be the whole of what the next Turn reads.
+ */
+export const ROUTINE_CARD_ACTION_LIMIT = 8;
+
 /** Most drain receipts retained; one is only needed while its Turn is running. */
 export const ROUTINE_DRAIN_RECEIPT_LIMIT = 16;
 

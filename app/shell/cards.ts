@@ -24,7 +24,11 @@
  *
  *  * **Every fold bumps the revision.** An action names the revision it was
  *    drawn against; a stale one is refused, so nobody answers a card that has
- *    moved under them.
+ *    moved under them. A fold that happens to change nothing bumps it too: the
+ *    fold writes what the messages say and never compares one record against
+ *    another. A delete of a member that is not there changes nothing because
+ *    the pointer walk returns the model untouched, not because the fold
+ *    noticed the record came out the same.
  *
  *  * **The Session's surfaces are bounded.** Cards do not tear down, so the
  *    index caps how many a Session may hold, and this is the one statement of
@@ -38,8 +42,7 @@
  *
  *    The fold is decided before the index is touched, so a refused send never
  *    evicts another card; it does take a slot when one is free, and that is
- *    deliberate — an indexed refusal is readable by surface id and is not a
- *    record the listing's retention may drop.
+ *    deliberate — an indexed refusal is out of the listing retention's reach.
  *
  *    When the index is full and a new surface arrives, the oldest indexed
  *    surface this Turn is not itself writing is tombstoned with a refusal
@@ -51,7 +54,10 @@
  *    surface named before this Turn has folded anything is refused outright,
  *    with a record saying the Session is full of cards this Turn is drawing.
  *    Every one of those paths writes a record, so no card send ever leaves no
- *    trace, not even a Turn drawing more surfaces than a Session may hold.
+ *    trace, not even a Turn drawing more surfaces than a Session may hold —
+ *    though that last refusal cannot take an index slot, there being none free
+ *    by the very condition that raised it, so it is the one record retention
+ *    may eventually drop.
  *
  *    Trimming loses a row and never a fact, because the send that drew the
  *    trimmed card is still on its Turn's log. The records eviction leaves
@@ -747,6 +753,7 @@ export async function cardTerminalRecordsV1(
       : decodeCardIndexV1(stored);
   const surfaces = [...index.surfaces];
   const writing = new Set(sends.map((send) => send.surfaceId));
+  const foldedSurfaces = new Set<string>();
   let movedIndex = false;
   for (const send of sends) {
     const key = cardKeyV1(send.surfaceId);
@@ -773,8 +780,8 @@ export async function cardTerminalRecordsV1(
         input,
         error.message,
       );
-      // It still takes a slot when one is free, so the refusal is readable by
-      // surface id and is not a record the listing's retention may drop.
+      // It still takes a slot when one is free, so the refusal is out of the
+      // listing retention's reach.
       if (
         !surfaces.includes(send.surfaceId) &&
         surfaces.length < A2UI_LIMITS_V1.surfacesPerSession
@@ -784,15 +791,14 @@ export async function cardTerminalRecordsV1(
       }
       continue;
     }
+    foldedSurfaces.add(send.surfaceId);
     // The index is the bound, not whether a record happens to still be in
     // storage: a surface evicted earlier is as new to the Session as one never
     // drawn, tombstone and all, and is admitted the same way.
     if (!surfaces.includes(send.surfaceId)) {
       if (surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession) {
-        const victimAt = evictionVictimV1(
-          surfaces,
-          writing,
-          (surfaceId) => records[cardKeyV1(surfaceId)] !== undefined,
+        const victimAt = evictionVictimV1(surfaces, writing, (surfaceId) =>
+          foldedSurfaces.has(surfaceId),
         );
         if (victimAt === -1) {
           records[key] = refusedCardRecordV1(

@@ -20,6 +20,7 @@ import {
 import { createMemoryRoutineStorageV1 } from "./testing.js";
 import {
   routineInboxKeyV1,
+  ROUTINE_CARD_ACTION_LIMIT,
   ROUTINE_INBOX_LIMIT,
   ROUTINE_INBOX_PREFIX,
   ROUTINE_PENDING_INPUT_LIMIT,
@@ -549,10 +550,10 @@ describe("the pending-input cap", () => {
 
   /**
    * A card action is the one kind a person mints directly, as often as they
-   * press. It belongs on the trimmed side of the rule with the wakes, not on
-   * the retained side with what the kernel bounds for itself.
+   * press, so the queue bounds it where the press is written. The burst never
+   * grows past that bound, and it never pushes out what the kernel minted.
    */
-  test("a burst of card presses cannot push out what the kernel minted", async () => {
+  test("a burst of card presses is bounded as it is written and pushes out nothing the kernel minted", async () => {
     const store = storage();
     const inbox = new RoutineInboxStore(store);
     for (let index = 0; index < ROUTINE_PENDING_INPUT_LIMIT + 24; index += 1) {
@@ -564,6 +565,13 @@ describe("the pending-input cap", () => {
         context: `{"item":${index}}`,
         createdAt: new Date(Date.parse(NOW) + index).toISOString(),
       });
+      // The queue is bounded as the presses are made, so it never grows past
+      // the bound and the drain is never handed a burst to trim.
+      expect(
+        (await inbox.pending()).filter(
+          (entry) => entry.input.kind === "card-action",
+        ).length,
+      ).toBeLessThanOrEqual(ROUTINE_CARD_ACTION_LIMIT);
     }
     await inbox.enqueue({
       schemaVersion: 1,
@@ -590,7 +598,7 @@ describe("the pending-input cap", () => {
     });
 
     const drained = await inbox.drainInto("chat-run-1");
-    expect(drained).toHaveLength(ROUTINE_PENDING_INPUT_LIMIT);
+    expect(drained).toHaveLength(ROUTINE_CARD_ACTION_LIMIT + 3);
     expect(drained.filter((input) => input.kind === "approval")).toHaveLength(
       1,
     );
@@ -601,7 +609,7 @@ describe("the pending-input cap", () => {
       drained.filter((input) => input.kind === "superseded-turn"),
     ).toHaveLength(1);
     const presses = drained.filter((input) => input.kind === "card-action");
-    expect(presses).toHaveLength(ROUTINE_PENDING_INPUT_LIMIT - 3);
+    expect(presses).toHaveLength(ROUTINE_CARD_ACTION_LIMIT);
     // The presses kept are the most recent ones: the last thing a person
     // pressed is the thing the Bot should answer about.
     expect(

@@ -904,6 +904,124 @@ describe("what one settled Turn writes", () => {
     expect(index.surfaces.at(-1)).toBe(`s${over - 1}`);
   });
 
+  /**
+   * A Turn spends what it has folded, and a send it refused is not that. The
+   * refusal is the only thing saying why that card stopped updating, so
+   * overwriting it to make room would spend the one record with something to
+   * say in preference to a card the Turn had just drawn successfully.
+   */
+  test("making room never spends a surface this Turn refused", async () => {
+    const surfaces = Array.from(
+      { length: A2UI_LIMITS_V1.surfacesPerSession },
+      (_, index) => `s${index}`,
+    );
+    const full: CardRecordV1 = {
+      schemaVersion: 1,
+      surfaceId: "s0",
+      runId: "run-0",
+      sessionId: "user-1:bot-1",
+      components: Array.from(
+        { length: A2UI_LIMITS_V1.componentsPerSurface },
+        (_, index) => ({ id: `a${index}`, component: "Text" }),
+      ),
+      dataModel: {},
+      revision: 4,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const records = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        events: [
+          // s0 is past its component budget, so this Turn refuses its fold.
+          sendEvent("s0", [
+            {
+              version: "v1.0",
+              updateComponents: {
+                surfaceId: "s0",
+                components: [{ id: "extra", component: "Text" }],
+              },
+            },
+          ]),
+          ...surfaces
+            .slice(1)
+            .map((surfaceId) =>
+              sendEvent(surfaceId, [
+                { version: "v1.0", createSurface: { surfaceId } },
+              ]),
+            ),
+          sendEvent("one-too-many", [
+            { version: "v1.0", createSurface: { surfaceId: "one-too-many" } },
+          ]),
+        ],
+      },
+      now: "2026-09-17T11:00:00.000Z",
+      read: reader({
+        [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces },
+        [cardKeyV1("s0")]: full,
+      }),
+    });
+    const refused = decodeCardRecordV1(records[cardKeyV1("s0")]);
+    expect(refused.refusal).toMatch(/components/);
+    expect(refused.deleted).toBeUndefined();
+    expect(refused.revision).toBe(4);
+    const index = records[CARD_INDEX_KEY] as { surfaces: string[] };
+    expect(index.surfaces).toContain("s0");
+    // The oldest surface this Turn actually folded is what made room.
+    const evicted = decodeCardRecordV1(records[cardKeyV1("s1")]);
+    expect(evicted.deleted).toBe(true);
+    expect(evicted.refusal).toContain("make room");
+    expect(index.surfaces).not.toContain("s1");
+    expect(index.surfaces.at(-1)).toBe("one-too-many");
+    expect(
+      decodeCardRecordV1(records[cardKeyV1("one-too-many")]).refusal,
+    ).toBeUndefined();
+  });
+
+  /**
+   * A new surface named before the Turn has folded anything, with the index
+   * full of surfaces that same Turn is about to write. There is nothing it may
+   * spend — every indexed surface still has a send coming — so the send is
+   * refused and says so, rather than destroying a card the Turn is drawing.
+   */
+  test("a new surface named before this Turn folds anything is refused and says why", async () => {
+    const surfaces = Array.from(
+      { length: A2UI_LIMITS_V1.surfacesPerSession },
+      (_, index) => `s${index}`,
+    );
+    const records = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        events: [
+          sendEvent("one-too-many", [
+            { version: "v1.0", createSurface: { surfaceId: "one-too-many" } },
+          ]),
+          ...surfaces.map((surfaceId) =>
+            sendEvent(surfaceId, [
+              { version: "v1.0", createSurface: { surfaceId } },
+            ]),
+          ),
+        ],
+      },
+      now: NOW,
+      read: reader({ [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces } }),
+    });
+    const refused = decodeCardRecordV1(records[cardKeyV1("one-too-many")]);
+    expect(refused.refusal).toContain("full of cards this Turn is drawing");
+    expect(refused.components).toEqual([]);
+    // Every card the Turn was already holding survives untouched.
+    for (const surfaceId of surfaces) {
+      const card = decodeCardRecordV1(records[cardKeyV1(surfaceId)]);
+      expect(card.deleted).toBeUndefined();
+      expect(card.refusal).toBeUndefined();
+    }
+    // The index never moved, so the refusal is not indexed: there was no slot
+    // to take, which is the very condition that raised it.
+    expect(records[CARD_INDEX_KEY]).toBeUndefined();
+  });
+
   test("a recovered Turn does not fold twice onto a surface evicted in between", async () => {
     const drawn = foldCardMessagesV1(
       undefined,

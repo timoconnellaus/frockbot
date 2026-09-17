@@ -49,7 +49,10 @@ import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 /** How long one Plugin card handler may run. A press, not a job. */
 export const CARD_ACTION_DEADLINE_MS = 10_000;
 
-/** A surface this Bot never drew, or one the Session no longer holds. */
+/**
+ * A surface no record was ever written for, or one the listing's retention has
+ * since dropped.
+ */
 export class CardNotFoundError extends Error {
   constructor(surfaceId: string) {
     super(`card "${surfaceId}" was not found`);
