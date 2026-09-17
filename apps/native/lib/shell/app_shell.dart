@@ -477,6 +477,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       final now = session.currentBotId;
       if (now == null || now == voiceBotId) return;
       setState(() => voiceBotId = now);
+      // The conversation moved, so the page does too: the person is talking
+      // to this Bot now, and the thread they can read should be the one they
+      // are talking about. Only when the call is the thing on screen — a
+      // hand-over must not drag someone out of a page they went to
+      // themselves while the call carried on in the background.
+      if (selected?.botId.value != now &&
+          bots.any((bot) => bot.botId.value == now)) {
+        _select(now);
+      }
     });
     setState(() {
       voiceSession = session;
@@ -2041,7 +2050,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 MediaQuery.textScalerOf(context).scale(14) / 14,
                             // A phone's bar is GrokBot's three things; the wider tiers
                             // name each entry of the right panel beside the title.
-                            onBack: single ? _openBack : null,
+                            //
+                            // In voice mode there is no Back (ADR 0029): the
+                            // way out of the Bot you are talking to is to end
+                            // the call, and a control that left the page with
+                            // the call still running would be a trap.
+                            onBack:
+                                single &&
+                                    !(footerOpen &&
+                                        voiceBotId == bot.botId.value)
+                                ? _openBack
+                                : null,
                             onOpenBot: single
                                 ? () => _pushPanel('bot-settings')
                                 : null,
@@ -2076,6 +2095,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           ),
                     conversationOpen: bot != null && conversationOpen,
                     onBack: _openBack,
+                    // Voice mode is this Bot being the one on the call: the
+                    // page belongs to the conversation until it ends.
+                    voiceMode:
+                        footerOpen &&
+                        bot != null &&
+                        voiceBotId == bot.botId.value,
+                    onEndVoice: () =>
+                        unawaited(_endVoice(reason: 'system-back')),
                     panelOpen: panelOpen,
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
