@@ -27,6 +27,7 @@ class BotSettingsController extends ChangeNotifier {
   final String botId;
   bool busy = false;
   bool saving = false;
+  Future<bool> _voiceWrites = Future.value(false);
 
   /// Whether a read has landed. A Bot that has never been edited is at
   /// revision 0, so the revision cannot double as this.
@@ -317,8 +318,16 @@ class BotSettingsController extends ChangeNotifier {
   /// One command, fenced like every other configuration write. It is its own
   /// save rather than part of [save] because the voice page is a page of its
   /// own: nothing else on it can be dirty at the same time.
-  Future<bool> saveVoice(BotVoiceAppearanceV1 next) async {
-    if (saving) return false;
+  ///
+  /// The voice page saves on every tap, so a second choice made while the
+  /// first is still in flight queues behind it rather than being dropped.
+  Future<bool> saveVoice(BotVoiceAppearanceV1 next) {
+    final write = _voiceWrites.then((_) => _writeVoice(next));
+    _voiceWrites = write;
+    return write;
+  }
+
+  Future<bool> _writeVoice(BotVoiceAppearanceV1 next) async {
     saving = true;
     message = null;
     final previous = voice;

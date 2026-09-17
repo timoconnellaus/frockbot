@@ -106,12 +106,18 @@ class _BotVoicePageState extends State<BotVoicePage> {
     characterId: widget.characterId,
   );
 
+  /// Every write carries the words in the field, not the ones last saved, so
+  /// a choice made mid-sentence keeps the sentence.
+  BotVoiceAppearanceV1 _withCustom(BotVoiceAppearanceV1 next) => next.copyWith(
+    delivery: next.delivery.copyWith(custom: _custom.isEmpty ? null : _custom),
+  );
+
   /// A choice: written now. The page is its own surface, so there is nothing
   /// else in flight to reconcile with.
   void _chose(BotVoiceAppearanceV1 next) {
     _pending?.cancel();
     _pending = null;
-    unawaited(state.saveVoice(next));
+    unawaited(state.saveVoice(_withCustom(next)));
   }
 
   /// The person's own words: written once typing pauses, like every other
@@ -119,12 +125,7 @@ class _BotVoicePageState extends State<BotVoicePage> {
   void _typed(String words) {
     _custom = words;
     _pending?.cancel();
-    _pending = Timer(botSettingsAutosaveDelay, () {
-      _pending = null;
-      _chose(
-        _voice.copyWith(delivery: _voice.delivery.copyWith(custom: words)),
-      );
-    });
+    _pending = Timer(botSettingsAutosaveDelay, () => _chose(_voice));
   }
 
   @override
@@ -133,11 +134,7 @@ class _BotVoicePageState extends State<BotVoicePage> {
     if (_pending != null) {
       _pending!.cancel();
       _pending = null;
-      unawaited(
-        state.saveVoice(
-          _voice.copyWith(delivery: _voice.delivery.copyWith(custom: _custom)),
-        ),
-      );
+      unawaited(state.saveVoice(_withCustom(_voice)));
     }
     super.dispose();
   }

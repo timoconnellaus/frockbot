@@ -6,6 +6,7 @@
 /// states instead of trusting the constants.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -25,7 +26,8 @@ import 'package:frockbot_native/voice/capture.dart';
 import 'package:frockbot_native/voice/footer.dart';
 import 'package:frockbot_native/voice/voice_mode.dart';
 
-import 'bot_settings_test.dart' show api, botSettings;
+import 'bot_settings_test.dart' show account, api, botSettings;
+import 'settings_test.dart' show SettingsApi;
 import 'shell_layout_test.dart' show byIdentifier;
 import 'voice_fakes.dart';
 import 'voice_shell_harness.dart';
@@ -600,6 +602,106 @@ void main() {
     expect(find.text('Sulafat · Warm'), findsOneWidget);
     expect(find.text('Australian'), findsOneWidget);
     await capture(tester, surfaceBoundary, 'voice-settings-phone');
+  });
+
+  testWidgets('a choice made mid-sentence keeps the sentence', (tester) async {
+    final commands = <Map<String, Object?>>[];
+    final state = BotSettingsController(
+      api(
+        MemoryStore(),
+        commands,
+        bot: {
+          ...botSettings(),
+          'voice': {
+            'schemaVersion': 1,
+            'voiceName': 'Sulafat',
+            'delivery': {'pace': 'natural'},
+          },
+        },
+      ),
+      'alpha',
+    );
+    addTearDown(state.dispose);
+    tester.view.physicalSize = const Size(390, 2200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await state.load();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: BotVoicePage(controller: state, characterId: 'dog'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byType(TextFormField),
+      'Talk like a ship captain.',
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.text('Faster'));
+    await tester.tap(find.text('Faster'));
+    await tester.pumpAndSettle();
+
+    final delivery = (commands.single['voice']! as Map)['delivery']! as Map;
+    expect(delivery['pace'], 'faster');
+    expect(delivery['custom'], 'Talk like a ship captain.');
+  });
+
+  test('a voice choice made while a save is in flight is not dropped', () async {
+    final commands = <Map<String, Object?>>[];
+    final gates = <Completer<void>>[];
+    final state = BotSettingsController(
+      SettingsApi(MemoryStore(), (path, body) async {
+        if (body == null) {
+          if (path.startsWith('/api/settings')) return account();
+          return {
+            ...botSettings(),
+            'voice': {
+              'schemaVersion': 1,
+              'voiceName': 'Sulafat',
+              'delivery': <String, Object?>{},
+            },
+          };
+        }
+        commands.add(Map<String, Object?>.from(body as Map));
+        final gate = Completer<void>();
+        gates.add(gate);
+        await gate.future;
+        return {
+          'schemaVersion': 1,
+          'commandId': body['commandId'],
+          'status': 'applied',
+        };
+      }),
+      'alpha',
+    );
+    addTearDown(state.dispose);
+    await state.load();
+
+    final base = state.voice!;
+    final faster = base.copyWith(
+      delivery: base.delivery.copyWith(pace: 'faster'),
+    );
+    final dry = faster.copyWith(
+      delivery: faster.delivery.copyWith(humour: 'dry'),
+    );
+    final first = state.saveVoice(faster);
+    final second = state.saveVoice(dry);
+    await pumpEventQueue();
+    expect(gates.length, 1);
+    gates.first.complete();
+    await pumpEventQueue();
+    expect(gates.length, 2);
+    gates.last.complete();
+
+    expect(await first, isTrue);
+    expect(await second, isTrue);
+    expect(
+      (commands[1]['voice']! as Map)['delivery'],
+      containsPair('humour', 'dry'),
+    );
+    expect(state.voice!.delivery.humour, 'dry');
   });
 
   test('the Dart voice tables mirror the TypeScript ones', () {
