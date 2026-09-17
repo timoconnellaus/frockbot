@@ -2610,15 +2610,30 @@ export class VoiceAssistant extends VoiceAgentBase<
     call.announcing = controller;
     const release = () => {
       if (call.announcing === controller) call.announcing = undefined;
+      // The borrowed voice is given back with the floor. Left set, the call
+      // would keep speaking as a Bot it is no longer talking to.
+      call.speakingVoiceId = undefined;
     };
     try {
       const ledger = this.ledger();
+      // ADR 0029: work the current Bot started is its own, and is told in
+      // the first person. Only an answer from a Bot the call has since
+      // handed over from carries a name — and it is spoken in that Bot's
+      // voice, so the person hears who is answering before they are told.
+      const own = delegation.botId === call.botId;
       const transcript = renderVoiceBotAnswerEventV1({
         botName: delegation.botName,
         question: await this.delegationQuestion(ledger, delegation),
         ...(delegation.answer ? { answer: delegation.answer } : {}),
         ...(delegation.failure ? { failure: delegation.failure } : {}),
+        ...(own ? { own: true } : {}),
       });
+      if (!own) {
+        call.speakingVoiceId = await this.voiceForBot(
+          identity.userId,
+          delegation.botId,
+        );
+      }
       const admitted = await ledger.admitTurn({
         connectionId: connection.id,
         transcript,

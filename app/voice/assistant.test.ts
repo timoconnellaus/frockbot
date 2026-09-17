@@ -740,6 +740,42 @@ describe("the system prompt", () => {
     expect(prompt).toContain("2026-09-10");
   });
 
+  // ADR 0029. The voice layer wears one Bot and speaks as it, so work that
+  // Bot started comes back as its own: no narrator, no name. An answer from
+  // a Bot the call has since handed over from still carries one, because
+  // there the person really is being told about somebody else.
+  test("the current Bot's own work comes back in the first person, unnamed", () => {
+    const own = renderVoiceBotAnswerEventV1({
+      botName: "Sunny",
+      question: "can you book the flights?",
+      answer: "Booked, both legs.",
+      own: true,
+    });
+    expect(own).toContain("The work you started earlier");
+    expect(own).toContain("Say it as your own, in the first person");
+    expect(own).not.toContain("Sunny");
+    expect(own).toContain('"Booked, both legs."');
+    expect(own.startsWith(VOICE_BOT_ANSWER_MARKER_V1)).toBe(true);
+
+    const failed = renderVoiceBotAnswerEventV1({
+      botName: "Sunny",
+      question: "book the flights",
+      failure: "the airline site was down",
+      own: true,
+    });
+    expect(failed).toContain("could not be finished");
+    expect(failed).not.toContain("Sunny");
+
+    // Another Bot's answer is still somebody else's, and is named.
+    expect(
+      renderVoiceBotAnswerEventV1({
+        botName: "Sunny",
+        question: "book the flights",
+        answer: "Booked.",
+      }),
+    ).toContain("Sunny");
+  });
+
   test("a Bot's answer is one message, marked, with the request in the person's words", () => {
     expect(
       renderVoiceBotAnswerEventV1({

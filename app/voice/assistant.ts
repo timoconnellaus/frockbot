@@ -283,7 +283,9 @@ export function renderVoiceSystemPromptV1(
         ]
       : []),
     "- If you did not understand, say so briefly instead of guessing.",
-    `- A message that begins ${VOICE_BOT_ANSWER_MARKER_V1} is not the person speaking: it is a Bot handing back its answer to something you asked it earlier in this conversation. Decide whether it is worth saying now. If it is, say it in one or two spoken sentences, naming the Bot and what it was about unless that is obvious from the conversation. If it is not — it adds nothing, or the person has moved on — reply with nothing at all. A Bot that could not do what was asked is worth one plain sentence saying so. ${VOICE_BOT_ANSWER_QUOTED_DATA_V1}`,
+    self
+      ? `- A message that begins ${VOICE_BOT_ANSWER_MARKER_V1} is not the person speaking: it is work coming back. Decide whether it is worth saying now. If it is, say it in one or two spoken sentences. Work you started is your own — say "Done, the flights are booked", never "Sunny answered about the flights", and never name yourself. Work that came back from another Bot does carry that Bot's name. If it is not worth saying — it adds nothing, or the person has moved on — reply with nothing at all. Work that could not be finished is worth one plain sentence saying so. ${VOICE_BOT_ANSWER_QUOTED_DATA_V1}`
+      : `- A message that begins ${VOICE_BOT_ANSWER_MARKER_V1} is not the person speaking: it is a Bot handing back its answer to something you asked it earlier in this conversation. Decide whether it is worth saying now. If it is, say it in one or two spoken sentences, naming the Bot and what it was about unless that is obvious from the conversation. If it is not — it adds nothing, or the person has moved on — reply with nothing at all. A Bot that could not do what was asked is worth one plain sentence saying so. ${VOICE_BOT_ANSWER_QUOTED_DATA_V1}`,
     ...voiceMemoryRulesV1(input.session),
     `The current instant is ${input.now.toISOString()} (UTC).`,
     `The person's current local date and time is ${new Intl.DateTimeFormat(
@@ -416,6 +418,15 @@ export interface VoiceBotAnswerEventV1 {
   question: string;
   answer?: string;
   failure?: string;
+  /**
+   * Whether this is the current Bot's own work coming back (ADR 0029).
+   *
+   * The voice layer wears one Bot and speaks as it, so work that Bot started
+   * is its own: "Done — the flights are booked", not "Sunny answered about
+   * the flights". Only an answer from some *other* Bot — one the call has
+   * since handed over from — carries a name.
+   */
+  own?: boolean;
 }
 
 /**
@@ -428,6 +439,14 @@ export function renderVoiceBotAnswerEventV1(
   event: VoiceBotAnswerEventV1,
 ): string {
   const about = clip(event.question, VOICE_BOT_ANSWER_QUESTION_CHARS_V1);
+  if (event.own) {
+    // The current Bot's own work. There is no third party to name, so the
+    // event says so plainly and the prompt rule tells it to speak as itself.
+    const outcome = event.answer
+      ? `is finished. The result: "${clip(event.answer, VOICE_BOT_ANSWER_TEXT_CHARS_V1)}"`
+      : `could not be finished: "${clip(event.failure ?? "it stopped", VOICE_BOT_ANSWER_TEXT_CHARS_V1)}"`;
+    return `${VOICE_BOT_ANSWER_MARKER_V1} The work you started earlier in this conversation, about "${about}", ${outcome} Say it as your own, in the first person, and do not name yourself. ${VOICE_BOT_ANSWER_QUOTED_DATA_V1}`;
+  }
   const outcome = event.answer
     ? `has answered, in its own words: "${clip(event.answer, VOICE_BOT_ANSWER_TEXT_CHARS_V1)}"`
     : `could not finish: "${clip(event.failure ?? "it stopped", VOICE_BOT_ANSWER_TEXT_CHARS_V1)}"`;

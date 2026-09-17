@@ -322,6 +322,27 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
       const reply =
         this.#script.answerReply ??
         (() => {
+          // Since ADR 0029 the event comes in two shapes. The current Bot's
+          // own work is told in the first person with no name; another
+          // Bot's still carries one. A real model chooses its words; this
+          // one keeps the distinction visible so a test can assert it.
+          const mine = /^The work you started earlier/.test(
+            last.content.slice(VOICE_BOT_ANSWER_MARKER_V1.length).trim(),
+          );
+          if (mine) {
+            const result = /is finished\. The result: "(.*?)" Say it as/s.exec(
+              last.content,
+            )?.[1];
+            const stopped = /could not be finished: "(.*?)" Say it as/s.exec(
+              last.content,
+            )?.[1];
+            // Deliberately not "Done:" — the tool-result reply already
+            // starts that way, and a test that wants to prove a read-out
+            // has *not* happened yet must be able to tell them apart.
+            return result
+              ? `Finished: ${result}`
+              : `I could not finish that: ${stopped ?? ""}`;
+          }
           const bot =
             new RegExp(
               `^${VOICE_BOT_ANSWER_MARKER_V1.replace(/[[\]]/g, "\\$&")} (.*?), asked`,

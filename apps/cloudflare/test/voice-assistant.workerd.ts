@@ -851,7 +851,7 @@ describe("the voice session object", () => {
     await startCall(next, identity.botId);
     await next.waitFor(
       (f) =>
-        f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
+        f.type === "transcript_end" && String(f.text).startsWith("Finished:"),
       "the answer told on the rejoined call",
       15_000,
     );
@@ -1146,14 +1146,14 @@ describe("the voice session object", () => {
     );
     expect(held).toMatchObject({ reason: "reply-in-flight" });
     expect(
-      (await stub.probeSynthesized()).some((t) => t.startsWith("Workerd Bot")),
+      (await stub.probeSynthesized()).some((t) => t.startsWith("Finished:")),
     ).toBe(false);
     await stub.probeReleaseTts();
     // Once the window has passed the scheduled announcement lands: the
     // assistant is told, and says it.
     await opened.waitFor(
       (f) =>
-        f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
+        f.type === "transcript_end" && String(f.text).startsWith("Finished:"),
       "the answer said",
       10_000,
     );
@@ -1464,7 +1464,7 @@ describe("the voice session object", () => {
     );
     await opened.waitFor(
       (f) =>
-        f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
+        f.type === "transcript_end" && String(f.text).startsWith("Finished:"),
       "the completed Bot answer read out with no hand-run look-up",
       40_000,
     );
@@ -1554,7 +1554,7 @@ describe("the voice session object", () => {
     // then read out on the live call.
     await next.waitFor(
       (f) =>
-        f.type === "transcript_end" && String(f.text).startsWith("Workerd Bot"),
+        f.type === "transcript_end" && String(f.text).startsWith("Finished:"),
       "answer read out after the scheduled look-up",
       60_000,
     );
@@ -1638,7 +1638,7 @@ describe("the voice session object", () => {
       answer: "",
       event: { kind: "bot-answer", runId: told.runId },
     });
-    expect(turn.transcript).toContain("could not finish");
+    expect(turn.transcript).toContain("could not be finished");
     const states = opened.frames
       .filter((f) => f.type === "voice/delegation")
       .map((f) => f.state);
@@ -1700,8 +1700,7 @@ describe("the voice session object", () => {
     expect(
       opened.frames.some(
         (f) =>
-          f.type === "transcript_end" &&
-          String(f.text).startsWith("Workerd Bot"),
+          f.type === "transcript_end" && String(f.text).startsWith("Finished:"),
       ),
     ).toBe(false);
     // One answer, one event turn: the delegation is marked spoken as soon as
