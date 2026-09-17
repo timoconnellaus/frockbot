@@ -412,6 +412,39 @@ describe("the three routes", () => {
     });
   });
 
+  /**
+   * A Workers isolate advances its clock only on I/O, so two presses made in
+   * the same batch carry the same instant. They are still two presses.
+   */
+  test("two identical presses in the same instant are two inputs", async () => {
+    const values = new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]);
+    const { state } = harness(values);
+    const command = {
+      schemaVersion: 1 as const,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "pick-tuesday" },
+    };
+    const RealDate = Date;
+    globalThis.Date = class extends RealDate {
+      constructor() {
+        super(NOW);
+      }
+    } as DateConstructor;
+    try {
+      await cardAction(state, IDENTITY, command);
+      await cardAction(state, IDENTITY, command);
+    } finally {
+      globalThis.Date = RealDate;
+    }
+    const queued = [...values.entries()]
+      .filter(([key]) => key.startsWith("routine-wake:"))
+      .map(([, value]) => value as { createdAt: string; pressId: string });
+    expect(queued).toHaveLength(2);
+    expect(queued[0]!.createdAt).toBe(queued[1]!.createdAt);
+    expect(queued[0]!.pressId).not.toBe(queued[1]!.pressId);
+  });
+
   test("a context past what the preamble carries is refused, never cut", async () => {
     // The Bot reads this verbatim, so half of a JSON object is worse than a
     // refusal the person is told about.

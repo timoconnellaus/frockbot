@@ -1017,9 +1017,53 @@ describe("what one settled Turn writes", () => {
       expect(card.deleted).toBeUndefined();
       expect(card.refusal).toBeUndefined();
     }
-    // The index never moved, so the refusal is not indexed: there was no slot
-    // to take, which is the very condition that raised it.
-    expect(records[CARD_INDEX_KEY]).toBeUndefined();
+    // The refusal takes the relaxed slot, so the one record saying why the
+    // card is not there is out of the listing retention's reach.
+    const index = records[CARD_INDEX_KEY] as { surfaces: string[] };
+    expect(index.surfaces).toContain("one-too-many");
+    expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession + 1);
+  });
+
+  /**
+   * A second surface named before the Turn has folded anything spends the
+   * relaxed slot the first one took rather than growing the index again.
+   */
+  test("a second refusal spends the relaxed slot rather than taking another", async () => {
+    const surfaces = Array.from(
+      { length: A2UI_LIMITS_V1.surfacesPerSession },
+      (_, index) => `s${index}`,
+    );
+    const records = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        events: [
+          sendEvent("extra-a", [
+            { version: "v1.0", createSurface: { surfaceId: "extra-a" } },
+          ]),
+          sendEvent("extra-b", [
+            { version: "v1.0", createSurface: { surfaceId: "extra-b" } },
+          ]),
+          ...surfaces.map((surfaceId) =>
+            sendEvent(surfaceId, [
+              { version: "v1.0", createSurface: { surfaceId } },
+            ]),
+          ),
+        ],
+      },
+      now: NOW,
+      read: reader({ [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces } }),
+    });
+    const first = decodeCardRecordV1(records[cardKeyV1("extra-a")]);
+    expect(first.deleted).toBe(true);
+    expect(first.refusal).toContain("make room");
+    expect(decodeCardRecordV1(records[cardKeyV1("extra-b")]).refusal).toBe(
+      undefined,
+    );
+    const index = records[CARD_INDEX_KEY] as { surfaces: string[] };
+    expect(index.surfaces).not.toContain("extra-a");
+    expect(index.surfaces).toContain("extra-b");
+    expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession + 1);
   });
 
   test("a recovered Turn does not fold twice onto a surface evicted in between", async () => {

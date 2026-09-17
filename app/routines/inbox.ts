@@ -261,6 +261,8 @@ export interface RoutinePendingSupersededTurnV1 {
 export interface RoutinePendingCardActionV1 {
   schemaVersion: 1;
   kind: "card-action";
+  /** What makes this press its own input: minted once, where the press lands. */
+  pressId: string;
   surfaceId: string;
   /** The action's name, as the surface declared it. */
   name: string;
@@ -285,11 +287,11 @@ export function pendingBotInputIdV1(input: PendingBotInputV1): string {
   if (input.kind === "wake") return input.wakeId;
   if (input.kind === "approval") return input.approvalId;
   if (input.kind === "superseded-turn") return `superseded-turn:${input.runId}`;
-  // A surface can be pressed more than once, so the id carries the instant as
-  // well: two presses are two inputs, and a replay of one is still one.
-  if (input.kind === "card-action") {
-    return `card-action:${input.surfaceId}:${input.name}:${input.createdAt}`;
-  }
+  // A surface can be pressed more than once, and two presses in the same
+  // millisecond are still two presses — a Workers isolate advances its clock
+  // only on I/O, so the instant cannot tell them apart. The press's own minted
+  // id can: two presses are two inputs, and a replay of one is still one.
+  if (input.kind === "card-action") return `card-action:${input.pressId}`;
   return `machine-result:${input.commandId}`;
 }
 
@@ -452,13 +454,14 @@ export function decodePendingBotInputV1(
   if (candidate.kind === "card-action") {
     routineExactKeys(
       candidate,
-      ["schemaVersion", "kind", "surfaceId", "name", "createdAt"],
+      ["schemaVersion", "kind", "pressId", "surfaceId", "name", "createdAt"],
       ["context"],
       label,
     );
     return {
       schemaVersion: 1,
       kind: "card-action",
+      pressId: routineText(candidate.pressId, 128, `${label} pressId`),
       surfaceId: routineText(candidate.surfaceId, 128, `${label} surfaceId`),
       name: routineText(candidate.name, 256, `${label} name`),
       ...(candidate.context === undefined

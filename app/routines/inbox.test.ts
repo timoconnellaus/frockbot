@@ -560,6 +560,7 @@ describe("the pending-input cap", () => {
       await inbox.enqueue({
         schemaVersion: 1,
         kind: "card-action",
+        pressId: `press-${index}`,
         surfaceId: "surface-1",
         name: "add",
         context: `{"item":${index}}`,

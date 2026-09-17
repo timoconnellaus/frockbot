@@ -53,11 +53,12 @@
  *    named its surfaces in decides which of its cards survives — and a new
  *    surface named before this Turn has folded anything is refused outright,
  *    with a record saying the Session is full of cards this Turn is drawing.
- *    Every one of those paths writes a record, so no card send ever leaves no
- *    trace, not even a Turn drawing more surfaces than a Session may hold —
- *    though that last refusal cannot take an index slot, there being none free
- *    by the very condition that raised it, so it is the one record retention
- *    may eventually drop.
+ *    That refusal takes an index slot even though the condition that raised it
+ *    is that none was free: the index runs one past the cap to hold it, and a
+ *    Turn that keeps naming new surfaces spends that same relaxed slot rather
+ *    than growing the index further. Every one of those paths writes a record
+ *    and indexes it, so no card send ever leaves no trace, not even a Turn
+ *    drawing more surfaces than a Session may hold.
  *
  *    Trimming loses a row and never a fact, because the send that drew the
  *    trimmed card is still on its Turn's log. The records eviction leaves
@@ -691,11 +692,14 @@ export interface CardTerminalInputV1 {
 function evictionVictimV1(
   surfaces: readonly string[],
   writing: ReadonlySet<string>,
-  settled: (surfaceId: string) => boolean,
+  folded: ReadonlySet<string>,
+  relaxed: ReadonlySet<string>,
 ): number {
   const untouched = surfaces.findIndex((surfaceId) => !writing.has(surfaceId));
   if (untouched !== -1) return untouched;
-  return surfaces.findIndex((surfaceId) => settled(surfaceId));
+  const settled = surfaces.findIndex((surfaceId) => folded.has(surfaceId));
+  if (settled !== -1) return settled;
+  return surfaces.findIndex((surfaceId) => relaxed.has(surfaceId));
 }
 
 /** The record a send that could not be folded or indexed leaves behind. */
@@ -754,6 +758,7 @@ export async function cardTerminalRecordsV1(
   const surfaces = [...index.surfaces];
   const writing = new Set(sends.map((send) => send.surfaceId));
   const foldedSurfaces = new Set<string>();
+  const relaxedSurfaces = new Set<string>();
   let movedIndex = false;
   for (const send of sends) {
     const key = cardKeyV1(send.surfaceId);
@@ -797,8 +802,11 @@ export async function cardTerminalRecordsV1(
     // drawn, tombstone and all, and is admitted the same way.
     if (!surfaces.includes(send.surfaceId)) {
       if (surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession) {
-        const victimAt = evictionVictimV1(surfaces, writing, (surfaceId) =>
-          foldedSurfaces.has(surfaceId),
+        const victimAt = evictionVictimV1(
+          surfaces,
+          writing,
+          foldedSurfaces,
+          relaxedSurfaces,
         );
         if (victimAt === -1) {
           records[key] = refusedCardRecordV1(
@@ -807,9 +815,16 @@ export async function cardTerminalRecordsV1(
             input,
             "the Session is full of cards this Turn is drawing",
           );
+          // It takes the relaxed slot the header describes, so the one record
+          // saying why the card is not there is out of the listing retention's
+          // reach; the next such refusal spends this slot rather than another.
+          surfaces.push(send.surfaceId);
+          relaxedSurfaces.add(send.surfaceId);
+          movedIndex = true;
           continue;
         }
         const evicted = surfaces.splice(victimAt, 1)[0]!;
+        relaxedSurfaces.delete(evicted);
         const evictedKey = cardKeyV1(evicted);
         const staged = records[evictedKey] as CardRecordV1 | undefined;
         const storedEvicted = await input.read<unknown>(evictedKey);
