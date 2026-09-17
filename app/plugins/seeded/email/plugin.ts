@@ -129,6 +129,25 @@ function addressRows(draft: Draft, full: boolean): unknown {
   return { id: "rows", component: "KeyValueRows", rows };
 }
 
+/**
+ * The two components a "More details" press changes, and only those: a press
+ * redraws what it was about, never the ApprovalActions, whose approvalId the
+ * kernel bound when the card was sent and which the Plugin cannot mint again.
+ */
+function detailComponents(draft: Draft, full: boolean): unknown[] {
+  return [
+    addressRows(draft, full),
+    {
+      id: "more",
+      component: "Button",
+      label: full ? "Fewer details" : "More details",
+      // A press the kernel routes to this Plugin's own handler, which answers
+      // with the rows again. Costs no Turn, which is the point of the route.
+      action: { name: `plugin/email/details`, context: { full: !full } },
+    },
+  ];
+}
+
 function draftComponents(draft: Draft, full: boolean): unknown[] {
   return [
     {
@@ -142,20 +161,12 @@ function draftComponents(draft: Draft, full: boolean): unknown[] {
       label: "Ready to send",
       tone: "pending",
     },
-    addressRows(draft, full),
+    ...detailComponents(draft, full),
     {
       id: "body",
       component: "CollapsibleText",
       text: draft.body,
       collapsedLines: 6,
-    },
-    {
-      id: "more",
-      component: "Button",
-      label: full ? "Fewer details" : "More details",
-      // A press the kernel routes to this Plugin's own handler, which answers
-      // with the rows again. Costs no Turn, which is the point of the route.
-      action: { name: `plugin/email/details`, context: { full: !full } },
     },
     {
       id: "actions",
@@ -231,7 +242,7 @@ const draftCard: PluginCard = {
           version: "v1.0",
           updateComponents: {
             surfaceId,
-            components: draftComponents(state.draft, full),
+            components: detailComponents(state.draft, full),
           },
         },
       ];

@@ -17,6 +17,7 @@ import {
   type IsolateContractVersion,
 } from "./isolate.js";
 import { isSkillReferenceNameV1, isSkillRefSlugV1 } from "./skills.js";
+import { assertEnforceableJsonSchemaV1 } from "./json-schema.js";
 
 /** Authority a plugin may hold. */
 export const PLUGIN_GRANTS_V1 = [
@@ -499,6 +500,9 @@ function decodePluginCardsV1(input: unknown, label: string): PluginCardV1[] {
       if (schemaText.length > MAX_PLUGIN_CARD_SCHEMA_BYTES_V1) {
         throw new Error(`${itemLabel}.dataSchema exceeds its bound`);
       }
+      // Walked whole here, not per value at draw time: a card declaring a
+      // constraint the kernel cannot check is a card that never mounts.
+      assertEnforceableJsonSchemaV1(dataSchema, `${itemLabel}.dataSchema`);
       const actions = boundedArray(
         value.actions,
         `${itemLabel}.actions`,

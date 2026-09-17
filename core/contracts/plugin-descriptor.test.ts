@@ -460,6 +460,65 @@ describe("a plugin's services, triggers and settings", () => {
     ).toThrow(/a card of the same name/);
   });
 
+  // A card whose schema the kernel cannot enforce whole never mounts, rather
+  // than drawing until the Bot happens to fill the unchecked field.
+  test("a card's schema is refused for a constraint nothing would check", () => {
+    const card = (dataSchema: Record<string, unknown>) => ({
+      id: "draft",
+      displayName: "Draft",
+      description: "Shows a draft.",
+      dataSchema,
+      actions: [],
+    });
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        cards: [
+          card({
+            type: "object",
+            properties: { note: { type: "string", pattern: "^a" } },
+          }),
+        ],
+      }),
+    ).toThrow(/does not enforce/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        cards: [
+          card({
+            type: "object",
+            properties: {},
+            additionalProperties: { type: "string" },
+          }),
+        ],
+      }),
+    ).toThrow(/additionalProperties must be true or false/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        cards: [
+          card({
+            type: "object",
+            properties: { tags: { type: "array", items: { type: "date" } } },
+          }),
+        ],
+      }),
+    ).toThrow(/does not declare a known type/);
+    expect(
+      decodePluginDescriptorV1({
+        ...base,
+        cards: [
+          card({
+            type: "object",
+            properties: { note: { type: "string", maxLength: 8 } },
+            required: ["note"],
+            additionalProperties: false,
+          }),
+        ],
+      }).cards?.[0]?.id,
+    ).toBe("draft");
+  });
+
   test("a settings schema describes an object and is bounded", () => {
     expect(
       decodePluginDescriptorV1({

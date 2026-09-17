@@ -2341,9 +2341,8 @@ export const tools = [];
 export async function execute(tool) {
   throw new Error("unknown tool " + tool);
 }
-function components(subject, expanded) {
+function detail(subject, expanded) {
   return [
-    { id: "root", component: "Column", children: ["rows", "more", "actions"] },
     {
       id: "rows",
       component: "KeyValueRows",
@@ -2357,6 +2356,12 @@ function components(subject, expanded) {
       label: "More",
       action: { name: "plugin/probe-card/details", context: { expanded: true } },
     },
+  ];
+}
+function components(subject, expanded) {
+  return [
+    { id: "root", component: "Column", children: ["rows", "more", "actions"] },
+    ...detail(subject, expanded),
     {
       id: "actions",
       component: "ApprovalActions",
@@ -2391,7 +2396,7 @@ export const cards = {
               version: "v1.0",
               updateComponents: {
                 surfaceId: press.surfaceId,
-                components: components(String(stored.value), press.context.expanded === true),
+                components: detail(String(stored.value), press.context.expanded === true),
               },
             },
           ],
@@ -2451,7 +2456,7 @@ export const cards = {
     expect(listed.cards).toHaveLength(1);
     const card = listed.cards[0]!;
     // The kernel minted the surface, so the Plugin never named one.
-    expect(card.surfaceId.startsWith(`${CARD_PLUGIN_ID}-draft-`)).toBe(true);
+    expect(card.surfaceId.startsWith(`${CARD_PLUGIN_ID}_draft.`)).toBe(true);
     const actions = card.components.find((part) => part.id === "actions")!;
     // Trust chrome is bound to an id only the kernel issues: whatever the
     // Plugin wrote is gone.
@@ -2492,6 +2497,12 @@ export const cards = {
           unknown[] | undefined
       )?.length,
     ).toBe(2);
+    // A press redraws what it was about and leaves the trust chrome alone:
+    // the Approval the kernel bound when the card was sent is still the one
+    // the decision is read under, so the card can still be decided.
+    expect(
+      pressed.card.components.find((part) => part.id === "actions")?.approvalId,
+    ).toBe(actions.approvalId);
 
     // The line the handler left for the Bot is waiting as durable input.
     const pending = await runInDurableObject(

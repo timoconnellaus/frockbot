@@ -95,21 +95,26 @@ export interface BotIsolateMemberV1 {
  */
 /** The `Identifier` a surface id is, as the Card seam bounds one. */
 const CARD_SURFACE_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-/** What that `Identifier` may weigh, which the minted id has to fit inside. */
-const CARD_SURFACE_ID_MAX_V1 = 128;
+
+/**
+ * The prefix every surface of one Plugin's one card carries. A plugin id holds
+ * no `_` and neither id holds a `.`, so the pair a prefix names is the only
+ * pair that could have written it — which is what makes it something to check
+ * a Bot-supplied surface id against. At most 98 characters, leaving the
+ * uniqueness room inside the 128 the Card seam bounds a surface id to.
+ */
+function cardSurfacePrefixV1(pluginId: string, cardId: string): string {
+  return `${pluginId}_${cardId}.`;
+}
 
 /**
  * The surface id one card draw is minted under. It names the Plugin and the
  * card so a person reading durable state can tell what drew it, and the
- * random half is what makes it new; a Plugin id long enough to crowd the
- * bound loses the readable half rather than the uniqueness.
+ * random half is what makes it new.
  */
 function mintedCardSurfaceIdV1(pluginId: string, cardId: string): string {
-  const unique = crypto.randomUUID();
-  const prefix = `${pluginId}-${cardId}-`;
-  return prefix.length + unique.length <= CARD_SURFACE_ID_MAX_V1
-    ? `${prefix}${unique}`
-    : `card-${unique}`;
+  const unique = crypto.randomUUID().replaceAll("-", "").slice(0, 24);
+  return `${cardSurfacePrefixV1(pluginId, cardId)}${unique}`;
 }
 
 const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
@@ -1331,13 +1336,19 @@ export class PluginWorkerHost {
             isError: true,
           };
         }
+        // Only a surface this card itself minted may be named again. Without
+        // this the model could hand over another Plugin's surface id and draw
+        // over its card, because a card record carries no owner of its own.
         if (
           request.surfaceId !== undefined &&
           (typeof request.surfaceId !== "string" ||
-            !CARD_SURFACE_ID_V1.test(request.surfaceId))
+            !CARD_SURFACE_ID_V1.test(request.surfaceId) ||
+            !request.surfaceId.startsWith(
+              cardSurfacePrefixV1(pluginId, card.id),
+            ))
         ) {
           return {
-            content: `${name} was refused: surfaceId is not a surface this Bot could have drawn`,
+            content: `${name} was refused: surfaceId is not a surface this card drew`,
             isError: true,
           };
         }

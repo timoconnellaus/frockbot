@@ -1492,7 +1492,7 @@ describe("a Plugin's cards", () => {
   const messages = [
     {
       version: "v1.0",
-      createSurface: { surfaceId: "mail-draft-1", components: [] },
+      createSurface: { surfaceId: "mail_draft.1", components: [] },
     },
   ];
 
@@ -1584,21 +1584,28 @@ describe("a Plugin's cards", () => {
     expect(drawn.isError).toBe(false);
     const send = subject.sends[0] as { surfaceId: string; cardId: string };
     expect(send.cardId).toBe("draft");
-    expect(send.surfaceId).toMatch(/^mail-draft-/);
+    expect(send.surfaceId).toMatch(/^mail_draft\.[0-9a-f]{24}$/);
     expect(drawn.content).toContain(send.surfaceId);
 
     await tool.execute!(
-      { data: { subject: "Hello" }, surfaceId: "mail-draft-1" },
+      { data: { subject: "Hello" }, surfaceId: send.surfaceId },
       executionContext(),
     );
     expect((subject.sends[1] as { surfaceId: string }).surfaceId).toBe(
-      "mail-draft-1",
+      send.surfaceId,
     );
     const refused = await tool.execute!(
       { data: { subject: "Hello" }, surfaceId: "not a surface" },
       executionContext(),
     );
     expect(refused.isError).toBe(true);
+    // A surface another Plugin's card minted is not this card's to draw on.
+    const stolen = await tool.execute!(
+      { data: { subject: "Hello" }, surfaceId: "post_draft.0123456789abcdef" },
+      executionContext(),
+    );
+    expect(stolen.isError).toBe(true);
+    expect(stolen.content).toMatch(/not a surface this card drew/);
     expect(subject.sends).toHaveLength(2);
   });
 

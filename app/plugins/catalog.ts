@@ -185,11 +185,15 @@ export function decodePluginCatalogV1(input: unknown): SeededPluginV1[] {
   return catalog;
 }
 
+/** How one seeded Plugin is described on the Plugins page, and how it ships. */
+export interface SeededPluginWordsV1 {
+  displayName: string;
+  description: string;
+  seed: PluginSeedStateV1;
+}
+
 /** How each seeded Plugin is described on the Plugins page, and how it ships. */
-const SEEDED_PLUGIN_WORDS_V1: Record<
-  string,
-  { displayName: string; description: string; seed: PluginSeedStateV1 }
-> = {
+const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
   email: {
     displayName: "Email",
     description:
@@ -199,6 +203,23 @@ const SEEDED_PLUGIN_WORDS_V1: Record<
     seed: "default-off",
   },
 };
+
+/**
+ * The deployment's words for one seeded Plugin.
+ *
+ * A directory built without an entry above is the build's mistake and not a
+ * Composition read's, so `scripts/build-seeded-plugins.ts` asks this before it
+ * writes an artifact and says which file to edit.
+ */
+export function seededPluginWordsV1(pluginId: string): SeededPluginWordsV1 {
+  const words = SEEDED_PLUGIN_WORDS_V1[pluginId];
+  if (!words) {
+    throw new Error(
+      `seeded plugin "${pluginId}" has no entry in app/plugins/catalog.ts`,
+    );
+  }
+  return words;
+}
 
 /**
  * What this deployment seeds.
@@ -213,7 +234,7 @@ export const DEPLOYMENT_PLUGIN_CATALOG_V1: readonly SeededPluginV1[] =
   SEEDED_PLUGIN_ARTIFACTS_V1.map((artifact) =>
     decodeSeededPluginV1({
       pluginId: artifact.pluginId,
-      ...SEEDED_PLUGIN_WORDS_V1[artifact.pluginId]!,
+      ...seededPluginWordsV1(artifact.pluginId),
       artifact: {
         contentHash: artifact.contentHash,
         size: artifact.size,
