@@ -381,12 +381,20 @@ serve`), the platform model over the remote Workers AI binding, asked
    > model's because a Plugin need not draw its input: the email card redraws
    > the draft it holds, so binding the tool input would bind values nobody
    > saw. A draw that asks for a decision and declares no `covers` is refused.
-   > The ids themselves are derived from the effect that records the send
-   > rather than minted, so a replayed tool call recomputes them, the send
-   > dedupe makes the ask a no-op and the binding it rewrites is the one that
-   > was already there. `isolateEmail` refuses a decision that is not the one
-   > bound to this send, and a redraw of a pending draft reuses that decision
-   > rather than minting a second over one draft.
+   > The ids themselves are derived from the Session and the effect that
+   > records the send rather than minted, so a replayed tool call recomputes
+   > them, the send dedupe makes the ask a no-op and the binding it rewrites
+   > is the one that was already there; the Session is in the derivation
+   > because an effect id is unique only inside one while card and Approval
+   > records are Bot-wide. The wording an Approval is recorded with — its
+   > action, risk and rationale — is declared on the render result's
+   > `decision` rather than on the `ApprovalActions` component, because the
+   > committed Frock catalog allows that component only `approvalId`,
+   > `approveLabel` and `declineLabel`; the component carries the buttons and
+   > the kernel-minted id, and the words come from the result beside it.
+   > `isolateEmail` refuses a decision that is not the one bound to this send,
+   > and a redraw of a pending draft reuses that decision rather than minting
+   > a second over one draft.
 7. The five first-party cards as locked Plugins; the old members mapped, then
    removed a release later.
 8. The rest of the Frock catalog, family by family, each with its reference.

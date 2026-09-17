@@ -1200,18 +1200,22 @@ export const CARD_APPROVAL_SECRET_KEY_V1 = "shell:card-approval-secret";
  * that were a pure function of the effect could be asked for — and answered —
  * a Turn before the card that will carry it exists.
  *
- * A seed over the Bot's own secret and the effect id is both: the same effect
- * recomputes the same seed, and nothing outside this Durable Object can
- * compute it at all. The prefix is refused for a model-supplied `approvalId`
+ * A seed over the Bot's own secret, the Session and the effect id is both: the
+ * same effect of the same Session recomputes the same seed, and nothing
+ * outside this Durable Object can compute it at all. The Session is hashed in
+ * because an effect id is only unique inside one, while Approval records are
+ * Bot-wide: two Sessions drawing at the same turn and step would otherwise
+ * share one decision. The prefix is refused for a model-supplied `approvalId`
  * at the `send_to_user` seam, so the two namespaces never meet.
  */
 export async function cardApprovalSeedV1(
   secret: string,
+  sessionId: string,
   effectId: string,
 ): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(`${secret}\n${effectId}`),
+    new TextEncoder().encode(`${secret}\n${sessionId}\n${effectId}`),
   );
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))

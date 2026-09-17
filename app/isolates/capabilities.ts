@@ -342,13 +342,17 @@ export function createR2PackageArtifactStore(
       const seeded = SEEDED_PLUGIN_ARTIFACTS_V1.find(
         (artifact) => artifact.contentHash === contentHash,
       );
-      if (seeded) return seeded.module;
-      const key = `packages/${contentHash}.mjs`;
-      const object = await bucket.get(key);
-      if (!object) {
-        throw new Error(`package artifact "${contentHash}" is missing`);
+      let module: string;
+      if (seeded) {
+        module = seeded.module;
+      } else {
+        const key = `packages/${contentHash}.mjs`;
+        const object = await bucket.get(key);
+        if (!object) {
+          throw new Error(`package artifact "${contentHash}" is missing`);
+        }
+        module = await object.text();
       }
-      const module = await object.text();
       if ((await sha256Hex(module)) !== contentHash) {
         throw new Error(
           `package artifact "${contentHash}" failed hash verification`,

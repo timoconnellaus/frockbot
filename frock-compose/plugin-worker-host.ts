@@ -103,24 +103,32 @@ const CARD_SURFACE_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
  * card so a person reading durable state can tell what drew it, and the
  * effect that drew it is what makes it new.
  *
- * Derived from the effect rather than random for the same reason the card's
- * Approval ids are: a Turn interrupted before its tool result landed re-runs
- * the same call under the same effect, and a freshly minted surface would
- * name a card nobody is looking at while the one in the conversation — which
- * the send deduped under that effect — kept a live-looking button forever. An
- * effect id that will not fit the surface id the Card seam bounds falls back
- * to a random half, because a surface id that does not decode draws nothing.
+ * Derived from the Session and the effect rather than random for the same
+ * reason the card's Approval ids are: a Turn interrupted before its tool
+ * result landed re-runs the same call under the same effect, and a freshly
+ * minted surface would name a card nobody is looking at while the one in the
+ * conversation — which the send deduped under that effect — kept a
+ * live-looking button forever. The Session is hashed in because an effect id
+ * is only unique inside one Session and every Routine of a Bot has its own,
+ * while card records are Bot-wide: two Sessions drawing at the same turn and
+ * step would otherwise land on one surface. A hash is what keeps the pair
+ * inside the 128 characters the Card seam bounds a surface id to.
  */
-function mintedCardSurfaceIdV1(
+async function mintedCardSurfaceIdV1(
   pluginId: string,
   cardId: string,
+  sessionId: string,
   effectId: string,
-): string {
-  const prefix = cardSurfacePrefixV1(pluginId, cardId);
-  const derived = `${prefix}${effectId.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
-  if (CARD_SURFACE_ID_V1.test(derived)) return derived;
-  const unique = crypto.randomUUID().replaceAll("-", "").slice(0, 24);
-  return `${prefix}${unique}`;
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${sessionId}\n${effectId}`),
+  );
+  const unique = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 24);
+  return `${cardSurfacePrefixV1(pluginId, cardId)}${unique}`;
 }
 
 const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
@@ -1374,7 +1382,12 @@ export class PluginWorkerHost {
         }
         const surfaceId =
           (request.surfaceId as string | undefined) ??
-          mintedCardSurfaceIdV1(pluginId, card.id, context.effectId);
+          (await mintedCardSurfaceIdV1(
+            pluginId,
+            card.id,
+            context.sessionId,
+            context.effectId,
+          ));
         const invocation: PluginWorkerRenderCardInvocationV1 = {
           schemaVersion: 1,
           pluginId,

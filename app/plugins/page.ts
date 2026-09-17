@@ -12,7 +12,10 @@ import {
   type ViewDocument,
   type ViewNode,
 } from "@frockbot/core/protocol-schemas";
-import type { PluginNetworkV1 } from "@frockbot/core/contracts";
+import type {
+  PluginGrantV1,
+  PluginNetworkV1,
+} from "@frockbot/core/contracts";
 import type { PluginSeedStateV1 } from "./catalog.js";
 import {
   MAX_PLUGIN_TOOL_ARGUMENTS_BYTES_V1,
@@ -35,6 +38,8 @@ export interface BotPluginRowV1 {
   switchable: boolean;
   /** The network the descriptor declares, shown on the card before it is on. */
   network?: PluginNetworkV1;
+  /** The grants the descriptor asked for; `http` also opens this deployment's sender. */
+  grants?: readonly PluginGrantV1[];
   /** A first-party feature the account has not installed cannot be switched on. */
   unavailable?: string;
   /** Off after failing Turns in a row; the switch turns it on again (ADR 0026). */
@@ -196,16 +201,33 @@ export function decodeSetBotPluginEnabledCommandV1(
 const NODE_LIMIT = 512;
 const IDENTIFIER: ActionValueSchema = { type: "string", maxLength: 128 };
 
-/** What the card says about the reach a Plugin asked for. */
+/**
+ * What the card says about the reach a Plugin asked for.
+ *
+ * `http` opens two members, not one: the declared hosts and the deployment's
+ * own sender. Both are said, in the same words the approval card says them
+ * (`pluginApprovalActionV1`), because a Plugin that can ask this deployment to
+ * mail somebody must never read as reaching nothing.
+ */
 export function pluginNetworkCopyV1(
   network: PluginNetworkV1 | undefined,
+  grants: readonly PluginGrantV1[] = [],
 ): string {
-  if (!network) return "";
+  const sendsEmail = grants.includes("http");
+  const mail = sendsEmail
+    ? "Can ask this deployment to send email on the Bot's behalf, which a person approves message by message."
+    : "";
+  if (!network) return mail;
   if ("open" in network) {
-    return "Needs open network access. Turning this on gives every plugin on this account open network access.";
+    const open =
+      "Needs open network access. Turning this on gives every plugin on this account open network access.";
+    return mail ? `${open} ${mail}` : open;
   }
-  if (network.hosts.length === 0) return "Reaches no host of its own.";
-  return `Reaches ${network.hosts.join(", ")}.`;
+  if (network.hosts.length > 0) {
+    const hosts = `Reaches ${network.hosts.join(", ")}.`;
+    return mail ? `${hosts} ${mail}` : hosts;
+  }
+  return mail ? mail : "Reaches no host of its own.";
 }
 
 function kindLabel(row: BotPluginRowV1): string {
@@ -223,7 +245,7 @@ function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
   const lines: ViewNode[] = [
     { type: "text", text: row.description.slice(0, 4000), style: "body" },
   ];
-  const reach = pluginNetworkCopyV1(row.network);
+  const reach = pluginNetworkCopyV1(row.network, row.grants);
   if (reach) lines.push({ type: "text", text: reach, style: "status" });
   if (row.unavailable) {
     lines.push({ type: "text", text: row.unavailable, style: "status" });

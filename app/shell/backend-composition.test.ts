@@ -542,13 +542,16 @@ describe("the Approvals a Plugin's Card asks for", () => {
   async function mountCards(
     store: CardApprovalStoreV1,
     options?: Parameters<typeof cardEntrypoint>[0],
+    // Which of this Bot's Sessions draws. One Bot holds many — every Routine
+    // gets its own — while its card and Approval records are Bot-wide.
+    sessionId: string = `${USER}:bot-1`,
   ) {
     const generation = await cardGeneration();
     const { signal } = new AbortController();
     const entrypoint = cardEntrypoint(options);
     const mounted = await createShellCompositionHost({
       botId: "bot-1",
-      sessionId: `${USER}:bot-1`,
+      sessionId,
       sessionEvents: [],
       admitEffect: () => Promise.resolve(true),
       cardApprovals: store,
@@ -570,7 +573,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
     // A send is recorded against the Turn's open step, which is what the
     // loop opens before it dispatches a tool call.
     mounted.runtime.services.sessions
-      .get(`${USER}:bot-1`)
+      .get(sessionId)
       ?.append({ type: "step/start", turn: 1, step: 1 });
     let effect = 0;
     const draw = async (
@@ -594,7 +597,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
       const context = {
         botId: "bot-1",
         agentId: "bot-1",
-        sessionId: `${USER}:bot-1`,
+        sessionId,
         compositionGenerationId: generation.generationId,
         effectId: effectId ?? `effect-${effect}`,
         toolCall: call,
@@ -610,12 +613,15 @@ describe("the Approvals a Plugin's Card asks for", () => {
         context,
       );
     };
-    return { mounted, draw, signal };
+    return { mounted, draw, signal, sessionId };
   }
 
   /** Every approval send the Turn's log carries, in order. */
-  function approvalIdsOnLog(mounted: ShellMountedComposition): string[] {
-    const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
+  function approvalIdsOnLog(
+    mounted: ShellMountedComposition,
+    sessionId: string = `${USER}:bot-1`,
+  ): string[] {
+    const session = mounted.runtime.services.sessions.get(sessionId);
     return (session?.events ?? [])
       .filter(
         (event) =>
@@ -631,8 +637,11 @@ describe("the Approvals a Plugin's Card asks for", () => {
   }
 
   /** Every card surface the Turn's log carries, in order. */
-  function cardSurfaceIdsOnLog(mounted: ShellMountedComposition): string[] {
-    const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
+  function cardSurfaceIdsOnLog(
+    mounted: ShellMountedComposition,
+    sessionId: string = `${USER}:bot-1`,
+  ): string[] {
+    const session = mounted.runtime.services.sessions.get(sessionId);
     return (session?.events ?? [])
       .filter(
         (event) =>
@@ -707,6 +716,32 @@ describe("the Approvals a Plugin's Card asks for", () => {
       expect(cardApprovalId(mounted)).toBe(asked[0]!);
     } finally {
       await mounted.dispose();
+    }
+  });
+
+  test("two Sessions of one Bot drawing at the same step draw two cards", async () => {
+    // Every Routine of a Bot has its own Session and every Session starts at
+    // turn 1, so the same effect id is drawn twice on one Bot — while the card
+    // and Approval records those draws land in are Bot-wide.
+    const { store } = cardApprovalStorage();
+    const chat = await mountCards(store, undefined, `${USER}:bot-1`);
+    const routine = await mountCards(store, undefined, "routine:r-1");
+    try {
+      const input = { data: { subject: "Hello" } };
+      const surfaceOf = (result: { content?: unknown }) =>
+        /surface "([^"]+)"/.exec(String(result.content))![1]!;
+      const first = surfaceOf(await chat.draw(input, "tool:1:1:0"));
+      const second = surfaceOf(await routine.draw(input, "tool:1:1:0"));
+      expect(second).not.toBe(first);
+
+      const asked = approvalIdsOnLog(chat.mounted, chat.sessionId);
+      const alsoAsked = approvalIdsOnLog(routine.mounted, routine.sessionId);
+      expect(asked).toHaveLength(1);
+      expect(alsoAsked).toHaveLength(1);
+      expect(alsoAsked[0]).not.toBe(asked[0]);
+    } finally {
+      await chat.mounted.dispose();
+      await routine.mounted.dispose();
     }
   });
 

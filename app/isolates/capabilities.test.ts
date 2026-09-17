@@ -15,7 +15,9 @@ import {
   matchingModelBindingV1,
   type IsolateModelBindingV1,
   type IsolateModelRequestRecordV1,
+  createR2PackageArtifactStore,
 } from "./capabilities.ts";
+import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "../plugins/seeded/artifacts.generated.ts";
 
 const CONNECTIONS: IsolateConnectionV1[] = [
   {
@@ -394,5 +396,49 @@ describe("what the egress loopback admits", () => {
     expect(
       pluginEgressAdmitsV1(open, "http://anything.invalid/"),
     ).toMatchObject({ admitted: false });
+  });
+});
+
+describe("mounting a Bot Package artifact", () => {
+  /** A bucket holding exactly what a publisher put there, by content address. */
+  function bucketOf(objects: Record<string, string>) {
+    return {
+      get: (key: string) =>
+        Promise.resolve(
+          key in objects
+            ? { text: () => Promise.resolve(objects[key]!) }
+            : null,
+        ),
+    } as unknown as R2Bucket;
+  }
+
+  test("a seeded artifact is verified against its content address like any other", async () => {
+    const store = createR2PackageArtifactStore(bucketOf({}));
+    const seeded = SEEDED_PLUGIN_ARTIFACTS_V1[0]!;
+    // The artifact as generated mounts: the module is the content its address
+    // names.
+    expect(await store.loadPackageArtifact(seeded.contentHash)).toBe(
+      seeded.module,
+    );
+
+    // A hand-edited `artifacts.generated.ts` — module text changed, the
+    // recorded hashes left alone — must not mount. The bundle is no more
+    // trusted than R2; the hash is the only thing that makes either safe.
+    const original = seeded.module;
+    (seeded as { module: string }).module = `${original}\n// edited by hand`;
+    try {
+      await expect(
+        store.loadPackageArtifact(seeded.contentHash),
+      ).rejects.toThrow(/failed hash verification/);
+    } finally {
+      (seeded as { module: string }).module = original;
+    }
+  });
+
+  test("an artifact missing from the bucket is refused", async () => {
+    const store = createR2PackageArtifactStore(bucketOf({}));
+    await expect(store.loadPackageArtifact("a".repeat(64))).rejects.toThrow(
+      /is missing/,
+    );
   });
 });

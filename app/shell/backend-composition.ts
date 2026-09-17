@@ -311,14 +311,15 @@ export function createShellCompositionHost(
                 }
                 const reused = live?.approvalIds ?? [];
                 // The unguessable half of this card's Approval ids, from the
-                // Bot's own secret and the effect that records the send: the
-                // same effect recomputes it, and nothing outside the Durable
-                // Object can compute it at all.
+                // Bot's own secret, the Session and the effect that records the
+                // send: the same effect of the same Session recomputes it, and
+                // nothing outside the Durable Object can compute it at all.
                 const seed =
                   approvals === undefined
                     ? undefined
                     : await cardApprovalSeedV1(
                         await approvals.secret(),
+                        send.context.sessionId,
                         send.context.effectId,
                       );
                 const bound = bindCardApprovalsV1(

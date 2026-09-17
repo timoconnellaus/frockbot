@@ -1584,15 +1584,31 @@ describe("a Plugin's cards", () => {
     expect(drawn.isError).toBe(false);
     const send = subject.sends[0] as { surfaceId: string; cardId: string };
     expect(send.cardId).toBe("draft");
-    // Minted from the effect, so a replay of the same call redraws it.
-    expect(send.surfaceId).toBe("mail_draft.tool-1-1-0");
+    // The Plugin and the card it drew are readable in the id, and the rest is
+    // minted from the Session and the effect.
+    expect(send.surfaceId.startsWith("mail_draft.")).toBe(true);
     expect(drawn.content).toContain(send.surfaceId);
+
+    // A replay of the same call in the same Session redraws that surface,
+    // while another Session of this Bot at the same turn and step draws its
+    // own: card records are Bot-wide and an effect id is not.
+    await tool.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect((subject.sends[1] as { surfaceId: string }).surfaceId).toBe(
+      send.surfaceId,
+    );
+    await tool.execute!(
+      { data: { subject: "Hello" } },
+      executionContext({ sessionId: "routine:r-1" }),
+    );
+    expect(
+      (subject.sends[2] as { surfaceId: string }).surfaceId,
+    ).not.toBe(send.surfaceId);
 
     await tool.execute!(
       { data: { subject: "Hello" }, surfaceId: send.surfaceId },
       executionContext(),
     );
-    expect((subject.sends[1] as { surfaceId: string }).surfaceId).toBe(
+    expect((subject.sends[3] as { surfaceId: string }).surfaceId).toBe(
       send.surfaceId,
     );
     const refused = await tool.execute!(
@@ -1607,7 +1623,7 @@ describe("a Plugin's cards", () => {
     );
     expect(stolen.isError).toBe(true);
     expect(stolen.content).toMatch(/not a surface this card drew/);
-    expect(subject.sends).toHaveLength(2);
+    expect(subject.sends).toHaveLength(4);
 
     // An effect id too long for the surface id the Card seam bounds falls
     // back to a random half rather than drawing nothing.

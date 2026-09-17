@@ -7,6 +7,7 @@ import {
   pluginNetworkCopyV1,
   type BotPluginsFrameV1,
 } from "./page.js";
+import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./seeded/artifacts.generated.js";
 
 const frame: BotPluginsFrameV1 = {
   schemaVersion: 1,
@@ -103,6 +104,38 @@ describe("a Bot's Plugins document", () => {
       "set-package-enabled",
       "plugin-tool",
     ]);
+  });
+
+  test("the seeded email plugin's row says it can ask this deployment to mail", () => {
+    // Declared with `http` and no host of its own: the grant opens this
+    // deployment's own sender, so the row a person flips the switch on must
+    // not read as reaching nothing.
+    const email = SEEDED_PLUGIN_ARTIFACTS_V1.find(
+      (artifact) => artifact.pluginId === "email",
+    )!.descriptor;
+    const document = botPluginsDocumentV1({
+      ...frame,
+      plugins: [
+        {
+          pluginId: email.id,
+          displayName: email.displayName,
+          description: "Draft an email and ask before sending it.",
+          kind: "seeded",
+          seed: "default-off",
+          on: false,
+          switchable: true,
+          ...(email.network ? { network: email.network } : {}),
+          grants: email.grants,
+        },
+      ],
+    });
+    const lines = groups(document)[0]!
+      .children.filter((child) => child.type === "text")
+      .map((child) => child.text);
+    expect(lines).toContain(
+      "Can ask this deployment to send email on the Bot's behalf, which a person approves message by message.",
+    );
+    expect(lines).not.toContain("Reaches no host of its own.");
   });
 
   test("says what an open-network plugin means for the whole account", () => {
