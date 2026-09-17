@@ -26,8 +26,8 @@ void main() {
         FrockTheme.window,
         reason: '$platform',
       );
-      // The surface a card or a sheet sits on is its own colour, one step up
-      // from the window, and it does not move by platform either.
+      // The chrome — app bar, composer, sidebar — has its own colour, one
+      // step below the window, and it does not move by platform either.
       expect(
         theme.colorScheme.surface,
         FrockTheme.surface,

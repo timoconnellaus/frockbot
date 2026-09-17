@@ -32,11 +32,41 @@ abstract final class FrockTheme {
   static const warningInk = Color(0xff8a6000);
 
   static const window = Color(0xff1f1e24);
-  static const surface = Color(0xff211f26);
+
+  /// The ground the furniture stands on: app bar, composer, sidebar. It sits
+  /// one step *below* the window, so the thread is the lit part of the screen
+  /// and the chrome falls back from it. It used to be #211F26 — two units
+  /// above the window, a step no eye could find.
+  static const surface = Color(0xff1a191e);
   static const raised = Color(0xff2c2a33);
   static const border = Color(0xff3a3742);
-  static const muted = Color(0xffaaa6b1);
-  static const text = Color(0xfff4f2f6);
+  static const muted = Color(0xffa8a3a6);
+
+  /// A third rung below [muted], where a timestamp or a run's age goes. On
+  /// paper it would fall under the contrast floor, so the light theme reads
+  /// those in [inkMuted] instead and only the dark theme has three rungs.
+  static const subtle = Color(0xff8d8896);
+
+  /// Cream written on ink, not lilac: the dark theme is the site's paper
+  /// inverted, which is why the whites here are warm.
+  static const text = Color(0xfff6f2ee);
+
+  /// The light theme is the site's own paper — cream ground, white cards, a
+  /// warm line — rather than the lavender grey Material mixes from the seed.
+  static const cream = Color(0xfffaf7f2);
+  static const paper = Color(0xffffffff);
+  static const ink = Color(0xff1e1d27);
+  static const inkMuted = Color(0xff6d6974);
+  static const line = Color(0xffe7e0d9);
+
+  /// What a selected row, chip or rail tab is filled with. Rose at low alpha
+  /// went muddy over both grounds — over cream because the ground is warm and
+  /// the rose is not, over ink because alpha only ever greys. These are the
+  /// blend already made: the site's blush, and its opposite number on ink.
+  static const blush = Color(0xfffce2ea);
+  static const blushInk = Color(0xffb11f4b);
+  static const blushDark = Color(0xff3a2229);
+  static const blushDarkInk = Color(0xfff6d2db);
   static const fast = Duration(milliseconds: 140);
   static const enter = Duration(milliseconds: 260);
 
@@ -88,11 +118,11 @@ abstract final class FrockTheme {
         ).copyWith(
           primary: dark ? accent : const Color(0xffc23359),
           onPrimary: Colors.white,
-          surface: dark ? surface : const Color(0xfffaf8fb),
-          onSurface: dark ? text : window,
-          onSurfaceVariant: dark ? muted : const Color(0xff625c6b),
-          surfaceContainerHighest: dark ? raised : const Color(0xffefebf1),
-          outlineVariant: dark ? border : const Color(0xffdfd9e3),
+          surface: dark ? surface : cream,
+          onSurface: dark ? text : ink,
+          onSurfaceVariant: dark ? muted : inkMuted,
+          surfaceContainerHighest: dark ? raised : const Color(0xfff2ece4),
+          outlineVariant: dark ? border : line,
         );
     final base = ThemeData(
       useMaterial3: true,
@@ -108,7 +138,9 @@ abstract final class FrockTheme {
       borderRadius: BorderRadius.circular(radiusControl),
     );
     final hair = hairline(scheme);
-    final cardColor = dark ? raised : Colors.white;
+    final cardColor = dark ? raised : paper;
+    final selectionFill = dark ? blushDark : blush;
+    final selectionInk = dark ? blushDarkInk : blushInk;
     final textTheme = type.copyWith(
       displaySmall: type.displaySmall?.copyWith(
         fontFamily: 'Archivo Black',
@@ -163,7 +195,7 @@ abstract final class FrockTheme {
         fontWeight: FontWeight.w400,
         height: 1.4,
         letterSpacing: 0,
-        color: scheme.onSurfaceVariant,
+        color: dark ? subtle : scheme.onSurfaceVariant,
         fontFeatures: [const FontFeature.tabularFigures()],
       ),
       labelLarge: type.labelLarge?.copyWith(
@@ -187,8 +219,8 @@ abstract final class FrockTheme {
     );
     return base.copyWith(
       textTheme: textTheme,
-      scaffoldBackgroundColor: dark ? window : const Color(0xfffaf8fb),
-      canvasColor: dark ? surface : const Color(0xfffaf8fb),
+      scaffoldBackgroundColor: dark ? window : cream,
+      canvasColor: dark ? window : cream,
       dividerColor: hair,
       splashFactory: InkSparkle.splashFactory,
       splashColor: scheme.onSurface.withValues(alpha: 0.05),
@@ -324,7 +356,7 @@ abstract final class FrockTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusControl),
         ),
-        selectedTileColor: scheme.primary.withValues(alpha: 0.1),
+        selectedTileColor: selectionFill,
         selectedColor: scheme.onSurface,
         iconColor: scheme.onSurfaceVariant,
         textColor: scheme.onSurface,
@@ -372,10 +404,13 @@ abstract final class FrockTheme {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: cardColor,
-        selectedColor: scheme.primary.withValues(alpha: 0.16),
+        selectedColor: selectionFill,
         side: BorderSide(color: hair),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
         labelStyle: textTheme.labelMedium?.copyWith(color: scheme.onSurface),
+        secondaryLabelStyle: textTheme.labelMedium?.copyWith(
+          color: selectionInk,
+        ),
         labelPadding: const EdgeInsets.symmetric(horizontal: 4),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         iconTheme: IconThemeData(size: 16, color: scheme.onSurfaceVariant),
@@ -507,7 +542,7 @@ abstract final class FrockTheme {
         selectionHandleColor: scheme.primary,
       ),
       bannerTheme: MaterialBannerThemeData(
-        backgroundColor: dark ? raised : const Color(0xffefebf1),
+        backgroundColor: dark ? raised : const Color(0xfff2ece4),
         surfaceTintColor: Colors.transparent,
         dividerColor: hair,
         contentTextStyle: textTheme.bodyMedium?.copyWith(
@@ -518,7 +553,7 @@ abstract final class FrockTheme {
       ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: scheme.surface,
-        indicatorColor: scheme.primary.withValues(alpha: 0.14),
+        indicatorColor: selectionFill,
       ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
