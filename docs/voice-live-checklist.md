@@ -58,11 +58,12 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
    (Flash v2.5, PCM 24 kHz) in **this Bot's** voice, the same meter blooms
    deep rose from the playback, the reply names the other Bots.
 3. **Every voice in the catalog, against this account.** The ids in
-   `app/voice/voices.ts` are ElevenLabs' public premade voices and have never
-   been played here (ADR 0029). Make a Bot on each character in turn, or set
-   the fallback, and hear every entry speak: an id this account cannot reach
-   reaches a person as a sentence that never becomes sound. Two Bots must not
-   sound the same.
+   `app/voice/voices.ts` were read back from this account and exist, but none
+   has been listened to (`docs/voice.md`, "Each Bot has a voice"). Make a Bot
+   on each character in turn, or set the fallback, and hear every one speak:
+   judge whether the voice suits its character, and confirm an id that is
+   supposed to be reachable actually produces sound rather than silence. Two
+   Bots must not sound the same.
 4. Ask this Bot to hand you over ("let me talk to Remy"). Expect: the audio
    stays up, the next sentence is in Remy's voice, the page moves to Remy and
    the composer control there reads as pressed. Pressing voice on a third

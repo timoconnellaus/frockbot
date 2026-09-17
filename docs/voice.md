@@ -75,8 +75,14 @@ read-out belongs to another Bot — and one provider is made and kept per voice
 the object has spoken as.
 
 A Bot's own stored `voiceId` override is not built yet; `resolveVoiceIdV1`
-takes it and nothing writes it. The ids in that file are ElevenLabs' public
-premade voices and have not been played against this account.
+takes it and nothing writes it.
+
+Every id in that file was read back from this deployment's ElevenLabs account
+on 2026-09-17. That check is not ceremony: most of the provider's well-known
+"premade" ids are absent from this account, and an id the account cannot reach
+does not fail loudly — the sentence simply never becomes sound. A voice that
+is verified to exist has still not been listened to, so re-verify and audition
+after editing the list.
 
 ## Capabilities
 
@@ -311,8 +317,8 @@ delegated: that work is durable in the Bot.
 Everything between the end of the person's words and the first sound is
 what they wait through, so the turn does as little as it can in that gap.
 The Bot activity look-ups behind the system prompt and `list_bots` go to
-every Bot's object together, not one after another; a Bot lookup for
-`bot_status`, `ask_bot` and `cancel_bot` is one directory read. When the
+every Bot's object together, not one after another; the Bot lookup behind
+`status`, `ask` and `cancel` is one directory read. When the
 turn has said nothing after 2.5 seconds (`VOICE_TURN_ACK_DELAY_MS_V1`) the
 session speaks a bridge (`VOICE_TURN_BRIDGES_V1`: "One second.", "Let me
 check.", "Just a moment." and three more, never the same one twice running
@@ -554,7 +560,7 @@ the target Bot admits the same `runId` once. Active conversations and Routines
 finish normally, then queued voice requests run in FIFO order with User work
 prioritised. A voice request does not supersede existing work. Ending or
 interrupting the voice call does not cancel accepted Bot work. The assistant's
-`cancel_bot` tool requires an explicit request to stop the named Bot and
+`cancel` tool requires an explicit request to stop the call's own Bot and
 records intent before sending its authenticated stop command.
 
 The Bot receives `reply_to_request`, whose `reply/to-caller` event addresses
@@ -622,12 +628,13 @@ memory.
 
 ### Reading a Bot without asking it
 
-`read_bot_history` reads recent visible conversation directly from the Bot's
-run projection. `search_bot_history` queries the existing account transcript
-index for the selected Bot, then reads the matching runs to retain the actual
-speaker. Both tools require a Bot ID checked against the User's directory
-before access. They admit no Bot Turn, call no Bot model, and leave running
-work alone. `bot_status` reads authoritative running, queued and terminal
+`read_history` reads recent visible conversation directly from the Bot's
+run projection. `search_history` queries the existing account transcript
+index for that Bot, then reads the matching runs to retain the actual
+speaker. Neither tool takes a Bot ID: the loop supplies the call's own Bot,
+already checked against the User's directory when the call was admitted. They
+admit no Bot Turn, call no Bot model, and leave running
+work alone. `status` reads authoritative running, queued and terminal
 state plus the most recent explicit reply; it never quotes partial model
 text or a private model outcome.
 
@@ -639,7 +646,7 @@ Timestamps are explicitly labelled as Turn admission times, the timestamps
 available in the public projection. The search query is bounded to 256
 characters and only requests User/assistant conversation rows, excluding
 private tool output. Search reports its index state and may lag unsettled
-work; current-progress questions use `bot_status` instead. Returned excerpts
+work; current-progress questions use `status` instead. Returned excerpts
 are quoted data, not instructions for the voice assistant to follow.
 
 ## Session memory
