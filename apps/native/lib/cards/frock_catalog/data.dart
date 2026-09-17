@@ -10,6 +10,8 @@
 /// its layout.
 library;
 
+import 'dart:math' show min;
+
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 
@@ -227,11 +229,20 @@ final frockDataTable = CatalogItem(
     Widget cell(int index, Widget child) =>
         Expanded(flex: weights[index], child: child);
 
-    // The columns share the card's width rather than scrolling sideways: a
-    // table inside a scrolling transcript that scrolled the other way would
-    // fight the thread for every drag, and at phone width the person would
-    // never find the column that was off-screen.
-    return Column(
+    // The columns share the card's width, and scroll sideways only when
+    // sharing it would make them unreadable. The first live Turn to draw a
+    // table wrote four columns at 412 logical pixels, and squeezing them broke
+    // "INV-0912" across two lines mid-word: a column narrower than a short
+    // value is not a column. So a column claims a floor of
+    // `_minColumnWidthV1 * weight`, and a table past what the card can give
+    // becomes one horizontal scroller — the transcript scrolls the other way,
+    // so the two never fight over a drag.
+    // A column's share is its weight over the total, so the narrowest column
+    // is what decides whether the table fits: give the lightest one its floor
+    // and the rest follow.
+    final share = weights.reduce((a, b) => a + b) / weights.reduce(min);
+    final floor = _minColumnWidthV1 * share;
+    final table = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -303,8 +314,21 @@ final frockDataTable = CatalogItem(
           ),
       ],
     );
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth >= floor
+          ? table
+          : SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(width: floor, child: table),
+            ),
+    );
   },
 );
+
+/// What one column of weight 1 is worth having. Below this a short value
+/// breaks mid-word, which is where the live Turn's four-column table went
+/// wrong at phone width.
+const _minColumnWidthV1 = 88.0;
 
 Object? _cellAt(Object? cells, int index) {
   if (cells is! List || index >= cells.length) return '';

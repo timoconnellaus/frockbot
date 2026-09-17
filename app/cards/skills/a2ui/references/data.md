@@ -32,10 +32,16 @@ and the host draws the arrow. Which direction is _good_ is yours to say in
 ## A table fits the card
 
 Five columns at most, twenty-four rows at most, and the columns share the
-card's width — they do not scroll sideways. So:
+card's width. **Three columns is what fits a phone.** Past that — or with a
+heavy `weight` on one of them — the table becomes a sideways scroller rather
+than squeezing a column narrower than the values in it, which is a table the
+person has to drag to read. So:
 
 - give a numeric column `"align": "end"`;
-- give the column that carries the long text a bigger `weight`;
+- give the column that carries the long text a bigger `weight`, and remember
+  that the weight is what pushes the others towards the scrolling case;
+- prefer three columns; put the fourth fact in the row's own first cell, or in
+  a `Timeline` entry's `detail`;
 - when there are more rows than fit, send the first few and say so in
   `caption`: `"Showing 12 of 340"`.
 

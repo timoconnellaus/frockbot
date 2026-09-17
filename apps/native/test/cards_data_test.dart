@@ -166,6 +166,69 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a table too wide for the card scrolls rather than squeezes', (
+    tester,
+  ) async {
+    // What the first live Turn to draw a table wrote: four columns, one of
+    // them heavy, at phone width. Squeezed, "INV-0912" broke across two lines
+    // mid-word — so the table takes its floor and scrolls instead.
+    await drawFamily(tester, [
+      {
+        'id': 'root',
+        'component': 'DataTable',
+        'columns': [
+          {'label': 'Client', 'weight': 3},
+          {'label': 'Invoice'},
+          {'label': 'Status'},
+          {'label': 'Amount', 'align': 'end'},
+        ],
+        'rows': [
+          {
+            'cells': ['Harper & Co', 'INV-0912', 'Overdue 14d', r'$3,850'],
+          },
+        ],
+      },
+    ], width: 412);
+    expect(find.text('INV-0912'), findsOneWidget);
+    final scroller = find.descendant(
+      of: find.byType(CardChatCard),
+      matching: find.byType(SingleChildScrollView),
+    );
+    expect(scroller, findsOneWidget);
+    // The table is laid out at its floor, which is wider than the card: the
+    // last column sits past the card's edge until the person drags it in.
+    expect(
+      tester.getRect(find.text(r'$3,850')).right,
+      greaterThan(tester.getRect(find.byType(CardChatCard)).right),
+    );
+
+    // Three columns fit, and nothing scrolls.
+    await drawFamily(tester, [
+      {
+        'id': 'root',
+        'component': 'DataTable',
+        'columns': [
+          {'label': 'Client'},
+          {'label': 'Status'},
+          {'label': 'Amount', 'align': 'end'},
+        ],
+        'rows': [
+          {
+            'cells': ['Harper & Co', 'Overdue 14d', r'$3,850'],
+          },
+        ],
+      },
+    ], width: 412);
+    expect(
+      find.descendant(
+        of: find.byType(CardChatCard),
+        matching: find.byType(SingleChildScrollView),
+      ),
+      findsNothing,
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('a short row is padded and a long one loses its tail', (
     tester,
   ) async {
