@@ -582,7 +582,17 @@ jobs:
   macos-release:
     name: Build notarized macOS app
     needs: verify
-    runs-on: macos-14
+    # macos-15, not macos-14, because of the toolchain the image defaults to.
+    # `video_player_avfoundation` (pulled in by `genui`, ADR 0030) opens
+    # `FVPViewProvider.m` with its own header, so nothing has included
+    # `TargetConditionals.h` when the header reaches `#if TARGET_OS_OSX`. It
+    # therefore takes the iOS branch and asks for `@import Flutter`, a module
+    # that does not exist on macOS, and the archive fails (v0.7.108, run
+    # 35278091232). Apple clang only predefines the `TARGET_OS_*` macros when
+    # `-fdefine-target-os-macros` is on, which Xcode 16 made the default;
+    # macos-14 defaults to Xcode 15.4, which does not. The guard below keeps
+    # this honest if the image's default Xcode ever moves back.
+    runs-on: macos-15
     timeout-minutes: 45
     permissions:
       contents: read
@@ -609,6 +619,19 @@ jobs:
           # constraint (v0.7.16, run 34562782289). The 3.47.0 tag points at
           # the pinned revision, so fetching tags makes the SDK name itself.
           fetch-tags: true
+
+      # An archive failure inside a generated Swift package is three minutes
+      # of log to read; this says the same thing in one line. See the note on
+      # `runs-on` above for why the macros matter.
+      - name: Check the toolchain predefines the Darwin target macros
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          if ! clang -dM -E -x objective-c /dev/null | grep -q '^#define TARGET_OS_OSX 1$'; then
+            echo "::error::$(clang --version | head -1) does not predefine TARGET_OS_OSX. Flutter plugin headers that guard on it take the iOS branch and the archive fails; select an Xcode 16 or newer toolchain."
+            exit 1
+          fi
 
       - name: Put Flutter on PATH
         shell: bash
