@@ -514,7 +514,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   search/         Per-User transcript index, search route, and overlay
   settings/       Bot, Package, and User settings surfaces
   shell/          The Bot Durable Object's state, its Turn, the Composition mount, and the hosted geometry
-  skills/         Skill catalog, disclosure on demand, managed Skills, and the Bot's Workspace seam
+  skills/         Skill catalog, disclosure on demand, managed and Plugin-borne Skills, and the Bot's Workspace seam
   subagents/      Subagent Tasks: the parent Bot's task authority, the Durable Object binding, and their records
   testkit/        Shared test doubles and harnesses
   ui-theme/       The Appearance Package definition; it contributes no code
