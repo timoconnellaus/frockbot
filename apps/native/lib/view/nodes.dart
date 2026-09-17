@@ -318,17 +318,26 @@ bool _viewIsRowControlsV1(Map<String, Object?> child) {
       );
 }
 
+/// The kinds the Plugins projection appends to a row's title (app/plugins/
+/// page.ts). Every other title is the reader's own words — a Routine may well
+/// be called "Standup · daily" — so only these are read as a kind.
+const _rowKinds = {'Built in', 'Always on', 'Included', 'Made by your Bot'};
+
 /// What a projection appended to a title to say what kind of thing it is —
 /// "Web · Built in" — which belongs over the group rather than in every row.
 String viewRowKindV1(String title) {
   final cut = title.lastIndexOf(' · ');
-  return cut < 0 ? '' : title.substring(cut + 3);
+  if (cut < 0) return '';
+  final kind = title.substring(cut + 3);
+  return _rowKinds.contains(kind) ? kind : '';
 }
 
 /// The same title without it.
 String viewRowTitleV1(String title) {
-  final cut = title.lastIndexOf(' · ');
-  return cut < 0 ? title : title.substring(0, cut);
+  final kind = viewRowKindV1(title);
+  return kind.isEmpty
+      ? title
+      : title.substring(0, title.length - kind.length - 3);
 }
 
 class _ViewSwitchRow extends StatelessWidget {

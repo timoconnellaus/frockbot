@@ -205,7 +205,8 @@ class _ComputerCardState extends State<ComputerCard> {
     final status = computerCardStatusV1(
       streaming: _streaming,
       unconfigured: unconfigured,
-      message: controller.failure ?? state.message,
+      message: state.message,
+      failure: controller.failure,
       capturedAt: screenshot?.capturedAt,
       now: _now,
     );

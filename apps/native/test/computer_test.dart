@@ -264,6 +264,21 @@ void main() {
       );
     });
 
+    test('a refusal is said even when a photograph is on the card', () {
+      final now = DateTime.parse('2026-09-05T01:00:12.000Z');
+      expect(
+        computerCardStatusV1(
+          streaming: false,
+          unconfigured: false,
+          message: 'Ready to start',
+          failure: 'The Computer host answered 503',
+          capturedAt: DateTime.parse('2026-09-05T01:00:00.000Z'),
+          now: now,
+        ),
+        'The Computer host answered 503',
+      );
+    });
+
     test('the age is a whole unit at every scale', () {
       expect(computerSnapshotAgeLabelV1(const Duration(seconds: 5)), '5s ago');
       expect(computerSnapshotAgeLabelV1(const Duration(minutes: 9)), '9m ago');

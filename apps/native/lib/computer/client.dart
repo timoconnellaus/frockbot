@@ -280,10 +280,14 @@ String computerCardStatusV1({
   required bool streaming,
   required bool unconfigured,
   required String message,
+  String? failure,
   DateTime? capturedAt,
   DateTime? now,
 }) {
   if (streaming) return message.isEmpty ? 'Live' : 'Live · $message';
+  // A Computer that refused says so, even when a photograph of it is still on
+  // the card: the age of that photograph is not what this thing is doing now.
+  if (failure != null && failure.isNotEmpty) return failure;
   // A Computer the deployment says is not there, which is not the same as one
   // this client could not reach: that one says what refused.
   if (unconfigured) return 'No computer';
