@@ -40,6 +40,9 @@ const decodeHookInvocation = new Function(
 const decodeTriggerInvocation = new Function(
   `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeTriggerInvocation;`,
 )() as Decode;
+const decodeCardActionInvocation = new Function(
+  `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeCardActionInvocation;`,
+)() as Decode;
 
 type NarrowContext = (
   env: Record<string, unknown>,
@@ -345,6 +348,48 @@ describe("the generated wrapper's invocation decoders", () => {
     ).toThrow(/trigger is invalid/);
     expect(() => decodeTriggerInvocation({ ...trigger, body: 42 })).toThrow(
       /event is invalid/,
+    );
+  });
+
+  test("accept a card action invocation, its context and model optional", () => {
+    const action = {
+      schemaVersion: 1,
+      pluginId: "email",
+      surfaceId: "draft-email",
+      action: "send",
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "run-1",
+      turnId: "run-1",
+      generationId: "gen-1",
+      deadlineMs: 1_000,
+    };
+    expect(decodeCardActionInvocation(action)).toMatchObject({
+      surfaceId: "draft-email",
+      action: "send",
+    });
+    expect(
+      decodeCardActionInvocation({
+        ...action,
+        context: { choice: "tuesday" },
+        dataModel: { sent: false },
+      }),
+    ).toMatchObject({ context: { choice: "tuesday" } });
+    expect(() =>
+      decodeCardActionInvocation({ ...action, surfaceId: "../run:foo" }),
+    ).toThrow(/surfaceId is invalid/);
+    expect(() =>
+      decodeCardActionInvocation({ ...action, action: "send/now" }),
+    ).toThrow(/action is invalid/);
+    expect(() =>
+      decodeCardActionInvocation({ ...action, context: [] }),
+    ).toThrow(/context is invalid/);
+    expect(() =>
+      decodeCardActionInvocation({ ...action, capabilities: [] }),
+    ).toThrow(/invalid fields/);
+    const { turnId: _turnId, ...missing } = action;
+    expect(() => decodeCardActionInvocation(missing)).toThrow(
+      /invalid fields/,
     );
   });
 });

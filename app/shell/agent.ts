@@ -230,7 +230,7 @@ const SEND_TO_USER_DESCRIPTION = [
   '{"type":"secret-request","prompt":"…","secretName":"…"}',
   '{"type":"applet","appletId":"the id returned by applet_list or applet_create"} — embed the live Applet as an interactive chat card. Only an Applet you own or that is shared with you opens; the card opens it as you.',
   '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
-  '{"type":"card","surfaceId":"…","messages":[{"version":"v1.0","createSurface":{"surfaceId":"…","components":[{"id":"root","component":"Column","children":["title"]},{"id":"title","component":"Text","text":"…"}],"dataModel":{}}}]} — one A2UI surface in the conversation. Load the `a2ui` Skill for the catalog before you write one; a later send with the same surfaceId updates it in place and does not end your Turn.',
+  '{"type":"card","surfaceId":"…","messages":[{"version":"v1.0","createSurface":{"surfaceId":"…","components":[{"id":"root","component":"Column","children":["title"]},{"id":"title","component":"Text","text":"…"}],"dataModel":{}}}]} — one A2UI surface in the conversation. A later send with the same surfaceId updates it in place and does not end your Turn.',
   '{"type":"approval","approvalId":"…","action":"…","rationale":"…","risk":"low|medium|high","expiresInSeconds":86400}',
   "A widget asks the user a question with 1 to 6 options and ends your Turn;",
   "their answer arrives as a new Turn. An approval asks the user to allow one",

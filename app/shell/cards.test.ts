@@ -15,6 +15,7 @@ import {
   CardBudgetError,
   CARD_INDEX_KEY,
   decodeCardActionCommandV1,
+  decodeCardListViewV1,
   decodeCardRecordV1,
   foldCardMessagesV1,
   projectCardV1,
@@ -692,5 +693,39 @@ describe("the action command", () => {
         decision: "approved",
       }),
     ).toThrow(/unexpected key/);
+  });
+
+  test("refuses a surface id that could never have been a key", () => {
+    // The send decoder holds a surfaceId to the same shape, so a name like
+    // this can never name a stored record; it is refused where it is read
+    // rather than turned into a lookup that simply misses.
+    expect(() =>
+      decodeCardActionCommandV1({
+        schemaVersion: 1,
+        surfaceId: "../run:foo",
+        revision: 0,
+        event: { name: "send" },
+      }),
+    ).toThrow(/surfaceId/);
+    const stored = {
+      schemaVersion: 1,
+      surfaceId: "../run:foo",
+      runId: "run-1",
+      sessionId: "user-1:bot-1",
+      components: [{ id: "root", component: "Text", text: "Hi" }],
+      dataModel: {},
+      revision: 0,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    expect(() => decodeCardRecordV1(stored)).toThrow(/surfaceId/);
+    const { runId: _runId, sessionId: _sessionId, ...view } = stored;
+    expect(() =>
+      decodeCardListViewV1({
+        schemaVersion: 1,
+        botId: "bot-1",
+        cards: [view],
+      }),
+    ).toThrow(/surfaceId/);
   });
 });

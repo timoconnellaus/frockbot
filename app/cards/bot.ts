@@ -13,6 +13,8 @@
 // made to have said.
 import type { BotIdentity } from "@frockbot/core/durable";
 import {
+  a2uiByteLengthV1,
+  A2UI_LIMITS_V1,
   decodeA2uiAgentMessageV1,
   type A2uiAgentMessageV1,
 } from "@frockbot/core/contracts";
@@ -37,6 +39,7 @@ import {
   type CardActionReceiptV1,
   type CardListViewV1,
   type CardRecordV1,
+  type CardViewV1,
 } from "@frockbot/app/shell/cards";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 
@@ -74,6 +77,11 @@ function cardFailureV1(reason: string): string {
  * The Bot's Cards, newest first. Every Card a Session drew is carried,
  * tombstoned ones included, because the send that drew one is still in the
  * transcript and the transcript still has to say something where it sits.
+ *
+ * Newest first is also what makes the listing's byte budget honest: the walk
+ * stops before `cardListBytes` is exceeded and says `truncated` when it did,
+ * so what falls off the end is the stalest card rather than an arbitrary one,
+ * and a client is never quietly told it has them all.
  */
 export async function listCards(
   state: ShellBotStateV1,
@@ -81,13 +89,26 @@ export async function listCards(
 ): Promise<CardListViewV1> {
   await state.authority.validateIdentity(identity);
   const stored = await state.ctx.storage.list<unknown>({ prefix: CARD_PREFIX });
-  const cards = [...stored.values()]
+  const records = [...stored.values()]
     .map((value) => decodeCardRecordV1(value))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const cards: CardViewV1[] = [];
+  let bytes = 0;
+  let truncated = false;
+  for (const record of records) {
+    const card = projectCardV1(record);
+    bytes += a2uiByteLengthV1(card);
+    if (bytes > A2UI_LIMITS_V1.cardListBytes) {
+      truncated = true;
+      break;
+    }
+    cards.push(card);
+  }
   return {
     schemaVersion: 1,
     botId: identity.botId,
-    cards: cards.map((card) => projectCardV1(card)),
+    cards,
+    ...(truncated ? { truncated: true as const } : {}),
   };
 }
 

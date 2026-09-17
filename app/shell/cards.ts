@@ -37,6 +37,7 @@
  *    Turn's log.
  */
 import {
+  A2UI_IDENTIFIER_V1,
   A2UI_LIMITS_V1,
   a2uiActionCountV1,
   a2uiByteLengthV1,
@@ -119,6 +120,22 @@ function text(value: unknown, maximum: number, label: string): string {
   return value;
 }
 
+/**
+ * A surface id, held to the same shape the send decoder holds it to. A surface
+ * id is a durable key and a URL path segment, so one that could never have
+ * been written is refused wherever it is read rather than only where it would
+ * be stored.
+ */
+function surfaceIdentifier(value: unknown, label: string): string {
+  const said = text(value, A2UI_LIMITS_V1.surfaceId, label);
+  if (!A2UI_IDENTIFIER_V1.test(said)) {
+    throw new CardDecodeError(
+      `${label} must be letters, digits, dot, underscore or dash`,
+    );
+  }
+  return said;
+}
+
 function timestamp(value: unknown, label: string): string {
   const stamp = text(value, MAX_TIMESTAMP_LENGTH, label);
   if (Number.isNaN(Date.parse(stamp))) {
@@ -181,11 +198,7 @@ export function decodeCardRecordV1(
   }
   return {
     schemaVersion: 1,
-    surfaceId: text(
-      candidate.surfaceId,
-      A2UI_LIMITS_V1.surfaceId,
-      `${label} surfaceId`,
-    ),
+    surfaceId: surfaceIdentifier(candidate.surfaceId, `${label} surfaceId`),
     runId: text(candidate.runId, MAX_ID_LENGTH, `${label} runId`),
     sessionId: text(candidate.sessionId, MAX_ID_LENGTH, `${label} sessionId`),
     components: candidate.components as A2uiComponentV1[],
@@ -238,7 +251,7 @@ export function decodeCardIndexV1(
   return {
     schemaVersion: 1,
     surfaces: candidate.surfaces.map((surfaceId, index) =>
-      text(surfaceId, A2UI_LIMITS_V1.surfaceId, `${label} surfaces[${index}]`),
+      surfaceIdentifier(surfaceId, `${label} surfaces[${index}]`),
     ),
   };
 }
@@ -692,6 +705,8 @@ export interface CardListViewV1 {
   schemaVersion: 1;
   botId: string;
   cards: CardViewV1[];
+  /** Set when the listing stopped at its byte budget with cards left unread. */
+  truncated?: true;
 }
 
 /** One renderer action, as the client posts it. */
@@ -744,11 +759,7 @@ export function decodeCardActionCommandV1(
   }
   return {
     schemaVersion: 1,
-    surfaceId: text(
-      candidate.surfaceId,
-      A2UI_LIMITS_V1.surfaceId,
-      `${label} surfaceId`,
-    ),
+    surfaceId: surfaceIdentifier(candidate.surfaceId, `${label} surfaceId`),
     revision: candidate.revision as number,
     event,
     ...(dataModel === undefined ? {} : { dataModel }),
@@ -839,11 +850,7 @@ function decodeCardViewV1(value: unknown, label = "card"): CardViewV1 {
   }
   return {
     schemaVersion: 1,
-    surfaceId: text(
-      candidate.surfaceId,
-      A2UI_LIMITS_V1.surfaceId,
-      `${label} surfaceId`,
-    ),
+    surfaceId: surfaceIdentifier(candidate.surfaceId, `${label} surfaceId`),
     revision: candidate.revision as number,
     components: candidate.components as A2uiComponentV1[],
     dataModel: record(candidate.dataModel, `${label} dataModel`),
@@ -887,7 +894,12 @@ export function decodeCardListViewV1(
   label = "card list",
 ): CardListViewV1 {
   const candidate = record(value, label);
-  exactKeys(candidate, ["schemaVersion", "botId", "cards"], [], label);
+  exactKeys(
+    candidate,
+    ["schemaVersion", "botId", "cards"],
+    ["truncated"],
+    label,
+  );
   if (candidate.schemaVersion !== 1 || !Array.isArray(candidate.cards)) {
     throw new CardDecodeError(`${label} is invalid`);
   }
@@ -897,6 +909,7 @@ export function decodeCardListViewV1(
     cards: candidate.cards.map((card) =>
       decodeCardViewV1(card, `${label} entry`),
     ),
+    ...(candidate.truncated === undefined ? {} : { truncated: true as const }),
   };
 }
 

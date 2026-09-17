@@ -2,6 +2,7 @@
 // two things it refuses before it does anything at all.
 import { describe, expect, test } from "bun:test";
 import type { BotIdentity } from "@frockbot/core/durable";
+import { a2uiByteLengthV1, A2UI_LIMITS_V1 } from "@frockbot/core/contracts";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { approvalKeyV1 } from "@frockbot/app/shell/approvals";
 import {
@@ -94,6 +95,37 @@ describe("reading a Bot's Cards", () => {
     ]);
     // The record's own bookkeeping is not the client's business.
     expect(listed.cards[0]).not.toHaveProperty("runId");
+    expect(listed.truncated).toBeUndefined();
+  });
+
+  test("stops at the listing budget and says so", async () => {
+    // Each card carries a data model near its own record budget, so a handful
+    // of them passes what one listing may answer with.
+    const filler = "x".repeat(15_000);
+    const values = new Map<string, unknown>();
+    for (let index = 0; index < 32; index += 1) {
+      const surfaceId = `surface-${index.toString().padStart(2, "0")}`;
+      values.set(
+        cardKeyV1(surfaceId),
+        card({
+          surfaceId,
+          dataModel: { filler },
+          updatedAt: `2026-09-17T10:00:${index.toString().padStart(2, "0")}.000Z`,
+        }),
+      );
+    }
+    const listed = await listCards(harness(values).state, IDENTITY);
+    expect(listed.truncated).toBe(true);
+    expect(listed.cards.length).toBeGreaterThan(0);
+    expect(listed.cards.length).toBeLessThan(32);
+    // Newest first, so what falls off the end is the stalest surface.
+    expect(listed.cards[0]?.surfaceId).toBe("surface-31");
+    expect(
+      listed.cards.reduce(
+        (total, entry) => total + a2uiByteLengthV1(entry),
+        0,
+      ),
+    ).toBeLessThanOrEqual(A2UI_LIMITS_V1.cardListBytes);
   });
 });
 

@@ -38,6 +38,10 @@
 //    and far enough under the Durable Object per-value limit that a fold is
 //    refused in words on the card rather than by a `put` throwing inside the
 //    transaction settling the Turn.
+//  * **262,144 bytes for one listing.** Those two multiply — 32 surfaces at a
+//    full record each is megabytes across two RPC hops — so a read of a
+//    Session's cards stops at this and says on the view that it did. A card
+//    left out is still readable once the ones above it settle.
 //
 // A message past any of them is refused whole, not truncated: a partial
 // surface misrepresents what its author said.
@@ -149,6 +153,7 @@ export const A2UI_LIMITS_V1 = {
   actionsPerSurface: 32,
   dataModelBytes: 16_000,
   cardRecordBytes: 131_072,
+  cardListBytes: 262_144,
   componentId: 128,
   componentName: 128,
   catalogId: 512,
