@@ -171,6 +171,31 @@ test("prose is not an input to a category that reads only code", async () => {
   expect(probeRuns(root)).toBe("1");
 });
 
+test("a reused receipt leaves the run holding one command, echoed live", async () => {
+  const root = fixture();
+  categories.probe = [[process.execPath, "-e", ""]];
+  categories.sleeper = [
+    [process.execPath, "-e", 'process.stdout.write("live-marker\\n")'],
+  ];
+  // Earn `probe`'s receipt, so the second run spawns `sleeper` alone however
+  // many categories it was asked for.
+  await validate(root, ["probe"]);
+  const written: string[] = [];
+  const write = process.stdout.write;
+  process.stdout.write = ((chunk: unknown) => {
+    written.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    await validate(root, ["probe", "sleeper"]);
+  } finally {
+    process.stdout.write = write;
+  }
+  const output = written.join("");
+  expect(output).toContain("live-marker");
+  expect(output).not.toContain("--- sleeper:");
+});
+
 test("a killed category's surviving descendants cannot wedge the run", async () => {
   const root = fixture();
   // `sleeper` leaks a grandchild into a process group of its own — what

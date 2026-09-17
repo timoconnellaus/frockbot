@@ -24,10 +24,10 @@ sources, and any category reading the work tree beside it could see a
 half-written file. Every command is spawned the same way — in a process group
 of its own, with both pipes read by the runner — so one signal reaches the
 workers below any package-manager wrapper. The only thing that varies is where
-those pipes go: a run that will spawn exactly one command echoes it to the
-terminal as it arrives, since there is nothing to interleave with; a run that
-will spawn more holds each command's output and prints it as one block when
-that command ends. The first failure kills the commands still running, and
+those pipes go: a run left holding exactly one command once reused receipts
+are discounted echoes it to the terminal as it arrives, since there is nothing
+to interleave with; a run holding more holds each command's output and prints
+it as one block when that command ends. The first failure kills the commands still running, and
 every command is waited for before the run cleans up.
 
 Receipts live in gitignored `.local-validation/receipts/<category>-<key>.json`.

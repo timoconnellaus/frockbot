@@ -194,14 +194,6 @@ export async function validate(
   for (const name of names)
     if (!Object.hasOwn(categories, name))
       throw new Error(`Unknown category: ${name}`);
-  // Every command is spawned the same way — its own process group, both pipes
-  // read here — so there is one kill semantics and one reader. The only thing
-  // this decides is what the reader does with a chunk: a run that will spawn
-  // exactly one command has nothing to interleave with, so its progress —
-  // Playwright's, vitest's — is echoed as it arrives; anything more is held
-  // and printed as one block per command.
-  const echoLive =
-    names.reduce((total, name) => total + categories[name]!.length, 0) === 1;
   const sha = snapshot(root);
   // Receipts are addressed by what they validated, not by the commit that
   // carried it, so this directory is shared across commits rather than being
@@ -260,19 +252,12 @@ export async function validate(
       if (result.status === "rejected") throw result.reason;
   };
   /**
-   * One category: decide whether its receipt still stands, run its commands if
-   * not, and record the result. Commands within a category are independent by
-   * construction — `runtime`'s three are separate packages with separate
-   * outputs, and every other category holds one — so they run together.
-   *
-   * Each command leads its own process group: what `stop` must reach is not
-   * the package-manager wrapper but the workers below it, which are what hold
-   * the pipe open.
+   * What a category would cost this run: the receipt it would write, and
+   * whether the one already on disk still stands. Every category is decided
+   * before the first command is spawned, so the run knows what it will
+   * actually do rather than what it was asked to do.
    */
-  const runCategory = async (name: string): Promise<void> => {
-    if (failure !== undefined) return;
-    if (snapshot(root) !== sha)
-      throw new Error("Commit changed during validation");
+  const planCategory = (name: string) => {
     const inputs = inputFingerprint(root, name);
     const key = createHash("sha256")
       .update(
@@ -294,103 +279,145 @@ export async function validate(
     } catch {
       /* Missing or damaged receipts require validation. */
     }
-    if (passed && !force) {
-      console.log(
-        `validate: ${name} cached (inputs ${inputs.slice(0, 8)}, key ${key.slice(0, 8)})`,
-      );
-      return;
-    }
-    rmSync(receipt, { force: true });
-    console.log(`validate: running ${name}`);
-    await settle(
-      categories[name]!.map(async (command) => {
-        const child = Bun.spawn(command, {
-          cwd: root,
-          env: {
-            ...GIT_ENV,
-            // Wrangler otherwise shares service discovery across all worktrees.
-            WRANGLER_REGISTRY_PATH: registry,
-          },
-          stdin: "inherit",
-          stdout: "pipe",
-          stderr: "pipe",
-          detached: true,
-        });
-        const kill = (): void => {
-          try {
-            process.kill(-child.pid, "SIGTERM");
-          } catch {
-            /* Already gone. */
-          }
-        };
-        live.add(kill);
-        const captured: string[] = [];
-        const readers = [child.stdout, child.stderr].map((stream) =>
-          (stream as ReadableStream<Uint8Array>).getReader(),
-        );
-        const drained = Promise.all(
-          readers.map(async (reader) => {
-            const decoder = new TextDecoder();
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done) return;
-              const text = decoder.decode(value, { stream: true });
-              if (echoLive) process.stdout.write(text);
-              else captured.push(text);
-            }
-          }),
-        ).catch(() => {});
-        const code = await child.exited.finally(() => live.delete(kill));
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([
-          drained,
-          new Promise((resolve) => {
-            timer = setTimeout(resolve, CAPTURE_DRAIN_MS);
-          }),
-        ]);
-        clearTimeout(timer);
-        await Promise.all(
-          readers.map((reader) => reader.cancel().catch(() => {})),
-        );
-        const output = captured.join("").trimEnd();
-        if (output.trim())
-          console.log(`\n--- ${name}: ${command.join(" ")} ---\n${output}`);
-        if (code !== 0) throw new Error(`${name} failed; no success recorded`);
-      }),
-    );
-    if (snapshot(root) !== sha)
-      throw new Error("Commit changed during validation; no success recorded");
-    const temp = `${receipt}.${process.pid}.tmp`;
-    await Bun.write(
-      temp,
-      JSON.stringify({
-        key,
-        sha,
-        category: name,
-        completedAt: new Date().toISOString(),
-      }) + "\n",
-    );
-    renameSync(temp, receipt);
+    return { name, inputs, key, receipt, cached: passed && !force };
   };
 
   try {
+    const plan = names.map(planCategory);
+    // Every command is spawned the same way — its own process group, both
+    // pipes read here — so there is one kill semantics and one reader. The
+    // only thing this decides is what the reader does with a chunk: a run
+    // holding exactly one command has nothing to interleave with, so its
+    // progress — Playwright's, vitest's — is echoed as it arrives; anything
+    // more is held and printed as one block per command. Reused receipts are
+    // already discounted, so naming a cached category beside a slow one does
+    // not hide the slow one's output.
+    const echoLive =
+      plan
+        .filter((entry) => !entry.cached)
+        .reduce((total, entry) => total + categories[entry.name]!.length, 0) ===
+      1;
+    /**
+     * One category: run its commands unless its receipt still stands, and
+     * record the result. Commands within a category are independent by
+     * construction — `runtime`'s three are separate packages with separate
+     * outputs, and every other category holds one — so they run together.
+     *
+     * Each command leads its own process group: what `stop` must reach is not
+     * the package-manager wrapper but the workers below it, which are what
+     * hold the pipe open.
+     */
+    const runCategory = async (entry: (typeof plan)[number]): Promise<void> => {
+      const { name, inputs, key, receipt } = entry;
+      if (failure !== undefined) return;
+      if (snapshot(root) !== sha)
+        throw new Error("Commit changed during validation");
+      if (entry.cached) {
+        console.log(
+          `validate: ${name} cached (inputs ${inputs.slice(0, 8)}, key ${key.slice(0, 8)})`,
+        );
+        return;
+      }
+      rmSync(receipt, { force: true });
+      console.log(`validate: running ${name}`);
+      await settle(
+        categories[name]!.map(async (command) => {
+          const child = Bun.spawn(command, {
+            cwd: root,
+            env: {
+              ...GIT_ENV,
+              // Wrangler otherwise shares service discovery across worktrees.
+              WRANGLER_REGISTRY_PATH: registry,
+            },
+            stdin: "inherit",
+            stdout: "pipe",
+            stderr: "pipe",
+            detached: true,
+          });
+          const kill = (): void => {
+            try {
+              process.kill(-child.pid, "SIGTERM");
+            } catch {
+              /* Already gone. */
+            }
+          };
+          live.add(kill);
+          const captured: string[] = [];
+          // In pipe order, so the echoed halves land where the caller's own
+          // redirection expects them: diagnostics stay on the error stream.
+          const readers = [child.stdout, child.stderr].map((stream) =>
+            (stream as ReadableStream<Uint8Array>).getReader(),
+          );
+          const drained = Promise.all(
+            readers.map(async (reader, index) => {
+              const sink = index === 0 ? process.stdout : process.stderr;
+              const decoder = new TextDecoder();
+              for (;;) {
+                const { done, value } = await reader.read();
+                if (done) return;
+                const text = decoder.decode(value, { stream: true });
+                if (echoLive) sink.write(text);
+                else captured.push(text);
+              }
+            }),
+          ).catch(() => {});
+          const code = await child.exited.finally(() => live.delete(kill));
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            drained,
+            new Promise((resolve) => {
+              timer = setTimeout(resolve, CAPTURE_DRAIN_MS);
+            }),
+          ]);
+          clearTimeout(timer);
+          await Promise.all(
+            readers.map((reader) => reader.cancel().catch(() => {})),
+          );
+          const output = captured.join("").trimEnd();
+          if (output.trim())
+            console.log(`\n--- ${name}: ${command.join(" ")} ---\n${output}`);
+          if (code !== 0)
+            throw new Error(`${name} failed; no success recorded`);
+        }),
+      );
+      if (snapshot(root) !== sha)
+        throw new Error(
+          "Commit changed during validation; no success recorded",
+        );
+      const temp = `${receipt}.${process.pid}.tmp`;
+      await Bun.write(
+        temp,
+        JSON.stringify({
+          key,
+          sha,
+          category: name,
+          completedAt: new Date().toISOString(),
+        }) + "\n",
+      );
+      renameSync(temp, receipt);
+    };
+
     // Everything that does not build the artifact runs at once; the artifact
     // builders run in order beside them. A single machine has been running
     // these one after another on one core of many.
-    const concurrent = names.filter((name) => !EXCLUSIVE.has(name));
-    const parallel = concurrent.filter((name) => !SHARED_ARTIFACT.has(name));
-    const serial = concurrent.filter((name) => SHARED_ARTIFACT.has(name));
+    const concurrent = plan.filter((entry) => !EXCLUSIVE.has(entry.name));
+    const parallel = concurrent.filter(
+      (entry) => !SHARED_ARTIFACT.has(entry.name),
+    );
+    const serial = concurrent.filter((entry) =>
+      SHARED_ARTIFACT.has(entry.name),
+    );
     // Every task is settled before the exclusive pass begins, and before the
     // `finally` below removes the registry and the lock, so no child outlives
     // what it reads.
     await settle([
-      ...parallel.map((name) => runCategory(name).catch(stop)),
+      ...parallel.map((entry) => runCategory(entry).catch(stop)),
       (async () => {
-        for (const name of serial) await runCategory(name).catch(stop);
+        for (const entry of serial) await runCategory(entry).catch(stop);
       })(),
     ]);
-    for (const name of names.filter((name) => EXCLUSIVE.has(name)))
-      await runCategory(name).catch(stop);
+    for (const entry of plan.filter((entry) => EXCLUSIVE.has(entry.name)))
+      await runCategory(entry).catch(stop);
     if (failure !== undefined) throw failure;
     if (snapshot(root) !== sha)
       throw new Error("Commit changed during validation");
