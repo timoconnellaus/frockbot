@@ -35,7 +35,8 @@ No model key is needed. Frock AI runs on the account's own `AI` binding, where A
 Install from a release tag: the container images and the release assets are published per tag, and a checkout that is not on one can only pull whatever `latest` happens to be.
 
 ```bash
-git clone --branch tag 1 https://github.com/timoconnellaus/frockbot.git <the >--depth
+TAG=v0.0.0 # the newest release tag; see below
+git clone --branch "$TAG" --depth 1 https://github.com/timoconnellaus/frockbot.git
 cd frockbot
 bun install
 bunx wrangler login
@@ -96,7 +97,8 @@ Check out the next tag and run the installer again. It converges — nothing alr
 
 ```bash
 git fetch --tags
-git checkout <the next tag>
+TAG=v0.0.0 # the tag you are moving to
+git checkout "$TAG"
 bun install
 bun run setup
 ```

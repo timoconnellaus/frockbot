@@ -187,13 +187,51 @@ async function settle(ms = 50): Promise<void> {
  * sends the idle status frame before it awaits `onCallEnd`, so a frame on the
  * socket does not yet mean the assistant's own bookkeeping has finished.
  */
+/**
+ * What every probe budget in this file is multiplied by.
+ *
+ * The budgets below are written for a laptop, and a CI runner is not one: two
+ * cores, this file running beside three other jobs, and tests in this very
+ * file legitimately taking twenty-four seconds there. `sends acknowledgment
+ * audio while the model is still pending` spends the default eight seconds and
+ * has twice reported an empty result at the deadline — on 2026-09-17 against
+ * `26909074` and again against `caa29268` — and both times the identical
+ * assertion passed when the job was simply run again. A budget a passing run
+ * clears by a whisker is not a budget; it is a red `main` and a release that
+ * does not cut, which is exactly what those two produced.
+ *
+ * Scaling here rather than at each call site keeps every budget's intent
+ * intact — a site that asked for five times the default still gets five times
+ * it — and means a new probe inherits the allowance without its author having
+ * to know CI is slower. Locally nothing changes: the short budgets are the
+ * useful ones there, because a wait that would pass in ten seconds on a
+ * shared runner is a hang on a machine doing nothing else.
+ */
+const PROBE_BUDGET_FACTOR = process.env.CI ? 4 : 1;
+
+/**
+ * The most a single probe may wait, however it was scaled.
+ *
+ * `vitest.config.ts` gives a test 120 seconds, and the longest budget written
+ * below is forty — which multiplied would be 160, so a probe that was merely
+ * slow would stop failing on its own terms and start failing as a test
+ * timeout, with none of the value that says. Half the test's allowance leaves
+ * room for the rest of a test that has already spent time getting to its
+ * probe, and it is still far more than any of these have ever needed.
+ */
+const PROBE_BUDGET_CEILING_MS = 60_000;
+
 async function eventually<T>(
   probe: () => Promise<T>,
   satisfied: (value: T) => boolean,
   label: string,
   timeoutMs = 8_000,
 ): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
+  const budget = Math.min(
+    timeoutMs * PROBE_BUDGET_FACTOR,
+    PROBE_BUDGET_CEILING_MS,
+  );
+  const deadline = Date.now() + budget;
   let value = await probe();
   while (!satisfied(value)) {
     if (Date.now() >= deadline) {
