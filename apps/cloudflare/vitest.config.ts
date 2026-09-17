@@ -93,6 +93,11 @@ export default defineConfig({
           },
         },
         bindings: {
+          // Whether this run is on CI, carried in from the runner's shell.
+          // `process.env` inside workerd is these bindings and nothing else,
+          // so a suite that scales its waiting budgets for a slow runner
+          // cannot read the flag any other way.
+          CI: process.env.CI ?? "",
           BETTER_AUTH_URL: "https://bot.frockbot.com",
           TEST_MIGRATIONS: authMigrations,
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
