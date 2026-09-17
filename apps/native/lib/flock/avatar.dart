@@ -11,9 +11,17 @@ import 'package:rive/rive.dart' as rive;
 
 // flutter_tester cannot host Rive Native's renderer. Keep widget tests on the
 // checked-in still while release/debug apps exercise the real artboard.
-bool get _isFlutterTest => WidgetsBinding.instance.runtimeType
-    .toString()
-    .contains('TestWidgetsFlutterBinding');
+bool get _isFlutterTest =>
+    !debugForceRiveInTests &&
+    WidgetsBinding.instance.runtimeType.toString().contains(
+      'TestWidgetsFlutterBinding',
+    );
+
+/// Probe escape hatch: render the real artboard under a test binding.
+bool debugForceRiveInTests = false;
+
+/// Probe escape hatch: render through Flutter's canvas so captures are exact.
+bool debugUseFlutterRiveFactory = false;
 
 enum CharacterActivity {
   idle,
@@ -233,7 +241,9 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     _characterId,
     () => rive.FileLoader.fromAsset(
       'assets/characters/$_characterId.riv',
-      riveFactory: rive.Factory.rive,
+      riveFactory: debugUseFlutterRiveFactory
+          ? rive.Factory.flutter
+          : rive.Factory.rive,
     ),
   );
 
@@ -246,7 +256,13 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   @override
   void didUpdateWidget(CharacterAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.characterId != widget.characterId) _loaded = null;
+    // Compare the character this avatar resolved to, not the raw argument:
+    // callers may name it through `background`, and a stale `_loaded` points
+    // at a controller the builder has already disposed.
+    if (oldWidget.characterId != widget.characterId ||
+        oldWidget.background != widget.background) {
+      _loaded = null;
+    }
     _scheduleQuietTwitch();
     _sync();
   }
@@ -327,6 +343,21 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
         ((event.localPosition.dy / widget.size) * 2 - 1).clamp(-1.0, 1.0);
   }
 
+  /// The checked-in still. It is baked in the character's catalog colour, so
+  /// outside the artboard it is only ever shown as a silhouette in the Bot's
+  /// own colour: a Bot is never drawn wearing somebody else's colour.
+  Widget _still() => ColorFiltered(
+    colorFilter: ColorFilter.mode(
+      characterColourV1(widget.primary, _characterId),
+      BlendMode.srcIn,
+    ),
+    child: Image.asset(
+      'assets/characters/$_characterId.png',
+      fit: BoxFit.contain,
+      excludeFromSemantics: true,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final avatar = SizedBox.square(
@@ -345,18 +376,19 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
                 _loaded = loaded;
                 _sync();
               },
+              onFailed: (error, stack) {
+                // A character that will not mount is worth saying out loud:
+                // silently wearing a silhouette hides a broken build.
+                debugPrint('CharacterAvatar $_characterId failed: $error');
+              },
               builder: (context, state) => switch (state) {
                 rive.RiveLoaded() => rive.RiveWidget(
                   controller: state.controller,
                   fit: rive.Fit.contain,
                   hitTestBehavior: rive.RiveHitTestBehavior.none,
                 ),
-                rive.RiveLoading() => const SizedBox.shrink(),
-                rive.RiveFailed() => Image.asset(
-                  'assets/characters/$_characterId.png',
-                  fit: BoxFit.contain,
-                  excludeFromSemantics: true,
-                ),
+                rive.RiveLoading() => _still(),
+                rive.RiveFailed() => _still(),
               },
             ),
     );
