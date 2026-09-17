@@ -112,9 +112,21 @@ function context(
   };
 }
 
+/** The A2UI messages a card answer carries, whether or not it declared covers. */
+function messagesOf(answer: unknown): Record<string, unknown>[] {
+  return Array.isArray(answer)
+    ? (answer as Record<string, unknown>[])
+    : ((answer as { messages: Record<string, unknown>[] }).messages ?? []);
+}
+
+/** What the answer says a decision on it covers, as the kernel digests it. */
+function coversOf(answer: unknown): unknown {
+  return (answer as { covers?: unknown }).covers;
+}
+
 /** Every component a render answered with, decoded as the kernel decodes it. */
 function componentsOf(answer: unknown): A2uiComponentV1[] {
-  const messages = (answer as Record<string, unknown>[]).map((message, index) =>
+  const messages = messagesOf(answer).map((message, index) =>
     decodeA2uiAgentMessageV1(message, `message[${index}]`),
   );
   const first = messages[0]!;
@@ -161,7 +173,7 @@ describe("the email Plugin's draft card", () => {
 
     // The Plugin writes a placeholder; the kernel binds the real Approval.
     const bound = bindCardApprovalsV1(
-      (answer as Record<string, unknown>[]).map((message, index) =>
+      messagesOf(answer).map((message, index) =>
         decodeA2uiAgentMessageV1(message, `message[${index}]`),
       ),
       () => APPROVAL,
@@ -174,6 +186,8 @@ describe("the email Plugin's draft card", () => {
         risk: "medium",
       },
     ]);
+    // And the draw names what that decision covers: the draft itself.
+    expect(coversOf(answer)).toEqual(draft);
   });
 
   test("a draft with no recipient draws nothing", async () => {
@@ -302,17 +316,18 @@ describe("the email Plugin's draft card", () => {
       if (state === "sent") {
         await execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx);
       }
-      const answer = (await cards.draft.render(
+      const answer = await cards.draft.render(
         { surfaceId: SURFACE, data: draft },
         ctx,
-      )) as Record<string, unknown>[];
+      );
+      const messages = messagesOf(answer);
       const payload = decodeSendToUserPayloadV1({
         type: "card",
         surfaceId: SURFACE,
-        messages: answer,
+        messages,
       });
       expect(payload.type).toBe("card");
-      for (const message of answer) {
+      for (const message of messages) {
         expect(a2uiByteLengthV1(message)).toBeLessThan(
           A2UI_LIMITS_V1.bytesPerMessage,
         );
@@ -362,15 +377,18 @@ describe("the email Plugin's draft card", () => {
   test("a redraw never changes what a pending decision covers", async () => {
     const { ctx, sends } = context();
     await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx);
-    const redrawn = componentsOf(
-      await cards.draft.render(
-        {
-          surfaceId: SURFACE,
-          data: { ...draft, to: ["someone-else@example.com"] },
-        },
-        ctx,
-      ),
+    const answer = await cards.draft.render(
+      {
+        surfaceId: SURFACE,
+        data: { ...draft, to: ["someone-else@example.com"] },
+      },
+      ctx,
     );
+    // What the redraw says the decision covers is the draft it is holding,
+    // not the values the Bot just sent — so the Approval the kernel binds is
+    // about the message this card will actually send.
+    expect(coversOf(answer)).toEqual(draft);
+    const redrawn = componentsOf(answer);
     const rows = named(redrawn, "rows").rows as { value: string }[];
     expect(rows[0]!.value).toBe("nick@example.com");
     expect(named(redrawn, "actions").action).toBe(
@@ -381,7 +399,13 @@ describe("the email Plugin's draft card", () => {
       { surfaceId: SURFACE, approvalId: APPROVAL },
       ctx,
     );
-    expect((sends[0] as { to: string[] }).to).toEqual(["nick@example.com"]);
+    // And the message that left is exactly what the card declared it covered,
+    // which is what the kernel compares the Approval's digest against.
+    const { approvalId: _id, surfaceId: _surface, ...message } = sends[0] as {
+      approvalId: string;
+      surfaceId: string;
+    };
+    expect(message).toEqual(coversOf(answer) as Record<string, unknown>);
   });
 });
 

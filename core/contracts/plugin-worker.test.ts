@@ -7,6 +7,8 @@ import {
   MAX_TRIGGER_BODY_BYTES_V1,
   decodePluginWorkerTriggerInvocationV1,
   decodePluginWorkerTriggerResultV1,
+  decodePluginWorkerRenderCardResultV1,
+  MAX_PLUGIN_CARD_COVERS_BYTES_V1,
   pluginWorkerLoaderIdV1,
   pluginWorkerModuleSetHashV1,
 } from "./plugin-worker.js";
@@ -470,5 +472,51 @@ describe("plugin worker triggers", () => {
         reason: "y",
       }),
     ).toThrow(/invalid fields/);
+  });
+});
+
+describe("what a render says its decision covers", () => {
+  const messages = [{ version: "v1.0", createSurface: { surfaceId: "s" } }];
+
+  test("covers travels beside the messages, and is optional", () => {
+    expect(
+      decodePluginWorkerRenderCardResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        covers: { to: ["nick@example.com"], subject: "Hi" },
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "rendered",
+      messages,
+      covers: { to: ["nick@example.com"], subject: "Hi" },
+    });
+    expect(
+      decodePluginWorkerRenderCardResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+      }),
+    ).toEqual({ schemaVersion: 1, status: "rendered", messages });
+  });
+
+  test("covers must be one bounded JSON object", () => {
+    expect(() =>
+      decodePluginWorkerRenderCardResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        covers: ["nick@example.com"],
+      }),
+    ).toThrow(/covers must be an object/);
+    expect(() =>
+      decodePluginWorkerRenderCardResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        covers: { body: "x".repeat(MAX_PLUGIN_CARD_COVERS_BYTES_V1 + 1) },
+      }),
+    ).toThrow(/covers exceeds/);
   });
 });

@@ -239,11 +239,13 @@ export interface PluginCardSendV1 {
   cardId: string;
   surfaceId: string;
   /**
-   * The values the Bot filled in, already checked against the card's declared
-   * schema. The seam binds the Card's Approvals to these, so a decision a
-   * person gives covers the values they were shown and nothing else.
+   * The canonical values this draw says a decision on it would authorize, as
+   * the Plugin declared them. The seam binds the Card's Approvals to these,
+   * so a decision a person gives covers what the Plugin drew and will act on
+   * rather than whatever the model passed to the tool. Absent when the draw
+   * declared none, which is only allowed of a card that asks for nothing.
    */
-  data: Record<string, unknown>;
+  covers?: Record<string, unknown>;
   /** The A2UI messages the Plugin drew, still undecoded. */
   messages: Record<string, unknown>[];
   context: ToolExecutionContext;
@@ -1390,7 +1392,7 @@ export class PluginWorkerHost {
           pluginId,
           cardId: card.id,
           surfaceId,
-          data: request.data as Record<string, unknown>,
+          ...(rendered.covers === undefined ? {} : { covers: rendered.covers }),
           messages: rendered.messages,
           context,
         });

@@ -133,6 +133,23 @@ function surface(surfaceId: string, components: unknown[]): CardMessage[] {
   ];
 }
 
+/**
+ * The draft card, and what a decision on it authorizes. `covers` is the draft
+ * this surface is holding — exactly what the card draws and exactly what
+ * `email_send` will hand to `ctx.email` — so the Approval the kernel binds is
+ * about the message the person read rather than about whatever values the
+ * model last passed to the tool.
+ */
+function drawDraft(
+  surfaceId: string,
+  draft: Draft,
+): { messages: CardMessage[]; covers: { [key: string]: unknown } } {
+  return {
+    messages: surface(surfaceId, draftComponents(draft, false)),
+    covers: { ...draft },
+  };
+}
+
 /** The rows a person reads before deciding: who, and about what. */
 function addressRows(draft: Draft, full: boolean): unknown {
   const rows: { label: string; value: string }[] = [
@@ -249,7 +266,7 @@ const draftCard: PluginCard = {
     // pending decision covers; a different email is a different card, which
     // the Bot gets by calling email_draft with no surfaceId.
     if (existing) {
-      return surface(surfaceId, draftComponents(existing.draft, false));
+      return drawDraft(surfaceId, existing.draft);
     }
     const draft = readDraft(data);
     if (draft.to.length === 0) {
@@ -263,7 +280,7 @@ const draftCard: PluginCard = {
       };
     }
     await writeState(ctx, surfaceId, { status: "drafted", draft });
-    return surface(surfaceId, draftComponents(draft, false));
+    return drawDraft(surfaceId, draft);
   },
   actions: {
     /** "More details": the same card, with the rest of the headers on it. */

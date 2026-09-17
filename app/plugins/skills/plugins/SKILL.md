@@ -315,13 +315,20 @@ export const cards: Record<string, PluginCard> = {
 - You never choose a `surfaceId`: the kernel mints it and hands it to `render`,
   which is what stops one Plugin drawing over another's card.
 - `render` returns the A2UI messages for the surface — an array, or
-  `{ messages }`. Return `{ drop: true, reason }` to draw nothing.
+  `{ messages, covers }`. Return `{ drop: true, reason }` to draw nothing.
 - Components come from the catalogs the client compiled in. You ship no code
   and no markup; a component the client does not know refuses the whole card.
 - An `ApprovalActions` component is the person's decision. Write
   `"approvalId": "pending"`: the kernel overwrites it with an Approval it
   records, and its `action` and `risk` are the words that Approval is recorded
   with. Drawing one ends the Turn; the decision arrives as durable input later.
+- A card that draws an `ApprovalActions` must also return `covers`: the
+  canonical values that decision authorizes, as *you* drew them. The kernel
+  binds the Approval to those, and a capability claiming the decision later has
+  to be about the same values. Return what your tool will actually act on —
+  the draft you are holding, not the values the Bot passed to the card tool,
+  which you may have ignored. A draw that asks for a decision and declares no
+  `covers` is refused rather than recorded.
 - `actions` are your own handlers, one per name declared in `plugin.json` and
   reached as `plugin/<pluginId>/<action>` from a component's `action` property.
   A press runs the handler with the Bot's authority and redraws the card — it

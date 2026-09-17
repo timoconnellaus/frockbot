@@ -7,6 +7,7 @@
 // and provenance the model was shown.
 import { describe, expect, test } from "bun:test";
 import {
+  cardSurfacePrefixV1,
   decodePluginDescriptorV1,
   ISOLATE_CONTRACT_VERSION,
   type BotCapabilitiesStub,
@@ -26,6 +27,8 @@ import {
 } from "./backend-composition.js";
 import { approvalKeyV1 } from "./approvals.js";
 import {
+  cardApprovalBindingKeyV1,
+  cardValuesDigestV1,
   createCardApprovalStoreV1,
   type CardApprovalStoreV1,
 } from "./cards.js";
@@ -410,7 +413,12 @@ describe("the Approvals a Plugin's Card asks for", () => {
     });
   }
 
-  function cardEntrypoint(): PluginWorkerEntrypoint {
+  function cardEntrypoint(options?: {
+    /** What the drawn card says its decision covers, whatever the Bot sent. */
+    covers?: Record<string, unknown>;
+    /** A draw that asks for a decision and declares nothing it covers. */
+    declaresNothing?: true;
+  }): PluginWorkerEntrypoint {
     return {
       health: () =>
         Promise.resolve({
@@ -449,11 +457,20 @@ describe("the Approvals a Plugin's Card asks for", () => {
       view: () =>
         Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
       // Whatever the values are, the surface the Plugin draws asks for a
-      // decision — which is exactly the redraw the binding has to hold.
-      renderCard: (invocation: { surfaceId: string }) =>
+      // decision — which is exactly the redraw the binding has to hold. What
+      // it says that decision covers is the Plugin's own word, as a real one's
+      // is: by default the values it was handed, or a fixed draft when the
+      // test is about a Plugin that redraws what it is holding.
+      renderCard: (invocation: {
+        surfaceId: string;
+        data: Record<string, unknown>;
+      }) =>
         Promise.resolve({
           schemaVersion: 1 as const,
           status: "rendered" as const,
+          ...(options?.declaresNothing
+            ? {}
+            : { covers: options?.covers ?? invocation.data }),
           messages: [
             {
               version: "v1.0",
@@ -512,10 +529,13 @@ describe("the Approvals a Plugin's Card asks for", () => {
     });
   }
 
-  async function mountCards(store: CardApprovalStoreV1) {
+  async function mountCards(
+    store: CardApprovalStoreV1,
+    options?: Parameters<typeof cardEntrypoint>[0],
+  ) {
     const generation = await cardGeneration();
     const { signal } = new AbortController();
-    const entrypoint = cardEntrypoint();
+    const entrypoint = cardEntrypoint(options);
     const mounted = await createShellCompositionHost({
       botId: "bot-1",
       sessionId: `${USER}:bot-1`,
@@ -543,7 +563,12 @@ describe("the Approvals a Plugin's Card asks for", () => {
       .get(`${USER}:bot-1`)
       ?.append({ type: "step/start", turn: 1, step: 1 });
     let effect = 0;
-    const draw = async (input: Record<string, unknown>) => {
+    const draw = async (
+      input: Record<string, unknown>,
+      // The effect the call is recorded under. Named by a test that replays
+      // one tool call the way an interrupted Turn does.
+      effectId?: string,
+    ) => {
       effect += 1;
       // A Plugin's tools live in its own namespace, so the Bot reaches one
       // through the registry's dynamic call, exactly as the model does.
@@ -561,7 +586,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
         agentId: "bot-1",
         sessionId: `${USER}:bot-1`,
         compositionGenerationId: generation.generationId,
-        effectId: `effect-${effect}`,
+        effectId: effectId ?? `effect-${effect}`,
         toolCall: call,
         turnType: "chat" as const,
         signal,
@@ -615,6 +640,82 @@ describe("the Approvals a Plugin's Card asks for", () => {
     );
     return actions?.approvalId ?? "";
   }
+
+  /** The binding this surface's decision is recorded under, as stored. */
+  function bindingFor(
+    values: Map<string, unknown>,
+    surfaceId: string,
+  ): { digest: string; approvalIds: string[] } | undefined {
+    return values.get(cardApprovalBindingKeyV1(CARD_PLUGIN, surfaceId)) as
+      | { digest: string; approvalIds: string[] }
+      | undefined;
+  }
+
+  test("a replayed card tool call asks for the one decision it already asked for", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store);
+    try {
+      // The same call, twice, under the one effect id: what an interrupted
+      // Turn does on resume, because only a call whose journal entry already
+      // holds a result is skipped.
+      const surfaceId = `${cardSurfacePrefixV1(CARD_PLUGIN, "draft")}replayed`;
+      const input = { data: { subject: "Hello" }, surfaceId };
+      const first = await draw(input, "effect-replay");
+      expect(first).toMatchObject({ isError: false, endsTurn: true });
+      const again = await draw(input, "effect-replay");
+      expect(again).toMatchObject({ isError: false, endsTurn: true });
+
+      // One ask, one binding, and the button the person can press is the id
+      // the binding names — not a second decision nobody was ever asked for.
+      const asked = approvalIdsOnLog(mounted);
+      expect(asked).toHaveLength(1);
+      const binding = bindingFor(values, surfaceId);
+      expect(binding?.approvalIds).toEqual(asked);
+      expect(cardApprovalId(mounted)).toBe(asked[0]!);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a decision is bound to what the Plugin drew, not to what the Bot sent", async () => {
+    const { values, store } = cardApprovalStorage();
+    // A Plugin that redraws the draft it is holding and ignores the values
+    // the model passed — which is what the email card does.
+    const held = { subject: "The draft it is holding" };
+    const { mounted, draw } = await mountCards(store, { covers: held });
+    try {
+      const first = await draw({ data: { subject: "Something else" } });
+      const surfaceId = /surface "([^"]+)"/.exec(String(first.content))![1]!;
+      expect(bindingFor(values, surfaceId)?.digest).toBe(
+        await cardValuesDigestV1(held),
+      );
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a card asking for a decision it declares nothing about is refused", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store, {
+      declaresNothing: true,
+    });
+    try {
+      const drawn = await draw({ data: { subject: "Hello" } });
+      expect(drawn.isError).toBe(true);
+      expect(String(drawn.content)).toMatch(/without declaring the values/);
+      // Nothing was recorded: no card, no decision, no binding.
+      expect(approvalIdsOnLog(mounted)).toEqual([]);
+      expect([...values.keys()]).toEqual([]);
+      const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
+      expect(
+        (session?.events ?? []).filter(
+          (event) => event.type === "send/to-user",
+        ),
+      ).toEqual([]);
+    } finally {
+      await mounted.dispose();
+    }
+  });
 
   test("a redraw of the same values keeps the one decision already pending", async () => {
     const { values, store } = cardApprovalStorage();

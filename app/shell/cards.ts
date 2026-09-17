@@ -1180,6 +1180,24 @@ export interface CardApprovalBindingV1 {
   rationale?: string;
 }
 
+/**
+ * The Approval id the Nth decision on one card send is recorded under.
+ *
+ * Derived from the effect that records the send rather than minted, because
+ * the send itself is deduped by that effect id: a Turn interrupted before its
+ * tool result landed re-runs the same call under the same effect, and a freshly
+ * minted id would name a decision nobody was ever asked for while the card in
+ * the conversation still carried the first one. Computing the id instead means
+ * a replay recomputes it, the send dedupe makes the ask a no-op, and the
+ * binding the replay writes is the one that was already there.
+ *
+ * The effect id is a storage key and a URL path segment by the time it is an
+ * Approval id, so anything outside the id's alphabet becomes a dash.
+ */
+export function cardApprovalIdV1(effectId: string, index: number): string {
+  return `card-approval-${effectId.replace(/[^a-zA-Z0-9._-]/g, "-")}-${index}`;
+}
+
 /** Where one surface's live Approvals are recorded, keyed by whose card it is. */
 export const CARD_APPROVAL_BINDING_PREFIX = "shell:card-approval:";
 
@@ -1386,11 +1404,24 @@ export function createCardApprovalStoreV1(storage: {
       }
       return undefined;
     },
+    // Idempotent: a replayed card send recomputes the same ids over the same
+    // values, and rewriting the binding it already wrote would only move its
+    // `createdAt`. A write that would say something different about the same
+    // surface still lands — that is a new draw, with its own decision.
     async record(binding) {
-      await storage.put(
-        cardApprovalBindingKeyV1(binding.pluginId, binding.surfaceId),
-        binding,
-      );
+      const key = cardApprovalBindingKeyV1(binding.pluginId, binding.surfaceId);
+      const stored = decodeCardApprovalRecordV1(await storage.get<unknown>(key));
+      if (
+        stored &&
+        stored.digest === binding.digest &&
+        stored.approvalIds.length === binding.approvalIds.length &&
+        stored.approvalIds.every(
+          (approvalId, index) => approvalId === binding.approvalIds[index],
+        )
+      ) {
+        return;
+      }
+      await storage.put(key, binding);
     },
   };
 }

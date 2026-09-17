@@ -962,6 +962,7 @@ type CardRun = (
   deliberate?: true;
   messages?: unknown[];
   input?: string;
+  covers?: Record<string, unknown>;
 }>;
 
 const { runRenderCard, runCardAction } = new Function(
@@ -1043,6 +1044,35 @@ describe("the generated wrapper's card handlers", () => {
       await runRenderCard(
         renderInvocation(),
         () => cardPlugin({ render: () => ({ messages, input: "read me" }) }),
+        contextFor,
+      ),
+    ).toEqual({ schemaVersion: 1, status: "rendered", messages });
+  });
+
+  test("a render carries the values it says its decision covers", async () => {
+    expect(
+      await runRenderCard(
+        renderInvocation(),
+        () =>
+          cardPlugin({
+            // What the Plugin drew, not what the Bot sent: the kernel binds
+            // the Approval to this.
+            render: () => ({ messages, covers: { subject: "Held" } }),
+          }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "rendered",
+      messages,
+      covers: { subject: "Held" },
+    });
+    // A bare array of messages declares nothing, and the seam refuses such a
+    // draw if it asked for a decision.
+    expect(
+      await runRenderCard(
+        renderInvocation(),
+        () => cardPlugin({ render: () => messages }),
         contextFor,
       ),
     ).toEqual({ schemaVersion: 1, status: "rendered", messages });

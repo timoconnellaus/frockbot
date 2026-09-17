@@ -2377,15 +2377,20 @@ export const cards = {
   draft: {
     render: async function (payload, ctx) {
       await ctx.storage.put({ key: "subject:" + payload.surfaceId, value: payload.data.subject });
-      return [
-        {
-          version: "v1.0",
-          createSurface: {
-            surfaceId: payload.surfaceId,
-            components: components(payload.data.subject, false),
+      return {
+        messages: [
+          {
+            version: "v1.0",
+            createSurface: {
+              surfaceId: payload.surfaceId,
+              components: components(payload.data.subject, false),
+            },
           },
-        },
-      ];
+        ],
+        // What the decision this card asks for covers, in the Plugin's own
+        // words. A draw that asks for one and names none is refused.
+        covers: { subject: payload.data.subject },
+      };
     },
     actions: {
       details: async function (press, ctx) {

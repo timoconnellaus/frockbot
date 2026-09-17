@@ -769,6 +769,12 @@ async function runRenderCard(invocation, resolve, contextFor) {
     const answer = cardAnswer(value);
     delete answer.input;
     delete answer.deliberate;
+    // What this draw is about, in the Plugin's own words. A card that asks
+    // for a decision and names none of these is refused at the seam, so the
+    // decision a person gives can never cover values they were not shown.
+    if (answer.status === "rendered" && isRecord(value) && isRecord(value.covers)) {
+      answer.covers = value.covers;
+    }
     return answer;
   } catch (error) {
     return { schemaVersion: 1, status: "drop", reason: errorText(error) };

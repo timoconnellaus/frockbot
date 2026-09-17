@@ -505,6 +505,22 @@ export type PluginCardAnswer =
   | void;
 
 /**
+ * What a card's `render` answers with. The same messages a press answers
+ * with, and beside them `covers`: the canonical values a decision on this
+ * card would authorize. The Plugin states them because the Plugin, not the
+ * model, decides what the card draws — a redraw that ignores the Bot's values
+ * and shows the draft it is holding covers that draft. A draw that puts an
+ * `ApprovalActions` on the card and declares no `covers` is refused, so a
+ * decision bound to nothing cannot exist.
+ */
+export type PluginCardDraw =
+  | CardMessage[]
+  | { messages: CardMessage[]; covers?: { [key: string]: unknown } }
+  | PluginCardDrop
+  | undefined
+  | void;
+
+/**
  * One Card the Plugin draws (ADR 0030). `render` composes the surface from
  * the catalogs the client compiled in; `actions` are the handlers behind the
  * names the surface's components raise. An action name is the Plugin's, not
@@ -515,7 +531,7 @@ export interface PluginCard {
   render(
     payload: PluginCardRender,
     ctx: PluginContext,
-  ): Promise<PluginCardAnswer> | PluginCardAnswer;
+  ): Promise<PluginCardDraw> | PluginCardDraw;
   actions?: Record<
     string,
     (

@@ -39,6 +39,7 @@ import {
 import { recordSendToUserV1 } from "./agent.js";
 import {
   bindCardApprovalsV1,
+  cardApprovalIdV1,
   cardValuesDigestV1,
   type CardApprovalStoreV1,
 } from "./cards.js";
@@ -279,20 +280,28 @@ export function createShellCompositionHost(
                 if (payload.type !== "card") {
                   return { status: "refused" as const, reason: "not a card" };
                 }
-                // What this card is showing, as one content address. It is
-                // what the Approval is bound to, so a capability claiming the
-                // decision later has to be about the same values the person
-                // read rather than about whatever the model names.
-                const digest = await cardValuesDigestV1(send.data);
+                // What the Plugin says this draw is about, as one content
+                // address. It is what the Approval is bound to, so a
+                // capability claiming the decision later has to be about the
+                // same values the person read. Taken over what the Plugin
+                // drew and will act on, never over the tool input: a Plugin
+                // that redraws the draft it is holding rather than the values
+                // the model passed would otherwise bind the decision to a
+                // message nobody was shown.
+                const digest =
+                  send.covers === undefined
+                    ? undefined
+                    : await cardValuesDigestV1(send.covers);
                 const approvals = options.cardApprovals;
                 const live = await approvals?.live(
                   send.pluginId,
                   send.surfaceId,
                 );
                 // One draft, one live decision. A redraw of what is already
-                // pending keeps that decision; a redraw of *different* values
-                // would silently move what the pending decision covers, so it
-                // is refused and the card stays exactly as it was.
+                // pending keeps that decision; a redraw covering *different*
+                // values, or one covering nothing at all, would silently move
+                // what the pending decision covers, so it is refused and the
+                // card stays exactly as it was.
                 if (live && live.digest !== digest) {
                   return {
                     status: "refused" as const,
@@ -303,10 +312,40 @@ export function createShellCompositionHost(
                 const bound = bindCardApprovalsV1(
                   payload.messages,
                   (index) =>
-                    reused[index] ?? `card-approval-${crypto.randomUUID()}`,
+                    reused[index] ??
+                    cardApprovalIdV1(send.context.effectId, index),
                   `${send.pluginId}: ${send.cardId}`,
                 );
+                // An unbound decision cannot exist. A card asking one of a
+                // person while naming nothing it covers would record an
+                // Approval that authorizes whatever a later call claims it
+                // does, so the draw is refused rather than recorded.
+                if (bound.approvals.length > 0 && digest === undefined) {
+                  return {
+                    status: "refused" as const,
+                    reason: `plugin "${send.pluginId}" drew a decision on card "${send.cardId}" without declaring the values it covers`,
+                  };
+                }
                 const tool = `${send.pluginId}_${send.cardId}`;
+                // Decoded like any other payload before anything reaches the
+                // log, and decoded *before* the Card is recorded: a decision
+                // the seam could not put on the log would otherwise leave a
+                // card in the conversation asking for one nobody can answer.
+                let asks;
+                try {
+                  asks = bound.approvals.map((approval) =>
+                    decodeSendToUserPayloadV1(
+                      { type: "approval", ...approval },
+                      `plugin "${send.pluginId}" card approval`,
+                    ),
+                  );
+                } catch (error) {
+                  return {
+                    status: "refused" as const,
+                    reason:
+                      error instanceof Error ? error.message : String(error),
+                  };
+                }
                 const recorded = await recordSendToUserV1(
                   runtime.services.sessions,
                   { ...payload, messages: bound.messages },
@@ -322,19 +361,15 @@ export function createShellCompositionHost(
                     reason: recorded.reason,
                   };
                 }
-                for (const [index, approval] of bound.approvals.entries()) {
+                for (const [index, ask] of asks.entries()) {
                   // A reused decision was already asked for on the Turn that
                   // drew this surface first; asking again would put a second
                   // request for one decision on the log.
-                  if (reused.includes(approval.approvalId)) continue;
+                  const approval = bound.approvals[index];
+                  if (approval && reused.includes(approval.approvalId)) continue;
                   const asked = await recordSendToUserV1(
                     runtime.services.sessions,
-                    // Decoded like any other payload before it reaches the
-                    // log: the words came off a component a Plugin wrote.
-                    decodeSendToUserPayloadV1(
-                      { type: "approval", ...approval },
-                      `plugin "${send.pluginId}" card approval`,
-                    ),
+                    ask,
                     {
                       sessionId: send.context.sessionId,
                       // Its own occurrence: one tool call records the Card and
@@ -348,7 +383,7 @@ export function createShellCompositionHost(
                     return { status: "refused" as const, reason: asked.reason };
                   }
                 }
-                if (approvals && bound.approvals.length > 0) {
+                if (approvals && bound.approvals.length > 0 && digest) {
                   await approvals.record({
                     schemaVersion: 1,
                     pluginId: send.pluginId,

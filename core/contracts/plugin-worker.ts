@@ -303,6 +303,14 @@ export interface PluginWorkerRenderCardInvocationV1 {
  * with, for the same reason. The messages are carried opaque and decoded as
  * A2UI where the Card's own budgets are, and anything else is a refusal the
  * Bot reads in the tool result.
+ *
+ * `covers` is what the Plugin says this draw is *about*: the canonical values
+ * a decision on this card would authorize, stated by the Plugin that drew
+ * them rather than read off the tool input the model sent. A Plugin that does
+ * not draw its input verbatim — the email card redraws the draft it is
+ * holding — would otherwise have the kernel bind a decision to values the
+ * person never saw. A draw that asks for a decision and declares none of
+ * these is refused at the seam.
  */
 export type PluginWorkerRenderCardResultV1 =
   | { schemaVersion: 1; status: "drop"; reason?: string }
@@ -310,6 +318,7 @@ export type PluginWorkerRenderCardResultV1 =
       schemaVersion: 1;
       status: "rendered";
       messages: Record<string, unknown>[];
+      covers?: Record<string, unknown>;
     };
 
 /** The document is carried opaque and bounded; the host decodes it as a `ViewDocument`. */
@@ -830,6 +839,8 @@ export const MAX_PLUGIN_CARD_ACTION_BYTES_V1 = 256_000;
  * record it becomes holds a card action's context to the same bound.
  */
 export const MAX_PLUGIN_CARD_ACTION_INPUT_V1 = 4_000;
+/** The values one draw declares its decision covers, serialized. */
+export const MAX_PLUGIN_CARD_COVERS_BYTES_V1 = 256_000;
 
 export function decodePluginWorkerCardActionResultV1(
   input: unknown,
@@ -944,7 +955,7 @@ export function decodePluginWorkerRenderCardResultV1(
           }),
     };
   }
-  exactKeys(value, ["schemaVersion", "status", "messages"], label);
+  exactKeys(value, ["schemaVersion", "status", "messages"], label, ["covers"]);
   if (value.status !== "rendered") {
     throw new Error(`${label}.status is invalid`);
   }
@@ -952,7 +963,36 @@ export function decodePluginWorkerRenderCardResultV1(
     schemaVersion: 1,
     status: "rendered",
     messages: decodeCardMessagesV1(value.messages, label),
+    ...(value.covers === undefined
+      ? {}
+      : { covers: decodeCardCoversV1(value.covers, label) }),
   };
+}
+
+/**
+ * The values one draw says its decision covers, held to the same bound the
+ * card's own messages are and round-tripped through JSON, so what the kernel
+ * digests is exactly what crossed the worker boundary.
+ */
+function decodeCardCoversV1(
+  input: unknown,
+  label: string,
+): Record<string, unknown> {
+  const covers = record(input, `${label}.covers`);
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(covers);
+  } catch {
+    throw new Error(`${label}.covers is not JSON`);
+  }
+  if (
+    new TextEncoder().encode(serialized).length > MAX_PLUGIN_CARD_COVERS_BYTES_V1
+  ) {
+    throw new Error(
+      `${label}.covers exceeds ${MAX_PLUGIN_CARD_COVERS_BYTES_V1} bytes`,
+    );
+  }
+  return JSON.parse(serialized) as Record<string, unknown>;
 }
 
 export function decodePluginWorkerViewInvocationV1(
