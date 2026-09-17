@@ -38,6 +38,10 @@ ELEVENLABS_API_KEY=replace-with-an-elevenlabs-api-key
 # VOICE_ASSISTANT_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
 # Optional: the ElevenLabs voice id; the default is George.
 # ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
+# Optional: the model that tidies a dictated transcript once the person stops
+# recording, instead of the default route. No `AI` binding means no tidying
+# and the raw transcript stands.
+# VOICE_DICTATION_CLEANUP_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
 
 # Connected apps: the provider project key. Absent, no app can be connected
 # and the Connectors rows for apps say so.

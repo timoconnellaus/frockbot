@@ -32,18 +32,27 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
    transcript is in the draft within ~1 s (bounded at 6 s), the draft stays
    editable, nothing is sent until you press Send. There is no upstream turn
    detection, so Stop is the only thing that transcribes: a capture without
-   Stop leaves nothing behind.
-3. Start dictating, switch to another Bot in the sidebar. Expect: dictation
+   Stop leaves nothing behind. The finishing state then holds a moment longer
+   while the transcript is tidied (bounded at 8 s).
+3. Dictate a sentence with an "um", a false start and a self-correction
+   ("Check Thursday — sorry, Friday's flights"), then Stop. Expect: the raw
+   words appear first, are replaced once by the tidied span, and "Use what I
+   said" appears beside the composer and puts the raw transcript back. Typing
+   after the tidied text keeps that offer; editing inside it, or pressing
+   Send, withdraws it. Dictate something exploratory or negated ("maybe we
+   should change the model") and check the Worker log: either the wording
+   survives or the tidy-up was refused by name.
+4. Start dictating, switch to another Bot in the sidebar. Expect: dictation
    stops and its words are in the first Bot's draft, not the second's.
-4. Deny the microphone permission. Expect: one actionable line beside the
+5. Deny the microphone permission. Expect: one actionable line beside the
    composer, no socket opened.
-5. Kill the network mid-dictation. Expect: the words received so far remain in
+6. Kill the network mid-dictation. Expect: the words received so far remain in
    the draft, one short error line, no reconnect loop.
-6. Dictate for more than five minutes. Expect: the capture finalises the way a
+7. Dictate for more than five minutes. Expect: the capture finalises the way a
    Stop does first — the transcript segment lands in the draft, so it keeps
    everything captured — and then one error line saying dictation stopped after
    five minutes and to press the microphone to continue.
-7. Confirm in the OpenAI dashboard that the session used
+8. Confirm in the OpenAI dashboard that the session used
    `gpt-live-transcribe` and was billed per audio minute, not per token.
 
 ## Continuous session

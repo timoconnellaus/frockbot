@@ -74,6 +74,14 @@ class ChatPane extends StatefulWidget {
   /// Whether the open call is with this Bot.
   final bool voiceActive;
   final DictationState dictationState;
+
+  /// Whether a tidied transcript is in the draft and can be put back. Asked
+  /// on every build rather than passed as a value, so a draft edit withdraws
+  /// the offer the moment it happens.
+  final bool Function()? canRevertDictation;
+
+  /// Puts the raw transcript back into the draft.
+  final VoidCallback? onRevertDictation;
   final ValueListenable<double>? dictationLevel;
 
   /// The Bot's character and chosen colour, shared by every avatar surface.
@@ -105,6 +113,8 @@ class ChatPane extends StatefulWidget {
     this.onVoice,
     this.voiceActive = false,
     this.dictationState = DictationState.idle,
+    this.canRevertDictation,
+    this.onRevertDictation,
     this.dictationLevel,
     this.background,
     this.primary,
@@ -478,6 +488,8 @@ class _ChatPaneState extends State<ChatPane> {
     onVoice: widget.onVoice,
     voiceActive: widget.voiceActive,
     dictationState: widget.dictationState,
+    canRevertDictation: widget.canRevertDictation,
+    onRevertDictation: widget.onRevertDictation,
     dictationLevel: widget.dictationLevel,
   );
 
@@ -523,6 +535,14 @@ class ConversationView extends StatefulWidget {
   /// Whether the open call is with this Bot.
   final bool voiceActive;
   final DictationState dictationState;
+
+  /// Whether a tidied transcript is in the draft and can be put back. Asked
+  /// on every build rather than passed as a value, so a draft edit withdraws
+  /// the offer the moment it happens.
+  final bool Function()? canRevertDictation;
+
+  /// Puts the raw transcript back into the draft.
+  final VoidCallback? onRevertDictation;
   final ValueListenable<double>? dictationLevel;
   final String? background;
   final String? primary;
@@ -555,6 +575,8 @@ class ConversationView extends StatefulWidget {
     this.onVoice,
     this.voiceActive = false,
     this.dictationState = DictationState.idle,
+    this.canRevertDictation,
+    this.onRevertDictation,
     this.dictationLevel,
     this.background,
     this.primary,
@@ -672,6 +694,8 @@ class _ConversationViewState extends State<ConversationView>
       voiceActive: widget.voiceActive,
       onStopDictation: widget.onStopDictation,
       dictationState: widget.dictationState,
+      canRevertDictation: widget.canRevertDictation,
+      onRevertDictation: widget.onRevertDictation,
       dictationLevel: widget.dictationLevel,
     ),
   );

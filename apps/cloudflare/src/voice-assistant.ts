@@ -142,7 +142,7 @@ export const VOICE_ASSISTANT_INTERNAL_PATH = "/internal/voice-assistant/v1";
 
 interface DictationLeaseRequest {
   userId: string;
-  action: "acquire" | "renew" | "release";
+  action: "acquire" | "renew" | "release" | "cleanup";
   leaseId: string;
   activeSeconds?: number;
 }
@@ -159,7 +159,8 @@ function decodeDictationLeaseRequest(input: unknown): DictationLeaseRequest {
     !/^[A-Za-z0-9-]{8,64}$/.test(value.leaseId) ||
     (value.action !== "acquire" &&
       value.action !== "renew" &&
-      value.action !== "release")
+      value.action !== "release" &&
+      value.action !== "cleanup")
   ) {
     throw new Error("dictation lease request is invalid");
   }
@@ -2892,6 +2893,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     | { status: "refused"; reason: string }
     | { status: "renewed"; ok: boolean }
     | { status: "released" }
+    | { status: "cleanup"; admitted: boolean }
   > {
     const request = decodeDictationLeaseRequest(input);
     if (request.userId !== this.name) {
@@ -2918,6 +2920,12 @@ export class VoiceAssistant extends VoiceAgentBase<
           reserveSeconds: VOICE_DICTATION_RESERVE_SECONDS_V1,
         }),
       };
+    }
+    if (request.action === "cleanup") {
+      // Booked here rather than in the relay so the account's whole day is
+      // counted in one place, next to the seconds the same capture spent.
+      const admitted = await ledger.admitDictationCleanup(at);
+      return { status: "cleanup", admitted: admitted.status === "admitted" };
     }
     await ledger.releaseDictationLease({
       leaseId: request.leaseId,

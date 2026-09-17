@@ -204,6 +204,15 @@ class Composer extends StatefulWidget {
 
   /// The capture level, 0..1, which is what the bars are drawn from.
   final ValueListenable<double>? dictationLevel;
+
+  /// Whether the draft holds a tidied transcript that can be put back, asked
+  /// of the draft as it stands on every build. The offer disappears the moment
+  /// they edit inside it, because from then on the words in the field are
+  /// partly theirs and swapping them would lose the edit.
+  final bool Function()? canRevertDictation;
+
+  /// Puts the raw transcript back. Null leaves the offer off entirely.
+  final VoidCallback? onRevertDictation;
   const Composer({
     super.key,
     required this.editor,
@@ -221,6 +230,8 @@ class Composer extends StatefulWidget {
     this.voiceActive = false,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
+    this.canRevertDictation,
+    this.onRevertDictation,
   });
 
   @override
@@ -350,10 +361,10 @@ class _ComposerState extends State<Composer> {
               VoiceIds.composerDictationStop,
               IconButton.filled(
                 key: const ValueKey('dictation-stop'),
-                tooltip: widget.dictationState == DictationState.stopping
+                tooltip: widget.dictationState.finishing
                     ? 'Finishing dictation'
                     : 'Stop dictation',
-                onPressed: widget.dictationState == DictationState.stopping
+                onPressed: widget.dictationState.finishing
                     ? null
                     : widget.onStopDictation,
                 style: IconButton.styleFrom(
@@ -364,7 +375,7 @@ class _ComposerState extends State<Composer> {
                 ),
                 icon: voiceIconTransition(
                   context,
-                  widget.dictationState == DictationState.stopping
+                  widget.dictationState.finishing
                       ? SizedBox(
                           key: const ValueKey('finishing'),
                           width: 20,
@@ -488,6 +499,29 @@ class _ComposerState extends State<Composer> {
           ),
         if (widget.stoppable)
           ComposerStopButton(stopping: widget.stopping, onStop: widget.onStop),
+        // Said once, quietly, and only while it is still true. Tidying is
+        // something done to the person's words without being asked, so the
+        // way back has to be visible — but it is not an action anybody came
+        // here to take, so it does not get a button's weight.
+        if (widget.canRevertDictation?.call() == true &&
+            widget.onRevertDictation != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                key: const ValueKey('dictation-revert'),
+                onPressed: widget.onRevertDictation,
+                icon: const Icon(Icons.undo_rounded, size: 16),
+                label: const Text('Use what I said'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: theme.colorScheme.onSurfaceVariant,
+                  textStyle: theme.textTheme.labelMedium,
+                ),
+              ),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
           child: AnimatedContainer(
@@ -661,6 +695,7 @@ class _ComposerState extends State<Composer> {
                   label: switch (widget.dictationState) {
                     DictationState.starting => 'Starting dictation',
                     DictationState.stopping => 'Finishing dictation',
+                    DictationState.cleaning => 'Tidying what you said',
                     _ => 'Listening for dictation',
                   },
                   child: Row(

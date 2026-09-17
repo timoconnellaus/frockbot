@@ -148,7 +148,11 @@ import {
 } from "./admin-identities.js";
 import type { DebugGatewaySurface } from "./debug.js";
 import type { BotDebugQueryV1 } from "@frockbot/app/shell/debug-protocol";
-import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
+import {
+  BotState,
+  frockAiWorkerVarV1,
+  type OwnedBotTurnCommand,
+} from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
   PackageArtifactStore,
@@ -170,7 +174,15 @@ import {
   VoiceAssistant,
   voiceAssistantConfiguredV1,
 } from "./voice-assistant.js";
-import { openVoiceDictationRelayV1 } from "./voice-dictation.js";
+import {
+  openVoiceDictationRelayV1,
+  type VoiceDictationCleanupV1,
+} from "./voice-dictation.js";
+import { createFrockAiGatewayHostV1 } from "./frock-ai.js";
+import {
+  FROCK_AI_DEFAULT_MODEL,
+  gatewayModelForFrockRequestV1,
+} from "@frockbot/providers/frock-ai/catalog";
 import { voiceDictationConfiguredV1 } from "@frockbot/app/voice/dictation-upstream";
 import type { VoiceGatewayDependencies } from "./contracts.js";
 import {
@@ -277,6 +289,12 @@ interface Env {
   ELEVENLABS_VOICE_ID?: string;
   VOICE_ASSISTANT_STT?: string;
   VOICE_ASSISTANT_MODEL?: string;
+  /**
+   * The model that tidies a dictated transcript. Unset takes the ordinary
+   * default route; a deployment that wants a cheap, fast model for a job that
+   * is only ever "remove the ums" pins one here without a code change.
+   */
+  VOICE_DICTATION_CLEANUP_MODEL?: string;
   /** A local dictation stand-in for the test harness; never set in production. */
   VOICE_DICTATION_UPSTREAM_URL?: string;
   COMPUTER_HOST: Fetcher;
@@ -1860,6 +1878,74 @@ async function ownedComputerBotState(
   return botStateStub(env, userId, botId);
 }
 
+/**
+ * The tidy-up the dictation relay offers a finished capture.
+ *
+ * Two jobs and no judgement: book the spend against the account's own voice
+ * object, then reach the model gateway with the deployment's credential. What
+ * is asked for and what is accepted back belong to the relay, which is where
+ * they can be tested without a model.
+ *
+ * Absent — and so no tidying at all — in a deployment with no usable `AI`
+ * binding. A draft that keeps the ums is a working draft.
+ */
+function voiceDictationCleanup(
+  env: Env,
+  userId: string,
+): VoiceDictationCleanupV1 | undefined {
+  const ai = env.AI;
+  if (!ai || typeof Reflect.get(ai, "gateway") !== "function") return undefined;
+  return {
+    run: async (body, signal) => {
+      const stub = await getAgentByName(env.VOICE_ASSISTANTS, userId);
+      const booked = await stub.dictationLease({
+        schemaVersion: 1,
+        userId,
+        // The lease id is this booking's, not the capture's: nothing is held
+        // and nothing is released, so it only has to satisfy the decoder.
+        leaseId: crypto.randomUUID(),
+        action: "cleanup",
+      });
+      if (booked.status !== "cleanup" || !booked.admitted) return undefined;
+      const host = createFrockAiGatewayHostV1(ai as Pick<Ai, "gateway">, {
+        gatewayId: frockAiWorkerVarV1(env, "FROCK_AI_GATEWAY_ID"),
+        autoRoute: frockAiWorkerVarV1(env, "FROCK_AI_AUTO_ROUTE"),
+        accountId: frockAiWorkerVarV1(env, "FROCK_AI_ACCOUNT_ID"),
+        token: frockAiWorkerVarV1(env, "FROCK_AI_GATEWAY_TOKEN"),
+      });
+      const model =
+        env.VOICE_DICTATION_CLEANUP_MODEL?.trim() ||
+        gatewayModelForFrockRequestV1(
+          FROCK_AI_DEFAULT_MODEL,
+          false,
+          host.autoRoute,
+        );
+      const stream = await host.runChatCompletion(model, body, signal);
+      return voiceDictationCleanupAnswerV1(await new Response(stream).text());
+    },
+  };
+}
+
+/**
+ * The assistant's message out of one unstreamed chat completion.
+ *
+ * Returns the empty string for a body that is not the shape we asked for,
+ * which every guard downstream reads as "nothing came back" and answers by
+ * keeping the raw transcript. A malformed answer must never be a thrown
+ * error here: it is an ordinary outcome of asking a model for text.
+ */
+export function voiceDictationCleanupAnswerV1(raw: string): string {
+  try {
+    const body = JSON.parse(raw) as {
+      choices?: { message?: { content?: unknown } }[];
+    };
+    const content = body.choices?.[0]?.message?.content;
+    return typeof content === "string" ? content : "";
+  } catch {
+    return "";
+  }
+}
+
 /** The voice doors the gateway opens once it has proved the identity. */
 function voiceGatewayDependencies(env: Env): VoiceGatewayDependencies {
   return {
@@ -1877,6 +1963,7 @@ function voiceGatewayDependencies(env: Env): VoiceGatewayDependencies {
         stub.dictationLease({ schemaVersion: 1, userId, leaseId, ...input });
       return openVoiceDictationRelayV1(request, {
         env,
+        cleanup: voiceDictationCleanup(env, userId),
         lease: {
           acquire: async () => {
             const answer = await call({ action: "acquire" });

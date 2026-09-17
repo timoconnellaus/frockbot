@@ -11,6 +11,7 @@
 // marked `abandoned` and never re-sent. A Bot delegation does have a key — the
 // run id the target Bot fences on — so it is looked up again, never re-issued.
 import {
+  VOICE_DICTATION_DAILY_CLEANUPS_V1,
   VOICE_DICTATION_DAILY_SECONDS_V1,
   VOICE_ASSISTANT_DAILY_DELEGATIONS_V1,
   VOICE_ASSISTANT_DAILY_STT_SECONDS_V1,
@@ -143,6 +144,8 @@ export interface VoiceMeterV1 {
   delegations: number;
   /** Dictation provider seconds, reserved and reconciled the same way. */
   dictationSeconds: number;
+  /** Model calls spent tidying a dictated transcript. Counted, never refunded. */
+  dictationCleanups?: number;
 }
 
 export interface VoiceMeterCapsV1 {
@@ -151,6 +154,7 @@ export interface VoiceMeterCapsV1 {
   turns: number;
   delegations: number;
   dictationSeconds: number;
+  dictationCleanups: number;
 }
 
 export const VOICE_METER_CAPS_V1: VoiceMeterCapsV1 = {
@@ -159,6 +163,7 @@ export const VOICE_METER_CAPS_V1: VoiceMeterCapsV1 = {
   turns: VOICE_ASSISTANT_DAILY_TURNS_V1,
   delegations: VOICE_ASSISTANT_DAILY_DELEGATIONS_V1,
   dictationSeconds: VOICE_DICTATION_DAILY_SECONDS_V1,
+  dictationCleanups: VOICE_DICTATION_DAILY_CLEANUPS_V1,
 };
 
 /** The one dictation an account may run at a time. */
@@ -251,11 +256,21 @@ export async function voiceDelegationRunIdV1(parts: readonly string[]) {
 }
 
 export class VoiceLedgerV1 {
+  /**
+   * The caps in force. Overrides are merged over the shipped ones rather than
+   * replacing them, so a caller that lowers one cap for a test does not
+   * silently leave a newly added cap undefined — which reads as zero, and
+   * refuses everything.
+   */
+  private readonly caps: VoiceMeterCapsV1;
+
   constructor(
     private readonly storage: VoiceLedgerStorageV1,
     private readonly userId: string,
-    private readonly caps: VoiceMeterCapsV1 = VOICE_METER_CAPS_V1,
-  ) {}
+    caps: Partial<VoiceMeterCapsV1> = {},
+  ) {
+    this.caps = { ...VOICE_METER_CAPS_V1, ...caps };
+  }
 
   // -- calls ----------------------------------------------------------------
 
@@ -717,6 +732,7 @@ export class VoiceLedgerV1 {
         turns: 0,
         delegations: 0,
         dictationSeconds: 0,
+        dictationCleanups: 0,
       }
     );
   }
@@ -772,6 +788,32 @@ export class VoiceLedgerV1 {
   ): Promise<void> {
     if (seconds <= 0) return;
     await this.addMeter(at, { [kind]: -seconds });
+  }
+
+  /**
+   * Books one transcript tidy-up, or refuses it.
+   *
+   * Counted before the model is asked and never refunded, so an eviction
+   * between the booking and the answer costs the account one call rather than
+   * losing the record that a call was made. There is no idempotency key
+   * because there is no retry: a tidy-up that fails is not tried again, the
+   * raw transcript simply stands.
+   *
+   * Deliberately its own admission rather than a line in [exceededCap]: that
+   * one decides whether a voice *call* may go on, and a day of tidy-ups is no
+   * reason to refuse somebody a conversation.
+   */
+  async admitDictationCleanup(
+    at: Date,
+  ): Promise<{ status: "admitted" } | { status: "refused" }> {
+    const meter = await this.meter(at);
+    const spent = meter.dictationCleanups ?? 0;
+    if (spent >= this.caps.dictationCleanups) return { status: "refused" };
+    await this.storage.put(meterKey(meter.day), {
+      ...meter,
+      dictationCleanups: spent + 1,
+    });
+    return { status: "admitted" };
   }
 
   /** The first cap the day has hit, or nothing. */

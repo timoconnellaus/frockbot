@@ -228,6 +228,7 @@
     "./user": "./user.ts",
     "./voice/assistant": "./voice/assistant.ts",
     "./voice/definition": "./voice/definition.ts",
+    "./voice/dictation-cleanup": "./voice/dictation-cleanup.ts",
     "./voice/dictation-upstream": "./voice/dictation-upstream.ts",
     "./voice/history": "./voice/history.ts",
     "./voice/ledger": "./voice/ledger.ts",

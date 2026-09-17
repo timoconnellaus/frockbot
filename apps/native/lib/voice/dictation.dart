@@ -8,6 +8,14 @@
 ///
 /// Stop flushes into the editable draft and never sends. Sending is the
 /// person's, through the ordinary Send.
+///
+/// After the last word arrives the server may tidy the capture and send the
+/// result back. It is applied through the very same [DictationDraftRange] as
+/// every other write, which is what makes it safe: a span the person has
+/// edited inside is already fenced and takes nothing more, and a draft that
+/// has been sent no longer contains the span at all, so a late tidy-up
+/// finds nothing to replace and writes nothing. [revertCleanup] puts the raw
+/// transcript back through the same path.
 library;
 
 import 'dart:async';
@@ -19,7 +27,19 @@ import 'capture.dart';
 import 'protocol.dart';
 import 'socket.dart';
 
-enum DictationState { idle, starting, capturing, stopping, done, error }
+enum DictationState {
+  idle,
+  starting,
+  capturing,
+  stopping,
+
+  /// Said everything, and the server is tidying it. The words are already in
+  /// the draft and the microphone is off; this is a state the composer shows,
+  /// not one that is still recording.
+  cleaning,
+  done,
+  error,
+}
 
 extension DictationStateActivity on DictationState {
   /// Whether a capture is in progress: the one definition every surface asks,
@@ -27,7 +47,14 @@ extension DictationStateActivity on DictationState {
   bool get active =>
       this == DictationState.starting ||
       this == DictationState.capturing ||
-      this == DictationState.stopping;
+      this == DictationState.stopping ||
+      this == DictationState.cleaning;
+
+  /// Whether the microphone is off and the capture is being wrapped up.
+  /// Both halves look the same to the person — a brief wait they cannot
+  /// speak into — so every surface draws them the same way.
+  bool get finishing =>
+      this == DictationState.stopping || this == DictationState.cleaning;
 }
 
 /// Writes the assembled draft into one composer context.
@@ -60,6 +87,19 @@ class DictationDraftRange {
 
   /// Whether the person has edited inside the transcript, which stops it.
   bool get fenced => _fenced;
+
+  /// Whether the span this range owns can still be found in [current].
+  ///
+  /// Read-only on purpose: it is asked while the composer is being built, and
+  /// a predicate that fenced as a side effect of being looked at would be a
+  /// worse bug than the one it answers. The lazy fence in [next] is enough for
+  /// writing; this is for deciding whether a write would land at all.
+  bool holds(String current) {
+    if (_fenced) return false;
+    if (current == _compose(_transcript)) return true;
+    if (_transcript.isEmpty) return true;
+    return current.contains(_transcript);
+  }
 
   /// The draft [transcript] makes of [current], or null once fenced.
   String? next(String current, String transcript) {
@@ -114,6 +154,10 @@ class DictationController extends ChangeNotifier {
   final Duration connectTimeout;
   final Duration finalTimeout;
 
+  /// How long to wait once the server says it is tidying. The words are
+  /// already in the draft by then, so this is longer than [finalTimeout].
+  final Duration cleanupTimeout;
+
   DictationController({
     required this.openSocket,
     required this.capture,
@@ -122,6 +166,7 @@ class DictationController extends ChangeNotifier {
     this.onFinished,
     this.connectTimeout = voiceDictationConnectTimeoutV1,
     this.finalTimeout = voiceDictationFinalTimeoutV1,
+    this.cleanupTimeout = voiceDictationCleanupTimeoutV1,
   });
 
   DictationState _state = DictationState.idle;
@@ -136,6 +181,11 @@ class DictationController extends ChangeNotifier {
 
   final List<String> _segments = [];
   String _delta = '';
+
+  /// What the capture actually transcribed to, kept whole from the moment a
+  /// tidy-up replaces it. This is the person's own words; the tidied version
+  /// is a convenience, and a convenience you cannot undo is a trap.
+  String? _rawTranscript;
 
   VoiceSocket? _socket;
   StreamSubscription<Object?>? _frames;
@@ -163,6 +213,18 @@ class DictationController extends ChangeNotifier {
 
   /// A non-fatal word from the server — truncated opening audio, and such.
   String? get notice => _notice;
+
+  /// Whether the draft currently holds a tidied transcript that [revertCleanup]
+  /// can put back. Asked of the draft as it stands rather than of the fence,
+  /// which only closes on the next write: once the capture is over there is no
+  /// next write, so an edit inside the tidied span — or a Send that empties the
+  /// composer — would otherwise leave the offer drawn over nothing.
+  bool get cleaned {
+    final context = _context;
+    if (_rawTranscript == null || context == null || _disposed) return false;
+    return _range.holds(readDraft(context));
+  }
+
   Object? get context => _context;
   double get micLevel => level.value;
   bool get active => _state.active;
@@ -189,6 +251,7 @@ class DictationController extends ChangeNotifier {
     _range = DictationDraftRange(before: readDraft(context));
     _segments.clear();
     _delta = '';
+    _rawTranscript = null;
     _error = null;
     _notice = null;
     _ready = false;
@@ -306,11 +369,65 @@ class DictationController extends ChangeNotifier {
       case DictationNoticeV1(:final message):
         _notice = message;
         _notify();
+      case DictationCleaningV1():
+        // Nothing to write: everything said is already in the draft. The
+        // deadline is re-armed because the one `stop` set covers a capture
+        // the server never finished, and this capture is finished.
+        if (_state == DictationState.stopping) {
+          _set(DictationState.cleaning);
+          _finalTimer?.cancel();
+          _finalTimer = Timer(cleanupTimeout, () => unawaited(_finish(null)));
+        }
+      case DictationCleanedV1(:final text):
+        _applyCleaned(text);
       case DictationFinalV1():
         unawaited(_finish(null));
       case DictationErrorV1(:final message):
         unawaited(_finish(message));
     }
+  }
+
+  /// Swaps the capture's own span for the tidied text.
+  ///
+  /// Through [_publish], so every rule that governs an ordinary segment
+  /// governs this too: surrounding typing is preserved, an edit inside the
+  /// span fences the range and refuses the write, and a draft that has been
+  /// sent no longer contains the span, so nothing is restored over it.
+  void _applyCleaned(String text) {
+    if (_disposed || _range.fenced) return;
+    final tidied = text.trim();
+    if (tidied.isEmpty) return;
+    final raw = this.text;
+    if (tidied == raw) return;
+    _rawTranscript = raw;
+    _segments
+      ..clear()
+      ..add(tidied);
+    _delta = '';
+    _publish();
+  }
+
+  /// Puts the raw transcript back, for a person who preferred their own words.
+  ///
+  /// Available until they edit inside the span, at which point the draft no
+  /// longer holds it and this does nothing rather than overwriting what they
+  /// typed. The raw transcript is only given up once it has actually been
+  /// written back, so a refused revert leaves the person exactly where they
+  /// were.
+  void revertCleanup() {
+    final raw = _rawTranscript;
+    final context = _context;
+    if (raw == null || context == null || _disposed) return;
+    if (!_range.holds(readDraft(context))) {
+      _notify();
+      return;
+    }
+    _rawTranscript = null;
+    _segments
+      ..clear()
+      ..add(raw);
+    _delta = '';
+    _publish();
   }
 
   void _publish() {

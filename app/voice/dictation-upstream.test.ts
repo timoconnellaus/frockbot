@@ -159,7 +159,10 @@ describe("the shared voice frames", () => {
   });
 
   test("dictation server frames round-trip", () => {
-    for (const frame of [{ schemaVersion: 1, type: "ready" }] as unknown[]) {
+    for (const frame of [
+      { schemaVersion: 1, type: "ready" },
+      { schemaVersion: 1, type: "cleaning" },
+    ] as unknown[]) {
       expect(decodeVoiceDictationServerFrameV1(frame)).toEqual(
         frame as ReturnType<typeof decodeVoiceDictationServerFrameV1>,
       );
@@ -167,6 +170,7 @@ describe("the shared voice frames", () => {
     for (const frame of [
       { schemaVersion: 1, type: "delta", text: "a" },
       { schemaVersion: 1, type: "segment", text: "b" },
+      { schemaVersion: 1, type: "cleaned", text: "B." },
       { schemaVersion: 1, type: "final" },
       { schemaVersion: 1, type: "notice", message: "m" },
       { schemaVersion: 1, type: "error", message: "e", code: "upstream" },
