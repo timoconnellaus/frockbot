@@ -31,10 +31,11 @@
  *    refused whole and says so on the record it did not change: a card that
  *    silently stopped updating is worse than one that says it stopped. A first
  *    send refused this way still writes an empty record carrying the refusal,
- *    so the transcript has something to draw where the send sits. The one
- *    exception is deliberate: when the index is already full there is nowhere
- *    to put a record at all, and that send leaves no trace outside its own
- *    Turn's log.
+ *    so the transcript has something to draw where the send sits. When the
+ *    index is already full, the oldest surface this Turn is not itself writing
+ *    to is tombstoned with a refusal saying it made room, and the new card is
+ *    written normally — trimming loses a row and never a fact, because the
+ *    send that drew the trimmed card is still on its Turn's log.
  */
 import {
   A2UI_IDENTIFIER_V1,
@@ -567,6 +568,9 @@ export function foldCardMessagesV1(
       continue;
     }
     if ("updateComponents" in message) {
+      if (card.deleted) {
+        throw new CardBudgetError("the surface was deleted");
+      }
       card = {
         ...card,
         components: upsertComponents(
@@ -577,6 +581,9 @@ export function foldCardMessagesV1(
       continue;
     }
     if ("updateDataModel" in message) {
+      if (card.deleted) {
+        throw new CardBudgetError("the surface was deleted");
+      }
       const update = message.updateDataModel;
       card = {
         ...card,
@@ -667,10 +674,31 @@ export async function cardTerminalRecordsV1(
       current === undefined &&
       surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession
     ) {
-      // Nothing is evicted to make room: an older Card is still in the
-      // transcript, still readable and still answerable, and dropping it to
-      // draw a new one would break a conversation the person can scroll to.
-      continue;
+      const evictable = surfaces.findIndex(
+        (surfaceId) => !sends.some((other) => other.surfaceId === surfaceId),
+      );
+      if (evictable === -1) continue;
+      const [evicted] = surfaces.splice(evictable, 1);
+      const evictedKey = cardKeyV1(evicted!);
+      const storedEvicted = await input.read<unknown>(evictedKey);
+      const evictedCard =
+        storedEvicted === undefined
+          ? undefined
+          : decodeCardRecordV1(storedEvicted);
+      records[evictedKey] = {
+        schemaVersion: 1,
+        surfaceId: evicted!,
+        runId: input.run.runId,
+        sessionId: input.run.sessionId,
+        components: [],
+        dataModel: {},
+        revision: (evictedCard?.revision ?? 0) + 1,
+        createdAt: evictedCard?.createdAt ?? input.now,
+        updatedAt: input.now,
+        deleted: true,
+        refusal: "the card was dropped to make room for a newer card",
+      } satisfies CardRecordV1;
+      movedIndex = true;
     }
     const context = {
       surfaceId: send.surfaceId,

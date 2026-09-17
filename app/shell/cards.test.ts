@@ -602,10 +602,28 @@ describe("what one settled Turn writes", () => {
     expect(resettled).toEqual({});
   });
 
-  test("a Session already holding its surfaces draws no more", async () => {
+  test("a Session already holding its surfaces makes room for a newer card", async () => {
     const surfaces = Array.from(
       { length: A2UI_LIMITS_V1.surfacesPerSession },
       (_, index) => `s${index}`,
+    );
+    const oldest = foldCardMessagesV1(
+      undefined,
+      [
+        message({
+          version: "v1.0",
+          createSurface: {
+            surfaceId: "s0",
+            components: [{ id: "root", component: "Text", text: "Old" }],
+          },
+        }),
+      ],
+      {
+        surfaceId: "s0",
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        now: NOW,
+      },
     );
     const records = await cardTerminalRecordsV1({
       run: {
@@ -620,9 +638,101 @@ describe("what one settled Turn writes", () => {
       now: NOW,
       read: reader({
         [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces },
+        [cardKeyV1("s0")]: oldest,
       }),
     });
-    expect(records).toEqual({});
+    const evicted = decodeCardRecordV1(records[cardKeyV1("s0")]);
+    expect(evicted.deleted).toBe(true);
+    expect(evicted.components).toEqual([]);
+    expect(evicted.refusal).toContain("make room");
+    expect(evicted.revision).toBe(oldest.revision + 1);
+    const drawn = decodeCardRecordV1(records[cardKeyV1("one-too-many")]);
+    expect(drawn.revision).toBe(1);
+    expect(drawn.refusal).toBeUndefined();
+    const index = records[CARD_INDEX_KEY] as { surfaces: string[] };
+    expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession);
+    expect(index.surfaces).not.toContain("s0");
+    expect(index.surfaces.at(-1)).toBe("one-too-many");
+  });
+
+  test("a tombstoned surface takes no update", () => {
+    const drawn = foldCardMessagesV1(
+      undefined,
+      [
+        message({
+          version: "v1.0",
+          createSurface: {
+            surfaceId: SURFACE,
+            components: [{ id: "root", component: "Text", text: "Ready" }],
+          },
+        }),
+        message({ version: "v1.0", deleteSurface: { surfaceId: SURFACE } }),
+      ],
+      {
+        surfaceId: SURFACE,
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        now: NOW,
+      },
+    );
+    expect(drawn.deleted).toBe(true);
+    expect(() =>
+      foldCardMessagesV1(
+        drawn,
+        [
+          message({
+            version: "v1.0",
+            updateComponents: {
+              surfaceId: SURFACE,
+              components: [{ id: "root", component: "Text", text: "Back" }],
+            },
+          }),
+        ],
+        {
+          surfaceId: SURFACE,
+          runId: "run-2",
+          sessionId: "user-1:bot-1",
+          now: NOW,
+        },
+      ),
+    ).toThrow(/deleted/);
+    expect(() =>
+      foldCardMessagesV1(
+        drawn,
+        [
+          message({
+            version: "v1.0",
+            updateDataModel: { surfaceId: SURFACE, path: "/a", value: 1 },
+          }),
+        ],
+        {
+          surfaceId: SURFACE,
+          runId: "run-2",
+          sessionId: "user-1:bot-1",
+          now: NOW,
+        },
+      ),
+    ).toThrow(/deleted/);
+    const revived = foldCardMessagesV1(
+      drawn,
+      [
+        message({
+          version: "v1.0",
+          createSurface: {
+            surfaceId: SURFACE,
+            components: [{ id: "root", component: "Text", text: "Back" }],
+          },
+        }),
+      ],
+      {
+        surfaceId: SURFACE,
+        runId: "run-2",
+        sessionId: "user-1:bot-1",
+        now: NOW,
+      },
+    );
+    expect(revived.deleted).toBeUndefined();
+    expect(revived.components).toHaveLength(1);
   });
 
   test("a first send refused by a budget still leaves a card to draw", async () => {

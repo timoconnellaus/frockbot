@@ -26,7 +26,9 @@
 //    for the same reason: this is a message in a conversation.
 //  * **16 messages per send**, so one call cannot smuggle a stream.
 //  * **32 surfaces per Session.** Cards do not tear down, so every one a Bot
-//    draws stays readable; a Session is a conversation, not a canvas.
+//    draws stays readable; a Session is a conversation, not a canvas. A Bot
+//    that draws past it does not lose the new card: the oldest surface is
+//    tombstoned with a refusal saying it made room for a newer one.
 //  * **32 actions per surface**, the number `ActionSchema` already allows a
 //    `ViewDocument`, because the two are the same question: how many things
 //    one surface may ask the kernel to do.
