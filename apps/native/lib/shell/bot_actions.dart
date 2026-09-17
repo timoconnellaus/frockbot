@@ -254,7 +254,7 @@ class _LabelPickerState extends State<_LabelPicker> {
     final current = widget.current;
     return AlertDialog(
       insetPadding: frockDialogInset,
-      title: Text('Label ${widget.botName}'),
+      title: frockDialogTitle(Text('Label ${widget.botName}')),
       content: identified(
         BotActionIds.labelPicker,
         frockDialogBody(

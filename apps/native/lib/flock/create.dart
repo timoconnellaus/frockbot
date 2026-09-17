@@ -480,7 +480,7 @@ class AvatarPickerSheet extends StatefulWidget {
       builder: (dialog) => Dialog(
         insetPadding: frockDialogInset,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: dialogWidth),
+          constraints: const BoxConstraints.tightFor(width: dialogWidth),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
             child: picker,

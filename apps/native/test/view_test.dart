@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_native/theme/rows.dart';
 import 'package:frockbot_native/view/action.dart';
 import 'package:frockbot_native/view/budgets.dart';
 import 'package:frockbot_native/view/document.dart';
@@ -757,7 +758,7 @@ void main() {
       expect(find.text('Standup'), findsNothing);
     });
 
-    testWidgets('a plugin kind moves out of the title and over the group', (
+    testWidgets('a plugin kind is the label over its rows, said once', (
       tester,
     ) async {
       await pump(
@@ -766,14 +767,73 @@ void main() {
           {
             'type': 'group',
             'orientation': 'column',
-            'children': [switchRow('Web · Built in', 'set-package-enabled')],
+            'children': [
+              {
+                'type': 'group',
+                'orientation': 'column',
+                'title': 'Built in',
+                'children': [
+                  switchRow('Web', 'set-package-enabled'),
+                  switchRow('Image', 'set-package-enabled'),
+                ],
+              },
+            ],
           },
           actions: [action('set-package-enabled')],
         ),
         switchRows: true,
       );
       expect(find.text('Web'), findsOneWidget);
+      expect(find.text('Image'), findsOneWidget);
       expect(find.text('BUILT IN'), findsOneWidget);
+      expect(find.byType(FrockRowGroup), findsOneWidget);
+    });
+
+    testWidgets('a plugin that draws a form keeps its card under the label', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        document(
+          {
+            'type': 'group',
+            'orientation': 'column',
+            'children': [
+              {
+                'type': 'group',
+                'orientation': 'column',
+                'title': 'Made by your Bot',
+                'children': [
+                  switchRow('Weather', 'set-package-enabled'),
+                  {
+                    'type': 'group',
+                    'orientation': 'column',
+                    'title': 'Counter',
+                    'children': [
+                      {'type': 'text', 'text': 'Counts things.'},
+                      {
+                        'type': 'group',
+                        'orientation': 'column',
+                        'children': [
+                          {'type': 'text', 'text': 'Count: 2'},
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          actions: [action('set-package-enabled')],
+        ),
+        switchRows: true,
+      );
+      expect(find.text('MADE BY YOUR BOT'), findsOneWidget);
+      expect(find.byType(FrockRowGroup), findsOneWidget);
+      expect(find.text('Weather'), findsOneWidget);
+      // The form the row shape cannot hold is still drawn, on a card of its
+      // own under the same label.
+      expect(find.text('Count: 2'), findsOneWidget);
     });
   });
 

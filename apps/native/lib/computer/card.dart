@@ -750,7 +750,7 @@ Future<void> confirmComputerTakeControlV1(
       ComputerIds.takeControlConfirm,
       AlertDialog(
         insetPadding: frockDialogInset,
-        title: const Text('Take control?'),
+        title: frockDialogTitle(const Text('Take control?')),
         content: frockDialogBody(
           const Text(
             'The Bot pauses while you are driving. Release control to give it '

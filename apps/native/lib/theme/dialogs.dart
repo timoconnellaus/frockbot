@@ -29,3 +29,11 @@ Widget frockDialogBody(Widget child) => ConstrainedBox(
   ),
   child: child,
 );
+
+/// Gives a dialog's title the same width as its body.
+///
+/// An [AlertDialog] is as wide as the widest of its title, its content and its
+/// actions, and a title is one unwrapped line however long the Bot's name is —
+/// so the body's width is a floor until the title is held to it too, and a
+/// long name is where a confirmation came out 700 wide.
+Widget frockDialogTitle(Widget child) => frockDialogBody(child);

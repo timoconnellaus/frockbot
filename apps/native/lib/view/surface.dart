@@ -40,7 +40,8 @@ class ViewSurfacePage extends StatefulWidget {
   /// the Marketplace on a desktop: the list a phone scrolls, laid out wide.
   final bool gridGroups;
 
-  /// Whether the root's titled groups are drawn as switch rows on one card.
+  /// Whether the root's titled groups are drawn as labelled cards of switch
+  /// rows, one card per section the document names.
   final bool switchRows;
 
   /// How wide the document is allowed to be. A column of settings reads best

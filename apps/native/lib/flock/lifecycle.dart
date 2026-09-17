@@ -277,7 +277,7 @@ Future<bool> confirmBotLifecycleChange({
               FlockIds.lifecycleConfirm,
               AlertDialog(
                 insetPadding: frockDialogInset,
-                title: Text('${words.title} $botName?'),
+                title: frockDialogTitle(Text('${words.title} $botName?')),
                 content: frockDialogBody(
                   SingleChildScrollView(
                     child: Text([words.body, ?applets].join('\n\n')),
