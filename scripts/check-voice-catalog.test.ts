@@ -3,6 +3,7 @@ import {
   fetchAccountVoicesV1,
   voiceCatalogAuditFailsV1,
   voiceCatalogAuditReportV1,
+  voiceCatalogAuditSummaryV1,
   voiceCatalogAuditV1,
 } from "./check-voice-catalog.js";
 
@@ -139,6 +140,30 @@ describe("reading the account's voices", () => {
     expect(asked).toHaveLength(2);
   });
 
+  // Nothing else bounds this loop and it runs inside the deploy job, so a
+  // provider that keeps handing back the cursor it just gave must end the
+  // walk rather than spin until the runner's own limit kills the job.
+  test("stops when the account repeats a page token", async () => {
+    const asked: string[] = [];
+    const voices = await fetchAccountVoicesV1("key", (async (url: string) => {
+      asked.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          voices: [{ voice_id: `v${asked.length}`, name: "Bec" }],
+          has_more: true,
+          next_page_token: "stuck",
+        }),
+      };
+    }) as unknown as typeof fetch);
+    expect(asked).toHaveLength(2);
+    expect(voices).toEqual([
+      { voiceId: "v1", name: "Bec" },
+      { voiceId: "v2", name: "Bec" },
+    ]);
+  });
+
   // A key without voices_read returns 401, which must not read as "the
   // account has no voices" and quietly fail every id in the catalog.
   test("refuses to treat a rejected key as an empty account", async () => {
@@ -149,5 +174,35 @@ describe("reading the account's voices", () => {
         json: async () => ({}),
       })) as unknown as typeof fetch),
     ).rejects.toThrow("voices_read");
+  });
+});
+
+describe("the line the job ends a failing run on", () => {
+  // The run fails on the unmapped character alone. Signing off with "0 of 2
+  // voices are unreachable" would describe a reason that is not the reason.
+  test("names the unmapped characters when nothing is unreachable", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: { cow: "aaa", rabbit: "zzz" },
+      account: [
+        { voiceId: "aaa", name: "Bec" },
+        { voiceId: "bbb", name: "Daniel" },
+      ],
+    });
+    expect(voiceCatalogAuditFailsV1(audit)).toBe(true);
+    const summary = voiceCatalogAuditSummaryV1(audit, catalog.length);
+    expect(summary).toContain("1 character defaults to a voice outside");
+    expect(summary).not.toContain("unreachable");
+  });
+
+  test("names both when voices are unreachable and characters unmapped", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: { cow: "aaa", rabbit: "zzz" },
+      account: [{ voiceId: "aaa", name: "Bec" }],
+    });
+    const summary = voiceCatalogAuditSummaryV1(audit, catalog.length);
+    expect(summary).toContain("1 of 2 voices are unreachable");
+    expect(summary).toContain("1 character defaults to a voice outside");
   });
 });
