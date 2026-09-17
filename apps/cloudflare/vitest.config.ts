@@ -31,6 +31,50 @@ const authMigrations = await readD1Migrations(
   resolve(import.meta.dirname, "migrations"),
 );
 
+const workerdBindings = {
+  // Whether this run is on CI, carried in from the runner's shell.
+  // `process.env` inside workerd is these bindings and nothing else,
+  // so a suite that scales its waiting budgets for a slow runner
+  // cannot read the flag any other way.
+  CI: process.env.CI ?? "",
+  BETTER_AUTH_URL: "https://bot.frockbot.com",
+  TEST_MIGRATIONS: authMigrations,
+  CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
+  // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
+  // state the gateway accepts and forge one it must refuse; strong
+  // enough to pass the same check production makes, because the
+  // Contribution refuses to serve its routes at all otherwise.
+  COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
+  COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
+  // A fixed signing secret, so a test can mint the key it presents.
+  ROUTINE_HOOK_SECRET: "workerd-routine-hook-secret-0123456789abcdef",
+  // The Connected apps provider key the harness stub accepts.
+  COMPOSIO_API_KEY: COMPOSIO_TEST_API_KEY,
+  // The registered-machine door's signing secret. Fixed, so a test can
+  // mint the token a machine presents and forge one that must be
+  // refused.
+  MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
+  // A leak canary: a Bot isolate — and an Applet facet — must never see
+  // a host binding.
+  SECRET_TOKEN: "host-only-secret",
+  // The Applet viewer door's signing secret. Fixed, so a test can mint
+  // the token a page presents and forge one that must be refused.
+  APPLET_VIEWER_SECRET: "workerd-applet-viewer-secret-0123456789ab",
+};
+
+// The voice suite multiplies every waiting budget in
+// `test/voice-assistant.workerd.ts` by this flag, because those budgets are
+// written for a laptop and spent on a two-core runner. Only this file can see
+// both the runner's shell and what the bindings carry into workerd, so the
+// forwarding is checked here: a config that stops passing the flag through
+// fails at load rather than as a probe that times out on the runner that
+// needed the allowance.
+if (Boolean(process.env.CI) !== Boolean(workerdBindings.CI)) {
+  throw new Error(
+    'vitest.config.ts is not forwarding the runner\'s CI flag into workerd: `workerdBindings.CI` must be `process.env.CI ?? ""`.',
+  );
+}
+
 export default defineConfig({
   plugins: [
     cloudflareTest({
@@ -92,36 +136,7 @@ export default defineConfig({
             useSQLite: true,
           },
         },
-        bindings: {
-          // Whether this run is on CI, carried in from the runner's shell.
-          // `process.env` inside workerd is these bindings and nothing else,
-          // so a suite that scales its waiting budgets for a slow runner
-          // cannot read the flag any other way.
-          CI: process.env.CI ?? "",
-          BETTER_AUTH_URL: "https://bot.frockbot.com",
-          TEST_MIGRATIONS: authMigrations,
-          CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
-          // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
-          // state the gateway accepts and forge one it must refuse; strong
-          // enough to pass the same check production makes, because the
-          // Contribution refuses to serve its routes at all otherwise.
-          COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
-          COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
-          // A fixed signing secret, so a test can mint the key it presents.
-          ROUTINE_HOOK_SECRET: "workerd-routine-hook-secret-0123456789abcdef",
-          // The Connected apps provider key the harness stub accepts.
-          COMPOSIO_API_KEY: COMPOSIO_TEST_API_KEY,
-          // The registered-machine door's signing secret. Fixed, so a test can
-          // mint the token a machine presents and forge one that must be
-          // refused.
-          MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
-          // A leak canary: a Bot isolate — and an Applet facet — must never see
-          // a host binding.
-          SECRET_TOKEN: "host-only-secret",
-          // The Applet viewer door's signing secret. Fixed, so a test can mint
-          // the token a page presents and forge one that must be refused.
-          APPLET_VIEWER_SECRET: "workerd-applet-viewer-secret-0123456789ab",
-        },
+        bindings: workerdBindings,
       },
     }),
   ],

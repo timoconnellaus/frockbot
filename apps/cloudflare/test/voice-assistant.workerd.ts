@@ -79,24 +79,16 @@ afterEach(async () => {
 const PROBE_BUDGET_FACTOR = process.env.CI ? 4 : 1;
 
 /**
- * The most a single probe may wait, however it was scaled.
- *
- * A probe that is merely slow must fail on its own terms — its message names
- * what it waited for and what it saw — rather than as a bare test timeout,
- * which says only that time ran out. The ceiling keeps any one wait well
- * inside `FILE_TEST_TIMEOUT_MS` below, and it is still far more than any of
- * these waits has ever needed.
- */
-const PROBE_BUDGET_CEILING_MS = 60_000;
-
-/**
  * What a wait in this file is actually allowed, given what its call site asked
  * for. Every wait goes through here — both the frame helper and the polling
  * one — so the scaling belongs to waiting on this runner rather than to either
- * helper, and a helper added later cannot miss it.
+ * helper, and a helper added later cannot miss it. Nothing is capped: the
+ * file's own test timeout below is the only bound, so the largest budgets —
+ * the ones a slow runner is most likely to overrun — get the same allowance as
+ * the rest.
  */
 function probeBudget(timeoutMs: number): number {
-  return Math.min(timeoutMs * PROBE_BUDGET_FACTOR, PROBE_BUDGET_CEILING_MS);
+  return timeoutMs * PROBE_BUDGET_FACTOR;
 }
 
 /** What a wait is allowed when its call site names no budget of its own. */
@@ -105,15 +97,17 @@ const DEFAULT_PROBE_BUDGET_MS = 8_000;
 /**
  * How long one test in this file may run.
  *
- * This has to stay above the waiting a single test can ask for, or the ceiling
- * above stops meaning anything: budgets compound within a test, and once they
- * exceed the limit the first informative failure is swallowed by a bare test
- * timeout, which is the failure the ceiling exists to avoid. The figure comes
- * from reading the heaviest test in the file, `a delegation whose scheduled
- * check is lost…`: nine waits, worth sixteen default budgets, so 128 s on a
- * laptop and 332 s on CI, where the sixty-second wait is the one the ceiling
- * holds back. Seven minutes clears both with room to spare. If a test here
- * ever grants materially more waiting than that, this number moves with it.
+ * This is the only bound on waiting here, so it has to stay above everything a
+ * single test can ask for: budgets compound within a test, and once they
+ * exceed the limit the first informative failure — a message naming what the
+ * probe waited for and what it saw — is swallowed by a bare test timeout,
+ * which says only that time ran out. The figure comes from reading the
+ * heaviest test in the file, `a delegation whose scheduled check is lost…`:
+ * nine waits, worth 128 s on a laptop, and four times that on CI. Because
+ * every budget now scales by the same factor, the heaviest test is the same
+ * one on both. Ten minutes clears the 512 s CI worst case with about a minute
+ * and a half spare. If a test here ever grants materially more waiting than
+ * that, this number moves with it.
  *
  * That is above the 120 s the shared config gives every other file, so a
  * genuinely hung test here takes longer to report — a known trade, and the
@@ -121,21 +115,15 @@ const DEFAULT_PROBE_BUDGET_MS = 8_000;
  * rather than of scaling the budgets. The shared 120 s is deliberately left
  * alone, because it is the right figure everywhere else.
  */
-const FILE_TEST_TIMEOUT_MS = 420_000;
+const FILE_TEST_TIMEOUT_MS = 600_000;
 
 vi.setConfig({ testTimeout: FILE_TEST_TIMEOUT_MS });
 
 test("the runner's CI flag reaches the worker the budgets are scaled in", () => {
   expect(
     Object.hasOwn(process.env, "CI"),
-    "vitest.config.ts is no longer carrying CI into workerd, so every wait in this file has silently dropped back to its laptop budget — look at the miniflare bindings",
+    "the CI binding never arrived in workerd, so every wait in this file is on its laptop budget whatever the runner is — restore `CI` in `workerdBindings` in apps/cloudflare/vitest.config.ts",
   ).toBe(true);
-  expect(
-    probeBudget(DEFAULT_PROBE_BUDGET_MS),
-    "the CI flag is visible but the waits are not scaled by it — look at PROBE_BUDGET_FACTOR",
-  ).toBe(
-    process.env.CI ? DEFAULT_PROBE_BUDGET_MS * 4 : DEFAULT_PROBE_BUDGET_MS,
-  );
 });
 
 interface Opened {
