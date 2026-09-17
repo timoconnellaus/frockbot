@@ -135,6 +135,7 @@ export interface VoiceTraceLine {
 export class WorkerdVoiceAssistant extends VoiceAssistant {
   #sessions: ProbeSession[] = [];
   #synthesized: string[] = [];
+  #spokenVoices: string[] = [];
   #chats: Record<string, unknown>[] = [];
   #script: VoiceProbeScript = {};
   #dropDispatches = 0;
@@ -221,10 +222,13 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     }
   }
 
-  protected override createTts() {
+  protected override createTts(voiceId?: string) {
     return {
       synthesize: async (text: string, signal?: AbortSignal) => {
         this.#synthesized.push(text);
+        // Which voice each sentence was spoken in, so a test can prove a Bot
+        // sounds like itself and that a hand-over changes who is heard.
+        this.#spokenVoices.push(voiceId ?? "");
         // A real provider is an HTTP request carrying this signal: a held
         // sentence waits, and an interrupt part way through it rejects then
         // and there rather than handing back audio for a moment that has
@@ -454,6 +458,11 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   async probeSynthesized(): Promise<string[]> {
     return [...this.#synthesized];
+  }
+
+  /** The voice id each synthesized sentence was spoken in, in order. */
+  async probeSpokenVoices(): Promise<string[]> {
+    return [...this.#spokenVoices];
   }
 
   async probeChats(): Promise<number> {

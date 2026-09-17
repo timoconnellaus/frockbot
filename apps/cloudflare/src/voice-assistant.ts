@@ -39,6 +39,7 @@ import {
   type VoiceBotSummaryV1,
   type VoiceCurrentBotV1,
 } from "@frockbot/app/voice/assistant";
+import { resolveVoiceIdV1 } from "@frockbot/app/voice/voices";
 import {
   VoiceLedgerV1,
   voiceCallIsStaleV1,
@@ -296,6 +297,14 @@ interface LiveCall {
    */
   botId: string;
   botName: string;
+  /** The voice this call's Bot speaks in; the deployment's when it has none. */
+  voiceId?: string;
+  /**
+   * The voice the next sentence is in, when it is not the call's own: a Bot
+   * answer read out on behalf of the Bot that answered it. Cleared as soon as
+   * that read-out is done, so the call goes back to its own voice.
+   */
+  speakingVoiceId?: string;
   /** When the call was admitted, so every later line can say how far in. */
   startedAt: number;
   /**
@@ -489,7 +498,69 @@ export class VoiceAssistant extends VoiceAgentBase<
   >();
 
   tts: (TTSProvider & Partial<StreamingTTSProvider>) | undefined =
-    this.guardTts(this.createTts());
+    this.guardTts(this.speakingTts());
+
+  /**
+   * One provider per voice this object has spoken as (ADR 0029).
+   *
+   * A call speaks in its Bot's voice, and a Bot's answer arriving from a
+   * delegation is read out in the answering Bot's, so one object can need
+   * several. Each is a cheap object over the same key; the first sentence in
+   * a new voice may pay a connection, which the bridge covers.
+   */
+  #ttsByVoice = new Map<
+    string,
+    (TTSProvider & Partial<StreamingTTSProvider>) | undefined
+  >();
+
+  /**
+   * The provider the SDK holds: one object that picks the voice per sentence.
+   *
+   * The SDK reads `tts` once and speaks every sentence through it, so the
+   * choice cannot be made by handing it a different provider. It is made here
+   * instead, from the call that is speaking, which is also the only place
+   * that knows a read-out belongs to another Bot.
+   */
+  private speakingTts():
+    (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
+    // A deployment with no speech provider at all has no voices either; the
+    // seam is asked once so a test subclass can refuse the same way.
+    if (!this.createTts()) return undefined;
+    const self = this;
+    return {
+      async synthesize(text, signal) {
+        const voice = self.ttsForVoice(self.speakingVoiceId());
+        if (!voice) return null;
+        return voice.synthesize(text, signal);
+      },
+    };
+  }
+
+  /** The provider for one voice, made once and kept. */
+  private ttsForVoice(
+    voiceId: string | undefined,
+  ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
+    const key = voiceId ?? "";
+    if (this.#ttsByVoice.has(key)) return this.#ttsByVoice.get(key);
+    const made = this.createTts(voiceId);
+    this.#ttsByVoice.set(key, made);
+    return made;
+  }
+
+  /**
+   * Whose voice the next sentence is in.
+   *
+   * The live call's Bot, unless something is being read out on behalf of
+   * another Bot — an answer that settled while this call was talking to
+   * somebody else — in which case it is that Bot's, so the person hears who
+   * is actually answering.
+   */
+  private speakingVoiceId(): string | undefined {
+    for (const call of this.#calls.values()) {
+      return call.speakingVoiceId ?? call.voiceId;
+    }
+    return undefined;
+  }
 
   /**
    * The provider never answers with silence: a sentence that produces no
@@ -567,13 +638,23 @@ export class VoiceAssistant extends VoiceAgentBase<
 
   // -- seams a test subclass overrides ---------------------------------------
 
-  protected createTts():
-    (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
+  /**
+   * One speech provider, in one voice.
+   *
+   * Takes the voice rather than reading it from the environment, because a
+   * call speaks as its Bot (ADR 0029) and one object may hold several. An
+   * absent voice is the deployment's own, which is what an account with no
+   * per-Bot voices chosen still sounds like.
+   */
+  protected createTts(
+    voiceId?: string,
+  ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
     const apiKey = this.env.ELEVENLABS_API_KEY?.trim();
     if (!apiKey) return undefined;
     return new ElevenLabsTTS({
       apiKey,
       voiceId:
+        voiceId?.trim() ||
         this.env.ELEVENLABS_VOICE_ID?.trim() ||
         VOICE_ASSISTANT_DEFAULT_VOICE_ID,
       modelId: VOICE_ASSISTANT_TTS_MODEL,
@@ -1205,11 +1286,16 @@ export class VoiceAssistant extends VoiceAgentBase<
   private async resolveCallTarget(
     userId: string,
     botId: string | undefined,
-  ): Promise<{ botId: string; name: string }> {
+  ): Promise<{ botId: string; name: string; voiceId?: string }> {
     if (botId) {
       try {
         const owned = await this.ownedBot(userId, botId);
-        return { botId: owned.botId, name: owned.name };
+        const voiceId = await this.voiceForBot(userId, owned.botId);
+        return {
+          botId: owned.botId,
+          name: owned.name,
+          ...(voiceId ? { voiceId } : {}),
+        };
       } catch {
         // Fall through to the account's default.
       }
@@ -1220,9 +1306,41 @@ export class VoiceAssistant extends VoiceAgentBase<
     const general =
       bots.find((bot) => bot.name.trim().toLowerCase() === "general") ??
       bots[0];
-    return general
-      ? { botId: general.botId, name: general.name }
-      : { botId: "", name: "" };
+    if (!general) return { botId: "", name: "" };
+    const voiceId = await this.voiceForBot(userId, general.botId);
+    return {
+      botId: general.botId,
+      name: general.name,
+      ...(voiceId ? { voiceId } : {}),
+    };
+  }
+
+  /**
+   * The voice a Bot speaks in (ADR 0029, decision 4).
+   *
+   * Its own choice if it has made one, else the voice its character carries,
+   * else the deployment's. The character is read from the account directory's
+   * avatar mirror, which is already the authority for what a Bot wears, so a
+   * Bot that has only ever picked a look already sounds unlike its siblings.
+   */
+  private async voiceForBot(
+    userId: string,
+    botId: string,
+  ): Promise<string | undefined> {
+    let characterId: string | undefined;
+    try {
+      const directory = await this.directory(userId);
+      characterId = directory.bots.find((bot) => bot.botId === botId)?.avatar
+        .characterId;
+    } catch {
+      // No directory, no character: the deployment's voice still answers.
+    }
+    return resolveVoiceIdV1({
+      ...(characterId ? { characterId } : {}),
+      ...(this.env.ELEVENLABS_VOICE_ID
+        ? { fallback: this.env.ELEVENLABS_VOICE_ID }
+        : {}),
+    });
   }
 
   /**
@@ -1331,6 +1449,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       connectionId: connection.id,
       botId: target.botId,
       botName: target.name,
+      ...(target.voiceId ? { voiceId: target.voiceId } : {}),
       startedAt: Date.now(),
       sequence: Date.parse(admission.call.startedAt),
       promptContext: this.buildPromptContext(identity.userId, target.botId),
@@ -2128,6 +2247,9 @@ export class VoiceAssistant extends VoiceAgentBase<
         }
         call.botId = bot.botId;
         call.botName = bot.name;
+        // The voice moves with the Bot: from the next sentence the person
+        // hears somebody else, which is the whole point of the hand-over.
+        call.voiceId = await this.voiceForBot(userId, bot.botId);
         // The Bot's own context is what the next turn wears, so it is read
         // now rather than left to the next turn's critical path.
         call.promptContext = this.buildPromptContext(userId, bot.botId);

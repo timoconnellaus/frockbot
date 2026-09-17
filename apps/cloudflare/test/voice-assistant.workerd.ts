@@ -370,6 +370,47 @@ describe("the voice session object", () => {
     opened.socket.close();
   });
 
+  // ADR 0029, decision 4. Before any name is said, what tells the person who
+  // answered is the voice. A Bot that has only ever picked a look already
+  // has one, from its character, and a hand-over changes it.
+  test("a Bot speaks in its character's voice, and a hand-over changes it", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `voice-voices-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    const other = { ...identity, botId: `voice-other-${suffix}` };
+    await provisionBot(identity);
+    await provisionSiblingBot(other);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({
+      reply: "Right you are.",
+      switchWord: "handover",
+      switchBotId: other.botId,
+    });
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("are you there")).toBe(true);
+    await opened.waitFor((f) => f.type === "transcript_end", "an answer");
+    const first = await stub.probeSpokenVoices();
+    // Whatever character the Bot wears, it is a voice from the catalog and
+    // not the empty default.
+    expect(first.length).toBeGreaterThan(0);
+    const before = first.length;
+    expect(await stub.probeUtterance("please handover now")).toBe(true);
+    await eventually(
+      () => stub.probeSpokenVoices(),
+      (voices) => voices.length > before,
+      "the other Bot speaking",
+    );
+    const after = await stub.probeSpokenVoices();
+    // The Bots wear different characters, so they must not sound the same.
+    expect(after.at(-1)).not.toBe(first.at(-1));
+    opened.socket.close();
+  });
+
   test("sends acknowledgment audio while the model is still pending", async () => {
     const userId = `voice-ack-${crypto.randomUUID()}`;
     const stub = assistant(userId);
