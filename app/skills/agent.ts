@@ -861,6 +861,7 @@ export function createSkillsRuntimeFeature(
       host.owner,
       host.reads,
       host.withheldManagedSlugs ?? [],
+      host.pluginSkills ?? [],
     );
     const disposers: Array<() => void> = [];
     disposers.push(

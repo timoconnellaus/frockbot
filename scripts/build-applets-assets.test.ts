@@ -23,7 +23,7 @@ async function check(): Promise<number> {
 
 // The Skill this runs against is the real one in the checkout, so cleanup
 // removes the fixture it wrote and nothing an author put there.
-let referencesExisted = false;
+const referencesExisted = existsSync(REFERENCES);
 
 afterEach(() => {
   rmSync(FIXTURE, { force: true });
@@ -34,7 +34,6 @@ describe("the managed Skill generator", () => {
   test("the committed modules are fresh, and a new reference makes them stale", async () => {
     expect(await check()).toBe(0);
 
-    referencesExisted = existsSync(REFERENCES);
     mkdirSync(REFERENCES, { recursive: true });
     writeFileSync(FIXTURE, "# Fixture\n");
 

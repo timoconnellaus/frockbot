@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { SessionStore, type Session } from "@frockbot/core/contracts";
+import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import {
   createSkillLoadTool,
+  createSkillsRuntimeFeature,
   createSkillWriteTool,
   openSkillTurnPositionV1,
   SkillCatalog,
@@ -639,5 +641,52 @@ describe("the recorded step", () => {
     expect(() => openSkillTurnPositionV1(session)).toThrow(
       "no open step to record against",
     );
+  });
+});
+
+describe("the Skills runtime feature", () => {
+  test("offers the host's Plugin Skills in the Turn's catalog", async () => {
+    const runtime = createAgentRuntimeHarness();
+    await runtime.mount(
+      createSkillsRuntimeFeature({
+        owner: OWNER,
+        reads: new FakeWorkspace(),
+        pluginSkills: [
+          {
+            pluginId: "email-card",
+            displayName: "Email",
+            skills: [
+              {
+                slug: "drafting",
+                text: skillMarkdown(
+                  "Draft an email",
+                  "Use this when drafting.",
+                  "Body.",
+                ),
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const session = runtime.sessions.create("user-1:bot-1");
+    session.appendBatch([{ type: "turn/start", turn: 1 }]);
+    const decision = await runtime.hooks.preStep(
+      { id: "bot-1", botId: "bot-1", session, status: "running" },
+      [],
+      1,
+      1,
+      async () => ({ kind: "enter", inputs: [] }),
+    );
+
+    expect(decision.kind).toBe("enter");
+    const assembled = await runtime.systemPrompt.assemble({
+      sessionId: "user-1:bot-1",
+      provider: "fixture",
+      model: "fixture",
+      turnType: "chat",
+    });
+    expect(assembled.text).toContain('ref="plugin/email-card/drafting"');
+    await runtime.dispose();
   });
 });
