@@ -1,0 +1,206 @@
+import { describe, expect, test } from "bun:test";
+import {
+  fetchAccountVoicesV1,
+  voiceCatalogAuditFailsV1,
+  voiceCatalogAuditReportV1,
+  voiceCatalogAuditSummaryV1,
+  voiceCatalogAuditV1,
+} from "./check-voice-catalog.js";
+
+const catalog = [
+  { voiceId: "aaa", name: "Bec", description: "Australian." },
+  { voiceId: "bbb", name: "Daniel", description: "British." },
+];
+
+describe("auditing the catalog against the account", () => {
+  test("passes when every voice resolves and every character is mapped", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: { cow: "aaa", guardian: "bbb" },
+      account: [
+        { voiceId: "aaa", name: "Bec" },
+        { voiceId: "bbb", name: "Daniel - Steady Broadcaster" },
+      ],
+    });
+    expect(audit).toEqual({ missing: [], unmapped: [], renamed: [] });
+    expect(voiceCatalogAuditFailsV1(audit)).toBe(false);
+  });
+
+  // The failure that shipped: ids copied from the provider's documentation
+  // that this account cannot reach. It is silence, not an error, so nothing
+  // else catches it.
+  test("fails on a voice the account cannot reach", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: { cow: "aaa", guardian: "bbb" },
+      account: [{ voiceId: "aaa", name: "Bec" }],
+    });
+    expect(audit.missing).toEqual([
+      { voiceId: "bbb", name: "Daniel", description: "British." },
+    ]);
+    expect(voiceCatalogAuditFailsV1(audit)).toBe(true);
+    expect(voiceCatalogAuditReportV1(audit)).toContain("speak silence");
+  });
+
+  test("fails on a character pointing outside the catalog", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: { cow: "aaa", rabbit: "zzz" },
+      account: [
+        { voiceId: "aaa", name: "Bec" },
+        { voiceId: "bbb", name: "Daniel" },
+        { voiceId: "zzz", name: "Somebody" },
+      ],
+    });
+    expect(audit.unmapped).toEqual(["rabbit"]);
+    expect(voiceCatalogAuditFailsV1(audit)).toBe(true);
+  });
+
+  // The other half of what shipped: EXAVITQu4vr4xnSDxMaL was listed as
+  // "Bella" and is Sarah. The voice speaks, so this is reported rather than
+  // fatal — but a picker offering the wrong name is still wrong.
+  test("reports a name that has drifted from the account, without failing", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: { cow: "aaa", guardian: "bbb" },
+      account: [
+        { voiceId: "aaa", name: "Sarah - Mature, Reassuring" },
+        { voiceId: "bbb", name: "Daniel" },
+      ],
+    });
+    expect(audit.renamed).toEqual([
+      { voiceId: "aaa", ours: "Bec", theirs: "Sarah - Mature, Reassuring" },
+    ]);
+    expect(voiceCatalogAuditFailsV1(audit)).toBe(false);
+    expect(voiceCatalogAuditReportV1(audit)).toContain('"Bec" here');
+  });
+
+  // Ours is the short name the picker shows. The account writes both a
+  // descriptive tail and a surname, and both are the same person, so neither
+  // may be reported as drift every single run — a check that always prints
+  // something is a check nobody reads.
+  test("accepts the account's descriptive tail and its surname", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: {},
+      account: [
+        { voiceId: "aaa", name: "Bec Pike" },
+        { voiceId: "bbb", name: "Daniel - Warm, Captivating Storyteller" },
+      ],
+    });
+    expect(audit.renamed).toEqual([]);
+  });
+
+  // A prefix has to end at a word boundary, or "Bec" would silently accept a
+  // voice the account calls "Beckett", who is somebody else.
+  test("does not accept a name that merely starts with the same letters", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: {},
+      account: [
+        { voiceId: "aaa", name: "Beckett" },
+        { voiceId: "bbb", name: "Daniel" },
+      ],
+    });
+    expect(audit.renamed).toEqual([
+      { voiceId: "aaa", ours: "Bec", theirs: "Beckett" },
+    ]);
+  });
+});
+
+describe("reading the account's voices", () => {
+  // The provider's list is cursor-based, so the second request has to carry
+  // the token the first one handed back. Driving a page number instead
+  // re-reads page one forever and silently loses every voice past the first
+  // hundred, which reads as a catalog full of unreachable ids.
+  test("follows the page token the account hands back", async () => {
+    const byToken: Record<string, unknown> = {
+      "": {
+        voices: [{ voice_id: "aaa", name: "Bec" }],
+        has_more: true,
+        next_page_token: "second",
+      },
+      second: {
+        voices: [{ voice_id: "bbb", name: "Daniel" }],
+        has_more: false,
+      },
+    };
+    const asked: string[] = [];
+    const voices = await fetchAccountVoicesV1("key", (async (url: string) => {
+      asked.push(url);
+      const token = new URL(url).searchParams.get("next_page_token") ?? "";
+      const page = byToken[token];
+      if (!page) throw new Error(`no such page: ${token}`);
+      return { ok: true, status: 200, json: async () => page };
+    }) as unknown as typeof fetch);
+    expect(voices).toEqual([
+      { voiceId: "aaa", name: "Bec" },
+      { voiceId: "bbb", name: "Daniel" },
+    ]);
+    expect(asked).toHaveLength(2);
+  });
+
+  // Nothing else bounds this loop and it runs inside the deploy job, so an
+  // account that never stops handing back a cursor — a fresh one each time,
+  // not a repeat — must end the walk rather than spin until the runner's own
+  // limit kills the job.
+  test("stops after a bounded number of pages", async () => {
+    const asked: string[] = [];
+    const voices = await fetchAccountVoicesV1("key", (async (url: string) => {
+      asked.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          voices: [{ voice_id: `v${asked.length}`, name: "Bec" }],
+          has_more: true,
+          next_page_token: `page-${asked.length}`,
+        }),
+      };
+    }) as unknown as typeof fetch);
+    expect(asked).toHaveLength(20);
+    expect(voices).toHaveLength(20);
+  });
+
+  // A key without voices_read returns 401, which must not read as "the
+  // account has no voices" and quietly fail every id in the catalog.
+  test("refuses to treat a rejected key as an empty account", async () => {
+    await expect(
+      fetchAccountVoicesV1("key", (async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({}),
+      })) as unknown as typeof fetch),
+    ).rejects.toThrow("voices_read");
+  });
+});
+
+describe("the line the job ends a failing run on", () => {
+  // The run fails on the unmapped character alone. Signing off with "0 of 2
+  // voices are unreachable" would describe a reason that is not the reason.
+  test("names the unmapped characters when nothing is unreachable", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: { cow: "aaa", rabbit: "zzz" },
+      account: [
+        { voiceId: "aaa", name: "Bec" },
+        { voiceId: "bbb", name: "Daniel" },
+      ],
+    });
+    expect(voiceCatalogAuditFailsV1(audit)).toBe(true);
+    const summary = voiceCatalogAuditSummaryV1(audit, catalog.length);
+    expect(summary).toContain("1 character defaults to a voice outside");
+    expect(summary).not.toContain("unreachable");
+  });
+
+  test("names both when voices are unreachable and characters unmapped", () => {
+    const audit = voiceCatalogAuditV1({
+      catalog,
+      byCharacter: { cow: "aaa", rabbit: "zzz" },
+      account: [{ voiceId: "aaa", name: "Bec" }],
+    });
+    const summary = voiceCatalogAuditSummaryV1(audit, catalog.length);
+    expect(summary).toContain("1 of 2 voices are unreachable");
+    expect(summary).toContain("1 character defaults to a voice outside");
+  });
+});

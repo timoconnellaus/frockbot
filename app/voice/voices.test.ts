@@ -31,6 +31,17 @@ describe("the voice catalog", () => {
     }
     const assigned = Object.values(VOICE_BY_CHARACTER_V1);
     expect(new Set(assigned).size).toBe(assigned.length);
+    for (const [characterId, voiceId] of Object.entries(
+      VOICE_BY_CHARACTER_V1,
+    )) {
+      expect(
+        Object.hasOwn(avatarCatalog, characterId),
+        `${characterId} is not a character`,
+      ).toBe(true);
+      expect(isVoiceIdV1(voiceId), `${characterId} maps off the list`).toBe(
+        true,
+      );
+    }
   });
 
   test("a voice the deployment does not offer is not a voice", () => {

@@ -718,6 +718,17 @@ jobs:
           fs.writeFileSync(file, source.replaceAll(placeholder, process.env.ARTIFACT_HASH));
           NODE
 
+      # Runs here because it is the first place the voice key exists: the test
+      # suites script the speech provider, so an unreachable voice id is
+      # invisible to every one of them, and at runtime it is silence rather
+      # than an error. Before the deploy, so a catalog nobody can speak in
+      # does not reach staging or get a release tag cut over it. No key in the
+      # environment skips it rather than failing.
+      - name: Check the voice catalog against the account
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: bun scripts/check-voice-catalog.ts
+
       - name: Apply D1 migrations
         working-directory: apps/cloudflare
         env:
