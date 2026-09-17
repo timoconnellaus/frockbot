@@ -360,7 +360,12 @@ serve`), the platform model over the remote Workers AI binding, asked
    Plugin worker, `plugin/` actions. The email card as the first seeded
    Plugin, sending through a Connection.
 
-   > Built 2026-09-17, step 6. `renderCard` and `cardAction` answer
+   > Built 2026-09-17, step 6. The descriptor's `cards` entry names no
+   > surface, against "A Plugin, pre-configured" above: an entry is
+   > `{id, displayName, description, dataSchema, actions}` and the
+   > components are what `renderCard` answers with, because a Plugin's
+   > surface depends on the values it was drawn with — the email card's
+   > `Receipt` is not its draft. `renderCard` and `cardAction` answer
    > `rendered`/`drop` rather than the task's `ok`/`refused`, to match the
    > view and trigger results already on the Plugin worker contract. A card
    > action name is unique per Plugin rather than per card, because the wire
