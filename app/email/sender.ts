@@ -95,20 +95,12 @@ function headerText(value: string): string {
 }
 
 /**
- * An address list. The addresses themselves are left exactly as they are —
- * they are what the envelope carries — and only a display name in front of
- * one is encoded, since that is the part free text can reach.
+ * An address list. Every address is ASCII by the validators in front of this
+ * seam, which forbid whitespace and angle brackets, so each is emitted as the
+ * bare address it is — there is no display name for free text to reach.
  */
 function headerAddressList(values: string[]): string {
-  return values
-    .map((value) => {
-      const sanitised = headerValue(value);
-      const named = /^\s*(.+?)\s*(<[^<>]*>)\s*$/.exec(sanitised);
-      return named === null
-        ? sanitised
-        : `${headerText(named[1]!)} ${named[2]!}`;
-    })
-    .join(", ");
+  return values.map(headerValue).join(", ");
 }
 
 /**

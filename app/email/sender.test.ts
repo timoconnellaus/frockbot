@@ -151,19 +151,13 @@ describe("the composed message's headers", () => {
     expect(decodeHeader(folded)).toBe(subject);
   });
 
-  test("a display name is encoded while its address is left alone", () => {
+  test("addresses are emitted as the bare addresses they are", () => {
     const raw = composeEmailMessageV1(
-      {
-        ...request,
-        to: ["Zoë Dupont <zoe@example.com>"],
-        cc: ["cc@example.com"],
-      },
+      { ...request, to: ["zoe@example.com"], cc: ["cc@example.com"] },
       from,
     );
     const block = headerBlock(raw);
-    expect(block).toContain("<zoe@example.com>");
+    expect(block).toContain("To: zoe@example.com");
     expect(block).toContain("Cc: cc@example.com");
-    const to = block.split("\r\nTo: ")[1]!.split(/\r\n(?! )/)[0]!;
-    expect(decodeHeader(to)).toBe("Zoë Dupont <zoe@example.com>");
   });
 });

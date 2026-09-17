@@ -82,7 +82,7 @@ describe("a Plugin failing more than once in one Turn", () => {
 
   // A press is counted the same way a Turn is, but it is not one: the body's
   // last sentence must not read back a run of failing Turns that never ran.
-  test("a failed press's body counts failures, a hook's counts Turns", async () => {
+  test("a run holding a press never counts itself as failing Turns", async () => {
     const { state, notices } = harness();
     await notePluginFailureV1(state, TURN, {
       pluginId: "email",
@@ -99,43 +99,66 @@ describe("a Plugin failing more than once in one Turn", () => {
       { pluginId: "email", phase: "hook", message: "beforeModel threw" },
     );
     expect(notices[1]?.body).toBe(
+      'The plugin "email" was skipped for this Turn: beforeModel threw. This Bot carried on without it. 2 of 3 failures in a row before it is turned off.',
+    );
+  });
+
+  test("a run of Turns alone counts Turns", async () => {
+    const { state, notices } = harness();
+    for (const runId of ["run-1", "run-2"]) {
+      await notePluginFailureV1(
+        state,
+        { runId, generationId: "gen-1" },
+        { pluginId: "email", phase: "hook", message: "beforeModel threw" },
+      );
+    }
+    expect(notices[1]?.body).toBe(
       'The plugin "email" was skipped for this Turn: beforeModel threw. This Bot carried on without it. 2 of 3 failing Turns in a row before it is turned off.',
     );
   });
 
   // The threshold notice is the last thing the person reads about the run
-  // that turned the Plugin off, and a run of presses is not a run of Turns.
-  test("the threshold notice counts presses as presses and Turns as Turns", async () => {
-    const { state: pressed, notices: pressNotices } = harness();
-    for (const runId of ["run-1", "run-2", "run-3"]) {
-      await notePluginFailureV1(
-        pressed,
-        { runId, generationId: "gen-1" },
-        {
-          pluginId: "email",
-          phase: "hook",
-          message: "the handler threw",
-          card: "press",
-        },
-      );
+  // that turned the Plugin off, and the run — not its last failure — is what
+  // it has to describe.
+  describe("the threshold notice describes the run that turned it off", () => {
+    async function runOf(
+      cards: (undefined | "press" | "draw")[],
+    ): Promise<string> {
+      const { state, notices } = harness();
+      for (const [index, card] of cards.entries()) {
+        await notePluginFailureV1(
+          state,
+          { runId: `run-${index + 1}`, generationId: "gen-1" },
+          {
+            pluginId: "email",
+            phase: "hook",
+            message: "it threw",
+            ...(card === undefined ? {} : { card }),
+          },
+        );
+      }
+      const last = notices.at(-1);
+      expect(last?.title).toBe("A plugin was turned off");
+      return last?.body ?? "";
     }
-    const pressQuarantine = pressNotices.at(-1);
-    expect(pressQuarantine?.title).toBe("A plugin was turned off");
-    expect(pressQuarantine?.body).toBe(
-      'The plugin "email" failed 3 times in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
-    );
 
-    const { state: hooked, notices: hookNotices } = harness();
-    for (const runId of ["run-1", "run-2", "run-3"]) {
-      await notePluginFailureV1(
-        hooked,
-        { runId, generationId: "gen-1" },
-        { pluginId: "email", phase: "hook", message: "beforeModel threw" },
+    test("three presses are read back as presses", async () => {
+      expect(await runOf(["press", "press", "press"])).toBe(
+        'The plugin "email" failed on 3 card presses in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
       );
-    }
-    expect(hookNotices.at(-1)?.body).toBe(
-      'The plugin "email" failed on 3 Turns in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
-    );
+    });
+
+    test("three Turns are read back as Turns", async () => {
+      expect(await runOf([undefined, undefined, undefined])).toBe(
+        'The plugin "email" failed on 3 Turns in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
+      );
+    });
+
+    test("two presses and a Turn claim neither", async () => {
+      expect(await runOf(["press", "press", undefined])).toBe(
+        'The plugin "email" failed 3 times in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
+      );
+    });
   });
 
   test("the same thing failing twice in one Turn is one notice", async () => {

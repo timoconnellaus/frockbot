@@ -7,9 +7,11 @@ import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "./catalog.js";
 import { switchPluginForBotV1 } from "./authoring.js";
 import {
   PLUGIN_QUARANTINE_THRESHOLD_V1,
+  pluginFailureRunKindV1,
   readPluginHealthV1,
   recordPluginFailureV1,
   type PluginFailurePhaseV1,
+  type PluginHealthRecordV1,
 } from "./health.js";
 
 /** One Plugin failing during one Turn, as the mount host reports it. */
@@ -74,29 +76,31 @@ function failureCost(failure: PluginFailureNoticeV1): string {
 /**
  * Where the Plugin stands against the count that would turn it off. A press
  * and a draw are counted the same way a Turn is, but neither is a Turn, so
- * neither may be read back to the person as one.
+ * only a run made of Turns alone may be read back to the person as Turns —
+ * the run the count is of, not whichever failure happened to arrive last.
  */
-function failureCount(
-  failure: PluginFailureNoticeV1,
-  failures: number,
-): string {
-  return failure.card === undefined
-    ? `${failures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failing Turns in a row before it is turned off.`
-    : `${failures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failures in a row before it is turned off.`;
+function failureCount(health: PluginHealthRecordV1): string {
+  return pluginFailureRunKindV1(health) === "turn"
+    ? `${health.consecutiveFailures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failing Turns in a row before it is turned off.`
+    : `${health.consecutiveFailures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failures in a row before it is turned off.`;
 }
 
 /**
  * The run that turned the Plugin off, in the words the notice uses. Presses
- * and draws are counted with Turns, so the run may be any mixture of them;
- * only a run of Turns alone may be read back to the person as Turns.
+ * and draws are counted with Turns, so the run may be any mixture of them: a
+ * run of one kind says which, and a mixed run says only that it failed.
  */
-function quarantineRun(
-  failure: PluginFailureNoticeV1,
-  failures: number,
-): string {
-  return failure.card === undefined
-    ? `failed on ${failures} Turns in a row`
-    : `failed ${failures} times in a row`;
+function quarantineRun(health: PluginHealthRecordV1): string {
+  switch (pluginFailureRunKindV1(health)) {
+    case "turn":
+      return `failed on ${health.consecutiveFailures} Turns in a row`;
+    case "press":
+      return `failed on ${health.consecutiveFailures} card presses in a row`;
+    case "draw":
+      return `failed on ${health.consecutiveFailures} card draws in a row`;
+    default:
+      return `failed ${health.consecutiveFailures} times in a row`;
+  }
 }
 
 /** The notice's title, which must not say a Turn was lost when none was. */
@@ -171,6 +175,7 @@ export async function notePluginFailureV1(
       runId: turn.runId,
       phase: failure.phase,
       message: failure.message,
+      kind: failure.card ?? "turn",
       now: now(),
     },
   );
@@ -192,7 +197,7 @@ export async function notePluginFailureV1(
     createdAt: now().toISOString(),
     title: failureTitle(failure),
     body: `The plugin "${failure.pluginId}" ${failureWords(failure)}: ${failure.message}. ${failureCost(failure)}${
-      quarantined ? "" : ` ${failureCount(failure, health.consecutiveFailures)}`
+      quarantined ? "" : ` ${failureCount(health)}`
     }`.slice(0, 2_000),
   });
   if (quarantined) {
@@ -213,7 +218,7 @@ export async function notePluginFailureV1(
       runId: turn.runId,
       createdAt: now().toISOString(),
       title: "A plugin was turned off",
-      body: `The plugin "${failure.pluginId}" ${quarantineRun(failure, health.consecutiveFailures)} and is now off for this Bot. Turn it on again under Plugins to try it once more.`,
+      body: `The plugin "${failure.pluginId}" ${quarantineRun(health)} and is now off for this Bot. Turn it on again under Plugins to try it once more.`,
       urgency: "critical",
     });
   }
