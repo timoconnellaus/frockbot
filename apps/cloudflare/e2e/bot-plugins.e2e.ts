@@ -100,6 +100,8 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   await openBotPlugins(page);
 
   // The five first-party features the panel offers.
+  // The panel scrolls: the deployment's own seeded plugins are cards here too,
+  // so the five first-party ones no longer all fit the viewport at once.
   for (const slug of [
     "web-built-in",
     "routines-built-in",
@@ -107,7 +109,9 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
     "subagents-built-in",
     "messages-built-in",
   ]) {
-    await expect(sem(page, `view-group-${slug}`).first()).toBeVisible();
+    const card = sem(page, `view-group-${slug}`).first();
+    await card.scrollIntoViewIfNeeded();
+    await expect(card).toBeVisible();
   }
   // Choosing a model is a Settings decision, so it is never a card here.
   await expect(sem(page, "view-group-custom-models-built-in")).toHaveCount(0);
@@ -118,6 +122,9 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
 
   // Web is on for a Bot nobody has switched.
   const web = cardSwitch(page, "Web");
+  // The sweep above left the list scrolled to its last card, and an off-screen
+  // switch is not in the semantics tree at all.
+  await sem(page, "view-group-web-built-in").first().scrollIntoViewIfNeeded();
   await expect(web).toHaveAttribute("aria-checked", "true");
   await web.click();
   await expect(web).toHaveAttribute("aria-checked", "false", {
