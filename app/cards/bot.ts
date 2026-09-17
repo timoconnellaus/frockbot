@@ -521,17 +521,25 @@ export function cardActionInvocationV1(
 
 /**
  * Why the kernel will not put this press to the Plugin, or `undefined` when
- * it will. Two different things are said apart, the way an admission refusal
- * and a missing capability are: a Plugin this Bot is not running cannot
- * answer any of its cards' controls, and a Plugin that is running answers
- * only the actions the descriptor the Composition mounted declares. Neither
- * is the Plugin failing — it never ran — so neither is charged to it.
+ * it will. Three different things are said apart, the way an admission
+ * refusal and a missing capability are: a Plugin the Composition no longer
+ * carries, a member this Bot has switched off, and a member that is on but
+ * whose descriptor declares no such action. None is the Plugin failing — it
+ * never ran — so none is charged to it.
  */
 async function pluginCardActionRefusalV1(
   state: ShellBotStateV1,
   roster: BotPluginRosterV1,
   handler: { pluginId: string; cardId: string; action: string },
 ): Promise<string | undefined> {
+  const member = roster.members.find(
+    (candidate) => candidate.packageId === handler.pluginId,
+  );
+  // A Plugin the Composition no longer carries has no switch to throw, so it
+  // must not be described as one a person could turn back on.
+  if (member === undefined) {
+    return `this Bot no longer runs plugin "${handler.pluginId}", so this card's controls do nothing`;
+  }
   if (!roster.enabled.includes(handler.pluginId)) {
     // The switch reads the same whoever threw it, so the health record is
     // what says whether the person turned this Plugin off or a quarantine
@@ -544,10 +552,7 @@ async function pluginCardActionRefusalV1(
       ? `plugin "${handler.pluginId}" was turned off for this Bot after it failed repeatedly, so this card's controls do nothing until it is turned on again under Plugins`
       : `plugin "${handler.pluginId}" is switched off for this Bot, so this card's controls do nothing until it is turned back on under Plugins`;
   }
-  const member = roster.members.find(
-    (candidate) => candidate.packageId === handler.pluginId,
-  );
-  const declared = (member?.descriptor.cards ?? []).some(
+  const declared = (member.descriptor.cards ?? []).some(
     (card) =>
       card.id === handler.cardId &&
       card.actions.some((action) => action.name === handler.action),

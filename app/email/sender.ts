@@ -51,9 +51,64 @@ export function emailMessageIdV1(from: string): string {
   return `<${crypto.randomUUID()}@${domain}>`;
 }
 
-/** One line of a header, with anything that could start another removed. */
+/** One header, from a value already sanitised and folded. */
 function headerLine(name: string, value: string): string {
-  return `${name}: ${value.replace(/[\r\n]+/g, " ")}`;
+  return `${name}: ${value}`;
+}
+
+/** Anything that could start another header, removed. */
+function headerValue(value: string): string {
+  return value.replace(/[\r\n]+/g, " ");
+}
+
+/**
+ * A header value as RFC 2047 encoded-words: UTF-8, Base64, split so that no
+ * word passes the 75-octet limit and no multi-byte character is cut in half,
+ * and folded onto continuation lines so no header line approaches 998.
+ */
+function encodedWords(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  const words: string[] = [];
+  for (let start = 0; start < bytes.length;) {
+    let end = Math.min(start + 45, bytes.length);
+    while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+    let binary = "";
+    for (const byte of bytes.subarray(start, end))
+      binary += String.fromCharCode(byte);
+    words.push(`=?utf-8?B?${btoa(binary)}?=`);
+    start = end;
+  }
+  return words.join("\r\n ");
+}
+
+/**
+ * Text in a header: left exactly as it is while it is plain ASCII, so the
+ * common message is the bytes it always was, and encoded when it is not —
+ * a header is not covered by the body's `charset`, and a recipient's client
+ * reading raw UTF-8 there shows mojibake rather than what was written.
+ */
+function headerText(value: string): string {
+  const sanitised = headerValue(value);
+  return /^[\x20-\x7e\t]*$/.test(sanitised)
+    ? sanitised
+    : encodedWords(sanitised);
+}
+
+/**
+ * An address list. The addresses themselves are left exactly as they are —
+ * they are what the envelope carries — and only a display name in front of
+ * one is encoded, since that is the part free text can reach.
+ */
+function headerAddressList(values: string[]): string {
+  return values
+    .map((value) => {
+      const sanitised = headerValue(value);
+      const named = /^\s*(.+?)\s*(<[^<>]*>)\s*$/.exec(sanitised);
+      return named === null
+        ? sanitised
+        : `${headerText(named[1]!)} ${named[2]!}`;
+    })
+    .join(", ");
 }
 
 /**
@@ -65,18 +120,18 @@ export function composeEmailMessageV1(
   from: { address: string; messageId: string },
 ): string {
   const headers = [
-    headerLine("From", from.address),
-    headerLine("To", request.to.join(", ")),
+    headerLine("From", headerValue(from.address)),
+    headerLine("To", headerAddressList(request.to)),
     ...(request.cc && request.cc.length > 0
-      ? [headerLine("Cc", request.cc.join(", "))]
+      ? [headerLine("Cc", headerAddressList(request.cc))]
       : []),
-    headerLine("Subject", request.subject),
-    headerLine("Message-ID", from.messageId),
+    headerLine("Subject", headerText(request.subject)),
+    headerLine("Message-ID", headerValue(from.messageId)),
     ...(request.inReplyTo === undefined
       ? []
       : [
-          headerLine("In-Reply-To", request.inReplyTo),
-          headerLine("References", request.inReplyTo),
+          headerLine("In-Reply-To", headerValue(request.inReplyTo)),
+          headerLine("References", headerValue(request.inReplyTo)),
         ]),
     headerLine("Date", new Date().toUTCString()),
     "MIME-Version: 1.0",

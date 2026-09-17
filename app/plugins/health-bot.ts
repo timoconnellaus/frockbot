@@ -85,6 +85,20 @@ function failureCount(
     : `${failures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failures in a row before it is turned off.`;
 }
 
+/**
+ * The run that turned the Plugin off, in the words the notice uses. Presses
+ * and draws are counted with Turns, so the run may be any mixture of them;
+ * only a run of Turns alone may be read back to the person as Turns.
+ */
+function quarantineRun(
+  failure: PluginFailureNoticeV1,
+  failures: number,
+): string {
+  return failure.card === undefined
+    ? `failed on ${failures} Turns in a row`
+    : `failed ${failures} times in a row`;
+}
+
 /** The notice's title, which must not say a Turn was lost when none was. */
 function failureTitle(failure: PluginFailureNoticeV1): string {
   switch (failure.card) {
@@ -199,7 +213,7 @@ export async function notePluginFailureV1(
       runId: turn.runId,
       createdAt: now().toISOString(),
       title: "A plugin was turned off",
-      body: `The plugin "${failure.pluginId}" failed on ${health.consecutiveFailures} Turns in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.`,
+      body: `The plugin "${failure.pluginId}" ${quarantineRun(failure, health.consecutiveFailures)} and is now off for this Bot. Turn it on again under Plugins to try it once more.`,
       urgency: "critical",
     });
   }

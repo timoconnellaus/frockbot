@@ -54,6 +54,8 @@ function harness(
    * a generation that reads rather than one that cannot be reached at all.
    */
   declaredCards?: { id: string; actions: { name: string }[] }[],
+  /** The member that declares them, which is not always the one pressed. */
+  memberPackageId = "email",
 ) {
   const notices: { title: string; body: string }[] = [];
   const storage = {
@@ -96,7 +98,7 @@ function harness(
                   status: "active",
                   members: [
                     {
-                      packageId: "email",
+                      packageId: memberPackageId,
                       version: "1.0.0",
                       descriptor: { cards: declaredCards },
                     },
@@ -458,6 +460,45 @@ describe("the three routes", () => {
     // The Card is exactly as it was, and no failure was charged.
     expect(receipt.card.revision).toBe(2);
     expect(values.get(cardKeyV1(SURFACE))).toMatchObject({ revision: 2 });
+    expect(notices).toHaveLength(0);
+    expect(
+      [...values.keys()].filter((key) => key.startsWith("plugin:health:")),
+    ).toHaveLength(0);
+  });
+
+  /**
+   * A Plugin the Composition no longer carries has no switch on the Plugins
+   * page, so the refusal must not send the person looking for one.
+   */
+  test("a press on a Plugin this Bot no longer runs says so, not that it is switched off", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: true },
+          updatedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(
+      values,
+      undefined,
+      [{ id: "draft", actions: [{ name: "regenerate" }] }],
+      "calendar",
+    );
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure).toContain("no longer runs");
+    expect(receipt.failure).not.toContain("switched off");
+    expect(receipt.failure).not.toContain("declares no action");
+    expect(receipt.card.revision).toBe(2);
     expect(notices).toHaveLength(0);
     expect(
       [...values.keys()].filter((key) => key.startsWith("plugin:health:")),

@@ -1,6 +1,6 @@
 // What the deployment's sender reports, which is what a caller may retry.
 import { describe, expect, mock, test } from "bun:test";
-import { createBindingEmailSenderV1 } from "./sender.ts";
+import { composeEmailMessageV1, createBindingEmailSenderV1 } from "./sender.ts";
 
 // The platform module the sender imports only when it actually sends. It does
 // not exist outside workerd, so the envelope class stands in for it here.
@@ -87,5 +87,83 @@ describe("the deployment's binding sender", () => {
       "sam@example.com",
       "cc@example.com",
     ]);
+  });
+});
+
+/**
+ * The composed message is this module's own byte contract: an RFC 5322
+ * message a recipient's client parses, so what the header block says is
+ * asserted here directly.
+ */
+describe("the composed message's headers", () => {
+  const from = { address: "bot@example.com", messageId: "<id@example.com>" };
+
+  function headerBlock(raw: string): string {
+    return raw.slice(0, raw.indexOf("\r\n\r\n"));
+  }
+
+  /** What a client makes of an encoded-word header: the text that was meant. */
+  function decodeHeader(value: string): string {
+    return value
+      .replace(/\r\n /g, "")
+      .replace(/=\?utf-8\?B\?([^?]*)\?=/g, (_match, encoded: string) =>
+        new TextDecoder().decode(
+          Uint8Array.from(atob(encoded), (character) =>
+            character.charCodeAt(0),
+          ),
+        ),
+      );
+  }
+
+  test("a subject with an accent and an em dash travels as an encoded-word", () => {
+    const raw = composeEmailMessageV1(
+      { ...request, subject: "Café — update" },
+      from,
+    );
+    expect(headerBlock(raw)).toContain(
+      "Subject: =?utf-8?B?Q2Fmw6kg4oCUIHVwZGF0ZQ==?=",
+    );
+  });
+
+  test("a plain ASCII subject is the bytes it always was", () => {
+    const raw = composeEmailMessageV1(request, from);
+    expect(headerBlock(raw)).toContain("Subject: Re: Following up");
+    expect(headerBlock(raw)).not.toContain("=?utf-8?B?");
+  });
+
+  test("a long encoded subject folds, and every line stays under 998 octets", () => {
+    const subject = `Résumé ${"x".repeat(400)}`;
+    const raw = composeEmailMessageV1({ ...request, subject }, from);
+    const lines = headerBlock(raw).split("\r\n");
+    expect(lines.filter((line) => line.startsWith(" ")).length).toBeGreaterThan(
+      0,
+    );
+    for (const line of lines) {
+      expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(998);
+      // No encoded-word may pass 75 octets, folded or not.
+      for (const word of line.match(/=\?utf-8\?B\?[^?]*\?=/g) ?? []) {
+        expect(word.length).toBeLessThanOrEqual(75);
+      }
+    }
+    const folded = headerBlock(raw)
+      .split("\r\nSubject: ")[1]!
+      .split(/\r\n(?! )/)[0]!;
+    expect(decodeHeader(folded)).toBe(subject);
+  });
+
+  test("a display name is encoded while its address is left alone", () => {
+    const raw = composeEmailMessageV1(
+      {
+        ...request,
+        to: ["Zoë Dupont <zoe@example.com>"],
+        cc: ["cc@example.com"],
+      },
+      from,
+    );
+    const block = headerBlock(raw);
+    expect(block).toContain("<zoe@example.com>");
+    expect(block).toContain("Cc: cc@example.com");
+    const to = block.split("\r\nTo: ")[1]!.split(/\r\n(?! )/)[0]!;
+    expect(decodeHeader(to)).toBe("Zoë Dupont <zoe@example.com>");
   });
 });

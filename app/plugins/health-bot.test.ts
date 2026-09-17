@@ -103,6 +103,41 @@ describe("a Plugin failing more than once in one Turn", () => {
     );
   });
 
+  // The threshold notice is the last thing the person reads about the run
+  // that turned the Plugin off, and a run of presses is not a run of Turns.
+  test("the threshold notice counts presses as presses and Turns as Turns", async () => {
+    const { state: pressed, notices: pressNotices } = harness();
+    for (const runId of ["run-1", "run-2", "run-3"]) {
+      await notePluginFailureV1(
+        pressed,
+        { runId, generationId: "gen-1" },
+        {
+          pluginId: "email",
+          phase: "hook",
+          message: "the handler threw",
+          card: "press",
+        },
+      );
+    }
+    const pressQuarantine = pressNotices.at(-1);
+    expect(pressQuarantine?.title).toBe("A plugin was turned off");
+    expect(pressQuarantine?.body).toBe(
+      'The plugin "email" failed 3 times in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
+    );
+
+    const { state: hooked, notices: hookNotices } = harness();
+    for (const runId of ["run-1", "run-2", "run-3"]) {
+      await notePluginFailureV1(
+        hooked,
+        { runId, generationId: "gen-1" },
+        { pluginId: "email", phase: "hook", message: "beforeModel threw" },
+      );
+    }
+    expect(hookNotices.at(-1)?.body).toBe(
+      'The plugin "email" failed on 3 Turns in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
+    );
+  });
+
   test("the same thing failing twice in one Turn is one notice", async () => {
     const { state, notices } = harness();
     for (const message of ["render threw", "render threw again"]) {
