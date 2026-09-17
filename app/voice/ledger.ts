@@ -48,6 +48,13 @@ export interface VoiceCallRecordV1 {
   startedAt: string;
   lastSeenAt: string;
   turnSequence: number;
+  /**
+   * The Bot this call is talking to (ADR 0029), durable so the Bot survives
+   * the object being evicted mid-call and a rejoin comes back to the same
+   * conversation. Absent on a record written before per-Bot calls, and on a
+   * client that never named one; the object falls back to General.
+   */
+  botId?: string;
 }
 
 export type VoiceTurnStateV1 = "admitted" | "answered" | "failed" | "abandoned";
@@ -281,6 +288,8 @@ export class VoiceLedgerV1 {
     deviceKey: string;
     connectionId: string;
     at: Date;
+    /** The Bot the client opened the call on; a rejoin keeps the one it had. */
+    botId?: string;
   }): Promise<VoiceCallAdmissionV1> {
     const previous = await this.currentCall();
     const at = input.at.toISOString();
@@ -310,6 +319,7 @@ export class VoiceLedgerV1 {
       startedAt: at,
       lastSeenAt: at,
       turnSequence: 0,
+      ...(input.botId ? { botId: input.botId } : {}),
     };
     await this.storage.put(VOICE_CALL_KEY_V1, call);
     if (previous) await this.cancelOpenDelegations(previous.callId);
@@ -317,6 +327,32 @@ export class VoiceLedgerV1 {
       return { status: "superseded", call, previous, replaced: previous };
     }
     return { status: "admitted", call, rejoined: false };
+  }
+
+  /**
+   * Points the live call at another Bot (ADR 0029, `switch_bot`).
+   *
+   * Only the connection that holds the call may retarget it, and the record
+   * is written before the voice changes, so an eviction between the two
+   * leaves the call on the Bot the person was last told about rather than on
+   * one nobody heard named. A delegation the previous Bot still owes is
+   * deliberately left open: it belongs to the call, not to the target, and
+   * is read out in that Bot's own voice when it lands.
+   */
+  async retargetCall(
+    connectionId: string,
+    botId: string,
+    at: Date,
+  ): Promise<VoiceCallRecordV1 | undefined> {
+    const call = await this.currentCall();
+    if (!call || call.connectionId !== connectionId) return undefined;
+    const next: VoiceCallRecordV1 = {
+      ...call,
+      botId,
+      lastSeenAt: at.toISOString(),
+    };
+    await this.storage.put(VOICE_CALL_KEY_V1, next);
+    return next;
   }
 
   async touchCall(connectionId: string, at: Date): Promise<void> {

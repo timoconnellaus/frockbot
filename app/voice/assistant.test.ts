@@ -76,8 +76,8 @@ describe("the chat completion stream parser", () => {
         sse([
           text("Hel"),
           text("lo"),
-          toolCall(0, "call_1", "ask_bot", '{"bot_id":'),
-          toolArgs(0, '"remy","message":"plan"}'),
+          toolCall(0, "call_1", "ask", "{"),
+          toolArgs(0, '"message":"plan"}'),
           toolCall(1, "call_2", "list_bots", "{}"),
           { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
         ]),
@@ -90,8 +90,8 @@ describe("the chat completion stream parser", () => {
         type: "tool-call",
         call: {
           id: "call_1",
-          name: "ask_bot",
-          arguments: '{"bot_id":"remy","message":"plan"}',
+          name: "ask",
+          arguments: '{"message":"plan"}',
         },
       },
       {
@@ -127,13 +127,16 @@ function host(
 ): VoiceAssistantHostV1 & {
   bodies: Record<string, unknown>[];
   asked: string[];
+  switched: string[];
 } {
   const bodies: Record<string, unknown>[] = [];
   const asked: string[] = [];
+  const switched: string[] = [];
   let step = 0;
   return {
     bodies,
     asked,
+    switched,
     chat: async (body) => {
       bodies.push(body);
       const events = steps[Math.min(step, steps.length - 1)]!();
@@ -163,6 +166,22 @@ function host(
       return `Asked ${botId}.`;
     },
     cancelBot: async (botId) => `Stopped ${botId}.`,
+    switchBot: async (botId) => {
+      const bot = { remy: "Remy", finch: "Finch" }[botId];
+      if (!bot) {
+        return {
+          status: "refused" as const,
+          message: `There is no Bot called ${botId}.`,
+        };
+      }
+      switched.push(botId);
+      return {
+        status: "switched" as const,
+        botId,
+        name: bot,
+        message: `You are now ${bot}.`,
+      };
+    },
     recallProject: async (projectId) => `Project ${projectId}: nothing yet.`,
     remember: async ({ text, kind }) => `Kept ${kind}: ${text}`,
     forget: async (text) => `Dropped ${text}`,
@@ -175,6 +194,9 @@ const baseInput = (transcript: string) => ({
   history: [] as { role: "user" | "assistant"; content: string }[],
   transcript,
   signal: new AbortController().signal,
+  // Every call talks to one Bot (ADR 0029); the fake directory's first Bot
+  // stands in for it, and a test that switches names the other one.
+  botId: "remy",
 });
 
 describe("the bridge phrase", () => {
@@ -275,6 +297,8 @@ describe("one voice turn", () => {
       answer: "Sure, it is ten.",
       delegations: 0,
       outcome: "answered",
+      botId: "remy",
+      switched: false,
     });
     expect(h.bodies).toHaveLength(1);
     expect((h.bodies[0]!.messages as unknown[]).at(-1)).toEqual({
@@ -287,12 +311,7 @@ describe("one voice turn", () => {
   test("runs tools, feeds results back, and speaks the second answer", async () => {
     const h = host([
       () => [
-        toolCall(
-          0,
-          "c1",
-          "ask_bot",
-          '{"bot_id":"remy","message":"plan my week"}',
-        ),
+        toolCall(0, "c1", "ask", '{"bot_id":"remy","message":"plan my week"}'),
       ],
       () => [text("I've asked Remy to plan your week.")],
     ]);
@@ -329,16 +348,11 @@ describe("one voice turn", () => {
     const h = host(
       [
         () => [
-          toolCall(
-            0,
-            "read",
-            "read_bot_history",
-            '{"bot_id":"remy","limit":2}',
-          ),
+          toolCall(0, "read", "read_history", '{"bot_id":"remy","limit":2}'),
           toolCall(
             1,
             "search",
-            "search_bot_history",
+            "search_history",
             '{"bot_id":"remy","query":"calendar"}',
           ),
         ],
@@ -409,14 +423,14 @@ describe("one voice turn", () => {
   });
 
   test.each([
-    ['{"bot_id":"remy","limit":0}', "read_bot_history"],
-    ['{"bot_id":"remy","limit":1.5}', "read_bot_history"],
-    ['{"bot_id":"remy","limit":9}', "read_bot_history"],
-    ['{"bot_id":"remy","limit":"2"}', "read_bot_history"],
-    ['{"bot_id":"remy","query":""}', "search_bot_history"],
+    ['{"bot_id":"remy","limit":0}', "read_history"],
+    ['{"bot_id":"remy","limit":1.5}', "read_history"],
+    ['{"bot_id":"remy","limit":9}', "read_history"],
+    ['{"bot_id":"remy","limit":"2"}', "read_history"],
+    ['{"bot_id":"remy","query":""}', "search_history"],
     [
       JSON.stringify({ bot_id: "remy", query: "x".repeat(257) }),
-      "search_bot_history",
+      "search_history",
     ],
   ])(
     "refuses invalid history arguments before touching a Bot: %s",
@@ -449,9 +463,7 @@ describe("one voice turn", () => {
   test("an ownership refusal stays a read failure and never falls back to asking the Bot", async () => {
     const h = host(
       [
-        () => [
-          toolCall(0, "foreign", "read_bot_history", '{"bot_id":"foreign"}'),
-        ],
+        () => [toolCall(0, "foreign", "read_history", '{"bot_id":"foreign"}')],
         () => [text("That Bot is not in your account.")],
       ],
       {
@@ -471,7 +483,7 @@ describe("one voice turn", () => {
   test("a tool that throws becomes a result the model hears, not a failed turn", async () => {
     const h = host(
       [
-        () => [toolCall(0, "c1", "bot_status", '{"bot_id":"ghost"}')],
+        () => [toolCall(0, "c1", "status", '{"bot_id":"ghost"}')],
         () => [text("I couldn't find that Bot.")],
       ],
       {
@@ -506,7 +518,7 @@ describe("one voice turn", () => {
     const h = host([
       () => [
         text("Let me check. "),
-        toolCall(0, "c1", "bot_status", '{"bot_id":"remy"}'),
+        toolCall(0, "c1", "status", '{"bot_id":"remy"}'),
       ],
       () => [text("Remy is idle.")],
     ]);
@@ -531,12 +543,7 @@ describe("one voice turn", () => {
     controller.abort();
     pending.resolve(
       sse([
-        toolCall(
-          0,
-          "c1",
-          "ask_bot",
-          '{"bot_id":"remy","message":"check emails"}',
-        ),
+        toolCall(0, "c1", "ask", '{"bot_id":"remy","message":"check emails"}'),
       ]),
     );
     expect(await collect(turn)).toEqual([]);
@@ -558,12 +565,7 @@ describe("one voice turn", () => {
     expect((await turn.next()).value?.kind).toBe("bridge");
     pending.resolve(
       sse([
-        toolCall(
-          0,
-          "c1",
-          "ask_bot",
-          '{"bot_id":"remy","message":"check emails"}',
-        ),
+        toolCall(0, "c1", "ask", '{"bot_id":"remy","message":"check emails"}'),
       ]),
     );
     expect(await collect(turn)).toEqual([
@@ -575,7 +577,7 @@ describe("one voice turn", () => {
 
   test("refuses to delegate past the per-turn bound", async () => {
     const calls = Array.from({ length: 9 }, (_, i) =>
-      toolCall(i, `c${i}`, "ask_bot", `{"bot_id":"remy","message":"job ${i}"}`),
+      toolCall(i, `c${i}`, "ask", `{"bot_id":"remy","message":"job ${i}"}`),
     );
     const h = host([() => calls, () => [text("Done asking.")]]);
     let result: VoiceTurnResultV1 | undefined;
@@ -810,6 +812,8 @@ describe("the system prompt", () => {
       answer: "Bob says it is sunny.",
       delegations: 0,
       outcome: "answered",
+      botId: "remy",
+      switched: false,
     });
   });
 
@@ -850,6 +854,8 @@ describe("the system prompt", () => {
       answer: "",
       delegations: 0,
       outcome: "no_output",
+      botId: "remy",
+      switched: false,
     });
   });
 
