@@ -67,7 +67,6 @@ A small pill stating what state the card is in. One per card, beside its title.
 | -------- | ---------------------------------------------------------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `label`  | DynamicString                                              | yes      | bindable | The words on the pill, e.g. 'Ready to send' or 'Sent'. Bind this to the data model when the card settles.                                                                                 |
 | `tone`   | `neutral` \| `ready` \| `success` \| `warning` \| `danger` | no       | literal  | What the state means, which is what the host colours the pill by. 'ready' is waiting on the person, 'success' is done, 'warning' needs attention, 'danger' failed. Defaults to 'neutral'. |
-| `weight` | number                                                     | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                    |
 
 ```json
 {
@@ -81,10 +80,9 @@ A small pill stating what state the card is in. One per card, beside its title.
 
 Labelled values in a column, one per row: From, To, Cc, Subject. For facts about the thing the card shows, never as a form.
 
-| Property | Type                                             | Required | Binding                       | What it is                                                                             |
-| -------- | ------------------------------------------------ | -------- | ----------------------------- | -------------------------------------------------------------------------------------- |
-| `rows`   | array of { label: string, value: DynamicString } | yes      | literal rows; values bindable | The rows, in the order they are read.                                                  |
-| `weight` | number                                           | no       | literal                       | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
+| Property | Type                                             | Required | Binding                       | What it is                            |
+| -------- | ------------------------------------------------ | -------- | ----------------------------- | ------------------------------------- |
+| `rows`   | array of { label: string, value: DynamicString } | yes      | literal rows; values bindable | The rows, in the order they are read. |
 
 ```json
 {
@@ -103,11 +101,10 @@ Labelled values in a column, one per row: From, To, Cc, Subject. For facts about
 
 A body of text that starts collapsed, with a control that shows the rest. For a draft, a quote, or anything longer than the card.
 
-| Property         | Type          | Required | Binding  | What it is                                                                             |
-| ---------------- | ------------- | -------- | -------- | -------------------------------------------------------------------------------------- |
-| `text`           | DynamicString | yes      | bindable | The body. Plain text; a card is not a document.                                        |
-| `collapsedLines` | integer       | no       | literal  | How many lines are shown before the control appears. Defaults to 6.                    |
-| `weight`         | number        | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
+| Property         | Type          | Required | Binding  | What it is                                                          |
+| ---------------- | ------------- | -------- | -------- | ------------------------------------------------------------------- |
+| `text`           | DynamicString | yes      | bindable | The body. Plain text; a card is not a document.                     |
+| `collapsedLines` | integer       | no       | literal  | How many lines are shown before the control appears. Defaults to 6. |
 
 ```json
 {
@@ -126,7 +123,6 @@ The approve and decline controls for one Approval the kernel issued. Compose it 
 | `approvalId`   | string | yes      | literal | The id the kernel issued when the Bot proposed the action. A card cannot invent one: an id the kernel never recorded is refused when the button is pressed. |
 | `approveLabel` | string | no       | literal | The word on the approving control. Defaults to 'Approve'.                                                                                                   |
 | `declineLabel` | string | no       | literal | The word on the declining control. Defaults to 'Decline'.                                                                                                   |
-| `weight`       | number | no       | literal | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                      |
 
 ```json
 {
@@ -146,7 +142,6 @@ What a card settles into: its title, the pill saying what happened, and one line
 | `status`  | DynamicString                                              | yes      | bindable | The words on the pill, e.g. 'Sent'.                                                         |
 | `tone`    | `neutral` \| `ready` \| `success` \| `warning` \| `danger` | no       | literal  | What the state means. Defaults to 'success', because a receipt usually says a thing worked. |
 | `summary` | DynamicString                                              | no       | bindable | One line saying what was done, e.g. 'Sent to nick@example.com — Re: Following up'.          |
-| `weight`  | number                                                     | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.      |
 
 ```json
 {

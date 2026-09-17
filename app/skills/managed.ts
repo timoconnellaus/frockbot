@@ -48,7 +48,8 @@ import {
 
 // Re-exported because the generated modules they come from are not package
 // exports, and a caller outside this package needs the slugs to withhold them.
-export { APPLETS_SKILL_SLUG_V1, PLUGINS_SKILL_SLUG_V1, A2UI_SKILL_SLUG_V1 };
+// `a2ui` is not among them: it is offered to every Bot, so nothing withholds it.
+export { APPLETS_SKILL_SLUG_V1, PLUGINS_SKILL_SLUG_V1 };
 
 /** The directory prefix a managed Skill's synthetic path carries. */
 export const MANAGED_SKILL_PATH_PREFIX = "managed";

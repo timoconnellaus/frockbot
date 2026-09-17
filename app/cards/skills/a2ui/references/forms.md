@@ -52,7 +52,7 @@ number on a range the person can see the ends of.
 | `value`            | DynamicString                                           | no       | bindable            | The value of the text field.                                                                           |
 | `variant`          | `longText` \| `number` \| `shortText` \| `obscured`     | no       | literal             | The type of input field to display. Defaults to `"shortText"`.                                         |
 | `validationRegexp` | string                                                  | no       | literal             | A regular expression used for client-side validation of the input.                                     |
-| `weight`           | number                                                  | no       | literal             | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                 |
+| `weight`           | integer                                                 | no       | literal             | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                 |
 | `checks`           | array of { condition: DynamicBoolean, message: string } | no       | conditions bindable | Client-side validation. Each condition is a boolean function call; the message shows when it is false. |
 
 ```json
@@ -69,7 +69,7 @@ number on a range the person can see the ends of.
 | -------- | ------------------------------------------------------- | -------- | ------------------- | ------------------------------------------------------------------------------------------------------ |
 | `label`  | DynamicString                                           | yes      | bindable            | The text to display next to the checkbox.                                                              |
 | `value`  | DynamicBoolean                                          | yes      | bindable            | The current state of the checkbox (true for checked, false for unchecked).                             |
-| `weight` | number                                                  | no       | literal             | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                 |
+| `weight` | integer                                                 | no       | literal             | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                 |
 | `checks` | array of { condition: DynamicBoolean, message: string } | no       | conditions bindable | Client-side validation. Each condition is a boolean function call; the message shows when it is false. |
 
 ```json
@@ -91,7 +91,7 @@ number on a range the person can see the ends of.
 | `min`        | DynamicString                                           | no       | bindable            | The minimum allowed date/time in ISO 8601 format.                                                        |
 | `max`        | DynamicString                                           | no       | bindable            | The maximum allowed date/time in ISO 8601 format.                                                        |
 | `label`      | DynamicString                                           | no       | bindable            | The text label for the input field.                                                                      |
-| `weight`     | number                                                  | no       | literal             | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                   |
+| `weight`     | integer                                                 | no       | literal             | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                   |
 | `checks`     | array of { condition: DynamicBoolean, message: string } | no       | conditions bindable | Client-side validation. Each condition is a boolean function call; the message shows when it is false.   |
 
 ```json
@@ -114,7 +114,7 @@ A component that allows selecting one or more options from a list.
 | `value`        | DynamicStringList                                       | yes      | bindable                      | The list of currently selected values. This should be bound to a string array in the data model.       |
 | `displayStyle` | `checkbox` \| `chips`                                   | no       | literal                       | The display style of the component. Defaults to `"checkbox"`.                                          |
 | `filterable`   | boolean                                                 | no       | literal                       | If true, displays a search input to filter the options. Defaults to `false`.                           |
-| `weight`       | number                                                  | no       | literal                       | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                 |
+| `weight`       | integer                                                 | no       | literal                       | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                 |
 | `checks`       | array of { condition: DynamicBoolean, message: string } | no       | conditions bindable           | Client-side validation. Each condition is a boolean function call; the message shows when it is false. |
 
 ```json
@@ -139,7 +139,7 @@ A component that allows selecting one or more options from a list.
 | `min`    | number                                                  | no       | literal             | The minimum value of the slider. Defaults to `0`.                                                      |
 | `max`    | number                                                  | yes      | literal             | The maximum value of the slider.                                                                       |
 | `value`  | DynamicNumber                                           | yes      | bindable            | The current value of the slider.                                                                       |
-| `weight` | number                                                  | no       | literal             | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                 |
+| `weight` | integer                                                 | no       | literal             | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                 |
 | `checks` | array of { condition: DynamicBoolean, message: string } | no       | conditions bindable | Client-side validation. Each condition is a boolean function call; the message shows when it is false. |
 
 ```json

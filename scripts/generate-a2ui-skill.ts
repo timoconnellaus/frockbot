@@ -28,10 +28,7 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { format } from "prettier";
-import {
-  SKILL_MAX_FILE_BYTES,
-  SKILL_MAX_REFERENCES,
-} from "../app/skills/skill-md.ts";
+import { SKILL_MAX_FILE_BYTES } from "../app/skills/skill-md.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const skill = resolve(root, "app/cards/skills/a2ui");
@@ -64,6 +61,7 @@ interface JsonSchema {
 interface CatalogFile {
   components: Record<string, JsonSchema>;
   functions?: Record<string, JsonSchema>;
+  $defs?: Record<string, JsonSchema>;
 }
 
 function readCatalog(path: string): CatalogFile {
@@ -174,8 +172,8 @@ function describe(schema: JsonSchema): string {
  */
 function exampleValue(name: string, schema: JsonSchema): unknown {
   const named = refName(schema);
-  if (named === "ComponentId") return "body";
-  if (named === "ChildList") return ["body"];
+  if (named === "ComponentId") return `\${${name}}`;
+  if (named === "ChildList") return [`\${${name}}`];
   if (named === "Action") return { event: { name: "confirm" } };
   if (named === "DynamicString") return `\${${name}}`;
   if (named === "DynamicNumber") return 0;
@@ -221,7 +219,11 @@ function readable(value: unknown): unknown {
   return value;
 }
 
-function componentSection(name: string, schema: JsonSchema): string {
+function componentSection(
+  name: string,
+  schema: JsonSchema,
+  common: JsonSchema,
+): string {
   const own = ownSchema(schema);
   const required = new Set(own.required ?? []);
   const lines: string[] = [];
@@ -252,9 +254,16 @@ function componentSection(name: string, schema: JsonSchema): string {
     );
     if (need) example[property] = exampleValue(property, member);
   }
-  lines.push(
-    `| \`weight\` | number | no | literal | Its share of a \`Row\` or \`Column\`, like CSS \`flex-grow\`. Only on a direct child of one. |`,
-  );
+  // `weight` is common to a catalog, not to a component, and only the basic
+  // catalog declares it: a Frock component is `unevaluatedProperties: false`
+  // and would be refused carrying one. The renderer reads it with `as int?`
+  // (genui `basic_catalog_widgets/row.dart`), so a fractional weight throws
+  // while the child is built — the table says `integer` for that reason.
+  if (common.properties?.weight) {
+    lines.push(
+      `| \`weight\` | integer | no | literal | Its share of a \`Row\` or \`Column\`, like CSS \`flex-grow\`. Only on a direct child of one. |`,
+    );
+  }
   // `Checkable` is contributed by `$ref`, not by the component's own
   // properties, so the row is emitted from the reference rather than skipped:
   // a Bot reading this table would otherwise never learn `checks` exists.
@@ -322,16 +331,19 @@ async function build(): Promise<Map<string, string>> {
   // component names, and every name either catalog declares is in this set.
   const components = { ...basic.components, ...frock.components };
   const functions = basic.functions ?? {};
+  // Which catalog declared a component, remembered as that catalog's common
+  // properties, because those are the rows the component carries beyond its
+  // own and the two catalogs do not declare the same ones.
+  const commons: Record<string, JsonSchema> = {};
+  for (const catalog of [basic, frock]) {
+    const common = catalog.$defs?.CatalogComponentCommon ?? {};
+    for (const entry of Object.keys(catalog.components)) commons[entry] = common;
+  }
 
   const names = readdirSync(templates)
     .filter((name) => name.endsWith(".md"))
     .sort();
   if (names.length === 0) throw new Error("no templates to stitch");
-  if (names.length > SKILL_MAX_REFERENCES) {
-    throw new Error(
-      `${names.length} references; the loader's bound is ${SKILL_MAX_REFERENCES}`,
-    );
-  }
 
   const covered = {
     components: new Set<string>(),
@@ -363,7 +375,7 @@ async function build(): Promise<Map<string, string>> {
         covered[kind].add(entry);
         sections.push(
           kind === "components"
-            ? componentSection(entry, schema)
+            ? componentSection(entry, schema, commons[entry] ?? {})
             : functionSection(entry, schema),
         );
       }

@@ -37,13 +37,13 @@ A layout component that arranges its children horizontally. To create a grid lay
 | `children` | ChildList                                                                                     | yes      | ids, or a template | Defines the children. Use an array of strings for a fixed set of children, or a template object to generate children from a data list. Children cannot be defined inline, they must be referred to by ID. |
 | `justify`  | `center` \| `end` \| `spaceAround` \| `spaceBetween` \| `spaceEvenly` \| `start` \| `stretch` | no       | literal            | Defines the arrangement of children along the main axis (horizontally). Use 'spaceBetween' to push items to the edges, or 'start'/'end'/'center' to pack them together. Defaults to `"start"`.            |
 | `align`    | `start` \| `center` \| `end` \| `stretch`                                                     | no       | literal            | Defines the alignment of children along the cross axis (vertically). This is similar to the CSS 'align-items' property, but uses camelCase values (e.g., 'start'). Defaults to `"stretch"`.               |
-| `weight`   | number                                                                                        | no       | literal            | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                    |
+| `weight`   | integer                                                                                       | no       | literal            | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                    |
 
 ```json
 {
   "id": "root",
   "component": "Row",
-  "children": ["body"]
+  "children": ["…children…"]
 }
 ```
 
@@ -56,13 +56,13 @@ A layout component that arranges its children vertically. To create a grid layou
 | `children` | ChildList                                                                                     | yes      | ids, or a template | Defines the children. Use an array of strings for a fixed set of children, or a template object to generate children from a data list. Children cannot be defined inline, they must be referred to by ID.                           |
 | `justify`  | `start` \| `center` \| `end` \| `spaceBetween` \| `spaceAround` \| `spaceEvenly` \| `stretch` | no       | literal            | Defines the arrangement of children along the main axis (vertically). Use 'spaceBetween' to push items to the edges (e.g. header at top, footer at bottom), or 'start'/'end'/'center' to pack them together. Defaults to `"start"`. |
 | `align`    | `center` \| `end` \| `start` \| `stretch`                                                     | no       | literal            | Defines the alignment of children along the cross axis (horizontally). This is similar to the CSS 'align-items' property. Defaults to `"stretch"`.                                                                                  |
-| `weight`   | number                                                                                        | no       | literal            | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                                              |
+| `weight`   | integer                                                                                       | no       | literal            | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                                              |
 
 ```json
 {
   "id": "root",
   "component": "Column",
-  "children": ["body"]
+  "children": ["…children…"]
 }
 ```
 
@@ -73,13 +73,13 @@ A layout component that arranges its children vertically. To create a grid layou
 | `children`  | ChildList                                 | yes      | ids, or a template | Defines the children. Use an array of strings for a fixed set of children, or a template object to generate children from a data list. |
 | `direction` | `vertical` \| `horizontal`                | no       | literal            | The direction in which the list items are laid out. Defaults to `"vertical"`.                                                          |
 | `align`     | `start` \| `center` \| `end` \| `stretch` | no       | literal            | Defines the alignment of children along the cross axis. Defaults to `"stretch"`.                                                       |
-| `weight`    | number                                    | no       | literal            | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                 |
+| `weight`    | integer                                   | no       | literal            | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                 |
 
 ```json
 {
   "id": "root",
   "component": "List",
-  "children": ["body"]
+  "children": ["…children…"]
 }
 ```
 
@@ -88,13 +88,13 @@ A layout component that arranges its children vertically. To create a grid layou
 | Property | Type        | Required | Binding                  | What it is                                                                                                                                                                                                                                         |
 | -------- | ----------- | -------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `child`  | ComponentId | yes      | another component's `id` | The ID of the single child component to be rendered inside the card. To display multiple elements, you MUST wrap them in a layout component (like Column or Row) and pass that container's ID here. Do NOT pass multiple IDs or a non-existent ID. |
-| `weight` | number      | no       | literal                  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                                                             |
+| `weight` | integer     | no       | literal                  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                                                             |
 
 ```json
 {
   "id": "root",
   "component": "Card",
-  "child": "body"
+  "child": "…child…"
 }
 ```
 
@@ -103,7 +103,7 @@ A layout component that arranges its children vertically. To create a grid layou
 | Property | Type                                                  | Required | Binding                       | What it is                                                                               |
 | -------- | ----------------------------------------------------- | -------- | ----------------------------- | ---------------------------------------------------------------------------------------- |
 | `tabs`   | array of { title: DynamicString, child: ComponentId } | yes      | literal rows; values bindable | An array of objects, where each object defines a tab with a title and a child component. |
-| `weight` | number                                                | no       | literal                       | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.   |
+| `weight` | integer                                               | no       | literal                       | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.   |
 
 ```json
 {
@@ -112,7 +112,7 @@ A layout component that arranges its children vertically. To create a grid layou
   "tabs": [
     {
       "title": "…title…",
-      "child": "body"
+      "child": "…child…"
     }
   ]
 }
@@ -123,7 +123,7 @@ A layout component that arranges its children vertically. To create a grid layou
 | Property | Type                       | Required | Binding | What it is                                                                             |
 | -------- | -------------------------- | -------- | ------- | -------------------------------------------------------------------------------------- |
 | `axis`   | `horizontal` \| `vertical` | no       | literal | The orientation of the divider. Defaults to `"horizontal"`.                            |
-| `weight` | number                     | no       | literal | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
+| `weight` | integer                    | no       | literal | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
 
 ```json
 {
@@ -138,14 +138,14 @@ A layout component that arranges its children vertically. To create a grid layou
 | --------- | ----------- | -------- | ------------------------ | -------------------------------------------------------------------------------------- |
 | `trigger` | ComponentId | yes      | another component's `id` | The ID of the component that opens the modal when interacted with (e.g., a button).    |
 | `content` | ComponentId | yes      | another component's `id` | The ID of the component to be displayed inside the modal.                              |
-| `weight`  | number      | no       | literal                  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
+| `weight`  | integer     | no       | literal                  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
 
 ```json
 {
   "id": "root",
   "component": "Modal",
-  "trigger": "body",
-  "content": "body"
+  "trigger": "…trigger…",
+  "content": "…content…"
 }
 ```
 

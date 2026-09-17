@@ -33,7 +33,7 @@ it.
 | --------- | ----------------------------------------------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `text`    | DynamicString                                               | yes      | bindable | The text content to display. While simple Markdown formatting is supported (i.e. without HTML, images, or links), utilizing dedicated UI components is generally preferred for a richer and more structured presentation. |
 | `variant` | `h1` \| `h2` \| `h3` \| `h4` \| `h5` \| `caption` \| `body` | no       | literal  | A hint for the base text style. Defaults to `"body"`.                                                                                                                                                                     |
-| `weight`  | number                                                      | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                                    |
+| `weight`  | integer                                                     | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                                    |
 
 ```json
 {
@@ -51,7 +51,7 @@ it.
 | `description` | DynamicString                                                                         | no       | bindable | Accessibility text for the image.                                                                                                        |
 | `fit`         | `contain` \| `cover` \| `fill` \| `none` \| `scaleDown`                               | no       | literal  | Specifies how the image should be resized to fit its container. This corresponds to the CSS 'object-fit' property. Defaults to `"fill"`. |
 | `variant`     | `icon` \| `avatar` \| `smallFeature` \| `mediumFeature` \| `largeFeature` \| `header` | no       | literal  | A hint for the image size and style. Defaults to `"mediumFeature"`.                                                                      |
-| `weight`      | number                                                                                | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                   |
+| `weight`      | integer                                                                               | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                   |
 
 ```json
 {
@@ -66,7 +66,7 @@ it.
 | Property | Type                                                        | Required | Binding | What it is                                                                             |
 | -------- | ----------------------------------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------- |
 | `name`   | string (listed below) \| { svgPath: string } \| DataBinding | yes      | literal | The name of the icon to display.                                                       |
-| `weight` | number                                                      | no       | literal | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
+| `weight` | integer                                                     | no       | literal | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
 
 `name` is one of: `accountCircle`, `add`, `arrowBack`, `arrowForward`, `attachFile`, `calendarToday`, `call`, `camera`, `check`, `close`, `delete`, `download`, `edit`, `event`, `error`, `fastForward`, `favorite`, `favoriteOff`, `folder`, `help`, `home`, `info`, `locationOn`, `lock`, `lockOpen`, `mail`, `menu`, `moreVert`, `moreHoriz`, `notificationsOff`, `notifications`, `pause`, `payment`, `person`, `phone`, `photo`, `play`, `print`, `refresh`, `rewind`, `search`, `send`, `settings`, `share`, `shoppingCart`, `skipNext`, `skipPrevious`, `star`, `starHalf`, `starOff`, `stop`, `upload`, `visibility`, `visibilityOff`, `volumeDown`, `volumeMute`, `volumeOff`, `volumeUp`, `warning`.
 
@@ -83,7 +83,7 @@ it.
 | Property | Type          | Required | Binding  | What it is                                                                             |
 | -------- | ------------- | -------- | -------- | -------------------------------------------------------------------------------------- |
 | `url`    | DynamicString | yes      | bindable | The URL of the video to display.                                                       |
-| `weight` | number        | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
+| `weight` | integer       | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
 
 ```json
 {
@@ -99,7 +99,7 @@ it.
 | ------------- | ------------- | -------- | -------- | -------------------------------------------------------------------------------------- |
 | `url`         | DynamicString | yes      | bindable | The URL of the audio to be played.                                                     |
 | `description` | DynamicString | no       | bindable | A description of the audio, such as a title or summary.                                |
-| `weight`      | number        | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
+| `weight`      | integer       | no       | literal  | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one. |
 
 ```json
 {

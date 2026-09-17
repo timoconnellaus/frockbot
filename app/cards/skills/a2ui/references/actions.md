@@ -69,14 +69,14 @@ the less there is to get wrong.
 | `child`   | ComponentId                                             | yes      | another component's `id`       | The ID of the child component. Use a 'Text' component for a labeled button. Only use an 'Icon' if the requirements explicitly ask for an icon-only button.                                                                                                                             |
 | `variant` | `default` \| `primary` \| `borderless`                  | no       | literal                        | A hint for the button style. If omitted, a default button style is used. 'primary' indicates this is the main call-to-action button. 'borderless' means the button has no visual border or background, making its child content appear like a clickable link. Defaults to `"default"`. |
 | `action`  | Action                                                  | yes      | `{ event: { name, context } }` |                                                                                                                                                                                                                                                                                        |
-| `weight`  | number                                                  | no       | literal                        | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                                                                                                 |
+| `weight`  | integer                                                 | no       | literal                        | Its share of a `Row` or `Column`, like CSS `flex-grow`. Only on a direct child of one.                                                                                                                                                                                                 |
 | `checks`  | array of { condition: DynamicBoolean, message: string } | no       | conditions bindable            | Client-side validation. Each condition is a boolean function call; the message shows when it is false.                                                                                                                                                                                 |
 
 ```json
 {
   "id": "root",
   "component": "Button",
-  "child": "body",
+  "child": "…child…",
   "action": {
     "event": {
       "name": "confirm"
