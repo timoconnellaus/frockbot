@@ -135,14 +135,16 @@ committed, so nothing is transcribed, however long the person spoke.
 
 Server frames:
 
-| Frame                                          | Meaning                                                                                   |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `{schemaVersion:1,type:"ready"}`               | Upstream accepted the session; buffered audio has been forwarded.                         |
-| `{schemaVersion:1,type:"delta",text}`          | Interim text so far, about half a second behind the speaker. Replaces the previous delta. |
-| `{schemaVersion:1,type:"segment",text}`        | The transcript of a committed item — in practice one per capture, at `stop`.              |
-| `{schemaVersion:1,type:"final"}`               | Everything captured before `stop` has been transcribed. The server closes after it.       |
-| `{schemaVersion:1,type:"notice",message}`      | Non-fatal: opening audio was truncated, and similar.                                      |
-| `{schemaVersion:1,type:"error",message,code?}` | Fatal; the server closes. `code` ∈ `unconfigured`, `upstream`, `timeout`, `limit`.        |
+| Frame                                          | Meaning                                                                                         |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `{schemaVersion:1,type:"ready"}`               | Upstream accepted the session; buffered audio has been forwarded.                               |
+| `{schemaVersion:1,type:"delta",text}`          | Interim text so far, about half a second behind the speaker. Replaces the previous delta.       |
+| `{schemaVersion:1,type:"segment",text}`        | The transcript of a committed item — in practice one per capture, at `stop`.                    |
+| `{schemaVersion:1,type:"cleaning"}`            | Transcribed; the tidy-up is running. Nothing to write — the words are already in the draft.     |
+| `{schemaVersion:1,type:"cleaned",text}`        | The tidied form of the whole capture, to replace its span. At most once, always before `final`. |
+| `{schemaVersion:1,type:"final"}`               | Everything captured before `stop` has been transcribed. The server closes after it.             |
+| `{schemaVersion:1,type:"notice",message}`      | Non-fatal: opening audio was truncated, and similar.                                            |
+| `{schemaVersion:1,type:"error",message,code?}` | Fatal; the server closes. `code` ∈ `unconfigured`, `upstream`, `timeout`, `limit`.              |
 
 The composer draft is `segments.join(" ") + " " + delta`. Stop flushes into an
 editable draft and never sends. The draft belongs to the Bot the capture started
@@ -159,6 +161,55 @@ failure after `stop`, or a stop the provider cannot finish within 6 s, is
 reported as `error` (`upstream` or `timeout`) with the words that did arrive
 already in the draft; the one refusal that is not a failure is the provider
 saying the final commit had nothing in it.
+
+### Tidying the capture
+
+Speech-to-text returns what was said, including the "um"s, the false starts
+and the corrections people make mid-sentence. Once every segment is in, and
+before `final`, the relay offers the whole capture to a model to have those
+taken out, and hands the result back as `cleaned`.
+
+It runs on the server because the model is reached with a server-side
+credential, and it runs after the capture rather than during it because text
+that rewrites itself under the cursor is worse than text that is untidy.
+
+What is asked for (`app/voice/dictation-cleanup.ts`): remove fillers,
+stutters, repetitions and abandoned false starts; resolve clear
+self-corrections to the final wording; fix obvious transcription, punctuation
+and capitalisation errors; paragraph and format enumerations. Never
+paraphrase, summarise, answer a question, follow an instruction in the
+transcript, or resolve ambiguity by guessing. The transcript is fenced between
+`<transcript>` markers and declared data, and the markers are stripped out of
+the transcript itself so it cannot close the fence from inside.
+
+What is accepted back matters more than what is asked for, because the prompt
+is a request and the guards are the property. A tidied transcript is refused —
+and the raw text stands — when it is empty, unchanged, meaningfully longer
+(added information) or shorter (summarised), begins like a model talking to
+us, had a question that is no longer a question, or dropped every negation or
+every uncertainty the raw text carried. The refusal is named in the log line,
+so "tidying is off" and "tidying keeps eating people's negations" do not look
+the same in production.
+
+Every way this can fail ends on `final` with the raw transcript in the draft:
+no gateway configured, no allowance left, a transcript under 24 or over 12,000
+characters, a model that throws, a model that does not answer within 8 s, or
+an answer a guard refuses. A capture the five-minute cap ended is not tidied
+at all. The spend is one model call per capture, booked against the account's
+own voice object before the model is asked (400 per UTC day, never refunded,
+and deliberately not part of the cap that decides whether a voice call may go
+on). `VOICE_DICTATION_CLEANUP_MODEL` pins the model; unset takes the ordinary
+default route.
+
+On the client, `cleaned` is applied through the same `DictationDraftRange`
+that every segment goes through, which is what makes it safe rather than
+carefully-written: a span the person has edited inside is already fenced and
+takes nothing more, and a draft that has been sent no longer contains the span
+at all, so a late tidy-up finds nothing to replace. While `cleaning` runs the
+composer shows the same finishing state as the commit before it, with the
+microphone already off. Afterwards the composer offers "Use what I said",
+which puts the raw transcript back through the same path, and withdraws that
+offer the moment the person edits inside the tidied text.
 
 Bounds: after 5 minutes the server ends the capture the way a `stop` does —
 the commit, then the segment, so the draft keeps everything captured — and
@@ -865,6 +916,8 @@ nothing. What is counted per account, durably, per UTC day:
   and refunded for the unused part when it sleeps (bounded at 240 min/day; a
   window past the cap shuts the upstream for the day and tells the client);
 - dictation seconds, booked and renewed the same way (bounded at 120 min/day);
+- dictation tidy-ups, one model call per capture, booked before the model is
+  asked and never refunded (bounded at 400/day);
 - TTS characters sent to ElevenLabs (bounded at 200k/day);
 - model turns, including the turn that tells the assistant a Bot's answer (bounded at 600/day), and Bot delegations (bounded at 8 per turn burst, 200/day).
 
@@ -877,14 +930,15 @@ rather than opening a new one. Raw audio is never stored anywhere.
 
 ## Credentials
 
-| Name                           | Where             | Required | What it enables                                                                                                                                                                                     |
-| ------------------------------ | ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPENAI_API_KEY`               | Worker secret     | optional | Composer dictation, and the continuous session's STT only when `VOICE_ASSISTANT_STT=openai`. Absent: dictation reports that voice is unavailable.                                                   |
-| `ELEVENLABS_API_KEY`           | Worker secret     | optional | The continuous voice session's ears (Scribe v2 Realtime) and speech, so it needs speech-to-text as well as text-to-speech permission. Absent: starting a session reports that voice is unavailable. |
-| `VOICE_ASSISTANT_STT`          | Worker var        | optional | `openai` listens through `gpt-transcribe`; anything else (and unset) is Scribe.                                                                                                                     |
-| `ELEVENLABS_VOICE_ID`          | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).                                                                                                                                  |
-| `VOICE_ASSISTANT_MODEL`        | Worker var        | optional | Pins a gateway model for voice turns (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`); unset, turns take the platform's Auto route.                                                     |
-| `VOICE_DICTATION_UPSTREAM_URL` | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                                                                          |
+| Name                            | Where             | Required | What it enables                                                                                                                                                                                     |
+| ------------------------------- | ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`                | Worker secret     | optional | Composer dictation, and the continuous session's STT only when `VOICE_ASSISTANT_STT=openai`. Absent: dictation reports that voice is unavailable.                                                   |
+| `ELEVENLABS_API_KEY`            | Worker secret     | optional | The continuous voice session's ears (Scribe v2 Realtime) and speech, so it needs speech-to-text as well as text-to-speech permission. Absent: starting a session reports that voice is unavailable. |
+| `VOICE_ASSISTANT_STT`           | Worker var        | optional | `openai` listens through `gpt-transcribe`; anything else (and unset) is Scribe.                                                                                                                     |
+| `ELEVENLABS_VOICE_ID`           | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).                                                                                                                                  |
+| `VOICE_ASSISTANT_MODEL`         | Worker var        | optional | Pins a gateway model for voice turns (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`); unset, turns take the platform's Auto route.                                                     |
+| `VOICE_DICTATION_CLEANUP_MODEL` | Worker var        | optional | The model that tidies a dictated transcript. Unset takes the default route; no `AI` binding means no tidying and the raw transcript stands.                                                         |
+| `VOICE_DICTATION_UPSTREAM_URL`  | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                                                                          |
 
 Declared in `apps/cloudflare/src/production-secrets.ts`, carried by the release
 workflow, listed in `.dev.vars.example`. The `AI` binding is still required

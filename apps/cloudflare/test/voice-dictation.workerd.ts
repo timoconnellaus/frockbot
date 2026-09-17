@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   openVoiceDictationRelayV1,
+  type VoiceDictationCleanupV1,
   type VoiceDictationLeaseV1,
 } from "../src/voice-dictation.ts";
 
@@ -34,6 +35,8 @@ function fakeUpstream(
     refuse?: boolean;
     onCommit?: "answer" | "silent" | "empty" | "fail";
     answerDelayMs?: number;
+    /** What a committed item transcribes to, in place of "heard 1,2,3". */
+    transcript?: string;
   } = {},
 ): FakeUpstream {
   const appended: number[] = [];
@@ -75,7 +78,8 @@ function fakeUpstream(
       const heard = heardSinceCommit;
       heardSinceCommit = [];
       setTimeout(
-        () => complete(itemId, `heard ${heard.join(",")}`),
+        () =>
+          complete(itemId, options.transcript ?? `heard ${heard.join(",")}`),
         options.answerDelayMs ?? 0,
       );
       return itemId;
@@ -138,7 +142,11 @@ function fakeUpstream(
           const heard = heardSinceCommit;
           heardSinceCommit = [];
           setTimeout(
-            () => complete(itemId, `heard ${heard.join(",")}`),
+            () =>
+              complete(
+                itemId,
+                options.transcript ?? `heard ${heard.join(",")}`,
+              ),
             options.answerDelayMs ?? 0,
           );
         }
@@ -169,6 +177,48 @@ function fakeLease(options: { refuse?: string; renewOk?: boolean } = {}) {
   return { lease, calls };
 }
 
+/**
+ * A stand-in for the model that tidies a transcript.
+ *
+ * `answer` is what comes back, `refuse` stands for an account with no tidy-up
+ * allowance left, and `fail` for a gateway that threw. `hang` never answers
+ * until it is aborted, which is how the deadline is exercised.
+ */
+function fakeCleanup(
+  options: {
+    answer?: string;
+    refuse?: boolean;
+    fail?: boolean;
+    hang?: boolean;
+  } = {},
+) {
+  const asked: Record<string, unknown>[] = [];
+  let aborted = false;
+  const cleanup: VoiceDictationCleanupV1 = {
+    run: async (body, signal) => {
+      asked.push(body);
+      if (options.refuse) return undefined;
+      if (options.fail) throw new Error("the gateway exploded");
+      if (options.hang) {
+        return new Promise<string>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(new Error("aborted"));
+          });
+        });
+      }
+      return options.answer ?? "";
+    },
+  };
+  return {
+    cleanup,
+    asked,
+    get aborted() {
+      return aborted;
+    },
+  };
+}
+
 interface Opened {
   socket: WebSocket;
   frames: Record<string, unknown>[];
@@ -188,6 +238,9 @@ function openRelay(
     finalTimeoutMs?: number;
     leaseRenewMs?: number;
     lease?: VoiceDictationLeaseV1;
+    cleanup?: VoiceDictationCleanupV1;
+    cleanupTimeoutMs?: number;
+    maxCaptureMs?: number;
   } = {},
 ): Opened {
   const response = openVoiceDictationRelayV1(
@@ -506,5 +559,174 @@ describe("the dictation relay", () => {
     expect(limit.code).toBe("limit");
     await settle();
     expect(renewal.calls.at(-1)).toBe("release:ok");
+  });
+});
+
+// Tidying the finished capture. The relay owns what is asked for and what is
+// accepted back; the model itself is a stand-in here, because the property
+// worth testing is that none of these paths can cost the person their words.
+describe("tidying a finished capture", () => {
+  const RAW =
+    "um so I I think we should check the Friday flights but don't book anything yet";
+  const TIDY =
+    "So I think we should check the Friday flights, but don't book anything yet.";
+
+  test("says it is tidying, then hands the tidied span over before final", async () => {
+    const upstream = fakeUpstream({ transcript: RAW });
+    const model = fakeCleanup({ answer: TIDY });
+    const opened = openRelay(
+      upstream,
+      { OPENAI_API_KEY: "sk-test" },
+      {
+        cleanup: model.cleanup,
+      },
+    );
+    await ready(upstream, opened);
+    opened.socket.send(pcm(1));
+    opened.socket.send(stop);
+    await opened.waitFor((f) => f.type === "final", "final");
+
+    expect(opened.segments()).toEqual([RAW]);
+    const order = opened.frames
+      .map((f) => String(f.type))
+      .filter((type) =>
+        ["segment", "cleaning", "cleaned", "final"].includes(type),
+      );
+    expect(order).toEqual(["segment", "cleaning", "cleaned", "final"]);
+    expect(opened.frames.find((f) => f.type === "cleaned")).toEqual({
+      schemaVersion: 1,
+      type: "cleaned",
+      text: TIDY,
+    });
+    // It was asked about the capture's own words, and only those.
+    const asked = model.asked[0] as { messages: { content: string }[] };
+    expect(asked.messages[1]!.content).toContain(RAW);
+    expect(await opened.closed).toBe(1000);
+  });
+
+  // Every one of these is a way the tidy-up can go wrong. All of them end the
+  // same way: final, no cleaned frame, and the raw segment standing.
+  test.each([
+    [
+      "the model answered with something a guard refuses",
+      fakeCleanup({ answer: "Check the Friday flights and book them." }),
+    ],
+    [
+      "the account has no tidy-up allowance left",
+      fakeCleanup({ refuse: true }),
+    ],
+    ["the gateway failed", fakeCleanup({ fail: true })],
+  ])("keeps the raw transcript when %s", async (_label, model) => {
+    const upstream = fakeUpstream({ transcript: RAW });
+    const opened = openRelay(
+      upstream,
+      { OPENAI_API_KEY: "sk-test" },
+      {
+        cleanup: model.cleanup,
+      },
+    );
+    await ready(upstream, opened);
+    opened.socket.send(pcm(1));
+    opened.socket.send(stop);
+    await opened.waitFor((f) => f.type === "final", "final");
+
+    expect(opened.segments()).toEqual([RAW]);
+    expect(opened.frames.some((f) => f.type === "cleaned")).toBe(false);
+    expect(await opened.closed).toBe(1000);
+  });
+
+  // The person is watching a draft they can already read. A model that does
+  // not answer loses its turn rather than the person's patience.
+  test("gives up on a model that does not answer in time", async () => {
+    const upstream = fakeUpstream({ transcript: RAW });
+    const model = fakeCleanup({ hang: true });
+    const opened = openRelay(
+      upstream,
+      { OPENAI_API_KEY: "sk-test" },
+      {
+        cleanup: model.cleanup,
+        cleanupTimeoutMs: 40,
+      },
+    );
+    await ready(upstream, opened);
+    opened.socket.send(pcm(1));
+    opened.socket.send(stop);
+    await opened.waitFor((f) => f.type === "final", "final");
+
+    expect(model.aborted).toBe(true);
+    expect(opened.segments()).toEqual([RAW]);
+    expect(opened.frames.some((f) => f.type === "cleaned")).toBe(false);
+  });
+
+  // The stop deadline exists to report a capture the provider never finished.
+  // A capture that *is* finished and is merely being tidied must not trip it,
+  // or the person is told dictation failed over the top of a working draft.
+  test("the stop deadline does not fire over a tidy-up in progress", async () => {
+    const upstream = fakeUpstream({ transcript: RAW });
+    const model = fakeCleanup({ answer: TIDY });
+    const opened = openRelay(
+      upstream,
+      { OPENAI_API_KEY: "sk-test" },
+      {
+        cleanup: model.cleanup,
+        // Shorter than the tidy-up would ever be, had it stayed armed.
+        finalTimeoutMs: 30,
+        cleanupTimeoutMs: 5_000,
+      },
+    );
+    await ready(upstream, opened);
+    opened.socket.send(pcm(1));
+    opened.socket.send(stop);
+    await opened.waitFor((f) => f.type === "cleaning", "cleaning");
+    await settle(80);
+    await opened.waitFor((f) => f.type === "final", "final");
+
+    expect(opened.frames.some((f) => f.type === "error")).toBe(false);
+    expect(opened.frames.some((f) => f.type === "cleaned")).toBe(true);
+  });
+
+  // Two words are not worth a model call, and the person should not watch a
+  // "finishing" state for them either.
+  test("does not ask about a capture too short to be worth it", async () => {
+    const upstream = fakeUpstream({ transcript: "book it" });
+    const model = fakeCleanup({ answer: TIDY });
+    const opened = openRelay(
+      upstream,
+      { OPENAI_API_KEY: "sk-test" },
+      {
+        cleanup: model.cleanup,
+      },
+    );
+    await ready(upstream, opened);
+    opened.socket.send(pcm(1));
+    opened.socket.send(stop);
+    await opened.waitFor((f) => f.type === "final", "final");
+
+    expect(model.asked).toHaveLength(0);
+    expect(opened.frames.some((f) => f.type === "cleaning")).toBe(false);
+    expect(opened.segments()).toEqual(["book it"]);
+  });
+
+  // A capture cut off at five minutes is not one whose false starts we can
+  // tell from its words, and the person is being told why it ended. Tidying
+  // on top of that would replace the message they need to read.
+  test("does not tidy a capture the five-minute cap ended", async () => {
+    const upstream = fakeUpstream({ transcript: RAW });
+    const model = fakeCleanup({ answer: TIDY });
+    const opened = openRelay(
+      upstream,
+      { OPENAI_API_KEY: "sk-test" },
+      {
+        cleanup: model.cleanup,
+        maxCaptureMs: 30,
+      },
+    );
+    await ready(upstream, opened);
+    opened.socket.send(pcm(1));
+    const error = await opened.waitFor((f) => f.type === "error", "limit");
+
+    expect(error.code).toBe("limit");
+    expect(model.asked).toHaveLength(0);
+    expect(opened.segments()).toEqual([RAW]);
   });
 });

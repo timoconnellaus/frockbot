@@ -48,6 +48,19 @@ export const VOICE_DICTATION_LEASE_RENEW_MS_V1 = 30_000;
 export const VOICE_DICTATION_RESERVE_SECONDS_V1 = 60;
 /** Dictation seconds one account may spend per UTC day. */
 export const VOICE_DICTATION_DAILY_SECONDS_V1 = 120 * 60;
+/**
+ * How long the tidy-up after a capture may take before the raw transcript
+ * stands. Short on purpose: this is time the person spends watching a draft
+ * they can already read, so a slow model loses its turn rather than the
+ * person's patience.
+ */
+export const VOICE_DICTATION_CLEANUP_TIMEOUT_MS_V1 = 8_000;
+/**
+ * Tidy-ups one account may spend per UTC day. At most one runs per capture,
+ * so this is a second bound rather than the only one — it is what stops a
+ * client that opens and stops captures in a loop from spending on a model.
+ */
+export const VOICE_DICTATION_DAILY_CLEANUPS_V1 = 400;
 /** Opening audio held while the upstream connects: 30 s at 24 kHz PCM16. */
 export const VOICE_DICTATION_OPENING_BUFFER_BYTES_V1 =
   30 * VOICE_DICTATION_SAMPLE_RATE_V1 * 2;
@@ -89,6 +102,19 @@ export type VoiceDictationServerFrameV1 =
   | { schemaVersion: 1; type: "ready" }
   | { schemaVersion: 1; type: "delta"; text: string }
   | { schemaVersion: 1; type: "segment"; text: string }
+  /**
+   * The capture is transcribed and is being tidied. Everything said is
+   * already in the draft; this only asks the client to say so on screen and
+   * to keep waiting a little longer than `final` normally allows.
+   */
+  | { schemaVersion: 1; type: "cleaning" }
+  /**
+   * The tidied form of everything this capture dictated, to replace the
+   * capture's own span. Sent at most once, always before `final`, and only
+   * when every guard accepted it — a capture whose tidy-up failed, timed out
+   * or was refused simply gets `final` and keeps the raw transcript.
+   */
+  | { schemaVersion: 1; type: "cleaned"; text: string }
   | { schemaVersion: 1; type: "final" }
   | { schemaVersion: 1; type: "notice"; message: string }
   | {
@@ -131,8 +157,11 @@ export function decodeVoiceDictationServerFrameV1(
   switch (value.type) {
     case "ready":
       return { schemaVersion: 1, type: "ready" };
+    case "cleaning":
+      return { schemaVersion: 1, type: "cleaning" };
     case "final":
       return { schemaVersion: 1, type: "final" };
+    case "cleaned":
     case "delta":
     case "segment":
       return {

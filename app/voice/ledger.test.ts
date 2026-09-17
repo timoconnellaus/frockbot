@@ -695,3 +695,53 @@ describe("voice ledger debug snapshot", () => {
     });
   });
 });
+
+describe("the dictation tidy-up allowance", () => {
+  test("books each tidy-up and refuses the one past the cap", async () => {
+    const { ledger: l } = ledger({
+      sttSeconds: 10,
+      ttsCharacters: 10,
+      turns: 10,
+      delegations: 10,
+      dictationSeconds: 10,
+      dictationCleanups: 2,
+    });
+    expect(await l.admitDictationCleanup(t0)).toEqual({ status: "admitted" });
+    expect(await l.admitDictationCleanup(t0)).toEqual({ status: "admitted" });
+    expect(await l.admitDictationCleanup(t0)).toEqual({ status: "refused" });
+    expect((await l.meter(t0)).dictationCleanups).toBe(2);
+  });
+
+  // The day rolls over on its own; a person who dictated all day yesterday
+  // starts today with the whole allowance.
+  test("the allowance is per day", async () => {
+    const { ledger: l } = ledger({
+      sttSeconds: 10,
+      ttsCharacters: 10,
+      turns: 10,
+      delegations: 10,
+      dictationSeconds: 10,
+      dictationCleanups: 1,
+    });
+    await l.admitDictationCleanup(t0);
+    expect(await l.admitDictationCleanup(t0)).toEqual({ status: "refused" });
+    expect(await l.admitDictationCleanup(later(24 * 60 * 60_000))).toEqual({
+      status: "admitted",
+    });
+  });
+
+  // A day of tidy-ups is no reason to refuse somebody a conversation, so this
+  // cap deliberately stays out of the call-level check.
+  test("spending the tidy-up allowance does not close the day's calls", async () => {
+    const { ledger: l } = ledger({
+      sttSeconds: 10,
+      ttsCharacters: 10,
+      turns: 10,
+      delegations: 10,
+      dictationSeconds: 10,
+      dictationCleanups: 1,
+    });
+    await l.admitDictationCleanup(t0);
+    expect(await l.exceededCap(t0)).toBeUndefined();
+  });
+});

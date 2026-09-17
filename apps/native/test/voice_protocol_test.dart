@@ -69,6 +69,18 @@ void main() {
         isA<DictationFinalV1>(),
       );
       expect(
+        round({'schemaVersion': 1, 'type': 'cleaning'}),
+        isA<DictationCleaningV1>(),
+      );
+      expect(
+        round<DictationCleanedV1>({
+          'schemaVersion': 1,
+          'type': 'cleaned',
+          'text': 'Half a thought.',
+        }).text,
+        'Half a thought.',
+      );
+      expect(
         round<DictationDeltaV1>({
           'schemaVersion': 1,
           'type': 'delta',

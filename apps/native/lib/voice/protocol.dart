@@ -38,6 +38,15 @@ const voiceDictationConnectTimeoutV1 = Duration(seconds: 10);
 /// How long `stop` waits for `final` before flushing what it has anyway.
 const voiceDictationFinalTimeoutV1 = Duration(seconds: 6);
 
+/// How long to wait once the server says it is tidying the capture.
+///
+/// Longer than [voiceDictationFinalTimeoutV1] because by this point the words
+/// are already in the draft and nothing is at risk: the server is asking a
+/// model, and the only cost of waiting is a "Finishing" line on screen. It
+/// still ends, because a server that never answers must not leave the
+/// microphone button looking busy forever.
+const voiceDictationCleanupTimeoutV1 = Duration(seconds: 12);
+
 /// Opening audio the client holds while the dictation socket opens: 30 s.
 const voiceDictationOpeningBufferBytesV1 = 30 * voiceDictationSampleRateV1 * 2;
 
@@ -118,6 +127,18 @@ final class DictationSegmentV1 extends DictationServerFrameV1 {
   const DictationSegmentV1(this.text);
 }
 
+/// The capture is transcribed and the server is tidying it. Everything said
+/// is already in the draft; this only changes what the composer says.
+final class DictationCleaningV1 extends DictationServerFrameV1 {
+  const DictationCleaningV1();
+}
+
+/// The tidied form of everything this capture dictated, to replace its span.
+final class DictationCleanedV1 extends DictationServerFrameV1 {
+  final String text;
+  const DictationCleanedV1(this.text);
+}
+
 final class DictationFinalV1 extends DictationServerFrameV1 {
   const DictationFinalV1();
 }
@@ -143,6 +164,10 @@ DictationServerFrameV1 decodeDictationServerFrameV1(String raw) {
       return const DictationReadyV1();
     case 'final':
       return const DictationFinalV1();
+    case 'cleaning':
+      return const DictationCleaningV1();
+    case 'cleaned':
+      return DictationCleanedV1(_text(value['text'], 'dictation text', 32000));
     case 'delta':
       return DictationDeltaV1(_text(value['text'], 'dictation text', 32000));
     case 'segment':

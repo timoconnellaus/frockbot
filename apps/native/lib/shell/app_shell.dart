@@ -2221,6 +2221,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 dictation?.context == bot.botId.value
                                 ? dictation!.state
                                 : DictationState.idle,
+                            // The offer belongs to the composer the capture
+                            // was dictated into, exactly as the words do.
+                            dictationCleaned:
+                                dictation?.context == bot.botId.value &&
+                                dictation!.cleaned,
+                            onRevertDictation:
+                                dictation?.context == bot.botId.value &&
+                                    dictation!.cleaned
+                                ? dictation!.revertCleanup
+                                : null,
                             dictationLevel: dictation?.level,
                             onWorkingChanged: (runId) {
                               if (runId == workingRunId || !mounted) return;

@@ -29,7 +29,11 @@ class Harness {
   Completer<VoiceSocket>? pending;
   late final DictationController controller;
 
-  Harness({bool deferSocket = false, Duration? finalTimeout}) {
+  Harness({
+    bool deferSocket = false,
+    Duration? finalTimeout,
+    Duration? cleanupTimeout,
+  }) {
     if (deferSocket) pending = Completer<VoiceSocket>();
     controller = DictationController(
       openSocket: () => pending?.future ?? Future.value(socket),
@@ -37,6 +41,7 @@ class Harness {
       onDraft: drafts.setDraft,
       readDraft: drafts.draftFor,
       finalTimeout: finalTimeout ?? voiceDictationFinalTimeoutV1,
+      cleanupTimeout: cleanupTimeout ?? voiceDictationCleanupTimeoutV1,
     );
   }
 
@@ -325,6 +330,205 @@ void main() {
 
       expect(harness.capture.active, isFalse);
       expect(harness.socket.binaries, isEmpty);
+    });
+  });
+
+
+  // The tidy-up the server runs once a capture is finished. Everything here
+  // is about the same question asked from different directions: can the
+  // tidied text ever cost the person words they already have?
+  group('the tidy-up after a capture', () {
+    test('replaces the capture\'s own span and leaves the rest alone', () async {
+      final harness = Harness();
+      harness.drafts.setDraft('bot-a', 'typed first');
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      harness.say('segment', {'text': 'um so check the Friday flights'});
+      await settle();
+      expect(
+        harness.drafts.draftFor('bot-a'),
+        'typed first um so check the Friday flights',
+      );
+
+      // A `cleaning` that arrives while the person is still speaking is not a
+      // capture that has finished, and is ignored.
+      harness.say('cleaning');
+      await settle();
+      expect(harness.controller.state, DictationState.capturing);
+
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('cleaning');
+      await settle();
+      expect(harness.controller.state, DictationState.cleaning);
+      expect(harness.controller.active, isTrue);
+
+      harness.say('cleaned', {'text': 'Check the Friday flights.'});
+      harness.say('final');
+      await settle();
+
+      expect(
+        harness.drafts.draftFor('bot-a'),
+        'typed first Check the Friday flights.',
+      );
+      expect(harness.controller.cleaned, isTrue);
+      harness.controller.dispose();
+    });
+
+    test('the raw transcript comes back on revert', () async {
+      final harness = Harness();
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      harness.say('segment', {'text': 'um so check the Friday flights'});
+      await settle();
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('cleaning');
+      harness.say('cleaned', {'text': 'Check the Friday flights.'});
+      harness.say('final');
+      await settle();
+      expect(harness.drafts.draftFor('bot-a'), 'Check the Friday flights.');
+
+      harness.controller.revertCleanup();
+      expect(
+        harness.drafts.draftFor('bot-a'),
+        'um so check the Friday flights',
+      );
+      // Reverted once; there is nothing left to revert to.
+      expect(harness.controller.cleaned, isFalse);
+      harness.controller.revertCleanup();
+      expect(
+        harness.drafts.draftFor('bot-a'),
+        'um so check the Friday flights',
+      );
+      harness.controller.dispose();
+    });
+
+    // The rule that matters most. Somebody who starts editing their own words
+    // has taken the draft back; a tidy-up that lands afterwards must not take
+    // it off them again.
+    test('an edit inside the span refuses the tidied text', () async {
+      final harness = Harness();
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      harness.say('segment', {'text': 'um so check the Friday flights'});
+      await settle();
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('cleaning');
+      await settle();
+
+      // They fix it themselves while the server is still tidying.
+      harness.drafts.setDraft('bot-a', 'check the SATURDAY flights');
+      harness.say('cleaned', {'text': 'Check the Friday flights.'});
+      harness.say('final');
+      await settle();
+
+      expect(harness.drafts.draftFor('bot-a'), 'check the SATURDAY flights');
+      expect(harness.controller.cleaned, isFalse);
+      harness.controller.dispose();
+    });
+
+    // Send clears the composer. A tidy-up that arrives after that must not
+    // put a message back into a field the person has emptied.
+    test('a tidy-up that arrives after Send restores nothing', () async {
+      final harness = Harness();
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      harness.say('segment', {'text': 'um so check the Friday flights'});
+      await settle();
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('cleaning');
+      await settle();
+
+      // Sent: the composer is empty and the capture's span is gone with it.
+      harness.drafts.setDraft('bot-a', '');
+      harness.say('cleaned', {'text': 'Check the Friday flights.'});
+      harness.say('final');
+      await settle();
+
+      expect(harness.drafts.draftFor('bot-a'), '');
+      harness.controller.dispose();
+    });
+
+    // A tidy-up belongs to the Bot the capture started on, exactly as every
+    // segment does.
+    test('the tidied text lands in the composer it was dictated into', () async {
+      final harness = Harness();
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      harness.say('segment', {'text': 'um so check the Friday flights'});
+      await settle();
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.drafts.setDraft('bot-b', 'typed into B');
+      harness.say('cleaning');
+      harness.say('cleaned', {'text': 'Check the Friday flights.'});
+      harness.say('final');
+      await settle();
+
+      expect(harness.drafts.draftFor('bot-a'), 'Check the Friday flights.');
+      expect(harness.drafts.draftFor('bot-b'), 'typed into B');
+      harness.controller.dispose();
+    });
+
+    // A server that says it is tidying and then goes quiet must not leave the
+    // microphone button looking busy for the rest of the session.
+    test('a tidy-up that never answers ends the capture on what arrived', () async {
+      final harness = Harness(
+        finalTimeout: const Duration(milliseconds: 20),
+        cleanupTimeout: const Duration(milliseconds: 40),
+      );
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      harness.say('segment', {'text': 'um so check the Friday flights'});
+      await settle();
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('cleaning');
+      await settle();
+      expect(harness.controller.state, DictationState.cleaning);
+
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await settle();
+
+      expect(harness.controller.state, DictationState.done);
+      expect(harness.controller.error, isNull);
+      expect(
+        harness.drafts.draftFor('bot-a'),
+        'um so check the Friday flights',
+      );
+      harness.controller.dispose();
+    });
+
+    // A new capture is a new span. Nothing from the last one may be reverted
+    // into it.
+    test('a new capture clears what the last one could revert to', () async {
+      final harness = Harness();
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      harness.say('segment', {'text': 'um so check the Friday flights'});
+      await settle();
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('cleaning');
+      harness.say('cleaned', {'text': 'Check the Friday flights.'});
+      harness.say('final');
+      await settle();
+      expect(harness.controller.cleaned, isTrue);
+
+      await harness.controller.start('bot-a');
+      await settle();
+      expect(harness.controller.cleaned, isFalse);
+      harness.controller.dispose();
     });
   });
 

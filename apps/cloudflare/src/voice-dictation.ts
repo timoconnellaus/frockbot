@@ -27,6 +27,20 @@
 //   Opening audio. Frames that arrive before the upstream has accepted the
 //   session are held in order, bounded, and forwarded once it has, so
 //   pressing the microphone and speaking at once loses nothing.
+//
+//   Tidying. Once every segment is in, and before `final`, the capture's own
+//   words are offered to a model to have the fillers and false starts taken
+//   out. It happens here rather than on the client because the model is
+//   reached with a server-side credential, and it happens after the capture
+//   rather than during it because text that rewrites itself under the cursor
+//   is worse than text that is untidy. Every way this can go wrong — no
+//   model, no allowance, a refusal, a timeout, an answer a guard rejects —
+//   ends in the same place: `final`, with the raw transcript standing.
+import {
+  voiceDictationCleanupBodyV1,
+  voiceDictationCleanupResultV1,
+  voiceDictationCleanupWorthwhileV1,
+} from "@frockbot/app/voice/dictation-cleanup";
 import {
   voiceDictationSessionUpdateV1,
   voiceDictationUpstreamTargetV1,
@@ -39,6 +53,7 @@ import {
 } from "@frockbot/app/voice/openai-realtime";
 import {
   decodeVoiceDictationClientFrameV1,
+  VOICE_DICTATION_CLEANUP_TIMEOUT_MS_V1,
   VOICE_DICTATION_FINAL_TIMEOUT_MS_V1,
   VOICE_DICTATION_LEASE_RENEW_MS_V1,
   VOICE_DICTATION_MAX_MS_V1,
@@ -61,9 +76,31 @@ export interface VoiceDictationLeaseV1 {
   release(activeSeconds: number): Promise<void>;
 }
 
+/**
+ * Asks the model to tidy one transcript.
+ *
+ * Only the asking: booking the spend and reaching the gateway with a
+ * server-side credential. What we ask for and what we accept back are the
+ * relay's, so the policy is one testable place and the Worker's wiring has no
+ * judgement in it.
+ */
+export interface VoiceDictationCleanupV1 {
+  /**
+   * The model's answer, or nothing when the account has no allowance left.
+   * Throwing is the ordinary failure and is reported as "keep the raw text".
+   */
+  run(
+    body: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<string | undefined>;
+}
+
 export interface VoiceDictationRelayOptions {
   env: VoiceDictationEnvV1;
   lease?: VoiceDictationLeaseV1;
+  /** Absent in a deployment with no model gateway; the raw transcript stands. */
+  cleanup?: VoiceDictationCleanupV1;
+  cleanupTimeoutMs?: number;
   /** Opens the upstream socket; the default is a `fetch` upgrade. */
   connectUpstream?: (
     url: string,
@@ -168,6 +205,8 @@ function runRelay(
   const maxCaptureMs = options.maxCaptureMs ?? VOICE_DICTATION_MAX_MS_V1;
   const leaseRenewMs =
     options.leaseRenewMs ?? VOICE_DICTATION_LEASE_RENEW_MS_V1;
+  const cleanupTimeoutMs =
+    options.cleanupTimeoutMs ?? VOICE_DICTATION_CLEANUP_TIMEOUT_MS_V1;
   const connectUpstream = options.connectUpstream ?? fetchVoiceUpstreamSocketV1;
   const now = options.now ?? (() => Date.now());
 
@@ -195,6 +234,15 @@ function runRelay(
   const committedOrder: string[] = [];
   const answered = new Map<string, string>();
   const delivered = new Set<string>();
+  /**
+   * Every segment handed to the client, in order: the capture's own words and
+   * exactly the span the client will replace if the tidy-up is accepted.
+   */
+  const spoken: string[] = [];
+  /** The capture is ending; a second arrival must not race the first. */
+  let finishing = false;
+  /** The `stop` deadline, disarmed once the capture is safely ending. */
+  let finalTimer: ReturnType<typeof setTimeout> | undefined;
   const outstanding = new Set<string>();
   const partials = new Map<string, string>();
 
@@ -265,7 +313,10 @@ function runRelay(
       answered.delete(head);
       delivered.add(head);
       partials.delete(head);
-      if (text) send(client, { schemaVersion: 1, type: "segment", text });
+      if (text) {
+        spoken.push(text);
+        send(client, { schemaVersion: 1, type: "segment", text });
+      }
     }
     if (partials.size > 0)
       send(client, {
@@ -281,9 +332,21 @@ function runRelay(
   /**
    * Ends a capture the upstream finished. A capture the five-minute cap
    * stopped keeps every segment it produced and closes on the `limit` error
-   * in place of `final`, so the person is told why dictation ended.
+   * in place of `final`, so the person is told why dictation ended — and it
+   * is not tidied, because a capture that was cut off mid-sentence is not one
+   * whose false starts we can tell from its words.
    */
   const finishCapture = () => {
+    if (finishing || closed) return;
+    finishing = true;
+    // The capture is ending on its own terms now, so the stop deadline has
+    // nothing left to protect — and left armed it would report a timeout over
+    // the top of a tidy-up that is merely taking its few seconds.
+    if (finalTimer !== undefined) {
+      clearTimeout(finalTimer);
+      timers.delete(finalTimer);
+      finalTimer = undefined;
+    }
     if (capped) {
       fail(
         "Dictation stopped after five minutes. Press the microphone to continue.",
@@ -291,7 +354,59 @@ function runRelay(
       );
       return;
     }
-    finish({ schemaVersion: 1, type: "final" });
+    void tidyThenFinish();
+  };
+
+  /**
+   * Offers the capture's words to the model, then ends the capture.
+   *
+   * Every path through this ends on `final`. A deployment with no gateway, an
+   * account out of allowance, a transcript too short or too long to be worth
+   * a call, a model that fails or takes too long, an answer a guard refuses —
+   * all of them leave the raw transcript exactly where it already is, which
+   * is in the person's draft. Nothing here can lose text.
+   */
+  const tidyThenFinish = async () => {
+    const done = () => finish({ schemaVersion: 1, type: "final" });
+    const cleanup = options.cleanup;
+    const transcript = spoken.join(" ").trim();
+    if (!cleanup || !voiceDictationCleanupWorthwhileV1(transcript)) {
+      done();
+      return;
+    }
+    send(client, { schemaVersion: 1, type: "cleaning" });
+    const deadline = new AbortController();
+    const timer = after(cleanupTimeoutMs, () =>
+      deadline.abort(new Error("the tidy-up took too long")),
+    );
+    let answer: string | undefined;
+    try {
+      answer = await cleanup.run(
+        voiceDictationCleanupBodyV1(transcript),
+        deadline.signal,
+      );
+    } catch (error) {
+      console.error("voice dictation cleanup failed", error);
+    } finally {
+      clearTimeout(timer);
+      timers.delete(timer);
+    }
+    // The person closed the composer, sent, or navigated away while we asked.
+    // Their draft is not ours to touch any more.
+    if (closed) return;
+    if (answer !== undefined) {
+      const result = voiceDictationCleanupResultV1(transcript, answer);
+      if (result.status === "cleaned") {
+        send(client, { schemaVersion: 1, type: "cleaned", text: result.text });
+      } else {
+        // Named rather than silent: "cleanup is off" and "cleanup keeps
+        // eating people's negations" look identical without this line.
+        console.log("voice dictation cleanup kept the raw transcript", {
+          reason: result.reason,
+        });
+      }
+    }
+    done();
   };
 
   const finishIfComplete = () => {
@@ -498,8 +613,8 @@ function runRelay(
     // Bounded from the moment of the stop, whether or not the upstream has
     // opened yet: audio held here is still sent once it opens and committed
     // then, and a stop the upstream cannot finish is reported, not faked.
-    after(finalTimeoutMs, () => {
-      if (closed) return;
+    finalTimer = after(finalTimeoutMs, () => {
+      if (closed || finishing) return;
       fail(
         "Dictation ended before the last words were transcribed. What arrived is in your draft.",
         "timeout",
