@@ -45,6 +45,11 @@ export 'tone.dart';
 
 /// One component, declared to take a share of the flex it is in.
 ///
+/// The rule lives here for every component this build registers, Frock or
+/// standard: `catalog.dart` re-registers the standard `Text` through it too,
+/// so a sentence beside a pill in a `Row` wraps rather than pushing the pill
+/// off the edge of the card.
+///
 /// `genui`'s `Row` and `Column` wrap a child in a `Flexible` only when the
 /// model wrote a `weight` on it or the component declares itself implicitly
 /// flexible; a child they do not wrap is laid out at unbounded width. A Frock
@@ -57,7 +62,7 @@ export 'tone.dart';
 /// `genui` gives an implicit weight is `FlexFit.loose`, which is what makes
 /// this safe in both axes: a `Row` hands the child a width it may use and a
 /// `Column` still lets it be exactly as tall as it wants to be.
-CatalogItem _flexible(CatalogItem item) => CatalogItem(
+CatalogItem frockFlexibleV1(CatalogItem item) => CatalogItem(
   name: item.name,
   dataSchema: item.dataSchema,
   widgetBuilder: item.widgetBuilder,
@@ -75,5 +80,5 @@ final List<CatalogItem> frockCatalogItemsV1 = List.unmodifiable([
     ...frockRichTextItemsV1,
     ...frockStructureItemsV1,
   ])
-    _flexible(item),
+    frockFlexibleV1(item),
 ]);
