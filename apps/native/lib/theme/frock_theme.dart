@@ -11,7 +11,7 @@ import 'package:flutter/services.dart';
 /// radii, the weight of a line — so that a stock widget dropped anywhere in
 /// the app already looks like it belongs here.
 abstract final class FrockTheme {
-  static const accent = Color(0xffec386b);
+  static const accent = Color(0xffdb4b6d);
 
   /// The pale pink secondary actions are written in. The voice footer's
   /// lobes use it as the tint between white and the accent.
@@ -76,7 +76,7 @@ abstract final class FrockTheme {
           seedColor: accent,
           brightness: brightness,
         ).copyWith(
-          primary: dark ? accent : const Color(0xffbd1e50),
+          primary: dark ? accent : const Color(0xffc23359),
           onPrimary: Colors.white,
           surface: dark ? surface : const Color(0xfffaf8fb),
           onSurface: dark ? text : window,
