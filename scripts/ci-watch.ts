@@ -238,9 +238,11 @@ export async function releaseReport(
   }
 
   if (text(run.status).toLowerCase() !== "completed") {
-    // `waiting` is the run held at the `production` environment's required
-    // reviewer: the tag verified, and one approval in the run's page deploys
-    // it. Nothing here can grant that, so say what is being waited for.
+    // `waiting` is a run held at an environment reviewer. `production`
+    // carries no protection rule today, so this cannot occur; were a required
+    // reviewer added, the tag has verified and one approval in the run's page
+    // deploys it. Nothing here can grant that, so say what is being waited
+    // for.
     const waiting = text(run.status).toLowerCase() === "waiting";
     return {
       status: "pending",

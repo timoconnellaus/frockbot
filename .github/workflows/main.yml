@@ -15,10 +15,11 @@ name: Main
 #
 # Green here does three things in order: deploys staging when the repository
 # variable `DEPLOY_STAGING` is `true`, cuts the next patch tag, and starts
-# `release.yml` for it. Production still moves only behind that workflow's
-# approval gate on the `production` environment — see `README.md` →
-# Releases. Red here blocks nobody's merge; it blocks the deploy, and the
-# fix is the next pull request.
+# `release.yml` for it. Nothing waits for a person after that: the
+# `production` environment carries no protection rule, so a green `main`
+# reaches production on its own — see `README.md` → Releases. Red here
+# blocks nobody's merge; it blocks the deploy, and the fix is the next pull
+# request.
 #
 # Staging is opt-in because it does not exist yet: the `staging` environment
 # holds no Cloudflare token and no Google client, and a release must not wait
@@ -800,4 +801,4 @@ jobs:
 
           gh workflow run release.yml --ref "$tag"
           echo "started release.yml for $tag"
-          echo "Cut \`$tag\` at \`$SHA\` and started the release; approve it under the \`production\` environment to deploy." >> "$GITHUB_STEP_SUMMARY"
+          echo "Cut \`$tag\` at \`$SHA\` and started the release; it deploys production on its own." >> "$GITHUB_STEP_SUMMARY"
