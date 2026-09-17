@@ -11,6 +11,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart' hide ConnectionState;
@@ -47,7 +48,7 @@ class ChatPane extends StatefulWidget {
   /// shell's call, as it is for the run view.
   final void Function(TranscriptLine line)? onOpenExchange;
 
-  /// Another Bot's sheep and current name, for the marker that names it.
+  /// Another Bot's character and current name, for the marker that names it.
   final String? Function(String botId)? backgroundOf;
   final String? Function(String botId)? primaryOf;
   final String? Function(String botId)? nameOf;
@@ -109,6 +110,47 @@ class ChatPane extends StatefulWidget {
 class _ChatPaneState extends State<ChatPane> {
   final editor = TextEditingController();
   final focus = FocusNode();
+
+  /// Where the pointer is over the conversation, in the companion's frame:
+  /// `-1` to `1` across the pane on each axis from the character's centre,
+  /// or nothing while the pointer is elsewhere. The companion reads it
+  /// straight into its eyes; the pane never rebuilds for a mouse move.
+  final gaze = ValueNotifier<Offset?>(null);
+
+  /// Raised for a moment after any pointer down on the pane. The engine
+  /// attaches the composer's editing element in the frames after a tap, and
+  /// the companion drawing a turn of its eyes in those same frames cost the
+  /// first keystroke (skill-menu.e2e): the artboard holds still until the
+  /// field has the keys.
+  final hold = ValueNotifier<bool>(false);
+  Timer? _holdTimer;
+  final _companionKey = GlobalKey();
+
+  void _pointerDown() {
+    hold.value = true;
+    _holdTimer?.cancel();
+    _holdTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) hold.value = false;
+    });
+  }
+
+  void _pointerMoved(Offset global, Size pane) {
+    final box = _companionKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize || !box.attached) return;
+    final centre = box.localToGlobal(box.size.center(Offset.zero));
+    // Half the pane on each axis is a full turn of the eyes, so the far
+    // corner of a wide window and the near edge of a phone both read as
+    // "over there" rather than the eyes pinning to one side.
+    final reach = Size(
+      math.max(pane.width / 2, 1),
+      math.max(pane.height / 2, 1),
+    );
+    gaze.value = Offset(
+      ((global.dx - centre.dx) / reach.width).clamp(-1.0, 1.0),
+      ((global.dy - centre.dy) / reach.height).clamp(-1.0, 1.0),
+    );
+  }
+
   late final SkillMenuController? skills = widget.skills;
   ChatController get controller => widget.controller;
 
@@ -204,16 +246,47 @@ class _ChatPaneState extends State<ChatPane> {
   @override
   Widget build(BuildContext context) {
     final c = controller;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: readingWidth),
-        child: _column(context, c),
+    // The eyes follow the pointer over the whole conversation, not only over
+    // the character's own square. Translucent: the region takes no pointer
+    // from anything under it, the composer included.
+    return LayoutBuilder(
+      builder: (context, constraints) => Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => _pointerDown(),
+        child: MouseRegion(
+          opaque: false,
+          hitTestBehavior: HitTestBehavior.translucent,
+          onHover: (event) =>
+              _pointerMoved(event.position, constraints.biggest),
+          onExit: (_) => gaze.value = null,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: readingWidth),
+              child: _column(context, c),
+            ),
+          ),
+        ),
       ),
     );
   }
 
   Widget _column(BuildContext context, ChatController c) {
     final avatarSize = MediaQuery.sizeOf(context).width <= 640 ? 50.0 : 64.0;
+    final runs = projectRuns(c.runs);
+    final working = c.activeRunId != null;
+    // The Turn the companion's badge is paced by: the assistant line of the
+    // Turn actually running, or none while the submission is being delivered.
+    // A Turn queued behind it has nothing to read a tempo from.
+    final runningLine = working
+        ? runs
+              .where(
+                (line) =>
+                    line.role == LineRole.assistant &&
+                    line.status == LineStatus.streaming &&
+                    line.runId == c.activeRunId,
+              )
+              .lastOrNull
+        : null;
     return Column(
       children: [
         if (c.connection == ConnectionState.disconnected ||
@@ -252,17 +325,13 @@ class _ChatPaneState extends State<ChatPane> {
         Expanded(
           child: TranscriptView(
             background: widget.background,
-            primary: widget.primary,
             starters: widget.starters.isEmpty
                 ? null
                 : StarterSuggestions(
                     starters: widget.starters,
                     onSelect: _prefill,
                   ),
-            lines: [
-              ...projectRuns(c.runs),
-              ...projectAnnouncements(c.announcements),
-            ],
+            lines: [...runs, ...projectAnnouncements(c.announcements)],
             pendingText: c.visiblePendingText,
             loading: c.loading,
             hasEarlier: c.before != null,
@@ -324,32 +393,59 @@ class _ChatPaneState extends State<ChatPane> {
               padding: EdgeInsets.only(left: avatarSize + 12),
               child: _composer(c),
             ),
+            // The field sits above the system's bottom inset (the composer
+            // keeps it in a SafeArea); the companion sits above the same
+            // inset, or on a phone it hung a gesture bar's height below the
+            // field's baseline.
             Positioned(
+              key: _companionKey,
               left: 10,
-              bottom: 10,
-              child: CharacterAvatar(
-                size: avatarSize,
-                characterId: widget.background,
-                primary: widget.primary,
-                enableGaze: true,
-                // Alive while the Bot works; the still picture between Turns.
-                // An idle loop here redrew the whole window sixty times a
-                // second for as long as a chat was open, and even a resting
-                // artboard beside the field cost keystrokes typed right after
-                // a tap on the composer (errors.e2e, skill-menu.e2e). Hover
-                // gaze and the occasional twitch are lost at rest as a result;
-                // bring them back once the artboard and the text field can
-                // share a frame.
-                motion: c.activeRunId == null
-                    ? CharacterMotion.still
-                    : CharacterMotion.active,
-                activity: c.activeRunId == null
-                    ? CharacterActivity.idle
-                    : CharacterActivity.thinking,
-                semanticsLabel: c.activeRunId == null
-                    ? 'Bot is ready'
-                    : 'Bot is thinking',
-              ),
+              bottom: 10 + MediaQuery.paddingOf(context).bottom,
+              // The companion is the working indicator: while a Turn runs it
+              // takes the working pose and wears the typing badge, paced by
+              // the Turn's own stream. Nothing in the thread says "thinking"
+              // any more; the character does.
+              child: working
+                  ? identified(
+                      ShellIds.workingIndicator,
+                      Semantics(
+                        container: true,
+                        liveRegion: true,
+                        label: 'Working',
+                        child: WorkingPace(
+                          line: runningLine,
+                          builder: (context, tempo) => CharacterAvatar(
+                            size: avatarSize,
+                            characterId: widget.background,
+                            primary: widget.primary,
+                            gaze: gaze,
+                            hold: hold,
+                            motion: CharacterMotion.active,
+                            activity: CharacterActivity.working,
+                            working: true,
+                            tempo: tempo,
+                          ),
+                        ),
+                      ),
+                    )
+                  : CharacterAvatar(
+                      size: avatarSize,
+                      characterId: widget.background,
+                      primary: widget.primary,
+                      gaze: gaze,
+                      hold: hold,
+                      // A live artboard at rest, so the eyes can follow the
+                      // pointer and the character can twitch between Turns.
+                      // Quiet, not active: the ticker runs only for a moment
+                      // after a change and stops again, which is what keeps
+                      // an open chat from redrawing the window sixty times
+                      // a second. The artboard takes no pointer and no
+                      // focus, so the field beside it keeps its keystrokes
+                      // (errors.e2e, skill-menu.e2e).
+                      motion: CharacterMotion.quiet,
+                      activity: CharacterActivity.idle,
+                      semanticsLabel: 'Bot is ready',
+                    ),
             ),
           ],
         ),
@@ -381,6 +477,9 @@ class _ChatPaneState extends State<ChatPane> {
     widget.approvals?.removeListener(_repaint);
     editor.dispose();
     focus.dispose();
+    gaze.dispose();
+    _holdTimer?.cancel();
+    hold.dispose();
     super.dispose();
   }
 }

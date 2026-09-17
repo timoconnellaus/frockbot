@@ -20,14 +20,19 @@ still need to be established.
 ## What exists in the app
 
 - `apps/native/lib/flock/avatar.dart`: the shared Rive `CharacterAvatar`, full
-  cast catalogue, colour binding, activity/emotion inputs, pointer gaze,
-  reduced motion, still-image fallback and independent quiet-twitch timing.
+  cast catalogue, colour binding, activity/emotion inputs, reduced motion,
+  still-image fallback and independent quiet-twitch timing. Gaze is fed by the
+  surface that owns the pointer rather than read off the character's own
+  square: `gaze` carries where to look, `hold` keeps the artboard from drawing
+  while a nearby text field is being attached.
 - `apps/native/lib/flock/create.dart`: creation and editing for all eleven
   characters plus curated colours.
 - The persisted `AvatarAppearanceV1` contains `characterId` and `primary`.
   Registration, templates, Bot-created Bots and identity updates share it.
-- Product surfaces include sidebar rows and groups, chat header, persistent
-  composer companion, working row, settings, search, recovery and sign-in.
+- Product surfaces include sidebar rows and groups, the persistent composer
+  companion, settings, search, recovery and sign-in. The chat header names the
+  Bot without drawing it, and the thread has no working row: the composer
+  companion is the working indicator and wears the typing badge.
 - Realtime voice sends `asked`, `answering` and `finished` delegation events.
   The consulted Bot rises into the voice footer, changes activity while its
   answer is read, then settles away.
@@ -37,16 +42,15 @@ still need to be established.
 
 ## Surface behaviour
 
-| Surface         | Motion                                                                                    |
-| --------------- | ----------------------------------------------------------------------------------------- |
-| Bot list        | Mostly still; independently timed twitch every 7–18 seconds                               |
-| Bot row hover   | The whole row triggers one restrained hello on desktop/web                                |
-| Chat header     | Small, quiet identity marker                                                              |
-| Bottom of chat  | Always visible; idle or thinking, with desktop pointer gaze                               |
-| Mobile chat     | Same activity without synthetic pointer tracking                                          |
-| Working row     | Working activity plus the existing readable activity trail                                |
-| Picker/settings | Animated preview of character and selected colour                                         |
-| Voice footer    | Rise/fade/scale handoff, thinking while asked, content while answering, success on finish |
+| Surface         | Motion                                                                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bot list        | Mostly still; independently timed twitch every 7–18 seconds                                                                                           |
+| Bot row hover   | The whole row triggers one restrained hello on desktop/web                                                                                            |
+| Bottom of chat  | A quiet live artboard at rest; the working pose and typing badge while a Turn runs                                                                    |
+| Mobile chat     | Same activity without pointer tracking; sits above the system's bottom inset                                                                          |
+| Chat gaze       | The eyes follow the pointer anywhere over the conversation pane, held still for 900 ms after a pointer down so the composer keeps its first keystroke |
+| Picker/settings | Animated preview of character and selected colour                                                                                                     |
+| Voice footer    | The delegated Bot by its character alone: rise/fade/scale handoff, thinking while asked, content while answering, success on finish                   |
 
 All motion yields to `MediaQuery.disableAnimationsOf`, `TickerMode` and the
 character's still mode. Widget tests use the checked-in neutral PNG because
@@ -61,7 +65,15 @@ validation exercise the real `.riv` files.
 - `apps/native/README.md`: one Flutter client serves web, Android and macOS;
   Flutter 3.47.0 / Dart 3.13.0 must remain pinned.
 
-## 1. Prove the renderer in a Flutter studio
+## The original delivery plan
+
+Everything below is the plan as it was written before the work, kept as the
+record of what was intended and why. It is not a description of the app today:
+where it disagrees with **What exists in the app** and **Surface behaviour**
+above, those sections are authoritative. In particular the working ring and
+trail, and the conversation header's avatar, were reviewed and removed.
+
+### 1. Prove the renderer in a Flutter studio
 
 Build a development-only Flutter studio using all eleven actual `.riv` assets,
 the current behaviour controls and the character switcher. This is the first
@@ -92,7 +104,7 @@ Acceptance: the studio works on Flutter web, Android and macOS; two instances of
 the same character can have different colours and expressions; loading, removal,
 resize and repeated switching do not leak controllers or show stale characters.
 
-## 2. Save appearance and offer a character picker
+### 2. Save appearance and offer a character picker
 
 Proposed stored appearance: `characterId` plus a validated primary colour,
 inside the app's normal versioned wire envelope. Use `avatar` as the registration
@@ -129,7 +141,7 @@ Acceptance: create, edit, reload, reconnect and second-device reads preserve the
 same character/colour; conflict and failure paths are visible and recoverable;
 fresh Bot creation and conversation work after the coordinated data change.
 
-## 3. Connect actual activity to motion
+### 3. Connect actual activity to motion
 
 Keep saved identity separate from temporary animation state. A small deterministic
 presentation function maps existing server projections into activity and feeling.
@@ -167,7 +179,7 @@ component API. Do not assign them to production events without a clear meaning;
 network failures should not make the character perform distress. Add listening
 or speaking behaviour only when we explicitly design that voice interaction.
 
-## 4. Replace avatar surfaces and tune interaction
+### 4. Replace avatar surfaces and tune interaction
 
 Use `CharacterAvatar` everywhere, passing the same appearance. Review sidebar,
 groups, conversation header, working indicator, create/edit sheets, settings,
@@ -195,7 +207,7 @@ Acceptance: scrolling a busy sidebar stays smooth; hidden instances stop
 advancing; selection, keyboard navigation and screen-reader labels still work;
 animation never becomes the sole indicator of work, errors or required input.
 
-## 5. Validate and deliver
+### 5. Validate and deliver
 
 Test the pure status mapping, one-shot lifecycle, identity validation and cloud
 round trips. Widget tests should exercise loading/failure handling, switching,
@@ -214,7 +226,7 @@ build and coordinated server contract/cleanup together, with the native minimum
 version updated if required to exclude clients speaking the removed schema.
 Normal release approval remains the final deployment gate.
 
-## Suggested checkpoints
+### Suggested checkpoints
 
 1. **Flutter studio:** all eleven characters, colours and behaviours on the real
    app platforms; settle framing and renderer performance.

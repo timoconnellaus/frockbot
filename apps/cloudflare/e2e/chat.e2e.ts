@@ -415,11 +415,12 @@ test("a delivered reply is one bubble, wide enough for its own text", async () =
 
 // The settled case above, from the other end of a Turn. The avatar used to sit
 // in a gutter to the left of the running Turn's bubbles and then vanish when
-// the Turn ended, which took the bubble sideways with it. The working row is
-// under the bubbles now, so a bubble is at the transcript's left edge while
-// the Bot is still writing, the avatar is below it rather than beside it, and
-// the end of the Turn moves nothing horizontally.
-test("the working avatar sits below the bubbles and never shifts them", async () => {
+// the Turn ended, which took the bubble sideways with it. The working
+// indicator is the companion beside the composer now — the thread draws no
+// working row at all — so a bubble is at the transcript's left edge while the
+// Bot is still writing, the working character is below the thread rather than
+// in it, and the end of the Turn moves nothing.
+test("the working companion sits beside the composer and never shifts the bubbles", async () => {
   const { page, ollamaBaseUrl } = application();
   // Measure layout without the bubble's entrance motion.
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -457,8 +458,8 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
         running = {
           bubbleLeft: bubble.x,
           bubbleBottom: bubble.y + bubble.height,
-          // How far the row's top is below the bubble's bottom. Negative would
-          // mean the two overlap, which is the old side-by-side row.
+          // How far the companion's top is below the bubble's bottom. Negative
+          // would mean the two overlap, which is the old side-by-side row.
           gap: row.y - (bubble.y + bubble.height),
         };
         return true;
@@ -472,8 +473,14 @@ test("the working avatar sits below the bubbles and never shifts them", async ()
     gap: number;
   };
 
-  // Below, not beside.
+  // Below, not beside — and outside the thread: the transcript has no working
+  // row to draw or to take away.
   expect(midTurn.gap).toBeGreaterThanOrEqual(0);
+  await expect(
+    sem(page, "chat-transcript").locator(
+      '[flt-semantics-identifier="working-indicator"]',
+    ),
+  ).toHaveCount(0);
 
   await expect(sem(page, "working-indicator")).toHaveCount(0, {
     timeout: 120_000,
@@ -542,7 +549,7 @@ test.fixme("a message sent mid-Turn lands above the working avatar, unlabelled",
             '[flt-semantics-identifier="chat-transcript"]',
           );
           const row = transcript?.querySelector(
-            '[flt-semantics-identifier="working-indicator"]',
+            '[flt-semantics-identifier="working-notice"]',
           );
           if (!transcript || !row) return null;
           const rowTop = row.getBoundingClientRect().top;
@@ -760,8 +767,22 @@ test("a send the server refuses for size keeps the draft and says why", async ({
   // reaches the widget only while the engine is holding an editing session
   // open on the field, so the focus is the part that matters and the read
   // below is what proves the widget took it.
-  await composer.focus();
-  await composer.fill("x".repeat(TURN_TEXT_MAX_CHARACTERS_V1 + 10));
+  // Filled until the widget agrees, the way `answerComposer` types: a fresh
+  // Bot's conversation is still loading for a moment after its sheet closes,
+  // and a fill that lands while the engine re-establishes focus after that
+  // load is dropped with nothing to show for it — the element holds the text
+  // and the widget's draft is empty. The corner tells the two apart: Send
+  // stands for a draft (closed, over the limit), the microphone for none.
+  for (let attempt = 0; ; attempt += 1) {
+    await composer.focus();
+    await composer.fill("x".repeat(TURN_TEXT_MAX_CHARACTERS_V1 + 10));
+    try {
+      await expect(sem(page, "send-button")).toHaveCount(1, { timeout: 8_000 });
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+    }
+  }
   // Read off the conversation rather than the field's own node: the count is
   // a line under the composer row, and which semantics node the engine merges
   // it onto is its business rather than this spec's.

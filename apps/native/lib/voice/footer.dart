@@ -276,51 +276,24 @@ class _VoiceFooterState extends State<VoiceFooter> {
                               : delegation == VoiceDelegationStateV1.finished
                               ? '$botName finished'
                               : 'Asked $botName',
+                          // The character alone: its pose says whether the
+                          // Bot is being asked, answering or done, which is
+                          // what the animations are for. The words stay on
+                          // the semantics label for a screen reader.
                           child: Align(
                             alignment: Alignment.centerLeft,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CharacterAvatar(
-                                  size: 76,
-                                  characterId: appearance.characterId,
-                                  primary: appearance.primary,
-                                  activity:
-                                      delegation ==
-                                          VoiceDelegationStateV1.finished
-                                      ? CharacterActivity.success
-                                      : CharacterActivity.thinking,
-                                  emotion:
-                                      delegation ==
-                                          VoiceDelegationStateV1.answering
-                                      ? CharacterEmotion.content
-                                      : CharacterEmotion.curious,
-                                ),
-                                const SizedBox(width: 4),
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 110,
-                                  ),
-                                  child: Text(
-                                    delegation ==
-                                            VoiceDelegationStateV1.answering
-                                        ? '$botName is answering'
-                                        : delegation ==
-                                              VoiceDelegationStateV1.finished
-                                        ? '$botName finished'
-                                        : 'Asked $botName',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                  ),
-                                ),
-                              ],
+                            child: CharacterAvatar(
+                              size: 76,
+                              characterId: appearance.characterId,
+                              primary: appearance.primary,
+                              activity:
+                                  delegation == VoiceDelegationStateV1.finished
+                                  ? CharacterActivity.success
+                                  : CharacterActivity.thinking,
+                              emotion:
+                                  delegation == VoiceDelegationStateV1.answering
+                                  ? CharacterEmotion.content
+                                  : CharacterEmotion.curious,
                             ),
                           ),
                         ),

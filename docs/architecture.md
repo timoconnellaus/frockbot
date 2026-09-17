@@ -483,7 +483,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `SearchOverlay` — `lib/search/overlay.dart` over `lib/search/controller.dart`:
   the backend index across every Bot, debounced, with each of its four states
   named
-- `CreateBotSheet` — `lib/flock/create.dart`: a sheep, a name and the first
+- `CreateBotSheet` — `lib/flock/create.dart`: a character, a name and the first
   thing to say to the Bot, opened from the sidebar's own create gesture
 - `MachinesPage` — `lib/machines/page.dart`: a host over `ViewDocumentView` for
   the computers a Bot may reach, plus the pairing code the host holds
@@ -514,8 +514,8 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 
 The thread's rules were ported from the Vue shell without change and with its
 tests, and are unchanged since: a Turn is ordered as a unit by its own user
-message's stamp (`transcript_model.dart`), the working row says the previous
-reply is being
+message's stamp (`transcript_model.dart`), the thread's working notice says the
+previous reply is being
 stopped only while a supersede drains, a draft belongs to the Bot it was typed
 for and survives a refusal (`composer.dart`), and readiness and the draft are
 separate questions so Try again works with an empty composer.
@@ -677,14 +677,16 @@ Bot's Packages declare join the same row at the wider tiers, built straight from
 the Package catalog the shell holds (`ChatHeader.packageEntries`): they belong
 to one Bot, so they are never drawn over the list of every Bot. A phone's bar
 stays GrokBot's three things and those doors are rows on the Bot's page instead.
-Bot messages have no avatar or tool-count row; the in-chat avatar is reserved
-for the working indicator and its typing badge. A message that crossed to or
-from a counterpart — another of the User's Bots, or the voice session — is one
-centred marker in the thread, "Messaged 🐑 Codex Watch" or "Message from 🐑
-Xero Books", wearing the counterpart's own sheep and, while queued, stopped
-or unanswered, its status; a running exchange says nothing there, because the
-Bot's own working row already says it. The words are never in the thread: the
-marker opens a view-only chat,
+Bot messages have no avatar or tool-count row, and the thread draws no working
+row: the Bot's companion beside the composer takes the working pose and wears
+the typing badge while a Turn runs, and the thread only says something when a
+Stop is being waited on or a Turn is queued behind the one it displaced.
+A message that crossed to or from a counterpart — another of the User's Bots,
+or the voice session — is one centred marker in the thread, "Messaged Codex
+Watch" or "Message from Xero Books", wearing the counterpart's own character
+and, while queued, stopped or unanswered, its status; a running exchange says
+nothing there, because the Bot's companion beside the composer already says it.
+The words are never in the thread: the marker opens a view-only chat,
 "General ⇄ Xero Books", that lists every exchange between the two in both
 directions, each request under the name that sent it and each answer under
 the name that gave it, with a lock footer saying it is view-only. The history
@@ -713,19 +715,17 @@ projected by `projectAnnouncements` and ordered by their recorded timestamps.
 **PR 9: the Flock, and three more projections.**
 
 `lib/flock/` is what a Bot looks like and what may be done to one.
-`sheep.dart` draws the avatar from two bundled layers — a background and the
-canonical sheep, the seven WebPs `apps/native/assets/sheep/` carries — and the
-same sheep is drawn wherever a Bot is: the sidebar row, its pinned tile, the
-thread, the working row and Bot settings, each from the `sheep.background` the
-directory already returns. Wearables are deferred, so the background is the
-whole of the choice a person makes and `defaultSheepRecipeV1` pins the other
-three bands to the catalogue's neutral roots — a Bot this app creates is still
-one the wardrobe can dress when they return.
+`avatar.dart` is `CharacterAvatar`, one animated Rive artboard per Bot drawn
+from the cast `apps/native/assets/characters/` bundles, and the same character
+is drawn wherever a Bot is: the sidebar row, its pinned tile, the thread, the
+composer companion and Bot settings, each from the `characterId` and `primary`
+the directory already returns. The cast and the motion contract are
+[the character integration note](design/character-app-integration.md).
 
 `create.dart` is the sidebar's create gesture, which no longer hands off to
-Manage Bots, and `SheepColourSheet` beside it is the wardrobe's edit half — the
-one thing left of the wardrobe under the single-default-avatar rule — reached
-by pressing the avatar in Bot settings and fenced on the sheep revision the read
+Manage Bots, and `AvatarPickerSheet` beside it is the edit half — the one thing
+left of the old wardrobe under the single-default-avatar rule — reached
+by pressing the avatar in Bot settings and fenced on the avatar revision the read
 just reported rather than one held since the sheet opened. The command is written to the durable store before it is sent and
 cleared only once the authority has answered it, so a lost reply finishes the
 Bot that was asked for rather than making a second one; a 409 is not a failure
@@ -778,7 +778,7 @@ as the person is looking at it and nowhere else. It is the same reasoning
 `SettingField.secret` already carried, from the other direction.
 
 Creating a Bot and its danger zone are host chrome rather than projections, and
-deliberately: the sheep is bundled art rather than an `embed`'s https image,
+deliberately: the character is bundled art rather than an `embed`'s https image,
 the create command fences on a directory revision `ViewController` has no way
 to express, and the lifecycle receipt has a third state — `pending` — that a
 view action's two do not.

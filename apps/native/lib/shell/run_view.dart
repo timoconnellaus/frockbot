@@ -17,7 +17,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../flock/avatar.dart';
 import 'semantics.dart';
 import 'transcript_model.dart';
 
@@ -179,36 +178,26 @@ Duration workingBadgePeriod(WorkingPacePlan plan) {
   }
 }
 
-/// The working row: the Bot's avatar wearing the typing badge, and the only
-/// words it ever says — the ones a supersede drain needs.
-class WorkingIndicator extends StatefulWidget {
-  static const double avatarSize = 28;
-
-  final TranscriptLine line;
-  final String? label;
-
-  /// The Bot's appearance, shared with the thread and sidebar.
-  final String? background;
-  final String? primary;
-  const WorkingIndicator({
-    super.key,
-    required this.line,
-    this.label,
-    this.background,
-    this.primary,
-  });
+/// The tempo of a running Turn, read off its line: fast while tokens stream,
+/// slow while the model is quiet, stopped once the Turn ends. Whatever wears
+/// the typing badge — the companion beside the composer — takes its period
+/// from here, so the badge's pace is the Turn's and not a metronome.
+class WorkingPace extends StatefulWidget {
+  /// The running Turn's line, or nothing while the submission is still being
+  /// delivered: the Bot is busy either way, and a Turn not yet admitted is
+  /// paced as one waiting on its model.
+  final TranscriptLine? line;
+  final Widget Function(BuildContext context, Duration tempo) builder;
+  const WorkingPace({super.key, required this.line, required this.builder});
 
   @override
-  State<WorkingIndicator> createState() => _WorkingIndicatorState();
+  State<WorkingPace> createState() => _WorkingPaceState();
 }
 
-class _WorkingIndicatorState extends State<WorkingIndicator> {
+class _WorkingPaceState extends State<WorkingPace> {
   final Stopwatch _clock = Stopwatch()..start();
   Timer? _timer;
-  late WorkingPaceMemory _memory = workingPaceBegin(
-    WorkingPaceSample.fromLine(widget.line),
-    Duration.zero,
-  );
+  WorkingPaceMemory? _memory;
   WorkingPacePlan _plan = const WorkingPacePlan(
     true,
     WorkingPaceState.running,
@@ -231,15 +220,27 @@ class _WorkingIndicatorState extends State<WorkingIndicator> {
   }
 
   @override
-  void didUpdateWidget(WorkingIndicator oldWidget) {
+  void didUpdateWidget(WorkingPace oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (_timer != null && !identical(oldWidget.line, widget.line)) _read();
   }
 
   void _read() {
+    final line = widget.line;
+    if (line == null) {
+      // Nothing has streamed: the badge keeps the waiting pace until the Turn
+      // is admitted and its line arrives.
+      _memory = null;
+      const waiting = WorkingPacePlan(true, WorkingPaceState.waiting, 0);
+      final changed = workingBadgePeriod(waiting) != workingBadgePeriod(_plan);
+      _plan = waiting;
+      if (changed && mounted) setState(() {});
+      return;
+    }
+    final sample = WorkingPaceSample.fromLine(line);
     final stepped = workingPaceStep(
-      _memory,
-      WorkingPaceSample.fromLine(widget.line),
+      _memory ?? workingPaceBegin(sample, _clock.elapsed),
+      sample,
       _clock.elapsed,
     );
     _memory = stepped.memory;
@@ -256,34 +257,32 @@ class _WorkingIndicatorState extends State<WorkingIndicator> {
   }
 
   @override
+  Widget build(BuildContext context) =>
+      widget.builder(context, workingBadgePeriod(_plan));
+}
+
+/// The words a running Turn earns in the thread — and only those. A plain
+/// running Turn draws nothing here: the companion beside the composer wears
+/// the typing badge and the working pose. Two states still need a line of
+/// text above the composer: a Stop the person asked for and is waiting on, and
+/// a Turn waiting behind the one it displaced.
+class WorkingIndicator extends StatelessWidget {
+  final String label;
+  const WorkingIndicator({super.key, required this.label});
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return identified(
-      ShellIds.workingIndicator,
+      ShellIds.workingNotice,
       Semantics(
         liveRegion: true,
-        label: widget.label ?? 'Working',
-        child: Row(
-          children: [
-            CharacterAvatar(
-              size: WorkingIndicator.avatarSize,
-              characterId: widget.background,
-              primary: widget.primary,
-              activity: CharacterActivity.working,
-              working: true,
-              tempo: workingBadgePeriod(_plan),
-            ),
-            const SizedBox(width: 14),
-            if (widget.label != null)
-              Flexible(
-                child: Text(
-                  widget.label!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-          ],
+        label: label,
+        child: Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ),
     );

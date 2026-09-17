@@ -65,10 +65,9 @@ class TranscriptView extends StatefulWidget {
   /// not here, and the thread says nothing rather than pretending to scroll.
   final String? focusRunId;
 
-  /// The Bot's character and chosen colour. Every live avatar in the thread
-  /// uses the same appearance as the sidebar and composer companion.
+  /// The Bot's character. Every live avatar in the thread uses the same
+  /// appearance as the sidebar and composer companion.
   final String? background;
-  final String? primary;
 
   /// Drawn under the empty thread's greeting, and gone with the first row.
   final Widget? starters;
@@ -96,7 +95,6 @@ class TranscriptView extends StatefulWidget {
     this.onReadLatest,
     this.focusRunId,
     this.background,
-    this.primary,
     this.starters,
   });
 
@@ -397,17 +395,6 @@ class _TranscriptViewState extends State<TranscriptView> {
                 ),
               ),
             ...rows,
-            // Keep the latest messages in place when the working row goes.
-            if (!ordered.any(
-              (line) =>
-                  line.role == LineRole.assistant &&
-                  line.status == LineStatus.streaming &&
-                  line.empty,
-            ))
-              SizedBox(
-                key: const ValueKey('row:working-space'),
-                height: WorkingIndicator.avatarSize + workingPadding.vertical,
-              ),
             if (widget.bottomSpace != null) widget.bottomSpace!,
           ].reversed.toList(),
         ),
@@ -457,21 +444,19 @@ class _TranscriptViewState extends State<TranscriptView> {
       );
     }
     if (line.status == LineStatus.streaming && line.empty) {
-      // A plain running Turn is the animated row and no words. Two states earn
-      // words: a Stop the person asked for and is now waiting on, and a Turn
-      // still waiting behind the one it displaced.
+      // A plain running Turn draws nothing in the thread: the companion
+      // beside the composer is the one that works. Two states earn words: a
+      // Stop the person asked for and is now waiting on, and a Turn still
+      // waiting behind the one it displaced.
+      final label = line.stopRequested
+          ? 'Stopping…'
+          : line.pending
+          ? supersedeDrainLabel(drain) ?? 'Waiting…'
+          : null;
+      if (label == null) return null;
       return Padding(
         padding: workingPadding,
-        child: WorkingIndicator(
-          line: line,
-          background: widget.background,
-          primary: widget.primary,
-          label: line.stopRequested
-              ? 'Stopping…'
-              : line.pending
-              ? supersedeDrainLabel(drain) ?? 'Waiting…'
-              : null,
-        ),
+        child: WorkingIndicator(label: label),
       );
     }
     final children = <Widget>[
@@ -780,8 +765,8 @@ class _ExchangeMarker extends StatelessWidget {
   }
 }
 
-/// A counterpart's face: the Bot's own sheep, or the waveform for the voice
-/// session, which has no face of its own.
+/// A counterpart's face: the Bot's own character, or the waveform for the
+/// voice session, which has no face of its own.
 class CounterpartAvatar extends StatelessWidget {
   final ExchangeCounterpart counterpart;
   final String? background;
