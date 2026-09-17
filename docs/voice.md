@@ -77,12 +77,17 @@ the object has spoken as.
 A Bot's own stored `voiceId` override is not built yet; `resolveVoiceIdV1`
 takes it and nothing writes it.
 
-Every id in that file was read back from this deployment's ElevenLabs account
-on 2026-09-17. That check is not ceremony: most of the provider's well-known
-"premade" ids are absent from this account, and an id the account cannot reach
-does not fail loudly — the sentence simply never becomes sound. A voice that
-is verified to exist has still not been listened to, so re-verify and audition
-after editing the list.
+Every id in that file is held against this deployment's ElevenLabs account by
+`scripts/check-voice-catalog.ts`, which runs in the staging deploy before the
+deploy itself — the first place the key exists. That check is not ceremony:
+most of the provider's well-known "premade" ids are absent from this account,
+and an id the account cannot reach does not fail loudly — the sentence simply
+never becomes sound, which is why no test suite can see it either (they all
+script the speech provider). An id the account cannot reach, and a character
+whose default is not in the catalog, each fail the job; a name that has
+drifted from the account's own is reported without failing, because the voice
+still speaks. A voice that is verified to exist has still not been listened
+to, so audition after editing the list — that part no machine can do.
 
 ## Capabilities
 

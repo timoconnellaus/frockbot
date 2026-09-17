@@ -34,7 +34,7 @@ No Fly configuration exists in the repository. Fly Sprites are rented at runtime
 
 Deploy paths:
 
-- `.github/workflows/main.yml`, job `deploy-staging` — on push to `main`, deploys the app Worker from the `staging` profile; opt-in through the repository variable `DEPLOY_STAGING`, and skipped while it is unset.
+- `.github/workflows/main.yml`, job `deploy-staging` — on push to `main`, deploys the app Worker from the `staging` profile; opt-in through the repository variable `DEPLOY_STAGING`, and skipped while it is unset. Before the deploy it runs `scripts/check-voice-catalog.ts`, which is the first place `ELEVENLABS_API_KEY` exists and so the first place the shipped voice catalog can be held against the account ([voice](voice.md#each-bot-has-a-voice)); with no key in the environment it prints a skip line and exits zero.
 - `.github/workflows/release.yml` — on tag `v*.*.*`, deploys marketing and the admin portal in one job, the computer host, the Applet build service and the app Worker, each from the configs `scripts/deployment-config.ts` writes for the `hosted` profile. The portal's step skips when the `production` environment names no Access application.
 
 ### Deployment profiles
