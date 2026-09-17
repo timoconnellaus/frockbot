@@ -136,6 +136,32 @@ function surfaceIdentifier(value: unknown, label: string): string {
   return said;
 }
 
+/**
+ * A flag, decoded by its value rather than by its presence. A key carrying
+ * `false` says the opposite of what carrying it at all would say, so a
+ * decoder that read presence alone would answer `true` to a producer that
+ * said `false`; anything that is not a boolean is refused outright.
+ */
+function flag(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new CardDecodeError(`${label} must be a boolean`);
+  }
+  return value;
+}
+
+/** A flag carried only when it is true, and refused when it is neither. */
+function trueFlag(value: unknown, label: string): boolean {
+  return value === undefined ? false : flag(value, label);
+}
+
+/** A surface id as a client names one, for a read keyed by the path. */
+export function decodeCardSurfaceIdV1(
+  value: unknown,
+  label = "card surfaceId",
+): string {
+  return surfaceIdentifier(value, label);
+}
+
 function timestamp(value: unknown, label: string): string {
   const stamp = text(value, MAX_TIMESTAMP_LENGTH, label);
   if (Number.isNaN(Date.parse(stamp))) {
@@ -217,7 +243,12 @@ export function decodeCardRecordV1(
         }),
     ...(candidate.sendDataModel === undefined
       ? {}
-      : { sendDataModel: Boolean(candidate.sendDataModel) }),
+      : {
+          sendDataModel: flag(
+            candidate.sendDataModel,
+            `${label} sendDataModel`,
+          ),
+        }),
     ...(candidate.surfaceProperties === undefined
       ? {}
       : {
@@ -226,7 +257,9 @@ export function decodeCardRecordV1(
             `${label} surfaceProperties`,
           ),
         }),
-    ...(candidate.deleted === undefined ? {} : { deleted: true as const }),
+    ...(trueFlag(candidate.deleted, `${label} deleted`)
+      ? { deleted: true as const }
+      : {}),
     ...(candidate.refusal === undefined
       ? {}
       : {
@@ -820,7 +853,7 @@ export interface CardActionReceiptV1 {
   failure?: string;
 }
 
-function decodeCardViewV1(value: unknown, label = "card"): CardViewV1 {
+export function decodeCardViewV1(value: unknown, label = "card"): CardViewV1 {
   const candidate = record(value, label);
   exactKeys(
     candidate,
@@ -867,7 +900,12 @@ function decodeCardViewV1(value: unknown, label = "card"): CardViewV1 {
         }),
     ...(candidate.sendDataModel === undefined
       ? {}
-      : { sendDataModel: Boolean(candidate.sendDataModel) }),
+      : {
+          sendDataModel: flag(
+            candidate.sendDataModel,
+            `${label} sendDataModel`,
+          ),
+        }),
     ...(candidate.surfaceProperties === undefined
       ? {}
       : {
@@ -876,7 +914,9 @@ function decodeCardViewV1(value: unknown, label = "card"): CardViewV1 {
             `${label} surfaceProperties`,
           ),
         }),
-    ...(candidate.deleted === undefined ? {} : { deleted: true as const }),
+    ...(trueFlag(candidate.deleted, `${label} deleted`)
+      ? { deleted: true as const }
+      : {}),
     ...(candidate.refusal === undefined
       ? {}
       : {
@@ -909,7 +949,9 @@ export function decodeCardListViewV1(
     cards: candidate.cards.map((card) =>
       decodeCardViewV1(card, `${label} entry`),
     ),
-    ...(candidate.truncated === undefined ? {} : { truncated: true as const }),
+    ...(trueFlag(candidate.truncated, `${label} truncated`)
+      ? { truncated: true as const }
+      : {}),
   };
 }
 

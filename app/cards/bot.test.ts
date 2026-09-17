@@ -11,7 +11,14 @@ import {
   CARD_REFUSAL_MAX_V1,
   type CardRecordV1,
 } from "@frockbot/app/shell/cards";
-import { cardAction, CardStaleError, listCards } from "./bot.js";
+import { CARD_ACTION_CONTEXT_MAX_V1 } from "@frockbot/app/routines/inbox";
+import {
+  cardAction,
+  cardActionInvocationV1,
+  CardStaleError,
+  listCards,
+  readCardView,
+} from "./bot.js";
 
 const IDENTITY: BotIdentity = { userId: "user-1", botId: "bot-1" };
 const SURFACE = "draft-email";
@@ -121,11 +128,79 @@ describe("reading a Bot's Cards", () => {
     // Newest first, so what falls off the end is the stalest surface.
     expect(listed.cards[0]?.surfaceId).toBe("surface-31");
     expect(
-      listed.cards.reduce(
-        (total, entry) => total + a2uiByteLengthV1(entry),
-        0,
-      ),
+      listed.cards.reduce((total, entry) => total + a2uiByteLengthV1(entry), 0),
     ).toBeLessThanOrEqual(A2UI_LIMITS_V1.cardListBytes);
+  });
+});
+
+describe("reading one Card by its id", () => {
+  test("answers a surface the listing's byte budget would have cut", async () => {
+    const { state } = harness(
+      new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]),
+    );
+    const view = await readCardView(state, IDENTITY, SURFACE);
+    expect(view).toMatchObject({ surfaceId: SURFACE, revision: 2 });
+    expect(view).not.toHaveProperty("runId");
+  });
+
+  test("answers a tombstoned surface, which the transcript still draws", async () => {
+    const { state } = harness(
+      new Map<string, unknown>([
+        [cardKeyV1(SURFACE), card({ deleted: true, components: [] })],
+      ]),
+    );
+    expect(await readCardView(state, IDENTITY, SURFACE)).toMatchObject({
+      surfaceId: SURFACE,
+      deleted: true,
+    });
+  });
+
+  test("a surface this Bot never drew is not found", async () => {
+    const { state } = harness();
+    await expect(readCardView(state, IDENTITY, SURFACE)).rejects.toMatchObject({
+      name: "CardNotFoundError",
+    });
+  });
+});
+
+describe("what a Plugin handler is handed", () => {
+  const handler = {
+    pluginId: "email",
+    action: "regenerate",
+    runId: "card-action:draft-email:2",
+    generationId: "foundation-v1",
+  };
+
+  test("the data model travels when the surface asked for it", () => {
+    const invocation = cardActionInvocationV1(
+      IDENTITY,
+      {
+        schemaVersion: 1,
+        surfaceId: SURFACE,
+        revision: 2,
+        event: { name: "plugin/email/regenerate" },
+        dataModel: { tone: "brisk" },
+      },
+      card({ sendDataModel: true }),
+      handler,
+    );
+    expect(invocation.dataModel).toEqual({ tone: "brisk" });
+  });
+
+  test("a surface that did not ask for its model is never handed one", () => {
+    const invocation = cardActionInvocationV1(
+      IDENTITY,
+      {
+        schemaVersion: 1,
+        surfaceId: SURFACE,
+        revision: 2,
+        event: { name: "plugin/email/regenerate" },
+        dataModel: { tone: "brisk" },
+      },
+      card(),
+      handler,
+    );
+    expect(invocation).not.toHaveProperty("dataModel");
   });
 });
 
@@ -284,5 +359,26 @@ describe("the three routes", () => {
       name: "pick-tuesday",
       context: '{"day":"Tue"}',
     });
+  });
+
+  test("a context past what the preamble carries is refused, never cut", async () => {
+    // The Bot reads this verbatim, so half of a JSON object is worse than a
+    // refusal the person is told about.
+    const values = new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]);
+    const { state } = harness(values);
+    await expect(
+      cardAction(state, IDENTITY, {
+        schemaVersion: 1,
+        surfaceId: SURFACE,
+        revision: 2,
+        event: {
+          name: "pick-tuesday",
+          context: { note: "x".repeat(CARD_ACTION_CONTEXT_MAX_V1) },
+        },
+      }),
+    ).rejects.toMatchObject({ name: "CardDecodeError" });
+    expect(
+      [...values.keys()].filter((key) => key.startsWith("routine-wake:")),
+    ).toHaveLength(0);
   });
 });

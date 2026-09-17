@@ -17,6 +17,7 @@ import {
   A2UI_LIMITS_V1,
   decodeA2uiAgentMessageV1,
   type A2uiAgentMessageV1,
+  type PluginWorkerCardActionInvocationV1,
 } from "@frockbot/core/contracts";
 import { decideApproval } from "@frockbot/app/approvals/bot";
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
@@ -78,10 +79,12 @@ function cardFailureV1(reason: string): string {
  * tombstoned ones included, because the send that drew one is still in the
  * transcript and the transcript still has to say something where it sits.
  *
- * Newest first is also what makes the listing's byte budget honest: the walk
- * stops before `cardListBytes` is exceeded and says `truncated` when it did,
- * so what falls off the end is the stalest card rather than an arbitrary one,
- * and a client is never quietly told it has them all.
+ * The listing is the newest Cards that fit: the walk stops before
+ * `cardListBytes` is exceeded and says `truncated` when it did, so what falls
+ * off the end is the stalest card rather than an arbitrary one, and a client
+ * is never quietly told it has them all. A card the listing left out is read
+ * by its id with `readCard`, so every surface a Session holds stays readable
+ * whatever the budget cut.
  */
 export async function listCards(
   state: ShellBotStateV1,
@@ -110,6 +113,21 @@ export async function listCards(
     cards,
     ...(truncated ? { truncated: true as const } : {}),
   };
+}
+
+/**
+ * One Card by its surface id, for a client reading a surface the listing's
+ * byte budget left out. A surface this Bot never drew is not found; a
+ * tombstoned one is carried, exactly as the listing carries it, because the
+ * send that drew it is still in the transcript.
+ */
+export async function readCardView(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  surfaceId: string,
+): Promise<CardViewV1> {
+  await state.authority.validateIdentity(identity);
+  return projectCardV1(await readCard(state, surfaceId));
 }
 
 async function readCard(
@@ -225,7 +243,7 @@ export async function cardAction(
     // told why. A press on a card must not be able to fail a read of it.
     let outcome: Awaited<ReturnType<typeof runPluginCardAction>>;
     try {
-      outcome = await runPluginCardAction(state, identity, command, {
+      outcome = await runPluginCardAction(state, identity, command, card, {
         pluginId: route.pluginId,
         action: route.action,
         runId,
@@ -269,10 +287,15 @@ export async function cardAction(
   const context =
     command.event.context === undefined
       ? undefined
-      : JSON.stringify(command.event.context).slice(
-          0,
-          CARD_ACTION_CONTEXT_MAX_V1,
-        );
+      : JSON.stringify(command.event.context);
+  if (context !== undefined && context.length > CARD_ACTION_CONTEXT_MAX_V1) {
+    // The preamble puts this in the Bot's prompt verbatim, so a cut one is a
+    // fragment of JSON the Bot would read as the whole answer. The press is
+    // refused and the person is told, rather than half of it being acted on.
+    throw new CardDecodeError(
+      `a card action context is at most ${CARD_ACTION_CONTEXT_MAX_V1} characters once serialized`,
+    );
+  }
   await state.ctx.storage.transaction(async (transaction) => {
     await enqueuePendingBotInputV1(transaction, {
       schemaVersion: 1,
@@ -291,10 +314,47 @@ export async function cardAction(
 }
 
 /** The Plugin handler behind one `plugin/<pluginId>/<action>` name. */
+/**
+ * What the handler is handed for one press. The data model travels only when
+ * the surface was created asking for it: a client may post one regardless,
+ * and a surface that did not ask is not made to answer about a model the
+ * kernel never compared against its own.
+ */
+export function cardActionInvocationV1(
+  identity: BotIdentity,
+  command: CardActionCommandV1,
+  card: CardRecordV1,
+  handler: {
+    pluginId: string;
+    action: string;
+    runId: string;
+    generationId: string;
+  },
+): PluginWorkerCardActionInvocationV1 {
+  const dataModel = card.sendDataModel === true ? command.dataModel : undefined;
+  return {
+    schemaVersion: 1,
+    pluginId: handler.pluginId,
+    surfaceId: command.surfaceId,
+    action: handler.action,
+    ...(command.event.context === undefined
+      ? {}
+      : { context: command.event.context }),
+    ...(dataModel === undefined ? {} : { dataModel }),
+    botId: identity.botId,
+    sessionId: `${identity.userId}:${identity.botId}`,
+    runId: handler.runId,
+    turnId: handler.runId,
+    generationId: handler.generationId,
+    deadlineMs: CARD_ACTION_DEADLINE_MS,
+  };
+}
+
 function runPluginCardAction(
   state: ShellBotStateV1,
   identity: BotIdentity,
   command: CardActionCommandV1,
+  card: CardRecordV1,
   handler: { pluginId: string; action: string; runId: string },
 ) {
   return readBotPluginRosterV1(state, identity).then((roster) =>
@@ -304,24 +364,12 @@ function runPluginCardAction(
       roster,
       { runId: handler.runId, deadlineMs: CARD_ACTION_DEADLINE_MS },
       (worker) =>
-        worker.active.cardAction({
-          schemaVersion: 1,
-          pluginId: handler.pluginId,
-          surfaceId: command.surfaceId,
-          action: handler.action,
-          ...(command.event.context === undefined
-            ? {}
-            : { context: command.event.context }),
-          ...(command.dataModel === undefined
-            ? {}
-            : { dataModel: command.dataModel }),
-          botId: identity.botId,
-          sessionId: `${identity.userId}:${identity.botId}`,
-          runId: handler.runId,
-          turnId: handler.runId,
-          generationId: roster.generationId,
-          deadlineMs: CARD_ACTION_DEADLINE_MS,
-        }),
+        worker.active.cardAction(
+          cardActionInvocationV1(identity, command, card, {
+            ...handler,
+            generationId: roster.generationId,
+          }),
+        ),
     ),
   );
 }

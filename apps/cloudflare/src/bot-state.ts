@@ -135,7 +135,7 @@ import {
   resolveConfiguration,
 } from "@frockbot/app/settings/bot";
 import { decideApproval, listApprovals } from "@frockbot/app/approvals/bot";
-import { cardAction, listCards } from "@frockbot/app/cards/bot";
+import { cardAction, listCards, readCardView } from "@frockbot/app/cards/bot";
 import {
   getCompositionGeneration,
   listCompositionGenerations,
@@ -171,6 +171,7 @@ import {
 } from "@frockbot/app/shell/approvals";
 import {
   decodeCardActionCommandV1,
+  decodeCardSurfaceIdV1,
   type CardActionCommandV1,
 } from "@frockbot/app/shell/cards";
 import {
@@ -2128,6 +2129,24 @@ export class BotState extends DurableObject<BotStateEnv> {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     return listCards(shell.state, identity);
+  }
+
+  /**
+   * One Card by its surface id. The listing is bounded by bytes, so this is
+   * how a client reads a surface that fell past the budget.
+   */
+  async readCard(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      surfaceId: rpcDecoded(decodeCardSurfaceIdV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return readCardView(shell.state, identity, request.surfaceId as string);
   }
 
   /**

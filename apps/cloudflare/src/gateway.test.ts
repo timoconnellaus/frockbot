@@ -9,6 +9,7 @@ import type {
 import type {
   CardActionReceiptV1,
   CardListViewV1,
+  CardViewV1,
 } from "@frockbot/app/shell/cards";
 import { describe, expect, test } from "bun:test";
 import {
@@ -217,6 +218,10 @@ class MemoryBotState implements BotStateBinding {
     return Promise.resolve({ schemaVersion: 1, botId, cards: [] });
   }
 
+  readCard(): Promise<CardViewV1> {
+    return Promise.reject(new Error("cards are not wired in this test"));
+  }
+
   cardAction(): Promise<CardActionReceiptV1> {
     return Promise.reject(new Error("cards are not wired in this test"));
   }
@@ -322,6 +327,7 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     decideApproval: ({ botId, approvalId, command }) =>
       state.decideApproval(botId, approvalId, command),
     listCards: ({ botId }) => state.listCards(botId),
+    readCard: ({ botId, surfaceId }) => state.readCard(botId, surfaceId),
     cardAction: ({ botId, command }) => state.cardAction(botId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),

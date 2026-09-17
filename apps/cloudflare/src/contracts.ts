@@ -9,6 +9,7 @@ import type {
   CardActionCommandV1,
   CardActionReceiptV1,
   CardListViewV1,
+  CardViewV1,
 } from "@frockbot/app/shell/cards";
 import type {
   SettingsFrame,
@@ -182,6 +183,7 @@ export interface BotStateBinding {
     command: ApprovalDecisionCommandV1,
   ): Promise<ApprovalDecisionReceiptV1>;
   listCards(botId: string): Promise<CardListViewV1>;
+  readCard(botId: string, surfaceId: string): Promise<CardViewV1>;
   cardAction(
     botId: string,
     command: CardActionCommandV1,
@@ -367,6 +369,11 @@ export interface UserBotStateBinding {
     schemaVersion: 1;
     botId: string;
   }): Promise<CardListViewV1>;
+  readCard(input: {
+    schemaVersion: 1;
+    botId: string;
+    surfaceId: string;
+  }): Promise<CardViewV1>;
   cardAction(input: {
     schemaVersion: 1;
     botId: string;

@@ -17,6 +17,7 @@ import {
   decodeCardActionCommandV1,
   decodeCardListViewV1,
   decodeCardRecordV1,
+  decodeCardViewV1,
   foldCardMessagesV1,
   projectCardV1,
   type CardRecordV1,
@@ -727,5 +728,64 @@ describe("the action command", () => {
         cards: [view],
       }),
     ).toThrow(/surfaceId/);
+  });
+});
+
+describe("the flags a decoder carries", () => {
+  const view = {
+    schemaVersion: 1,
+    surfaceId: SURFACE,
+    revision: 0,
+    components: [],
+    dataModel: {},
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+
+  test("a listing that says nothing was withheld is not read as truncated", () => {
+    expect(
+      decodeCardListViewV1({
+        schemaVersion: 1,
+        botId: "bot-1",
+        cards: [],
+        truncated: false,
+      }),
+    ).not.toHaveProperty("truncated");
+    expect(
+      decodeCardListViewV1({
+        schemaVersion: 1,
+        botId: "bot-1",
+        cards: [],
+        truncated: true,
+      }).truncated,
+    ).toBe(true);
+  });
+
+  test("a truncated that is not a boolean is refused", () => {
+    expect(() =>
+      decodeCardListViewV1({
+        schemaVersion: 1,
+        botId: "bot-1",
+        cards: [],
+        truncated: "yes",
+      }),
+    ).toThrow(/truncated/);
+  });
+
+  test("a surface that says it was not deleted is not read as tombstoned", () => {
+    expect(decodeCardViewV1({ ...view, deleted: false })).not.toHaveProperty(
+      "deleted",
+    );
+    expect(decodeCardViewV1({ ...view, deleted: true }).deleted).toBe(true);
+    expect(() => decodeCardViewV1({ ...view, deleted: 1 })).toThrow(/deleted/);
+  });
+
+  test("a sendDataModel that is not a boolean is refused", () => {
+    expect(
+      decodeCardViewV1({ ...view, sendDataModel: false }).sendDataModel,
+    ).toBe(false);
+    expect(() => decodeCardViewV1({ ...view, sendDataModel: "true" })).toThrow(
+      /sendDataModel/,
+    );
   });
 });

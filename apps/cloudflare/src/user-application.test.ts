@@ -81,6 +81,7 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     decideApproval: ({ botId, approvalId, command }) =>
       state.decideApproval(botId, approvalId, command),
     listCards: ({ botId }) => state.listCards(botId),
+    readCard: ({ botId, surfaceId }) => state.readCard(botId, surfaceId),
     cardAction: ({ botId, command }) => state.cardAction(botId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
@@ -352,6 +353,7 @@ describe("user application Bot seam", () => {
       decideApproval: () => Promise.reject(new Error("unexpected")),
       listCards: (botId) =>
         Promise.resolve({ schemaVersion: 1 as const, botId, cards: [] }),
+      readCard: () => Promise.reject(new Error("unexpected")),
       cardAction: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
       stopRun: () => Promise.reject(new Error("must not stop")),
@@ -1012,6 +1014,49 @@ describe("the cards route", () => {
     });
   });
 
+  test("a GET of one id answers the card the listing may have cut", async () => {
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards/draft-email"),
+      envFor({
+        readCard: (_botId: string, surfaceId: string) =>
+          Promise.resolve({ ...card, surfaceId }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      surfaceId: "draft-email",
+      revision: 2,
+    });
+  });
+
+  test("a surface this Bot never drew is a 404", async () => {
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards/never-drawn"),
+      envFor({
+        readCard: () =>
+          Promise.reject(
+            namedError("CardNotFoundError", 'card "never-drawn" was not found'),
+          ),
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  test("a surface id that could never have been stored never reaches the Durable Object", async () => {
+    let reached = 0;
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards/run%3Afoo"),
+      envFor({
+        readCard: () => {
+          reached += 1;
+          return Promise.reject(new Error("unexpected"));
+        },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(reached).toBe(0);
+  });
+
   test("a malformed action never reaches the Durable Object", async () => {
     let reached = 0;
     const env = envFor({
@@ -1159,6 +1204,7 @@ describe("run list failures", () => {
       decideApproval: () => Promise.reject(new Error("unexpected")),
       listCards: (botId) =>
         Promise.resolve({ schemaVersion: 1 as const, botId, cards: [] }),
+      readCard: () => Promise.reject(new Error("unexpected")),
       cardAction: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
       stopRun: () => Promise.reject(new Error("unexpected")),
