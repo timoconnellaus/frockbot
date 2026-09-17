@@ -54,8 +54,9 @@ class ViewDocumentView extends StatefulWidget {
   /// Whether the root's titled groups are drawn as a grid of cards.
   final bool gridGroups;
 
-  /// Whether the root's titled groups are drawn as switch rows on one card
-  /// per kind, which is what a list of things to turn on and off is.
+  /// Whether the root's titled groups are drawn as labelled cards of switch
+  /// rows — one card per section the document itself names — which is what a
+  /// list of things to turn on and off is. See [ViewSwitchRows].
   final bool switchRows;
   ViewDocumentView({
     super.key,
