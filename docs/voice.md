@@ -336,9 +336,11 @@ boundaries (a chunk may end on an odd byte; carry the byte). This is Gemini's
 own output rate, sent on as it arrives. The client plays them in order and
 measures amplitude from what it is playing.
 
-`voice/delegation` (`botId`, `botName`, `state` ∈ `asked | answering |
-finished`) tells the footer where a request to a Bot is: asked, its answer
-being put into words, done. Chrome only; nothing durable turns on it.
+`voice/delegation` (`botId`, `botName`, `runId`, `state` ∈ `asked |
+answering | finished`) tells the voice surface where a request to a Bot is:
+asked, its answer being put into words, done. `runId` is the Turn the request
+became, so the activity slot opens that Work. Chrome only; nothing durable
+turns on it.
 `voice/speech` reports actual playback. The clients still send it and the
 server still accepts it, but nothing turns on it any more: deciding when a
 late answer may be spoken is the session's own job now, which is what

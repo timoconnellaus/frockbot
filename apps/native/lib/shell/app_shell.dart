@@ -1203,16 +1203,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// The Work a subagent left behind, from voice mode's activity slot.
   ///
-  /// A `voice/delegation` frame names the Bot, not the run, so what opens is
-  /// that Bot's latest Turn — the one the call just started. The call is not
-  /// ended and the page is not left: the run view opens over voice mode, the
-  /// way it opens over a thread.
-  void _openVoiceWork(String botId) {
+  /// The `voice/delegation` frame names the Turn, so that is what opens; if
+  /// the Bot's projection has not caught up with it yet, its latest Turn
+  /// stands in. The call is not ended and the page is not left: the run view
+  /// opens over voice mode, the way it opens over a thread.
+  void _openVoiceWork(String botId, String runId) {
     final lines = projectRuns(
       widget.sessions.open(widget.userId, botId).controller.runs,
     );
     if (lines.isEmpty) return;
-    _openRun(lines.last);
+    _openRun(
+      lines.lastWhere((line) => line.runId == runId, orElse: () => lines.last),
+    );
   }
 
   void _openRun(TranscriptLine line) {

@@ -299,6 +299,7 @@ void main() {
         'type': 'voice/delegation',
         'botId': 'dog-bot',
         'botName': 'Scout',
+        'runId': 'run-scout',
         'state': 'asked',
       }),
     );

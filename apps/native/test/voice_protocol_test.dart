@@ -231,10 +231,12 @@ void main() {
         'schemaVersion': 1,
         'botId': 'researcher',
         'botName': 'Scout',
+        'runId': 'run-1',
         'state': 'answering',
       })!;
       expect(delegation.botId, 'researcher');
       expect(delegation.botName, 'Scout');
+      expect(delegation.runId, 'run-1');
       expect(delegation.state, VoiceDelegationStateV1.answering);
     });
 

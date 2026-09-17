@@ -55,17 +55,17 @@ That is the only error channel: there is no `error` message type.
 an invalid argument.` The failure is deferred, so a setup-only check passes
   and a real call dies on the person's first word.
 
-So `gemini-3.8-live` does not take affective dialog. ADR 0031 decision 1 says
-"affective dialog on"; we do not send the field. Delivery goes through the
-persona prose instead, which is where the ADR already puts accent, pace and
-attitude.
+So `gemini-3.8-live` does not take affective dialog. ADR 0031 decision 1
+first said "affective dialog on" and now records this finding; we do not send
+the field. Delivery goes through the persona prose instead, which is where
+the ADR already puts accent, pace and attitude.
 
 ### `speechConfig.languageCode` is accepted — ADR contradicted, harmlessly
 
-ADR 0031 says native audio rejects `languageCode`. It does not: setup is
-accepted and the turn completes normally with it set to `en-US`. We still do
-not send it (the ADR's decision — language is pinned in prose, which also
-covers accent), but the stated reason no longer holds.
+ADR 0031 first said native audio rejects `languageCode`. It does not: setup
+is accepted and the turn completes normally with it set to `en-US`. We still
+do not send it (the ADR's decision — language is pinned in prose, which also
+covers accent); the ADR now gives that as the reason.
 
 ## A text turn
 

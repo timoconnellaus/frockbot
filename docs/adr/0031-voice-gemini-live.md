@@ -28,16 +28,23 @@ context and one extra tool — a subagent. It does not share the thread.**
 1. **One session replaces the cascade.** The `VoiceAssistant` object opens
    one `bidiGenerateContent` socket per call: the Bot's rendered system
    instruction, `speechConfig.voiceName`, the voice tools as function
-   declarations (non-blocking), `googleSearch` as a built-in, affective
-   dialog on. Audio is bridged both ways; the client wire (`docs/voice.md`,
-   16 kHz up, 24 kHz down, the same frames) does not change. `languageCode`
-   is never sent — native audio rejects it — so language is pinned in prose.
+   declarations (non-blocking), `googleSearch` as a built-in. Audio is
+   bridged both ways; the client wire (`docs/voice.md`, 16 kHz up, 24 kHz
+   down, the same frames) does not change. Affective dialog is not sent: the
+   3.8 Live model accepts the field at setup and then closes the socket on
+   the first content frame, so delivery goes through the prose alone.
+   `languageCode` is never sent either — the model does take it, but the
+   language is pinned in prose beside the accent, and one place is enough.
 2. **The model decides what is long.** Its tools are the Bot-scoped reads
    and memory tools it already had, `switch_bot`, and `subagent`: hand off
    anything that will take more than a moment and carry on. A subagent is a
    Turn on the Bot's `agent` lane through the existing `runVoice` path; its
    result returns as a late function response, or waits if the call is
-   paused. Nothing is classified by us.
+   paused. Nothing is classified by us. **The same `subagent` tool is in a
+   Bot's text Turns** (`app/flock/subagent.ts`): a chat reply can come back
+   before the work does, the hand-off is a Turn of the same Bot with a
+   `handoff` origin one level deep, and the person sees it on the Work views
+   like any other Turn. Voice and text delegate the same way.
 3. **Pause closes the session and starts nothing.** Sleep stops the socket
    (no audio, no billing). Subagents already admitted finish as any Turn
    would and their results queue; Resume reopens with the session's
@@ -90,6 +97,19 @@ context and one extra tool — a subagent. It does not share the thread.**
   is for the TTS models; for Live, delivery goes through the instruction and
   Google does not enumerate which descriptors bite. The probe in
   `apps/cloudflare/test/voice-gemini-probe.ts` is how a preset earns its place.
+- **What the probe found** (`docs/voice-gemini-probe.md`, 2026-09-17), which
+  the object is built on: the only error channel is a 1007 close with a
+  reason; `clientContent.turns[].role` is required; bare `{}` frames arrive
+  constantly and mean nothing; output is always `audio/pcm;rate=24000`;
+  `generationComplete` and `turnComplete` are separate frames and either can
+  be missing from an interrupted turn, so `switch_bot` waits for whichever
+  lands first; `usageMetadata` is tokens at turn end, not seconds, so the
+  meters count bridged bytes; `NON_BLOCKING` declarations and `WHEN_IDLE`
+  responses work, and a late response after the turn produced a fresh spoken
+  turn; resumption carries context, and a handle the server has forgotten
+  closes **1008**, which is the real "start fresh with a handover" signal —
+  `VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1` stays our own device-rejoin policy.
+  `goAway` and `toolCallCancellation` are decoded but were never produced.
 - **A search in flight dies with the socket.** Grounding runs inside the
   session; Pause loses it. Acceptable: the person asks again.
 - **Session limits are Google's.** The resumption window and the session
@@ -103,8 +123,6 @@ context and one extra tool — a subagent. It does not share the thread.**
 
 - Execute a Bot's tools outside a Turn, with approvals, so Live can call them
   directly and only hand off what is genuinely long.
-- The same `subagent` tool in text Turns, so a chat reply can come back
-  before the work does.
 - The chat model to `gemini-3.8-flash` with search grounding, as its own
   change: it touches the gateway, `BILLING_MODEL_RATES` and per-Bot models.
 - Dictation to `gemini-3.5-transcribe-live`, dropping `OPENAI_API_KEY`.

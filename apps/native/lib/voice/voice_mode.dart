@@ -69,7 +69,7 @@ class VoiceMode extends StatefulWidget {
   final VoidCallback onEnd;
 
   /// Opens the Work a finished subagent left behind, on that Bot.
-  final void Function(String botId)? onOpenWork;
+  final void Function(String botId, String runId)? onOpenWork;
   const VoiceMode({
     super.key,
     required this.session,
@@ -93,7 +93,12 @@ class _VoiceModeState extends State<VoiceMode> {
     badge: widget.session.finishedWhilePaused,
     chips: [
       for (final entry in widget.session.delegations)
-        (id: entry.botId, name: entry.botName, finished: entry.finished),
+        (
+          id: entry.botId,
+          runId: entry.runId,
+          name: entry.botName,
+          finished: entry.finished,
+        ),
     ],
   );
 
@@ -252,10 +257,10 @@ class _VoiceModeState extends State<VoiceMode> {
                           VoiceModeState.speaking => theme.colorScheme.primary,
                           VoiceModeState.listening =>
                             theme.colorScheme.onSurfaceVariant,
-                          VoiceModeState.paused => theme
-                              .colorScheme
-                              .onSurfaceVariant
-                              .withValues(alpha: 0.4),
+                          VoiceModeState.paused =>
+                            theme.colorScheme.onSurfaceVariant.withValues(
+                              alpha: 0.4,
+                            ),
                         },
                       ),
                     ),
@@ -361,7 +366,7 @@ class _VoiceModeState extends State<VoiceMode> {
               )
             else if (open != null)
               TextButton(
-                onPressed: () => open(chip.id),
+                onPressed: () => open(chip.id, chip.runId),
                 style: TextButton.styleFrom(
                   minimumSize: const Size(0, 44),
                   padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -548,17 +553,15 @@ class VoiceHeaderPill extends StatelessWidget {
         ),
         child: Text(
           'Voice',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: scheme.primary,
-            fontWeight: FontWeight.w600,
-          ),
+          style: Theme.of(context).textTheme.labelSmall
+              ?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600),
         ),
       ),
     );
   }
 }
 
-typedef _Chip = ({String id, String name, bool finished});
+typedef _Chip = ({String id, String runId, String name, bool finished});
 typedef _Presentation = ({
   VoiceModeState state,
   bool paused,

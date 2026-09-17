@@ -55,11 +55,15 @@ enum VoiceSessionPhase { idle, connecting, live, ending, ended, error }
 class VoiceDelegationEntryV1 {
   final String botId;
   final String botName;
+
+  /// The Turn the request became; what the chip opens.
+  final String runId;
   final VoiceDelegationStateV1 state;
   final bool finishedWhilePaused;
   const VoiceDelegationEntryV1({
     required this.botId,
     required this.botName,
+    required this.runId,
     required this.state,
     this.finishedWhilePaused = false,
   });
@@ -518,8 +522,13 @@ class AssistantSessionController extends ChangeNotifier {
         // produced it are this client's and are not overwritten by it.
         _upstream = upstream;
         _notify();
-      case AssistantDelegationV1(:final botId, :final botName, :final state):
-        _record(botId, botName, state);
+      case AssistantDelegationV1(
+        :final botId,
+        :final botName,
+        :final runId,
+        :final state,
+      ):
+        _record(botId, botName, runId, state);
         _delegationTimer?.cancel();
         _delegatedBotId = botId;
         _delegatedBotName = botName;
@@ -779,10 +788,16 @@ class AssistantSessionController extends ChangeNotifier {
 
   /// Moves the ledger's entry for one Bot, or opens it. A finish that lands
   /// while the call is paused is marked, because the Resume pill counts them.
-  void _record(String botId, String botName, VoiceDelegationStateV1 state) {
+  void _record(
+    String botId,
+    String botName,
+    String runId,
+    VoiceDelegationStateV1 state,
+  ) {
     final entry = VoiceDelegationEntryV1(
       botId: botId,
       botName: botName,
+      runId: runId,
       state: state,
       finishedWhilePaused: _paused && state == VoiceDelegationStateV1.finished,
     );
@@ -798,6 +813,7 @@ class AssistantSessionController extends ChangeNotifier {
         : VoiceDelegationEntryV1(
             botId: botId,
             botName: botName,
+            runId: runId,
             state: state,
             finishedWhilePaused: _delegations[at].finishedWhilePaused,
           );
@@ -831,6 +847,7 @@ class AssistantSessionController extends ChangeNotifier {
       _delegations[i] = VoiceDelegationEntryV1(
         botId: _delegations[i].botId,
         botName: _delegations[i].botName,
+        runId: _delegations[i].runId,
         state: _delegations[i].state,
       );
     }
@@ -847,4 +864,3 @@ class AssistantSessionController extends ChangeNotifier {
     super.dispose();
   }
 }
-

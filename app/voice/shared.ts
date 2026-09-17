@@ -277,14 +277,16 @@ export type VoiceAssistantServerMessageV1 =
     }
   /**
    * Where a request to a Bot is: asked, its answer being put into words by
-   * the assistant, or done. Chrome only — the footer names the Bot — and
-   * nothing durable turns on it.
+   * the assistant, or done. `runId` is the Turn the request became, so the
+   * activity slot can open that Work rather than the Bot's latest. Chrome
+   * only; nothing durable turns on it.
    */
   | {
       schemaVersion: 1;
       type: "voice/delegation";
       botId: string;
       botName: string;
+      runId: string;
       state: "asked" | "answering" | "finished";
     };
 
@@ -418,6 +420,7 @@ export function decodeVoiceAssistantServerFrameV1(
     if (
       typeof value.botId !== "string" ||
       typeof value.botName !== "string" ||
+      typeof value.runId !== "string" ||
       (value.state !== "asked" &&
         value.state !== "answering" &&
         value.state !== "finished")
@@ -431,6 +434,7 @@ export function decodeVoiceAssistantServerFrameV1(
         type: "voice/delegation",
         botId: value.botId,
         botName: value.botName,
+        runId: value.runId,
         state: value.state,
       },
     };

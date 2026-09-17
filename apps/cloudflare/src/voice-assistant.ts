@@ -288,21 +288,6 @@ interface ConnectionIdentity {
   deviceKey: string;
 }
 
-/**
- * The Bot's chosen voice, off the account directory's registration.
- *
- * Slice B of ADR 0031 adds `voice?: BotVoiceAppearanceV1` to
- * `BotRegistrationV1`; until those two halves meet the decoder does not carry
- * the field and this answers undefined, which resolves to the character's
- * default. The cast goes away with the merge.
- */
-function botVoiceOfRegistrationV1(
-  entry: unknown,
-): BotVoiceAppearanceV1 | undefined {
-  const voice = (entry as { voice?: BotVoiceAppearanceV1 } | undefined)?.voice;
-  return voice && voice.schemaVersion === 1 ? voice : undefined;
-}
-
 interface LiveCall {
   callId: string;
   /** The socket that holds this call, so a switch can retarget its record. */
@@ -2245,7 +2230,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     try {
       const directory = await this.directory(userId);
       const entry = directory.bots.find((bot) => bot.botId === botId);
-      const chosen = botVoiceOfRegistrationV1(entry);
+      const chosen = entry?.voice;
       return resolveBotVoiceV1({
         ...(chosen ? { chosen } : {}),
         ...(entry ? { characterId: entry.avatar.characterId } : {}),
@@ -2445,10 +2430,20 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         if (admission.status === "refused")
           return `Refused: ${admission.reason}`;
         if (admission.status === "duplicate") {
-          this.sendDelegationState(botId, bot.name, "asked");
+          this.sendDelegationState(
+            botId,
+            bot.name,
+            admission.delegation.runId,
+            "asked",
+          );
           return `${bot.name} was already asked this; its answer will be read out when it settles.`;
         }
-        this.sendDelegationState(botId, bot.name, "asked");
+        this.sendDelegationState(
+          botId,
+          bot.name,
+          admission.delegation.runId,
+          "asked",
+        );
         // Which function call this answers is decided by the caller, which
         // holds the id; this is the newest request it admitted.
         call.lastDelegationRunId = admission.delegation.runId;
@@ -2823,6 +2818,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       this.sendDelegationState(
         delegation.botId,
         delegation.botName,
+        runId,
         "finished",
       );
     } finally {
@@ -2858,6 +2854,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   private sendDelegationState(
     botId: string,
     botName: string,
+    runId: string,
     state: "asked" | "answering" | "finished",
   ): void {
     for (const connection of this.getConnections()) {
@@ -2866,6 +2863,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         type: "voice/delegation",
         botId,
         botName,
+        runId,
         state,
       });
     }

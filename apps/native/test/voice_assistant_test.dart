@@ -242,6 +242,7 @@ void main() {
         'type': 'voice/delegation',
         'botId': 'researcher',
         'botName': 'Scout',
+        'runId': 'run-scout',
         'state': 'asked',
       }),
     );
@@ -256,6 +257,7 @@ void main() {
         'type': 'voice/delegation',
         'botId': 'researcher',
         'botName': 'Scout',
+        'runId': 'run-scout',
         'state': 'answering',
       }),
     );

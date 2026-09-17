@@ -44,8 +44,7 @@ Future<void> capture(WidgetTester tester, GlobalKey key, String name) async {
   await tester.pump();
   await tester.runAsync(() async {
     final image =
-        await (key.currentContext!.findRenderObject()
-                as RenderRepaintBoundary)
+        await (key.currentContext!.findRenderObject() as RenderRepaintBoundary)
             .toImage(pixelRatio: 2);
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     await File('$output/$name.png').writeAsBytes(bytes!.buffer.asUint8List());
@@ -81,7 +80,7 @@ Future<void> mountSurface(
   AssistantSessionController controller, {
   required double width,
   double height = 844,
-  void Function(String botId)? onOpenWork,
+  void Function(String botId, String runId)? onOpenWork,
 }) async {
   tester.view.physicalSize = Size(width, height);
   tester.view.devicePixelRatio = 1;
@@ -112,6 +111,7 @@ String delegation(String botId, String botName, String state) => jsonEncode({
   'type': 'voice/delegation',
   'botId': botId,
   'botName': botName,
+  'runId': 'run-$botId',
   'state': state,
 });
 
@@ -215,12 +215,12 @@ void main() {
   ) async {
     final socket = FakeVoiceSocket();
     final controller = await live(tester, socket);
-    final opened = <String>[];
+    final opened = <(String, String)>[];
     await mountSurface(
       tester,
       controller,
       width: 390,
-      onOpenWork: opened.add,
+      onOpenWork: (botId, runId) => opened.add((botId, runId)),
     );
 
     // An empty slot says nothing at all.
@@ -254,7 +254,7 @@ void main() {
     expect(find.byIcon(Icons.check_rounded), findsOneWidget);
     await tester.tap(find.text('Work'));
     await tester.pump();
-    expect(opened, ['scout']);
+    expect(opened, [('scout', 'run-scout')]);
     await tester.pump(const Duration(milliseconds: 1300));
   });
 
@@ -295,7 +295,9 @@ void main() {
     expect(byIdentifier(VoiceIds.chip('archie')), findsOneWidget);
 
     socket.sent.clear();
-    await tester.tap(find.bySemanticsLabel('Resume the call, 2 finished while paused'));
+    await tester.tap(
+      find.bySemanticsLabel('Resume the call, 2 finished while paused'),
+    );
     await tester.pump();
     await tester.pump();
     expect(
