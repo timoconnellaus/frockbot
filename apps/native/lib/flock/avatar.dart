@@ -285,13 +285,8 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   /// A hold that begins stops a moment's wake at once; one that ends draws
   /// whatever the eyes were told meanwhile.
   void _holdChanged() {
-    if (_held) {
-      if (_running) return;
-      _restTimer?.cancel();
-      _loaded?.controller.active = false;
-    } else if (widget.gaze?.value != null) {
-      _wake();
-    }
+    _sync();
+    if (!_held && widget.gaze?.value != null) _wake();
   }
 
   /// The surface's pointer moved: the eyes turn, and a resting artboard is
@@ -403,13 +398,15 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     // and a wake per rebuild kept the companion animating for as long as
     // anyone typed.
     final signature =
-        '$run:${widget.activity}:${widget.emotion}:$primary:'
+        '$run:$_held:${widget.activity}:${widget.emotion}:$primary:'
         '${_localHovered || inheritedHover || _twitching}';
     if (signature != _synced) {
       _synced = signature;
       _running = run;
       _restTimer?.cancel();
-      if (run) {
+      if (_held) {
+        loaded.controller.active = false;
+      } else if (run) {
         loaded.controller.active = true;
       } else {
         loaded.controller.active = TickerMode.valuesOf(context).enabled;

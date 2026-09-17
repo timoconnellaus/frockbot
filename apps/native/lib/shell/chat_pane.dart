@@ -323,7 +323,6 @@ class _ChatPaneState extends State<ChatPane> {
         Expanded(
           child: TranscriptView(
             background: widget.background,
-            primary: widget.primary,
             starters: widget.starters.isEmpty
                 ? null
                 : StarterSuggestions(
@@ -417,7 +416,6 @@ class _ChatPaneState extends State<ChatPane> {
                             size: avatarSize,
                             characterId: widget.background,
                             primary: widget.primary,
-                            enableGaze: true,
                             gaze: gaze,
                             hold: hold,
                             motion: CharacterMotion.active,
@@ -432,7 +430,6 @@ class _ChatPaneState extends State<ChatPane> {
                       size: avatarSize,
                       characterId: widget.background,
                       primary: widget.primary,
-                      enableGaze: true,
                       gaze: gaze,
                       hold: hold,
                       // A live artboard at rest, so the eyes can follow the
