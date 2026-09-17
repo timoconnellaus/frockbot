@@ -496,9 +496,10 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   document, plus the controller that carries enablement to the settings route.
   A Bot's page is reached from the Plugins row in its Settings at every tier —
   a sub-page of the panel on a desktop, a pushed page on the phone — keyed per
-  Bot and drawn without chrome because the panel names it. It draws the document
-  as one card of switch rows (`ViewDocumentView.switchRows`) rather than a card
-  per Plugin; the Profile's entry is the account's list
+  Bot and drawn without chrome because the panel names it. The projection files
+  each Plugin under its kind and the host draws those as labelled cards of rows
+  (`ViewDocumentView.switchRows`) rather than a card per Plugin; the Profile's
+  entry is the account's list
 - `RoutinesView` — `lib/routines/page.dart`: what a Bot does on its own and
   what it left behind, reached from the All Routines row on the Bot page — a
   sub-page of the panel on a desktop, a pushed page on the phone. The projection
