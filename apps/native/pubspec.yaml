@@ -28,6 +28,12 @@ dependencies:
   record: 7.1.1
   flutter_slidable: 4.0.3
   rive: 0.14.11
+  # The A2UI renderer a Card is drawn with (ADR 0030). `genui` speaks v0.9 and
+  # `a2ui_core` is its object model; `json_schema_builder` is how a catalog
+  # item states its data schema, which the Frock catalog writes directly.
+  genui: 0.10.3
+  a2ui_core: 0.1.1
+  json_schema_builder: 0.1.7
 
 dev_dependencies:
   flutter_test:

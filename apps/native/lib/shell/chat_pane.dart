@@ -19,6 +19,7 @@ import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
 import '../applets/chat_card.dart';
+import '../cards/chat_card.dart';
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
@@ -669,7 +670,11 @@ class _ConversationViewState extends State<ConversationView>
   Widget build(BuildContext context) => AppletChatScope(
     api: widget.api,
     botId: widget.botId,
-    child: ChatPane(
+    child: CardChatScope(
+      api: widget.api,
+      botId: widget.botId,
+      invalidations: session.controller.invalidations,
+      child: ChatPane(
       background: widget.background,
       primary: widget.primary,
       starters: starters,
@@ -697,6 +702,7 @@ class _ConversationViewState extends State<ConversationView>
       canRevertDictation: widget.canRevertDictation,
       onRevertDictation: widget.onRevertDictation,
       dictationLevel: widget.dictationLevel,
+      ),
     ),
   );
 

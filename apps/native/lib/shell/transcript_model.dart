@@ -189,6 +189,27 @@ class TranscriptLine {
       sends.isEmpty &&
       retry == null &&
       exchange == null;
+
+  /// The same line with fewer sends. Only [dedupeCardSendsV1] needs it: a line
+  /// is otherwise never edited once the projection has made it.
+  TranscriptLine withSends(List<SendPayloadLine> sends) => TranscriptLine(
+    id: id,
+    runId: runId,
+    role: role,
+    text: text,
+    status: status,
+    at: at,
+    pending: pending,
+    stopRequested: stopRequested,
+    notice: notice,
+    retry: retry,
+    failureMessageId: failureMessageId,
+    readAt: readAt,
+    tools: tools,
+    sends: sends,
+    pluginCalls: pluginCalls,
+    exchange: exchange,
+  );
 }
 
 /// Where each Turn sits in the conversation: the timestamp of the message the
@@ -235,7 +256,44 @@ List<TranscriptLine> orderTranscript(List<TranscriptLine> lines, String now) {
     final compared = keyOf(left.$2).compareTo(keyOf(right.$2));
     return compared != 0 ? compared : left.$1 - right.$1;
   });
-  return [for (final entry in indexed) entry.$2];
+  return dedupeCardSendsV1([for (final entry in indexed) entry.$2]);
+}
+
+/// One Card, one place in the thread.
+///
+/// A Card is a durable surface, not a message: a later `card` send naming the
+/// same `surfaceId` updates the record the first one drew, and the widget that
+/// holds it re-reads and redraws where it already sits. So the second send has
+/// nothing of its own to draw, and a line left with no sends draws nothing at
+/// all — the same as any other empty line.
+///
+/// The first occurrence wins, in the order the thread is drawn, because that
+/// is where the card has been all along; a card that jumped to the bottom
+/// every time its Bot touched it would lose the conversation around it.
+List<TranscriptLine> dedupeCardSendsV1(List<TranscriptLine> lines) {
+  final seen = <String>{};
+  var changed = false;
+  final kept = <TranscriptLine>[];
+  for (final line in lines) {
+    if (!line.sends.any((send) => send.type == 'card')) {
+      kept.add(line);
+      continue;
+    }
+    final sends = [
+      for (final send in line.sends)
+        if (send.type != 'card' ||
+            send.payload!['surfaceId'] is! String ||
+            seen.add(send.payload!['surfaceId']! as String))
+          send,
+    ];
+    if (sends.length == line.sends.length) {
+      kept.add(line);
+      continue;
+    }
+    changed = true;
+    kept.add(line.withSends(sends));
+  }
+  return changed ? kept : lines;
 }
 
 // ------------------------------------------------------- supersede drain
