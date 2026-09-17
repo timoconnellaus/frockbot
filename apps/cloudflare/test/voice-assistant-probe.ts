@@ -12,7 +12,7 @@ import type {
 import type { Connection } from "agents";
 import { VoiceAssistant } from "../src/voice-assistant.ts";
 import type { VoiceDelegationRecordV1 } from "@frockbot/app/voice/ledger";
-import { VOICE_RESULT_PROMPT_MARKER_V1 } from "@frockbot/app/voice/assistant";
+import { VOICE_BOT_ANSWER_MARKER_V1 } from "@frockbot/app/voice/assistant";
 import type {
   VoiceMemoryJobV1,
   VoiceMemoryRecordV1,
@@ -33,10 +33,11 @@ export interface VoiceProbeScript {
   /** The whole model reply, so a test can choose its sentences. */
   reply?: string;
   /**
-   * The read-out composition request throws, as an unreachable model gateway
-   * does, so the plain read-out is what the person hears.
+   * What the scripted assistant says when a Bot's answer arrives. Absent, it
+   * repeats the answer under the Bot's name; an empty string is the assistant
+   * deciding the answer is not worth saying.
    */
-  composeFails?: boolean;
+  answerReply?: string;
   /** The speech provider answers every sentence with nothing, as a refused key does. */
   silentTts?: boolean;
   failTts?: boolean;
@@ -120,6 +121,7 @@ export interface VoiceTraceLine {
   turn?: string;
   ms?: number;
   sinceTurnMs?: number;
+  failure?: string;
 }
 
 export class WorkerdVoiceAssistant extends VoiceAssistant {
@@ -133,13 +135,13 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #stalled: Promise<void> | undefined;
   #release: (() => void) | undefined;
   #now: string | undefined;
-  #composed = 0;
-  #composeHeld: Promise<void> | undefined;
-  #speaking: Promise<void> | undefined;
-  #releaseCompose: (() => void) | undefined;
+  #announced = 0;
+  #announceHeld: Promise<void> | undefined;
+  #releaseAnnounce: (() => void) | undefined;
   #ttsHeld: Promise<void> | undefined;
   #releaseTts: (() => void) | undefined;
   #playbackAckTimeoutMs: number | undefined;
+  #botAnswerDeadlineMs: number | undefined;
   #memoryRequests: VoiceMemoryRequest[] = [];
 
   protected override now(): Date {
@@ -163,6 +165,11 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
    */
   protected override playbackAckTimeoutMs(): number {
     return this.#playbackAckTimeoutMs ?? super.playbackAckTimeoutMs();
+  }
+
+  /** The real twenty-second bound, unless a test shortens it. */
+  protected override botAnswerDeadlineMs(): number {
+    return this.#botAnswerDeadlineMs ?? super.botAnswerDeadlineMs();
   }
 
   /** Drops the next N dispatches: the intent is durable, the send is lost. */
@@ -251,6 +258,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   protected override async chatCompletion(
     body: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<ReadableStream<Uint8Array>> {
     const messages = body.messages as { role: string; content: string }[];
     const last = messages.at(-1)!;
@@ -283,31 +291,38 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     }
     this.#chats.push(body);
     if (this.#stalled) await this.#stalled;
-    const system = messages.find((message) => message.role === "system");
-    if (system?.content.includes(VOICE_RESULT_PROMPT_MARKER_V1)) {
-      this.#composed += 1;
-      if (this.#composeHeld) await this.#composeHeld;
-      if (this.#script.composeFails) throw new Error("gateway down");
-      // The read-out request, which is not a spoken turn. A real model writes
-      // a sentence of its own from the Bot, the question and the answer; this
-      // one repeats the answer it was given, so a test can tell whether the
-      // right answer reached it and whether the question came with it.
-      const bot = /^Bot: (.*)$/m.exec(last.content)?.[1] ?? "The Bot";
-      const answered = /What it answered: (.*)$/m.exec(last.content)?.[1];
-      const failed = /What went wrong: (.*)$/m.exec(last.content)?.[1];
-      return sse([
-        {
-          choices: [
-            {
-              delta: {
-                content: answered
-                  ? `${bot} says ${answered}`
-                  : `${bot} could not finish that: ${failed ?? ""}`,
-              },
-            },
-          ],
-        },
-      ]);
+    if (
+      last.role === "user" &&
+      last.content.startsWith(VOICE_BOT_ANSWER_MARKER_V1)
+    ) {
+      // A Bot's answer arriving, in the person's seat. A real model decides
+      // what to say from the Bot, the request and the answer; this one
+      // repeats the answer under the Bot's name, so a test can tell whether
+      // the right answer reached it and whether the request came with it —
+      // or says what the script tells it to, which may be nothing.
+      this.#announced += 1;
+      // A real gateway request carries this signal: a held answer that is
+      // aborted rejects here rather than hanging on past the abort.
+      if (this.#announceHeld) {
+        await Promise.race([this.#announceHeld, aborts(signal)]);
+      }
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+      const reply =
+        this.#script.answerReply ??
+        (() => {
+          const bot =
+            new RegExp(
+              `^${VOICE_BOT_ANSWER_MARKER_V1.replace(/[[\]]/g, "\\$&")} (.*?), asked`,
+            ).exec(last.content)?.[1] ?? "The Bot";
+          const answered = /has answered, in its own words: "(.*)"/s.exec(
+            last.content,
+          )?.[1];
+          const failed = /could not finish: "(.*)"/s.exec(last.content)?.[1];
+          return answered
+            ? `${bot} says ${answered}`
+            : `${bot} could not finish that: ${failed ?? ""}`;
+        })();
+      return sse(reply ? [{ choices: [{ delta: { content: reply } }] }] : []);
     }
     if (last.role === "tool") {
       return sse([
@@ -452,6 +467,10 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     this.#playbackAckTimeoutMs = ms;
   }
 
+  async probeSetBotAnswerDeadlineMs(ms: number): Promise<void> {
+    this.#botAnswerDeadlineMs = ms;
+  }
+
   async probeSetNow(now: string): Promise<void> {
     this.#now = now;
   }
@@ -491,22 +510,22 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     release?.();
   }
 
-  /** How many read-out sentences the model has been asked to write. */
-  async probeComposed(): Promise<number> {
-    return this.#composed;
+  /** How many Bot answers the assistant has been told. */
+  async probeAnnounced(): Promise<number> {
+    return this.#announced;
   }
 
-  /** Holds the read-out composition open, so the call can change under it. */
-  async probeHoldCompose(): Promise<void> {
-    this.#composeHeld = new Promise<void>((resolve) => {
-      this.#releaseCompose = resolve;
+  /** Holds the Bot-answer turn's model call open, so the call can change under it. */
+  async probeHoldAnnounce(): Promise<void> {
+    this.#announceHeld = new Promise<void>((resolve) => {
+      this.#releaseAnnounce = resolve;
     });
   }
 
-  async probeReleaseCompose(): Promise<void> {
-    const release = this.#releaseCompose;
-    this.#composeHeld = undefined;
-    this.#releaseCompose = undefined;
+  async probeReleaseAnnounce(): Promise<void> {
+    const release = this.#releaseAnnounce;
+    this.#announceHeld = undefined;
+    this.#releaseAnnounce = undefined;
     release?.();
   }
 
@@ -529,30 +548,14 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   }
 
   /**
-   * Two scheduled read-outs firing at once, which is a thing the scheduler
+   * Scheduled announcements firing at once, which is a thing the scheduler
    * does: each held answer books its own row, and two rows that come due
    * together run together. Nothing here reaches past the public callback.
    */
-  async probeSpeakConcurrently(runIds: string[]): Promise<void> {
+  async probeAnnounceConcurrently(runIds: string[]): Promise<void> {
     await Promise.all(
-      runIds.map((runId) => this.speakSettledDelegation({ runId })),
+      runIds.map((runId) => this.announceDelegation({ runId })),
     );
-  }
-
-  /**
-   * The same, detached: the scheduler does not wait for a callback either, and
-   * a test that has to act *while* a read-out is in flight cannot be holding
-   * its promise. `probeAwaitSpeaking` is how it joins back up.
-   */
-  async probeSpeakDetached(runIds: string[]): Promise<void> {
-    this.#speaking = Promise.all(
-      runIds.map((runId) => this.speakSettledDelegation({ runId })),
-    ).then(() => undefined);
-  }
-
-  async probeAwaitSpeaking(): Promise<void> {
-    await this.#speaking;
-    this.#speaking = undefined;
   }
 
   // -- session memory -------------------------------------------------------

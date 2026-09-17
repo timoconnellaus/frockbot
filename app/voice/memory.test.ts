@@ -6,6 +6,7 @@ import {
   emptyVoiceMemoryRecordV1,
   matchVoiceMemoryV1,
   pruneVoiceMemoryV1,
+  renderVoiceMemoryInstructionV1,
   renderVoiceMemoryLinesV1,
   renderVoiceMemoryRequestMessagesV1,
   voiceMemoryCorrectionTargetsV1,
@@ -1132,7 +1133,7 @@ describe("the end-of-call job", () => {
     const instruction = renderVoiceMemoryRequestMessagesV1({
       turns: chunk!.turns,
       record: await memory.read(),
-      progress: { from: chunk!.from, total: chunk!.total },
+      progress: { from: chunk!.from, to: chunk!.to, total: chunk!.total },
     }).at(-1)!.content;
     expect(instruction).toContain(
       `durable (short-answers) Keep answers short. [said 2026-09-05T10:00:00.000Z, call ${CALL_TWO} turn 1]`,
@@ -1412,6 +1413,112 @@ describe("the end-of-call job", () => {
     expect(job?.state).toBe("failed");
     expect(job?.cursor).toBe(0);
     expect(await memory.read()).toEqual(emptyVoiceMemoryRecordV1());
+  });
+
+  test("a call whose ordinals skip an event turn is not called part of a longer conversation", async () => {
+    const { memory, calls, read } = ledger();
+    // Turn 2 was a Bot answer: it is in the call's ledger, so the ordinals
+    // that follow it count it, but it is not something the person said and
+    // the memory source leaves it out.
+    calls["call-1"] = [
+      turn({ ordinal: 1, at: "2026-09-01T10:00:00.000Z" }),
+      turn({ ordinal: 3, at: "2026-09-01T10:02:00.000Z" }),
+    ];
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-01T11:00:00.000Z"),
+    });
+    const chunk = await memory.claimChunk({
+      callId: "call-1",
+      at: new Date(),
+      read,
+    });
+    expect(chunk!.turns).toHaveLength(2);
+    const instruction = renderVoiceMemoryInstructionV1({
+      turns: chunk!.turns,
+      record: await memory.read(),
+      progress: { from: chunk!.from, to: chunk!.to, total: chunk!.total },
+    });
+    expect(instruction).not.toContain("part of a longer conversation");
+    // The whole source was read, so applying this chunk finishes the job.
+    const applied = await memory.applyChunk({
+      callId: "call-1",
+      chunk: chunk!,
+      update: { operations: [], refusals: [], malformed: false },
+      at: new Date("2026-09-01T11:00:05.000Z"),
+    });
+    expect(applied).toMatchObject({ status: "applied", done: true });
+  });
+
+  test("a chunk that leaves turns unread says so, in the ordinals it was read in", async () => {
+    const { memory, calls, read } = ledger();
+    calls["call-1"] = conversation(
+      "call-1",
+      CALL_ONE,
+      VOICE_MEMORY_CHUNK_TURNS_V1 + 5,
+    );
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-01T12:00:00.000Z"),
+    });
+    const chunk = await memory.claimChunk({
+      callId: "call-1",
+      at: new Date(),
+      read,
+    });
+    expect(
+      renderVoiceMemoryInstructionV1({
+        turns: chunk!.turns,
+        record: await memory.read(),
+        progress: { from: chunk!.from, to: chunk!.to, total: chunk!.total },
+      }),
+    ).toContain(
+      `turns 1–${VOICE_MEMORY_CHUNK_TURNS_V1} of ${VOICE_MEMORY_CHUNK_TURNS_V1 + 5}`,
+    );
+  });
+
+  test("a chunk made entirely of an earlier call's turns names no range of this one", async () => {
+    const { memory, calls, read } = ledger();
+    // The earlier call gave up with more unread turns than one window holds,
+    // so this call's first chunk reaches none of its own turns at all.
+    calls["call-1"] = conversation(
+      "call-1",
+      CALL_ONE,
+      VOICE_MEMORY_CHUNK_TURNS_V1 + 5,
+    );
+    calls["call-2"] = conversation(
+      "call-2",
+      CALL_TWO,
+      2,
+      "2026-09-02T10:00:00.000Z",
+    );
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-01T12:00:00.000Z"),
+    });
+    await memory.claimChunk({ callId: "call-1", at: new Date(), read });
+    await memory.abandonChunk("call-1", "never answered", new Date());
+    await memory.createJob({
+      callId: "call-2",
+      sequence: CALL_TWO,
+      at: new Date("2026-09-02T10:01:00.000Z"),
+    });
+    const chunk = await memory.claimChunk({
+      callId: "call-2",
+      at: new Date(),
+      read,
+    });
+    expect(chunk!.turns.every((item) => item.callId === "call-1")).toBe(true);
+    expect(chunk!.to).toBe(chunk!.from);
+    const instruction = renderVoiceMemoryInstructionV1({
+      turns: chunk!.turns,
+      record: await memory.read(),
+      progress: { from: chunk!.from, to: chunk!.to, total: chunk!.total },
+    });
+    expect(instruction).not.toContain("part of a longer conversation");
   });
 
   test("a long call is read in chunks, keeping what was said at the start", async () => {
@@ -1760,7 +1867,7 @@ describe("the end-of-call job", () => {
       system: chunk!.job.system,
       turns: chunk!.turns,
       record: await memory.read(),
-      progress: { from: chunk!.from, total: chunk!.total },
+      progress: { from: chunk!.from, to: chunk!.to, total: chunk!.total },
     });
     expect(messages[0]).toEqual({
       role: "system",
@@ -1837,7 +1944,7 @@ describe("the order the finalizer is shown", () => {
     const instruction = renderVoiceMemoryRequestMessagesV1({
       turns: chunk!.turns,
       record: await memory.read(),
-      progress: { from: chunk!.from, total: chunk!.total },
+      progress: { from: chunk!.from, to: chunk!.to, total: chunk!.total },
     }).at(-1)!.content;
 
     // The carried turn is the morning one; the correction is the afternoon
@@ -1924,7 +2031,7 @@ describe("a fact that came back", () => {
     const instruction = renderVoiceMemoryRequestMessagesV1({
       turns: second,
       record,
-      progress: { from: 0, total: second.length },
+      progress: { from: 0, to: second.length, total: second.length },
     }).at(-1)!.content;
 
     expect(instruction).toContain(

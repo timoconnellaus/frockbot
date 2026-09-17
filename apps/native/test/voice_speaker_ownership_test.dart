@@ -1,4 +1,3 @@
-import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -118,13 +117,6 @@ void main() {
     final owner = native.owner;
 
     // Audio still in flight when the app moved on must not reach the speaker.
-    socket.deliver(
-      jsonEncode({
-        'schemaVersion': 1,
-        'type': 'voice/answer',
-        'deliveryId': 'request#1',
-      }),
-    );
     socket.deliver(Uint8List(1600));
     await settle();
 

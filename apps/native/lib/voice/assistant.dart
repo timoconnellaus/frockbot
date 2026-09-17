@@ -114,7 +114,6 @@ class AssistantSessionController extends ChangeNotifier {
   /// so a call ended while the person was still answering the permission
   /// prompt cannot resurrect a capture behind them.
   int _generation = 0;
-  _AnswerPlayback? _answer;
   bool _reportedPlaying = false;
 
   /// Audio captured before `start_call` went out, bounded at 10 s and drained
@@ -339,7 +338,6 @@ class AssistantSessionController extends ChangeNotifier {
     // that must reach the server while it is talking.
     if (decision.bargeIn && _playing && !muted && !_barged) {
       _barged = true;
-      _answer = null;
       unawaited(player.interrupt());
       final socket = _socket;
       socket?.sendText(encodeAssistantInterruptV1());
@@ -420,7 +418,6 @@ class AssistantSessionController extends ChangeNotifier {
     // because the app has already built the next session's player.
     if (_disposed || !active || _phase == VoiceSessionPhase.ending) return;
     if (message is List<int>) {
-      if (message.isNotEmpty) _answer?.bytes += message.length;
       player.write(
         message is Uint8List ? message : Uint8List.fromList(message),
       );
@@ -430,14 +427,6 @@ class AssistantSessionController extends ChangeNotifier {
     final frame = decodeAssistantServerFrameV1(message);
     if (frame == null) return;
     switch (frame) {
-      case AssistantAnswerV1(:final deliveryId):
-        _answer = _AnswerPlayback(deliveryId, player.lossCount);
-      case AssistantAnswerEndV1(:final deliveryId):
-        final answer = _answer;
-        if (answer != null && answer.id == deliveryId && !answer.ended) {
-          answer.ended = true;
-          unawaited(_finishAnswer(answer, _generation));
-        }
       case AssistantWelcomeV1():
         _welcomed = true;
         _beginCall();
@@ -459,7 +448,6 @@ class AssistantSessionController extends ChangeNotifier {
           player.configure(sampleRate ?? voiceAssistantOutputSampleRateV1),
         );
       case AssistantPlaybackInterruptV1():
-        _answer = null;
         unawaited(player.interrupt());
       case AssistantVoiceStateV1(:final upstream):
         // The server reports its own view of the mute; the two inputs that
@@ -483,7 +471,6 @@ class AssistantSessionController extends ChangeNotifier {
       case AssistantRefusalV1(:final code):
         unawaited(_fail(voiceRefusalMessage(code)));
       case AssistantErrorV1(:final code):
-        _answer = null;
         if (code != null) {
           // A coded error is the call itself failing — the server has already
           // torn it down and stopped listening. Only a per-turn error, which
@@ -509,7 +496,6 @@ class AssistantSessionController extends ChangeNotifier {
     if (!active || _phase == VoiceSessionPhase.ending) return;
     switch (change) {
       case VoiceFocusChange.paused:
-        _answer = null;
         unawaited(player.interrupt());
         if (_playing) _socket?.sendText(encodeAssistantInterruptV1());
         unawaited(holdMicrophone(true));
@@ -547,25 +533,6 @@ class AssistantSessionController extends ChangeNotifier {
       _socket?.sendText(encodeVoiceSpeechV1(playing));
     }
     _notify();
-  }
-
-  Future<void> _finishAnswer(_AnswerPlayback answer, int generation) async {
-    if (answer.bytes < 2 ||
-        answer.bytes.isOdd ||
-        answer.lossCount != player.lossCount) {
-      return;
-    }
-    final played = await player.drain();
-    if (!played ||
-        generation != _generation ||
-        !identical(_answer, answer) ||
-        answer.lossCount != player.lossCount ||
-        !active ||
-        _disposed) {
-      return;
-    }
-    _answer = null;
-    _socket?.sendText(encodeVoicePlayedV1(answer.id));
   }
 
   void _showNotice(String message) {
@@ -671,7 +638,6 @@ class AssistantSessionController extends ChangeNotifier {
     int code = voiceCloseNormalV1,
     String reason = '',
   }) async {
-    _answer = null;
     _reportedPlaying = false;
     _startTimer?.cancel();
     _startTimer = null;
@@ -734,10 +700,3 @@ class AssistantSessionController extends ChangeNotifier {
   }
 }
 
-class _AnswerPlayback {
-  final String id;
-  final int lossCount;
-  int bytes = 0;
-  bool ended = false;
-  _AnswerPlayback(this.id, this.lossCount);
-}

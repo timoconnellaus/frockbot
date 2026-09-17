@@ -202,25 +202,9 @@ String encodeVoiceSpeechV1(bool playing) => jsonEncode({
   'type': 'voice/speech',
   'playing': playing,
 });
-String encodeVoicePlayedV1(String deliveryId) => jsonEncode({
-  'schemaVersion': 1,
-  'type': 'voice/played',
-  'deliveryId': deliveryId,
-});
 
 sealed class AssistantServerFrameV1 {
   const AssistantServerFrameV1();
-}
-
-final class AssistantAnswerV1 extends AssistantServerFrameV1 {
-  final String deliveryId;
-  final String botName;
-  const AssistantAnswerV1(this.deliveryId, this.botName);
-}
-
-final class AssistantAnswerEndV1 extends AssistantServerFrameV1 {
-  final String deliveryId;
-  const AssistantAnswerEndV1(this.deliveryId);
 }
 
 final class AssistantWelcomeV1 extends AssistantServerFrameV1 {
@@ -303,26 +287,6 @@ AssistantServerFrameV1? decodeAssistantServerFrameV1(String raw) {
   final type = value['type'];
   if (type is! String) return null;
   switch (type) {
-    case 'voice/answer':
-    case 'voice/answer-end':
-      final id = value['deliveryId'];
-      if (value['schemaVersion'] != 1 ||
-          id is! String ||
-          id.isEmpty ||
-          id.length > 200) {
-        return null;
-      }
-      return type == 'voice/answer'
-          ? AssistantAnswerV1(
-              id,
-              value['botName'] is String
-                  ? (value['botName'] as String).substring(
-                      0,
-                      (value['botName'] as String).length.clamp(0, 100),
-                    )
-                  : '',
-            )
-          : AssistantAnswerEndV1(id);
     case 'voice/refusal':
       final code = switch (value['code']) {
         'exclusive' => VoiceRefusalCodeV1.exclusive,
