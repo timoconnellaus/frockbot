@@ -288,7 +288,12 @@ export class VoiceLedgerV1 {
     deviceKey: string;
     connectionId: string;
     at: Date;
-    /** The Bot the client opened the call on; a rejoin keeps the one it had. */
+    /**
+     * The Bot the client opened the call on. A rejoin that names one honours
+     * it — the person pressed voice on that Bot and must not be handed back
+     * the Bot of a call they had already lost — and a rejoin that names none
+     * keeps the Bot the record already has.
+     */
     botId?: string;
   }): Promise<VoiceCallAdmissionV1> {
     const previous = await this.currentCall();
@@ -298,6 +303,7 @@ export class VoiceLedgerV1 {
         ...previous,
         connectionId: input.connectionId,
         lastSeenAt: at,
+        ...(input.botId ? { botId: input.botId } : {}),
       };
       await this.storage.put(VOICE_CALL_KEY_V1, call);
       // The same call, a newer socket: the older socket is still a live

@@ -1224,16 +1224,12 @@ export class VoiceAssistant extends VoiceAgentBase<
       }
       const identity = this.identity(connection);
       if (!identity) return;
-      const switched = await this.turnHost(
+      await this.turnHost(
         identity.userId,
         live,
         `target-${crypto.randomUUID()}`,
         undefined,
       ).switchBot(custom.botId);
-      // A refusal is answered too: the client pressed a control and must not
-      // be left showing a Bot the audio never moved to.
-      if (switched.status === "refused")
-        this.sendTarget(connection, live.botId);
       return;
     }
     const call = this.#calls.get(connection.id);
@@ -1285,10 +1281,10 @@ export class VoiceAssistant extends VoiceAgentBase<
    *
    * The client's choice wins when it names a Bot this account owns. Anything
    * else — no choice, a deleted Bot, another account's — falls back to the
-   * account's General Bot, and failing that the first Bot in the directory,
-   * because a call with nobody on the other end is worse than a call with
-   * the wrong somebody. An account with no Bots at all is answered by the
-   * account-wide assistant, as before.
+   * account's General Bot, and to nothing else: a Bot the person never asked
+   * for would answer in its own name, memory and thread with nothing saying
+   * it is not the one they wanted. An account with no General — and so, in
+   * practice, no Bots at all — is answered by the account-wide assistant.
    */
   private async resolveCallTarget(
     userId: string,
@@ -1307,20 +1303,23 @@ export class VoiceAssistant extends VoiceAgentBase<
         // Fall through to the account's default.
       }
     }
-    const bots = await this.listBots(userId).catch(
-      () => [] as VoiceBotSummaryV1[],
-    );
     // Which Bot is General is recorded by the flock bootstrap, not spelled by
     // a display name a person is free to change.
     const generalBotId = await this.generalBotId(userId);
-    const general = bots.find((bot) => bot.botId === generalBotId) ?? bots[0];
-    if (!general) return { botId: "", name: "" };
-    const voiceId = await this.voiceForBot(userId, general.botId);
-    return {
-      botId: general.botId,
-      name: general.name,
-      ...(voiceId ? { voiceId } : {}),
-    };
+    if (generalBotId) {
+      try {
+        const general = await this.ownedBot(userId, generalBotId);
+        const voiceId = await this.voiceForBot(userId, general.botId);
+        return {
+          botId: general.botId,
+          name: general.name,
+          ...(voiceId ? { voiceId } : {}),
+        };
+      } catch {
+        // General has been deleted. Nobody else stands in for it.
+      }
+    }
+    return { botId: "", name: "" };
   }
 
   /**
@@ -1419,8 +1418,11 @@ export class VoiceAssistant extends VoiceAgentBase<
       await this.beginMemoryFinalization(displaced);
     }
     // ADR 0029: a call addresses one Bot. The client says which before it
-    // says `start_call`; a rejoin keeps the Bot its record already has, and
-    // a client that names none — or names one this account does not own —
+    // says `start_call`, and that is what the call opens on whether it is a
+    // new call or a rejoin — the person pressed voice on a Bot just now, and
+    // a dropped call coming back on the Bot they left is not what they asked
+    // for. A rejoin that names none keeps the Bot its record has, and a
+    // client that names none — or names one this account does not own —
     // gets General, so there is always somebody on the line.
     const requested = this.#targets.get(connection.id);
     const admission = await ledger.beginCall({

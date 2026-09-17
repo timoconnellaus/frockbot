@@ -192,6 +192,35 @@ async function startCall(opened: Opened, botId?: string): Promise<void> {
   await opened.waitFor(status("listening"), "listening");
 }
 
+/**
+ * Every sentence that was synthesized, with the voice it was spoken in. The
+ * probe records the two in step, one entry per call into the speech seam.
+ */
+async function sentenceVoices(
+  stub: ReturnType<typeof assistant>,
+): Promise<[string, string][]> {
+  const [sentences, voices] = await Promise.all([
+    stub.probeSynthesized(),
+    stub.probeSpokenVoices(),
+  ]);
+  return sentences.map((sentence, index) => [sentence, voices[index] ?? ""]);
+}
+
+/**
+ * The voices of what was said, with the bridge left out.
+ *
+ * The bridge goes through the same speech seam, and it is spoken in the voice
+ * the call had when the turn started: a test asking who is speaking now must
+ * not read a filler that a slow first chunk put there.
+ */
+async function spokenVoices(
+  stub: ReturnType<typeof assistant>,
+): Promise<string[]> {
+  return (await sentenceVoices(stub))
+    .filter(([sentence]) => !VOICE_TURN_BRIDGES_V1.includes(sentence))
+    .map(([, voice]) => voice);
+}
+
 async function settle(ms = 50): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -404,20 +433,95 @@ describe("the voice session object", () => {
     await opened.waitFor(state("awake"), "awake");
     expect(await stub.probeUtterance("are you there")).toBe(true);
     await opened.waitFor((f) => f.type === "transcript_end", "an answer");
-    const first = await stub.probeSpokenVoices();
     // The Bot wears sunny, so it speaks in sunny's voice.
-    expect(first.at(-1)).toBe(VOICE_BY_CHARACTER_V1.sunny);
-    const before = first.length;
+    expect((await spokenVoices(stub)).at(-1)).toBe(VOICE_BY_CHARACTER_V1.sunny);
+    const before = opened.frames.length;
     expect(await stub.probeUtterance("please handover now")).toBe(true);
-    await eventually(
-      () => stub.probeSpokenVoices(),
-      (voices) => voices.length > before,
-      "the other Bot speaking",
+    // The turn's own end, not just another sentence: under contention the
+    // bridge is spoken first, in the voice the call still had, and a test
+    // that waited for one more voice would read the filler.
+    await opened.waitFor(
+      (f) => opened.frames.indexOf(f) >= before && f.type === "transcript_end",
+      "the reply after the hand-over",
     );
-    const after = await stub.probeSpokenVoices();
     // The hand-over moved the call to the Bot wearing guardian, and the voice
     // moved with it.
-    expect(after.at(-1)).toBe(VOICE_BY_CHARACTER_V1.guardian);
+    expect((await spokenVoices(stub)).at(-1)).toBe(
+      VOICE_BY_CHARACTER_V1.guardian,
+    );
+    opened.socket.close();
+  });
+
+  // ADR 0029, decision 5. Work the call has since handed over from still
+  // comes back, and it is told under the answering Bot's name in that Bot's
+  // voice — borrowed for the read-out and given back with the floor, so the
+  // next thing said is the call's own Bot again.
+  test("an answer from a Bot the call left is read out in that Bot's voice", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `voice-borrowed-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    const other = { ...identity, botId: `voice-other-${suffix}` };
+    await provisionBot({
+      ...identity,
+      avatar: { schemaVersion: 1, characterId: "sunny", primary: "#ffc928" },
+    });
+    await provisionSiblingBot({
+      ...other,
+      avatar: { schemaVersion: 1, characterId: "guardian", primary: "#3c3543" },
+    });
+    const stub = assistant(identity.userId);
+    const readOut = "The plan is ready for you.";
+    await stub.probeSetScript({
+      delegateWord: "plan",
+      botId: identity.botId,
+      switchWord: "handover",
+      switchBotId: other.botId,
+      answerReply: readOut,
+    });
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+    // Asked of the Bot the call is on, which wears sunny.
+    expect(await stub.probeUtterance("plan the launch")).toBe(true);
+    await opened.waitFor(
+      (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
+      "the delegation acknowledged",
+    );
+    // The call moves to the Bot wearing guardian while that work is still out.
+    expect(await stub.probeUtterance("please handover now")).toBe(true);
+    await eventually(
+      async () =>
+        (
+          Object.values(
+            await stub.probeStorage("voice:call"),
+          ) as VoiceCallRecordV1[]
+        )[0]?.botId,
+      (botId) => botId === other.botId,
+      "the call moving to the other Bot",
+    );
+    // The answer lands afterwards. It is sunny's work, so sunny says it.
+    const spoken = await eventually(
+      () => sentenceVoices(stub),
+      (said) => said.some(([sentence]) => sentence === readOut),
+      "the answer read out",
+      20_000,
+    );
+    expect(spoken.find(([sentence]) => sentence === readOut)?.[1]).toBe(
+      VOICE_BY_CHARACTER_V1.sunny,
+    );
+    // And the voice is given back: the call's next words are its own Bot's.
+    const before = opened.frames.length;
+    expect(await stub.probeUtterance("thanks, are you there")).toBe(true);
+    await opened.waitFor(
+      (f) => opened.frames.indexOf(f) >= before && f.type === "transcript_end",
+      "the call's own next reply",
+    );
+    expect((await spokenVoices(stub)).at(-1)).toBe(
+      VOICE_BY_CHARACTER_V1.guardian,
+    );
     opened.socket.close();
   });
 
@@ -1042,10 +1146,12 @@ describe("the voice session object", () => {
     );
 
     // What the model is told about the account, and what the person hears.
+    // The call wears this Bot, so its new name is who is speaking rather
+    // than a row in the directory of Bots it can hand over to.
     const prompt = (await stub.probeSystemPrompts()).at(-1)!;
-    expect(prompt).toContain(
-      `- ${identity.botId}: Weekly Planner — Plans the week.`,
-    );
+    expect(prompt).toContain("- name: Weekly Planner");
+    expect(prompt).toContain("- description: Plans the week.");
+    expect(prompt).not.toContain(`- ${identity.botId}: `);
     expect(prompt).not.toContain("Workerd Bot");
     const delegations = Object.values(
       await stub.probeStorage("voice:delegation:"),

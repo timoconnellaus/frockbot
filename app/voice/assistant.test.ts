@@ -13,6 +13,7 @@ import {
   VOICE_TURN_BRIDGES_V1,
   pickVoiceBridgeV1,
   VOICE_TURN_MAX_STEPS_V1,
+  VOICE_ACCOUNT_TOOLS_V1,
   VOICE_TOOLS_V1,
   type VoiceAssistantHostV1,
   type VoiceAssistantPromptInputV1,
@@ -298,8 +299,6 @@ describe("one voice turn", () => {
       answer: "Sure, it is ten.",
       delegations: 0,
       outcome: "answered",
-      botId: "remy",
-      switched: false,
     });
     expect(h.bodies).toHaveLength(1);
     expect((h.bodies[0]!.messages as unknown[]).at(-1)).toEqual({
@@ -714,6 +713,8 @@ describe("the system prompt", () => {
       })),
     ];
     const prompt = renderVoiceSystemPromptV1({
+      // A call wears a Bot (ADR 0029), and the answer rule is that Bot's.
+      bot: { botId: "sunny", name: "Sunny" },
       bots: [
         {
           botId: "remy",
@@ -849,9 +850,27 @@ describe("the system prompt", () => {
       answer: "Bob says it is sunny.",
       delegations: 0,
       outcome: "answered",
-      botId: "remy",
-      switched: false,
     });
+  });
+
+  // A call the account has no Bot for is answered by the account-wide
+  // assistant (ADR 0029). The tools that mean a Bot would refer to nobody,
+  // so they are never offered — every one of them would come back as a
+  // failure for the whole call, under a prompt telling the model to try.
+  test("a call with no Bot is never handed the tools that mean one", async () => {
+    const h = host([() => [text("There is nobody to ask yet.")]]);
+    await collect(
+      runVoiceTurnV1(h, { ...baseInput("plan my week"), botId: "" }, () => {}),
+    );
+    const offered = (
+      h.bodies[0]!.tools as { function: { name: string } }[]
+    ).map((tool) => tool.function.name);
+    expect(offered).toEqual(
+      VOICE_ACCOUNT_TOOLS_V1.map((tool) => tool.function.name),
+    );
+    for (const name of ["ask", "status", "cancel", "switch_bot"]) {
+      expect(offered).not.toContain(name);
+    }
   });
 
   test("a turn nobody is waiting on is not bridged, however long the model takes", async () => {
@@ -891,28 +910,60 @@ describe("the system prompt", () => {
       answer: "",
       delegations: 0,
       outcome: "no_output",
-      botId: "remy",
-      switched: false,
     });
   });
 
-  // Every tool the prompt tells the model to call has to exist, or the loop
-  // answers "Unknown tool". The call without a current Bot is the one that
+  // Every tool the prompt tells the model to call has to exist and be one of
+  // the tools that call is actually given, or the loop answers "Unknown tool"
+  // or fails every attempt. The call without a current Bot is the one that
   // drifts, because it is only reached when a Bot cannot be resolved.
   test.each([
-    ["with a Bot", { botId: "sunny", name: "Sunny" }],
-    ["without one", undefined],
-  ])("only names tools that exist, %s", (_label, bot) => {
+    ["with a Bot", { botId: "sunny", name: "Sunny" }, VOICE_TOOLS_V1],
+    ["without one", undefined, VOICE_ACCOUNT_TOOLS_V1],
+  ])("only names tools it is given, %s", (_label, bot, tools) => {
     const prompt = renderVoiceSystemPromptV1({
       bots: [],
       memory: { logDays: 30 },
       now: new Date("2026-09-12T00:00:00.000Z"),
       ...(bot ? { bot } : {}),
     });
-    const known = new Set(VOICE_TOOLS_V1.map((tool) => tool.function.name));
-    const named = prompt.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? [];
-    expect(named.length).toBeGreaterThan(0);
-    for (const name of named) expect(known).toContain(name);
+    const offered = new Set<string>(tools.map((tool) => tool.function.name));
+    // How the prompt names a tool: in backticks, or as a snake_case word.
+    // A bare word like "ask" is left out on purpose — it is also English,
+    // and the rules for a call with no Bot use it as such.
+    const named = [
+      ...(prompt.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? []),
+      ...[...prompt.matchAll(/`([a-z_]+)`/g)].map((match) => match[1]!),
+    ];
+    for (const name of named) expect(offered).toContain(name);
+  });
+
+  // The header says "the other Bots … you cannot act as them". Listed among
+  // them, a Bot can pick its own id for switch_bot and be told, mid-turn,
+  // that it is already the one talking to them.
+  test("the directory is the other Bots, never the one speaking", () => {
+    const prompt = renderVoiceSystemPromptV1({
+      bot: { botId: "sunny", name: "Sunny" },
+      bots: [
+        { botId: "sunny", name: "Sunny" },
+        { botId: "remy", name: "Remy" },
+      ],
+      memory: { logDays: 30 },
+      now: new Date("2026-09-12T00:00:00.000Z"),
+    });
+    expect(prompt).toContain("- remy: Remy");
+    expect(prompt).not.toContain("- sunny: Sunny");
+  });
+
+  test("a Bot with no siblings is told there is nobody to hand over to", () => {
+    const prompt = renderVoiceSystemPromptV1({
+      bot: { botId: "sunny", name: "Sunny" },
+      bots: [{ botId: "sunny", name: "Sunny" }],
+      memory: { logDays: 30 },
+      now: new Date("2026-09-12T00:00:00.000Z"),
+    });
+    expect(prompt).toContain("no other Bots on this account");
+    expect(prompt).not.toContain("<bots>");
   });
 
   test("says when memory could not be read rather than pretending it is empty", () => {

@@ -26,16 +26,22 @@ import no Cloudflare SDK. The two Worker modules above are the adapters.
 Since ADR 0029 a call addresses a Bot rather than the account. The client
 names it in a `voice/target` frame just before `start_call` — the SDK's own
 frame carries only a preferred format — and the id is written into the call
-record, so it survives eviction and a rejoin. A client that names none, or
-names a Bot this account does not own, gets the account's General Bot: a call
-with nobody on the other end is worse than one with the wrong somebody.
+record, so it survives eviction and a rejoin — and a rejoin that names a Bot
+honours that one, because the person pressed voice on it just now. A client
+that names none, or names a Bot this account does not own, gets the account's
+General Bot, recorded by the flock bootstrap rather than spelled by a name.
+Nobody else stands in: a Bot the person never asked for would answer in its
+own name, memory and thread with nothing saying it is the wrong one. An
+account with no General at all is answered by the account-wide assistant,
+which is told it has no Bot to hand work to and is given only the tools that
+need none.
 
 The voice layer then wears that Bot. The prompt opens as it, in the first
 person, and carries `<you>` (its name, description and live activity),
 `<your-memory>` (its own memory, read and never written, beside the User's)
 and `<your-recent-conversation>` (the tail of its thread). The account
 directory is still in the prompt, but only so a hand-over can be asked for by
-name.
+name, and it lists the other Bots rather than this one.
 
 The tools narrow with it. `ask`, `status`, `read_history`, `search_history`
 and `cancel` take no `bot_id` and mean this Bot; the loop supplies the target,
