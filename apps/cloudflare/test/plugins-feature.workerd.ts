@@ -94,9 +94,14 @@ describe("the Plugin authoring switch inside a real Bot", () => {
     await provisionBot(identity);
     await setPluginAuthoring(identity.userId, true);
 
+    // The deployment seeds every account with its shipped Plugins, so the
+    // listing is never the empty-state line that used to name `plugin_create`
+    // here. What the switch being on buys is the tools themselves, which the
+    // `plugin_create` call below exercises directly.
     const listed = await callTool(identity, `run-list-${id}`, "plugin_list");
     expect(listed.isError).toBe(false);
-    expect(listed.content).toContain("plugin_create");
+    expect(listed.content).toContain("Email (email)");
+    expect(listed.content).not.toContain("notes");
 
     const created = await callTool(
       identity,
@@ -111,8 +116,8 @@ describe("the Plugin authoring switch inside a real Bot", () => {
 
     // The scaffold is source, not a Plugin yet: `plugin_files` reads it back
     // off the Workspace root, while `plugin_list` — which lists the account's
-    // Composition — still has nothing, because only a publish the User
-    // approves puts a Plugin there.
+    // Composition — is byte-for-byte what it was, because only a publish the
+    // User approves puts a Plugin there.
     const files = await callTool(identity, `run-files-${id}`, "plugin_files", {
       pluginId: "notes",
     });
@@ -121,7 +126,7 @@ describe("the Plugin authoring switch inside a real Bot", () => {
     expect(files.content).toContain("plugin.json");
 
     const again = await callTool(identity, `run-relist-${id}`, "plugin_list");
-    expect(again.content).toContain("no Plugins yet");
+    expect(again.content).toBe(listed.content);
 
     expect(await skillRefs(identity)).toContain("managed/plugins");
   });

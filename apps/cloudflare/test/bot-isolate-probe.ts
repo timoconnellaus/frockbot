@@ -8,7 +8,10 @@
 // `BotCapabilities`), and only the Turn's
 // surrounding configuration is fixture.
 import { DurableObject } from "cloudflare:workers";
-import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
+import {
+  decodePluginDescriptorV1,
+  ISOLATE_CONTRACT_VERSION,
+} from "@frockbot/core/contracts";
 import type {
   LlmProvider,
   LlmStreamEvent,
@@ -226,6 +229,15 @@ export const PROBE_REQUEST_REDIRECT_HOOK_SOURCE = PROBE_PACKAGE_SOURCE.replace(
 /** The hooks a source declares, which the descriptor must name exactly. */
 export const PROBE_REQUEST_HOOKS = ["agent/tool-exposure", "agent/request"];
 
+/**
+ * The probe's Plugins are ordinary, currently-served ones, so they take the
+ * contract from the constant rather than a literal. A literal silently falls
+ * out of the served window — the current contract and the one before it — on
+ * the second bump after it is written, and the host then refuses the plugin
+ * before it mounts. Nothing is left to name the namespace, so every test that
+ * needs a mounted Package fails with `Available namespaces: none` rather than
+ * with the contract (v0.7.108, bump to contract 5).
+ */
 function probePackageDescriptor(hooks: string[]) {
   return decodePluginDescriptorV1({
     id: PROBE_PACKAGE_ID,
@@ -243,7 +255,7 @@ function probePackageDescriptor(hooks: string[]) {
       "schedule_surface",
       "context_keys",
     ].map((name) => ({ name, description: name, inputSchema: {} })),
-    contractVersion: 3,
+    contractVersion: ISOLATE_CONTRACT_VERSION,
     hooks,
     grants: ["ai", "http", "schedule", "memory", "workspace", "storage"],
     // The probe's `reach_network` tool reaches for a host outside this list,
@@ -297,7 +309,7 @@ const PROBE_PROVIDER_DESCRIPTOR = decodePluginDescriptorV1({
   displayName: "Probe provider",
   version: "0.0.1",
   tools: [{ name: "provider_ping", description: "Answers", inputSchema: {} }],
-  contractVersion: 4,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   hooks: ["agent/tool-exposure"],
   grants: [],
   provides: [{ name: "greeting", version: 1 }],
@@ -315,7 +327,7 @@ const PROBE_CONSUMER_DESCRIPTOR = decodePluginDescriptorV1({
       inputSchema: {},
     },
   ],
-  contractVersion: 4,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   hooks: ["agent/tool-exposure"],
   grants: [],
   consumes: [{ name: "greeting", version: 1 }],
@@ -372,7 +384,7 @@ const PROBE_TRIGGER_DESCRIPTOR = decodePluginDescriptorV1({
   tools: [
     { name: "trigger_noop", description: "Does nothing", inputSchema: {} },
   ],
-  contractVersion: 4,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   hooks: [],
   grants: [],
   // The descriptor names every trigger the module exports: a report that
