@@ -324,16 +324,16 @@ interface LiveCall {
   /**
    * When the client last reported its own speaker as playing, unset once it
    * reports quiet. A stamp rather than a flag because a report that is never
-   * withdrawn — a device whose completion never came back — must not hold the
-   * queue for the rest of the call.
+   * withdrawn — a device whose completion never came back — must not hold
+   * every Bot answer back for the rest of the call.
    */
   playingSince?: number;
   synthesizing: number;
   /**
    * Bumped every time what this call is saying changes: a new spoken turn, an
-   * interruption. A read-out that was being composed when it changed is stale
-   * — the person has moved on — and is put back rather than spoken into what
-   * is happening now.
+   * interruption. A Bot answer whose words were being written when it changed
+   * is stale — the person has moved on — and is dropped rather than spoken
+   * into what is happening now.
    */
   speechGeneration: number;
   /**
@@ -640,9 +640,8 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   /**
-   * How long an unwithdrawn playback report holds the queue; a test shortens
-   * it. The same bound covers a delivery nobody acknowledged and a speaker
-   * the client never reported quiet again.
+   * How long an unwithdrawn playback report holds the floor; a test shortens
+   * it. It covers a speaker the client never reported quiet again.
    */
   protected playbackAckTimeoutMs(): number {
     return VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1;
@@ -1724,15 +1723,6 @@ export class VoiceAssistant extends VoiceAgentBase<
   }
 
   /**
-   * Whether something is still being said, so a Bot answer would cut it off.
-   *
-   * Two things count. A model still producing a reply is in flight by
-   * definition. A speaker the client reports as playing is in flight because
-   * the person is hearing it — bounded by a clock, because a client that
-   * cannot report the end of a sound must not be able to hold every Bot
-   * answer back for the rest of the call.
-   */
-  /**
    * The client says its speaker is playing, recently enough to believe it.
    * A device whose completion report never comes back — a route change part
    * way through an answer, a dropped callback — would otherwise hold every
@@ -1746,6 +1736,15 @@ export class VoiceAssistant extends VoiceAgentBase<
     );
   }
 
+  /**
+   * Whether something is still being said, so a Bot answer would cut it off.
+   *
+   * Two things count. A model still producing a reply is in flight by
+   * definition. A speaker the client reports as playing is in flight because
+   * the person is hearing it — bounded by a clock, because a client that
+   * cannot report the end of a sound must not be able to hold every Bot
+   * answer back for the rest of the call.
+   */
   private replyInFlight(call: LiveCall): boolean {
     // A Bot answer already being told is a reply in flight from the moment it
     // claims the floor, which is before its turn is admitted: two event turns
@@ -2082,9 +2081,9 @@ export class VoiceAssistant extends VoiceAgentBase<
 
   /**
    * The ledger as the operator sees it on `/api/debug/voice`. A read of
-   * storage and nothing else: no call is ended, no delegation is checked or
-   * expired, no read-out is started. The object waking to answer it runs its
-   * ordinary `onStart` recovery, which is the same thing any request does.
+   * storage and nothing else: no call is ended and no delegation is checked or
+   * expired. The object waking to answer it runs its ordinary `onStart`
+   * recovery, which is the same thing any request does.
    */
   async debugSnapshot(): Promise<VoiceAssistantDebugSnapshotV1> {
     const ledger = await this.ledger().debugSnapshot();
