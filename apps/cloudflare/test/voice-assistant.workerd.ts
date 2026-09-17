@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   VOICE_ASSISTANT_DEVICE_HEADER,
   VOICE_ASSISTANT_INTERNAL_PATH,
@@ -54,6 +54,98 @@ afterEach(async () => {
     );
   }
   touched.clear();
+});
+
+/**
+ * What every probe budget in this file is multiplied by.
+ *
+ * The budgets below are written for a laptop, and a CI runner is not one: two
+ * cores, this file running beside three other jobs, and tests in this very
+ * file legitimately taking twenty-four seconds there. `sends acknowledgment
+ * audio while the model is still pending` spends the default eight seconds and
+ * has twice reported an empty result at the deadline — on 2026-09-17 against
+ * `26909074` and again against `caa29268` — and both times the identical
+ * assertion passed when the job was simply run again. A budget a passing run
+ * clears by a whisker is not a budget; it is a red `main` and a release that
+ * does not cut, which is exactly what those two produced.
+ *
+ * Scaling here rather than at each call site keeps every budget's intent
+ * intact — a site that asked for five times the default still asks for more
+ * than the site next to it — and means a new probe inherits the allowance
+ * without its author having to know CI is slower. Locally nothing changes: the short budgets are the
+ * useful ones there, because a wait that would pass in ten seconds on a
+ * shared runner is a hang on a machine doing nothing else.
+ */
+const PROBE_BUDGET_FACTOR = process.env.CI ? 4 : 1;
+
+/**
+ * The most any single wait here may be stretched to.
+ *
+ * This is what a wedged test costs the job. The workerd job runs every
+ * `*.workerd.ts` file serially in one vitest process under a single
+ * `timeout-minutes: 20` in `.github/workflows/main.yml`, so a probe that sits
+ * on its deadline spends that budget out of the twenty minutes the other
+ * fifty-seven files also have to finish in. Two minutes is a tenth of it, and
+ * it is the same two minutes the shared config gives a whole test everywhere
+ * else — a wait in this file may not outlast that.
+ *
+ * It is also twice the largest budget written below (the 60 s read-out after
+ * a scheduled look-up), so every call site gains from the scaling: everything
+ * asking 30 s or less gets the full factor, and the 60 s site still gets
+ * double. A ceiling equal to the largest budget would give the one wait most
+ * likely to overrun on a slow runner no allowance at all.
+ */
+const PROBE_BUDGET_CEILING_MS = 120_000;
+
+/**
+ * What a wait in this file is actually allowed, given what its call site asked
+ * for. Every wait goes through here — both the frame helper and the polling
+ * one — so the scaling belongs to waiting on this runner rather than to either
+ * helper, and a helper added later cannot miss it.
+ */
+function probeBudget(timeoutMs: number): number {
+  return Math.min(timeoutMs * PROBE_BUDGET_FACTOR, PROBE_BUDGET_CEILING_MS);
+}
+
+/** What a wait is allowed when its call site names no budget of its own. */
+const DEFAULT_PROBE_BUDGET_MS = 8_000;
+
+/**
+ * How long one test in this file may run.
+ *
+ * Three things have to hold at once, and this number is the third of them.
+ * The ceiling above keeps a single wedged wait to 120 s, a tenth of the
+ * twenty minutes `.github/workflows/main.yml` gives the whole serial workerd
+ * job; it also stays clear of the largest budget written here so every call
+ * site still gains from the scaling. This constant is what keeps the probe's
+ * own message the thing that reports: budgets compound within a test, and
+ * once their sum exceeds the limit the first informative failure — naming
+ * what the probe waited for and what it saw — is swallowed by a bare test
+ * timeout, which says only that time ran out.
+ *
+ * The figure comes from the heaviest test in the file, `a delegation whose
+ * scheduled check is lost…`: nine waits worth 128 s on a laptop and 392 s
+ * under the ceiling on CI, which is the heaviest on both. Eight minutes
+ * clears that with 88 s spare. Move this number if a test here ever grants
+ * materially more waiting, and move it together with the ceiling: raising one
+ * without the other breaks whichever constraint the other was holding.
+ *
+ * Note what the eight minutes is not: it is not what a wedged test costs the
+ * job. Any wait that reaches its deadline throws and ends the test there, so
+ * a wedged probe costs one ceiling — 120 s — and the compounding 392 s needs
+ * every wait in the test to finish a hair inside its budget. Only a hang
+ * outside every probe reaches this timeout, and that is the one failure no
+ * message here could have described anyway.
+ */
+const FILE_TEST_TIMEOUT_MS = 480_000;
+
+vi.setConfig({ testTimeout: FILE_TEST_TIMEOUT_MS });
+
+test("the runner's CI flag reaches the worker the budgets are scaled in", () => {
+  expect(
+    Object.hasOwn(process.env, "CI"),
+    "the CI binding never arrived in workerd, so every wait in this file is on its laptop budget whatever the runner is — restore `CI` in `workerdBindings` in apps/cloudflare/vitest.config.ts",
+  ).toBe(true);
 });
 
 interface Opened {
@@ -129,13 +221,13 @@ async function open(
     frames,
     audio,
     closed,
-    waitFor(predicate, label, timeoutMs = 8_000) {
+    waitFor(predicate, label, timeoutMs = DEFAULT_PROBE_BUDGET_MS) {
       const seen = frames.find(predicate);
       if (seen) return Promise.resolve(seen);
       return new Promise((resolve, reject) => {
         const timer = setTimeout(
           () => reject(new Error(`timed out waiting for ${label}`)),
-          timeoutMs,
+          probeBudget(timeoutMs),
         );
         waiters.push({
           predicate,
@@ -191,9 +283,9 @@ async function eventually<T>(
   probe: () => Promise<T>,
   satisfied: (value: T) => boolean,
   label: string,
-  timeoutMs = 8_000,
+  timeoutMs = DEFAULT_PROBE_BUDGET_MS,
 ): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + probeBudget(timeoutMs);
   let value = await probe();
   while (!satisfied(value)) {
     if (Date.now() >= deadline) {
