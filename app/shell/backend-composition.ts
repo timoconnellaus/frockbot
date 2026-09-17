@@ -321,25 +321,6 @@ export function createShellCompositionHost(
                     reason: `surface "${send.surfaceId}" has a decision still pending on the values it was drawn with; draw a new card rather than changing what that decision covers`,
                   };
                 }
-                // A decision the person already gave, on this surface, that
-                // nothing has spent yet. Redrawing over it would mint a new
-                // id, ask for the decision a second time and leave the one
-                // they gave bound to nothing — so the draw is refused, the
-                // same way a redraw changing what a pending decision covers
-                // is. Once the decision has been used, or declined, the
-                // surface draws on: that is the receipt.
-                if (!live) {
-                  const decided = await approvals?.settled(
-                    send.pluginId,
-                    send.surfaceId,
-                  );
-                  if (decided) {
-                    return {
-                      status: "refused" as const,
-                      reason: `surface "${send.surfaceId}" carries a decision the user already approved and nothing has acted on yet; draw a new card rather than redrawing one they have decided`,
-                    };
-                  }
-                }
                 const reused = live?.approvalIds ?? [];
                 // The unguessable half of this card's Approval ids, from the
                 // Bot's own secret, the Session and the effect that records the
@@ -359,6 +340,37 @@ export function createShellCompositionHost(
                     reused[index] ??
                     (seed === undefined ? "" : cardApprovalIdV1(seed, index)),
                 );
+                // A decision the person already gave, on this surface, that
+                // nothing has spent yet. A *different* effect redrawing over
+                // it would mint a new id, ask for the decision a second time
+                // and leave the one they gave bound to nothing — so that draw
+                // is refused, the same way a redraw changing what a pending
+                // decision covers is. The draw that asked for the decision is
+                // not such a redraw: its ids are a function of the same
+                // effect, so recomputing them lands on the very ids the
+                // binding holds, and the replay goes on to the send's own
+                // occurrence-id dedupe, which makes it the no-op it is. Once
+                // the decision has been used, or declined, the surface draws
+                // on: that is the receipt.
+                if (!live) {
+                  const decided = await approvals?.settled(
+                    send.pluginId,
+                    send.surfaceId,
+                  );
+                  if (
+                    decided &&
+                    (decided.approvalIds.length !== bound.approvalIds.length ||
+                      decided.approvalIds.some(
+                        (approvalId, index) =>
+                          approvalId !== bound.approvalIds[index],
+                      ))
+                  ) {
+                    return {
+                      status: "refused" as const,
+                      reason: `surface "${send.surfaceId}" carries a decision the user already approved and nothing has acted on yet; draw a new card rather than redrawing one they have decided`,
+                    };
+                  }
+                }
                 // An unbound decision cannot exist. A card asking one of a
                 // person while naming nothing it covers, saying nothing about
                 // what it is asking, or drawn where this host records no card

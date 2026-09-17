@@ -242,6 +242,18 @@ export function cardSurfacePluginIdV1(surfaceId: string): string | undefined {
 }
 
 /**
+ * The card a minted surface id names, or `undefined` for a surface no card
+ * draw minted. It is what tells a handler which of its Plugin's cards it was
+ * pressed on, and what the pressed action's declared owner is checked against.
+ */
+export function cardSurfaceCardIdV1(surfaceId: string): string | undefined {
+  const separator = surfaceId.indexOf("_");
+  const dot = surfaceId.indexOf(".");
+  if (separator <= 0 || dot <= separator + 1) return undefined;
+  return surfaceId.slice(separator + 1, dot);
+}
+
+/**
  * One Card action routed to a Plugin (ADR 0030): the renderer's
  * `plugin/<pluginId>/<action>` reaching the handler that wrote the Card. The
  * surface's data model travels with it when the surface asked for it, so a
@@ -250,11 +262,20 @@ export function cardSurfacePluginIdV1(surfaceId: string): string | undefined {
 export interface PluginWorkerCardActionInvocationV1 {
   schemaVersion: 1;
   pluginId: string;
+  /** The card the pressed surface was minted for; see `cardSurfaceCardIdV1`. */
+  cardId: string;
   surfaceId: string;
   /** The `<action>` half of the name; the namespace is the kernel's. */
   action: string;
   context?: Record<string, unknown>;
   dataModel?: Record<string, unknown>;
+  /**
+   * The Card's stored data model as the kernel holds it, which is what the
+   * surface is actually made of rather than what a client sent back. A handler
+   * reads the state of its own card from here instead of keeping a second copy
+   * of it keyed by surface id.
+   */
+  record?: Record<string, unknown>;
   botId: string;
   sessionId: string;
   runId: string;

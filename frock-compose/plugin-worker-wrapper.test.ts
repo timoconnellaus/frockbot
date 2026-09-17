@@ -363,6 +363,7 @@ describe("the generated wrapper's invocation decoders", () => {
     const action = {
       schemaVersion: 1,
       pluginId: "email",
+      cardId: "draft",
       surfaceId: "draft-email",
       action: "send",
       botId: "bot-1",
@@ -373,6 +374,7 @@ describe("the generated wrapper's invocation decoders", () => {
       deadlineMs: 1_000,
     };
     expect(decodeCardActionInvocation(action)).toMatchObject({
+      cardId: "draft",
       surfaceId: "draft-email",
       action: "send",
     });
@@ -381,11 +383,25 @@ describe("the generated wrapper's invocation decoders", () => {
         ...action,
         context: { choice: "tuesday" },
         dataModel: { sent: false },
+        record: { sent: false },
       }),
-    ).toMatchObject({ context: { choice: "tuesday" } });
+    ).toMatchObject({
+      context: { choice: "tuesday" },
+      record: { sent: false },
+    });
     expect(() =>
       decodeCardActionInvocation({ ...action, surfaceId: "../run:foo" }),
     ).toThrow(/surfaceId is invalid/);
+    expect(() =>
+      decodeCardActionInvocation({ ...action, cardId: "Draft" }),
+    ).toThrow(/cardId is invalid/);
+    expect(() => decodeCardActionInvocation({ ...action, record: [] })).toThrow(
+      /record is invalid/,
+    );
+    const { cardId: _cardId, ...cardless } = action;
+    expect(() => decodeCardActionInvocation(cardless)).toThrow(
+      /invalid fields/,
+    );
     expect(() =>
       decodeCardActionInvocation({ ...action, action: "send/now" }),
     ).toThrow(/action is invalid/);
@@ -1013,6 +1029,7 @@ describe("the generated wrapper's card handlers", () => {
     return {
       schemaVersion: 1,
       pluginId: "mail",
+      cardId: "draft",
       surfaceId: "mail-draft-1",
       action: "details",
       context: { expanded: true },
@@ -1167,12 +1184,76 @@ describe("the generated wrapper's card handlers", () => {
     });
     expect(presses).toEqual([
       {
+        cardId: "draft",
         surfaceId: "mail-draft-1",
         action: "details",
         context: { expanded: true },
         dataModel: undefined,
+        record: undefined,
       },
     ]);
+  });
+
+  test("a press hands its handler the card it is on and the Card's record", async () => {
+    const presses: unknown[] = [];
+    await runCardAction(
+      pressInvocation({ record: { sent: false, subject: "Hello" } }),
+      () =>
+        cardPlugin({
+          render: () => messages,
+          actions: {
+            details: (press: unknown) => {
+              presses.push(press);
+              return messages;
+            },
+          },
+        }),
+      contextFor,
+    );
+    expect(presses).toEqual([
+      {
+        cardId: "draft",
+        surfaceId: "mail-draft-1",
+        action: "details",
+        context: { expanded: true },
+        dataModel: undefined,
+        record: { sent: false, subject: "Hello" },
+      },
+    ]);
+  });
+
+  // One Plugin, two cards: the press names the action, and the surface names
+  // the card. A press that pairs one card's action with another card's
+  // surface is a drop, never an answer folded onto the wrong surface.
+  test("a press whose surface names another of the Plugin's cards is a drop", async () => {
+    const pressed: unknown[] = [];
+    expect(
+      await runCardAction(
+        pressInvocation({ cardId: "receipt" }),
+        () =>
+          cardPlugin(
+            {
+              render: () => messages,
+              actions: {
+                details: (press: unknown) => {
+                  pressed.push(press);
+                  return messages;
+                },
+              },
+            },
+            [
+              { id: "draft", actions: ["details"] },
+              { id: "receipt", actions: ["archive"] },
+            ],
+          ),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: 'plugin "mail" card "receipt" does not declare action "details"',
+    });
+    expect(pressed).toEqual([]);
   });
 
   test("a press at a name no card declares is a drop, and the Card is left alone", async () => {
@@ -1284,7 +1365,8 @@ describe("the generated wrapper's card handlers", () => {
     );
 
     // And when they are spelled apart, the press reaches the card that owns
-    // the name even though another card is scanned first.
+    // the name even though another card is scanned first: the surface names
+    // that card, and the declaration is what picks the handler.
     const drew: string[] = [];
     const module = {
       cards: {
@@ -1309,7 +1391,7 @@ describe("the generated wrapper's card handlers", () => {
       },
     };
     const answer = await runCardAction(
-      pressInvocation(),
+      pressInvocation({ cardId: "reply" }),
       () => ({
         pluginId: "mail",
         cards: declarations.declaredCards(module, "mail"),

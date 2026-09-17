@@ -957,6 +957,37 @@ describe("the Approvals a Plugin's Card asks for", () => {
     }
   });
 
+  // The send is deduped by its effect id, so a Turn interrupted before its
+  // tool result landed re-runs the very call that asked for the decision. That
+  // replay is not a redraw over what the person decided: the ids it mints are
+  // the ones the binding already holds.
+  test("the replayed draw that asked for an approved decision still succeeds", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store);
+    try {
+      const surfaceId = `${cardSurfacePrefixV1(CARD_PLUGIN, "draft")}replayed`;
+      const input = { data: { subject: "Hello" }, surfaceId };
+      const first = await draw(input, "effect-replay");
+      expect(first).toMatchObject({ isError: false });
+      const minted = approvalIdsOnLog(mounted);
+      expect(minted).toHaveLength(1);
+      recordPendingApproval(values, minted[0]!);
+      // The person pressed Send while the Turn was down, and nothing has
+      // spent that decision yet.
+      decide(values, minted[0]!, "approved");
+
+      const again = await draw(input, "effect-replay");
+      expect(again).toMatchObject({ isError: false });
+      // Nothing new was asked for: the send deduped on its effect id, and the
+      // decision the person gave is still the one the card points at.
+      expect(approvalIdsOnLog(mounted)).toEqual(minted);
+      expect(bindingFor(values, surfaceId)?.approvalIds).toEqual(minted);
+      expect(cardApprovalId(mounted)).toBe(minted[0]!);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
   test("a redraw after that decision was spent draws again", async () => {
     const { values, store } = cardApprovalStorage();
     const { mounted, draw } = await mountCards(store);

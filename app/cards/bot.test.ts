@@ -224,6 +224,7 @@ describe("reading one Card by its id", () => {
 describe("what a Plugin handler is handed", () => {
   const handler = {
     pluginId: "email",
+    cardId: "draft",
     action: "regenerate",
     runId: "card-action:draft-email:2",
     generationId: "foundation-v1",
@@ -259,6 +260,22 @@ describe("what a Plugin handler is handed", () => {
       handler,
     );
     expect(invocation).not.toHaveProperty("dataModel");
+  });
+
+  test("the card it is on and the Card's stored record travel with every press", () => {
+    const invocation = cardActionInvocationV1(
+      IDENTITY,
+      {
+        schemaVersion: 1,
+        surfaceId: SURFACE,
+        revision: 2,
+        event: { name: "plugin/email/regenerate" },
+      },
+      card({ dataModel: { sent: true, subject: "Hello" } }),
+      handler,
+    );
+    expect(invocation.cardId).toBe("draft");
+    expect(invocation.record).toEqual({ sent: true, subject: "Hello" });
   });
 });
 

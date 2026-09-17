@@ -339,6 +339,11 @@ export const cards: Record<string, PluginCard> = {
   costs no Turn. Return `{ messages, input }` to also leave one line for the
   Bot's next Turn. Action names are the Plugin's, so two cards may not share
   one, and a handler that throws or overruns leaves the card exactly as it was.
+- A handler is handed `{ cardId, surfaceId, action, context, dataModel, record }`:
+  `cardId` is the card the pressed surface was drawn from, `record` is that
+  Card's data model as the kernel stores it — read your card's state from there
+  rather than keeping a second copy of it keyed by surface id — and `dataModel`
+  is what the client sent back, only when the surface asked for it.
 
 ## What you cannot do
 

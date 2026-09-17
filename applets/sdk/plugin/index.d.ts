@@ -477,12 +477,20 @@ export interface PluginCardRender {
 
 /** What a card action handler is handed: the press, as the person made it. */
 export interface PluginCardPress {
+  /** The card this press is on — the one the pressed surface was drawn from. */
+  cardId: string;
   surfaceId: string;
   /** The `<action>` half of the `plugin/<pluginId>/<action>` that was pressed. */
   action: string;
   context?: { [key: string]: unknown };
   /** The surface's data model, when the surface was created asking for it. */
   dataModel?: { [key: string]: unknown };
+  /**
+   * The Card's data model as the kernel stores it: what the surface is made
+   * of, rather than what the client sent back. A handler reads the state of
+   * its own card here instead of keeping a second copy keyed by surface id.
+   */
+  record?: { [key: string]: unknown };
 }
 
 /** A card handler's refusal: the Card is left exactly as it was. */

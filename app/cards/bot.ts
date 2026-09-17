@@ -15,6 +15,7 @@ import type { BotIdentity } from "@frockbot/core/durable";
 import {
   a2uiByteLengthV1,
   A2UI_LIMITS_V1,
+  cardSurfaceCardIdV1,
   cardSurfacePluginIdV1,
   decodeA2uiAgentMessageV1,
   type A2uiAgentMessageV1,
@@ -302,7 +303,11 @@ export async function cardAction(
     // whose card this is. Without it a card drawn by one Plugin — or by the
     // Bot itself — could hand another Plugin that surface, its context and
     // its whole data model, and fold whatever came back onto it.
-    if (cardSurfacePluginIdV1(command.surfaceId) !== route.pluginId) {
+    const cardId = cardSurfaceCardIdV1(command.surfaceId);
+    if (
+      cardSurfacePluginIdV1(command.surfaceId) !== route.pluginId ||
+      cardId === undefined
+    ) {
       return {
         schemaVersion: 1,
         routed: "plugin",
@@ -345,6 +350,7 @@ export async function cardAction(
     try {
       outcome = await runPluginCardAction(state, identity, command, card, {
         pluginId: route.pluginId,
+        cardId,
         action: route.action,
         runId,
       });
@@ -457,6 +463,7 @@ export function cardActionInvocationV1(
   card: CardRecordV1,
   handler: {
     pluginId: string;
+    cardId: string;
     action: string;
     runId: string;
     generationId: string;
@@ -466,12 +473,14 @@ export function cardActionInvocationV1(
   return {
     schemaVersion: 1,
     pluginId: handler.pluginId,
+    cardId: handler.cardId,
     surfaceId: command.surfaceId,
     action: handler.action,
     ...(command.event.context === undefined
       ? {}
       : { context: command.event.context }),
     ...(dataModel === undefined ? {} : { dataModel }),
+    record: card.dataModel,
     botId: identity.botId,
     sessionId: `${identity.userId}:${identity.botId}`,
     runId: handler.runId,
@@ -487,7 +496,7 @@ function runPluginCardAction(
   identity: BotIdentity,
   command: CardActionCommandV1,
   card: CardRecordV1,
-  handler: { pluginId: string; action: string; runId: string },
+  handler: { pluginId: string; cardId: string; action: string; runId: string },
 ) {
   return readBotPluginRosterV1(state, identity).then((roster) =>
     withPluginWorkerV1(

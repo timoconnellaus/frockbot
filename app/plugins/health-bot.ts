@@ -91,6 +91,7 @@ export async function notePluginFailureV1(
         turn.runId,
         failure.pluginId,
         failure.phase,
+        failure.card ?? "turn",
       ),
       runId: turn.runId,
       createdAt: now().toISOString(),
@@ -122,13 +123,18 @@ export async function notePluginFailureV1(
     },
   );
   // One notice per Turn and phase for a hook; one per generation for a mount
-  // phase, which would otherwise repeat every Turn until the Plugin is off.
+  // phase, which would otherwise repeat every Turn until the Plugin is off. A
+  // card draw is charged under the Turn's own runId and the hook phase, so
+  // what it was doing is part of the id too: without it a Turn whose hook was
+  // skipped and whose card draw also failed would read as one notice, worded
+  // for whichever landed first.
   await state.authority.recordNotification({
     notificationId: notificationIdV1(
       "plugin-failed",
       failure.phase === "hook" ? turn.runId : turn.generationId,
       failure.pluginId,
       failure.phase,
+      failure.card ?? "turn",
     ),
     runId: turn.runId,
     createdAt: now().toISOString(),

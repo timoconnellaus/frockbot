@@ -167,6 +167,7 @@ function decodeViewInvocation(value) {
 var CARD_ACTION_INVOCATION_KEYS = [
   "schemaVersion",
   "pluginId",
+  "cardId",
   "surfaceId",
   "action",
   "botId",
@@ -181,7 +182,7 @@ function decodeCardActionInvocation(value) {
     throw new Error("plugin worker card action invocation must be an object");
   }
   for (const key of Object.keys(value)) {
-    if (!CARD_ACTION_INVOCATION_KEYS.includes(key) && key !== "context" && key !== "dataModel") {
+    if (!CARD_ACTION_INVOCATION_KEYS.includes(key) && key !== "context" && key !== "dataModel" && key !== "record") {
       throw new Error("plugin worker card action invocation has invalid fields");
     }
   }
@@ -196,6 +197,9 @@ function decodeCardActionInvocation(value) {
   if (typeof value.pluginId !== "string" || !PLUGIN_ID.test(value.pluginId)) {
     throw new Error("plugin worker card action invocation pluginId is invalid");
   }
+  if (typeof value.cardId !== "string" || !CARD_ID.test(value.cardId)) {
+    throw new Error("plugin worker card action invocation cardId is invalid");
+  }
   if (typeof value.surfaceId !== "string" || !SURFACE_ID.test(value.surfaceId)) {
     throw new Error("plugin worker card action invocation surfaceId is invalid");
   }
@@ -207,6 +211,9 @@ function decodeCardActionInvocation(value) {
   }
   if (value.dataModel !== undefined && !isRecord(value.dataModel)) {
     throw new Error("plugin worker card action invocation dataModel is invalid");
+  }
+  if (value.record !== undefined && !isRecord(value.record)) {
+    throw new Error("plugin worker card action invocation record is invalid");
   }
   identityFields(value, "plugin worker card action invocation");
   return value;
@@ -739,12 +746,15 @@ export const BOT_ISOLATE_VIEW_SOURCE = `async function runView(invocation, resol
  * A handler answers with the A2UI messages the kernel folds — an array, or
  * `{ messages, input }` when it also has a line for the Bot's next Turn — and
  * anything else is a drop with its reason, so a Card is never half-redrawn.
- * A press names no card: `plugin/<pluginId>/<action>` is the plugin's
- * namespace, so the press is resolved against the card the module declared
- * that action on. One name on two cards fails the mount, and the host checks
- * the declaration against the descriptor at health, so the card a press
- * reaches is the one the descriptor says owns it — never whichever card the
- * module happened to be scanned in first.
+ * A press's name carries no card: `plugin/<pluginId>/<action>` is the
+ * plugin's namespace, so the press is resolved against the card the module
+ * declared that action on. One name on two cards fails the mount, and the
+ * host checks the declaration against the descriptor at health, so the card a
+ * press reaches is the one the descriptor says owns it — never whichever card
+ * the module happened to be scanned in first. The invocation's `cardId` is
+ * the card the pressed surface was minted for: it is what the handler is told
+ * it is on, and a press whose surface names a different card of the same
+ * Plugin is refused rather than answered on the wrong surface.
  */
 export const BOT_ISOLATE_CARD_SOURCE = `function cardAnswer(value) {
   if (Array.isArray(value)) {
@@ -816,15 +826,25 @@ async function runCardAction(invocation, resolve, contextFor) {
     if (owner === undefined) {
       throw new Error('plugin "' + invocation.pluginId + '" declares no card action "' + invocation.action + '"');
     }
+    // The card the pressed surface was minted for, as the kernel read it off
+    // the surface id. The handler is still the one that declared the action;
+    // this only refuses a press whose surface belongs to a different card of
+    // the same Plugin, which would otherwise hand one card's handler another
+    // card's surface, data model and record.
+    if (owner.id !== invocation.cardId) {
+      throw new Error('plugin "' + invocation.pluginId + '" card "' + invocation.cardId + '" does not declare action "' + invocation.action + '"');
+    }
     const cardId = owner.id;
     const context = contextFor(invocation, plugin, invocation.deadlineMs);
     const value = await withIsolateDeadline(function () {
       return plugin.module.cards[cardId].actions[invocation.action](
         {
+          cardId: cardId,
           surfaceId: invocation.surfaceId,
           action: invocation.action,
           context: invocation.context,
           dataModel: invocation.dataModel,
+          record: invocation.record,
         },
         context,
       );
@@ -1100,7 +1120,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v7";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v8";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(
