@@ -215,7 +215,7 @@ describe("the budgets", () => {
       (_, index) => ({
         id: `b${index}`,
         component: "Button",
-        action: { name: "send" },
+        action: { event: { name: "send" } },
       }),
     );
     expect(a2uiActionCountV1(components)).toBe(

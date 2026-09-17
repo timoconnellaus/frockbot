@@ -2367,7 +2367,9 @@ function detail(subject, expanded) {
       id: "more",
       component: "Button",
       label: "More",
-      action: { name: "plugin/probe-card/details", context: { expanded: true } },
+      action: {
+        event: { name: "plugin/probe-card/details", context: { expanded: true } },
+      },
     },
   ];
 }

@@ -207,7 +207,9 @@ function detailComponents(draft: Draft, full: boolean): unknown[] {
       variant: "borderless",
       // A press the kernel routes to this Plugin's own handler, which answers
       // with the rows again. Costs no Turn, which is the point of the route.
-      action: { name: `plugin/email/details`, context: { full: !full } },
+      action: {
+        event: { name: `plugin/email/details`, context: { full: !full } },
+      },
     },
   ];
 }

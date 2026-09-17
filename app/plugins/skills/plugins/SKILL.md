@@ -288,7 +288,7 @@ export const cards: Record<string, PluginCard> = {
               id: "more",
               component: "Button",
               child: "more-label",
-              action: { name: "plugin/<your plugin id>/details" },
+              action: { event: { name: "plugin/<your plugin id>/details" } },
             },
           ],
         },

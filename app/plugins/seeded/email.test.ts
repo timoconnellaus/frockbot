@@ -174,8 +174,8 @@ describe("the email Plugin's draft card", () => {
       { label: "Subject", value: "Re: Following up" },
     ]);
     expect(named(components, "body")).toMatchObject({ collapsedLines: 6 });
-    expect(named(components, "more").action).toMatchObject({
-      name: "plugin/email/details",
+    expect(named(components, "more").action).toEqual({
+      event: { name: "plugin/email/details", context: { full: true } },
     });
 
     // The Plugin writes a placeholder; the kernel binds the real Approval.
@@ -650,6 +650,26 @@ function expectConforms(component: A2uiComponentV1): void {
         "string",
       );
     }
+    // An `Action` is A2UI's own, and the renderer accepts one shape for it:
+    // a server event under `event`, or a client-side `functionCall`. A flat
+    // `{name}` fails the renderer's `oneOf` and takes the whole card down
+    // with it, so a card that writes an action writes the event.
+    if (property.$ref?.endsWith("common_types.json#/$defs/Action")) {
+      expect(
+        Object.keys(value as Record<string, unknown>),
+        `${where} draws "${key}" as no A2UI action`,
+      ).toEqual(["event"]);
+      const event = (value as { event: Record<string, unknown> }).event;
+      expect(typeof event.name, `${where} names no action on its event`).toBe(
+        "string",
+      );
+      expect(
+        Object.keys(event).every(
+          (name) => name === "name" || name === "context",
+        ),
+        `${where} writes an event key A2UI does not allow`,
+      ).toBe(true);
+    }
   }
 }
 
@@ -705,6 +725,14 @@ describe("every state the email card draws", () => {
         component: "StatusPill",
         label: "Ready to send",
         tone: "pending",
+      } as unknown as A2uiComponentV1),
+    ).toThrow();
+    expect(() =>
+      expectConforms({
+        id: "more",
+        component: "Button",
+        child: "more-label",
+        action: { name: "plugin/email/details" },
       } as unknown as A2uiComponentV1),
     ).toThrow();
     expect(() =>
