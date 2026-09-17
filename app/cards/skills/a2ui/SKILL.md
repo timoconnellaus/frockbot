@@ -197,7 +197,8 @@ A surface is refused **whole** — never drawn with a hole in it — and the Use
 sees an unavailable region where your card would be, saying why. The causes:
 
 - a component name no catalog declares, or a property it does not have;
-- a `url` that is not `https://`;
+- any link that is not `https://` — a `url` or an `imageUrl`, wherever it is
+  written, including inside a gallery's or a row's own list;
 - no `root`, a duplicate `id`, or an `id` that is not well formed;
 - anything past a budget above;
 - an envelope that is not `"v1.0"` with exactly one message key.

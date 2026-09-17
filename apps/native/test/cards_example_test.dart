@@ -134,6 +134,7 @@ void main() {
       );
       expect(find.text('This card can’t be shown'), findsNothing);
       _expectTextInsideCard(tester);
+      await captureFamily(tester, 'published-${card.surfaceId}-412');
       await tester.pumpWidget(const SizedBox());
     });
   }
@@ -159,6 +160,7 @@ void main() {
       ),
       findsNothing,
     );
+    await captureFamily(tester, 'published-${withTable.surfaceId}-1440');
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -202,6 +204,7 @@ void main() {
     // control is drawn after it.
     await tester.tap(find.text(ticking['label']! as String).last);
     await tester.pumpAndSettle();
+    await captureFamily(tester, 'published-${asking.surfaceId}-ticked');
     await tester.tap(find.text(submitLabel));
     await tester.pumpAndSettle();
 

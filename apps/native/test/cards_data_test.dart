@@ -201,6 +201,18 @@ void main() {
       tester.getRect(find.text(r'$3,850')).right,
       greaterThan(tester.getRect(find.byType(CardChatCard)).right),
     );
+    await captureFamily(tester, 'wide-table-before-drag');
+
+    // Dragging the table sideways brings that last column back inside the
+    // card, which is what makes a scroller an answer rather than a loss.
+    await tester.drag(scroller, const Offset(-400, 0));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(find.text(r'$3,850')).right,
+      lessThanOrEqualTo(tester.getRect(find.byType(CardChatCard)).right + 0.5),
+    );
+    expect(find.text('INV-0912'), findsOneWidget);
+    await captureFamily(tester, 'wide-table-after-drag');
 
     // Three columns fit, and nothing scrolls.
     await drawFamily(tester, [

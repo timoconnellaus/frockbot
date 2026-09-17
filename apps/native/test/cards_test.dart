@@ -395,6 +395,10 @@ void main() {
   });
 
   group('the card in the thread', () {
+    setUpAll(() async {
+      if (cardVisualOutput.isNotEmpty) await loadInter();
+    });
+
     testWidgets('draws the surface it read', (tester) async {
       final api = SettingsApi(MemoryStore(), (path, body) async {
         expect(path, '/api/bots/bot-1/cards/draft-1');
@@ -900,6 +904,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'actually, no');
       await tester.pumpAndSettle();
+      await capture(tester, 'kept-answer-before-notice');
       // A notice says some durable state of the Bot's moved, never which
       // record, so the card re-reads and rebuilds from what came back. The
       // record's data model has not moved, so what the renderer held is this
@@ -911,6 +916,7 @@ void main() {
       expect(find.text('actually, no'), findsOneWidget);
       expect(find.byType(TextField), findsOneWidget);
       expect(find.text('Approve'), findsOneWidget);
+      await capture(tester, 'kept-answer-after-notice');
       await tester.pumpWidget(const SizedBox());
     });
 
