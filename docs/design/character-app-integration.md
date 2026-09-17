@@ -20,14 +20,19 @@ still need to be established.
 ## What exists in the app
 
 - `apps/native/lib/flock/avatar.dart`: the shared Rive `CharacterAvatar`, full
-  cast catalogue, colour binding, activity/emotion inputs, pointer gaze,
-  reduced motion, still-image fallback and independent quiet-twitch timing.
+  cast catalogue, colour binding, activity/emotion inputs, reduced motion,
+  still-image fallback and independent quiet-twitch timing. Gaze is fed by the
+  surface that owns the pointer rather than read off the character's own
+  square: `gaze` carries where to look, `hold` keeps the artboard from drawing
+  while a nearby text field is being attached.
 - `apps/native/lib/flock/create.dart`: creation and editing for all eleven
   characters plus curated colours.
 - The persisted `AvatarAppearanceV1` contains `characterId` and `primary`.
   Registration, templates, Bot-created Bots and identity updates share it.
-- Product surfaces include sidebar rows and groups, chat header, persistent
-  composer companion, working row, settings, search, recovery and sign-in.
+- Product surfaces include sidebar rows and groups, the persistent composer
+  companion, settings, search, recovery and sign-in. The chat header names the
+  Bot without drawing it, and the thread has no working row: the composer
+  companion is the working indicator and wears the typing badge.
 - Realtime voice sends `asked`, `answering` and `finished` delegation events.
   The consulted Bot rises into the voice footer, changes activity while its
   answer is read, then settles away.
@@ -37,16 +42,15 @@ still need to be established.
 
 ## Surface behaviour
 
-| Surface         | Motion                                                                                    |
-| --------------- | ----------------------------------------------------------------------------------------- |
-| Bot list        | Mostly still; independently timed twitch every 7–18 seconds                               |
-| Bot row hover   | The whole row triggers one restrained hello on desktop/web                                |
-| Chat header     | Small, quiet identity marker                                                              |
-| Bottom of chat  | Always visible; idle or thinking, with desktop pointer gaze                               |
-| Mobile chat     | Same activity without synthetic pointer tracking                                          |
-| Working row     | Working activity plus the existing readable activity trail                                |
-| Picker/settings | Animated preview of character and selected colour                                         |
-| Voice footer    | Rise/fade/scale handoff, thinking while asked, content while answering, success on finish |
+| Surface         | Motion                                                                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bot list        | Mostly still; independently timed twitch every 7–18 seconds                                                                                           |
+| Bot row hover   | The whole row triggers one restrained hello on desktop/web                                                                                            |
+| Bottom of chat  | A quiet live artboard at rest; the working pose and typing badge while a Turn runs                                                                    |
+| Mobile chat     | Same activity without pointer tracking; sits above the system's bottom inset                                                                          |
+| Chat gaze       | The eyes follow the pointer anywhere over the conversation pane, held still for 900 ms after a pointer down so the composer keeps its first keystroke |
+| Picker/settings | Animated preview of character and selected colour                                                                                                     |
+| Voice footer    | The delegated Bot by its character alone: rise/fade/scale handoff, thinking while asked, content while answering, success on finish                   |
 
 All motion yields to `MediaQuery.disableAnimationsOf`, `TickerMode` and the
 character's still mode. Widget tests use the checked-in neutral PNG because

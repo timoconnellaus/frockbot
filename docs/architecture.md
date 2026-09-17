@@ -514,8 +514,8 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 
 The thread's rules were ported from the Vue shell without change and with its
 tests, and are unchanged since: a Turn is ordered as a unit by its own user
-message's stamp (`transcript_model.dart`), the working row says the previous
-reply is being
+message's stamp (`transcript_model.dart`), the thread's working notice says the
+previous reply is being
 stopped only while a supersede drains, a draft belongs to the Bot it was typed
 for and survives a refusal (`composer.dart`), and readiness and the draft are
 separate questions so Try again works with an empty composer.
@@ -680,13 +680,13 @@ stays GrokBot's three things and those doors are rows on the Bot's page instead.
 Bot messages have no avatar or tool-count row, and the thread draws no working
 row: the Bot's companion beside the composer takes the working pose and wears
 the typing badge while a Turn runs, and the thread only says something when a
-Stop is being waited on or a Turn is queued behind the one it displaced. A message that crossed to or
-from a counterpart — another of the User's Bots, or the voice session — is one
-centred marker in the thread, "Messaged 🐑 Codex Watch" or "Message from 🐑
-Xero Books", wearing the counterpart's own sheep and, while queued, stopped
-or unanswered, its status; a running exchange says nothing there, because the
-Bot's own working row already says it. The words are never in the thread: the
-marker opens a view-only chat,
+Stop is being waited on or a Turn is queued behind the one it displaced.
+A message that crossed to or from a counterpart — another of the User's Bots,
+or the voice session — is one centred marker in the thread, "Messaged 🐑 Codex
+Watch" or "Message from 🐑 Xero Books", wearing the counterpart's own sheep
+and, while queued, stopped or unanswered, its status; a running exchange says
+nothing there, because the Bot's companion beside the composer already says it.
+The words are never in the thread: the marker opens a view-only chat,
 "General ⇄ Xero Books", that lists every exchange between the two in both
 directions, each request under the name that sent it and each answer under
 the name that gave it, with a lock footer saying it is view-only. The history
@@ -718,8 +718,9 @@ projected by `projectAnnouncements` and ordered by their recorded timestamps.
 `sheep.dart` draws the avatar from two bundled layers — a background and the
 canonical sheep, the seven WebPs `apps/native/assets/sheep/` carries — and the
 same sheep is drawn wherever a Bot is: the sidebar row, its pinned tile, the
-thread, the working row and Bot settings, each from the `sheep.background` the
-directory already returns. Wearables are deferred, so the background is the
+thread, the composer companion and Bot settings, each from the
+`sheep.background` the directory already returns. Wearables are deferred, so
+the background is the
 whole of the choice a person makes and `defaultSheepRecipeV1` pins the other
 three bands to the catalogue's neutral roots — a Bot this app creates is still
 one the wardrobe can dress when they return.
