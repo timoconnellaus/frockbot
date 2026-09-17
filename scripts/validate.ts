@@ -123,7 +123,9 @@ export function inputFingerprint(root: string, name: string): string {
   const inputs = git(root, "ls-tree", "-r", "-z", "HEAD")
     .split("\0")
     .filter((line) => line)
-    .filter((line) => isCategoryInput(name, line.slice(line.indexOf("\t") + 1)));
+    .filter((line) =>
+      isCategoryInput(name, line.slice(line.indexOf("\t") + 1)),
+    );
   return createHash("sha256").update(inputs.join("\n")).digest("hex");
 }
 
