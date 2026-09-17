@@ -29,12 +29,14 @@ frame carries only a preferred format — and the id is written into the call
 record, so it survives eviction and a rejoin — and a rejoin that names a Bot
 honours that one, because the person pressed voice on it just now. A client
 that names none, or names a Bot this account does not own, gets the account's
-General Bot, recorded by the flock bootstrap rather than spelled by a name.
-Nobody else stands in: a Bot the person never asked for would answer in its
-own name, memory and thread with nothing saying it is the wrong one. An
-account with no General at all is answered by the account-wide assistant,
-which is told it has no Bot to hand work to and is given only the tools that
-need none.
+General Bot, recorded by the flock bootstrap rather than spelled by a name. No
+General marker does not mean no Bots — an account that already owned Bots when
+the bootstrap ran is never given one, and deleting General does not bring it
+back — so the directory is asked next and the first Bot in it that can be read
+takes the call. Only an account the directory says is empty, or cannot be read
+at all, opens a Bot-less call: that one is answered by the account-wide
+assistant, which is told it has no Bot to hand work to and is offered only the
+tools that need none, so its rules and its tools say the same thing.
 
 The voice layer then wears that Bot. The prompt opens as it, in the first
 person, and carries `<you>` (its name, description and live activity),
@@ -47,9 +49,11 @@ The tools narrow with it. `ask`, `status`, `read_history`, `search_history`
 and `cancel` take no `bot_id` and mean this Bot; the loop supplies the target,
 not the model. `switch_bot` is the one that moves it: it writes the call
 record before the voice changes, tells the client so the screen follows, and
-rebuilds the prompt context. A delegation the previous Bot still owes is left
-open on purpose — it belongs to the call, not the target — and is read out in
-that Bot's own voice when it lands.
+rebuilds the prompt context. The person can move it too, without saying
+anything, by pressing voice on another Bot: a `voice/target` frame on a live
+call is a hand-over and goes the same way `switch_bot` does. A delegation the
+previous Bot still owes is left open on purpose — it belongs to the call, not
+the target — and is read out in that Bot's own voice when it lands.
 
 The two layers are unchanged: the voice layer answers in a second or two from
 what it holds, and real work is still a Bot Turn on the `agent` lane, so the
@@ -208,10 +212,15 @@ client), so both speak the same frames.
 
 1. Connect. Server sends `{type:"welcome",protocol_version:1}` then
    `{type:"status",status:"idle"}`.
-2. Client sends `{type:"hello",protocol_version:1}` then
-   `{type:"start_call",preferred_format:"pcm16"}`.
+2. Client sends `{type:"hello",protocol_version:1}`, then — if it is
+   addressing a Bot — `{"type":"voice/target","schemaVersion":1,"botId":"…"}`,
+   then `{type:"start_call",preferred_format:"pcm16"}`. The same frame sent
+   once the call is live is a hand-over instead; who the call is on is above.
 3. Server answers `{type:"audio_config",format:"pcm16",sampleRate:24000}` then,
-   once speech recognition is ready, `{type:"status",status:"listening"}`.
+   once speech recognition is ready, `{type:"status",status:"listening"}`. It
+   also sends `voice/target` back — on admission and again on every hand-over
+   — naming the Bot the call is actually on, which is the only authority on
+   that; a client that guessed could name a Bot the audio never reached.
    Or `{type:"error",message,code?,retryable?}` followed by `status: idle` when
    the call was refused or failed to start.
 
@@ -963,6 +972,23 @@ the thread and counts as unread, but carries `notify: false`
 (`app/notifications/messages.ts`): the person asked out loud and is on the
 call, and a buzz for what they are being told aloud is noise.
 
+**Where a call starts, and voice mode.** Since ADR 0029 the ordinary way in
+is the voice control at the far right of the Bot's composer, its own fixed
+control beside the one that morphs between dictate, send and stop — voice is
+not a mode of the draft, and a target that moved under the thumb would be
+pressed by accident. It starts the call on that Bot, reads as pressed while
+the call is on it, and ends it. Pressed on a different Bot while a call is up
+it moves the call rather than ending it. The sidebar control is still there
+and still starts a call with no Bot named, which is General's. While a call is
+on the Bot on screen the page is in **voice mode**: the desktop sidebar
+collapses so the Bot fills the window, and Back disappears — including the
+Android system gesture, which ends the call instead of leaving a page with a
+call running behind it. A hand-over moves the page to the new Bot, but only
+when the call was the thing on screen, so somebody who walked to another Bot
+while the call carried on is not dragged out of it. The enlarged character and
+an on-page mute are not built, which is why the account-wide footer still
+carries mute, End and the meter.
+
 **Starting.** The footer is on screen in the frame of the press, and the
 sidebar control takes its active colour on pointer-down, before the tap
 resolves; the same control ends the call while the footer is up. Every
@@ -1041,7 +1067,12 @@ which adds bun tests for the provider and key resolution and for the Scribe
 options. They also predate session memory, which adds bun tests for the
 memory record, its ordering fences and the finalization job, and workerd
 scenarios driving the scheduler through a long call, a malformed answer and
-an abandoned call. The numbers below are therefore understated; the next run of the suites should replace them wholesale rather
+an abandoned call. They also predate the per-Bot call of ADR 0029, which adds
+bun tests for the voice catalog, the narrowed tools and the first-person
+read-out, workerd scenarios for the targeted call, a durable hand-over and a
+borrowed voice, and Flutter tests for voice mode collapsing the desk sidebar
+and taking the system back gesture. The
+numbers below are therefore understated; the next run of the suites should replace them wholesale rather
 than add to them.
 
 ### The live endpoint, 2026-09-11

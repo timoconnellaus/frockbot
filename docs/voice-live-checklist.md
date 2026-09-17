@@ -48,38 +48,53 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
 
 ## Continuous session
 
-1. Press the waveform button. Expect: the footer slides up from the bottom
-   edge immediately, the meter's lobes bloom white and pale pink from the
-   microphone before the server says `listening`, the call starts within ~2 s.
+1. Open a Bot and press the voice control at the far right of its composer.
+   Expect: the footer slides up from the bottom edge immediately, the meter's
+   lobes bloom white and pale pink from the microphone before the server says
+   `listening`, the call starts within ~2 s, and the call is with that Bot —
+   the control reads as pressed and Back is gone. The sidebar control still
+   starts a call with the account's General.
 2. Ask "what bots do I have". Expect: the reply is spoken from ElevenLabs
-   (George, Flash v2.5, PCM 24 kHz), the same meter blooms deep rose from the
-   playback, the reply names the live Bots.
-3. Interrupt the reply by speaking. Expect: playback stops within ~200 ms and
+   (Flash v2.5, PCM 24 kHz) in **this Bot's** voice, the same meter blooms
+   deep rose from the playback, the reply names the other Bots.
+3. **Every voice in the catalog, against this account.** The ids in
+   `app/voice/voices.ts` are ElevenLabs' public premade voices and have never
+   been played here (ADR 0029). Make a Bot on each character in turn, or set
+   the fallback, and hear every entry speak: an id this account cannot reach
+   reaches a person as a sentence that never becomes sound. Two Bots must not
+   sound the same.
+4. Ask this Bot to hand you over ("let me talk to Remy"). Expect: the audio
+   stays up, the next sentence is in Remy's voice, the page moves to Remy and
+   the composer control there reads as pressed. Pressing voice on a third
+   Bot's composer moves the call again rather than hanging up.
+5. Interrupt the reply by speaking. Expect: playback stops within ~200 ms and
    the assistant listens; a cough or a door closing does not stop it.
-4. Ask a Bot to do something substantial ("ask Remy to plan my week").
-   Expect: the assistant says it has asked; the request appears in Remy's own
-   thread as a centred "Message from Voice" marker rather than an ordinary
-   user message, and tapping it opens the view-only "Remy ⇄ Voice" chat with
-   the request and, once given, Remy's reply, with no ordinary user
-   notification; when Remy finishes, the assistant tells you the answer in a
-   sentence or two, naming Remy and what it was about, at the next pause.
-   Hang up before Remy finishes, then start voice again: nothing is said
-   unasked. The new call opens listening, and Remy's reply is in the "Remy ⇄
+6. On a call with Remy, ask for something substantial ("plan my week").
+   Expect: it says it has started it, as its own work; the request appears in
+   Remy's own thread as a centred "Message from Voice" marker rather than an
+   ordinary user message, and tapping it opens the view-only "Remy ⇄ Voice"
+   chat with the request and, once given, Remy's reply, with no ordinary user
+   notification; when Remy finishes, the answer is told in a sentence or two
+   in the first person and without a name ("done, your week is planned"), at
+   the next pause. Hand over to another Bot before Remy finishes and the same
+   answer keeps Remy's name and is spoken in Remy's voice, after which the
+   call goes back to its own. Hang up before Remy finishes, then start voice
+   again: nothing is said unasked. The new call opens listening, and Remy's reply is in the "Remy ⇄
    Voice" chat for you to read.
-5. Stay silent for 25 s. Expect: `voice/state` reports `asleep` (visible in
+7. Stay silent for 25 s. Expect: `voice/state` reports `asleep` (visible in
    the network tab), no audio frames go up, the footer keeps animating from the
    microphone. Speak: the first syllable is transcribed (pre-roll).
-6. Mute, speak, unmute, speak. Expect: nothing is transcribed while muted; the
+8. Mute, speak, unmute, speak. Expect: nothing is transcribed while muted; the
    first phrase after unmuting is.
-7. Open the same account on a second device and start voice there. Expect:
+9. Open the same account on a second device and start voice there. Expect:
    the first device's footer shows "moved to another device"; the second
    works. Reload the second device within a minute: it rejoins the same call.
-8. Background the app (switch tabs on the phone, switch apps on Android).
-   Expect: capture and playback stop and the footer closes. Navigate between
-   Bots and pages in the app: the footer stays.
-9. Leave the footer open in a quiet room for an hour. Expect: the OpenAI and
-   ElevenLabs dashboards show no spend for that hour.
-10. Check the ElevenLabs dashboard for character counts against the meter
+10. Background the app (switch tabs on the phone, switch apps on Android).
+    Expect: capture and playback stop and the footer closes. Navigate between
+    Bots and pages in the app: the footer stays.
+11. Leave the footer open in a quiet room for an hour. Expect: the OpenAI and
+    ElevenLabs dashboards show no spend for that hour.
+12. Check the ElevenLabs dashboard for character counts against the meter
     (`voice:meter:<day>` in the object's storage, which the
     `GET /api/debug/voice` read does not yet include) and the OpenAI usage
     page for `gpt-transcribe` minutes.
@@ -87,7 +102,7 @@ whole ElevenLabs path — is still untested end to end. The deterministic checks
 ## Flutter
 
 1. Android: first press requests `RECORD_AUDIO`; denial shows the actionable
-   line; grant and the same eight checks above hold.
+   line; grant and the same checks above hold.
 2. macOS: the microphone prompt appears (usage description present); the
    entitlement admits capture in a release build.
 3. Playback and capture at once on Android with echo cancellation: the
