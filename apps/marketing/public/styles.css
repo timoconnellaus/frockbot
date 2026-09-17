@@ -894,6 +894,13 @@
     color: #fff;
     border-color: var(--ink);
   }
+  .open-page .legal-hero::after {
+    display: none;
+  }
+  .open-page .split-heading,
+  .open-page .split-heading-bottom {
+    align-items: start;
+  }
   @media (max-width: 860px) {
     .open-split {
       grid-template-columns: 1fr;
@@ -901,6 +908,15 @@
     .open-figure {
       padding: 18px;
       border-radius: 18px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .open-figure svg {
+      min-width: 900px;
+    }
+    .open-figure figcaption {
+      position: sticky;
+      left: 0;
     }
   }
   .use-grid {
