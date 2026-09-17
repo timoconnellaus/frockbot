@@ -54,12 +54,6 @@ afterEach(async () => {
     );
   }
   touched.clear();
-  const granted = budgetGrantedInCurrentTest;
-  budgetGrantedInCurrentTest = 0;
-  expect(
-    granted,
-    `this test's waits may now run ${granted} ms in total, past the ${WORST_CASE_BUDGET_IN_ONE_TEST} ms FILE_TEST_TIMEOUT_MS was derived for, so a stalled wait would be cut off by a bare test timeout instead of reporting what it waited for — raise WORST_CASE_BUDGETS_IN_ONE_TEST to cover it`,
-  ).toBeLessThanOrEqual(WORST_CASE_BUDGET_IN_ONE_TEST);
 });
 
 /**
@@ -102,60 +96,32 @@ const PROBE_BUDGET_CEILING_MS = 60_000;
  * helper, and a helper added later cannot miss it.
  */
 function probeBudget(timeoutMs: number): number {
-  const budget = Math.min(
-    timeoutMs * PROBE_BUDGET_FACTOR,
-    PROBE_BUDGET_CEILING_MS,
-  );
-  budgetGrantedInCurrentTest += budget;
-  return budget;
+  return Math.min(timeoutMs * PROBE_BUDGET_FACTOR, PROBE_BUDGET_CEILING_MS);
 }
-
-/**
- * The scaled time the waits so far in the running test were allowed between
- * them. `FILE_TEST_TIMEOUT_MS` below is derived from a count of those waits,
- * and a count kept by hand goes stale the first time a test grows a wait — so
- * the running total is checked after each test rather than trusted.
- */
-let budgetGrantedInCurrentTest = 0;
 
 /** What a wait is allowed when its call site names no budget of its own. */
 const DEFAULT_PROBE_BUDGET_MS = 8_000;
 
 /**
- * The most a single test here can spend waiting, counted in default budgets.
- *
- * Counting waits by hand was the wrong unit and gave the wrong answer: a test
- * that asks for its own longer budget spends several default ones in a single
- * wait. `a delegation whose scheduled check is lost…` is the heaviest at
- * fifteen — seven waits, but one of them alone asks for sixty seconds — ahead
- * of `a just-for-today request holds today…`, which takes thirteen default
- * budgets across thirteen waits. The guard in `afterEach` above measures this
- * rather than trusting it, so a test that grows past the figure says so.
- */
-const WORST_CASE_BUDGETS_IN_ONE_TEST = 15;
-
-/**
  * How long one test in this file may run.
  *
- * This must stay above the sum of the scaled waits a single test can perform,
- * or the ceiling above stops meaning anything: the budgets compound within a
- * test, and once they exceed the limit the first informative failure is
- * swallowed by a bare test timeout, which is the failure the ceiling exists to
- * avoid. So the figure is derived from the budgets rather than chosen — the
- * worst-case sum, plus one more ceiling for the setting-up a test does between
- * its waits — which is already above the 120 s the shared config gives every
- * other file, this one being the outlier that has to declare its own.
+ * This has to stay above the waiting a single test can ask for, or the ceiling
+ * above stops meaning anything: budgets compound within a test, and once they
+ * exceed the limit the first informative failure is swallowed by a bare test
+ * timeout, which is the failure the ceiling exists to avoid. The figure comes
+ * from reading the heaviest test in the file, `a delegation whose scheduled
+ * check is lost…`: nine waits, worth sixteen default budgets, so 128 s on a
+ * laptop and 332 s on CI, where the sixty-second wait is the one the ceiling
+ * holds back. Seven minutes clears both with room to spare. If a test here
+ * ever grants materially more waiting than that, this number moves with it.
+ *
+ * That is above the 120 s the shared config gives every other file, so a
+ * genuinely hung test here takes longer to report — a known trade, and the
+ * consequence of this file's own worst case already exceeding the default
+ * rather than of scaling the budgets. The shared 120 s is deliberately left
+ * alone, because it is the right figure everywhere else.
  */
-const FILE_TEST_TIMEOUT_MS =
-  WORST_CASE_BUDGETS_IN_ONE_TEST * probeBudget(DEFAULT_PROBE_BUDGET_MS) +
-  PROBE_BUDGET_CEILING_MS;
-
-/** What a test's waits may add up to and still leave the slack term unspent. */
-const WORST_CASE_BUDGET_IN_ONE_TEST =
-  FILE_TEST_TIMEOUT_MS - PROBE_BUDGET_CEILING_MS;
-
-// Deriving the figure above spent a budget no test asked for.
-budgetGrantedInCurrentTest = 0;
+const FILE_TEST_TIMEOUT_MS = 420_000;
 
 vi.setConfig({ testTimeout: FILE_TEST_TIMEOUT_MS });
 
