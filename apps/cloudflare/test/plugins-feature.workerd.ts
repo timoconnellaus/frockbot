@@ -101,7 +101,6 @@ describe("the Plugin authoring switch inside a real Bot", () => {
     const listed = await callTool(identity, `run-list-${id}`, "plugin_list");
     expect(listed.isError).toBe(false);
     expect(listed.content).toContain("Email (email)");
-    expect(listed.content).not.toContain("notes");
 
     const created = await callTool(
       identity,

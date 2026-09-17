@@ -14,6 +14,7 @@ import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 import { dynamicToolInputV1 } from "./dynamic-tools.ts";
 import {
   decodePluginDescriptorV1,
+  ISOLATE_CONTRACT_VERSION,
   pluginCardToolNameV1,
 } from "@frockbot/core/contracts";
 import {
@@ -64,7 +65,7 @@ const STORE_PLUGIN_DESCRIPTOR = decodePluginDescriptorV1({
   id: STORE_PLUGIN_ID,
   displayName: "Probe store",
   version: "0.0.1",
-  contractVersion: 4,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   tools: [
     {
       name: "store_roundtrip",
@@ -414,7 +415,7 @@ const BOUND_PLUGIN_DESCRIPTOR = decodePluginDescriptorV1({
   id: BOUND_PLUGIN_ID,
   displayName: "Probe bound",
   version: "0.0.1",
-  contractVersion: 4,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   tools: [
     {
       name: "bound_probe",
@@ -453,7 +454,7 @@ const UNGRANTED_PLUGIN_DESCRIPTOR = decodePluginDescriptorV1({
   id: UNGRANTED_PLUGIN_ID,
   displayName: "Probe ungranted",
   version: "0.0.1",
-  contractVersion: 4,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   tools: [
     {
       name: "grant_probe",
@@ -490,7 +491,7 @@ const OPEN_PLUGIN_DESCRIPTOR = decodePluginDescriptorV1({
   id: OPEN_PLUGIN_ID,
   displayName: "Probe open",
   version: "0.0.1",
-  contractVersion: 4,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   tools: [
     {
       name: "open_probe",
@@ -1470,7 +1471,7 @@ export async function execute() {
       id: TRIGGER_PLUGIN_ID,
       displayName: "Alerts",
       version: "0.0.1",
-      contractVersion: 4,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       tools: [
         { name: "alerts_noop", description: "Does nothing", inputSchema: {} },
       ],
@@ -1650,7 +1651,7 @@ export async function execute() {
       id: SLOW_PLUGIN_ID,
       displayName: "Slow alerts",
       version: "0.0.1",
-      contractVersion: 4,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       tools: [
         { name: "slow_noop", description: "Does nothing", inputSchema: {} },
       ],
@@ -1837,7 +1838,7 @@ export async function execute() {
       id: FLAKY_ID,
       displayName: "Flaky",
       version: "0.0.1",
-      contractVersion: 4,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       tools: [
         { name: "flaky_noop", description: "Does nothing", inputSchema: {} },
       ],
@@ -2131,7 +2132,7 @@ export async function execute() {
       "2026-09-12T06:00:00.000Z",
       "steady",
       THROWING_SOURCE,
-      steadyDescriptor(4, ["agent/tool-exposure"]),
+      steadyDescriptor(ISOLATE_CONTRACT_VERSION, ["agent/tool-exposure"]),
     );
     await switchPlugin(identity, "steady", true);
 
@@ -2154,7 +2155,7 @@ export async function execute() {
       "2026-09-12T06:10:00.000Z",
       "steady",
       NOOP_SOURCE,
-      steadyDescriptor(4, []),
+      steadyDescriptor(ISOLATE_CONTRACT_VERSION, []),
     );
     await turn(identity, "run-3");
     await seedPlugin(
@@ -2163,7 +2164,7 @@ export async function execute() {
       "2026-09-12T06:20:00.000Z",
       "steady",
       THROWING_SOURCE,
-      steadyDescriptor(4, ["agent/tool-exposure"]),
+      steadyDescriptor(ISOLATE_CONTRACT_VERSION, ["agent/tool-exposure"]),
     );
     await turn(identity, "run-4");
     await turn(identity, "run-5");
@@ -2220,7 +2221,7 @@ export const views = {
       id: COUNTER_ID,
       displayName: "Counter",
       version: "0.0.1",
-      contractVersion: 4,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       tools: [
         { name: "counter_bump", description: "Adds one", inputSchema: {} },
       ],
@@ -2456,7 +2457,7 @@ export const cards = {
       id: CARD_PLUGIN_ID,
       displayName: "Card probe",
       version: "0.0.1",
-      contractVersion: 4,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       tools: [],
       hooks: [],
       grants: ["storage"],
@@ -2679,7 +2680,7 @@ export const cards = {
       id: BROKEN_ID,
       displayName: "Broken",
       version: "0.0.1",
-      contractVersion: 4,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       tools: [
         { name: "broken_noop", description: "Does nothing", inputSchema: {} },
       ],
@@ -2788,7 +2789,7 @@ export async function execute(tool, input, ctx) {
       id: ASKER_ID,
       displayName: "Asker",
       version: "0.0.1",
-      contractVersion: 4,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       tools: [
         { name: "ask_model", description: "Asks the model", inputSchema: {} },
       ],
@@ -2913,7 +2914,7 @@ export const cards = {
         id,
         displayName: "Press probe",
         version: "0.0.1",
-        contractVersion: 4,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         tools: [],
         hooks,
         grants: ["storage"],
@@ -3123,7 +3124,7 @@ export const cards = {
       id: REFUSE_ID,
       displayName: "Refusal probe",
       version: "0.0.1",
-      contractVersion: 4,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       tools: [],
       hooks: [],
       grants: [],
