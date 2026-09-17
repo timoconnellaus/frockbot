@@ -177,6 +177,8 @@ class _CardChatCardState extends State<CardChatCard>
     }
     unawaited(previousInteractions?.cancel());
     interactions = next?.onSubmit.listen(_interaction);
+    retryCommandId = null;
+    retryAction = null;
     setState(() {
       card = answer;
       refusal = said;

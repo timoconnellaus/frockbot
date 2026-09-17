@@ -507,6 +507,55 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('a re-read card starts the next press as its own command', (
+      tester,
+    ) async {
+      final posts = <Map<String, Object?>>[];
+      var revision = 1;
+      var deliver = false;
+      final invalidations = ValueNotifier<int>(0);
+      addTearDown(invalidations.dispose);
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body == null) return cardJson(revision: revision);
+        posts.add((body as Map).cast<String, Object?>());
+        if (!deliver) throw const RequestFailure('The connection dropped.', 0);
+        return {
+          'schemaVersion': 1,
+          'routed': 'approval',
+          'card': cardJson(revision: revision),
+        };
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: CardChatScope(
+              api: api,
+              botId: 'bot-1',
+              invalidations: invalidations,
+              child: const CardChatCard(surfaceId: 'draft-1'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(find.text('The connection dropped.'), findsOneWidget);
+      // The surface moved on: the card is read again at its new revision, so
+      // the next press is a new decision and not a repeat of the lost one.
+      revision = 2;
+      invalidations.value++;
+      await tester.pumpAndSettle();
+      deliver = true;
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(posts, hasLength(2));
+      expect(posts[1]['revision'], 2);
+      expect(posts[1]['commandId'], isNot(posts[0]['commandId']));
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('a refused press says why, from the receipt', (tester) async {
       final api = SettingsApi(MemoryStore(), (path, body) async {
         if (body == null) return cardJson();
