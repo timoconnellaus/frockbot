@@ -918,6 +918,18 @@
       position: sticky;
       left: 0;
     }
+    .open-figure::before {
+      content: "Scroll sideways \2192";
+      position: sticky;
+      left: 0;
+      display: block;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
   }
   .use-grid {
     display: grid;
