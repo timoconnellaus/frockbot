@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
@@ -108,4 +109,64 @@ void main() {
       c.dispose();
     });
   }
+
+  testWidgets('the companion looks where the pointer is over the pane', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemoryStore();
+    final t = FakeTransport(store);
+    final c = ChatController(
+      transport: t,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-1',
+    );
+    await c.initialize();
+    c.connection = ConnectionState.connected;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: ChatPane(
+            controller: c,
+            onReconnect: () async {},
+            background: 'fox',
+            primary: '#ff6b57',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final state = tester.state(find.byType(ChatPane)) as dynamic;
+    final ValueNotifier<Offset?> gaze = state.gaze;
+    expect(gaze.value, isNull);
+
+    final companion = tester.getCenter(find.bySemanticsLabel('Bot is ready'));
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    // Up and to the right of the character: the eyes turn that way, and a
+    // point well short of the pane's far corner is not yet a full turn.
+    await mouse.moveTo(companion + const Offset(200, -120));
+    await tester.pump();
+    expect(gaze.value, isNotNull);
+    expect(gaze.value!.dx, greaterThan(0));
+    expect(gaze.value!.dx, lessThan(1));
+    expect(gaze.value!.dy, lessThan(0));
+    // The far corner is a full turn, clamped rather than beyond it.
+    await mouse.moveTo(const Offset(1279, 1));
+    await tester.pump();
+    expect(gaze.value, const Offset(1, -1));
+    // Off the pane, nowhere to look.
+    await mouse.moveTo(const Offset(-10, -10));
+    await tester.pump();
+    expect(gaze.value, isNull);
+
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
 }

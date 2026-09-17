@@ -11,6 +11,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart' hide ConnectionState;
@@ -109,6 +110,31 @@ class ChatPane extends StatefulWidget {
 class _ChatPaneState extends State<ChatPane> {
   final editor = TextEditingController();
   final focus = FocusNode();
+
+  /// Where the pointer is over the conversation, in the companion's frame:
+  /// `-1` to `1` across the pane on each axis from the character's centre,
+  /// or nothing while the pointer is elsewhere. The companion reads it
+  /// straight into its eyes; the pane never rebuilds for a mouse move.
+  final gaze = ValueNotifier<Offset?>(null);
+  final _companionKey = GlobalKey();
+
+  void _pointerMoved(Offset global, Size pane) {
+    final box = _companionKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize || !box.attached) return;
+    final centre = box.localToGlobal(box.size.center(Offset.zero));
+    // Half the pane on each axis is a full turn of the eyes, so the far
+    // corner of a wide window and the near edge of a phone both read as
+    // "over there" rather than the eyes pinning to one side.
+    final reach = Size(
+      math.max(pane.width / 2, 1),
+      math.max(pane.height / 2, 1),
+    );
+    gaze.value = Offset(
+      ((global.dx - centre.dx) / reach.width).clamp(-1.0, 1.0),
+      ((global.dy - centre.dy) / reach.height).clamp(-1.0, 1.0),
+    );
+  }
+
   late final SkillMenuController? skills = widget.skills;
   ChatController get controller => widget.controller;
 
@@ -204,10 +230,21 @@ class _ChatPaneState extends State<ChatPane> {
   @override
   Widget build(BuildContext context) {
     final c = controller;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: readingWidth),
-        child: _column(context, c),
+    // The eyes follow the pointer over the whole conversation, not only over
+    // the character's own square. Translucent: the region takes no pointer
+    // from anything under it, the composer included.
+    return LayoutBuilder(
+      builder: (context, constraints) => MouseRegion(
+        opaque: false,
+        hitTestBehavior: HitTestBehavior.translucent,
+        onHover: (event) => _pointerMoved(event.position, constraints.biggest),
+        onExit: (_) => gaze.value = null,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: readingWidth),
+            child: _column(context, c),
+          ),
+        ),
       ),
     );
   }
@@ -339,6 +376,7 @@ class _ChatPaneState extends State<ChatPane> {
             // inset, or on a phone it hung a gesture bar's height below the
             // field's baseline.
             Positioned(
+              key: _companionKey,
               left: 10,
               bottom: 10 + MediaQuery.paddingOf(context).bottom,
               // The companion is the working indicator: while a Turn runs it
@@ -359,6 +397,7 @@ class _ChatPaneState extends State<ChatPane> {
                             characterId: widget.background,
                             primary: widget.primary,
                             enableGaze: true,
+                            gaze: gaze,
                             motion: CharacterMotion.active,
                             activity: CharacterActivity.working,
                             working: true,
@@ -372,15 +411,16 @@ class _ChatPaneState extends State<ChatPane> {
                       characterId: widget.background,
                       primary: widget.primary,
                       enableGaze: true,
-                      // The still picture between Turns. An idle loop here
-                      // redrew the whole window sixty times a second for as
-                      // long as a chat was open, and even a resting artboard
-                      // beside the field cost keystrokes typed right after a
-                      // tap on the composer (errors.e2e, skill-menu.e2e).
-                      // Hover gaze and the occasional twitch are lost at rest
-                      // as a result; bring them back once the artboard and
-                      // the text field can share a frame.
-                      motion: CharacterMotion.still,
+                      gaze: gaze,
+                      // A live artboard at rest, so the eyes can follow the
+                      // pointer and the character can twitch between Turns.
+                      // Quiet, not active: the ticker runs only for a moment
+                      // after a change and stops again, which is what keeps
+                      // an open chat from redrawing the window sixty times
+                      // a second. The artboard takes no pointer and no
+                      // focus, so the field beside it keeps its keystrokes
+                      // (errors.e2e, skill-menu.e2e).
+                      motion: CharacterMotion.quiet,
                       activity: CharacterActivity.idle,
                       semanticsLabel: 'Bot is ready',
                     ),
@@ -415,6 +455,7 @@ class _ChatPaneState extends State<ChatPane> {
     widget.approvals?.removeListener(_repaint);
     editor.dispose();
     focus.dispose();
+    gaze.dispose();
     super.dispose();
   }
 }

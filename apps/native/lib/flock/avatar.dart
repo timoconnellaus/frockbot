@@ -199,6 +199,14 @@ class CharacterAvatar extends StatefulWidget {
   final CharacterEmotion emotion;
   final CharacterMotion motion;
   final bool enableGaze;
+
+  /// Where the eyes look, as a point in the artboard's own frame: `-1` to `1`
+  /// on each axis, or nothing when there is nowhere to look. The surface
+  /// that owns the pointer feeds this — the conversation pane, for the
+  /// companion beside the composer — so the eyes follow a pointer anywhere
+  /// over that surface rather than only over the character's own square.
+  /// Written straight into the artboard on each change; nothing rebuilds.
+  final ValueListenable<Offset?>? gaze;
   final bool workingRing;
   final bool working;
   final Duration tempo;
@@ -214,6 +222,7 @@ class CharacterAvatar extends StatefulWidget {
     this.emotion = CharacterEmotion.neutral,
     this.motion = CharacterMotion.active,
     this.enableGaze = false,
+    this.gaze,
     this.workingRing = false,
     this.working = false,
     this.tempo = thinkingBadgeDefaultTempo,
@@ -234,6 +243,10 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
 
   /// The last state the ticker was woken for; see `_sync`.
   String? _synced;
+
+  /// Whether `_sync` last left the ticker running for good, as opposed to a
+  /// moment's wake that `_restTimer` ends.
+  bool _running = false;
   bool _localHovered = false;
   bool _twitching = false;
 
@@ -254,7 +267,36 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   void initState() {
     super.initState();
     riveRuntimeReady.addListener(_runtimeChanged);
+    widget.gaze?.addListener(_gazeChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleQuietTwitch());
+  }
+
+  /// The surface's pointer moved: the eyes turn, and a resting artboard is
+  /// woken long enough to draw the turn before it rests again.
+  void _gazeChanged() {
+    final model = _loaded?.viewModelInstance;
+    if (model == null) return;
+    final at = widget.gaze?.value;
+    model.number('lookX')?.value = (at?.dx ?? 0).clamp(-1.0, 1.0);
+    model.number('lookY')?.value = (at?.dy ?? 0).clamp(-1.0, 1.0);
+    _wake();
+  }
+
+  /// Runs the ticker for a moment. A resting artboard advances only on a
+  /// change; the eyes are a change the state machine does not announce.
+  void _wake() {
+    final loaded = _loaded;
+    if (loaded == null || _running) return;
+    if (MediaQuery.disableAnimationsOf(context) ||
+        !TickerMode.valuesOf(context).enabled) {
+      return;
+    }
+    _restTimer?.cancel();
+    loaded.controller.active = true;
+    _restTimer = Timer(const Duration(milliseconds: 700), () {
+      if (!mounted || _running) return;
+      _loaded?.controller.active = false;
+    });
   }
 
   /// The runtime landed (or gave up) after this avatar first drew its still.
@@ -265,6 +307,10 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   @override
   void didUpdateWidget(CharacterAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.gaze, widget.gaze)) {
+      oldWidget.gaze?.removeListener(_gazeChanged);
+      widget.gaze?.addListener(_gazeChanged);
+    }
     if (oldWidget.characterId != widget.characterId) {
       _loaded = null;
       _synced = null;
@@ -334,6 +380,7 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
         '${_localHovered || inheritedHover || _twitching}';
     if (signature != _synced) {
       _synced = signature;
+      _running = run;
       _restTimer?.cancel();
       if (run) {
         loaded.controller.active = true;
@@ -362,6 +409,9 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   }
 
   void _look(PointerHoverEvent event) {
+    // A surface that feeds the gaze owns it; the square's own hover would
+    // only fight it for the last word.
+    if (widget.gaze != null) return;
     if (!widget.enableGaze ||
         defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS) {
@@ -400,6 +450,7 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
                 _loaded = loaded;
                 _synced = null;
                 _sync();
+                if (widget.gaze != null) _gazeChanged();
               },
               builder: (context, state) => switch (state) {
                 // Decoration only: the artboard takes no pointer and holds no
@@ -433,8 +484,10 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
       },
       onExit: (_) {
         setState(() => _localHovered = false);
-        _loaded?.viewModelInstance?.number('lookX')?.value = 0;
-        _loaded?.viewModelInstance?.number('lookY')?.value = 0;
+        if (widget.gaze == null) {
+          _loaded?.viewModelInstance?.number('lookX')?.value = 0;
+          _loaded?.viewModelInstance?.number('lookY')?.value = 0;
+        }
         _sync();
       },
       onHover: _look,
@@ -500,6 +553,7 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   @override
   void dispose() {
     riveRuntimeReady.removeListener(_runtimeChanged);
+    widget.gaze?.removeListener(_gazeChanged);
     _quietTimer?.cancel();
     _settleTimer?.cancel();
     _restTimer?.cancel();
