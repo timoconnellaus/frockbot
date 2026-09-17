@@ -1110,9 +1110,32 @@ describe("what one settled Turn writes", () => {
       expect(
         decodeCardRecordV1(store[cardKeyV1(`extra-${turn}`)]).refusal,
       ).toContain("full of cards this Turn is drawing");
-      lengths.push(
-        (store[CARD_INDEX_KEY] as { surfaces: string[] }).surfaces.length,
-      );
+      const live = (store[CARD_INDEX_KEY] as { surfaces: string[] }).surfaces;
+      lengths.push(live.length);
+      // The newest refusal is the one holding the slot, and no refusal is ever
+      // left without one for the listing retention to reach.
+      expect(live).toContain(`extra-${turn}`);
+      expect(
+        decodeCardRecordV1(store[cardKeyV1(`extra-${turn}`)]).relaxedSlot,
+      ).toBe(true);
+      expect(
+        live.filter(
+          (surfaceId) =>
+            decodeCardRecordV1(store[cardKeyV1(surfaceId)]).relaxedSlot ===
+            true,
+        ),
+      ).toEqual([`extra-${turn}`]);
+      for (const earlier of [1, 2, 3, 4]) {
+        const key = cardKeyV1(`extra-${earlier}`);
+        if (store[key] === undefined) continue;
+        if (
+          decodeCardRecordV1(store[key]).refusal?.includes(
+            "full of cards this Turn is drawing",
+          )
+        ) {
+          expect(live).toContain(`extra-${earlier}`);
+        }
+      }
     }
     const cap = A2UI_LIMITS_V1.surfacesPerSession;
     expect(lengths).toEqual([cap + 1, cap + 1, cap + 1, cap + 1]);

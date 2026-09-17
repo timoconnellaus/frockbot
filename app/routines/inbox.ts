@@ -261,7 +261,10 @@ export interface RoutinePendingSupersededTurnV1 {
 export interface RoutinePendingCardActionV1 {
   schemaVersion: 1;
   kind: "card-action";
-  /** What makes this press its own input: minted once, where the press lands. */
+  /**
+   * What makes this press its own input: the client's own `commandId` when it
+   * sent one, and a minted uuid when it did not.
+   */
   pressId: string;
   surfaceId: string;
   /** The action's name, as the surface declared it. */

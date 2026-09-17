@@ -56,12 +56,14 @@
  *    That refusal takes an index slot even though the condition that raised it
  *    is that none was free: the index runs one past the cap to hold it, and a
  *    Turn that keeps naming new surfaces spends that same relaxed slot rather
- *    than growing the index further. One past the cap is the whole of it — a
- *    Turn that inherits an index already there writes its refusal record
- *    without a slot rather than ratcheting the bound up a Turn at a time, and
- *    that one record is the only one the listing retention may reach. Every
- *    one of those paths writes a record, so no card send ever leaves no trace,
- *    not even a Turn drawing more surfaces than a Session may hold.
+ *    than growing the index further. One past the cap is the whole of it, for
+ *    every Turn and not just the one that first went there — a Turn inheriting
+ *    a full-plus-one index takes the slot over from the surface holding it,
+ *    which is tombstoned for making room like any evicted card. The record
+ *    says which surface that is, so the takeover is never a guess. Every one
+ *    of those paths writes an indexed record, so no card send ever leaves no
+ *    trace the listing retention cannot reach, not even a Turn drawing more
+ *    surfaces than a Session may hold.
  *
  *    Trimming loses a row and never a fact, because the send that drew the
  *    trimmed card is still on its Turn's log. The records eviction leaves
@@ -125,6 +127,13 @@ export interface CardRecordV1 {
   sendDataModel?: boolean;
   /** The surface's own properties, under 1.0's name for them. */
   surfaceProperties?: A2uiJsonObjectV1;
+  /**
+   * Whether this surface holds the one slot the index runs past its cap: set
+   * when an exhausted Session refuses a send, carried by every later fold onto
+   * the same surface, and cleared when the slot is given up, so the Session
+   * can always find the slot it is already spending.
+   */
+  relaxedSlot?: true;
   /** Set by `deleteSurface`. The record stays; the surface is gone. */
   deleted?: true;
   /** Why the last fold changed nothing. Cleared by the next one that does. */
@@ -251,6 +260,7 @@ export function decodeCardRecordV1(
       "catalogId",
       "sendDataModel",
       "surfaceProperties",
+      "relaxedSlot",
       "deleted",
       "refusal",
     ],
@@ -312,6 +322,9 @@ export function decodeCardRecordV1(
             `${label} surfaceProperties`,
           ),
         }),
+    ...(trueFlag(candidate.relaxedSlot, `${label} relaxedSlot`)
+      ? { relaxedSlot: true as const }
+      : {}),
     ...(trueFlag(candidate.deleted, `${label} deleted`)
       ? { deleted: true as const }
       : {}),
@@ -594,6 +607,9 @@ export function foldCardMessagesV1(
         ...(card.foldedRunId === undefined
           ? {}
           : { foldedRunId: card.foldedRunId }),
+        ...(card.relaxedSlot === undefined
+          ? {}
+          : { relaxedSlot: true as const }),
         sessionId: card.sessionId,
         components: [...(created.components ?? [])],
         dataModel: { ...(created.dataModel ?? {}) },
@@ -706,6 +722,69 @@ function evictionVictimV1(
   return surfaces.findIndex((surfaceId) => relaxed.has(surfaceId));
 }
 
+/** The record a surface has right now, whether this Turn wrote it or not. */
+async function readCardV1(
+  records: Record<string, unknown>,
+  input: CardTerminalInputV1,
+  surfaceId: string,
+): Promise<CardRecordV1 | undefined> {
+  const key = cardKeyV1(surfaceId);
+  const staged = records[key] as CardRecordV1 | undefined;
+  if (staged !== undefined) return staged;
+  const stored = await input.read<unknown>(key);
+  return stored === undefined ? undefined : decodeCardRecordV1(stored);
+}
+
+/**
+ * Where in `surfaces` the surface holding the one slot past the cap is.
+ *
+ * The record says so itself, so a Turn that inherits a full-plus-one index
+ * finds the slot it is already spending rather than guessing at one. An index
+ * past the cap always has such a record, written when the slot was taken; 0 —
+ * the stalest surface — is the answer only when the record it was written on
+ * is no longer there to say so.
+ */
+async function relaxedSlotIndexV1(
+  records: Record<string, unknown>,
+  input: CardTerminalInputV1,
+  surfaces: readonly string[],
+): Promise<number> {
+  for (const [at, surfaceId] of surfaces.entries()) {
+    const card = await readCardV1(records, input, surfaceId);
+    if (card?.relaxedSlot === true) return at;
+  }
+  return 0;
+}
+
+/**
+ * Tombstones the surface giving up its slot, saying why, and answers whether
+ * the slot it gave up was the one past the cap. An indexed surface always has
+ * its record, written by the same terminal-record set that indexed it; if
+ * somehow it does not, there is nothing to tombstone and taking it out of the
+ * index is the whole eviction.
+ */
+async function tombstoneForRoomV1(
+  records: Record<string, unknown>,
+  input: CardTerminalInputV1,
+  surfaceId: string,
+): Promise<boolean> {
+  const card = await readCardV1(records, input, surfaceId);
+  if (card === undefined) return false;
+  const tombstone: CardRecordV1 = {
+    ...card,
+    runId: input.run.runId,
+    components: [],
+    dataModel: {},
+    revision: card.revision + 1,
+    updatedAt: input.now,
+    deleted: true,
+    refusal: "the card was dropped to make room for a newer card",
+  };
+  delete tombstone.relaxedSlot;
+  records[cardKeyV1(surfaceId)] = tombstone;
+  return card.relaxedSlot === true;
+}
+
 /** The record a send that could not be folded or indexed leaves behind. */
 function refusedCardRecordV1(
   current: CardRecordV1 | undefined,
@@ -767,9 +846,14 @@ export async function cardTerminalRecordsV1(
   for (const send of sends) {
     const key = cardKeyV1(send.surfaceId);
     const existing = await input.read<unknown>(key);
-    const current =
+    const settled =
       existing === undefined ? undefined : decodeCardRecordV1(existing);
-    if (current?.foldedRunId === input.run.runId) continue;
+    if (settled?.foldedRunId === input.run.runId) continue;
+    // A Turn folds onto what it has already written this Turn, not onto what
+    // storage still holds: a second send to the same surface carries on from
+    // the first, and one to a surface this Turn evicted carries on from the
+    // tombstone that eviction left.
+    const current = (records[key] as CardRecordV1 | undefined) ?? settled;
     const context = {
       surfaceId: send.surfaceId,
       runId: input.run.runId,
@@ -804,6 +888,7 @@ export async function cardTerminalRecordsV1(
     // The index is the bound, not whether a record happens to still be in
     // storage: a surface evicted earlier is as new to the Session as one never
     // drawn, tombstone and all, and is admitted the same way.
+    let takesRelaxedSlot = false;
     if (!surfaces.includes(send.surfaceId)) {
       if (surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession) {
         const victimAt = evictionVictimV1(
@@ -813,58 +898,47 @@ export async function cardTerminalRecordsV1(
           relaxedSurfaces,
         );
         if (victimAt === -1) {
-          records[key] = refusedCardRecordV1(
-            current,
-            send.surfaceId,
-            input,
-            "the Session is full of cards this Turn is drawing",
-          );
           // It takes the relaxed slot the header describes, so the one record
           // saying why the card is not there is out of the listing retention's
-          // reach. The index runs at most one past the cap to hold it: a
-          // further refusal in this Turn spends that same slot through the
-          // eviction above, and one in a Turn that inherits a full-plus-one
-          // index is written without a slot rather than growing the index
-          // again. No older refusal can be spent for it — reaching here means
-          // every indexed surface is one this Turn is writing to.
-          if (surfaces.length < A2UI_LIMITS_V1.surfacesPerSession + 1) {
-            surfaces.push(send.surfaceId);
-            relaxedSurfaces.add(send.surfaceId);
-            movedIndex = true;
+          // reach. The index runs at most one past the cap to hold it: when it
+          // already stands there, the surface holding that slot gives it up
+          // the way any evicted card does, so a Turn inheriting a
+          // full-plus-one index spends the slot rather than growing it again.
+          if (surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession + 1) {
+            const slotAt = await relaxedSlotIndexV1(records, input, surfaces);
+            const given = surfaces.splice(slotAt, 1)[0]!;
+            relaxedSurfaces.delete(given);
+            await tombstoneForRoomV1(records, input, given);
           }
+          surfaces.push(send.surfaceId);
+          relaxedSurfaces.add(send.surfaceId);
+          movedIndex = true;
+          records[key] = {
+            ...refusedCardRecordV1(
+              current,
+              send.surfaceId,
+              input,
+              "the Session is full of cards this Turn is drawing",
+            ),
+            relaxedSlot: true as const,
+          };
           continue;
         }
         const evicted = surfaces.splice(victimAt, 1)[0]!;
         relaxedSurfaces.delete(evicted);
-        const evictedKey = cardKeyV1(evicted);
-        const staged = records[evictedKey] as CardRecordV1 | undefined;
-        const storedEvicted = await input.read<unknown>(evictedKey);
-        // An indexed surface always has its record, written by the same
-        // terminal-record set that indexed it. If somehow it does not, there
-        // is nothing to tombstone: taking it out of the index is the whole
-        // eviction.
-        const evictedCard =
-          staged ??
-          (storedEvicted === undefined
-            ? undefined
-            : decodeCardRecordV1(storedEvicted));
-        if (evictedCard !== undefined) {
-          records[evictedKey] = {
-            ...evictedCard,
-            runId: input.run.runId,
-            components: [],
-            dataModel: {},
-            revision: evictedCard.revision + 1,
-            updatedAt: input.now,
-            deleted: true,
-            refusal: "the card was dropped to make room for a newer card",
-          } satisfies CardRecordV1;
-        }
+        // The slot is the index's, not the surface's: a card taking over the
+        // one past the cap holds it in its turn.
+        takesRelaxedSlot = await tombstoneForRoomV1(records, input, evicted);
+        if (takesRelaxedSlot) relaxedSurfaces.add(send.surfaceId);
       }
       surfaces.push(send.surfaceId);
       movedIndex = true;
     }
-    records[key] = { ...folded, foldedRunId: input.run.runId };
+    records[key] = {
+      ...folded,
+      foldedRunId: input.run.runId,
+      ...(takesRelaxedSlot ? { relaxedSlot: true as const } : {}),
+    };
   }
   if (movedIndex) {
     records[CARD_INDEX_KEY] = {
