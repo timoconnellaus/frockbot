@@ -243,4 +243,47 @@ describe("a Plugin intent", () => {
       ),
     ).toContain("every Plugin on this account");
   });
+
+  test("the card names the card tools and what http opens", () => {
+    const descriptor = decodePluginDescriptorV1({
+      id: "mailer",
+      displayName: "Mailer",
+      version: "1",
+      contractVersion: 5,
+      tools: [],
+      hooks: [],
+      grants: ["http"],
+      network: { hosts: [] },
+      cards: [
+        {
+          id: "draft",
+          displayName: "Draft",
+          description: "Show a draft.",
+          dataSchema: { type: "object", properties: {} },
+          actions: [{ name: "details", description: "Show the headers." }],
+        },
+      ],
+      contextKeys: ["user", "bot", "session"],
+    });
+    const action = pluginApprovalActionV1({ descriptor }, "Turn on");
+    expect(action).toContain("It offers mailer_draft.");
+    expect(action).not.toContain("It offers no tools.");
+    expect(action).not.toContain("It reaches no host of its own.");
+    expect(action).toContain("send email on the Bot's behalf");
+  });
+
+  test("declared hosts and the email sender are both named", () => {
+    const action = pluginApprovalActionV1(MEMBER, "Run");
+    expect(action).toContain("It reaches api.example.com.");
+    expect(action).toContain("send email on the Bot's behalf");
+  });
+
+  test("a Plugin without http reaches no host of its own", () => {
+    const action = pluginApprovalActionV1(
+      { descriptor: { ...DESCRIPTOR, grants: ["storage"] } },
+      "Run",
+    );
+    expect(action).toContain("It reaches api.example.com.");
+    expect(action).not.toContain("send email");
+  });
 });

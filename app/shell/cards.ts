@@ -66,6 +66,7 @@
  */
 import {
   A2UI_IDENTIFIER_V1,
+  CARD_APPROVAL_ID_PREFIX_V1,
   A2UI_LIMITS_V1,
   a2uiActionCountV1,
   a2uiByteLengthV1,
@@ -77,6 +78,11 @@ import {
   type A2uiJsonObjectV1,
   type A2uiJsonValueV1,
 } from "@frockbot/core/contracts";
+import {
+  approvalKeyV1,
+  decodeApprovalRecordV1,
+  type ApprovalRecordV1,
+} from "./approvals.js";
 
 /** One `CardRecordV1`, keyed by the surface the Bot named. */
 export const CARD_PREFIX = "shell:card:";
@@ -1160,5 +1166,357 @@ export function decodeCardActionReceiptV1(
             `${label} failure`,
           ),
         }),
+  };
+}
+
+/**
+ * The Frock catalog component the host draws for a decision. The catalog
+ * allows it an `approvalId` and the two labels and nothing else, so the words
+ * the Approval is recorded with are not on the component: the draw states
+ * them beside the values it covers, and a draw that states neither is refused.
+ */
+export const CARD_APPROVAL_COMPONENT_V1 = "ApprovalActions";
+
+/** The words one card's decision is recorded with, as the Plugin drew it. */
+export interface CardDecisionWordingV1 {
+  action: string;
+  risk: "low" | "medium" | "high";
+  rationale?: string;
+}
+
+/** One Approval a Card asked for, as the kernel recorded it. */
+export interface CardApprovalBindingV1 extends CardDecisionWordingV1 {
+  approvalId: string;
+}
+
+/** Where the Bot's own card-approval seed secret is kept. */
+export const CARD_APPROVAL_SECRET_KEY_V1 = "shell:card-approval-secret";
+
+/**
+ * The unguessable half of a Card's Approval ids, one per card send.
+ *
+ * Two things pull in opposite directions here. The id has to be *stable*: the
+ * send is deduped by its effect id, so a Turn interrupted before its tool
+ * result landed re-runs the same call, and a freshly minted id would name a
+ * decision nobody was ever asked for while the card in the conversation still
+ * carried the first one. And it has to be *unguessable*: `send_to_user` lets
+ * the model choose an `approvalId` in the same storage namespace, so an id
+ * that were a pure function of the effect could be asked for — and answered —
+ * a Turn before the card that will carry it exists.
+ *
+ * A seed over the Bot's own secret, the Session and the effect id is both: the
+ * same effect of the same Session recomputes the same seed, and nothing
+ * outside this Durable Object can compute it at all. The Session is hashed in
+ * because an effect id is only unique inside one, while Approval records are
+ * Bot-wide: two Sessions drawing at the same turn and step would otherwise
+ * share one decision. The prefix is refused for a model-supplied `approvalId`
+ * at the `send_to_user` seam, so the two namespaces never meet.
+ */
+export async function cardApprovalSeedV1(
+  secret: string,
+  sessionId: string,
+  effectId: string,
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${secret}\n${sessionId}\n${effectId}`),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
+}
+
+/** The Approval id the Nth decision on one card send is recorded under. */
+export function cardApprovalIdV1(seed: string, index: number): string {
+  return `${CARD_APPROVAL_ID_PREFIX_V1}${seed}-${index}`;
+}
+
+/** Where one surface's live Approvals are recorded, keyed by whose card it is. */
+export const CARD_APPROVAL_BINDING_PREFIX = "shell:card-approval:";
+
+export function cardApprovalBindingKeyV1(
+  pluginId: string,
+  surfaceId: string,
+): string {
+  return `${CARD_APPROVAL_BINDING_PREFIX}${pluginId}:${surfaceId}`;
+}
+
+/**
+ * Where one card Approval's single permitted use is recorded as spent.
+ *
+ * The capability that acts on a decision claims it here, once. The store
+ * reads the same key: a surface whose decision is approved and unspent may
+ * not be redrawn, because redrawing it would leave the person's answer bound
+ * to a card nobody is looking at any more.
+ */
+export function cardApprovalUseKeyV1(approvalId: string): string {
+  return `shell:card-approval-used:${approvalId}`;
+}
+
+/**
+ * What the Approvals on one surface authorize.
+ *
+ * The Approval record says a person answered; this says *what they answered
+ * about*. Without it an approved decision is a bearer token for any outward
+ * effect the model can name, because `ApprovalRecordV1` carries only words.
+ * `digest` is the content address of the values the card was drawing when the
+ * decision was asked for, so a capability claiming one of these ids has to be
+ * about the same message the person read.
+ */
+export interface CardApprovalRecordV1 {
+  schemaVersion: 1;
+  pluginId: string;
+  surfaceId: string;
+  digest: string;
+  approvalIds: string[];
+  createdAt: string;
+}
+
+/**
+ * The canonical form the digest is taken over: object keys sorted, and
+ * anything a caller would have written as "nothing" — `undefined`, `null`,
+ * `""`, an empty list — dropped rather than recorded.
+ *
+ * Both sides of the gate canonicalise, so a card drawn with `cc: []` and a
+ * message sent with no `cc` at all are one value and not two.
+ */
+function canonicalCardValueV1(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const entries = value
+      .map(canonicalCardValueV1)
+      .filter((entry) => entry !== undefined);
+    return entries.length === 0 ? undefined : entries;
+  }
+  if (typeof value === "object" && value !== null) {
+    const source = value as Record<string, unknown>;
+    const canonical: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) {
+      const entry = canonicalCardValueV1(source[key]);
+      if (entry !== undefined) canonical[key] = entry;
+    }
+    return Object.keys(canonical).length === 0 ? undefined : canonical;
+  }
+  if (value === null || value === undefined || value === "") return undefined;
+  return value;
+}
+
+/** The content address of the values a Card is showing. */
+export async function cardValuesDigestV1(values: unknown): Promise<string> {
+  const canonical = JSON.stringify(canonicalCardValueV1(values) ?? null);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonical),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** The storage one Bot's card approval bindings are read and written through. */
+export interface CardApprovalStoreV1 {
+  /**
+   * The Approvals this surface already asked for that a person could still
+   * answer, or nothing. A binding whose Approval was never recorded is not
+   * live: the Turn that drew that card never settled, so nobody was ever
+   * asked, and reusing its id would leave a card that cannot be decided.
+   */
+  live(
+    pluginId: string,
+    surfaceId: string,
+  ): Promise<CardApprovalRecordV1 | undefined>;
+  /**
+   * The binding of this surface when a person has already approved one of its
+   * Approvals and nothing has spent that decision yet, or nothing. A declined
+   * decision, an expired one and one that has been acted on are all settled
+   * business: the surface may be redrawn over them.
+   */
+  settled(
+    pluginId: string,
+    surfaceId: string,
+  ): Promise<CardApprovalRecordV1 | undefined>;
+  record(binding: CardApprovalRecordV1): Promise<void>;
+  /**
+   * This Bot's own secret, minted once and kept. It is what makes a Card's
+   * Approval ids unguessable while still being a function of the effect that
+   * drew the card; see `cardApprovalSeedV1`.
+   */
+  secret(): Promise<string>;
+}
+
+/** Reads the record only; the liveness of each id is the caller's question. */
+export function decodeCardApprovalRecordV1(
+  value: unknown,
+): CardApprovalRecordV1 | undefined {
+  const candidate = value as Partial<CardApprovalRecordV1> | undefined;
+  if (
+    !candidate ||
+    candidate.schemaVersion !== 1 ||
+    typeof candidate.pluginId !== "string" ||
+    typeof candidate.surfaceId !== "string" ||
+    typeof candidate.digest !== "string" ||
+    typeof candidate.createdAt !== "string" ||
+    !Array.isArray(candidate.approvalIds) ||
+    candidate.approvalIds.some((id) => typeof id !== "string")
+  ) {
+    return undefined;
+  }
+  return candidate as CardApprovalRecordV1;
+}
+
+/**
+ * Binds every `ApprovalActions` on a Card to an Approval the kernel issues.
+ *
+ * "Trust chrome is a component only the host draws, bound to an id only the
+ * kernel issues" (ADR 0030) is this function. Whatever `approvalId` the
+ * author wrote is overwritten with a minted one before the send is recorded,
+ * so a Card can never point its decision at an Approval it did not ask for,
+ * and the returned ids are the Approvals the caller records beside the Card.
+ * `mint` is handed the index of the decision on this card, so a caller
+ * redrawing a surface whose decision is still pending can answer with the id
+ * that decision already has rather than leaving two live Approvals over one
+ * draft.
+ *
+ * The words each Approval is recorded with are the caller's, taken from what
+ * the draw declared: the catalog allows the component nothing but its id and
+ * its labels.
+ */
+export function bindCardApprovalsV1(
+  messages: readonly A2uiAgentMessageV1[],
+  mint: (index: number) => string,
+): { messages: A2uiAgentMessageV1[]; approvalIds: string[] } {
+  const approvalIds: string[] = [];
+  const bindComponent = (component: A2uiComponentV1): A2uiComponentV1 => {
+    if (component.component !== CARD_APPROVAL_COMPONENT_V1) return component;
+    const approvalId = mint(approvalIds.length);
+    approvalIds.push(approvalId);
+    return { ...component, approvalId };
+  };
+  const bound = messages.map((message) => {
+    if ("createSurface" in message) {
+      const components = message.createSurface.components;
+      return components === undefined
+        ? message
+        : {
+            ...message,
+            createSurface: {
+              ...message.createSurface,
+              components: components.map(bindComponent),
+            },
+          };
+    }
+    if ("updateComponents" in message) {
+      return {
+        ...message,
+        updateComponents: {
+          ...message.updateComponents,
+          components: message.updateComponents.components.map(bindComponent),
+        },
+      };
+    }
+    return message;
+  });
+  return { messages: bound, approvalIds };
+}
+
+/**
+ * The Bot Durable Object's own card approval store.
+ *
+ * `live` asks the Approval records themselves whether anyone can still answer
+ * this surface's decision, so the binding never has to be kept in step with a
+ * decision it does not own.
+ */
+export function createCardApprovalStoreV1(storage: {
+  get<T>(key: string): Promise<T | undefined>;
+  put(key: string, value: unknown): Promise<void>;
+}): CardApprovalStoreV1 {
+  // One read per store, and one mint: two sends racing the first draw would
+  // otherwise seed their ids from two different secrets.
+  let secret: Promise<string> | undefined;
+  /**
+   * The binding of one surface when any Approval it names is in the state the
+   * caller is asking about. The Approval records themselves are the authority,
+   * so the binding never has to be kept in step with a decision it does not
+   * own; a binding whose Approval was never recorded holds nothing, because
+   * the Turn that drew that card never settled and nobody was ever asked.
+   */
+  const holding = async (
+    pluginId: string,
+    surfaceId: string,
+    matches: (
+      approval: ApprovalRecordV1,
+      approvalId: string,
+    ) => Promise<boolean>,
+  ): Promise<CardApprovalRecordV1 | undefined> => {
+    const stored = decodeCardApprovalRecordV1(
+      await storage.get<unknown>(cardApprovalBindingKeyV1(pluginId, surfaceId)),
+    );
+    if (!stored) return undefined;
+    for (const approvalId of stored.approvalIds) {
+      const record = await storage.get<unknown>(approvalKeyV1(approvalId));
+      if (record === undefined) continue;
+      let approval;
+      try {
+        approval = decodeApprovalRecordV1(record);
+      } catch {
+        continue;
+      }
+      if (await matches(approval, approvalId)) return stored;
+    }
+    return undefined;
+  };
+  return {
+    secret() {
+      secret ??= (async () => {
+        const stored = await storage.get<unknown>(CARD_APPROVAL_SECRET_KEY_V1);
+        if (typeof stored === "string" && stored.length > 0) return stored;
+        const minted = [...crypto.getRandomValues(new Uint8Array(32))]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+        await storage.put(CARD_APPROVAL_SECRET_KEY_V1, minted);
+        return minted;
+      })();
+      return secret;
+    },
+    async live(pluginId, surfaceId) {
+      return holding(
+        pluginId,
+        surfaceId,
+        async (approval) =>
+          approval.decision === "pending" &&
+          Date.parse(approval.expiresAt) > Date.now(),
+      );
+    },
+    async settled(pluginId, surfaceId) {
+      return holding(pluginId, surfaceId, async (approval, approvalId) => {
+        if (approval.decision !== "approved") return false;
+        if (Date.parse(approval.expiresAt) <= Date.now()) return false;
+        return (
+          (await storage.get<unknown>(cardApprovalUseKeyV1(approvalId))) ===
+          undefined
+        );
+      });
+    },
+    // Idempotent: a replayed card send recomputes the same ids over the same
+    // values, and rewriting the binding it already wrote would only move its
+    // `createdAt`. A write that would say something different about the same
+    // surface still lands — that is a new draw, with its own decision.
+    async record(binding) {
+      const key = cardApprovalBindingKeyV1(binding.pluginId, binding.surfaceId);
+      const stored = decodeCardApprovalRecordV1(
+        await storage.get<unknown>(key),
+      );
+      if (
+        stored &&
+        stored.digest === binding.digest &&
+        stored.approvalIds.length === binding.approvalIds.length &&
+        stored.approvalIds.every(
+          (approvalId, index) => approvalId === binding.approvalIds[index],
+        )
+      ) {
+        return;
+      }
+      await storage.put(key, binding);
+    },
   };
 }

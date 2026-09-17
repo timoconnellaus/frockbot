@@ -80,6 +80,53 @@ export function openStepPositionV1(
   return { turn: started.turn, step: started.step };
 }
 
+/**
+ * Puts one payload on the Turn's log, exactly where `send_to_user` puts one.
+ *
+ * `send_to_user` is not the only thing that sends: a Plugin's card tool draws
+ * a Card, and the Card it draws is the same event in the same place. The
+ * occurrence id is what makes a retried call the same send, so a caller
+ * recording two payloads in one tool call gives each its own.
+ */
+export async function recordSendToUserV1(
+  sessions: { get(sessionId: string): Session | undefined },
+  payload: SendToUserPayloadV1,
+  where: { sessionId: string; occurrenceId: string; tool: string },
+): Promise<{ status: "sent" } | { status: "refused"; reason: string }> {
+  const session = sessions.get(where.sessionId);
+  if (!session) {
+    return {
+      status: "refused",
+      reason: `session "${where.sessionId}" is unavailable, so the send cannot be recorded`,
+    };
+  }
+  let position: { turn: number; step: number };
+  try {
+    position = openStepPositionV1(session, where.tool);
+  } catch (error) {
+    return {
+      status: "refused",
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (
+    !session.events.some(
+      (event) =>
+        event.type === "send/to-user" &&
+        event.occurrenceId === where.occurrenceId,
+    )
+  ) {
+    session.append({
+      type: "send/to-user",
+      ...position,
+      occurrenceId: where.occurrenceId,
+      payload,
+    });
+    await session.flush();
+  }
+  return { status: "sent" };
+}
+
 /** What a recorded send tells the model it did. */
 function sendAcknowledgement(payload: SendToUserPayloadV1): string {
   switch (payload.type) {
@@ -230,7 +277,7 @@ const SEND_TO_USER_DESCRIPTION = [
   '{"type":"secret-request","prompt":"…","secretName":"…"}',
   '{"type":"applet","appletId":"the id returned by applet_list or applet_create"} — embed the live Applet as an interactive chat card. Only an Applet you own or that is shared with you opens; the card opens it as you.',
   '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
-  '{"type":"card","surfaceId":"…","messages":[{"version":"v1.0","createSurface":{"surfaceId":"…","components":[{"id":"root","component":"Column","children":["title"]},{"id":"title","component":"Text","text":"…"}],"dataModel":{}}}]} — one A2UI surface in the conversation. A later send with the same surfaceId updates it in place and does not end your Turn.',
+  '{"type":"card","surfaceId":"…","messages":[{"version":"v1.0","createSurface":{"surfaceId":"…","components":[{"id":"root","component":"Column","children":["title"]},{"id":"title","component":"Text","text":"…"}],"dataModel":{}}}]} — one A2UI surface in the conversation. A later send with the same surfaceId updates it in place and does not end your Turn. Name the surface anything but an underscore followed later by a dot: "trip_summary.v1" is refused, because "<plugin>_<card>." is reserved for the cards a plugin draws. "trip-summary.v1" or "tripSummary.v1" are fine.',
   '{"type":"approval","approvalId":"…","action":"…","rationale":"…","risk":"low|medium|high","expiresInSeconds":86400}',
   "A widget asks the user a question with 1 to 6 options and ends your Turn;",
   "their answer arrives as a new Turn. An approval asks the user to allow one",
@@ -344,7 +391,11 @@ const SEND_TO_USER_INPUT_SCHEMA = {
           type: "object",
           properties: {
             type: { const: "card" },
-            surfaceId: { type: "string" },
+            surfaceId: {
+              type: "string",
+              description:
+                'Letters, digits, dot, underscore or dash. It must not hold an underscore followed later by a dot ("trip_summary.v1"): that shape names the cards a plugin draws and is refused.',
+            },
             // The A2UI envelope is decoded at the seam, not described here: a
             // catalog's components are the Skill's business and would cost
             // every Turn the whole vocabulary in its tool schema.
@@ -416,34 +467,13 @@ function createSendToUserTool(
           `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      const session = sessions.get(context.sessionId);
-      if (!session) {
-        return refusal(
-          `${name} was refused: session "${context.sessionId}" is unavailable, so the send cannot be recorded`,
-        );
-      }
-      let position: { turn: number; step: number };
-      try {
-        position = openStepPositionV1(session, name);
-      } catch (error) {
-        return refusal(
-          `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      if (
-        !session.events.some(
-          (event) =>
-            event.type === "send/to-user" &&
-            event.occurrenceId === context.effectId,
-        )
-      ) {
-        session.append({
-          type: "send/to-user",
-          ...position,
-          occurrenceId: context.effectId,
-          payload,
-        });
-        await session.flush();
+      const recorded = await recordSendToUserV1(sessions, payload, {
+        sessionId: context.sessionId,
+        occurrenceId: context.effectId,
+        tool: name,
+      });
+      if (recorded.status !== "sent") {
+        return refusal(`${name} was refused: ${recorded.reason}`);
       }
       return {
         content: sendAcknowledgement(payload),

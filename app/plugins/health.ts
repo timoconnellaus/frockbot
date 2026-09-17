@@ -17,11 +17,27 @@ export const PLUGIN_QUARANTINE_THRESHOLD_V1 = 3;
 
 export type PluginFailurePhaseV1 = "resolve" | "mount" | "health" | "hook";
 
+/**
+ * What the Plugin was doing when it failed. Presses and draws count toward
+ * the quarantine exactly as a Turn does — what turns a Plugin off is the
+ * total — but none of them is a Turn, so the run has to carry what it is
+ * made of for a notice to say so truthfully.
+ */
+export type PluginFailureKindV1 = "turn" | "press" | "draw";
+
+const FAILURE_KINDS: readonly PluginFailureKindV1[] = ["turn", "press", "draw"];
+
 export interface PluginHealthRecordV1 {
   schemaVersion: 1;
   pluginId: string;
   /** Turns in a row that ended with this Plugin failing. */
   consecutiveFailures: number;
+  /**
+   * The kinds of failure this run is made of, sorted and without repeats. A
+   * record written before the run carried its kinds has none, which reads as
+   * a run of unknown make-up rather than a run of Turns.
+   */
+  failureKinds: PluginFailureKindV1[];
   lastFailure: {
     runId: string;
     phase: PluginFailurePhaseV1;
@@ -42,6 +58,23 @@ export interface PluginHealthStorageV1 {
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const MAX_MESSAGE = 1_024;
 
+function sortedKinds(
+  kinds: readonly PluginFailureKindV1[],
+): PluginFailureKindV1[] {
+  return FAILURE_KINDS.filter((kind) => kinds.includes(kind));
+}
+
+/**
+ * What the run that is counting is made of: one kind when every failure in it
+ * was that kind, and "mixed" when it holds more than one — or when the record
+ * predates the kinds being carried and cannot say.
+ */
+export function pluginFailureRunKindV1(
+  health: PluginHealthRecordV1,
+): PluginFailureKindV1 | "mixed" {
+  return health.failureKinds.length === 1 ? health.failureKinds[0]! : "mixed";
+}
+
 export function pluginHealthKeyV1(pluginId: string): string {
   return `${PLUGIN_HEALTH_PREFIX}${pluginId}`;
 }
@@ -58,13 +91,25 @@ export function decodePluginHealthRecordV1(
   label = "plugin health",
 ): PluginHealthRecordV1 {
   const value = record(input, label);
-  const keys = Object.keys(value).sort().join(",");
+  const keys = Object.keys(value)
+    .filter((key) => key !== "failureKinds")
+    .sort()
+    .join(",");
   if (
     keys !== "consecutiveFailures,lastFailure,pluginId,schemaVersion" &&
     keys !==
       "consecutiveFailures,lastFailure,pluginId,quarantinedAt,schemaVersion"
   ) {
     throw new Error(`${label} has invalid fields`);
+  }
+  if (
+    value.failureKinds !== undefined &&
+    (!Array.isArray(value.failureKinds) ||
+      value.failureKinds.some(
+        (kind) => !FAILURE_KINDS.includes(kind as PluginFailureKindV1),
+      ))
+  ) {
+    throw new Error(`${label} failureKinds are invalid`);
   }
   if (value.schemaVersion !== 1) {
     throw new Error(`${label} schemaVersion is unsupported`);
@@ -99,6 +144,9 @@ export function decodePluginHealthRecordV1(
     schemaVersion: 1,
     pluginId: value.pluginId,
     consecutiveFailures: value.consecutiveFailures as number,
+    failureKinds: sortedKinds(
+      (value.failureKinds ?? []) as PluginFailureKindV1[],
+    ),
     lastFailure: {
       runId: last.runId,
       phase: last.phase as PluginFailurePhaseV1,
@@ -144,6 +192,7 @@ export async function recordPluginFailureV1(
     runId: string;
     phase: PluginFailurePhaseV1;
     message: string;
+    kind?: PluginFailureKindV1;
     now?: Date;
   },
 ): Promise<{ health: PluginHealthRecordV1; quarantined: boolean }> {
@@ -164,6 +213,10 @@ export async function recordPluginFailureV1(
     schemaVersion: 1,
     pluginId: input.pluginId,
     consecutiveFailures,
+    failureKinds: sortedKinds([
+      ...(previous?.failureKinds ?? []),
+      input.kind ?? "turn",
+    ]),
     lastFailure: {
       runId: input.runId,
       phase: input.phase,
@@ -208,7 +261,21 @@ export async function clearPluginHealthV1(
   await storage.delete(pluginHealthKeyV1(pluginId));
 }
 
-/** The words the Plugins page uses for a quarantined Plugin. */
+/**
+ * The words the Plugins page uses for a quarantined Plugin. A run of card
+ * presses or draws counted toward the same total a Turn does, so the count is
+ * the same whatever it was made of — but only a run of Turns is read back as
+ * Turns.
+ */
 export function pluginQuarantineCopyV1(health: PluginHealthRecordV1): string {
-  return `Turned off after ${health.consecutiveFailures} Turns in a row with a failure (last: ${health.lastFailure.message.slice(0, 200)}). Turn it on to try again.`;
+  const run = pluginFailureRunKindV1(health);
+  const what =
+    run === "turn"
+      ? `${health.consecutiveFailures} Turns in a row with a failure`
+      : run === "press"
+        ? `${health.consecutiveFailures} card presses in a row that failed`
+        : run === "draw"
+          ? `${health.consecutiveFailures} card draws in a row that failed`
+          : `${health.consecutiveFailures} failures in a row`;
+  return `Turned off after ${what} (last: ${health.lastFailure.message.slice(0, 200)}). Turn it on to try again.`;
 }

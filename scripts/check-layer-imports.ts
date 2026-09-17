@@ -13,7 +13,7 @@ interface Module {
   dir: string;
   allowed: string[];
   /** Subtrees of `dir` that belong to another workspace, relative to it. */
-  skip?: string[];
+  skip?: RegExp[];
 }
 
 const coreAllowed = ["@frockbot/core/"];
@@ -28,7 +28,7 @@ const modules: Module[] = [
     dir: "applets",
     allowed: [...coreAllowed, "@frockbot/applets/", "@frockbot/applet-sdk/"],
     // `applets/sdk` is its own published workspace, not part of this module.
-    skip: ["sdk/"],
+    skip: [/^sdk\//],
   },
   {
     dir: "computer",
@@ -62,6 +62,12 @@ const modules: Module[] = [
       "@frockbot/frock-compose/",
       "@frockbot/providers/",
     ],
+    // A seeded Plugin's source is Plugin code, not app code: it is written
+    // against the Plugin SDK and built into an artifact, exactly as a Plugin
+    // a Bot writes is. One Plugin's own directory is left to the Plugin build,
+    // whose bundler refuses an import this checker would not have liked
+    // either; the generated artifacts beside them are app code and are not.
+    skip: [/^plugins\/seeded\/[^/]+\//],
   },
 ];
 
@@ -191,7 +197,7 @@ for (const module of modules) {
     // Module tests mount concrete Packages on purpose; only shipped code is gated.
     if (entry.endsWith(".test.ts")) continue;
     const within = relative(module.dir, entry);
-    if (module.skip?.some((prefix) => within.startsWith(prefix))) continue;
+    if (module.skip?.some((pattern) => pattern.test(within))) continue;
     queue.push({ file: join(repoRoot, entry), root: moduleRoot, via: [] });
   }
 

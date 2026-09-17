@@ -19,6 +19,7 @@ import {
   pluginNetworkAdmitsHostV1,
 } from "@frockbot/core/contracts";
 import type { BotIsolateArtifactStore } from "@frockbot/frock-compose";
+import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "@frockbot/app/plugins/seeded/artifacts.generated";
 
 export type { IsolateModelBindingV1 } from "@frockbot/core/contracts";
 
@@ -334,12 +335,24 @@ export function createR2PackageArtifactStore(
 ): BotIsolateArtifactStore {
   return {
     async loadPackageArtifact(contentHash: string): Promise<string> {
-      const key = `packages/${contentHash}.mjs`;
-      const object = await bucket.get(key);
-      if (!object) {
-        throw new Error(`package artifact "${contentHash}" is missing`);
+      // A seeded Plugin's artifact ships in the bundle: the deployment built
+      // it from source and there is no publisher to have put it in R2. It is
+      // read by the same content address and verified by the same hash below,
+      // so nothing about mounting one is different.
+      const seeded = SEEDED_PLUGIN_ARTIFACTS_V1.find(
+        (artifact) => artifact.contentHash === contentHash,
+      );
+      let module: string;
+      if (seeded) {
+        module = seeded.module;
+      } else {
+        const key = `packages/${contentHash}.mjs`;
+        const object = await bucket.get(key);
+        if (!object) {
+          throw new Error(`package artifact "${contentHash}" is missing`);
+        }
+        module = await object.text();
       }
-      const module = await object.text();
       if ((await sha256Hex(module)) !== contentHash) {
         throw new Error(
           `package artifact "${contentHash}" failed hash verification`,

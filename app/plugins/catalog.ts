@@ -10,9 +10,9 @@
 //    Composition, each with a seed state that says whether a User may switch
 //    it, and whether an admin has to open it for the account first.
 //
-// The catalog is a deployment constant. This deployment seeds nothing yet;
-// the machinery is exercised by tests with a fixture catalog, and a seeded
-// entry arrives with a built artifact.
+// The catalog is a deployment constant, built from source: each seeded entry
+// is an artifact `scripts/build-seeded-plugins.ts` produced from a directory
+// under `seeded/`, so nothing here names an artifact that does not exist.
 import {
   decodePluginDescriptorV1,
   type PluginDescriptorV1,
@@ -23,6 +23,7 @@ import type {
 } from "@frockbot/core/durable";
 import { CAPABILITY_DESCRIPTIONS } from "@frockbot/app/settings/catalog-copy";
 import type { PluginEnablementV1 } from "./enablement.js";
+import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./seeded/artifacts.generated.js";
 
 export const PLUGIN_SEED_STATES_V1 = [
   "locked",
@@ -184,8 +185,65 @@ export function decodePluginCatalogV1(input: unknown): SeededPluginV1[] {
   return catalog;
 }
 
-/** What this deployment seeds. Nothing yet: an entry arrives with its artifact. */
-export const DEPLOYMENT_PLUGIN_CATALOG_V1: readonly SeededPluginV1[] = [];
+/** How one seeded Plugin is described on the Plugins page, and how it ships. */
+export interface SeededPluginWordsV1 {
+  displayName: string;
+  description: string;
+  seed: PluginSeedStateV1;
+}
+
+/** How each seeded Plugin is described on the Plugins page, and how it ships. */
+const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
+  email: {
+    displayName: "Email",
+    description:
+      "Draft an email as a card in the conversation, and send it through this deployment once you have approved it. Off until you switch it on.",
+    // Off until a person switches it on: a Bot that can put a draft in front
+    // of you is not something every Bot should start with.
+    seed: "default-off",
+  },
+};
+
+/**
+ * The deployment's words for one seeded Plugin.
+ *
+ * A directory built without an entry above is the build's mistake and not a
+ * Composition read's, so `scripts/build-seeded-plugins.ts` asks this before it
+ * writes an artifact and says which file to edit.
+ */
+export function seededPluginWordsV1(pluginId: string): SeededPluginWordsV1 {
+  const words = SEEDED_PLUGIN_WORDS_V1[pluginId];
+  if (!words) {
+    throw new Error(
+      `seeded plugin "${pluginId}" has no entry in app/plugins/catalog.ts`,
+    );
+  }
+  return words;
+}
+
+/**
+ * What this deployment seeds.
+ *
+ * One entry per directory under `app/plugins/seeded/`, built by
+ * `scripts/build-seeded-plugins.ts` — the artifact, its content hash and the
+ * descriptor all come from that build, so a catalog entry cannot name an
+ * artifact nobody built. The words each card shows are here, because they are
+ * the deployment's, not the Plugin's.
+ */
+export const DEPLOYMENT_PLUGIN_CATALOG_V1: readonly SeededPluginV1[] =
+  SEEDED_PLUGIN_ARTIFACTS_V1.map((artifact) =>
+    decodeSeededPluginV1({
+      pluginId: artifact.pluginId,
+      ...seededPluginWordsV1(artifact.pluginId),
+      artifact: {
+        contentHash: artifact.contentHash,
+        size: artifact.size,
+        mediaType: "application/javascript",
+        bundlerVersion: artifact.bundlerVersion,
+      },
+      descriptor: artifact.descriptor,
+    }),
+  );
 
 /**
  * The catalog entries one account's Composition carries: every seeded Plugin

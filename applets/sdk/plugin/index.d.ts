@@ -261,6 +261,34 @@ export interface PluginContext {
   readonly connection?: (
     connectionId: string,
   ) => Promise<ConnectionLease | CapabilityFailure>;
+  /**
+   * The `http` grant, second half: the deployment's own sender, sending for
+   * this Bot. The Plugin holds no credential and names no provider; a
+   * deployment that has bound no sender answers unavailable.
+   */
+  readonly email?: (request: {
+    /**
+     * The Approval whose decision authorizes this send. The kernel refuses a
+     * send whose Approval is missing, undecided, denied, expired or already
+     * spent, so one decision sends at most one message.
+     */
+    approvalId: string;
+    /**
+     * The Card that decision was given on. The Approval is bound to the
+     * surface and to the values it was showing, so a send whose message is
+     * not the one that was approved is refused.
+     */
+    surfaceId: string;
+    to: string[];
+    cc?: string[];
+    subject: string;
+    body: string;
+    /** The `Message-Id` this answers, when it answers one. */
+    inReplyTo?: string;
+  }) => Promise<
+    | { status: "sent"; messageId: string; undelivered?: string[] }
+    | CapabilityFailure
+  >;
   /** The `schedule` grant: a durable Routine operation attributed to this call. */
   readonly schedule?: (request: {
     callId: string;
@@ -430,6 +458,119 @@ export type PluginView = (
   | void;
 
 /**
+ * One A2UI message a Card is made of: the envelope plus exactly one of
+ * `createSurface`, `updateComponents`, `updateDataModel` or `deleteSurface`.
+ * The kernel decodes and bounds it, so it is carried loosely here.
+ */
+export interface CardMessage {
+  version: "v1.0";
+  [key: string]: unknown;
+}
+
+/** What a card's `render` is handed: the surface the kernel minted and the Bot's values. */
+export interface PluginCardRender {
+  /** The kernel's own surface id. A Plugin never chooses one. */
+  surfaceId: string;
+  /** The values the Bot sent, already validated against the card's `dataSchema`. */
+  data: { [key: string]: unknown };
+}
+
+/** What a card action handler is handed: the press, as the person made it. */
+export interface PluginCardPress {
+  /** The card this press is on — the one the pressed surface was drawn from. */
+  cardId: string;
+  surfaceId: string;
+  /** The `<action>` half of the `plugin/<pluginId>/<action>` that was pressed. */
+  action: string;
+  context?: { [key: string]: unknown };
+  /** The surface's data model, when the surface was created asking for it. */
+  dataModel?: { [key: string]: unknown };
+  /**
+   * The Card's data model as the kernel stores it: what the surface is made
+   * of, rather than what the client sent back. A handler reads the state of
+   * its own card here instead of keeping a second copy keyed by surface id.
+   */
+  record?: { [key: string]: unknown };
+}
+
+/** A card handler's refusal: the Card is left exactly as it was. */
+export interface PluginCardDrop {
+  drop: true;
+  reason?: string;
+}
+
+/**
+ * What a card handler answers with: the messages the kernel folds into the
+ * Card, on their own or with `input` — one line for the Bot's next Turn, the
+ * only thing a press may say to the Bot rather than to the card. `render`
+ * never carries `input`; a draw is not a press.
+ */
+export type PluginCardAnswer =
+  | CardMessage[]
+  | { messages: CardMessage[]; input?: string }
+  | PluginCardDrop
+  | undefined
+  | void;
+
+/**
+ * What a card's `render` answers with. The same messages a press answers
+ * with, and beside them `covers`: the canonical values a decision on this
+ * card would authorize. The Plugin states them because the Plugin, not the
+ * model, decides what the card draws — a redraw that ignores the Bot's values
+ * and shows the draft it is holding covers that draft. A draw that puts an
+ * `ApprovalActions` on the card and declares no `covers`, or no `decision`,
+ * is refused, so a decision bound to nothing — or asked in no words — cannot
+ * exist.
+ */
+export type PluginCardDraw =
+  | CardMessage[]
+  | {
+      messages: CardMessage[];
+      covers?: { [key: string]: unknown };
+      decision?: PluginCardDecision;
+    }
+  | PluginCardDrop
+  | undefined
+  | void;
+
+/**
+ * The words the decision a card asks for is recorded with. They are stated
+ * here rather than on the `ApprovalActions` component because the Frock
+ * catalog allows that component an `approvalId` and its two labels and
+ * nothing else: the host draws the labels, the kernel records the Approval
+ * with these, and a draw that asks for a decision and states none is refused.
+ */
+export interface PluginCardDecision {
+  /** What the person is asked, in their words: "Send an email to …". */
+  action: string;
+  /** What getting it wrong costs. */
+  risk: "low" | "medium" | "high";
+  /** Why, when the action does not say. */
+  rationale?: string;
+}
+
+/**
+ * One Card the Plugin draws (ADR 0030). `render` composes the surface from
+ * the catalogs the client compiled in; `actions` are the handlers behind the
+ * names the surface's components raise. An action name is the Plugin's, not
+ * one card's — the namespace is `plugin/<pluginId>/<action>` — so two cards
+ * may not declare the same one.
+ */
+export interface PluginCard {
+  render(
+    payload: PluginCardRender,
+    ctx: PluginContext,
+  ): Promise<PluginCardDraw> | PluginCardDraw;
+  actions?: Record<
+    string,
+    (
+      press: PluginCardPress,
+      ctx: PluginContext,
+    ) => Promise<PluginCardAnswer> | PluginCardAnswer
+  >;
+}
+
+/**
  * A tool call's answer. A string is handed to the Bot as it is; anything else
  * is JSON-serialized. Throw to answer with an error the Bot can read — the
  * wrapper turns a thrown `Error` into an error result with its message.
@@ -464,4 +605,10 @@ export interface PluginModule {
    * with slot `settings.sections`: a section drawn on this Plugin's card.
    */
   views?: Record<string, PluginView>;
+  /**
+   * One entry per card id declared under `cards` in `plugin.json`. The Bot
+   * calls the card's tool with the values, the kernel validates them against
+   * the card's `dataSchema` and `render` answers with the surface.
+   */
+  cards?: Record<string, PluginCard>;
 }

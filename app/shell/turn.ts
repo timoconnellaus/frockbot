@@ -49,6 +49,7 @@ import {
   type ShellMountedComposition,
 } from "./backend-composition.js";
 import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
+import { createCardApprovalStoreV1 } from "./cards.js";
 import {
   botStopCommandFingerprintV1,
   requireStoredRunV1,
@@ -307,6 +308,11 @@ export async function executeTurn(
         agentPackages: runtime.agentPackages,
         modelSelection: runtime.modelSelection,
         systemPromptSection: promptParts.join("\n\n"),
+        // Where a Card's Approvals are bound to the values they authorize.
+        // The Bot Durable Object's own storage, because the decision and the
+        // binding have to be read back together by the capability that
+        // claims one.
+        cardApprovals: createCardApprovalStoreV1(state.ctx.storage),
         // The turn type the run was admitted as; recovery reads it back from
         // the durable record, so a resumed Turn mounts the same catalog.
         turnType: input.command.turnType ?? "chat",

@@ -63,6 +63,7 @@ import type {
   ShellBotBackendContribution,
 } from "@frockbot/app/shell/backend";
 import type { BotStateEnv } from "@frockbot/app/shell/backend-state";
+import { createBindingEmailSenderV1 } from "@frockbot/app/email/sender";
 import {
   acceptSubagentTask,
   claimTaskMessages,
@@ -90,6 +91,7 @@ import {
   isolateMemoryForget,
   isolateMemoryRead,
   isolateMemoryWrite,
+  isolateEmail,
   isolateSchedule,
   isolateWorkspaceDelete,
   isolateWorkspaceList,
@@ -183,6 +185,7 @@ import {
   decodeIsolateStorageListRequestV1,
   decodeIsolateStoragePutRequestV1,
   decodeIsolateMemoryWriteRequestV1,
+  decodeIsolateEmailRequestV1,
   decodeIsolateScheduleRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
   decodeIsolateWorkspaceListRequestV1,
@@ -560,6 +563,9 @@ export class BotState extends DurableObject<BotStateEnv> {
       await cleanRetiredRoutineStateV1(this.ctx.storage);
     });
     this.outboundFetch = dependencies.outboundFetch;
+    const emailSender = createBindingEmailSenderV1(
+      env as Parameters<typeof createBindingEmailSenderV1>[0],
+    );
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it
     // serves from the RPC that addresses it, never from its constructor.
@@ -601,6 +607,10 @@ export class BotState extends DurableObject<BotStateEnv> {
             },
           }
         : {}),
+      // The deployment's own sender, when this one bound both halves of it.
+      // Nothing is constructed without them, so a Worker with no email
+      // binding carries no sender rather than one that fails on use.
+      ...(emailSender === undefined ? {} : { EMAIL_SENDER: emailSender }),
       MEMORY_CHUNK_INDEX: {
         record: async (vectorIds) => {
           const entries = memoryChunkIndexEntriesV1(vectorIds);
@@ -1471,6 +1481,13 @@ export class BotState extends DurableObject<BotStateEnv> {
         }
         return value;
       }) as never,
+    );
+  }
+
+  async isolateEmail(input: unknown) {
+    return isolateEmail(
+      (await this.contribution()).state,
+      decodeIsolateCallRpcV1(input, decodeIsolateEmailRequestV1) as never,
     );
   }
 

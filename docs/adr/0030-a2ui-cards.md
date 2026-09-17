@@ -359,6 +359,48 @@ serve`), the platform model over the remote Workers AI binding, asked
 6. Descriptor `cards` and `skills`, `renderCard` and `cardAction` on the
    Plugin worker, `plugin/` actions. The email card as the first seeded
    Plugin, sending through a Connection.
+
+   > Built 2026-09-17, step 6. The descriptor's `cards` entry names no
+   > surface, against "A Plugin, pre-configured" above: an entry is
+   > `{id, displayName, description, dataSchema, actions}` and the
+   > components are what `renderCard` answers with, because a Plugin's
+   > surface depends on the values it was drawn with — the email card's
+   > `Receipt` is not its draft. `renderCard` and `cardAction` answer
+   > `rendered`/`drop` rather than the task's `ok`/`refused`, to match the
+   > view and trigger results already on the Plugin worker contract. A card
+   > action name is unique per Plugin rather than per card, because the wire
+   > namespace `plugin/<pluginId>/<action>` carries no card, so the wrapper
+   > finds the card by the action it declares. A seeded Plugin's artifact
+   > travels in the Worker bundle
+   > (`app/plugins/seeded/artifacts.generated.ts`, module text included)
+   > because a seeded artifact has no publisher to put it in R2, and is read
+   > back through the same content address by
+   > `createR2PackageArtifactStore`. Sending is a kernel loopback —
+   > `ctx.email` to `isolateEmail` to `app/email/sender.ts` — attributed to
+   > the Bot and holding no credential the Plugin can see, and inert until a
+   > deployment binds `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS`. An Approval a
+   > Card asks for is bound to what it authorizes: `renderCard` answers with
+   > `covers` — the canonical values the Plugin drew and will act on — beside
+   > its messages, and the kernel records the Plugin, the surface and a digest
+   > of _those_ beside the Approval ids. It is the Plugin's word and not the
+   > model's because a Plugin need not draw its input: the email card redraws
+   > the draft it holds, so binding the tool input would bind values nobody
+   > saw. A draw that asks for a decision and declares no `covers` is refused.
+   > The ids themselves are derived from the Session and the effect that
+   > records the send rather than minted, so a replayed tool call recomputes
+   > them, the send dedupe makes the ask a no-op and the binding it rewrites
+   > is the one that was already there; the Session is in the derivation
+   > because an effect id is unique only inside one while card and Approval
+   > records are Bot-wide. The wording an Approval is recorded with — its
+   > action, risk and rationale — is declared on the render result's
+   > `decision` rather than on the `ApprovalActions` component, because the
+   > committed Frock catalog allows that component only `approvalId`,
+   > `approveLabel` and `declineLabel`; the component carries the buttons and
+   > the kernel-minted id, and the words come from the result beside it.
+   > `isolateEmail` refuses a decision that is not the one bound to this send,
+   > and a redraw of a pending draft reuses that decision rather than minting
+   > a second over one draft.
+
 7. The five first-party cards as locked Plugins; the old members mapped, then
    removed a release later.
 8. The rest of the Frock catalog, family by family, each with its reference.

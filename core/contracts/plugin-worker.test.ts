@@ -7,6 +7,10 @@ import {
   MAX_TRIGGER_BODY_BYTES_V1,
   decodePluginWorkerTriggerInvocationV1,
   decodePluginWorkerTriggerResultV1,
+  decodePluginWorkerRenderCardResultV1,
+  decodePluginWorkerCardActionResultV1,
+  MAX_PLUGIN_CARD_ACTION_INPUT_V1,
+  MAX_PLUGIN_CARD_COVERS_BYTES_V1,
   pluginWorkerLoaderIdV1,
   pluginWorkerModuleSetHashV1,
 } from "./plugin-worker.js";
@@ -30,13 +34,13 @@ const MEMBER_B = {
 describe("the plugin worker's identity", () => {
   test("hashes the same module set differently when the mount order differs", async () => {
     const forward = await pluginWorkerModuleSetHashV1({
-      contractVersion: 3,
+      contractVersion: 4,
       indexVersion: "index-v1",
       members: [MEMBER_A, MEMBER_B],
       bindingDigest: DIGEST,
     });
     const reversed = await pluginWorkerModuleSetHashV1({
-      contractVersion: 3,
+      contractVersion: 4,
       indexVersion: "index-v1",
       members: [MEMBER_B, MEMBER_A],
       bindingDigest: DIGEST,
@@ -48,7 +52,7 @@ describe("the plugin worker's identity", () => {
 
   test("changes with the contract, the index, an artifact or the bindings", async () => {
     const base = {
-      contractVersion: 3 as const,
+      contractVersion: 4 as const,
       indexVersion: "index-v1",
       members: [MEMBER_A],
       bindingDigest: DIGEST,
@@ -70,7 +74,7 @@ describe("the plugin worker's identity", () => {
   test("refuses duplicate members and non-hex hashes", async () => {
     await expect(
       pluginWorkerModuleSetHashV1({
-        contractVersion: 3,
+        contractVersion: 4,
         indexVersion: "index-v1",
         members: [MEMBER_A, { ...MEMBER_A, contentHash: HASH_B }],
         bindingDigest: DIGEST,
@@ -78,7 +82,7 @@ describe("the plugin worker's identity", () => {
     ).rejects.toThrow(/duplicate/);
     await expect(
       pluginWorkerModuleSetHashV1({
-        contractVersion: 3,
+        contractVersion: 4,
         indexVersion: "index-v1",
         members: [{ ...MEMBER_A, contentHash: "not hex" }],
         bindingDigest: DIGEST,
@@ -115,13 +119,14 @@ const healthyPlugin = {
   consumes: [],
   triggers: ["forecast_ready"],
   views: ["weather.settings"],
+  cards: [{ id: "draft", actions: ["details"] }],
 };
 
 describe("plugin worker health", () => {
   test("decodes every plugin the index mounted", () => {
     const health = decodePluginWorkerHealthV1({
       schemaVersion: 1,
-      contractVersion: 3,
+      contractVersion: 4,
       plugins: [
         healthyPlugin,
         {
@@ -134,10 +139,11 @@ describe("plugin worker health", () => {
           consumes: [{ name: "weather-data", version: 1 }],
           triggers: [],
           views: [],
+          cards: [],
         },
       ],
     });
-    expect(health.contractVersion).toBe(3);
+    expect(health.contractVersion).toBe(4);
     expect(health.plugins.map((plugin) => plugin.pluginId)).toEqual([
       "weather",
       "greeter",
@@ -153,10 +159,10 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 3,
+        contractVersion: 4,
         plugins: [],
       }),
-    ).toEqual({ schemaVersion: 1, contractVersion: 3, plugins: [] });
+    ).toEqual({ schemaVersion: 1, contractVersion: 4, plugins: [] });
     expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
@@ -181,7 +187,7 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 3,
+        contractVersion: 4,
         plugins: [hooklessPlugin],
       }).plugins[0],
     ).toMatchObject({
@@ -194,21 +200,21 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 3,
+        contractVersion: 4,
         plugins: [{ ...healthyPlugin, reason: "fine" }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 3,
+        contractVersion: 4,
         plugins: [{ ...healthyPlugin, ok: false }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
     expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 3,
+        contractVersion: 4,
         plugins: [healthyPlugin, healthyPlugin],
       }),
     ).toThrow(/duplicate/);
@@ -218,21 +224,21 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 3,
+        contractVersion: 4,
         plugins: [{ ...healthyPlugin, hooks: ["agent/request-error"] }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/hooks/) });
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 3,
+        contractVersion: 4,
         plugins: [{ ...healthyPlugin, triggers: ["Forecast Ready"] }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/triggers/) });
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 3,
+        contractVersion: 4,
         plugins: [{ ...healthyPlugin, extra: true }],
       }).plugins[0],
     ).toMatchObject({
@@ -242,7 +248,7 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 3,
+        contractVersion: 4,
         plugins: [{ ...healthyPlugin, pluginId: "Not An Id" }, healthyPlugin],
       }).plugins.map((plugin) => plugin.pluginId),
     ).toEqual(["weather"]);
@@ -468,5 +474,95 @@ describe("plugin worker triggers", () => {
         reason: "y",
       }),
     ).toThrow(/invalid fields/);
+  });
+});
+
+describe("what a render says its decision covers", () => {
+  const messages = [{ version: "v1.0", createSurface: { surfaceId: "s" } }];
+
+  test("covers travels beside the messages, and is optional", () => {
+    expect(
+      decodePluginWorkerRenderCardResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        covers: { to: ["nick@example.com"], subject: "Hi" },
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "rendered",
+      messages,
+      covers: { to: ["nick@example.com"], subject: "Hi" },
+    });
+    expect(
+      decodePluginWorkerRenderCardResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+      }),
+    ).toEqual({ schemaVersion: 1, status: "rendered", messages });
+  });
+
+  test("covers must be one bounded JSON object", () => {
+    expect(() =>
+      decodePluginWorkerRenderCardResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        covers: ["nick@example.com"],
+      }),
+    ).toThrow(/covers must be an object/);
+    expect(() =>
+      decodePluginWorkerRenderCardResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        covers: { body: "x".repeat(MAX_PLUGIN_CARD_COVERS_BYTES_V1 + 1) },
+      }),
+    ).toThrow(/covers exceeds/);
+  });
+});
+
+describe("the line a card action leaves for the Bot", () => {
+  const messages = [{ version: "v1.0", createSurface: { surfaceId: "s" } }];
+
+  test("arrives trimmed, so the pending-input record reads back what was written", () => {
+    expect(
+      decodePluginWorkerCardActionResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        input: "  the draft was sent\n",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "rendered",
+      messages,
+      input: "the draft was sent",
+    });
+  });
+
+  test("a blank line is refused rather than stored", () => {
+    for (const input of [" ", "\n", "\t\n "]) {
+      expect(() =>
+        decodePluginWorkerCardActionResultV1({
+          schemaVersion: 1,
+          status: "rendered",
+          messages,
+          input,
+        }),
+      ).toThrow(/input must be a bounded string/);
+    }
+  });
+
+  test("a line past the bound is refused", () => {
+    expect(() =>
+      decodePluginWorkerCardActionResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        input: "x".repeat(MAX_PLUGIN_CARD_ACTION_INPUT_V1 + 1),
+      }),
+    ).toThrow(/input must be a bounded string/);
   });
 });

@@ -23,7 +23,7 @@ import {
 } from "./bot.js";
 
 const IDENTITY: BotIdentity = { userId: "user-1", botId: "bot-1" };
-const SURFACE = "draft-email";
+const SURFACE = "email_draft.0123456789abcdef01234567";
 const NOW = "2026-09-17T10:00:00.000Z";
 
 function card(overrides: Partial<CardRecordV1> = {}): CardRecordV1 {
@@ -49,7 +49,15 @@ function card(overrides: Partial<CardRecordV1> = {}): CardRecordV1 {
 function harness(
   values: Map<string, unknown> = new Map(),
   mountError = "this deployment cannot mount a Plugin worker",
+  /**
+   * The cards the Composition's `email` member declares, when the test needs
+   * a generation that reads rather than one that cannot be reached at all.
+   */
+  declaredCards?: { id: string; actions: { name: string }[] }[],
+  /** The member that declares them, which is not always the one pressed. */
+  memberPackageId = "email",
 ) {
+  const notices: { title: string; body: string }[] = [];
   const storage = {
     get: (key: string) => Promise.resolve(values.get(key)),
     put: (keyOrEntries: unknown, value?: unknown) => {
@@ -77,13 +85,39 @@ function harness(
       USER_CONFIGURATIONS: {
         idFromName: (name: string) => name,
         get: () => {
-          throw new Error(mountError);
+          if (declaredCards === undefined) throw new Error(mountError);
+          return {
+            readComposition: () =>
+              Promise.resolve({
+                current: {
+                  schemaVersion: 1,
+                  generationId: "gen-1",
+                  artifactSetHash: "hash-1",
+                  createdAt: NOW,
+                  origin: { kind: "bootstrap" },
+                  status: "active",
+                  members: [
+                    {
+                      packageId: memberPackageId,
+                      version: "1.0.0",
+                      descriptor: { cards: declaredCards },
+                    },
+                  ],
+                },
+              }),
+          };
         },
       },
     },
-    authority: { validateIdentity: () => Promise.resolve() },
+    authority: {
+      validateIdentity: () => Promise.resolve(),
+      recordNotification: (notification: { title: string; body: string }) => {
+        notices.push(notification);
+        return Promise.resolve();
+      },
+    },
   } as unknown as ShellBotStateV1;
-  return { state, values };
+  return { state, values, notices };
 }
 
 describe("reading a Bot's Cards", () => {
@@ -217,6 +251,7 @@ describe("reading one Card by its id", () => {
 describe("what a Plugin handler is handed", () => {
   const handler = {
     pluginId: "email",
+    cardId: "draft",
     action: "regenerate",
     runId: "card-action:draft-email:2",
     generationId: "foundation-v1",
@@ -252,6 +287,22 @@ describe("what a Plugin handler is handed", () => {
       handler,
     );
     expect(invocation).not.toHaveProperty("dataModel");
+  });
+
+  test("the card it is on and the Card's stored record travel with every press", () => {
+    const invocation = cardActionInvocationV1(
+      IDENTITY,
+      {
+        schemaVersion: 1,
+        surfaceId: SURFACE,
+        revision: 2,
+        event: { name: "plugin/email/regenerate" },
+      },
+      card({ dataModel: { sent: true, subject: "Hello" } }),
+      handler,
+    );
+    expect(invocation.cardId).toBe("draft");
+    expect(invocation.record).toEqual({ sent: true, subject: "Hello" });
   });
 });
 
@@ -358,6 +409,208 @@ describe("the three routes", () => {
     expect(receipt.routed).toBe("plugin");
     expect(receipt.failure).toBeTruthy();
     expect(receipt.card.revision).toBe(2);
+  });
+
+  // A press is not a Turn: nothing was lost when one fails, so the notice the
+  // person reads must not tell them a Turn could not continue.
+  test("a failed press is noticed as a press, not as a lost Turn", async () => {
+    const { state, notices } = harness(
+      new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]),
+    );
+    await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.body).toContain("could not answer a card press");
+    expect(notices[0]?.body).not.toContain("was skipped for this Turn");
+  });
+
+  /**
+   * A card drawn before the Plugin stopped declaring an action still carries
+   * its button. Pressing it is the kernel refusing a name no card of that
+   * Plugin owns — the Plugin never ran, so nothing is charged to it.
+   */
+  test("a press naming an action the Plugin never declared is refused and charges nothing", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: true },
+          updatedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(values, undefined, [
+      { id: "draft", actions: [{ name: "regenerate" }] },
+    ]);
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/details" },
+    });
+    expect(receipt.routed).toBe("plugin");
+    expect(receipt.failure).toContain("details");
+    // The Card is exactly as it was, and no failure was charged.
+    expect(receipt.card.revision).toBe(2);
+    expect(values.get(cardKeyV1(SURFACE))).toMatchObject({ revision: 2 });
+    expect(notices).toHaveLength(0);
+    expect(
+      [...values.keys()].filter((key) => key.startsWith("plugin:health:")),
+    ).toHaveLength(0);
+  });
+
+  /**
+   * A Plugin the Composition no longer carries has no switch on the Plugins
+   * page, so the refusal must not send the person looking for one.
+   */
+  test("a press on a Plugin this Bot no longer runs says so, not that it is switched off", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: true },
+          updatedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(
+      values,
+      undefined,
+      [{ id: "draft", actions: [{ name: "regenerate" }] }],
+      "calendar",
+    );
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure).toContain("no longer runs");
+    expect(receipt.failure).not.toContain("switched off");
+    expect(receipt.failure).not.toContain("declares no action");
+    expect(receipt.card.revision).toBe(2);
+    expect(notices).toHaveLength(0);
+    expect(
+      [...values.keys()].filter((key) => key.startsWith("plugin:health:")),
+    ).toHaveLength(0);
+  });
+
+  /**
+   * A Plugin this Bot is not running cannot answer any of its cards' controls,
+   * which is a different thing from a card that declares no such action: the
+   * person is sent to the switch, not back to the card.
+   */
+  test("a press on a switched-off Plugin says so, not that the card declares nothing", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: false },
+          updatedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(values, undefined, [
+      { id: "draft", actions: [{ name: "regenerate" }] },
+    ]);
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure).toContain("is switched off for this Bot");
+    expect(receipt.failure).not.toContain("declares no action");
+    expect(receipt.card.revision).toBe(2);
+    expect(notices).toHaveLength(0);
+  });
+
+  // The switch reads the same whoever threw it, so a Plugin a quarantine
+  // turned off must not be described as one the person turned off.
+  test("a press on a quarantined Plugin does not say the person turned it off", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: false },
+          updatedAt: NOW,
+        },
+      ],
+      [
+        "plugin:health:email",
+        {
+          schemaVersion: 1,
+          pluginId: "email",
+          consecutiveFailures: 3,
+          lastFailure: {
+            runId: "run-1",
+            phase: "hook",
+            message: "the handler threw",
+            at: NOW,
+          },
+          quarantinedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(values, undefined, [
+      { id: "draft", actions: [{ name: "regenerate" }] },
+    ]);
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure).toContain("after it failed repeatedly");
+    expect(receipt.failure).not.toContain("is switched off for this Bot");
+    expect(receipt.card.revision).toBe(2);
+    expect(notices).toHaveLength(0);
+  });
+
+  test("a declared action whose press fails is still charged, once", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: true },
+          updatedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(values, undefined, [
+      { id: "draft", actions: [{ name: "regenerate" }] },
+    ]);
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure).toBeTruthy();
+    expect(receipt.card.revision).toBe(2);
+    expect(notices).toHaveLength(1);
+    expect(
+      [...values.keys()].filter((key) => key.startsWith("plugin:health:")),
+    ).toHaveLength(1);
   });
 
   test("a plugin failure too long to carry still answers a readable receipt", async () => {

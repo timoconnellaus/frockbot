@@ -496,13 +496,17 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   approvals/      Recording one approval decision inside the Bot Durable Object
   audit/          Audited-effect projection and the User's rebuildable audit table
   auth/           The two auth Packages behind `AuthPackageV1` — `better-auth/` and `access/` — and what they share
+  billing/        The account's subscription, its metered usage ledger, the Stripe seam, and the billing page
   bot-template/   Bot template export, share records, and guarded import
+  cards/          The Bot's half of Cards: an approval, a Plugin's own action, or conversation input
   clock/          Reference feature with agent and host contributions
   composition/    The User's Composition store and RPCs, and the Bot's mirror of them
   connect/        Connected apps: the connection backend, its app tools, and the curated app list
   credentials/    Per-User Connection credential encryption and leases
   custom-models/  Opt-in Bot model override setting, default-disabled
   echo/           Minimal reference feature used by tests and examples
+  email/          The deployment's own outbound sender, behind the `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS` bindings, inert until both are set
+  evals/          Development-only model evaluations and their grading, run through `bun run eval:greeting` and `eval:conversation`
   flock/          Durable Bot directory and Bot character avatars
   identity/       The agent runtime's identity system-prompt section
   image/          generate_image through Cloudflare's AI binding, fenced by the Workspace
@@ -520,6 +524,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   subagents/      Subagent Tasks: the parent Bot's task authority, the Durable Object binding, and their records
   testkit/        Shared test doubles and harnesses
   ui-theme/       The Appearance Package definition; it contributes no code
+  voice/          Composer dictation and the account-wide voice assistant over the deployment's speech providers
   web/            web_search and a bounded, SSRF-classified web_fetch
 applets/          Applets: the seven applet_* tools, the source root, and the shell's pages
   sdk/            Applet authoring SDK, component kit, linter, the Applet and Plugin build pipelines, and the declarations-only Plugin entry; published to npm

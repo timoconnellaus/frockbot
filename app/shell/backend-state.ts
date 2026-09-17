@@ -18,6 +18,7 @@ import type { AppletInstanceNamespaceV1 } from "@frockbot/app/applets-host/recor
 import type { ShellMountedComposition } from "./backend-composition.js";
 import { storedRunCodecV1 } from "./backend-contracts.js";
 import type { NativeAiBindingV1 } from "./backend-image.js";
+import type { EmailSenderV1 } from "@frockbot/app/email/sender";
 import {
   createBotRoutineHookMinter,
   createBotRoutines,
@@ -43,6 +44,12 @@ export interface BotStateEnv {
   BOT_PACKAGES?: BotIsolateLoader;
   /** Immutable, content-addressed Package artifacts, read hash-verified. */
   APPLICATION_ARTIFACTS?: R2Bucket;
+  /**
+   * The deployment's transactional sender, when it has bound one (ADR 0030).
+   * Absent means this deployment sends no mail, and a card that asks to says
+   * so on its face rather than failing when a person presses Send.
+   */
+  EMAIL_SENDER?: EmailSenderV1;
   /**
    * One Applet Durable Object per Applet instance. Optional so a host without
    * Applets still compiles; a Composition generation carrying an Applet member

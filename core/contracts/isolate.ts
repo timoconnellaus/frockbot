@@ -37,15 +37,16 @@ import { STRUCTURED_OUTPUT_ISSUE_LIMIT_V1 } from "./structured-output.js";
  * per-tool turn admission. Version 3 added declared loop hooks and hook RPC.
  * Version 4 is the Plugin worker: one Dynamic Worker per User over a
  * generated index, the `agent/request` hook, services a plugin provides and
- * consumes, and triggers.
+ * consumes, and triggers. Version 5 is Cards: `renderCard` and the card
+ * handlers a plugin declares, and `ctx.email` under the `http` grant.
  */
-export const ISOLATE_CONTRACT_VERSION = 4;
+export const ISOLATE_CONTRACT_VERSION = 5;
 
 /** Every contract version the kernel still decodes. */
-export type IsolateContractVersion = 1 | 2 | 3 | 4;
+export type IsolateContractVersion = 1 | 2 | 3 | 4 | 5;
 
 const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [
-  1, 2, 3, 4,
+  1, 2, 3, 4, 5,
 ];
 
 /** The upper bound on a single isolate invocation, enforced on both sides. */
@@ -288,6 +289,54 @@ export interface IsolateWorkspaceDeleteRequestV1 {
 export type IsolateWorkspaceOutcomeV1 =
   { status: "available"; value: unknown } | IsolateCapabilityFailureV1;
 
+/**
+ * One email a plugin asks the deployment to send for the Bot (ADR 0030).
+ *
+ * Sending is a loopback rather than a `fetch`, because a plugin never holds
+ * the credential that sends mail: the deployment's own sender does, the
+ * message leaves attributed to the Bot that asked, and the plugin learns only
+ * whether it went. A deployment that has bound no sender answers unavailable,
+ * which is what a card then says on its face.
+ */
+export interface IsolateEmailRequestV1 {
+  /**
+   * The Approval whose decision authorizes this send. Required: the kernel,
+   * not the model and not the Plugin, is what holds a send to a decision a
+   * person actually gave, and one decision sends at most one message.
+   */
+  approvalId: string;
+  /**
+   * The Card the decision was given on. The Approval is bound to a surface
+   * and to the values that surface was showing, so naming it is how the
+   * kernel checks that this message is the one that was approved.
+   */
+  surfaceId: string;
+  to: string[];
+  cc?: string[];
+  subject: string;
+  body: string;
+  /** The `Message-Id` this answers, when it answers one. */
+  inReplyTo?: string;
+}
+
+/**
+ * `undelivered` names the addresses the provider refused after at least one
+ * envelope had already left. The message went, so it is a send and never
+ * a failure a caller could retry — retrying would send it twice.
+ */
+export type IsolateEmailOutcomeV1 =
+  | { status: "sent"; messageId: string; undelivered?: string[] }
+  | IsolateCapabilityFailureV1;
+
+/** What one message may carry. A note to a person, not a mailing. */
+export const ISOLATE_EMAIL_LIMITS_V1 = {
+  recipients: 16,
+  address: 320,
+  subject: 512,
+  body: 64_000,
+  messageId: 512,
+} as const;
+
 /** A durable Routine operation attributed to one Package call. */
 export interface IsolateScheduleRequestV1 {
   callId: string;
@@ -381,6 +430,15 @@ export interface BotCapabilitiesStub {
     request: IsolateStorageListRequestV1,
   ): Promise<IsolateStorageListOutcomeV1>;
   settings(scope: IsolateScopeV1): Promise<IsolateSettingsOutcomeV1>;
+  /**
+   * Named `sendEmail` rather than `email`: a `WorkerEntrypoint` already has
+   * an `email` member, the platform's inbound handler, and the loopback that
+   * implements this stub is one.
+   */
+  sendEmail(
+    scope: IsolateScopeV1,
+    request: IsolateEmailRequestV1,
+  ): Promise<IsolateEmailOutcomeV1>;
 }
 
 /** The model outcome Bot-authored `package.js` receives after wrapper narrowing. */
@@ -471,6 +529,13 @@ export interface BotPackageContextV1 {
   readonly connection?: (
     connectionId: string,
   ) => Promise<IsolateConnectionOutcomeV1>;
+  /**
+   * The `http` grant, second half: the deployment's own sender, reached
+   * through the kernel and attributed to the Bot. Never a credential.
+   */
+  readonly email?: (
+    request: IsolateEmailRequestV1,
+  ) => Promise<IsolateEmailOutcomeV1>;
   /** The `schedule` grant. */
   readonly schedule?: (
     request: IsolateScheduleRequestV1,
@@ -1169,6 +1234,89 @@ export function decodeIsolateCapabilityListV1(
     memory: value.memory,
     workspace: value.workspace,
     schedule: true,
+  };
+}
+
+/** A mailbox, as loosely as one may be written and still be one. */
+const ISOLATE_EMAIL_ADDRESS_V1 = /^[^\s@,<>]+@[^\s@,<>.]+(?:\.[^\s@,<>.]+)+$/;
+
+function emailAddresses(
+  input: unknown,
+  label: string,
+  required: boolean,
+): string[] {
+  if (
+    !Array.isArray(input) ||
+    input.length > ISOLATE_EMAIL_LIMITS_V1.recipients
+  ) {
+    throw new Error(`${label} must be a bounded array of addresses`);
+  }
+  if (required && input.length === 0) {
+    throw new Error(`${label} must name at least one address`);
+  }
+  return input.map((entry, index) => {
+    const address = boundedString(
+      entry,
+      `${label}[${index}]`,
+      ISOLATE_EMAIL_LIMITS_V1.address,
+    );
+    if (!ISOLATE_EMAIL_ADDRESS_V1.test(address)) {
+      throw new Error(`${label}[${index}] is not an address`);
+    }
+    return address;
+  });
+}
+
+export function decodeIsolateEmailRequestV1(
+  input: unknown,
+  label = "isolate email request",
+): IsolateEmailRequestV1 {
+  const value = record(input, label);
+  exactKeys(
+    value,
+    ["approvalId", "surfaceId", "to", "subject", "body"],
+    label,
+    ["cc", "inReplyTo"],
+  );
+  const cc =
+    value.cc === undefined
+      ? undefined
+      : emailAddresses(value.cc, `${label}.cc`, false);
+  // A header value carrying a line break is a header a plugin wrote itself,
+  // so the two fields that become headers refuse one outright.
+  const subject = boundedString(
+    value.subject,
+    `${label}.subject`,
+    ISOLATE_EMAIL_LIMITS_V1.subject,
+  );
+  const inReplyTo =
+    value.inReplyTo === undefined
+      ? undefined
+      : boundedString(
+          value.inReplyTo,
+          `${label}.inReplyTo`,
+          ISOLATE_EMAIL_LIMITS_V1.messageId,
+        );
+  for (const [header, text] of [
+    ["subject", subject],
+    ...(inReplyTo === undefined ? [] : [["inReplyTo", inReplyTo] as const]),
+  ] as const) {
+    if (/[\r\n]/.test(text)) {
+      throw new Error(`${label}.${header} must be one line`);
+    }
+  }
+  return {
+    approvalId: boundedString(value.approvalId, `${label}.approvalId`, 256),
+    surfaceId: boundedString(value.surfaceId, `${label}.surfaceId`, 256),
+    to: emailAddresses(value.to, `${label}.to`, true),
+    ...(cc === undefined ? {} : { cc }),
+    subject,
+    body: boundedString(
+      value.body,
+      `${label}.body`,
+      ISOLATE_EMAIL_LIMITS_V1.body,
+    ),
+    ...(inReplyTo === undefined ? {} : { inReplyTo }),
   };
 }
 

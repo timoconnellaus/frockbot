@@ -38,6 +38,14 @@ const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 const PLUGIN_SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 /** Views one Plugin may export, matching the descriptor's bound. */
 const MAX_PLUGIN_VIEWS_V1 = 16;
+/** Cards one Plugin may export, matching the descriptor's bound. */
+const MAX_PLUGIN_CARDS_V1 = 16;
+/** A card id, as the descriptor bounds it. */
+const PLUGIN_CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
+/** A card action name, as the descriptor bounds it. */
+const PLUGIN_CARD_ACTION_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+/** Actions one card may declare, matching the descriptor's bound. */
+const MAX_PLUGIN_CARD_ACTIONS_V1 = 16;
 /** A rendered view, serialized. A card, not a page. */
 export const MAX_PLUGIN_VIEW_DOCUMENT_BYTES_V1 = 256_000;
 const MAX_PLUGINS_V1 = 64;
@@ -133,6 +141,20 @@ export interface PluginWorkerPluginHealthV1 {
   triggers: string[];
   /** The surfaces the module renders, by id; the descriptor's `views` must match. */
   views: string[];
+  /**
+   * The cards the module draws and the actions each one owns; the descriptor's
+   * `cards` must match, name for name. A press names no card — the namespace
+   * is `plugin/<pluginId>/<action>` — so which card owns an action is what
+   * says whose handler a press reaches, and it is checked here rather than
+   * assumed.
+   */
+  cards: PluginWorkerCardHealthV1[];
+}
+
+/** One card a module declared, with the actions it owns. */
+export interface PluginWorkerCardHealthV1 {
+  id: string;
+  actions: string[];
 }
 
 export interface PluginWorkerHealthV1 {
@@ -196,6 +218,42 @@ export interface PluginWorkerViewInvocationV1 {
 }
 
 /**
+ * The prefix every surface of one Plugin's one card carries. A plugin id holds
+ * no `_` and neither id holds a `.`, so the pair a prefix names is the only
+ * pair that could have written it — which is what makes it something to check
+ * a surface id against on the draw and on the press alike. At most 98
+ * characters, leaving the uniqueness room inside the 128 the Card seam bounds
+ * a surface id to.
+ */
+export function cardSurfacePrefixV1(pluginId: string, cardId: string): string {
+  return `${pluginId}_${cardId}.`;
+}
+
+/**
+ * The Plugin a minted surface id names, or `undefined` for a surface no card
+ * draw minted. A Bot-drawn surface has no prefix and so belongs to no Plugin,
+ * which is what stops one Plugin's handler being handed another's card.
+ */
+export function cardSurfacePluginIdV1(surfaceId: string): string | undefined {
+  const separator = surfaceId.indexOf("_");
+  const dot = surfaceId.indexOf(".");
+  if (separator <= 0 || dot <= separator + 1) return undefined;
+  return surfaceId.slice(0, separator);
+}
+
+/**
+ * The card a minted surface id names, or `undefined` for a surface no card
+ * draw minted. It is what tells a handler which of its Plugin's cards it was
+ * pressed on, and what the pressed action's declared owner is checked against.
+ */
+export function cardSurfaceCardIdV1(surfaceId: string): string | undefined {
+  const separator = surfaceId.indexOf("_");
+  const dot = surfaceId.indexOf(".");
+  if (separator <= 0 || dot <= separator + 1) return undefined;
+  return surfaceId.slice(separator + 1, dot);
+}
+
+/**
  * One Card action routed to a Plugin (ADR 0030): the renderer's
  * `plugin/<pluginId>/<action>` reaching the handler that wrote the Card. The
  * surface's data model travels with it when the surface asked for it, so a
@@ -204,11 +262,20 @@ export interface PluginWorkerViewInvocationV1 {
 export interface PluginWorkerCardActionInvocationV1 {
   schemaVersion: 1;
   pluginId: string;
+  /** The card the pressed surface was minted for; see `cardSurfaceCardIdV1`. */
+  cardId: string;
   surfaceId: string;
   /** The `<action>` half of the name; the namespace is the kernel's. */
   action: string;
   context?: Record<string, unknown>;
   dataModel?: Record<string, unknown>;
+  /**
+   * The Card's stored data model as the kernel holds it, which is what the
+   * surface is actually made of rather than what a client sent back. A handler
+   * reads the state of its own card from here instead of keeping a second copy
+   * of it keyed by surface id.
+   */
+  record?: Record<string, unknown>;
   botId: string;
   sessionId: string;
   runId: string;
@@ -221,14 +288,102 @@ export interface PluginWorkerCardActionInvocationV1 {
  * The handler's answer: A2UI messages the kernel folds into the Card, carried
  * opaque and bounded, or a drop with its reason. A handler that throws or
  * overruns is a drop, and the Card is left exactly as it was.
+ *
+ * `deliberate` tells a well-formed refusal apart from a failure. The wrapper
+ * sets it only when the handler itself answered `{ drop: true }`, so a throw,
+ * a deadline overrun, an unreachable worker and an undecodable answer stay
+ * charged to the Plugin's health while a handler saying "not on this card"
+ * costs it nothing.
+ *
+ * `input` is the one thing a handler may say to the Bot rather than to the
+ * card: a line the kernel enqueues as the next user-lane Turn's pending
+ * input, the way a conversation action on a Card is. A handler that only
+ * redraws the surface costs no Turn, which is the point of the route.
  */
 export type PluginWorkerCardActionResultV1 =
-  | { schemaVersion: 1; status: "drop"; reason?: string }
+  | {
+      schemaVersion: 1;
+      status: "drop";
+      reason?: string;
+      deliberate?: true;
+    }
   | {
       schemaVersion: 1;
       status: "rendered";
       messages: Record<string, unknown>[];
+      input?: string;
     };
+
+/**
+ * One Card a Plugin draws from the values the Bot sent (ADR 0030). The
+ * surface id is the kernel's — minted when the Bot named none — so a Plugin
+ * can never draw over a surface it was not handed, and `data` has already
+ * been validated against the card's declared `dataSchema`.
+ */
+export interface PluginWorkerRenderCardInvocationV1 {
+  schemaVersion: 1;
+  pluginId: string;
+  /** The `id` of one of the Plugin's declared cards. */
+  cardId: string;
+  surfaceId: string;
+  data: Record<string, unknown>;
+  botId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  generationId: string;
+  deadlineMs: number;
+}
+
+/**
+ * What `renderCard` answers with: the same two shapes a Card action answers
+ * with, for the same reason. The messages are carried opaque and decoded as
+ * A2UI where the Card's own budgets are, and anything else is a refusal the
+ * Bot reads in the tool result.
+ *
+ * `covers` is what the Plugin says this draw is *about*: the canonical values
+ * a decision on this card would authorize, stated by the Plugin that drew
+ * them rather than read off the tool input the model sent. A Plugin that does
+ * not draw its input verbatim — the email card redraws the draft it is
+ * holding — would otherwise have the kernel bind a decision to values the
+ * person never saw. A draw that asks for a decision and declares none of
+ * these is refused at the seam.
+ *
+ * `deliberate` means the same here as it does on a press: a draw that refused
+ * in as many words costs the Plugin's health nothing, while a throw, an
+ * overrun, an unreachable worker and an answer the kernel could not read are
+ * all charged toward quarantine.
+ */
+export type PluginWorkerRenderCardResultV1 =
+  | { schemaVersion: 1; status: "drop"; reason?: string; deliberate?: true }
+  | {
+      schemaVersion: 1;
+      status: "rendered";
+      messages: Record<string, unknown>[];
+      covers?: Record<string, unknown>;
+      decision?: PluginCardDecisionV1;
+    };
+
+/**
+ * What the decision a draw asks for is recorded as: the words a person is
+ * asked, how much it costs to get wrong, and why when the words do not say.
+ *
+ * They are stated beside `covers` rather than on the `ApprovalActions`
+ * component because the Frock catalog allows that component an `approvalId`
+ * and its two labels and nothing else — the host draws the labels, and the
+ * Approval is recorded with these. A draw that puts an `ApprovalActions` on
+ * the card and states none of this is refused at the seam, exactly as one
+ * that declares no `covers` is.
+ */
+export interface PluginCardDecisionV1 {
+  action: string;
+  risk: "low" | "medium" | "high";
+  rationale?: string;
+}
+
+/** The bounds a decision's words are held to, matching a `send_to_user` approval. */
+export const MAX_PLUGIN_CARD_DECISION_ACTION_V1 = 2_000;
+export const MAX_PLUGIN_CARD_DECISION_RATIONALE_V1 = 8_000;
 
 /** The document is carried opaque and bounded; the host decodes it as a `ViewDocument`. */
 export type PluginWorkerViewResultV1 =
@@ -257,6 +412,9 @@ export interface PluginWorkerEntrypoint {
   cardAction(
     invocation: PluginWorkerCardActionInvocationV1,
   ): Promise<PluginWorkerCardActionResultV1>;
+  renderCard(
+    invocation: PluginWorkerRenderCardInvocationV1,
+  ): Promise<PluginWorkerRenderCardResultV1>;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -438,6 +596,7 @@ export function decodePluginWorkerHealthV1(
           consumes: [],
           triggers: [],
           views: [],
+          cards: [],
         });
       }
     }
@@ -486,6 +645,7 @@ function decodePluginHealthEntryV1(
       "consumes",
       "triggers",
       "views",
+      "cards",
     ],
     itemLabel,
     ["reason"],
@@ -546,8 +706,48 @@ function decodePluginHealthEntryV1(
   if (new Set(views).size !== views.length) {
     throw new Error(`${itemLabel}.views contains duplicates`);
   }
+  if (
+    !Array.isArray(plugin.cards) ||
+    plugin.cards.length > MAX_PLUGIN_CARDS_V1
+  ) {
+    throw new Error(`${itemLabel}.cards must be a bounded array`);
+  }
+  const cards = plugin.cards.map((card, cardIndex) => {
+    const cardLabel = `${itemLabel}.cards[${cardIndex}]`;
+    const entry = record(card, cardLabel);
+    exactKeys(entry, ["id", "actions"], cardLabel);
+    const cardId = boundedString(entry.id, `${cardLabel}.id`, 32);
+    if (!PLUGIN_CARD_ID.test(cardId)) {
+      throw new Error(`${cardLabel}.id is invalid`);
+    }
+    if (
+      !Array.isArray(entry.actions) ||
+      entry.actions.length > MAX_PLUGIN_CARD_ACTIONS_V1
+    ) {
+      throw new Error(`${cardLabel}.actions must be a bounded array`);
+    }
+    const actions = entry.actions.map((action, actionIndex) => {
+      const name = boundedString(
+        action,
+        `${cardLabel}.actions[${actionIndex}]`,
+        64,
+      );
+      if (!PLUGIN_CARD_ACTION_NAME.test(name)) {
+        throw new Error(`${cardLabel}.actions[${actionIndex}] is invalid`);
+      }
+      return name;
+    });
+    if (new Set(actions).size !== actions.length) {
+      throw new Error(`${cardLabel}.actions contains duplicates`);
+    }
+    return { id: cardId, actions };
+  });
+  if (new Set(cards.map((card) => card.id)).size !== cards.length) {
+    throw new Error(`${itemLabel}.cards contains duplicates`);
+  }
   return {
     views,
+    cards,
     pluginId: pluginId(plugin.pluginId, `${itemLabel}.pluginId`),
     ok: plugin.ok,
     ...(plugin.reason === undefined
@@ -721,6 +921,28 @@ export function decodePluginWorkerTriggerResultV1(
 export const MAX_PLUGIN_CARD_ACTION_MESSAGES_V1 = 16;
 /** The handler's whole answer, serialized. A card, not a page. */
 export const MAX_PLUGIN_CARD_ACTION_BYTES_V1 = 256_000;
+/**
+ * The line a handler may leave for the Bot's next Turn. The pending-input
+ * record it becomes holds a card action's context to the same bound.
+ */
+export const MAX_PLUGIN_CARD_ACTION_INPUT_V1 = 4_000;
+/** The values one draw declares its decision covers, serialized. */
+export const MAX_PLUGIN_CARD_COVERS_BYTES_V1 = 256_000;
+
+/**
+ * The line a handler leaves for the Bot, held to what the pending-input
+ * record reads back: trimmed, non-blank and inside the bound.
+ */
+function boundedLine(value: unknown, label: string, maximum: number): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a bounded string`);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > maximum) {
+    throw new Error(`${label} must be a bounded string`);
+  }
+  return trimmed;
+}
 
 export function decodePluginWorkerCardActionResultV1(
   input: unknown,
@@ -731,7 +953,13 @@ export function decodePluginWorkerCardActionResultV1(
     throw new Error(`${label}.schemaVersion is unsupported`);
   }
   if (value.status === "drop") {
-    exactKeys(value, ["schemaVersion", "status"], label, ["reason"]);
+    exactKeys(value, ["schemaVersion", "status"], label, [
+      "reason",
+      "deliberate",
+    ]);
+    if (value.deliberate !== undefined && value.deliberate !== true) {
+      throw new Error(`${label}.deliberate must be true`);
+    }
     return {
       schemaVersion: 1,
       status: "drop",
@@ -744,22 +972,48 @@ export function decodePluginWorkerCardActionResultV1(
               MAX_FAILURE_REASON_V1,
             ),
           }),
+      ...(value.deliberate === true ? { deliberate: true as const } : {}),
     };
   }
-  exactKeys(value, ["schemaVersion", "status", "messages"], label);
+  exactKeys(value, ["schemaVersion", "status", "messages"], label, ["input"]);
   if (value.status !== "rendered") {
     throw new Error(`${label}.status is invalid`);
   }
+  return {
+    schemaVersion: 1,
+    status: "rendered",
+    messages: decodeCardMessagesV1(value.messages, label),
+    ...(value.input === undefined
+      ? {}
+      : {
+          input: boundedLine(
+            value.input,
+            `${label}.input`,
+            MAX_PLUGIN_CARD_ACTION_INPUT_V1,
+          ),
+        }),
+  };
+}
+
+/**
+ * The A2UI messages either card call answers with, held to one bound. They
+ * are carried opaque here and decoded as A2UI at the fold, which is where the
+ * Card's own budgets are.
+ */
+function decodeCardMessagesV1(
+  input: unknown,
+  label: string,
+): Record<string, unknown>[] {
   if (
-    !Array.isArray(value.messages) ||
-    value.messages.length === 0 ||
-    value.messages.length > MAX_PLUGIN_CARD_ACTION_MESSAGES_V1
+    !Array.isArray(input) ||
+    input.length === 0 ||
+    input.length > MAX_PLUGIN_CARD_ACTION_MESSAGES_V1
   ) {
     throw new Error(
       `${label}.messages must hold 1 to ${MAX_PLUGIN_CARD_ACTION_MESSAGES_V1} entries`,
     );
   }
-  const messages = value.messages.map((message, index) =>
+  const messages = input.map((message, index) =>
     record(message, `${label}.messages[${index}]`),
   );
   let serialized: string;
@@ -776,12 +1030,118 @@ export function decodePluginWorkerCardActionResultV1(
       `${label}.messages exceeds ${MAX_PLUGIN_CARD_ACTION_BYTES_V1} bytes`,
     );
   }
-  // Decoded as A2UI at the fold, which is where the Card's own budgets are.
+  return JSON.parse(serialized) as Record<string, unknown>[];
+}
+
+export function decodePluginWorkerRenderCardResultV1(
+  input: unknown,
+  label = "plugin worker render card result",
+): PluginWorkerRenderCardResultV1 {
+  const value = record(input, label);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (value.status === "drop") {
+    exactKeys(value, ["schemaVersion", "status"], label, [
+      "reason",
+      "deliberate",
+    ]);
+    if (value.deliberate !== undefined && value.deliberate !== true) {
+      throw new Error(`${label}.deliberate must be true`);
+    }
+    return {
+      schemaVersion: 1,
+      status: "drop",
+      ...(value.reason === undefined
+        ? {}
+        : {
+            reason: boundedString(
+              value.reason,
+              `${label}.reason`,
+              MAX_FAILURE_REASON_V1,
+            ),
+          }),
+      ...(value.deliberate === true ? { deliberate: true as const } : {}),
+    };
+  }
+  exactKeys(value, ["schemaVersion", "status", "messages"], label, [
+    "covers",
+    "decision",
+  ]);
+  if (value.status !== "rendered") {
+    throw new Error(`${label}.status is invalid`);
+  }
   return {
     schemaVersion: 1,
     status: "rendered",
-    messages: JSON.parse(serialized) as Record<string, unknown>[],
+    messages: decodeCardMessagesV1(value.messages, label),
+    ...(value.covers === undefined
+      ? {}
+      : { covers: decodeCardCoversV1(value.covers, label) }),
+    ...(value.decision === undefined
+      ? {}
+      : { decision: decodeCardDecisionV1(value.decision, label) }),
   };
+}
+
+/** The words one draw asks its decision in, held to the Approval's own bounds. */
+function decodeCardDecisionV1(
+  input: unknown,
+  label: string,
+): PluginCardDecisionV1 {
+  const decision = record(input, `${label}.decision`);
+  exactKeys(decision, ["action", "risk"], `${label}.decision`, ["rationale"]);
+  if (
+    decision.risk !== "low" &&
+    decision.risk !== "medium" &&
+    decision.risk !== "high"
+  ) {
+    throw new Error(`${label}.decision.risk must be low, medium or high`);
+  }
+  return {
+    action: boundedString(
+      decision.action,
+      `${label}.decision.action`,
+      MAX_PLUGIN_CARD_DECISION_ACTION_V1,
+    ),
+    risk: decision.risk,
+    ...(decision.rationale === undefined
+      ? {}
+      : {
+          rationale: boundedString(
+            decision.rationale,
+            `${label}.decision.rationale`,
+            MAX_PLUGIN_CARD_DECISION_RATIONALE_V1,
+          ),
+        }),
+  };
+}
+
+/**
+ * The values one draw says its decision covers, held to the same bound the
+ * card's own messages are and round-tripped through JSON, so what the kernel
+ * digests is exactly what crossed the worker boundary.
+ */
+function decodeCardCoversV1(
+  input: unknown,
+  label: string,
+): Record<string, unknown> {
+  const covers = record(input, `${label}.covers`);
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(covers);
+  } catch {
+    throw new Error(`${label}.covers is not JSON`);
+  }
+  if (
+    new TextEncoder().encode(serialized).length >
+    MAX_PLUGIN_CARD_COVERS_BYTES_V1
+  ) {
+    throw new Error(
+      `${label}.covers exceeds ${MAX_PLUGIN_CARD_COVERS_BYTES_V1} bytes`,
+    );
+  }
+  return JSON.parse(serialized) as Record<string, unknown>;
 }
 
 export function decodePluginWorkerViewInvocationV1(

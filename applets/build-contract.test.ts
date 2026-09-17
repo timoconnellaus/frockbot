@@ -304,6 +304,7 @@ describe("the Plugin build response", () => {
     services: ["weather-lookup"],
     triggers: ["weather_alert"],
     views: ["weather.settings"],
+    cards: ["draft"],
     hashes: { module: "b".repeat(64) },
   };
 

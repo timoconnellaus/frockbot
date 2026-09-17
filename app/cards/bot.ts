@@ -15,6 +15,8 @@ import type { BotIdentity } from "@frockbot/core/durable";
 import {
   a2uiByteLengthV1,
   A2UI_LIMITS_V1,
+  cardSurfaceCardIdV1,
+  cardSurfacePluginIdV1,
   decodeA2uiAgentMessageV1,
   type A2uiAgentMessageV1,
   type PluginWorkerCardActionInvocationV1,
@@ -25,10 +27,14 @@ import { CARD_ACTION_CONTEXT_MAX_V1 } from "@frockbot/app/routines/inbox";
 import {
   readBotPluginRosterV1,
   withPluginWorkerV1,
+  type BotPluginRosterV1,
 } from "@frockbot/app/plugins/worker-bot";
+import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
+import { readPluginHealthV1 } from "@frockbot/app/plugins/health";
 import {
   cardActionRouteV1,
   cardKeyV1,
+  CARD_APPROVAL_COMPONENT_V1,
   decodeCardIndexV1,
   CardBudgetError,
   CardDecodeError,
@@ -173,6 +179,19 @@ async function readCard(
   return decodeCardRecordV1(stored);
 }
 
+/** Whether one handler message carries trust chrome the press may not mint. */
+function messageAsksForDecisionV1(message: A2uiAgentMessageV1): boolean {
+  const components =
+    "createSurface" in message
+      ? message.createSurface.components
+      : "updateComponents" in message
+        ? message.updateComponents.components
+        : undefined;
+  return (components ?? []).some(
+    (component) => component.component === CARD_APPROVAL_COMPONENT_V1,
+  );
+}
+
 /**
  * Fold the messages a Plugin handler answered with onto the Card, in one
  * transaction, onto the record as it stands when the answer comes back. The
@@ -201,6 +220,18 @@ async function foldHandlerMessages(
           ? error.message
           : "the handler's messages were refused",
       ),
+    };
+  }
+  // A press runs outside a Turn, so there is nothing here that could record
+  // an Approval: `bindCardApprovalsV1` mints ids on the send path alone. A
+  // handler that returned trust chrome would therefore put a Plugin-chosen
+  // `approvalId` onto durable Card state, pointing a decision at an id the
+  // kernel never issued or — worse — at another card's live Approval. The
+  // Card is left exactly as it was and the refusal is the receipt's failure.
+  if (messages.some(messageAsksForDecisionV1)) {
+    return {
+      card: await readCard(state, surfaceId),
+      failure: cardFailureV1("a card action may not ask for a decision"),
     };
   }
   const key = cardKeyV1(surfaceId);
@@ -269,35 +300,117 @@ export async function cardAction(
     };
   }
   if (route.kind === "plugin") {
+    // The mirror of the draw's own check (`plugin-worker-host.ts`): a card
+    // record carries no owner, so the surface id's minted prefix is what says
+    // whose card this is. Without it a card drawn by one Plugin — or by the
+    // Bot itself — could hand another Plugin that surface, its context and
+    // its whole data model, and fold whatever came back onto it.
+    const cardId = cardSurfaceCardIdV1(command.surfaceId);
+    if (
+      cardSurfacePluginIdV1(command.surfaceId) !== route.pluginId ||
+      cardId === undefined
+    ) {
+      return {
+        schemaVersion: 1,
+        routed: "plugin",
+        card: projectCardV1(card),
+        failure: cardFailureV1(
+          `card "${command.surfaceId}" is not a surface plugin "${route.pluginId}" drew`,
+        ),
+      };
+    }
     const runId = `card-action:${command.surfaceId}:${card.revision}`;
+    /**
+     * A handler that threw, overran or answered with something the Card
+     * cannot take is charged to its Plugin, the way a hook failure is (ADR
+     * 0030): three in a row and the Plugin is off for this Bot. The verdict
+     * is not acted on here — a press is not a Turn, and there is nothing to
+     * fail — but the count and the notice are the same ones.
+     */
+    const chargeFailure = async (reason: string): Promise<void> => {
+      try {
+        await notePluginFailureV1(
+          state,
+          { runId, generationId: card.runId },
+          {
+            pluginId: route.pluginId,
+            phase: "hook",
+            message: reason,
+            // A press is not a Turn, and the notice the person reads must
+            // not tell them one was lost.
+            card: "press",
+          },
+        );
+      } catch {
+        // Recording a failure must not be what fails the press.
+      }
+    };
     // A Plugin that cannot be reached at all is the same answer as one whose
     // handler threw: the Card is left exactly as it was and the person is
     // told why. A press on a card must not be able to fail a read of it.
     let outcome: Awaited<ReturnType<typeof runPluginCardAction>>;
     try {
-      outcome = await runPluginCardAction(state, identity, command, card, {
+      const roster = await readBotPluginRosterV1(state, identity);
+      // A press the kernel will not put to the Plugin is refused here, off
+      // the roster and the descriptor, rather than by the worker's own
+      // refusal a round trip later — a card drawn before the Plugin stopped
+      // declaring an action, or before it was turned off, still carries its
+      // button, and pressing it must not count against a Plugin that never
+      // ran. The worker still refuses it too.
+      const refusal = await pluginCardActionRefusalV1(state, roster, {
         pluginId: route.pluginId,
+        cardId,
         action: route.action,
-        runId,
       });
+      if (refusal !== undefined) {
+        return {
+          schemaVersion: 1,
+          routed: "plugin",
+          card: projectCardV1(card),
+          failure: cardFailureV1(refusal),
+        };
+      }
+      outcome = await runPluginCardAction(
+        state,
+        identity,
+        command,
+        card,
+        roster,
+        {
+          pluginId: route.pluginId,
+          cardId,
+          action: route.action,
+          runId,
+        },
+      );
     } catch (error) {
+      const failure = cardFailureV1(
+        error instanceof Error ? error.message : "the plugin was unavailable",
+      );
+      await chargeFailure(failure);
       return {
         schemaVersion: 1,
         routed: "plugin",
         card: projectCardV1(card),
-        failure: cardFailureV1(
-          error instanceof Error ? error.message : "the plugin was unavailable",
-        ),
+        failure,
       };
     }
     if (outcome.status !== "rendered") {
+      const failure = cardFailureV1(
+        outcome.reason ?? "the plugin handler changed nothing",
+      );
+      // A handler that refused in as many words is not a handler that broke.
+      // Only a throw, an overrun, an unreachable worker, an answer the
+      // kernel could not read, or a fold the Card's budgets refused counts
+      // toward quarantine (ADR 0030).
+      const deliberate =
+        outcome.status === "drop" && outcome.deliberate === true;
+      if (!deliberate) await chargeFailure(failure);
       return {
         schemaVersion: 1,
         routed: "plugin",
         card: projectCardV1(card),
-        failure: cardFailureV1(
-          outcome.reason ?? "the plugin handler changed nothing",
-        ),
+        failure,
       };
     }
     const folded = await foldHandlerMessages(
@@ -306,6 +419,24 @@ export async function cardAction(
       runId,
       outcome.messages,
     );
+    // The one thing a handler may say to the Bot rather than to the card.
+    // Queued only when the fold landed: a Card the person is not looking at
+    // must not put words in front of the Bot about a change nobody saw.
+    if (outcome.input !== undefined && folded.failure === undefined) {
+      await state.ctx.storage.transaction(async (transaction) => {
+        await enqueuePendingBotInputV1(transaction, {
+          schemaVersion: 1,
+          kind: "card-action",
+          pressId: command.commandId ?? crypto.randomUUID(),
+          surfaceId: command.surfaceId,
+          name: command.event.name,
+          context: outcome.input!,
+          createdAt: new Date().toISOString(),
+        });
+      });
+    }
+    // A fold the Card's own budgets refused is the handler's doing too.
+    if (folded.failure !== undefined) await chargeFailure(folded.failure);
     return {
       schemaVersion: 1,
       routed: "plugin",
@@ -361,6 +492,7 @@ export function cardActionInvocationV1(
   card: CardRecordV1,
   handler: {
     pluginId: string;
+    cardId: string;
     action: string;
     runId: string;
     generationId: string;
@@ -370,12 +502,14 @@ export function cardActionInvocationV1(
   return {
     schemaVersion: 1,
     pluginId: handler.pluginId,
+    cardId: handler.cardId,
     surfaceId: command.surfaceId,
     action: handler.action,
     ...(command.event.context === undefined
       ? {}
       : { context: command.event.context }),
     ...(dataModel === undefined ? {} : { dataModel }),
+    record: card.dataModel,
     botId: identity.botId,
     sessionId: `${identity.userId}:${identity.botId}`,
     runId: handler.runId,
@@ -385,27 +519,69 @@ export function cardActionInvocationV1(
   };
 }
 
+/**
+ * Why the kernel will not put this press to the Plugin, or `undefined` when
+ * it will. Three different things are said apart, the way an admission
+ * refusal and a missing capability are: a Plugin the Composition no longer
+ * carries, a member this Bot has switched off, and a member that is on but
+ * whose descriptor declares no such action. None is the Plugin failing — it
+ * never ran — so none is charged to it.
+ */
+async function pluginCardActionRefusalV1(
+  state: ShellBotStateV1,
+  roster: BotPluginRosterV1,
+  handler: { pluginId: string; cardId: string; action: string },
+): Promise<string | undefined> {
+  const member = roster.members.find(
+    (candidate) => candidate.packageId === handler.pluginId,
+  );
+  // A Plugin the Composition no longer carries has no switch to throw, so it
+  // must not be described as one a person could turn back on.
+  if (member === undefined) {
+    return `this Bot no longer runs plugin "${handler.pluginId}", so this card's controls do nothing`;
+  }
+  if (!roster.enabled.includes(handler.pluginId)) {
+    // The switch reads the same whoever threw it, so the health record is
+    // what says whether the person turned this Plugin off or a quarantine
+    // did, and the person is never told they did something they did not.
+    const health = await readPluginHealthV1(
+      state.ctx.storage,
+      handler.pluginId,
+    );
+    return health?.quarantinedAt !== undefined
+      ? `plugin "${handler.pluginId}" was turned off for this Bot after it failed repeatedly, so this card's controls do nothing until it is turned on again under Plugins`
+      : `plugin "${handler.pluginId}" is switched off for this Bot, so this card's controls do nothing until it is turned back on under Plugins`;
+  }
+  const declared = (member.descriptor.cards ?? []).some(
+    (card) =>
+      card.id === handler.cardId &&
+      card.actions.some((action) => action.name === handler.action),
+  );
+  return declared
+    ? undefined
+    : `plugin "${handler.pluginId}" card "${handler.cardId}" declares no action "${handler.action}"`;
+}
+
 /** The Plugin handler behind one `plugin/<pluginId>/<action>` name. */
 function runPluginCardAction(
   state: ShellBotStateV1,
   identity: BotIdentity,
   command: CardActionCommandV1,
   card: CardRecordV1,
-  handler: { pluginId: string; action: string; runId: string },
+  roster: BotPluginRosterV1,
+  handler: { pluginId: string; cardId: string; action: string; runId: string },
 ) {
-  return readBotPluginRosterV1(state, identity).then((roster) =>
-    withPluginWorkerV1(
-      state,
-      identity,
-      roster,
-      { runId: handler.runId, deadlineMs: CARD_ACTION_DEADLINE_MS },
-      (worker) =>
-        worker.active.cardAction(
-          cardActionInvocationV1(identity, command, card, {
-            ...handler,
-            generationId: roster.generationId,
-          }),
-        ),
-    ),
+  return withPluginWorkerV1(
+    state,
+    identity,
+    roster,
+    { runId: handler.runId, deadlineMs: CARD_ACTION_DEADLINE_MS },
+    (worker) =>
+      worker.active.cardAction(
+        cardActionInvocationV1(identity, command, card, {
+          ...handler,
+          generationId: roster.generationId,
+        }),
+      ),
   );
 }

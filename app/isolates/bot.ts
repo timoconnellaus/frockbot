@@ -14,6 +14,7 @@ import type {
 import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
+  decodeIsolateEmailRequestV1,
   decodeIsolateScheduleRequestV1,
   decodeIsolateStorageDeleteRequestV1,
   decodeIsolateStorageGetRequestV1,
@@ -32,6 +33,8 @@ import {
   type IsolateConnectionV1,
   type IsolateMemoryOutcomeV1,
   type IsolateModelInvocationV1,
+  type IsolateCapabilityFailureV1,
+  type IsolateEmailOutcomeV1,
   type IsolateScheduleOutcomeV1,
   type IsolateSettingsOutcomeV1,
   type IsolateStorageListOutcomeV1,
@@ -65,6 +68,16 @@ import { createBotMemoryHost } from "@frockbot/app/shell/backend-memory";
 import { agentRuntime } from "@frockbot/app/shell/runtime-mount";
 import { admitRunEffect } from "@frockbot/app/shell/turn";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
+import {
+  approvalKeyV1,
+  decodeApprovalRecordV1,
+} from "@frockbot/app/shell/approvals";
+import {
+  cardApprovalBindingKeyV1,
+  cardApprovalUseKeyV1,
+  cardValuesDigestV1,
+  decodeCardApprovalRecordV1,
+} from "@frockbot/app/shell/cards";
 import {
   executionPackagesV1,
   type ActiveTurnV1,
@@ -836,6 +849,133 @@ export async function isolateConnection(
     generation: connection.generation,
     expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
   };
+}
+
+/**
+ * One email, sent by the deployment for the Bot that asked (ADR 0030).
+ *
+ * The plugin holds no credential and names no provider: it hands over a
+ * message and learns whether it went. The send is attributed to the Bot whose
+ * Turn asked for it, which is why the call is admitted like every other
+ * grant before the sender is reached at all.
+ */
+export async function isolateEmail(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<IsolateEmailOutcomeV1> {
+  if (!isolateCallAdmittedV1(state, input)) {
+    return {
+      status: "unavailable",
+      reason: "the Package is not running in this Bot's active Composition",
+    };
+  }
+  const sender = state.env.EMAIL_SENDER;
+  if (!sender) {
+    return {
+      status: "unavailable",
+      reason: "this deployment has no sender bound, so it sends no email",
+    };
+  }
+  const { approvalId, surfaceId, ...message } = decodeIsolateEmailRequestV1(
+    input.request,
+  );
+  // The decision is the kernel's to require, not the model's to remember: a
+  // Bot that misread a denial, or that called before anybody answered, gets
+  // no message out. And the decision has to be the one that covers *this*
+  // message: the Approval is bound to the card surface it was asked on and to
+  // the content address of the values that card was showing, so an approved
+  // decision about something else authorizes nothing. Claimed before the send
+  // rather than after it, so a deadline cut between the binding accepting the
+  // mail and this write can never let a retry send it twice.
+  const claim = await claimEmailApprovalV1(state, {
+    approvalId,
+    pluginId: input.packageId,
+    surfaceId,
+    digest: await cardValuesDigestV1(message),
+  });
+  if (claim.status !== "claimed") return claim.failure;
+  const outcome = await sender.send(message);
+  // Nothing left, so nothing was spent: the decision is still good and the
+  // Bot may try again once the deployment can send.
+  if (outcome.status !== "sent") {
+    await state.ctx.storage.delete(cardApprovalUseKeyV1(approvalId));
+  }
+  return outcome;
+}
+
+/**
+ * Holds one send to one Approval this Bot recorded, approved, unexpired and
+ * not already spent. The read and the claim are one transaction, so two
+ * concurrent calls under one decision cannot both pass it.
+ */
+async function claimEmailApprovalV1(
+  state: ShellBotStateV1,
+  claim: {
+    approvalId: string;
+    pluginId: string;
+    surfaceId: string;
+    digest: string;
+  },
+): Promise<
+  | { status: "claimed" }
+  | { status: "refused"; failure: IsolateCapabilityFailureV1 }
+> {
+  const { approvalId } = claim;
+  const refused = (reason: string) => ({
+    status: "refused" as const,
+    failure: { status: "unavailable" as const, reason },
+  });
+  return state.ctx.storage.transaction(async (transaction) => {
+    const stored = await transaction.get<unknown>(approvalKeyV1(approvalId));
+    if (stored === undefined) {
+      return refused(
+        `no Approval "${approvalId}" was recorded on this Bot, so nothing authorizes this send`,
+      );
+    }
+    const approval = decodeApprovalRecordV1(stored);
+    if (approval.decision !== "approved") {
+      return refused(
+        `Approval "${approvalId}" is ${approval.decision}, so nothing was sent`,
+      );
+    }
+    if (Date.parse(approval.expiresAt) <= Date.now()) {
+      return refused(
+        `Approval "${approvalId}" has expired, so nothing was sent`,
+      );
+    }
+    // What the person actually decided about. An Approval carrying no
+    // binding — one the Bot asked for with `send_to_user`, or one recorded
+    // for another Plugin's card — authorizes no send at all.
+    const binding = decodeCardApprovalRecordV1(
+      await transaction.get<unknown>(
+        cardApprovalBindingKeyV1(claim.pluginId, claim.surfaceId),
+      ),
+    );
+    if (!binding?.approvalIds.includes(approvalId)) {
+      return refused(
+        `Approval "${approvalId}" was not the decision on card "${claim.surfaceId}", so nothing authorizes this send`,
+      );
+    }
+    if (binding.digest !== claim.digest) {
+      return refused(
+        `Approval "${approvalId}" was given for different values than this message carries, so nothing was sent`,
+      );
+    }
+    const used = await transaction.get<unknown>(
+      cardApprovalUseKeyV1(approvalId),
+    );
+    if (used !== undefined) {
+      return refused(
+        `Approval "${approvalId}" has already sent its message; nothing was sent twice`,
+      );
+    }
+    await transaction.put(cardApprovalUseKeyV1(approvalId), {
+      schemaVersion: 1,
+      approvalId,
+      at: new Date().toISOString(),
+    });
+    return { status: "claimed" as const };
+  });
 }
 
 export async function isolateSchedule(

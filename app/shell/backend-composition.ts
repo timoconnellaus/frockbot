@@ -30,11 +30,21 @@ import {
   type BotIsolateLoader,
 } from "@frockbot/frock-compose";
 import {
+  decodeSendToUserPayloadV1,
+  pluginCardToolNameV1,
   type BotCapabilitiesStub,
   type PersistSessionEvents,
   type SessionEvent,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+import { recordSendToUserV1 } from "./agent.js";
+import {
+  bindCardApprovalsV1,
+  cardApprovalIdV1,
+  cardApprovalSeedV1,
+  cardValuesDigestV1,
+  type CardApprovalStoreV1,
+} from "./cards.js";
 
 /**
  * The generation a Bot starts on: empty.
@@ -99,6 +109,12 @@ export interface ShellIsolateMountOptions {
     pluginId: string;
     phase: "resolve" | "mount" | "health" | "hook";
     message: string;
+    /**
+     * What the Plugin was doing, when it was not a Turn's own work: a card
+     * press or a card draw. It is the wording of the notice the person reads,
+     * never the count, which is the same either way.
+     */
+    card?: "press" | "draw";
   }): Promise<{ fatal: boolean }>;
 }
 
@@ -156,6 +172,13 @@ export interface ShellCompositionMountOptions {
    * its catalog to it as well. Absent ⇒ no role narrowing.
    */
   subagentRole?: string;
+  /**
+   * Where the Approvals a Plugin's Card asks for are bound to what they
+   * authorize. Absent leaves every card send minting a fresh decision and
+   * binding none, which is fail-closed: a capability that requires a binding
+   * refuses rather than sending under a decision nobody tied to it.
+   */
+  cardApprovals?: CardApprovalStoreV1;
   /** Absent when the host cannot load isolates; isolate members then fail verify. */
   isolate?: ShellIsolateMountOptions;
   /** Absent when the host cannot reach Applet instances. */
@@ -239,6 +262,236 @@ export function createShellCompositionHost(
               ...(options.subagentRole === undefined
                 ? {}
                 : { subagentRole: options.subagentRole }),
+              // A Plugin's card tool draws a Card the same way the Bot's own
+              // `send_to_user` does: the messages are decoded at the seam
+              // every payload is decoded at, the Approvals the surface asks
+              // for are minted here rather than by the Plugin, and both land
+              // on this Turn's log.
+              sendCard: async (send) => {
+                let payload;
+                try {
+                  payload = decodeSendToUserPayloadV1(
+                    {
+                      type: "card",
+                      surfaceId: send.surfaceId,
+                      messages: send.messages,
+                    },
+                    `plugin "${send.pluginId}" card`,
+                    // The surface id is the one the host minted for this
+                    // Plugin's card, or one it already checked carries that
+                    // card's own prefix; the reserved shape is refused for
+                    // every payload a model authors.
+                    { kernelMinted: true },
+                  );
+                } catch (error) {
+                  return {
+                    status: "refused" as const,
+                    reason:
+                      error instanceof Error ? error.message : String(error),
+                  };
+                }
+                if (payload.type !== "card") {
+                  return { status: "refused" as const, reason: "not a card" };
+                }
+                // What the Plugin says this draw is about, as one content
+                // address. It is what the Approval is bound to, so a
+                // capability claiming the decision later has to be about the
+                // same values the person read. Taken over what the Plugin
+                // drew and will act on, never over the tool input: a Plugin
+                // that redraws the draft it is holding rather than the values
+                // the model passed would otherwise bind the decision to a
+                // message nobody was shown.
+                const digest =
+                  send.covers === undefined
+                    ? undefined
+                    : await cardValuesDigestV1(send.covers);
+                const approvals = options.cardApprovals;
+                const live = await approvals?.live(
+                  send.pluginId,
+                  send.surfaceId,
+                );
+                // One draft, one live decision. A redraw of what is already
+                // pending keeps that decision; a redraw covering *different*
+                // values, or one covering nothing at all, would silently move
+                // what the pending decision covers, so it is refused and the
+                // card stays exactly as it was.
+                if (live && live.digest !== digest) {
+                  return {
+                    status: "refused" as const,
+                    reason: `surface "${send.surfaceId}" has a decision still pending on the values it was drawn with; draw a new card rather than changing what that decision covers`,
+                  };
+                }
+                const reused = live?.approvalIds ?? [];
+                // The unguessable half of this card's Approval ids, from the
+                // Bot's own secret, the Session and the effect that records the
+                // send: the same effect of the same Session recomputes it, and
+                // nothing outside the Durable Object can compute it at all.
+                const seed =
+                  approvals === undefined
+                    ? undefined
+                    : await cardApprovalSeedV1(
+                        await approvals.secret(),
+                        send.context.sessionId,
+                        send.context.effectId,
+                      );
+                const bound = bindCardApprovalsV1(
+                  payload.messages,
+                  (index) =>
+                    reused[index] ??
+                    (seed === undefined ? "" : cardApprovalIdV1(seed, index)),
+                );
+                // A decision the person already gave, on this surface, that
+                // nothing has spent yet. A *different* effect redrawing over
+                // it would mint a new id, ask for the decision a second time
+                // and leave the one they gave bound to nothing — so that draw
+                // is refused, the same way a redraw changing what a pending
+                // decision covers is. The draw that asked for the decision is
+                // not such a redraw: its ids are a function of the same
+                // effect, so recomputing them lands on the very ids the
+                // binding holds, and the replay goes on to the send's own
+                // occurrence-id dedupe, which makes it the no-op it is. Once
+                // the decision has been used, or declined, the surface draws
+                // on: that is the receipt.
+                if (!live) {
+                  const decided = await approvals?.settled(
+                    send.pluginId,
+                    send.surfaceId,
+                  );
+                  if (
+                    decided &&
+                    (decided.approvalIds.length !== bound.approvalIds.length ||
+                      decided.approvalIds.some(
+                        (approvalId, index) =>
+                          approvalId !== bound.approvalIds[index],
+                      ))
+                  ) {
+                    return {
+                      status: "refused" as const,
+                      reason: `surface "${send.surfaceId}" carries a decision the user already approved and nothing has acted on yet; draw a new card rather than redrawing one they have decided`,
+                    };
+                  }
+                }
+                // An unbound decision cannot exist. A card asking one of a
+                // person while naming nothing it covers, saying nothing about
+                // what it is asking, or drawn where this host records no card
+                // approvals at all would record an Approval that authorizes
+                // whatever a later call claims it does, so the draw is refused
+                // rather than recorded.
+                const decision = send.decision;
+                if (bound.approvalIds.length > 0) {
+                  const unbound =
+                    digest === undefined
+                      ? "without declaring the values it covers"
+                      : decision === undefined
+                        ? "without declaring what that decision asks"
+                        : seed === undefined
+                          ? "where no card approvals are recorded"
+                          : undefined;
+                  if (unbound !== undefined) {
+                    return {
+                      status: "refused" as const,
+                      reason: `plugin "${send.pluginId}" drew a decision on card "${send.cardId}" ${unbound}`,
+                    };
+                  }
+                }
+                const cardApprovals =
+                  decision === undefined
+                    ? []
+                    : bound.approvalIds.map((approvalId) => ({
+                        approvalId,
+                        ...decision,
+                      }));
+                // The registry holds the card's tool under the canonical
+                // spelling, which turns a plugin id's dashes into
+                // underscores; a refusal has to name the tool that exists.
+                const tool = pluginCardToolNameV1(send.pluginId, send.cardId);
+                // Decoded like any other payload before anything reaches the
+                // log, and decoded *before* the Card is recorded: a decision
+                // the seam could not put on the log would otherwise leave a
+                // card in the conversation asking for one nobody can answer.
+                let asks;
+                try {
+                  asks = cardApprovals.map((approval) =>
+                    decodeSendToUserPayloadV1(
+                      { type: "approval", ...approval },
+                      `plugin "${send.pluginId}" card approval`,
+                      // The kernel minted these ids a few lines above; the
+                      // reserved namespace is refused for every other caller.
+                      { kernelMinted: true },
+                    ),
+                  );
+                } catch (error) {
+                  return {
+                    status: "refused" as const,
+                    reason:
+                      error instanceof Error ? error.message : String(error),
+                  };
+                }
+                const recorded = await recordSendToUserV1(
+                  runtime.services.sessions,
+                  { ...payload, messages: bound.messages },
+                  {
+                    sessionId: send.context.sessionId,
+                    occurrenceId: send.context.effectId,
+                    tool,
+                  },
+                );
+                if (recorded.status !== "sent") {
+                  return {
+                    status: "refused" as const,
+                    reason: recorded.reason,
+                  };
+                }
+                for (const [index, ask] of asks.entries()) {
+                  // A reused decision was already asked for on the Turn that
+                  // drew this surface first; asking again would put a second
+                  // request for one decision on the log.
+                  const approval = cardApprovals[index];
+                  if (approval && reused.includes(approval.approvalId))
+                    continue;
+                  const asked = await recordSendToUserV1(
+                    runtime.services.sessions,
+                    ask,
+                    {
+                      sessionId: send.context.sessionId,
+                      // Its own occurrence: one tool call records the Card and
+                      // the decisions it asks for, and a retry must be the
+                      // same send of each rather than the same send of one.
+                      occurrenceId: `${send.context.effectId}:approval:${index}`,
+                      tool,
+                    },
+                  );
+                  if (asked.status !== "sent") {
+                    return { status: "refused" as const, reason: asked.reason };
+                  }
+                }
+                if (approvals && cardApprovals.length > 0 && digest) {
+                  await approvals.record({
+                    schemaVersion: 1,
+                    pluginId: send.pluginId,
+                    surfaceId: send.surfaceId,
+                    digest,
+                    approvalIds: bound.approvalIds,
+                    createdAt: new Date().toISOString(),
+                  });
+                }
+                return {
+                  status: "sent" as const,
+                  approvals: bound.approvalIds.length,
+                };
+              },
+              // A card draw that failed counts toward the Plugin's
+              // quarantine, exactly as a press that failed does. The verdict
+              // is not acted on: the model already read the tool error and
+              // the Turn carries on without the card.
+              recordCardFailure: async (failure) => {
+                await isolate.onPluginFailure?.({
+                  pluginId: failure.pluginId,
+                  phase: "hook",
+                  message: failure.message,
+                  card: "draw",
+                });
+              },
               recordHookFailure: async (failure) => {
                 const session = runtime.services.sessions.get(
                   options.sessionId,

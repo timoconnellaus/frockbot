@@ -7,6 +7,7 @@ export * from "./contributions.js";
 export * from "./iframe-ui.js";
 export * from "./isolate.js";
 export * from "./isolate-context-catalog.generated.js";
+export * from "./json-schema.js";
 export * from "./loop-events.js";
 export * from "./loop-hooks.js";
 export * from "./model-invocation.js";

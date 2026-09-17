@@ -129,6 +129,7 @@ describe("a Plugin's health on one Bot", () => {
         schemaVersion: 1,
         pluginId: "weather",
         consecutiveFailures: 3,
+        failureKinds: ["turn"],
         lastFailure: {
           runId: "run-3",
           phase: "hook",
@@ -139,6 +140,74 @@ describe("a Plugin's health on one Bot", () => {
       }),
     ).toBe(
       "Turned off after 3 Turns in a row with a failure (last: exceeded its deadline). Turn it on to try again.",
+    );
+  });
+
+  // The count is the total whatever the run held, but only a run of Turns is
+  // read back to the person as Turns.
+  test("the page's words describe the run, not just its count", () => {
+    const health = {
+      schemaVersion: 1,
+      pluginId: "weather",
+      consecutiveFailures: 3,
+      lastFailure: {
+        runId: "run-3",
+        phase: "hook",
+        message: "the handler threw",
+        at: at(3).toISOString(),
+      },
+      quarantinedAt: at(3).toISOString(),
+    } as const;
+    expect(
+      pluginQuarantineCopyV1({ ...health, failureKinds: ["press"] }),
+    ).toContain("Turned off after 3 card presses in a row that failed");
+    expect(
+      pluginQuarantineCopyV1({ ...health, failureKinds: ["turn", "press"] }),
+    ).toContain("Turned off after 3 failures in a row");
+  });
+
+  // The run's kinds are carried on the record so a notice can describe the
+  // run rather than guess from whichever failure landed last.
+  test("a run carries every kind of failure it is made of", async () => {
+    const store = storage();
+    const failure = (runId: string, kind: "turn" | "press", minute: number) =>
+      recordPluginFailureV1(store, {
+        pluginId: "weather",
+        runId,
+        phase: "hook",
+        message: "exploded",
+        kind,
+        now: at(minute),
+      });
+    expect((await failure("run-1", "press", 1)).health.failureKinds).toEqual([
+      "press",
+    ]);
+    expect((await failure("run-2", "press", 2)).health.failureKinds).toEqual([
+      "press",
+    ]);
+    expect((await failure("run-3", "turn", 3)).health).toMatchObject({
+      consecutiveFailures: 3,
+      failureKinds: ["turn", "press"],
+    });
+  });
+
+  // A record written before the run carried its kinds still reads, and says
+  // nothing about what it was made of rather than claiming Turns.
+  test("a record without kinds reads as a run of unknown make-up", () => {
+    const decoded = decodePluginHealthRecordV1({
+      schemaVersion: 1,
+      pluginId: "weather",
+      consecutiveFailures: 2,
+      lastFailure: {
+        runId: "run-2",
+        phase: "hook",
+        message: "exploded",
+        at: at(2).toISOString(),
+      },
+    });
+    expect(decoded.failureKinds).toEqual([]);
+    expect(pluginQuarantineCopyV1(decoded)).toContain(
+      "Turned off after 2 failures in a row",
     );
   });
 

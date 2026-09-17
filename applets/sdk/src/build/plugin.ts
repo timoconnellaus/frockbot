@@ -52,6 +52,8 @@ export interface PluginDescriptionV1 {
   services: string[];
   triggers: string[];
   views: string[];
+  /** The cards the module draws, by id (ADR 0030). */
+  cards: string[];
 }
 
 export interface PluginBuildManifestV1 extends PluginDescriptionV1 {
@@ -277,6 +279,20 @@ function names(value, label) {
   });
 }
 
+function cardNames(value) {
+  if (value === undefined) return [];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error('"cards" must be an object');
+  }
+  return Object.keys(value).map(function (cardId) {
+    var card = value[cardId];
+    if (!card || typeof card.render !== "function") {
+      throw new Error('card "' + cardId + '" must export a render function');
+    }
+    return cardId;
+  });
+}
+
 function describe() {
   if (!Array.isArray(plugin.tools)) {
     throw new Error('the module must export a "tools" array');
@@ -303,6 +319,7 @@ function describe() {
     services: names(plugin.services, "services"),
     triggers: names(plugin.triggers, "triggers"),
     views: names(plugin.views, "views"),
+    cards: cardNames(plugin.cards),
   };
 }
 
@@ -396,6 +413,7 @@ function validateDescription(input: PluginDescriptionV1): PluginDescriptionV1 {
     services: [...input.services],
     triggers: [...input.triggers],
     views: [...input.views],
+    cards: [...(input.cards ?? [])],
   };
 }
 

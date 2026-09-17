@@ -1,6 +1,7 @@
 // The send payload codec, and the two durable events that carry it.
 import { describe, expect, test } from "bun:test";
 import {
+  CARD_APPROVAL_ID_PREFIX_V1,
   decodeSendToUserPayloadV1,
   decodeSessionEvent,
   SEND_TO_USER_LIMITS_V1,
@@ -67,6 +68,35 @@ describe("the card payload", () => {
         ),
       }),
     ).toThrow(/1 to /);
+  });
+
+  // A card record carries no owner, so the minted `<pluginId>_<cardId>.`
+  // prefix is what says whose card a surface is. A model that could spell it
+  // could draw a card wearing a Plugin's prefix and have a
+  // `plugin/<id>/<action>` press on it reach that Plugin's handler.
+  test("refuses a surfaceId in the namespace the kernel mints card surfaces in", () => {
+    const minted = {
+      type: "card" as const,
+      surfaceId: "email_draft.0123456789abcdef01234567",
+      messages: [
+        {
+          version: "v1.0" as const,
+          createSurface: {
+            surfaceId: "email_draft.0123456789abcdef01234567",
+            components: [
+              { id: "root", component: "Text", text: "Ready to send" },
+            ],
+          },
+        },
+      ],
+    };
+    expect(() => decodeSendToUserPayloadV1(minted)).toThrow(
+      "that namespace is the kernel's",
+    );
+    // And the draw the kernel minted that surface for still goes through.
+    expect(
+      decodeSendToUserPayloadV1(minted, "plugin card", { kernelMinted: true }),
+    ).toEqual(minted as SendToUserPayloadV1);
   });
 
   test("refuses a malformed message and an unexpected field", () => {
@@ -193,6 +223,35 @@ describe("the send payload codec", () => {
     expect(() => decodeSendToUserPayloadV1(withoutRisk)).toThrow("risk");
   });
 
+  // Approvals live in one storage namespace, so a caller that could spell the
+  // id the kernel mints for a Card could ask for a decision under it a Turn
+  // early, have a person answer that question, and leave an approved record
+  // sitting behind a card nobody decided about.
+  test("refuses an approvalId in the namespace the kernel mints Card ids in", () => {
+    const approval = {
+      type: "approval" as const,
+      approvalId: `${CARD_APPROVAL_ID_PREFIX_V1}0123456789abcdef-0`,
+      action: "Check the weather for you?",
+      risk: "low" as const,
+    };
+    expect(() => decodeSendToUserPayloadV1(approval)).toThrow(
+      "that namespace is the kernel's",
+    );
+    // Any spelling of the prefix, not one shape of the id after it.
+    expect(() =>
+      decodeSendToUserPayloadV1({
+        ...approval,
+        approvalId: `${CARD_APPROVAL_ID_PREFIX_V1}anything`,
+      }),
+    ).toThrow("that namespace is the kernel's");
+    // And the kernel recording the ask it just minted still goes through.
+    expect(
+      decodeSendToUserPayloadV1(approval, "kernel card approval", {
+        kernelMinted: true,
+      }),
+    ).toEqual(approval);
+  });
+
   test("refuses an unknown type, a missing field and an extra key", () => {
     expect(() =>
       decodeSendToUserPayloadV1({ type: "sms", text: "hi" }),
@@ -291,6 +350,26 @@ describe("the durable send and hand-off events", () => {
     expect(() => decodeSessionEvent({ ...send, occurrenceId: 4 })).toThrow(
       "session event.occurrenceId",
     );
+  });
+
+  // The reserved prefix is refused where a payload is *authored*. A Card ask
+  // the kernel already minted is on the log, and a Turn that could not read
+  // its own log back is a Turn that cannot settle.
+  test("reads back a Card's own approval ask, prefix and all", () => {
+    const send = event({
+      type: "send/to-user",
+      turn: 4,
+      step: 2,
+      occurrenceId: "tool:4:2:0:approval:0",
+      payload: {
+        type: "approval",
+        approvalId: `${CARD_APPROVAL_ID_PREFIX_V1}0123456789abcdef-0`,
+        action: "Send an email to nick@example.com",
+        risk: "medium",
+      },
+    });
+
+    expect(decodeSessionEvent(send)).toEqual(send as never);
   });
 
   test("decodes a recorded hand-off and requires its exact keys", () => {

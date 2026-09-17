@@ -12,6 +12,7 @@ import type {
   IsolateConnectionOutcomeV1,
   IsolateMemoryOutcomeV1,
   IsolateModelOutcomeV1,
+  IsolateEmailOutcomeV1,
   IsolateScheduleOutcomeV1,
   IsolateScopeV1,
   IsolateSettingsOutcomeV1,
@@ -24,6 +25,7 @@ import {
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateModelInvocationV1,
+  decodeIsolateEmailRequestV1,
   decodeIsolateScheduleRequestV1,
   decodeIsolateScopeV1,
   decodeIsolateStorageDeleteRequestV1,
@@ -65,6 +67,7 @@ interface BotIsolateRpc {
   isolateWorkspaceDelete(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
   isolateConnection(input: unknown): Promise<IsolateConnectionOutcomeV1>;
   isolateSchedule(input: unknown): Promise<IsolateScheduleOutcomeV1>;
+  isolateEmail(input: unknown): Promise<IsolateEmailOutcomeV1>;
   isolateStorageGet(input: unknown): Promise<IsolateStorageOutcomeV1>;
   isolateStoragePut(input: unknown): Promise<IsolateStorageOutcomeV1>;
   isolateStorageDelete(input: unknown): Promise<IsolateStorageOutcomeV1>;
@@ -274,6 +277,31 @@ export class BotCapabilities extends WorkerEntrypoint<
       return await rpc.isolateConnection(envelope);
     } catch {
       return unavailable("the Connection is unavailable");
+    }
+  }
+
+  async sendEmail(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateEmailOutcomeV1> {
+    // Decoded outside the call, because a request the kernel refuses and a
+    // deployment that cannot send mail are different facts: a draft naming
+    // something that is not an address is the draft's problem, and answering
+    // it with "unavailable" would tell the person this deployment sends no
+    // mail when it sends mail fine.
+    let decoded;
+    try {
+      decoded = decodeIsolateEmailRequestV1(request);
+    } catch (error) {
+      return unavailable(
+        `this email was refused: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    try {
+      const { rpc, envelope } = this.scoped(scope, decoded);
+      return await rpc.isolateEmail(envelope);
+    } catch {
+      return unavailable("sending email is unavailable");
     }
   }
 

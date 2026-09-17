@@ -46,6 +46,7 @@ export const BOT_ISOLATE_INVOCATION_SOURCE = `var TOOL_NAME = /^[a-z][a-z0-9_]{0
 var PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 var TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 var SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+var CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
 var HOOK_EVENTS = ${JSON.stringify(BOT_ISOLATE_HOOK_EVENTS_V1)};
 var IDENTITY_KEYS = ["botId", "sessionId", "runId", "turnId", "generationId"];
 function isRecord(value) {
@@ -166,6 +167,7 @@ function decodeViewInvocation(value) {
 var CARD_ACTION_INVOCATION_KEYS = [
   "schemaVersion",
   "pluginId",
+  "cardId",
   "surfaceId",
   "action",
   "botId",
@@ -180,7 +182,7 @@ function decodeCardActionInvocation(value) {
     throw new Error("plugin worker card action invocation must be an object");
   }
   for (const key of Object.keys(value)) {
-    if (!CARD_ACTION_INVOCATION_KEYS.includes(key) && key !== "context" && key !== "dataModel") {
+    if (!CARD_ACTION_INVOCATION_KEYS.includes(key) && key !== "context" && key !== "dataModel" && key !== "record") {
       throw new Error("plugin worker card action invocation has invalid fields");
     }
   }
@@ -195,6 +197,9 @@ function decodeCardActionInvocation(value) {
   if (typeof value.pluginId !== "string" || !PLUGIN_ID.test(value.pluginId)) {
     throw new Error("plugin worker card action invocation pluginId is invalid");
   }
+  if (typeof value.cardId !== "string" || !CARD_ID.test(value.cardId)) {
+    throw new Error("plugin worker card action invocation cardId is invalid");
+  }
   if (typeof value.surfaceId !== "string" || !SURFACE_ID.test(value.surfaceId)) {
     throw new Error("plugin worker card action invocation surfaceId is invalid");
   }
@@ -207,7 +212,43 @@ function decodeCardActionInvocation(value) {
   if (value.dataModel !== undefined && !isRecord(value.dataModel)) {
     throw new Error("plugin worker card action invocation dataModel is invalid");
   }
+  if (value.record !== undefined && !isRecord(value.record)) {
+    throw new Error("plugin worker card action invocation record is invalid");
+  }
   identityFields(value, "plugin worker card action invocation");
+  return value;
+}
+var RENDER_CARD_INVOCATION_KEYS = [
+  "schemaVersion",
+  "pluginId",
+  "cardId",
+  "surfaceId",
+  "data",
+  "botId",
+  "sessionId",
+  "runId",
+  "turnId",
+  "generationId",
+  "deadlineMs",
+];
+function decodeRenderCardInvocation(value) {
+  exactKeys(value, RENDER_CARD_INVOCATION_KEYS, "plugin worker render card invocation");
+  if (value.schemaVersion !== 1) {
+    throw new Error("plugin worker render card invocation schemaVersion is unsupported");
+  }
+  if (typeof value.pluginId !== "string" || !PLUGIN_ID.test(value.pluginId)) {
+    throw new Error("plugin worker render card invocation pluginId is invalid");
+  }
+  if (typeof value.cardId !== "string" || !CARD_ID.test(value.cardId)) {
+    throw new Error("plugin worker render card invocation cardId is invalid");
+  }
+  if (typeof value.surfaceId !== "string" || !SURFACE_ID.test(value.surfaceId)) {
+    throw new Error("plugin worker render card invocation surfaceId is invalid");
+  }
+  if (!isRecord(value.data)) {
+    throw new Error("plugin worker render card invocation data is invalid");
+  }
+  identityFields(value, "plugin worker render card invocation");
   return value;
 }
 function decodeTriggerInvocation(value) {
@@ -296,8 +337,9 @@ const BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1 = {
  */
 const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
   ai: [
-    "model",
-    `{
+    [
+      "model",
+      `{
       invoke: async function (request) {
         const outcome = await capabilities.invokeModel(scope, request);
         if (!outcome || outcome.status !== "streaming") return outcome;
@@ -308,10 +350,12 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
         };
       },
     }`,
+    ],
   ],
   memory: [
-    "memory",
-    `{
+    [
+      "memory",
+      `{
       read: function (request) {
         return capabilities.memoryRead(scope, request);
       },
@@ -322,10 +366,12 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
         return capabilities.memoryForget(scope, request);
       },
     }`,
+    ],
   ],
   workspace: [
-    "workspace",
-    `{
+    [
+      "workspace",
+      `{
       read: function (path) {
         return capabilities.workspaceRead(scope, path);
       },
@@ -342,18 +388,30 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
         return capabilities.workspaceDelete(scope, request);
       },
     }`,
+    ],
   ],
+  // The one grant that opens two members: reaching a declared host, and
+  // asking the deployment's own sender to send mail for the Bot.
   http: [
-    "connection",
-    "function (connectionId) { return capabilities.connection(scope, connectionId); }",
+    [
+      "connection",
+      "function (connectionId) { return capabilities.connection(scope, connectionId); }",
+    ],
+    [
+      "email",
+      "function (request) { return capabilities.sendEmail(scope, request); }",
+    ],
   ],
   schedule: [
-    "schedule",
-    "function (request) { return capabilities.schedule(scope, request); }",
+    [
+      "schedule",
+      "function (request) { return capabilities.schedule(scope, request); }",
+    ],
   ],
   storage: [
-    "storage",
-    `{
+    [
+      "storage",
+      `{
       get: function (request) {
         return capabilities.storageGet(scope, request);
       },
@@ -367,13 +425,16 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
         return capabilities.storageList(scope, request);
       },
     }`,
+    ],
   ],
-} satisfies Record<string, [keyof BotPackageContextV1, string]>;
+} satisfies Record<string, [keyof BotPackageContextV1, string][]>;
 
 /** The keys the generated wrapper places on `ctx` when every grant is held. */
 export const BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1 = [
   ...Object.keys(BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1),
-  ...Object.values(BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1).map(([key]) => key),
+  ...Object.values(BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1).flatMap((members) =>
+    members.map(([key]) => key),
+  ),
 ] as Array<keyof BotPackageContextV1>;
 
 export const BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1 = `function narrowContext(env, invocation, plugin, deadlineMs) {
@@ -395,9 +456,11 @@ ${Object.entries(BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1)
   .join("\n")}
   };
 ${Object.entries(BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1)
-  .map(
-    ([grant, [key, source]]) =>
-      `  if (grants.includes(${JSON.stringify(grant)})) {\n    context[${JSON.stringify(key)}] = ${source};\n  }`,
+  .flatMap(([grant, members]) =>
+    members.map(
+      ([key, source]) =>
+        `  if (grants.includes(${JSON.stringify(grant)})) {\n    context[${JSON.stringify(key)}] = ${source};\n  }`,
+    ),
   )
   .join("\n")}
   return context;
@@ -600,6 +663,43 @@ function declaredTriggers(module, pluginId) {
     return name;
   });
 }
+function declaredCards(module, pluginId) {
+  if (module.cards === undefined) return [];
+  if (!isRecord(module.cards)) {
+    throw new Error('plugin "' + pluginId + '" "cards" must be an object');
+  }
+  const owner = {};
+  return Object.keys(module.cards).map(function (cardId) {
+    if (!CARD_ID.test(cardId)) {
+      throw new Error('plugin "' + pluginId + '" declared a card with an invalid id');
+    }
+    const card = module.cards[cardId];
+    if (!isRecord(card) || typeof card.render !== "function") {
+      throw new Error('plugin "' + pluginId + '" card "' + cardId + '" must export a render function');
+    }
+    const actions = [];
+    if (card.actions !== undefined) {
+      if (!isRecord(card.actions)) {
+        throw new Error('plugin "' + pluginId + '" card "' + cardId + '" actions must be an object');
+      }
+      for (const name of Object.keys(card.actions)) {
+        if (typeof card.actions[name] !== "function") {
+          throw new Error('plugin "' + pluginId + '" card action "' + name + '" must be a function');
+        }
+        // A press names no card, so one action name on two cards would be two
+        // handlers behind one press and the one reached would be whichever
+        // card was scanned first. The descriptor refuses it; so does the
+        // mount, and a module that does it runs nothing at all.
+        if (Object.hasOwn(owner, name)) {
+          throw new Error('plugin "' + pluginId + '" declares card action "' + name + '" on both "' + owner[name] + '" and "' + cardId + '"');
+        }
+        owner[name] = cardId;
+        actions.push(name);
+      }
+    }
+    return { id: cardId, actions: actions };
+  });
+}
 function declaredViews(module, pluginId) {
   if (module.views === undefined) return [];
   if (!isRecord(module.views)) {
@@ -634,6 +734,122 @@ export const BOT_ISOLATE_VIEW_SOURCE = `async function runView(invocation, resol
       return { schemaVersion: 1, status: "rendered", document: value };
     }
     return { schemaVersion: 1, status: "drop", reason: "the view returned no document" };
+  } catch (error) {
+    return { schemaVersion: 1, status: "drop", reason: errorText(error) };
+  }
+}`;
+
+/**
+ * Drawing one Card and answering one press on it, shared verbatim between the
+ * generated wrapper and the Bun test that proves it.
+ *
+ * A handler answers with the A2UI messages the kernel folds — an array, or
+ * `{ messages, input }` when it also has a line for the Bot's next Turn — and
+ * anything else is a drop with its reason, so a Card is never half-redrawn.
+ * A press's name carries no card: `plugin/<pluginId>/<action>` is the
+ * plugin's namespace, so the press is resolved against the card the module
+ * declared that action on. One name on two cards fails the mount, and the
+ * host checks the declaration against the descriptor at health, so the card a
+ * press reaches is the one the descriptor says owns it — never whichever card
+ * the module happened to be scanned in first. The invocation's `cardId` is
+ * the card the pressed surface was minted for: it is what the handler is told
+ * it is on, and a press whose surface names a different card of the same
+ * Plugin is refused rather than answered on the wrong surface.
+ */
+export const BOT_ISOLATE_CARD_SOURCE = `function cardAnswer(value) {
+  if (Array.isArray(value)) {
+    return { schemaVersion: 1, status: "rendered", messages: value };
+  }
+  if (isRecord(value) && Array.isArray(value.messages)) {
+    return Object.assign(
+      { schemaVersion: 1, status: "rendered", messages: value.messages },
+      typeof value.input === "string" && value.input.length > 0 ? { input: value.input } : {},
+    );
+  }
+  if (isRecord(value) && value.drop === true) {
+    // The handler refused on purpose. Marked so the kernel can tell this
+    // apart from a throw, an overrun or an answer it could not read, which
+    // are the only drops a Plugin's health is charged for.
+    return Object.assign(
+      { schemaVersion: 1, status: "drop", deliberate: true },
+      typeof value.reason === "string" ? { reason: errorText(value.reason) } : {},
+    );
+  }
+  return { schemaVersion: 1, status: "drop", reason: "the card handler drew nothing" };
+}
+
+async function runRenderCard(invocation, resolve, contextFor) {
+  try {
+    const plugin = resolve(invocation.pluginId);
+    const declared = plugin.cards.find(function (candidate) {
+      return candidate.id === invocation.cardId;
+    });
+    if (!declared) {
+      throw new Error('plugin "' + invocation.pluginId + '" did not declare card "' + invocation.cardId + '"');
+    }
+    const context = contextFor(invocation, plugin, invocation.deadlineMs);
+    const value = await withIsolateDeadline(function () {
+      return plugin.module.cards[invocation.cardId].render(
+        { surfaceId: invocation.surfaceId, data: invocation.data },
+        context,
+      );
+    }, invocation.deadlineMs);
+    const answer = cardAnswer(value);
+    // A draw has no line for the Bot; only a press does. The deliberate flag
+    // stays: a draw that refused in as many words is charged nothing, and
+    // everything else is charged to the Plugin's health.
+    delete answer.input;
+    // What this draw is about, in the Plugin's own words. A card that asks
+    // for a decision and names none of these is refused at the seam, so the
+    // decision a person gives can never cover values they were not shown.
+    if (answer.status === "rendered" && isRecord(value) && isRecord(value.covers)) {
+      answer.covers = value.covers;
+    }
+    // And what that decision asks, in the Plugin's own words. The catalog
+    // allows the ApprovalActions component nothing but its id and its labels,
+    // so the wording rides here and the kernel records the Approval with it.
+    if (answer.status === "rendered" && isRecord(value) && isRecord(value.decision)) {
+      answer.decision = value.decision;
+    }
+    return answer;
+  } catch (error) {
+    return { schemaVersion: 1, status: "drop", reason: errorText(error) };
+  }
+}
+
+async function runCardAction(invocation, resolve, contextFor) {
+  try {
+    const plugin = resolve(invocation.pluginId);
+    const owner = plugin.cards.find(function (candidate) {
+      return candidate.actions.includes(invocation.action);
+    });
+    if (owner === undefined) {
+      throw new Error('plugin "' + invocation.pluginId + '" declares no card action "' + invocation.action + '"');
+    }
+    // The card the pressed surface was minted for, as the kernel read it off
+    // the surface id. The handler is still the one that declared the action;
+    // this only refuses a press whose surface belongs to a different card of
+    // the same Plugin, which would otherwise hand one card's handler another
+    // card's surface, data model and record.
+    if (owner.id !== invocation.cardId) {
+      throw new Error('plugin "' + invocation.pluginId + '" card "' + invocation.cardId + '" does not declare action "' + invocation.action + '"');
+    }
+    const cardId = owner.id;
+    const context = contextFor(invocation, plugin, invocation.deadlineMs);
+    const value = await withIsolateDeadline(function () {
+      return plugin.module.cards[cardId].actions[invocation.action](
+        {
+          cardId: cardId,
+          surfaceId: invocation.surfaceId,
+          action: invocation.action,
+          context: invocation.context,
+          dataModel: invocation.dataModel,
+          record: invocation.record,
+        },
+        context,
+      );
+    }, invocation.deadlineMs);
+    return cardAnswer(value);
   } catch (error) {
     return { schemaVersion: 1, status: "drop", reason: errorText(error) };
   }
@@ -690,6 +906,8 @@ ${BOT_ISOLATE_TRIGGER_SOURCE}
 
 ${BOT_ISOLATE_VIEW_SOURCE}
 
+${BOT_ISOLATE_CARD_SOURCE}
+
 /**
  * Every Plugin the identity names, mounted once in identity order. A Plugin
  * whose module does not declare itself correctly is carried as not ok and
@@ -716,6 +934,7 @@ function mountAll(env) {
       provides: [],
       triggers: [],
       views: [],
+      cards: [],
       services: {},
     };
     try {
@@ -724,6 +943,7 @@ function mountAll(env) {
       plugin.hooks = declaredHooks(module, pluginId);
       plugin.triggers = declaredTriggers(module, pluginId);
       plugin.views = declaredViews(module, pluginId);
+      plugin.cards = declaredCards(module, pluginId);
       const services = declaredServices(module, pluginId);
       plugin.provides = Object.keys(services);
       for (const name of plugin.consumes) {
@@ -771,6 +991,7 @@ export default class extends WorkerEntrypoint {
             }),
             triggers: plugin.triggers,
             views: plugin.views,
+            cards: plugin.cards,
           },
           plugin.ok ? {} : { reason: plugin.reason },
         );
@@ -830,17 +1051,47 @@ export default class extends WorkerEntrypoint {
   }
 
   /**
-   * Card actions (ADR 0030 step 6). The contract is here so the kernel can
-   * route \`plugin/<pluginId>/<action>\` today; no Plugin declares a card
-   * handler yet, so every call is a drop and the Card is left as it was.
+   * One press on a Card this Plugin drew (ADR 0030). The handler answers with
+   * the messages the kernel folds; a handler that throws, overruns or answers
+   * with anything else is a drop and the Card is left exactly as it was.
    */
   async cardAction(rawInvocation) {
+    let invocation;
     try {
-      decodeCardActionInvocation(rawInvocation);
+      invocation = decodeCardActionInvocation(rawInvocation);
     } catch (error) {
       return { schemaVersion: 1, status: "drop", reason: errorText(error) };
     }
-    return { schemaVersion: 1, status: "drop", reason: "this deployment does not run plugin card handlers yet" };
+    const env = this.env;
+    return runCardAction(
+      invocation,
+      function (pluginId) {
+        return findPlugin(env, pluginId);
+      },
+      function (identity, plugin, deadlineMs) {
+        return narrowContext(env, identity, plugin, deadlineMs);
+      },
+    );
+  }
+
+  /** One Card drawn from the values the Bot sent to its card tool. */
+  async renderCard(rawInvocation) {
+    let invocation;
+    try {
+      invocation = decodeRenderCardInvocation(rawInvocation);
+    } catch (error) {
+      return { schemaVersion: 1, status: "drop", reason: errorText(error) };
+    }
+    const env = this.env;
+    return runRenderCard(
+      invocation,
+      function (pluginId) {
+        return findPlugin(env, pluginId);
+      },
+      function (identity, plugin, deadlineMs) {
+        return narrowContext(env, identity, plugin, deadlineMs);
+      },
+    );
   }
 
   async view(rawInvocation) {
@@ -869,7 +1120,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v6";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v8";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(

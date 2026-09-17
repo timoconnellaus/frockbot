@@ -2,7 +2,7 @@
   "id": "__PLUGIN_ID__",
   "displayName": "__PLUGIN_NAME__",
   "version": "1",
-  "contractVersion": 4,
+  "contractVersion": 5,
   "tools": [
     {
       "name": "note_count",

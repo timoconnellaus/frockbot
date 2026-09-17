@@ -32,6 +32,7 @@ import {
   type BotIsolateMemberV1,
   type BotIsolateWorkerCode,
   type IsolateHookFailureV1,
+  type PluginCardFailureV1,
   type PluginWorkerHostOptions,
 } from "./plugin-worker-host.ts";
 import {
@@ -70,6 +71,7 @@ function member(
     grants?: PluginGrantV1[];
     slots?: string[];
     views?: { slot: string; surfaceId: string }[];
+    cards?: { id: string; actions: string[] }[];
     tools?: string[];
     provides?: { name: string; version: number }[];
     consumes?: { name: string; version: number }[];
@@ -96,6 +98,25 @@ function member(
       ...(overrides.provides ? { provides: overrides.provides } : {}),
       ...(overrides.consumes ? { consumes: overrides.consumes } : {}),
       ...(overrides.views ? { views: overrides.views } : {}),
+      ...(overrides.cards
+        ? {
+            cards: overrides.cards.map((card) => ({
+              id: card.id,
+              displayName: card.id,
+              description: `The ${card.id} card.`,
+              dataSchema: {
+                type: "object",
+                properties: { subject: { type: "string" } },
+                required: ["subject"],
+                additionalProperties: false,
+              },
+              actions: card.actions.map((name) => ({
+                name,
+                description: name,
+              })),
+            })),
+          }
+        : {}),
       ...(overrides.slots ? { slots: overrides.slots } : {}),
       contextKeys: ["user", "bot", "session"],
     }),
@@ -122,6 +143,7 @@ function healthy(
     consumes: [],
     triggers: [],
     views: [],
+    cards: [],
     ...overrides,
   };
 }
@@ -133,6 +155,7 @@ interface RecordedLoad {
 
 interface Harness {
   host: PluginWorkerHost;
+  cardFailures: PluginCardFailureV1[];
   loads: RecordedLoad[];
   definitions: ToolDefinition[];
   namespaces: string[];
@@ -150,6 +173,8 @@ function harness(
     receiveTrigger?: PluginWorkerEntrypoint["receiveTrigger"];
     view?: PluginWorkerEntrypoint["view"];
     cardAction?: PluginWorkerEntrypoint["cardAction"];
+    renderCard?: PluginWorkerEntrypoint["renderCard"];
+    sendCard?: PluginWorkerHostOptions["sendCard"];
     healthThrows?: string;
     deadlineMs?: number;
     artifacts?: Record<string, string>;
@@ -162,6 +187,7 @@ function harness(
   const namespaces: string[] = [];
   const hooks = new LoopHookListV1();
   const hookFailures: IsolateHookFailureV1[] = [];
+  const cardFailures: PluginCardFailureV1[] = [];
   const hookInvocations: PluginWorkerHookInvocationV1[] = [];
   const toolInvocations: PluginWorkerToolInvocationV1[] = [];
   const triggerInvocations: PluginWorkerTriggerInvocationV1[] = [];
@@ -209,6 +235,13 @@ function harness(
         status: "drop" as const,
         reason: "this fake runs no card handlers",
       }),
+    renderCard: (invocation) =>
+      input.renderCard?.(invocation) ??
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        status: "drop" as const,
+        reason: "this fake draws no cards",
+      }),
     receiveTrigger: (invocation) => {
       triggerInvocations.push(invocation);
       if (input.receiveTrigger) return input.receiveTrigger(invocation);
@@ -255,9 +288,14 @@ function harness(
     turnId: "turn-1",
     generationId: "gen-1",
     turnType: "chat",
+    ...(input.sendCard === undefined ? {} : { sendCard: input.sendCard }),
     recordHookFailure: (failure) => {
       hookFailures.push(failure);
       return input.recordHookFailure?.(failure) ?? Promise.resolve();
+    },
+    recordCardFailure: (failure) => {
+      cardFailures.push(failure);
+      return Promise.resolve();
     },
     capabilities: {} as BotCapabilitiesStub,
     compatibilityDate: "2026-01-01",
@@ -271,6 +309,7 @@ function harness(
     namespaces,
     hooks,
     hookFailures,
+    cardFailures,
     hookInvocations,
     toolInvocations,
     triggerInvocations,
@@ -1454,5 +1493,366 @@ describe("the Durable Object side of the deadline", () => {
     await expect(
       raceDeadline(() => Promise.resolve(1), 60_001),
     ).rejects.toThrow(/out of range/);
+  });
+});
+
+describe("a Plugin's cards", () => {
+  const messages = [
+    {
+      version: "v1.0",
+      createSurface: { surfaceId: "mail_draft.1", components: [] },
+    },
+  ];
+
+  function cardHarness(
+    input: {
+      renderCard?: PluginWorkerEntrypoint["renderCard"];
+      sendCard?: PluginWorkerHostOptions["sendCard"];
+      deadlineMs?: number;
+    } = {},
+  ) {
+    const sends: unknown[] = [];
+    const subject = harness({
+      ...(input.deadlineMs === undefined
+        ? {}
+        : { deadlineMs: input.deadlineMs }),
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) =>
+            healthy(pluginId, {
+              cards: [{ id: "draft", actions: ["details"] }],
+            }),
+          ),
+        }) as never,
+      ...(input.renderCard ? { renderCard: input.renderCard } : {}),
+      sendCard:
+        input.sendCard ??
+        ((send) => {
+          sends.push(send);
+          return Promise.resolve({ status: "sent" as const, approvals: 0 });
+        }),
+    });
+    return { ...subject, sends };
+  }
+
+  const cardMember = () =>
+    member("mail", { cards: [{ id: "draft", actions: ["details"] }] });
+
+  test("one tool per card, in the Plugin's own namespace", async () => {
+    const subject = cardHarness();
+    await (await subject.host.mount([cardMember()])).commit();
+    const tool = subject.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    );
+    expect(tool?.namespace).toBe("mail");
+    expect(
+      (tool?.inputSchema as { required?: string[] } | undefined)?.required,
+    ).toEqual(["data"]);
+  });
+
+  test("the values are validated against the card's schema before the Plugin sees them", async () => {
+    const rendered: unknown[] = [];
+    const subject = cardHarness({
+      renderCard: (invocation) => {
+        rendered.push(invocation);
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          messages,
+        });
+      },
+    });
+    await (await subject.host.mount([cardMember()])).commit();
+    const tool = subject.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!;
+    const refused = await tool.execute!(
+      { data: { subject: 7 } },
+      executionContext(),
+    );
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toMatch(/must be a string/);
+    expect(rendered).toHaveLength(0);
+    expect(subject.sends).toHaveLength(0);
+  });
+
+  test("the kernel mints the surface, and the Bot may name one it already drew", async () => {
+    const subject = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          messages,
+        }),
+    });
+    await (await subject.host.mount([cardMember()])).commit();
+    const tool = subject.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!;
+    const drawn = await tool.execute!(
+      { data: { subject: "Hello" } },
+      executionContext(),
+    );
+    expect(drawn.isError).toBe(false);
+    const send = subject.sends[0] as { surfaceId: string; cardId: string };
+    expect(send.cardId).toBe("draft");
+    // The Plugin and the card it drew are readable in the id, and the rest is
+    // minted from the Session and the effect.
+    expect(send.surfaceId.startsWith("mail_draft.")).toBe(true);
+    expect(drawn.content).toContain(send.surfaceId);
+
+    // A replay of the same call in the same Session redraws that surface,
+    // while another Session of this Bot at the same turn and step draws its
+    // own: card records are Bot-wide and an effect id is not.
+    await tool.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect((subject.sends[1] as { surfaceId: string }).surfaceId).toBe(
+      send.surfaceId,
+    );
+    await tool.execute!(
+      { data: { subject: "Hello" } },
+      executionContext({ sessionId: "routine:r-1" }),
+    );
+    expect((subject.sends[2] as { surfaceId: string }).surfaceId).not.toBe(
+      send.surfaceId,
+    );
+
+    await tool.execute!(
+      { data: { subject: "Hello" }, surfaceId: send.surfaceId },
+      executionContext(),
+    );
+    expect((subject.sends[3] as { surfaceId: string }).surfaceId).toBe(
+      send.surfaceId,
+    );
+    const refused = await tool.execute!(
+      { data: { subject: "Hello" }, surfaceId: "not a surface" },
+      executionContext(),
+    );
+    expect(refused.isError).toBe(true);
+    // A surface another Plugin's card minted is not this card's to draw on.
+    const stolen = await tool.execute!(
+      { data: { subject: "Hello" }, surfaceId: "post_draft.0123456789abcdef" },
+      executionContext(),
+    );
+    expect(stolen.isError).toBe(true);
+    expect(stolen.content).toMatch(/not a surface this card drew/);
+    expect(subject.sends).toHaveLength(4);
+
+    // An effect id too long for the surface id the Card seam bounds falls
+    // back to a random half rather than drawing nothing.
+    await tool.execute!(
+      { data: { subject: "Hello" } },
+      executionContext({ effectId: "e".repeat(200) }),
+    );
+    expect((subject.sends[2] as { surfaceId: string }).surfaceId).toMatch(
+      /^mail_draft\.[0-9a-f]{24}$/,
+    );
+  });
+
+  test("a card the Plugin refused, and a send the app refused, are the Bot's answer", async () => {
+    const refusing = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "drop" as const,
+          reason: "no draft to draw",
+        }),
+    });
+    await (await refusing.host.mount([cardMember()])).commit();
+    const drop = await refusing.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(drop).toMatchObject({ isError: true });
+    expect(drop.content).toMatch(/no draft to draw/);
+
+    const unrecorded = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          messages,
+        }),
+      sendCard: () =>
+        Promise.resolve({
+          status: "refused" as const,
+          reason: "the session is unavailable",
+        }),
+    });
+    await (await unrecorded.host.mount([cardMember()])).commit();
+    const refused = await unrecorded.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(refused).toMatchObject({ isError: true });
+    expect(refused.content).toMatch(/session is unavailable/);
+  });
+
+  // A Card that asks the person to decide is a question, so it ends the Turn
+  // the way an approval send does.
+  test("a card that asked for a decision ends the Turn", async () => {
+    const subject = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          messages,
+        }),
+      sendCard: () =>
+        Promise.resolve({ status: "sent" as const, approvals: 1 }),
+    });
+    await (await subject.host.mount([cardMember()])).commit();
+    const drawn = await subject.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(drawn.endsTurn).toBe(true);
+  });
+
+  // A draw that broke is charged to the Plugin the way a press that broke is,
+  // and a draw that refused in as many words is not.
+  test("a draw that failed counts toward the Plugin's health; one that refused does not", async () => {
+    const broken = cardHarness({
+      renderCard: () => Promise.reject(new Error("the worker is unreachable")),
+    });
+    await (await broken.host.mount([cardMember()])).commit();
+    const failed = await broken.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    // The model still reads the failure; the charge is beside it.
+    expect(failed).toMatchObject({ isError: true });
+    expect(failed.content).toMatch(/unreachable/);
+    expect(broken.cardFailures).toEqual([
+      {
+        pluginId: "mail",
+        cardId: "draft",
+        message: "the worker is unreachable",
+      },
+    ]);
+
+    const refusing = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "drop" as const,
+          deliberate: true as const,
+          reason: "there is no draft to draw",
+        }),
+    });
+    await (await refusing.host.mount([cardMember()])).commit();
+    const dropped = await refusing.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(dropped).toMatchObject({ isError: true });
+    expect(refusing.cardFailures).toEqual([]);
+
+    // A drop that says nothing about being deliberate is a failure.
+    const silent = cardHarness({
+      renderCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "drop" as const,
+          reason: "the card handler drew nothing",
+        }),
+    });
+    await (await silent.host.mount([cardMember()])).commit();
+    await silent.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(silent.cardFailures).toHaveLength(1);
+  });
+
+  // The Plugin's own deadline is the Plugin failing; the Turn's signal is the
+  // person pressing stop or the Turn running out of time, which is not.
+  test("a draw the Turn cancelled is not charged, while one that overran its deadline is", async () => {
+    const cancelled = cardHarness({
+      renderCard: () => new Promise(() => {}),
+    });
+    await (await cancelled.host.mount([cardMember()])).commit();
+    const controller = new AbortController();
+    const running = cancelled.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!(
+      { data: { subject: "Hello" } },
+      executionContext({ signal: controller.signal }),
+    );
+    controller.abort(new Error("agent cancelled by user"));
+    const stopped = await running;
+    expect(stopped).toMatchObject({ isError: true });
+    expect(stopped.content).toMatch(/agent cancelled by user/);
+    expect(cancelled.cardFailures).toEqual([]);
+
+    const overran = cardHarness({
+      deadlineMs: 5,
+      renderCard: () => new Promise(() => {}),
+    });
+    await (await overran.host.mount([cardMember()])).commit();
+    const late = await overran.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(late).toMatchObject({ isError: true });
+    expect(overran.cardFailures).toEqual([
+      {
+        pluginId: "mail",
+        cardId: "draft",
+        message: "isolate invocation exceeded its deadline of 5ms",
+      },
+    ]);
+  });
+
+  // A press names no card, so the card a module says owns an action is what
+  // routes it. A module owning `details` on a card the descriptor does not
+  // put it on must fail health rather than answer presses from there.
+  test("a report whose card actions differ from the descriptor fails that Plugin alone", async () => {
+    const subject = harness({
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) =>
+            healthy(pluginId, {
+              cards: [{ id: "draft", actions: ["escalate"] }],
+            }),
+          ),
+        }) as never,
+      sendCard: () =>
+        Promise.resolve({ status: "sent" as const, approvals: 0 }),
+    });
+    const prepared = await subject.host.mount([cardMember()]);
+    expect(prepared.mounted).toEqual([]);
+    expect(prepared.failures[0]?.message).toMatch(/cards do not match/);
+  });
+
+  test("a report whose cards differ from the descriptor fails that Plugin alone", async () => {
+    const subject = harness({
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) => healthy(pluginId)),
+        }) as never,
+      sendCard: () =>
+        Promise.resolve({ status: "sent" as const, approvals: 0 }),
+    });
+    const prepared = await subject.host.mount([cardMember()]);
+    expect(prepared.mounted).toEqual([]);
+    expect(prepared.failures[0]?.message).toMatch(/cards do not match/);
+  });
+
+  test("a host with no way to record a send registers no card tools", async () => {
+    const subject = harness({
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) =>
+            healthy(pluginId, {
+              cards: [{ id: "draft", actions: ["details"] }],
+            }),
+          ),
+        }) as never,
+    });
+    await (await subject.host.mount([cardMember()])).commit();
+    expect(
+      subject.definitions.map((definition) => definition.name),
+    ).not.toContain("mail_draft");
   });
 });

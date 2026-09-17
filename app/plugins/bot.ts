@@ -100,6 +100,9 @@ export async function readBotPluginsFrameV1(
       ...(member.descriptor.network
         ? { network: member.descriptor.network }
         : {}),
+      ...(member.descriptor.grants.length > 0
+        ? { grants: member.descriptor.grants }
+        : {}),
     });
   }
   if (options.sections) {
