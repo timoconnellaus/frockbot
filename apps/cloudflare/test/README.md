@@ -123,8 +123,8 @@ the page rather than the viewport:
   altogether, not merely hidden, so a spec scrolls its target into view before
   asserting on it or on the switch it holds — and scrolls back to something it
   passed earlier before reading that again, because a sweep down a list leaves
-  the list sitting at its last row. `bot-plugins.e2e.ts` does both; `profile`
-  and `theme` do the first.
+  the list sitting at its last row. `bot-plugins.e2e.ts` is the worked example
+  and does both.
 
 `e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`,
 seeds `dist/artifacts/foundation-v1.mjs` into the local
