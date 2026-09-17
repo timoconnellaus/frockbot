@@ -82,36 +82,13 @@ jobs:
         with:
           bun-version: 1.3.6
 
+      # Resolving the base, reading the range and classifying it all live in
+      # the script, so a test can drive the whole decision against a real
+      # repository. This step carries no logic of its own; the script writes
+      # `slow-tier` to `GITHUB_OUTPUT` itself.
       - name: Decide what this push obliges
         id: decide
-        env:
-          AFTER: ${{ github.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The range is measured from the newest release tag reachable from
-          # this head, not from the commit this push started at. A burst of
-          # merges collapses to the newest head — that is what the concurrency
-          # group is for — so the pushed range alone would let a cancelled
-          # run's commits go unverified by anybody. A tag is only ever cut
-          # after a run concluded, so everything since the newest one is
-          # exactly what no run has yet accepted.
-          #
-          # A repository with no such tag, or a tag this checkout cannot
-          # resolve, leaves no paths collected, and the decision falls to its
-          # default: run everything.
-          #
-          # `--no-renames` because rename detection prints only a rename's
-          # destination, so a file moved out of the application into an excused
-          # workspace would present as an excused change alone.
-          paths=""
-          if base="$(git describe --tags --abbrev=0 \
-            --match 'v[0-9]*.[0-9]*.[0-9]*' "$AFTER" 2>/dev/null)"; then
-            paths="$(git diff --no-renames --name-only "$base" "$AFTER")"
-          else
-            echo "::notice::No release tag is reachable from this head, so the range since the last verified commit could not be read; running the full tier."
-          fi
-          printf '%s' "$paths" | bun scripts/ci-change-scope.ts >> "$GITHUB_OUTPUT"
+        run: bun scripts/ci-change-scope.ts
 
   validate:
     name: Validate
