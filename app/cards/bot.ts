@@ -388,7 +388,7 @@ export async function cardAction(
           pressId: command.commandId ?? crypto.randomUUID(),
           surfaceId: command.surfaceId,
           name: command.event.name,
-          context: outcome.input!.slice(0, CARD_ACTION_CONTEXT_MAX_V1),
+          context: outcome.input!,
           createdAt: new Date().toISOString(),
         });
       });

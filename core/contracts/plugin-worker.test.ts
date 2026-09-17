@@ -8,6 +8,8 @@ import {
   decodePluginWorkerTriggerInvocationV1,
   decodePluginWorkerTriggerResultV1,
   decodePluginWorkerRenderCardResultV1,
+  decodePluginWorkerCardActionResultV1,
+  MAX_PLUGIN_CARD_ACTION_INPUT_V1,
   MAX_PLUGIN_CARD_COVERS_BYTES_V1,
   pluginWorkerLoaderIdV1,
   pluginWorkerModuleSetHashV1,
@@ -518,5 +520,49 @@ describe("what a render says its decision covers", () => {
         covers: { body: "x".repeat(MAX_PLUGIN_CARD_COVERS_BYTES_V1 + 1) },
       }),
     ).toThrow(/covers exceeds/);
+  });
+});
+
+describe("the line a card action leaves for the Bot", () => {
+  const messages = [{ version: "v1.0", createSurface: { surfaceId: "s" } }];
+
+  test("arrives trimmed, so the pending-input record reads back what was written", () => {
+    expect(
+      decodePluginWorkerCardActionResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        input: "  the draft was sent\n",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "rendered",
+      messages,
+      input: "the draft was sent",
+    });
+  });
+
+  test("a blank line is refused rather than stored", () => {
+    for (const input of [" ", "\n", "\t\n "]) {
+      expect(() =>
+        decodePluginWorkerCardActionResultV1({
+          schemaVersion: 1,
+          status: "rendered",
+          messages,
+          input,
+        }),
+      ).toThrow(/input must be a bounded string/);
+    }
+  });
+
+  test("a line past the bound is refused", () => {
+    expect(() =>
+      decodePluginWorkerCardActionResultV1({
+        schemaVersion: 1,
+        status: "rendered",
+        messages,
+        input: "x".repeat(MAX_PLUGIN_CARD_ACTION_INPUT_V1 + 1),
+      }),
+    ).toThrow(/input must be a bounded string/);
   });
 });

@@ -864,6 +864,21 @@ export const MAX_PLUGIN_CARD_ACTION_INPUT_V1 = 4_000;
 /** The values one draw declares its decision covers, serialized. */
 export const MAX_PLUGIN_CARD_COVERS_BYTES_V1 = 256_000;
 
+/**
+ * The line a handler leaves for the Bot, held to what the pending-input
+ * record reads back: trimmed, non-blank and inside the bound.
+ */
+function boundedLine(value: unknown, label: string, maximum: number): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a bounded string`);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > maximum) {
+    throw new Error(`${label} must be a bounded string`);
+  }
+  return trimmed;
+}
+
 export function decodePluginWorkerCardActionResultV1(
   input: unknown,
   label = "plugin worker card action result",
@@ -906,7 +921,7 @@ export function decodePluginWorkerCardActionResultV1(
     ...(value.input === undefined
       ? {}
       : {
-          input: boundedString(
+          input: boundedLine(
             value.input,
             `${label}.input`,
             MAX_PLUGIN_CARD_ACTION_INPUT_V1,
