@@ -254,17 +254,22 @@ fold into A2UI is a later decision, taken when a slot needs something
   > `updateComponents`, `updateDataModel` and `deleteSurface` are v0.9 names
   > that v1.0 keeps, and `a2ui_core` decodes exactly those four keys into
   > `CreateSurfaceMessage`, `UpdateComponentsMessage`, `UpdateDataModelMessage`
-  > and `DeleteSurfaceMessage`. The renderer-to-agent side is thinner than the
-  > decision assumes. Its only outbound is `UserActionEvent`
-  > (`genui/lib/src/model/ui_models.dart`), carrying the action's `name`, the
-  > component that raised it and its context, dispatched from a component's
-  > `action` property as `{ event: { name, context } }` — so the action route
-  > and its three kinds work on what ships today. There is no
-  > `callAgentFunction`, `rendererFunctionResponse` or `error` message in
-  > 0.10.3, so the Card's one action kind with a reply is the part the seam
-  > carries itself until the renderer catches up. What the bullet already says
-  > is what happens: the seam decodes 1.0, the renderer is fed what it speaks,
-  > and the Frock catalog never depends on the difference.
+  > and `DeleteSurfaceMessage`. Two details of the shape are v0.9's, not 1.0's:
+  > `createSurface` carries `theme`, which 1.0 renames, and the envelope carries
+  > `version: "v0.9"`.
+  >
+  > The renderer-to-agent side is thinner than the decision assumes. `action` is
+  > there — `genui` sends `{ version: "v0.9", action: … }` from
+  > `surface_controller.dart`, from the `event` a component's `action` property
+  > names, as `A2uiClientAction` with the action's `name`, the surface, the
+  > component that raised it and its context — so the action route and its three
+  > kinds work on what ships today, and `A2uiClientError` carries a refusal
+  > back. What is absent is `callAgentFunction`: it exists in the 1.0
+  > specification and nowhere in the Dart, so the Card's one action kind with a
+  > reply is the part the seam carries itself until the renderer catches up.
+  > What the bullet already says is what happens: the seam decodes 1.0, the
+  > renderer is fed what it speaks, and the Frock catalog never depends on the
+  > difference.
   >
   > The SDK floors clear ours with room: `genui` asks Dart `>=3.10.0 <4.0.0`
   > and Flutter `>=3.35.7`, `a2ui_core` asks Dart `>=3.10.0 <4.0.0`, and
