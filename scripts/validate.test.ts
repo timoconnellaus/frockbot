@@ -158,7 +158,7 @@ test("success is reused while a category's inputs are unchanged, and a forced fa
 
 // Not named for what it is about: the hook test above selects by
 // `-t "^documentation"` and counts the tests that match.
-test("no category treats prose as an input", async () => {
+test("prose is not an input to a category that reads only code", async () => {
   const root = fixture();
   categories.probe = [countingProbe];
   await validate(root, ["probe"]);
@@ -195,12 +195,78 @@ test("a killed category's surviving descendants cannot wedge the run", async () 
   expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual([]);
 });
 
+test("an interrupt reaches the children it took out of the foreground", async () => {
+  const root = fixture();
+  const scratch = mkdtempSync(join(tmpdir(), "validation-interrupt-"));
+  roots.push(scratch);
+  const marker = join(scratch, "child.pid");
+  // A real interrupt, delivered to a real validator process, because that is
+  // the whole claim: the children sit in process groups of their own and no
+  // longer receive the terminal's signal. Two commands, so the run captures
+  // and each child leads its own group. The first records its pid and then
+  // sleeps far longer than the test allows.
+  const driver = join(scratch, "driver.ts");
+  writeFileSync(
+    driver,
+    `import { categories, validate } from ${JSON.stringify(resolve(import.meta.dirname, "validate.ts"))};
+categories.probe = [
+  [process.execPath, "-e", ${JSON.stringify(`await Bun.write(${JSON.stringify(marker)}, String(process.pid)); await Bun.sleep(60_000);`)}],
+  [process.execPath, "-e", "await Bun.sleep(60_000)"],
+];
+try {
+  await validate(${JSON.stringify(root)}, ["probe"]);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+}
+`,
+  );
+  const validator = Bun.spawn([process.execPath, driver], {
+    env: GIT_ENV,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  while (!existsSync(marker)) await Bun.sleep(25);
+  const child = Number(readFileSync(marker, "utf8"));
+  validator.kill("SIGINT");
+  expect(await validator.exited).not.toBe(0);
+  expect(await new Response(validator.stderr).text()).toContain(
+    "interrupted by SIGINT",
+  );
+  // The child is gone, rather than still holding ports and scratch after the
+  // developer got their prompt back.
+  expect(() => process.kill(child, 0)).toThrow();
+  // And the run cleaned up after itself, which only happens if it unwound
+  // rather than being cut down where it stood.
+  expect(existsSync(join(root, ".local-validation", "running"))).toBe(false);
+  expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual([]);
+}, 30_000);
+
 test("the input rules exclude prose without excluding nested code", () => {
   expect(isCategoryInput("unit", "docs/plan.md")).toBe(false);
   expect(isCategoryInput("unit", "README.md")).toBe(false);
   expect(isCategoryInput("unit", "apps/cloudflare/skill.md")).toBe(true);
   expect(isCategoryInput("unit", "apps/native/lib/main.dart")).toBe(true);
   expect(isCategoryInput("runtime", "apps/native/lib/main.dart")).toBe(false);
+  // `prettier --check .` reads the repository, prose included, so nothing is
+  // excluded from it.
+  expect(isCategoryInput("format", "docs/plan.md")).toBe(true);
+  expect(isCategoryInput("format", "README.md")).toBe(true);
+  expect(isCategoryInput("format", "apps/native/lib/main.dart")).toBe(true);
+});
+
+test("the formatter re-runs on the prose the other categories skip", () => {
+  const root = fixture();
+  const before = {
+    format: inputFingerprint(root, "format"),
+    unit: inputFingerprint(root, "unit"),
+  };
+  writeFileSync(join(root, "README.md"), "# changed\n");
+  writeFileSync(join(root, "docs", "plan.md"), "changed\n");
+  git(root, "add", ".");
+  git(root, "commit", "-qm", "prose only");
+  expect(inputFingerprint(root, "format")).not.toBe(before.format);
+  expect(inputFingerprint(root, "unit")).toBe(before.unit);
 });
 
 test("the workerd suite does not read the Flutter client, and the rest do", () => {

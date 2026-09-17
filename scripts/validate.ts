@@ -74,7 +74,20 @@ const CATEGORY_EXCLUSIONS: Record<string, string[]> = {
   runtime: ["apps/native/", "apps/marketing/", "apps/admin-portal/"],
 };
 
+/**
+ * Categories that take no exclusions at all, because their command reads the
+ * repository rather than only its code. Every exclusion above — the prose rule
+ * as much as the Flutter one — assumes prose cannot change the category's
+ * result. That holds for a suite and fails for `prettier --check .`:
+ * `.prettierignore` exempts neither `docs/` nor root Markdown, so a
+ * documentation-only commit would be reported as cached against a check that
+ * never ran on it. A category whose command reads the repository itself
+ * belongs here, and pays a few seconds for prose it genuinely does read.
+ */
+const READS_REPOSITORY = new Set(["format"]);
+
 export function isCategoryInput(name: string, path: string): boolean {
+  if (READS_REPOSITORY.has(name)) return true;
   if (ignoredWorkingPath(path)) return false;
   return !CATEGORY_EXCLUSIONS[name]?.some((directory) =>
     path.startsWith(directory),
@@ -222,6 +235,20 @@ export async function validate(
     failure ??= error;
     for (const kill of live) kill();
   };
+  // Capture gives each command its own process group, which is what lets
+  // `stop` reach the workers below a package-manager wrapper — but it also
+  // takes those children out of the terminal's foreground group, so Ctrl-C
+  // reaches this process alone and would otherwise leave the real work
+  // running. Forward the signal, then step aside: the listener removes itself,
+  // so a second interrupt is handled the usual way and kills this process
+  // outright, while the first unwinds through the ordinary failure path and
+  // the `finally` below.
+  const SIGNALS = ["SIGINT", "SIGTERM"] as const;
+  const onSignal = (signal: string): void => {
+    for (const name of SIGNALS) process.off(name, onSignal);
+    stop(new Error(`Validation interrupted by ${signal}`));
+  };
+  for (const name of SIGNALS) process.on(name, onSignal);
   /**
    * Wait for every job before propagating the first failure, so nothing
    * removed below outlives a child still reading it. The first rejection is
@@ -378,6 +405,7 @@ export async function validate(
     if (snapshot(root) !== sha)
       throw new Error("Commit changed during validation");
   } finally {
+    for (const name of SIGNALS) process.off(name, onSignal);
     rmSync(registry, { recursive: true, force: true });
     rmSync(lock, { recursive: true, force: true });
   }
