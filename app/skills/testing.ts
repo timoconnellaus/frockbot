@@ -5,6 +5,7 @@
 // behaviour can be proven against the contract rather than against a host.
 import {
   normalizeWorkspaceRelativePathV1,
+  WORKSPACE_MAX_LIST_ENTRIES,
   workspaceRootKeyV1,
   type WorkspaceDeleteRequestV1,
   type WorkspaceEntryV1,
@@ -51,8 +52,10 @@ export class FakeWorkspace implements WorkspaceFilesV1 {
   #sequence = 0;
   /** Set to make `list` answer a failure, to exercise the unreadable path. */
   listFailure?: { status: "unavailable" | "refused"; reason: string };
-  /** Entries per `list` page, so a caller's paging can be exercised. */
+  /** Entries per `list` page when the caller names no limit, as the store's. */
   listPageSize = 100;
+  /** The largest page this store answers, whatever a caller asked for. */
+  listMaxEntries = WORKSPACE_MAX_LIST_ENTRIES;
 
   static async seeded(seeds: FakeWorkspaceSeedV1[]): Promise<FakeWorkspace> {
     const workspace = new FakeWorkspace();
@@ -132,7 +135,10 @@ export class FakeWorkspace implements WorkspaceFilesV1 {
       // other way round and hide what a cut listing does to a caller.
       .sort((left, right) => (left.path.path < right.path.path ? -1 : 1));
     const start = request.cursor ? Number(request.cursor) : 0;
-    const size = request.limit ?? this.listPageSize;
+    const size = Math.min(
+      request.limit ?? this.listPageSize,
+      this.listMaxEntries,
+    );
     const entries = all.slice(start, start + size);
     const next = start + entries.length;
     return Promise.resolve({

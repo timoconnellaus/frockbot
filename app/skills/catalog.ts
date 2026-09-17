@@ -41,6 +41,7 @@ import {
   type SkillRefSourceV1,
   type SkillRefV1,
   type SkillSourceV1,
+  WORKSPACE_MAX_LIST_ENTRIES,
   type WorkspaceEntryV1,
   type WorkspaceInstructionRootV1,
   type WorkspaceReadOutcomeV1,
@@ -72,8 +73,6 @@ export interface SkillOwnerV1 {
   botId: string;
 }
 
-/** Most `list` pages walked before enumeration stops. */
-export const SKILL_MAX_LIST_PAGES = 8;
 /**
  * Most `list` pages walked while counting a root for the quota.
  *
@@ -86,6 +85,29 @@ export const SKILL_MAX_LIST_PAGES = 8;
 export const SKILL_MAX_COUNT_LIST_PAGES = 256;
 /** Most Skills carried in one catalog. Beyond this, the rest are refused. */
 export const SKILL_MAX_CATALOG_ENTRIES = 200;
+
+/**
+ * Entries asked for per `list` page while loading an instruction root.
+ *
+ * The store's own default page is a tenth of this, which was ample while a
+ * Skill was one file. A Skill is a directory now, so the walk asks for the
+ * largest page the kernel will answer rather than paying ten times the round
+ * trips for the same root.
+ */
+export const SKILL_LIST_PAGE_LIMIT = WORKSPACE_MAX_LIST_ENTRIES;
+
+/**
+ * Most `list` pages walked before enumeration stops.
+ *
+ * Derived, not chosen: a root that stays inside its own declared bounds must
+ * list end to end, and those bounds are `SKILL_MAX_CATALOG_ENTRIES` Skills of
+ * one `SKILL.md` plus `SKILL_MAX_REFERENCES` files each. A root larger than
+ * that is still cut, and the cut is a recorded refusal.
+ */
+export const SKILL_MAX_LIST_PAGES = Math.ceil(
+  (SKILL_MAX_CATALOG_ENTRIES * (1 + SKILL_MAX_REFERENCES)) /
+    SKILL_LIST_PAGE_LIMIT,
+);
 
 /**
  * One Markdown file a Skill offers beside its `SKILL.md` (ADR 0030).
@@ -366,7 +388,9 @@ export async function loadSkillCatalogV1(
   let listedWhole = false;
   for (let page = 0; page < SKILL_MAX_LIST_PAGES; page += 1) {
     const outcome = await reads.list(
-      cursor === undefined ? { root } : { root, cursor },
+      cursor === undefined
+        ? { root, limit: SKILL_LIST_PAGE_LIMIT }
+        : { root, cursor, limit: SKILL_LIST_PAGE_LIMIT },
     );
     if (outcome.status !== "ok") {
       // "unavailable" is an ordinary answer, not an error condition: an
@@ -399,6 +423,17 @@ export async function loadSkillCatalogV1(
           entry.path.path > furthest ? entry.path.path : furthest,
         "",
       );
+  if (!listedWhole) {
+    // A Skill whose `SKILL.md` lies entirely past the cut never becomes a
+    // candidate, so without this the root would quietly hold fewer Skills
+    // than it has. The cut itself is the refusal; the straddling Skill below
+    // gets its own.
+    catalog.refusals.push({
+      path: "",
+      kind: "unreadable",
+      reason: `the ${refSource} instruction root did not finish listing within ${SKILL_MAX_LIST_PAGES} pages, so any Skill past the cut was not loaded`,
+    });
+  }
 
   const candidates = entries
     .filter((entry) => isSkillDocumentPathV1(entry.path.path))

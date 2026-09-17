@@ -341,9 +341,10 @@ describe("the Skills loader", () => {
         });
       }
     }
-    // Two entries a page: the bounded walk ends inside the sixth Skill, after
-    // its `SKILL.md` and before the `references/` beside it.
-    workspace.listPageSize = 2;
+    // A store that answers two entries a page whatever the walk asks for: the
+    // bounded walk ends inside the fifth Skill, after its `SKILL.md` and
+    // before the `references/` beside it.
+    workspace.listMaxEntries = 2;
 
     const catalog = await loadSkillCatalogV1(workspace, OWNER);
 
@@ -352,19 +353,64 @@ describe("the Skills loader", () => {
       "skills/skill-2/SKILL.md",
       "skills/skill-3/SKILL.md",
       "skills/skill-4/SKILL.md",
-      "skills/skill-5/SKILL.md",
     ]);
     expect(catalog.skills.map((skill) => skill.references.length)).toEqual([
-      2, 2, 2, 2, 2,
+      2, 2, 2, 2,
     ]);
-    // The sixth is refused whole rather than loaded off a partial index.
+    // The cut itself is recorded, because the Skills entirely past it are
+    // never candidates and would otherwise vanish silently; the one the cut
+    // fell inside is refused whole rather than loaded off a partial index.
     expect(catalog.refusals).toEqual([
       {
-        path: "skills/skill-6/SKILL.md",
+        path: "",
+        kind: "unreadable",
+        reason: expect.stringContaining("any Skill past the cut was not"),
+      },
+      {
+        path: "skills/skill-5/SKILL.md",
         kind: "unreadable",
         reason: expect.stringContaining("did not finish listing"),
       },
     ]);
+  });
+
+  test("lists a root that stays inside its own caps end to end", async () => {
+    const workspace = new FakeWorkspace();
+    // Every Skill inside the reference bound, the whole root inside the Skill
+    // cap: a walk sized to the caps finishes, so nothing is refused and
+    // nothing silently disappears.
+    const skills = 26;
+    for (let index = 1; index <= skills; index += 1) {
+      const slug = `skill-${String(index).padStart(2, "0")}`;
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `skills/${slug}/SKILL.md`,
+        text: skillMarkdown(slug, "Use this when capped.", "Body."),
+        writer: BOT_WRITER,
+      });
+      for (
+        let reference = 0;
+        reference < SKILL_MAX_REFERENCES - 1;
+        reference += 1
+      ) {
+        await workspace.seed({
+          root: OWN_ROOT,
+          path: `skills/${slug}/references/r-${String(reference).padStart(2, "0")}.md`,
+          text: "# Reference",
+          writer: BOT_WRITER,
+        });
+      }
+    }
+
+    const catalog = await loadSkillCatalogV1(workspace, OWNER);
+
+    expect(catalog.refusals).toEqual([]);
+    expect(catalog.skills).toHaveLength(skills);
+    expect(
+      catalog.skills.every(
+        (skill) => skill.references.length === SKILL_MAX_REFERENCES - 1,
+      ),
+    ).toBe(true);
   });
 
   test("refuses a Skill whole when a reference is past a bound or not the Bot's", async () => {

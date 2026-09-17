@@ -673,24 +673,12 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
           isError: false,
         };
       }
-      const offered = skill.references.flatMap(
-        (reference) =>
-          skillReferenceNameForV1(skill.path, reference.path) ?? [],
-      );
       return {
         content: [
           `# ${skill.name}`,
           `${skill.ref ? `Ref: ${formatSkillRefV1(skill.ref)}\n` : ""}Path: ${skill.path} (generation ${skill.generationId})`,
           "",
           skill.body,
-          // What the body's index can actually be loaded by, so a reference it
-          // names is asked for by the name this tool answers to.
-          ...(offered.length > 0
-            ? [
-                "",
-                `References: ${offered.join(", ")}. Load one with {"path":"${named}","reference":"${offered[0]}"}.`,
-              ]
-            : []),
         ].join("\n"),
         isError: false,
       };
@@ -737,11 +725,14 @@ export function createSkillWriteTool(
       "Write a Skill: a Markdown recipe stored under your own instruction root, or under your User's shared root where all of their Bots can read it. It becomes visible to you on your next Turn, not this one.",
     inputSchema: SKILL_WRITE_INPUT_SCHEMA as unknown as Record<string, unknown>,
     idempotent: false,
-    // Deliberately permissive, as `skill_load`'s is: the decoder's shape rules
-    // are the guidance, and a bare `false` here would replace every one of
-    // them with the generic `Invalid input for tool: skill_write`. A wrong
-    // shape reaches `execute`, which says what was wrong.
-    validate: (input: unknown) => !!input && typeof input === "object",
+    validate: (input: unknown) => {
+      try {
+        decodeSkillWriteInputV1(input);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     execute: async (input: unknown, context: ToolExecutionContext) => {
       let decoded: SkillWriteInputV1;
       try {

@@ -294,10 +294,11 @@ describe("the skill_load tool", () => {
     await catalog.refresh(4, session);
     const tool = createSkillLoadTool(catalog);
 
-    // The body names what can be loaded, and the tool says how to ask for it.
+    // The body is exactly what the Skill authored: its own index, not a
+    // generated one.
     const body = await tool.execute({ path: "bot/standup" }, CONTEXT);
     expect(body.isError).toBe(false);
-    expect(body.content).toContain("References: forms.md");
+    expect(body.content).toContain("Read forms.md before you fill one in.");
 
     const reference = await tool.execute(
       { path: "bot/standup", reference: "forms.md" },
@@ -611,7 +612,7 @@ describe("the skill_write tool", () => {
     await dispose();
   });
 
-  test("refuses input it cannot decode without touching the Workspace", async () => {
+  test("denies input it cannot decode without touching the Workspace", async () => {
     const workspace = new FakeWorkspace();
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
@@ -619,15 +620,26 @@ describe("the skill_write tool", () => {
       WRITER,
       sessions,
     );
-    // Through the registry, because a `validate` that denied the call would
-    // replace the decoder's reason with `Invalid input for tool: skill_write`.
+    // A shape the decoder refuses never reaches `execute`, and never reaches
+    // the Workspace: admission is the decoder's own rules.
+    expect(tool.validate?.({ name: "a", description: "b" })).toBe(false);
+    expect(
+      tool.validate?.({
+        reference: "forms.md",
+        slug: "standup",
+        body: "Body.",
+      }),
+    ).toBe(true);
+
+    // A decoded shape the write path still refuses keeps its own reason.
     const result = await callThroughRegistry(tool, {
       name: "a",
-      description: "b",
+      description: "Use this when refused.",
+      body: "Body.",
+      scope: "managed",
     });
     expect(result.isError).toBe(true);
-    expect(result.content).toContain("skill_write was refused");
-    expect(result.content).not.toContain("Invalid input for tool");
+    expect(result.content).toContain("managed skills are not editable");
     expect(workspace.calls).toEqual([]);
     await dispose();
   });
@@ -681,15 +693,15 @@ describe("the skill_write tool", () => {
     );
 
     for (const reference of ["../escape.md", "nested/forms.md", "forms.txt"]) {
-      // Through the registry: the shape rule is guidance only if the model
-      // actually receives it.
+      // Through the registry: a name that is not one `.md` file beside the
+      // Skill is refused, and nothing is written.
       const refused = await callThroughRegistry(tool, {
         slug: "standup",
         reference,
         body: "#",
       });
       expect(refused.isError).toBe(true);
-      expect(refused.content).toContain(".md file name");
+      expect(workspace.calls).toEqual([]);
     }
     // And a reference whose Skill is not written yet has nothing to belong to.
     const orphan = await tool.execute(
