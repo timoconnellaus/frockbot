@@ -62,6 +62,12 @@ class DeleteHarness extends NativeApi {
         'profile': {'name': settings.group(1)},
       };
     }
+    // The settings read also asks how the Bot sounds; these Bots have chosen
+    // nothing, so the record carries no voice at all (ADR 0031).
+    final voice = RegExp(r'^/api/bots/(\w+)/voice$').firstMatch(path);
+    if (voice != null && body == null) {
+      return {'schemaVersion': 1, 'botId': voice.group(1), 'revision': 0};
+    }
     final lifecycle = RegExp(r'^/api/bots/(\w+)/lifecycle$').firstMatch(path);
     if (lifecycle != null && body is Map) {
       lifecycleWrites.add(body);
