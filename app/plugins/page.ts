@@ -12,10 +12,7 @@ import {
   type ViewDocument,
   type ViewNode,
 } from "@frockbot/core/protocol-schemas";
-import type {
-  PluginGrantV1,
-  PluginNetworkV1,
-} from "@frockbot/core/contracts";
+import type { PluginGrantV1, PluginNetworkV1 } from "@frockbot/core/contracts";
 import type { PluginSeedStateV1 } from "./catalog.js";
 import {
   MAX_PLUGIN_TOOL_ARGUMENTS_BYTES_V1,

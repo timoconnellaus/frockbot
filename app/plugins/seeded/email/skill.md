@@ -31,7 +31,7 @@ attributed to this Bot.
    you draw it.
 
 2. **Wait.** Their decision arrives as durable input on a later Turn, the way
-   every approval does. The line names the decision *and* its id:
+   every approval does. The line names the decision _and_ its id:
    `[Approval] The decision on "card-approval-…" is approved.` Nothing is sent
    in the meantime.
 

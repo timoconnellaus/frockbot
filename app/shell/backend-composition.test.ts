@@ -11,6 +11,7 @@ import {
   decodePluginDescriptorV1,
   decodeSendToUserPayloadV1,
   ISOLATE_CONTRACT_VERSION,
+  pluginCardToolNameV1,
   type BotCapabilitiesStub,
   type PluginWorkerEntrypoint,
 } from "@frockbot/core/contracts";
@@ -355,7 +356,10 @@ describe("a Plugin that the worker refuses", () => {
  * carried nothing that said which card it was given on.
  */
 describe("the Approvals a Plugin's Card asks for", () => {
-  const CARD_PLUGIN = "drafts";
+  // A dashed plugin id on purpose: a tool name cannot hold a dash, so the
+  // registry holds this card under `draft_desk_draft`. Everything the seam
+  // says about the tool has to use that spelling, not the id's.
+  const CARD_PLUGIN = "draft-desk";
 
   function cardMember(): CompositionMemberV1 {
     return {
@@ -511,7 +515,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
     return {
       values,
       store: createCardApprovalStoreV1({
-        get: <T,>(key: string) => Promise.resolve(values.get(key) as T),
+        get: <T>(key: string) => Promise.resolve(values.get(key) as T),
         put: (key: string, value: unknown) => {
           values.set(key, value);
           return Promise.resolve();
@@ -590,7 +594,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
         name: "call_dynamic_tool",
         input: {
           namespace: CARD_PLUGIN,
-          toolName: `${CARD_PLUGIN}_draft`,
+          toolName: pluginCardToolNameV1(CARD_PLUGIN, "draft"),
           arguments: input,
         },
       };
@@ -689,8 +693,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
     surfaceId: string,
   ): { digest: string; approvalIds: string[] } | undefined {
     return values.get(cardApprovalBindingKeyV1(CARD_PLUGIN, surfaceId)) as
-      | { digest: string; approvalIds: string[] }
-      | undefined;
+      { digest: string; approvalIds: string[] } | undefined;
   }
 
   test("a replayed card tool call asks for the one decision it already asked for", async () => {
@@ -760,9 +763,9 @@ describe("the Approvals a Plugin's Card asks for", () => {
         /surface "([^"]+)"/.exec(String(result.content))![1]!;
       const surfaceId = surfaceOf(first);
       expect(surfaceOf(again)).toBe(surfaceId);
-      expect(surfaceId.startsWith(cardSurfacePrefixV1(CARD_PLUGIN, "draft"))).toBe(
-        true,
-      );
+      expect(
+        surfaceId.startsWith(cardSurfacePrefixV1(CARD_PLUGIN, "draft")),
+      ).toBe(true);
 
       const asked = approvalIdsOnLog(mounted);
       expect(asked).toHaveLength(1);
@@ -903,7 +906,10 @@ describe("the Approvals a Plugin's Card asks for", () => {
       const minted = approvalIdsOnLog(mounted);
       recordPendingApproval(values, minted[0]!);
 
-      const changed = await draw({ data: { subject: "Something else" }, surfaceId });
+      const changed = await draw({
+        data: { subject: "Something else" },
+        surfaceId,
+      });
       expect(changed.isError).toBe(true);
       expect(String(changed.content)).toMatch(/decision still pending/);
       // The card stands exactly as it was, and no second decision was asked.

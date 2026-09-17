@@ -310,7 +310,9 @@ describe("one email, sent for the Bot that asked", () => {
         values: { ...MESSAGE, cc: [], inReplyTo: "" },
       })),
     });
-    expect(await isolateEmail(subject.state, call(requestValues()))).toMatchObject({
+    expect(
+      await isolateEmail(subject.state, call(requestValues())),
+    ).toMatchObject({
       status: "sent",
     });
   });
@@ -318,7 +320,10 @@ describe("one email, sent for the Bot that asked", () => {
   test("refuses a decision nobody gave, denied, or expired", async () => {
     for (const [records, pattern] of [
       [{}, /no Approval/],
-      [{ [approvalKeyV1("ap-1")]: approval({ decision: "pending" }) }, /pending/],
+      [
+        { [approvalKeyV1("ap-1")]: approval({ decision: "pending" }) },
+        /pending/,
+      ],
       [{ [approvalKeyV1("ap-1")]: approval({ decision: "denied" }) }, /denied/],
       [
         {

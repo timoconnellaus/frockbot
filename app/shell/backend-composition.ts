@@ -31,6 +31,7 @@ import {
 } from "@frockbot/frock-compose";
 import {
   decodeSendToUserPayloadV1,
+  pluginCardToolNameV1,
   type BotCapabilitiesStub,
   type PersistSessionEvents,
   type SessionEvent,
@@ -358,7 +359,10 @@ export function createShellCompositionHost(
                         approvalId,
                         ...decision,
                       }));
-                const tool = `${send.pluginId}_${send.cardId}`;
+                // The registry holds the card's tool under the canonical
+                // spelling, which turns a plugin id's dashes into
+                // underscores; a refusal has to name the tool that exists.
+                const tool = pluginCardToolNameV1(send.pluginId, send.cardId);
                 // Decoded like any other payload before anything reaches the
                 // log, and decoded *before* the Card is recorded: a decision
                 // the seam could not put on the log would otherwise leave a
@@ -401,7 +405,8 @@ export function createShellCompositionHost(
                   // drew this surface first; asking again would put a second
                   // request for one decision on the log.
                   const approval = cardApprovals[index];
-                  if (approval && reused.includes(approval.approvalId)) continue;
+                  if (approval && reused.includes(approval.approvalId))
+                    continue;
                   const asked = await recordSendToUserV1(
                     runtime.services.sessions,
                     ask,

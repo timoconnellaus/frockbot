@@ -377,7 +377,7 @@ serve`), the platform model over the remote Workers AI binding, asked
    > Card asks for is bound to what it authorizes: `renderCard` answers with
    > `covers` — the canonical values the Plugin drew and will act on — beside
    > its messages, and the kernel records the Plugin, the surface and a digest
-   > of *those* beside the Approval ids. It is the Plugin's word and not the
+   > of _those_ beside the Approval ids. It is the Plugin's word and not the
    > model's because a Plugin need not draw its input: the email card redraws
    > the draft it holds, so binding the tool input would bind values nobody
    > saw. A draw that asks for a decision and declares no `covers` is refused.
@@ -395,6 +395,7 @@ serve`), the platform model over the remote Workers AI binding, asked
    > `isolateEmail` refuses a decision that is not the one bound to this send,
    > and a redraw of a pending draft reuses that decision rather than minting
    > a second over one draft.
+
 7. The five first-party cards as locked Plugins; the old members mapped, then
    removed a release later.
 8. The rest of the Frock catalog, family by family, each with its reference.

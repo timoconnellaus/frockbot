@@ -257,9 +257,13 @@ describe("the email Plugin's draft card", () => {
   test("sends once, settles into a receipt, and never sends a discarded draft", async () => {
     const { ctx, sends } = context();
     await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx);
-    expect(await execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx)).toMatch(
-      /Sent to nick@example.com/,
-    );
+    expect(
+      await execute(
+        "email_send",
+        { surfaceId: SURFACE, approvalId: APPROVAL },
+        ctx,
+      ),
+    ).toMatch(/Sent to nick@example.com/);
     expect(sends).toEqual([
       {
         approvalId: APPROVAL,
@@ -274,9 +278,13 @@ describe("the email Plugin's draft card", () => {
       },
     ]);
     // A retried Turn must not send the same mail twice.
-    expect(await execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx)).toMatch(
-      /Already sent/,
-    );
+    expect(
+      await execute(
+        "email_send",
+        { surfaceId: SURFACE, approvalId: APPROVAL },
+        ctx,
+      ),
+    ).toMatch(/Already sent/);
     expect(sends).toHaveLength(1);
 
     const settled = componentsOf(
@@ -332,7 +340,11 @@ describe("the email Plugin's draft card", () => {
     const { ctx } = context();
     for (const state of ["draft", "sent"] as const) {
       if (state === "sent") {
-        await execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx);
+        await execute(
+          "email_send",
+          { surfaceId: SURFACE, approvalId: APPROVAL },
+          ctx,
+        );
       }
       const answer = await cards.draft.render(
         { surfaceId: SURFACE, data: draft },
@@ -420,7 +432,11 @@ describe("the email Plugin's draft card", () => {
     );
     // And the message that left is exactly what the card declared it covered,
     // which is what the kernel compares the Approval's digest against.
-    const { approvalId: _id, surfaceId: _surface, ...message } = sends[0] as {
+    const {
+      approvalId: _id,
+      surfaceId: _surface,
+      ...message
+    } = sends[0] as {
       approvalId: string;
       surfaceId: string;
     };
@@ -607,7 +623,10 @@ function expectConforms(component: A2uiComponentV1): void {
   const rule = ruleFor(component.component);
   const where = `${component.component} "${component.id}"`;
   for (const key of Object.keys(component)) {
-    expect(rule.properties[key], `${where} has no "${key}" in the catalog`).toBeDefined();
+    expect(
+      rule.properties[key],
+      `${where} has no "${key}" in the catalog`,
+    ).toBeDefined();
   }
   for (const key of rule.required) {
     expect(
@@ -645,7 +664,11 @@ describe("every state the email card draws", () => {
       { surfaceId: SURFACE, action: "details", context: { full: true } },
       ctx,
     );
-    await execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx);
+    await execute(
+      "email_send",
+      { surfaceId: SURFACE, approvalId: APPROVAL },
+      ctx,
+    );
     const sent = await cards.draft.render(
       { surfaceId: SURFACE, data: draft },
       ctx,
@@ -664,7 +687,10 @@ describe("every state the email card draws", () => {
 
     // And the surface is created under the catalog the app registers both
     // families as, which is the id the committed Frock catalog carries.
-    const created = decodeA2uiAgentMessageV1(messagesOf(drafted)[0]!, "created");
+    const created = decodeA2uiAgentMessageV1(
+      messagesOf(drafted)[0]!,
+      "created",
+    );
     expect("createSurface" in created && created.createSurface.catalogId).toBe(
       CATALOGS[0]!.catalogId,
     );

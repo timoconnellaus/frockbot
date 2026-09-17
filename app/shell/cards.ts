@@ -1422,7 +1422,9 @@ export function createCardApprovalStoreV1(storage: {
     },
     async live(pluginId, surfaceId) {
       const stored = decodeCardApprovalRecordV1(
-        await storage.get<unknown>(cardApprovalBindingKeyV1(pluginId, surfaceId)),
+        await storage.get<unknown>(
+          cardApprovalBindingKeyV1(pluginId, surfaceId),
+        ),
       );
       if (!stored) return undefined;
       for (const approvalId of stored.approvalIds) {
@@ -1449,7 +1451,9 @@ export function createCardApprovalStoreV1(storage: {
     // surface still lands — that is a new draw, with its own decision.
     async record(binding) {
       const key = cardApprovalBindingKeyV1(binding.pluginId, binding.surfaceId);
-      const stored = decodeCardApprovalRecordV1(await storage.get<unknown>(key));
+      const stored = decodeCardApprovalRecordV1(
+        await storage.get<unknown>(key),
+      );
       if (
         stored &&
         stored.digest === binding.digest &&

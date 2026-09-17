@@ -1217,8 +1217,7 @@ describe("the generated wrapper's card handlers", () => {
     }
     const late = await runCardAction(
       pressInvocation({ deadlineMs: 25 }),
-      () =>
-        cardPlugin({ render: () => messages, actions: { details: never } }),
+      () => cardPlugin({ render: () => messages, actions: { details: never } }),
       contextFor,
     );
     expect(late.status).toBe("drop");

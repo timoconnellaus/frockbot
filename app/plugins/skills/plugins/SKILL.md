@@ -327,7 +327,7 @@ export const cards: Record<string, PluginCard> = {
   messages, as `decision: { action, risk, rationale? }`. Drawing one ends the
   Turn; the decision arrives as durable input later.
 - A card that draws an `ApprovalActions` must also return `covers`: the
-  canonical values that decision authorizes, as *you* drew them. The kernel
+  canonical values that decision authorizes, as _you_ drew them. The kernel
   binds the Approval to those, and a capability claiming the decision later has
   to be about the same values. Return what your tool will actually act on —
   the draft you are holding, not the values the Bot passed to the card tool,

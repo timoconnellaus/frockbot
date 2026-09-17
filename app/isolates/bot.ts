@@ -925,8 +925,10 @@ async function claimEmailApprovalV1(
   | { status: "refused"; failure: IsolateCapabilityFailureV1 }
 > {
   const { approvalId } = claim;
-  const refused = (reason: string) =>
-    ({ status: "refused" as const, failure: { status: "unavailable" as const, reason } });
+  const refused = (reason: string) => ({
+    status: "refused" as const,
+    failure: { status: "unavailable" as const, reason },
+  });
   return state.ctx.storage.transaction(async (transaction) => {
     const stored = await transaction.get<unknown>(approvalKeyV1(approvalId));
     if (stored === undefined) {
@@ -941,7 +943,9 @@ async function claimEmailApprovalV1(
       );
     }
     if (Date.parse(approval.expiresAt) <= Date.now()) {
-      return refused(`Approval "${approvalId}" has expired, so nothing was sent`);
+      return refused(
+        `Approval "${approvalId}" has expired, so nothing was sent`,
+      );
     }
     // What the person actually decided about. An Approval carrying no
     // binding — one the Bot asked for with `send_to_user`, or one recorded

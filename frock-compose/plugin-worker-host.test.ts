@@ -1600,9 +1600,9 @@ describe("a Plugin's cards", () => {
       { data: { subject: "Hello" } },
       executionContext({ sessionId: "routine:r-1" }),
     );
-    expect(
-      (subject.sends[2] as { surfaceId: string }).surfaceId,
-    ).not.toBe(send.surfaceId);
+    expect((subject.sends[2] as { surfaceId: string }).surfaceId).not.toBe(
+      send.surfaceId,
+    );
 
     await tool.execute!(
       { data: { subject: "Hello" }, surfaceId: send.surfaceId },

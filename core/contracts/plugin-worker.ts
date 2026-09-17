@@ -1047,7 +1047,8 @@ function decodeCardCoversV1(
     throw new Error(`${label}.covers is not JSON`);
   }
   if (
-    new TextEncoder().encode(serialized).length > MAX_PLUGIN_CARD_COVERS_BYTES_V1
+    new TextEncoder().encode(serialized).length >
+    MAX_PLUGIN_CARD_COVERS_BYTES_V1
   ) {
     throw new Error(
       `${label}.covers exceeds ${MAX_PLUGIN_CARD_COVERS_BYTES_V1} bytes`,
