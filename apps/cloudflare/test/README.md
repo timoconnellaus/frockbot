@@ -103,7 +103,9 @@ Run the whole suite with `bun run test:e2e`, one file with
 adding `--headed`. Locally it runs four workers at once; `--workers 1` puts it
 back to one file at a time when a failure needs reading.
 
-Three things keep that parallelism honest, and a new spec inherits all three:
+Four conventions carry across the layer, and a new spec inherits all four —
+three of them keep that parallelism honest, and the fourth keeps a spec reading
+the page rather than the viewport:
 
 - Every test takes a fresh `?as_user=` identity, so no two ever meet in one
   User Durable Object.
@@ -117,6 +119,12 @@ Three things keep that parallelism honest, and a new spec inherits all three:
   tests, and still fails each test on the console errors reported while it ran.
   `chat.e2e.ts` is the worked example — every test in it makes a Bot of its own
   and shares everything above that.
+- A widget that is off screen is absent from Flutter's semantics tree
+  altogether, not merely hidden, so a spec scrolls its target into view before
+  asserting on it or on the switch it holds — and scrolls back to something it
+  passed earlier before reading that again, because a sweep down a list leaves
+  the list sitting at its last row. `bot-plugins.e2e.ts` does both; `profile`
+  and `theme` do the first.
 
 `e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`,
 seeds `dist/artifacts/foundation-v1.mjs` into the local
