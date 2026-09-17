@@ -413,19 +413,19 @@ class _CreateBotSheetState extends State<CreateBotSheet> {
   }
 }
 
-/// Changing an existing Bot's colour.
+/// Changing an existing Bot's character and colour.
 ///
 /// The one thing the edit half still does under the single-default-avatar
 /// rule. It is fenced on the revision the read just
 /// reported rather than on one held since the sheet opened, because the sheet
-/// is open for as long as somebody is looking at six avatar.
+/// is open for as long as somebody is looking at the cast.
 class AvatarPickerSheet extends StatefulWidget {
   final NativeApi api;
   final String botId;
   final String botName;
 
-  /// The colour the Bot wears now, so the sheet opens with it marked rather
-  /// than with six colours and no answer to "which one am I?".
+  /// The character and colour the Bot wears now, so the sheet opens with them
+  /// marked rather than with the whole cast and no answer to "which one am I?".
   final String? background;
   final String? primary;
   const AvatarPickerSheet({

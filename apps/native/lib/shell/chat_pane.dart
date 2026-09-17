@@ -48,7 +48,7 @@ class ChatPane extends StatefulWidget {
   /// shell's call, as it is for the run view.
   final void Function(TranscriptLine line)? onOpenExchange;
 
-  /// Another Bot's sheep and current name, for the marker that names it.
+  /// Another Bot's character and current name, for the marker that names it.
   final String? Function(String botId)? backgroundOf;
   final String? Function(String botId)? primaryOf;
   final String? Function(String botId)? nameOf;

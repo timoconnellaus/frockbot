@@ -65,7 +65,15 @@ validation exercise the real `.riv` files.
 - `apps/native/README.md`: one Flutter client serves web, Android and macOS;
   Flutter 3.47.0 / Dart 3.13.0 must remain pinned.
 
-## 1. Prove the renderer in a Flutter studio
+## The original delivery plan
+
+Everything below is the plan as it was written before the work, kept as the
+record of what was intended and why. It is not a description of the app today:
+where it disagrees with **What exists in the app** and **Surface behaviour**
+above, those sections are authoritative. In particular the working ring and
+trail, and the conversation header's avatar, were reviewed and removed.
+
+### 1. Prove the renderer in a Flutter studio
 
 Build a development-only Flutter studio using all eleven actual `.riv` assets,
 the current behaviour controls and the character switcher. This is the first
@@ -96,7 +104,7 @@ Acceptance: the studio works on Flutter web, Android and macOS; two instances of
 the same character can have different colours and expressions; loading, removal,
 resize and repeated switching do not leak controllers or show stale characters.
 
-## 2. Save appearance and offer a character picker
+### 2. Save appearance and offer a character picker
 
 Proposed stored appearance: `characterId` plus a validated primary colour,
 inside the app's normal versioned wire envelope. Use `avatar` as the registration
@@ -133,7 +141,7 @@ Acceptance: create, edit, reload, reconnect and second-device reads preserve the
 same character/colour; conflict and failure paths are visible and recoverable;
 fresh Bot creation and conversation work after the coordinated data change.
 
-## 3. Connect actual activity to motion
+### 3. Connect actual activity to motion
 
 Keep saved identity separate from temporary animation state. A small deterministic
 presentation function maps existing server projections into activity and feeling.
@@ -171,7 +179,7 @@ component API. Do not assign them to production events without a clear meaning;
 network failures should not make the character perform distress. Add listening
 or speaking behaviour only when we explicitly design that voice interaction.
 
-## 4. Replace avatar surfaces and tune interaction
+### 4. Replace avatar surfaces and tune interaction
 
 Use `CharacterAvatar` everywhere, passing the same appearance. Review sidebar,
 groups, conversation header, working indicator, create/edit sheets, settings,
@@ -199,7 +207,7 @@ Acceptance: scrolling a busy sidebar stays smooth; hidden instances stop
 advancing; selection, keyboard navigation and screen-reader labels still work;
 animation never becomes the sole indicator of work, errors or required input.
 
-## 5. Validate and deliver
+### 5. Validate and deliver
 
 Test the pure status mapping, one-shot lifecycle, identity validation and cloud
 round trips. Widget tests should exercise loading/failure handling, switching,
@@ -218,7 +226,7 @@ build and coordinated server contract/cleanup together, with the native minimum
 version updated if required to exclude clients speaking the removed schema.
 Normal release approval remains the final deployment gate.
 
-## Suggested checkpoints
+### Suggested checkpoints
 
 1. **Flutter studio:** all eleven characters, colours and behaviours on the real
    app platforms; settle framing and renderer performance.

@@ -483,7 +483,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `SearchOverlay` — `lib/search/overlay.dart` over `lib/search/controller.dart`:
   the backend index across every Bot, debounced, with each of its four states
   named
-- `CreateBotSheet` — `lib/flock/create.dart`: a sheep, a name and the first
+- `CreateBotSheet` — `lib/flock/create.dart`: a character, a name and the first
   thing to say to the Bot, opened from the sidebar's own create gesture
 - `MachinesPage` — `lib/machines/page.dart`: a host over `ViewDocumentView` for
   the computers a Bot may reach, plus the pairing code the host holds
@@ -682,8 +682,8 @@ row: the Bot's companion beside the composer takes the working pose and wears
 the typing badge while a Turn runs, and the thread only says something when a
 Stop is being waited on or a Turn is queued behind the one it displaced.
 A message that crossed to or from a counterpart — another of the User's Bots,
-or the voice session — is one centred marker in the thread, "Messaged 🐑 Codex
-Watch" or "Message from 🐑 Xero Books", wearing the counterpart's own sheep
+or the voice session — is one centred marker in the thread, "Messaged Codex
+Watch" or "Message from Xero Books", wearing the counterpart's own character
 and, while queued, stopped or unanswered, its status; a running exchange says
 nothing there, because the Bot's companion beside the composer already says it.
 The words are never in the thread: the marker opens a view-only chat,
@@ -715,20 +715,17 @@ projected by `projectAnnouncements` and ordered by their recorded timestamps.
 **PR 9: the Flock, and three more projections.**
 
 `lib/flock/` is what a Bot looks like and what may be done to one.
-`sheep.dart` draws the avatar from two bundled layers — a background and the
-canonical sheep, the seven WebPs `apps/native/assets/sheep/` carries — and the
-same sheep is drawn wherever a Bot is: the sidebar row, its pinned tile, the
-thread, the composer companion and Bot settings, each from the
-`sheep.background` the directory already returns. Wearables are deferred, so
-the background is the
-whole of the choice a person makes and `defaultSheepRecipeV1` pins the other
-three bands to the catalogue's neutral roots — a Bot this app creates is still
-one the wardrobe can dress when they return.
+`avatar.dart` is `CharacterAvatar`, one animated Rive artboard per Bot drawn
+from the cast `apps/native/assets/characters/` bundles, and the same character
+is drawn wherever a Bot is: the sidebar row, its pinned tile, the thread, the
+composer companion and Bot settings, each from the `characterId` and `primary`
+the directory already returns. The cast and the motion contract are
+[the character integration note](design/character-app-integration.md).
 
 `create.dart` is the sidebar's create gesture, which no longer hands off to
-Manage Bots, and `SheepColourSheet` beside it is the wardrobe's edit half — the
-one thing left of the wardrobe under the single-default-avatar rule — reached
-by pressing the avatar in Bot settings and fenced on the sheep revision the read
+Manage Bots, and `AvatarPickerSheet` beside it is the edit half — the one thing
+left of the old wardrobe under the single-default-avatar rule — reached
+by pressing the avatar in Bot settings and fenced on the avatar revision the read
 just reported rather than one held since the sheet opened. The command is written to the durable store before it is sent and
 cleared only once the authority has answered it, so a lost reply finishes the
 Bot that was asked for rather than making a second one; a 409 is not a failure
@@ -781,7 +778,7 @@ as the person is looking at it and nowhere else. It is the same reasoning
 `SettingField.secret` already carried, from the other direction.
 
 Creating a Bot and its danger zone are host chrome rather than projections, and
-deliberately: the sheep is bundled art rather than an `embed`'s https image,
+deliberately: the character is bundled art rather than an `embed`'s https image,
 the create command fences on a directory revision `ViewController` has no way
 to express, and the lifecycle receipt has a third state — `pending` — that a
 view action's two do not.

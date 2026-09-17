@@ -16,7 +16,7 @@ import 'markdown.dart';
 import 'semantics.dart';
 import 'transcript.dart';
 
-/// One side of the chat: a name and the sheep that goes with it.
+/// One side of the chat: a name and the character that goes with it.
 class ExchangeParty {
   final String name;
   final String? background;

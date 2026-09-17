@@ -765,8 +765,8 @@ class _ExchangeMarker extends StatelessWidget {
   }
 }
 
-/// A counterpart's face: the Bot's own sheep, or the waveform for the voice
-/// session, which has no face of its own.
+/// A counterpart's face: the Bot's own character, or the waveform for the
+/// voice session, which has no face of its own.
 class CounterpartAvatar extends StatelessWidget {
   final ExchangeCounterpart counterpart;
   final String? background;

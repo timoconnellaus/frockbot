@@ -115,7 +115,7 @@ Nothing is gated. Every line of both profiles is in this repository, and a self-
 
 After sign-in, General opens automatically on a device with no saved Bot selection, provided General is active, no Bot link is pending, and no page is open over the shell. This applies to both the browser and native app. Account provisioning and deletion follow the [General bootstrap contract](app/flock/README.md#general-bootstrap).
 
-General's empty conversation offers suggestions to research a topic and recommend an action, plan and complete a project, set up a recurring check, or create a specialist Bot. Research appears when General has Web enabled; recurring checks appear when it has Routines enabled. While capabilities are unavailable or still loading, only the project and specialist suggestions appear. Choose a suggestion to fill the composer, edit the selected placeholder, and send when ready: choosing alone does not start work. You can also type your own message, or use **Add a sheep** to create another Bot.
+General's empty conversation offers suggestions to research a topic and recommend an action, plan and complete a project, set up a recurring check, or create a specialist Bot. Research appears when General has Web enabled; recurring checks appear when it has Routines enabled. While capabilities are unavailable or still loading, only the project and specialist suggestions appear. Choose a suggestion to fill the composer, edit the selected placeholder, and send when ready: choosing alone does not start work. You can also type your own message, or use **Add a Bot** to create another Bot.
 
 ## Requirements
 
@@ -141,7 +141,7 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-The left sidebar lists the authenticated User's Bots and switches the conversation. **Add a sheep** creates a Bot with a sheep identity, a name and the first thing to say to it; pressing the sheep in Bot settings opens the editor where its colour bands change. **Manage Bots** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings are the right panel at wide widths and a page on the phone, and the Bot's Plugins — what it could run and whether it does, one switch per row, each switch that Bot's own — sit beside them in the same panel. From the profile sheet, **Connectors** connects external accounts, including apps such as Gmail, Google Calendar, Google Drive, GitHub, Slack and Notion, whose tools every Bot the User owns can then call, **Plugins** is the account's installed list — a Bot's own Plugins are Bot settings, reached from the Plugins button in its header at wide widths and a row on its page on the phone — **Account features** turns the optional built-in features on and off for the whole account, **Settings** owns the remaining declared application settings, and **Models** renders Package contributions; enabling the default-disabled Custom models Package adds the account model picker and a Package-scoped model override to Bot settings. Without it, every Bot follows the platform's Frock AI model. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work.
+The left sidebar lists the authenticated User's Bots and switches the conversation. **Add a Bot** creates a Bot with a character, a name and the first thing to say to it; pressing the character in Bot settings opens the picker where its character and colour change. **Manage Bots** shows archived Bots and provides archive and restore controls without deleting their history or settings. Bot settings are the right panel at wide widths and a page on the phone, and the Bot's Plugins — what it could run and whether it does, one switch per row, each switch that Bot's own — sit beside them in the same panel. From the profile sheet, **Connectors** connects external accounts, including apps such as Gmail, Google Calendar, Google Drive, GitHub, Slack and Notion, whose tools every Bot the User owns can then call, **Plugins** is the account's installed list — a Bot's own Plugins are Bot settings, reached from the Plugins button in its header at wide widths and a row on its page on the phone — **Account features** turns the optional built-in features on and off for the whole account, **Settings** owns the remaining declared application settings, and **Models** renders Package contributions; enabling the default-disabled Custom models Package adds the account model picker and a Package-scoped model override to Bot settings. Without it, every Bot follows the platform's Frock AI model. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work.
 
 `@frockbot/providers/ollama-cloud` lets each User create multiple named Ollama Cloud Connections with their own write-only API keys. It is disabled by default and depends on the Custom models Package. The backend validates and encrypts each credential and discovers that Connection's model catalog; connecting it does not change the platform model. Rotation affects subsequent model effects while already-admitted effects retain their credential lease, and disconnect prevents new leases without cancelling admitted Turns.
 
@@ -228,7 +228,7 @@ The current slice includes:
 
 - one Flutter client, served as the app Worker's static assets and built from the same source for the phone;
 - backend-owned Bot Durable Objects running the event-sourced custom agent loop;
-- a durable User-owned Bot directory with Bot-owned settings, sessions, and composable sheep identities;
+- a durable User-owned Bot directory with Bot-owned settings, sessions, and character avatars;
 - account-wide Package enablement and User-owned Connections;
 - provider-neutral durable User settings independent of external integrations;
 - streamed text, journaled tool calls, durable recovery, and lifecycle cleanup;
@@ -500,8 +500,8 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   credentials/    Per-User Connection credential encryption and leases
   custom-models/  Opt-in Bot model override setting, default-disabled
   echo/           Minimal reference feature used by tests and examples
-  flock/          Durable Bot directory and composable sheep identity
-  identity/       Sheep identity composition and rendering
+  flock/          Durable Bot directory and Bot character avatars
+  identity/       The agent runtime's identity system-prompt section
   image/          generate_image through Cloudflare's AI binding, fenced by the Workspace
   isolates/       The authority a Bot isolate member is mounted with, and its grants
   machine/        Registered-machine enrollment and pairing
