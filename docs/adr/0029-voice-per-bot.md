@@ -67,14 +67,20 @@ Bot's context and speaks in that Bot's voice; the Bot is its worker.**
    lane Turn that queues behind the person's own chat and never supersedes
    it; an interrupt stops the voice layer's reply and never cancels the
    Bot's work. This is what keeps the person unblocked.
-7. **The button lives on the Bot, at the far right of the composer.** Option
-   A from the discussion: a fixed voice control to the right of the existing
-   mic / send / stop morph (`apps/native/lib/shell/composer.dart`,
-   `_actionButton`). It never morphs, so it is always the same target under
-   the thumb. Dictation stays beside it. In a call the Bot page becomes the
-   voice screen — the current Bot's character large, mute on the screen —
-   and the corner control becomes End. The sidebar `voice-start` and the
-   account-wide footer are removed; a switch moves the screen to the new Bot.
+7. **The button lives on the Bot, at the far right of the composer, and
+   voice is a focused mode of the Bot page.** Option A from the discussion:
+   a fixed voice control to the right of the existing mic / send / stop
+   morph (`apps/native/lib/shell/composer.dart`, `_actionButton`). It never
+   morphs, so it is always the same target under the thumb. Dictation stays
+   beside it. Pressing it puts the Bot page into **voice mode**: the current
+   Bot's character large, the thread still readable, mute on the screen, and
+   the corner control now End. The page's back control disappears — to leave
+   the Bot you end voice first — and on desktop the sidebar collapses so the
+   Bot fills the window. A system back gesture on Android ends voice rather
+   than being swallowed, so the gesture people reach for does the one thing
+   that is allowed. `switch_bot` moves the view to the new Bot's page without
+   leaving voice mode: same screen, new character, new voice, new thread. The
+   sidebar `voice-start` and the account-wide footer are removed.
 8. **Session memory stays per User.** "Keep spoken answers short" is a fact
    about talking to voice, whichever Bot; the record, its fences and its
    finalization jobs are untouched. Anything Bot-specific the voice layer
