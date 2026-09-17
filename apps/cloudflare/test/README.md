@@ -132,12 +132,12 @@ resting on a row a long list may never have published:
   stands on — the cards `bot-plugins.e2e.ts` counts, the rows
   `provisionThroughUi` is known to clear — and `enablePackage` filters the
   catalogue with its search box so the row it presses is at the top of a short
-  list. The rule is about
-  reaching a node that is not in the tree, not about scrolling as such: when
-  what you need is already there, scrolling to it is fine, and two specs do it
-  — `profile.e2e.ts` asserts the `Africa / Abidjan` entry visible and then
-  scrolls it into view, and `theme.e2e.ts` scrolls the create sheet's submit so
-  a screenshot's pixel sample lands inside a target that exists.
+  list. The rule is about reaching a node that is not in the tree, not about
+  scrolling as such: when what you need is already there, scrolling to it is
+  fine, and two specs do it — `profile.e2e.ts` asserts the `Africa / Abidjan`
+  entry visible and then scrolls it into view, and `theme.e2e.ts` scrolls the
+  create sheet's submit so a screenshot's pixel sample lands inside a target
+  that exists.
 
 `e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`,
 seeds `dist/artifacts/foundation-v1.mjs` into the local
