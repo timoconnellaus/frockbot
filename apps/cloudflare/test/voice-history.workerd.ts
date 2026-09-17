@@ -86,7 +86,8 @@ test("voice reads and searches owned conversation records without admitting Bot 
   ).toBe(true);
   expect(result.status).toContain("completed");
   expect(JSON.parse(JSON.stringify(await bot.listRuns(query)))).toEqual(before);
-  expect(await voice.probeChats()).toBe(0);
+  // Reading is reading: no session was opened and no Bot Turn was admitted.
+  expect(await voice.probeUpstreamCount()).toBe(0);
   expect(await voice.probeStorage("voice:delegation:")).toEqual({});
 
   const refused = await runInDurableObject(voice, async (instance) => {

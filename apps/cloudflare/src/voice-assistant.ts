@@ -450,12 +450,22 @@ class GeminiSessionV1 {
   private closedByUs = false;
   private pending: Uint8Array[] = [];
   private pendingBytes = 0;
+  /**
+   * Events are handled one at a time, in arrival order.
+   *
+   * Each handler awaits durable work — admitting a turn, settling it — and a
+   * socket delivers the next frame while that is still running. Unchained, a
+   * `turnComplete` could reach the object before the `audio` before it had
+   * finished admitting the turn it is meant to close, and the turn would
+   * never settle.
+   */
+  private chain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly options: {
       url: string;
       setup: Record<string, unknown>;
-      onEvent: (event: GeminiServerEventV1) => void;
+      onEvent: (event: GeminiServerEventV1) => void | Promise<void>;
       onClosed: (code: number, reason: string) => void;
       open: (url: string) => Promise<WebSocket>;
     },
@@ -483,7 +493,10 @@ class GeminiSessionV1 {
           this.state = "awake";
           this.drain();
         }
-        this.options.onEvent(decoded);
+        const event = decoded;
+        this.chain = this.chain
+          .then(() => this.options.onEvent(event))
+          .catch(() => undefined);
       }
     });
     socket.addEventListener("close", (event: CloseEvent) => {
@@ -1535,9 +1548,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     const session = new GeminiSessionV1({
       url,
       setup,
-      onEvent: (event) => {
-        void this.onSessionEvent(connection.id, call.callId, event);
-      },
+      onEvent: (event) =>
+        this.onSessionEvent(connection.id, call.callId, event),
       onClosed: (code, reason) => {
         void this.onSessionClosed(connection.id, call.callId, code, reason);
       },

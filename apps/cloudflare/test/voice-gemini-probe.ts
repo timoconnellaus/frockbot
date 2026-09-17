@@ -10,14 +10,15 @@
 // printed: every log line goes through `redact`.
 
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 const MODEL_V1 = "models/gemini-3.8-live";
 const ENDPOINT_V1 =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
 function readApiKeyV1(): string {
-  const path = resolve(import.meta.dir, "..", ".dev.vars");
+  // Relative to this file, not to the working directory: the probe is run by
+  // hand from wherever the person happens to be.
+  const path = new URL("../.dev.vars", import.meta.url);
   const text = readFileSync(path, "utf8");
   for (const line of text.split("\n")) {
     const trimmed = line.trim();

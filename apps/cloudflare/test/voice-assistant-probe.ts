@@ -1,72 +1,18 @@
 // The voice session object as the workerd suite drives it: the real class
-// with every provider seam replaced by a scripted fake, plus a few RPCs that
-// let a test read what the fakes saw.
+// with its upstream replaced by a scripted Gemini fake, plus a few RPCs that
+// let a test read what that fake saw and make it answer.
 //
-// The fakes are the point. What the suite proves is the object's own
-// behaviour — ownership, exclusivity, sleep and wake ordering, the ledger,
-// delegation across eviction — not that Workers AI or ElevenLabs answer.
-import type {
-  VoiceTranscriberSessionOptionsV1,
-  VoiceTranscriberV1,
-} from "@frockbot/app/voice/sleeping-transcriber";
+// The fake is the point. What the suite proves is the object's own behaviour
+// — ownership, exclusivity, sleep and wake ordering, the ledger, a delegation
+// across an eviction — not that Gemini answers.
 import type { Connection } from "agents";
 import { VoiceAssistant } from "../src/voice-assistant.ts";
+import { GeminiFakeV1, type GeminiFakeFrameV1 } from "./voice-gemini-fake.ts";
 import type { VoiceDelegationRecordV1 } from "@frockbot/app/voice/ledger";
-import { VOICE_BOT_ANSWER_MARKER_V1 } from "@frockbot/app/voice/assistant";
 import type {
   VoiceMemoryJobV1,
   VoiceMemoryRecordV1,
 } from "@frockbot/app/voice/memory";
-
-interface ProbeSession {
-  id: number;
-  fed: number[];
-  closed: boolean;
-  options: VoiceTranscriberSessionOptionsV1;
-}
-
-/** What the scripted model does with a transcript. */
-export interface VoiceProbeScript {
-  /**
-   * Transcripts containing this word become an `ask` call. Since ADR 0029
-   * the work goes to the Bot the call is on, so `botId` no longer chooses a
-   * target — it only says the script expects a delegation at all, and the
-   * test opens the call on the Bot it means.
-   */
-  delegateWord?: string;
-  botId?: string;
-  /** The whole model reply, so a test can choose its sentences. */
-  reply?: string;
-  /**
-   * What the scripted assistant says when a Bot's answer arrives. Absent, it
-   * repeats the answer under the Bot's name; an empty string is the assistant
-   * deciding the answer is not worth saying.
-   */
-  answerReply?: string;
-  /** The speech provider answers every sentence with nothing, as a refused key does. */
-  silentTts?: boolean;
-  failTts?: boolean;
-  /**
-   * What the end-of-call memory request answers with. `operations` is
-   * serialised as the update envelope; `raw` is sent exactly as given, so a
-   * test can send something that is not an update at all; `fail` makes the
-   * request itself throw, as an unreachable gateway does.
-   */
-  memory?: {
-    operations?: Record<string, unknown>[];
-    raw?: string;
-    fail?: boolean;
-  };
-  /** Transcripts containing this word become a `remember` tool call. */
-  rememberWord?: string;
-  remember?: Record<string, unknown>;
-  /** Transcripts containing this word become a `forget` tool call. */
-  forgetWord?: string;
-  forget?: string;
-  /** Transcripts containing this word hand the call to `switchBotId`. */
-  switchWord?: string;
-  switchBotId?: string;
-}
 
 /** One scheduled row, with its payload as JSON. */
 export interface VoiceScheduleRow {
@@ -83,13 +29,20 @@ export interface VoiceMemoryRequest {
   instruction: string;
 }
 
-/** Resolves when the pipeline's abort signal fires, and never otherwise. */
-function aborts(signal?: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (!signal) return;
-    if (signal.aborted) return resolve();
-    signal.addEventListener("abort", () => resolve(), { once: true });
-  });
+/** What the end-of-call memory request answers with. */
+export interface VoiceProbeScript {
+  memory?: {
+    operations?: Record<string, unknown>[];
+    raw?: string;
+    fail?: boolean;
+  };
+  /** The next opened session refuses, as an unreachable upstream does. */
+  refuseUpstream?: boolean;
+  /**
+   * The next opened session closes with this code the moment it is opened. A
+   * 1008 is the real server's answer to a resumption handle it has forgotten.
+   */
+  closeUpstreamWith?: number;
 }
 
 function sse(events: unknown[]): ReadableStream<Uint8Array> {
@@ -122,64 +75,73 @@ export interface VoiceTraceLine {
   reason?: string;
   chars?: number;
   bytes?: number;
-  chunk?: number;
   audioChunks?: number;
   audioBytes?: number;
-  sentencesSpoken?: number;
+  turns?: number;
   turn?: string;
+  tool?: string;
+  run?: string;
+  bot?: string;
+  voice?: string;
+  state?: string;
+  source?: string;
+  resumed?: boolean;
+  handover?: number;
   ms?: number;
-  sinceTurnMs?: number;
   failure?: string;
+  answerChars?: number;
 }
 
 export class WorkerdVoiceAssistant extends VoiceAssistant {
-  #sessions: ProbeSession[] = [];
-  #synthesized: string[] = [];
-  #streamed: string[] = [];
-  #spokenVoices: string[] = [];
-  #chats: Record<string, unknown>[] = [];
+  #fakes: GeminiFakeV1[] = [];
   #script: VoiceProbeScript = {};
   #dropDispatches = 0;
   #dispatched: string[] = [];
   #traces: VoiceTraceLine[] = [];
-  #stalled: Promise<void> | undefined;
-  #release: (() => void) | undefined;
   #now: string | undefined;
-  #announced = 0;
-  #announceHeld: Promise<void> | undefined;
-  #releaseAnnounce: (() => void) | undefined;
-  #ttsHeld: Promise<void> | undefined;
-  #releaseTts: (() => void) | undefined;
-  #playbackAckTimeoutMs: number | undefined;
-  #botAnswerDeadlineMs: number | undefined;
   #memoryRequests: VoiceMemoryRequest[] = [];
+  #silenceTimeoutMs: number | undefined;
+  #idleSleepMs: number | undefined;
 
   protected override now(): Date {
     return this.#now ? new Date(this.#now) : super.now();
   }
 
-  /** A one-second window, so a cap can bite inside a test's patience. */
-  protected override sttWindowSeconds(): number {
-    return 1;
+  protected override modelSilenceTimeoutMs(): number {
+    return this.#silenceTimeoutMs ?? super.modelSilenceTimeoutMs();
   }
 
-  /** A short drain window, so a held answer is read out inside a test. */
-  protected override replyDrainQuietMs(): number {
-    return 300;
+  protected override serverIdleSleepMs(): number {
+    return this.#idleSleepMs ?? super.serverIdleSleepMs();
   }
 
   /**
-   * The real ninety-second bound, unless a test shortens it: waiting that out
-   * in real time is not something a test can do, and what the bound is for is
-   * the same at either length.
+   * The upstream, as one half of a pair. The url is the one the object built
+   * from `VOICE_ASSISTANT_UPSTREAM_URL`, so the test still proves the object
+   * reads the var and puts its key on it.
    */
-  protected override playbackAckTimeoutMs(): number {
-    return this.#playbackAckTimeoutMs ?? super.playbackAckTimeoutMs();
-  }
-
-  /** The real twenty-second bound, unless a test shortens it. */
-  protected override botAnswerDeadlineMs(): number {
-    return this.#botAnswerDeadlineMs ?? super.botAnswerDeadlineMs();
+  protected override async openGeminiSocket(url: string): Promise<WebSocket> {
+    if (this.#script.refuseUpstream) {
+      throw new Error("upstream refused the upgrade (503)");
+    }
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+    // The production seam accepts the socket before handing it back; a socket
+    // nobody accepted throws on its first send.
+    client.accept();
+    const fake = new GeminiFakeV1(url, server);
+    this.#fakes.push(fake);
+    const closeWith = this.#script.closeUpstreamWith;
+    if (closeWith !== undefined) {
+      this.#script = { ...this.#script, closeUpstreamWith: undefined };
+      // After the object has had a chance to send its setup, as the real
+      // server's refusal does.
+      setTimeout(
+        () => fake.close(closeWith, "Requested entity was not found."),
+        10,
+      );
+    }
+    return client;
   }
 
   /** Drops the next N dispatches: the intent is durable, the send is lost. */
@@ -223,243 +185,143 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     }
   }
 
-  protected override createTts(voiceId?: string) {
-    // Read at stream time, not here: the base class builds its provider while
-    // its own fields initialize, before this subclass's are.
-    const self = this;
-    const speak = async (text: string, signal?: AbortSignal) => {
-      this.#synthesized.push(text);
-      // Which voice each sentence was spoken in, so a test can prove a Bot
-      // sounds like itself and that a hand-over changes who is heard.
-      this.#spokenVoices.push(voiceId ?? "");
-      // A real provider is an HTTP request carrying this signal: a held
-      // sentence waits, and an interrupt part way through it rejects then
-      // and there rather than handing back audio for a moment that has
-      // passed.
-      if (this.#ttsHeld) await Promise.race([this.#ttsHeld, aborts(signal)]);
-      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-      if (this.#script.failTts) throw new Error("speech provider unavailable");
-      if (this.#script.silentTts) return null;
-      // 20 ms of silence at 24 kHz: enough to be a real binary frame.
-      return new ArrayBuffer(24_000 * 2 * 0.02);
-    };
-    return {
-      synthesize: speak,
-      /**
-       * The real provider streams, and the SDK takes a different path when
-       * the object it is handed can: the fake streams too, so the suite runs
-       * the path a deployment with a key actually runs. One chunk per
-       * sentence, so what reaches the socket is what the buffered path sent,
-       * and the record below is the only difference a test can see.
-       */
-      synthesizeStream: async function* (text: string, signal?: AbortSignal) {
-        self.#streamed.push(text);
-        const audio = await speak(text, signal);
-        if (audio) yield audio;
-      },
-    };
+  /** Records the memory lines too, so a test reads what an operator would. */
+  protected override traceMemory(
+    event: string,
+    fields: Record<string, unknown> = {},
+    level: "info" | "warn" = "info",
+  ): void {
+    this.#traces.push({ event, ...fields } as VoiceTraceLine);
+    void level;
   }
 
-  protected override createInnerTranscriber(): VoiceTranscriberV1 {
-    const sessions = this.#sessions;
-    return {
-      createSession: (options = {}) => {
-        const session: ProbeSession = {
-          id: sessions.length + 1,
-          fed: [],
-          closed: false,
-          options,
-        };
-        sessions.push(session);
-        return {
-          feed: (chunk) => {
-            session.fed.push(new Uint8Array(chunk)[0] ?? -1);
-          },
-          waitUntilReady: () => Promise.resolve(),
-          close: () => {
-            session.closed = true;
-          },
-        };
-      },
-    };
-  }
-
+  /**
+   * Only the end-of-call memory update goes to a chat model now, so this seam
+   * answers that one request and nothing else.
+   */
   protected override async chatCompletion(
     body: Record<string, unknown>,
-    signal?: AbortSignal,
   ): Promise<ReadableStream<Uint8Array>> {
     const messages = body.messages as { role: string; content: string }[];
     const last = messages.at(-1)!;
-    // The end-of-call memory request is recorded on its own: it belongs to no
-    // spoken turn, and counting it as one would make every call look like it
-    // asked the model once more than it did.
-    if (last.content.includes("[end of conversation]")) {
-      const script = this.#script.memory ?? {};
-      this.#memoryRequests.push({
-        ...(messages[0]?.role === "system"
-          ? { system: messages[0].content }
-          : {}),
-        contents: messages.map((message) => message.content),
-        instruction: last.content,
-      });
-      if (script.fail) throw new Error("the model gateway is unavailable");
-      return sse([
-        {
-          choices: [
-            {
-              delta: {
-                content:
-                  script.raw ??
-                  JSON.stringify({ operations: script.operations ?? [] }),
-              },
-            },
-          ],
-        },
-      ]);
-    }
-    this.#chats.push(body);
-    if (this.#stalled) await this.#stalled;
-    if (
-      last.role === "user" &&
-      last.content.startsWith(VOICE_BOT_ANSWER_MARKER_V1)
-    ) {
-      // A Bot's answer arriving, in the person's seat. A real model decides
-      // what to say from the Bot, the request and the answer; this one
-      // repeats the answer under the Bot's name, so a test can tell whether
-      // the right answer reached it and whether the request came with it —
-      // or says what the script tells it to, which may be nothing.
-      this.#announced += 1;
-      // A real gateway request carries this signal: a held answer that is
-      // aborted rejects here rather than hanging on past the abort.
-      if (this.#announceHeld) {
-        await Promise.race([this.#announceHeld, aborts(signal)]);
-      }
-      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-      const reply =
-        this.#script.answerReply ??
-        (() => {
-          // Since ADR 0029 the event comes in two shapes. The current Bot's
-          // own work is told in the first person with no name; another
-          // Bot's still carries one. A real model chooses its words; this
-          // one keeps the distinction visible so a test can assert it.
-          const mine = /^The work you started earlier/.test(
-            last.content.slice(VOICE_BOT_ANSWER_MARKER_V1.length).trim(),
-          );
-          if (mine) {
-            const result = /is finished\. The result: "(.*?)" Say it as/s.exec(
-              last.content,
-            )?.[1];
-            const stopped = /could not be finished: "(.*?)" Say it as/s.exec(
-              last.content,
-            )?.[1];
-            // Deliberately not "Done:" — the tool-result reply already
-            // starts that way, and a test that wants to prove a read-out
-            // has *not* happened yet must be able to tell them apart.
-            return result
-              ? `Finished: ${result}`
-              : `I could not finish that: ${stopped ?? ""}`;
-          }
-          const bot =
-            new RegExp(
-              `^${VOICE_BOT_ANSWER_MARKER_V1.replace(/[[\]]/g, "\\$&")} (.*?), asked`,
-            ).exec(last.content)?.[1] ?? "The Bot";
-          const answered = /has answered, in its own words: "(.*)"/s.exec(
-            last.content,
-          )?.[1];
-          const failed = /could not finish: "(.*)"/s.exec(last.content)?.[1];
-          return answered
-            ? `${bot} says ${answered}`
-            : `${bot} could not finish that: ${failed ?? ""}`;
-        })();
-      return sse(reply ? [{ choices: [{ delta: { content: reply } }] }] : []);
-    }
-    if (last.role === "tool") {
-      return sse([
-        {
-          choices: [
-            { delta: { content: `Done: ${last.content.slice(0, 60)}` } },
-          ],
-        },
-      ]);
-    }
-    const script = this.#script;
-    const tool = (name: string, args: unknown) =>
-      sse([
-        {
-          choices: [
-            {
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: "call_1",
-                    function: { name, arguments: JSON.stringify(args) },
-                  },
-                ],
-              },
-            },
-          ],
-        },
-      ]);
-    if (
-      script.rememberWord &&
-      body.tools !== undefined &&
-      last.content.includes(script.rememberWord)
-    ) {
-      return tool(
-        "remember",
-        script.remember ?? { text: last.content, kind: "preference" },
-      );
-    }
-    if (
-      script.switchWord &&
-      script.switchBotId &&
-      body.tools !== undefined &&
-      last.content.includes(script.switchWord)
-    ) {
-      return tool("switch_bot", { bot_id: script.switchBotId });
-    }
-    if (
-      script.forgetWord &&
-      body.tools !== undefined &&
-      last.content.includes(script.forgetWord)
-    ) {
-      return tool("forget", { text: script.forget ?? last.content });
-    }
-    if (
-      script.delegateWord &&
-      script.botId &&
-      body.tools !== undefined &&
-      last.content.includes(script.delegateWord)
-    ) {
-      return sse([
-        {
-          choices: [
-            {
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: "call_1",
-                    function: {
-                      name: "ask",
-                      arguments: JSON.stringify({ message: last.content }),
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        },
-      ]);
-    }
-    if (script.reply) {
-      return sse([{ choices: [{ delta: { content: script.reply } }] }]);
-    }
+    const script = this.#script.memory ?? {};
+    this.#memoryRequests.push({
+      ...(messages[0]?.role === "system"
+        ? { system: messages[0].content }
+        : {}),
+      contents: messages.map((message) => message.content),
+      instruction: last.content,
+    });
+    if (script.fail) throw new Error("the model gateway is unavailable");
     return sse([
-      { choices: [{ delta: { content: "You said: " } }] },
-      { choices: [{ delta: { content: `${last.content}.` } }] },
+      {
+        choices: [
+          {
+            delta: {
+              content:
+                script.raw ??
+                JSON.stringify({ operations: script.operations ?? [] }),
+            },
+          },
+        ],
+      },
     ]);
+  }
+
+  // -- driving the fake upstream --------------------------------------------
+
+  /** The newest session the object opened, which is the live one. */
+  #fake(): GeminiFakeV1 | undefined {
+    return this.#fakes.at(-1);
+  }
+
+  async probeUpstreamCount(): Promise<number> {
+    return this.#fakes.length;
+  }
+
+  /** Every frame the newest session received, oldest first. */
+  async probeUpstreamFrames(): Promise<GeminiFakeFrameV1[]> {
+    return [...(this.#fake()?.frames ?? [])];
+  }
+
+  /** Every frame every session of this object received. */
+  async probeAllUpstreamFrames(): Promise<GeminiFakeFrameV1[][]> {
+    return this.#fakes.map((fake) => [...fake.frames]);
+  }
+
+  /** The URL the object opened the newest session with, key and all. */
+  async probeUpstreamUrl(): Promise<string> {
+    return this.#fake()?.url ?? "";
+  }
+
+  /** The session transcribes what the person said. */
+  async probeHears(text: string): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.hears(text);
+    return true;
+  }
+
+  /** One whole spoken turn: audio, its transcript, and both boundaries. */
+  async probeSays(text: string, audioBytes?: number): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.says(text, audioBytes);
+    return true;
+  }
+
+  /** Audio with no boundary: a turn still in flight. */
+  async probeSpeaks(audioBytes?: number): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.speaks(audioBytes);
+    return true;
+  }
+
+  async probeEndsTurn(): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.endsTurn();
+    return true;
+  }
+
+  async probeCalls(
+    name: string,
+    args: Record<string, unknown>,
+    id = "call_1",
+  ): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.calls(name, args, id);
+    return true;
+  }
+
+  async probeCancelsCalls(ids: string[]): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.cancels(ids);
+    return true;
+  }
+
+  async probeInterrupted(): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.interrupted();
+    return true;
+  }
+
+  async probeGoAway(): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.goAway();
+    return true;
+  }
+
+  async probeCloseUpstream(code = 1006, reason = "dropped"): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.close(code, reason);
+    return true;
   }
 
   // -- probe RPCs -----------------------------------------------------------
@@ -472,67 +334,12 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     this.#script = script;
   }
 
-  async probeSessions(): Promise<
-    { id: number; fed: number[]; closed: boolean }[]
-  > {
-    return this.#sessions.map(({ id, fed, closed }) => ({ id, fed, closed }));
+  async probeSetSilenceTimeoutMs(ms: number): Promise<void> {
+    this.#silenceTimeoutMs = ms;
   }
 
-  /** The fake transcriber "hears" a finished utterance on the newest session. */
-  async probeUtterance(text: string): Promise<boolean> {
-    const session = [...this.#sessions].reverse().find((s) => !s.closed);
-    if (!session) return false;
-    session.options.onUtterance?.(text);
-    return true;
-  }
-
-  async probeSpeechStart(): Promise<boolean> {
-    const session = [...this.#sessions].reverse().find((s) => !s.closed);
-    if (!session) return false;
-    session.options.onSpeechStart?.();
-    return true;
-  }
-
-  async probeSynthesized(): Promise<string[]> {
-    return [...this.#synthesized];
-  }
-
-  /** Sentences the SDK asked for as a stream rather than in one piece. */
-  async probeStreamed(): Promise<string[]> {
-    return [...this.#streamed];
-  }
-
-  /** The voice id each synthesized sentence was spoken in, in order. */
-  async probeSpokenVoices(): Promise<string[]> {
-    return [...this.#spokenVoices];
-  }
-
-  async probeChats(): Promise<number> {
-    return this.#chats.length;
-  }
-
-  /** Every request's messages, so a test can prove what a call carried. */
-  async probeChatMessages(): Promise<{ role: string; content: string }[][]> {
-    return this.#chats.map(
-      (body) => body.messages as { role: string; content: string }[],
-    );
-  }
-
-  async probeSystemPrompts(): Promise<string[]> {
-    return this.#chats.map((body) => {
-      const messages = body.messages as { role: string; content: string }[];
-      return (
-        messages.find((message) => message.role === "system")?.content ?? ""
-      );
-    });
-  }
-
-  async probeSetPlaybackAckTimeoutMs(ms: number): Promise<void> {
-    this.#playbackAckTimeoutMs = ms;
-  }
-
-  async probeSetBotAnswerDeadlineMs(ms: number): Promise<void> {
-    this.#botAnswerDeadlineMs = ms;
+  async probeSetIdleSleepMs(ms: number): Promise<void> {
+    this.#idleSleepMs = ms;
   }
 
   async probeSetNow(now: string): Promise<void> {
@@ -544,66 +351,16 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     return Object.fromEntries(rows);
   }
 
+  async probePutStorage(key: string, value: unknown): Promise<void> {
+    await this.ctx.storage.put(key, value);
+  }
+
   async probeDropDispatches(count: number): Promise<void> {
     this.#dropDispatches = count;
   }
 
   async probeDispatched(): Promise<string[]> {
     return [...this.#dispatched];
-  }
-
-  async probePutStorage(key: string, value: unknown): Promise<void> {
-    await this.ctx.storage.put(key, value);
-  }
-
-  /**
-   * Holds the model's answer open, so the call has a reply in flight for as
-   * long as the test wants one.
-   */
-  async probeStallChat(): Promise<void> {
-    this.#stalled = new Promise<void>((resolve) => {
-      this.#release = resolve;
-    });
-  }
-
-  /** Lets the held answer through. */
-  async probeReleaseChat(): Promise<void> {
-    const release = this.#release;
-    this.#stalled = undefined;
-    this.#release = undefined;
-    release?.();
-  }
-
-  /** How many Bot answers the assistant has been told. */
-  async probeAnnounced(): Promise<number> {
-    return this.#announced;
-  }
-
-  /** Holds the Bot-answer turn's model call open, so the call can change under it. */
-  async probeHoldAnnounce(): Promise<void> {
-    this.#announceHeld = new Promise<void>((resolve) => {
-      this.#releaseAnnounce = resolve;
-    });
-  }
-
-  async probeReleaseAnnounce(): Promise<void> {
-    const release = this.#releaseAnnounce;
-    this.#announceHeld = undefined;
-    this.#releaseAnnounce = undefined;
-    release?.();
-  }
-
-  async probeHoldTts(): Promise<void> {
-    this.#ttsHeld = new Promise<void>((resolve) => {
-      this.#releaseTts = resolve;
-    });
-  }
-
-  async probeReleaseTts(): Promise<void> {
-    const release = this.#releaseTts;
-    this.#ttsHeld = undefined;
-    this.#releaseTts = undefined;
-    release?.();
   }
 
   /** Runs the scheduled look-up by hand, as the alarm would. */
@@ -623,16 +380,6 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   }
 
   // -- session memory -------------------------------------------------------
-
-  /** Records the memory lines too, so a test reads what an operator would. */
-  protected override traceMemory(
-    event: string,
-    fields: Record<string, unknown> = {},
-    level: "info" | "warn" = "info",
-  ): void {
-    this.#traces.push({ event, ...fields } as VoiceTraceLine);
-    void level;
-  }
 
   async probeMemory(): Promise<VoiceMemoryRecordV1> {
     return this.memory().read();

@@ -84,7 +84,7 @@ describe("the production secrets manifest", () => {
       (secret) => secret.name,
     );
     expect(required).toContain("OPENAI_API_KEY");
-    expect(required).toContain("ELEVENLABS_API_KEY");
+    expect(required).toContain("GEMINI_API_KEY");
   });
 
   test("gives each auth Package exactly the secrets it declares", () => {
@@ -272,6 +272,10 @@ describe("the production secrets report", () => {
       NON_SECRET_WORKER_SETTINGS_V1.filter(
         (setting) => setting.forbiddenLive !== undefined,
       ).map((setting) => setting.name),
-    ).toEqual(["VOICE_DICTATION_UPSTREAM_URL", "ALLOW_DEVELOPMENT_AUTH"]);
+    ).toEqual([
+      "VOICE_ASSISTANT_UPSTREAM_URL",
+      "VOICE_DICTATION_UPSTREAM_URL",
+      "ALLOW_DEVELOPMENT_AUTH",
+    ]);
   });
 });
