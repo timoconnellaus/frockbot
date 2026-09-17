@@ -767,8 +767,22 @@ test("a send the server refuses for size keeps the draft and says why", async ({
   // reaches the widget only while the engine is holding an editing session
   // open on the field, so the focus is the part that matters and the read
   // below is what proves the widget took it.
-  await composer.focus();
-  await composer.fill("x".repeat(TURN_TEXT_MAX_CHARACTERS_V1 + 10));
+  // Filled until the widget agrees, the way `answerComposer` types: a fresh
+  // Bot's conversation is still loading for a moment after its sheet closes,
+  // and a fill that lands while the engine re-establishes focus after that
+  // load is dropped with nothing to show for it — the element holds the text
+  // and the widget's draft is empty. The corner tells the two apart: Send
+  // stands for a draft (closed, over the limit), the microphone for none.
+  for (let attempt = 0; ; attempt += 1) {
+    await composer.focus();
+    await composer.fill("x".repeat(TURN_TEXT_MAX_CHARACTERS_V1 + 10));
+    try {
+      await expect(sem(page, "send-button")).toHaveCount(1, { timeout: 8_000 });
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+    }
+  }
   // Read off the conversation rather than the field's own node: the count is
   // a line under the composer row, and which semantics node the engine merges
   // it onto is its business rather than this spec's.
