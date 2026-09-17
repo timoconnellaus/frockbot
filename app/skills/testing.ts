@@ -4,6 +4,7 @@
 // Package deliberately implements none of it. This fake exists so the loader's
 // behaviour can be proven against the contract rather than against a host.
 import {
+  normalizeWorkspaceRelativePathV1,
   workspaceRootKeyV1,
   type WorkspaceDeleteRequestV1,
   type WorkspaceEntryV1,
@@ -99,12 +100,31 @@ export class FakeWorkspace implements WorkspaceFilesV1 {
     this.calls.push(`list:${workspaceRootKeyV1(request.root)}`);
     if (this.listFailure) return Promise.resolve({ ...this.listFailure });
     const key = workspaceRootKeyV1(request.root);
+    // The real store normalizes a list prefix as a relative path and narrows
+    // at the segment boundary, so `by-agent/bot-1` does not list
+    // `by-agent/bot-10/`. A fake that took the prefix raw would let a test
+    // pass against behaviour the store refuses.
+    let prefix: string | undefined;
+    if (request.prefix !== undefined) {
+      try {
+        prefix = normalizeWorkspaceRelativePathV1(
+          request.prefix,
+          "list.prefix",
+        );
+      } catch (error) {
+        return Promise.resolve({
+          status: "refused",
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     const all = [...this.#files.values()]
       .filter(
         (stored) =>
           workspaceRootKeyV1(stored.entry.path.root) === key &&
-          (request.prefix === undefined ||
-            stored.entry.path.path.startsWith(request.prefix)),
+          (prefix === undefined ||
+            stored.entry.path.path === prefix ||
+            stored.entry.path.path.startsWith(`${prefix}/`)),
       )
       .map((stored) => stored.entry)
       // Path order, as the object store lists: `SKILL.md` before the

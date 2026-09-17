@@ -610,7 +610,9 @@ export async function countSkillReferencesV1(
   root: WorkspaceInstructionRootV1,
   documentPath: string,
 ): Promise<SkillCountOutcomeV1> {
-  const prefix = skillReferencesPrefixV1(documentPath);
+  // The store validates a list prefix as a relative path, and a path may not
+  // end in a separator; it narrows at the segment boundary itself.
+  const prefix = skillReferencesPrefixV1(documentPath).slice(0, -1);
   let count = 0;
   let cursor: string | undefined;
   for (let page = 0; page < SKILL_MAX_COUNT_LIST_PAGES; page += 1) {
@@ -824,7 +826,7 @@ export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
   }
   const entries = catalog.skills.map((skill) => {
     const ref = skill.ref ? formatSkillRefV1(skill.ref) : undefined;
-    const source = skill.ref?.source ?? "bot";
+    const source = skill.source;
     const name =
       (counts.get(skill.name) ?? 0) > 1 && ref
         ? `${skill.name} (${ref})`

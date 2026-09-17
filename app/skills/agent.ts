@@ -597,9 +597,8 @@ export function skillLoadNameV1(input: unknown): string | undefined {
 }
 
 /**
- * The reference a `skill_load` asked for, with the same tolerance the Skill's
- * own name gets: the file name as the Skill's instructions index it, or the
- * listed path it sits at.
+ * The reference a `skill_load` asked for: the file name as the Skill's
+ * instructions index it.
  */
 export function skillLoadReferenceV1(input: unknown): string | undefined {
   if (!input || typeof input !== "object") return undefined;

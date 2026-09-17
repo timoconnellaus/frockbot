@@ -283,6 +283,29 @@ describe("the rendered catalog block", () => {
     expect(rendered).not.toContain("Body.");
   });
 
+  test("names the root a Skill with no ref came from, not the Bot", async () => {
+    // A `SKILL.md` under the shared root whose directory is not a well-formed
+    // slug has no ref, and must still be presented as the User's.
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: USER_ROOT,
+        path: "skills/Standup Notes/SKILL.md",
+        text: skillMarkdown("Standup", "Use this when standing up.", "Body."),
+        writer: BOT_WRITER,
+      },
+    ]);
+
+    const catalog = await loadFullSkillCatalogV1(workspace, OWNER, {
+      managed: false,
+    });
+    const rendered = renderSkillCatalogPromptV1(catalog);
+
+    expect(catalog.skills).toHaveLength(1);
+    expect(catalog.skills[0]?.ref).toBeUndefined();
+    expect(rendered).toContain('source="user"');
+    expect(rendered).not.toContain('source="bot"');
+  });
+
   test("disambiguates a duplicated name by its ref", () => {
     const rendered = renderSkillCatalogPromptV1(
       assembleSkillCatalogV1(OWNER, {
