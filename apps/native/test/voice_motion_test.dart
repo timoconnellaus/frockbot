@@ -103,11 +103,12 @@ void main() {
           expect(tester.getRect(find.byType(Composer)), composer);
           final meter = tester.getRect(strip);
           final button = tester.getRect(stop);
-          // The meter is beside the control that ends the capture, and the
-          // way out of the capture is beside them both.
+          final bin = tester.getRect(discard);
+          // Throw it away at one end, keep it at the other, and the sound
+          // fills everything between them.
           expect(meter.right, lessThanOrEqualTo(button.left));
-          expect(tester.getRect(discard).right, lessThanOrEqualTo(meter.left));
-          expect(meter.width, dictationStripWidth);
+          expect(bin.right, lessThanOrEqualTo(meter.left));
+          expect(meter.width, greaterThan(button.left - bin.right - 4));
           expect(button.bottom, lessThanOrEqualTo(composer.bottom));
           expectUnclippedControl(tester, stop);
           expect(tester.takeException(), isNull);
@@ -253,7 +254,9 @@ void main() {
         findsNothing,
       );
       expect(find.byTooltip('End voice'), findsOneWidget);
-      expect(find.byTooltip('Mute microphone'), findsOneWidget);
+      // No microphone inside the call: one here read as the one that
+      // dictates, and the meter runs the whole row instead.
+      expect(find.byTooltip('Mute microphone'), findsNothing);
 
       await tester.tap(find.byTooltip('End voice'));
       await tester.runAsync(() => settle());

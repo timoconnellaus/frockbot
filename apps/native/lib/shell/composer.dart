@@ -66,6 +66,22 @@ bool get enterSends => !isNativeMobile;
 /// centred against the one-line field this produces.
 const EdgeInsets composerFieldPadding = EdgeInsets.fromLTRB(16, 12, 4, 12);
 
+/// How far a control inside the field sits from the field's edge — the same
+/// number on every side, so a round control is concentric with the round end
+/// it sits in. A control sized from the platform instead of from the field it
+/// is in was three points off the top and eight off the end, which on a phone
+/// read as a button jammed into the corner.
+const double composerControlInset = 4;
+
+/// The painted size of a control inside the field, from the field's own
+/// height. The touch target stays the platform minimum: the circle shrinks,
+/// the thing a thumb has to hit does not.
+double composerControlExtent(double fieldHeight) =>
+    fieldHeight - 2 * composerControlInset;
+
+/// The glyph inside one of those controls, at half its circle.
+double composerControlIconSize(double extent) => (extent / 2).roundToDouble();
+
 /// An [AnimatedSwitcher] layout where the outgoing child is only a picture:
 /// it stays visible for the cross-fade but cannot be pressed, and a screen
 /// reader is not read the label it is leaving behind on top of the new one.
@@ -319,7 +335,7 @@ class _ComposerState extends State<Composer> {
   /// under the thumb never moves. While a call is open on this Bot it reads
   /// as pressed and ends the call, which is the same control doing the
   /// opposite rather than a second one appearing somewhere else.
-  Widget _voiceButton(BuildContext context) {
+  Widget _voiceButton(BuildContext context, double extent) {
     final theme = Theme.of(context);
     final active = widget.voiceActive;
     return identified(
@@ -330,10 +346,10 @@ class _ComposerState extends State<Composer> {
         isSelected: active,
         onPressed: widget.onVoice,
         style: IconButton.styleFrom(
-          minimumSize: Size.square(chatControlExtent),
-          fixedSize: Size.square(chatControlExtent),
+          minimumSize: Size.square(extent),
+          fixedSize: Size.square(extent),
           padding: EdgeInsets.zero,
-          iconSize: chatIconSize,
+          iconSize: composerControlIconSize(extent),
           shape: const CircleBorder(),
           backgroundColor: active
               ? theme.colorScheme.primary
@@ -356,6 +372,7 @@ class _ComposerState extends State<Composer> {
     required bool dictating,
     required bool dictatable,
     required bool canSend,
+    required double extent,
   }) {
     final theme = Theme.of(context);
     return KeyedSubtree(
@@ -379,8 +396,8 @@ class _ComposerState extends State<Composer> {
                     : widget.onStopDictation,
                 style: IconButton.styleFrom(
                   shape: const CircleBorder(),
-                  minimumSize: Size.square(chatControlExtent),
-                  fixedSize: Size.square(chatControlExtent),
+                  minimumSize: Size.square(extent),
+                  fixedSize: Size.square(extent),
                   padding: EdgeInsets.zero,
                 ),
                 icon: voiceIconTransition(
@@ -400,7 +417,7 @@ class _ComposerState extends State<Composer> {
                       : Icon(
                           Icons.stop_rounded,
                           key: const ValueKey('recording'),
-                          size: chatIconSize,
+                          size: composerControlIconSize(extent),
                         ),
                 ),
               ),
@@ -413,10 +430,10 @@ class _ComposerState extends State<Composer> {
                 tooltip: 'Dictate message',
                 onPressed: widget.onDictate,
                 style: IconButton.styleFrom(
-                  minimumSize: Size.square(chatControlExtent),
-                  fixedSize: Size.square(chatControlExtent),
+                  minimumSize: Size.square(extent),
+                  fixedSize: Size.square(extent),
                   padding: EdgeInsets.zero,
-                  iconSize: chatIconSize,
+                  iconSize: composerControlIconSize(extent),
                   backgroundColor: theme.colorScheme.onSurface.withValues(
                     alpha: 0.08,
                   ),
@@ -433,10 +450,10 @@ class _ComposerState extends State<Composer> {
                 tooltip: 'Send',
                 onPressed: canSend ? _send : null,
                 style: IconButton.styleFrom(
-                  minimumSize: Size.square(chatControlExtent),
-                  fixedSize: Size.square(chatControlExtent),
+                  minimumSize: Size.square(extent),
+                  fixedSize: Size.square(extent),
                   padding: EdgeInsets.zero,
-                  iconSize: chatIconSize,
+                  iconSize: composerControlIconSize(extent),
                   shape: const CircleBorder(),
                   disabledBackgroundColor: theme.colorScheme.onSurface
                       .withValues(alpha: 0.06),
@@ -554,11 +571,10 @@ class _ComposerState extends State<Composer> {
               // ends it — so the thumb can find it without looking and the
               // field beside it never changes width under a capture.
               if (widget.onVoice != null)
-                Padding(
-                  padding: const EdgeInsets.only(left: 6),
-                  child: SizedBox(
-                    height: oneLine,
-                    child: Center(child: _voiceButton(context)),
+                SizedBox(
+                  height: oneLine,
+                  child: Center(
+                    child: _voiceButton(context, composerControlExtent(oneLine)),
                   ),
                 ),
             ],
@@ -586,14 +602,12 @@ class _ComposerState extends State<Composer> {
   /// so the field is stood in for rather than disabled in place.
   Widget _capturePill(BuildContext context, double oneLine) {
     final theme = Theme.of(context);
-    Widget corner(Widget button) => Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      child: SizedBox(
-        height: oneLine,
-        child: Center(child: button),
-      ),
+    final extent = composerControlExtent(oneLine);
+    Widget corner(Widget button) => SizedBox(
+      height: oneLine,
+      child: Center(child: button),
     );
-    return DecoratedBox(
+    return Container(
       key: const ValueKey('dictation-pill'),
       decoration: BoxDecoration(
         color: Color.alphaBlend(
@@ -607,33 +621,38 @@ class _ComposerState extends State<Composer> {
       ),
       child: Row(
         children: [
-          // One group at the end of the row: throw it away, what is being
-          // heard, keep it. Spread across the width they read as three
-          // unrelated things, which at a desktop's width they looked like.
-          const Spacer(),
-          corner(_discardButton(context)),
-          Semantics(
-            container: true,
-            liveRegion: true,
-            label: switch (widget.dictationState) {
-              DictationState.starting => 'Starting dictation',
-              DictationState.stopping => 'Finishing dictation',
-              _ => 'Listening for dictation',
-            },
-            child: SizedBox(
-              key: const ValueKey('dictation-strip'),
-              width: dictationStripWidth,
-              height: 26,
-              child: widget.dictationLevel == null
-                  ? const SizedBox.shrink()
-                  : identified(
-                      VoiceIds.composerDictationLevel,
-                      DictationWaveform(
-                        level: widget.dictationLevel!,
-                        capturing:
-                            widget.dictationState == DictationState.capturing,
-                      ),
-                    ),
+          // The way out of the capture at one end, the way to keep it at the
+          // other, and everything between them is the sound: the strip runs
+          // the width of whatever the row happens to be, so a phone and a
+          // desktop both show as much of the capture as they have room for.
+          corner(_discardButton(context, extent)),
+          Expanded(
+            child: Semantics(
+              container: true,
+              liveRegion: true,
+              label: switch (widget.dictationState) {
+                DictationState.starting => 'Starting dictation',
+                DictationState.stopping => 'Finishing dictation',
+                _ => 'Listening for dictation',
+              },
+              child: Center(
+                child: SizedBox(
+                  key: const ValueKey('dictation-strip'),
+                  height: 26,
+                  width: double.infinity,
+                  child: widget.dictationLevel == null
+                      ? const SizedBox.shrink()
+                      : identified(
+                          VoiceIds.composerDictationLevel,
+                          DictationWaveform(
+                            level: widget.dictationLevel!,
+                            capturing:
+                                widget.dictationState ==
+                                DictationState.capturing,
+                          ),
+                        ),
+                ),
+              ),
             ),
           ),
           corner(
@@ -642,6 +661,7 @@ class _ComposerState extends State<Composer> {
               dictating: true,
               dictatable: false,
               canSend: false,
+              extent: extent,
             ),
           ),
         ],
@@ -657,12 +677,14 @@ class _ComposerState extends State<Composer> {
     required bool canSend,
   }) {
     final theme = Theme.of(context);
-    Widget corner(Widget button) => Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      child: SizedBox(
-        height: oneLine,
-        child: Center(child: button),
-      ),
+    final extent = composerControlExtent(oneLine);
+    // No padding of its own: the control's touch target is wider than the
+    // circle it paints, and that difference is the inset. Padding on top of
+    // it is what put the circle further from the end of the field than from
+    // its top and bottom.
+    Widget corner(Widget button) => SizedBox(
+      height: oneLine,
+      child: Center(child: button),
     );
     final fieldStyle = theme.textTheme.bodyLarge?.copyWith(
       fontWeight: FontWeight.w400,
@@ -782,6 +804,7 @@ class _ComposerState extends State<Composer> {
                           dictating: false,
                           dictatable: dictatable,
                           canSend: canSend,
+                          extent: extent,
                         ),
                       ),
                     ),
@@ -794,7 +817,7 @@ class _ComposerState extends State<Composer> {
 
   /// Throws the capture away: the words it put in the draft go with it, which
   /// is the whole difference between this and the control beside it.
-  Widget _discardButton(BuildContext context) {
+  Widget _discardButton(BuildContext context, double extent) {
     final theme = Theme.of(context);
     return identified(
       VoiceIds.composerDictationDiscard,
@@ -803,10 +826,10 @@ class _ComposerState extends State<Composer> {
         tooltip: 'Discard dictation',
         onPressed: widget.onDiscardDictation,
         style: IconButton.styleFrom(
-          minimumSize: Size.square(chatControlExtent),
-          fixedSize: Size.square(chatControlExtent),
+          minimumSize: Size.square(extent),
+          fixedSize: Size.square(extent),
           padding: EdgeInsets.zero,
-          iconSize: chatIconSize,
+          iconSize: composerControlIconSize(extent),
           shape: const CircleBorder(),
           backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.08),
           foregroundColor: theme.colorScheme.onSurfaceVariant,

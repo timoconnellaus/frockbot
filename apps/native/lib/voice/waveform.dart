@@ -329,8 +329,8 @@ class _MeterPainter extends CustomPainter {
       oldDelegate.onAccent != onAccent;
 }
 
-/// The dictation meter: a fixed-width strip of bars that scrolls while the
-/// microphone is open.
+/// The dictation meter: a strip of bars that scrolls while the microphone is
+/// open, across whatever width the row gives it.
 ///
 /// It says a different thing from the five pills of a call. A call's meter
 /// answers "who is being heard right now"; this one answers "am I still
@@ -344,7 +344,6 @@ class _MeterPainter extends CustomPainter {
 /// own listenable, so nothing above it builds or lays out per audio frame.
 const double dictationBarWidth = 4;
 const double dictationBarGap = 2;
-const double dictationStripWidth = 108;
 const Duration dictationBarPeriod = Duration(milliseconds: 60);
 
 /// The resting dot: silence is still drawn, or a pause would look like a gap

@@ -20,6 +20,9 @@ const double voiceDockControlExtent = 40;
 
 /// The composer pill's corner, so the call reads as the field it replaced.
 const double voiceDockRadius = 22;
+
+/// The same inset the composer's own controls keep from the field's edge.
+const double voiceDockControlInset = 4;
 const double voiceFooterStageMaxWidth = 420;
 const double voiceFooterStageInset = 24;
 const double voiceFooterControlsWidth = 144;
@@ -355,28 +358,13 @@ class _VoiceComposerDockState extends State<VoiceComposerDock> {
                         ),
                       ),
               ),
-              // Mute alone. The way out of the call is the control that
-              // started it, still in its own place beside the field — a
-              // second X inside the row would be two ways to hang up sitting
-              // a thumb's width apart.
-              if (failure == null)
-                identified(
-                  VoiceIds.mute,
-                  Semantics(
-                    toggled: session.muted,
-                    child: voiceCircleControl(
-                      context,
-                      label: session.muted
-                          ? 'Unmute microphone'
-                          : 'Mute microphone',
-                      selected: session.muted,
-                      onPressed: () => session.setMuted(!session.userMuted),
-                      icon: session.muted ? Icons.mic_off : Icons.mic,
-                      size: voiceDockControlExtent,
-                    ),
-                  ),
-                )
-              else
+              // The sound and nothing else. The way out of the call is the
+              // control that started it, still in its own place beside the
+              // field; a microphone here read as the one that dictates, and
+              // a second X a thumb's width from the first would be two ways
+              // to hang up. A failure is the one thing that earns a control:
+              // the call is already over and this row is the only way out.
+              if (failure != null) ...[
                 identified(
                   VoiceIds.end,
                   voiceCircleControl(
@@ -387,7 +375,8 @@ class _VoiceComposerDockState extends State<VoiceComposerDock> {
                     size: voiceDockControlExtent,
                   ),
                 ),
-              const SizedBox(width: 8),
+                const SizedBox(width: voiceDockControlInset),
+              ],
             ],
           ),
         ),
