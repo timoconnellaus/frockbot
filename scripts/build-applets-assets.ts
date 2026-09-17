@@ -23,6 +23,11 @@
 // Freshness is proved by `--check`, which `bun run typecheck` runs.
 import { existsSync, readdirSync } from "node:fs";
 import { format } from "prettier";
+import {
+  SKILL_MAX_FILE_BYTES,
+  SKILL_MAX_REFERENCES,
+  isSkillReferenceNameV1,
+} from "../app/skills/skill-md.ts";
 
 const root = new URL("../", import.meta.url);
 const at = (path: string): URL => new URL(path, root);
@@ -201,10 +206,6 @@ async function pagesModule(): Promise<string> {
   );
 }
 
-/** Most references one managed Skill may ship, and how large each may be. */
-const SKILL_MAX_REFERENCES = 32;
-const SKILL_MAX_REFERENCE_BYTES = 65_536;
-
 /**
  * One authored Skill directory: its `SKILL.md` and the Markdown files under
  * `references/` (ADR 0030).
@@ -223,6 +224,13 @@ async function skillDirectory(
         .filter((name) => name.endsWith(".md"))
         .sort()
     : [];
+  for (const name of names) {
+    if (!isSkillReferenceNameV1(name)) {
+      throw new Error(
+        `${directory}references/${name} is not a name the loader reads as a reference`,
+      );
+    }
+  }
   if (names.length > SKILL_MAX_REFERENCES) {
     throw new Error(
       `${directory} offers ${names.length} references; the bound is ${SKILL_MAX_REFERENCES}`,
@@ -231,9 +239,9 @@ async function skillDirectory(
   const references: { path: string; text: string }[] = [];
   for (const path of names) {
     const body = await Bun.file(at(`${directory}references/${path}`)).text();
-    if (new TextEncoder().encode(body).byteLength > SKILL_MAX_REFERENCE_BYTES) {
+    if (new TextEncoder().encode(body).byteLength > SKILL_MAX_FILE_BYTES) {
       throw new Error(
-        `${directory}references/${path} is larger than ${SKILL_MAX_REFERENCE_BYTES} bytes`,
+        `${directory}references/${path} is larger than ${SKILL_MAX_FILE_BYTES} bytes`,
       );
     }
     references.push({ path, text: body });

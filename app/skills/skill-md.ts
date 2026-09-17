@@ -32,6 +32,16 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** A reference's file name: one Markdown file, never a path. */
 const REFERENCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\.md$/;
 
+/*
+ * `SKILL.md` is excluded because `isSkillDocumentPathV1` reads any path ending
+ * in it as a Skill: a reference by that name would load as a second Skill,
+ * slugged from `references/`, and collide on that ref with every other Skill
+ * carrying one.
+ */
+function isReferenceName(name: string): boolean {
+  return REFERENCE_NAME.test(name) && name !== SKILL_FILE_NAME;
+}
+
 /** One parsed `SKILL.md`. `body` is the markdown recipe after the frontmatter. */
 export interface SkillDocumentV1 {
   name: string;
@@ -157,7 +167,7 @@ export function skillDocumentPathV1(slug: string): string {
  * can only ever name a file inside its own Skill's `references/` directory.
  */
 export function isSkillReferenceNameV1(name: unknown): name is string {
-  return typeof name === "string" && REFERENCE_NAME.test(name);
+  return typeof name === "string" && isReferenceName(name);
 }
 
 /**
@@ -172,7 +182,7 @@ export function skillReferencePathForV1(
   if (!isSkillDocumentPathV1(documentPath)) {
     throw new Error("a reference needs the path of its SKILL.md");
   }
-  if (!REFERENCE_NAME.test(name)) {
+  if (!isReferenceName(name)) {
     throw new Error("skill reference must be a single .md file name");
   }
   return `${documentPath.slice(0, -SKILL_FILE_NAME.length)}${SKILL_REFERENCES_DIRECTORY}/${name}`;
@@ -199,7 +209,7 @@ export function skillReferenceNameForV1(
   const prefix = `${documentPath.slice(0, -SKILL_FILE_NAME.length)}${SKILL_REFERENCES_DIRECTORY}/`;
   if (!candidatePath.startsWith(prefix)) return undefined;
   const name = candidatePath.slice(prefix.length);
-  return REFERENCE_NAME.test(name) ? name : undefined;
+  return isReferenceName(name) ? name : undefined;
 }
 
 /** True when a slug is well formed. Total; never throws. */

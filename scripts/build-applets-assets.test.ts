@@ -6,7 +6,7 @@
  * runs, so a generator that silently ignored `references/` would keep passing.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
@@ -21,14 +21,20 @@ async function check(): Promise<number> {
   return await process.exited;
 }
 
+// The Skill this runs against is the real one in the checkout, so cleanup
+// removes the fixture it wrote and nothing an author put there.
+let referencesExisted = false;
+
 afterEach(() => {
-  rmSync(REFERENCES, { recursive: true, force: true });
+  rmSync(FIXTURE, { force: true });
+  if (!referencesExisted) rmSync(REFERENCES, { recursive: true, force: true });
 });
 
 describe("the managed Skill generator", () => {
   test("the committed modules are fresh, and a new reference makes them stale", async () => {
     expect(await check()).toBe(0);
 
+    referencesExisted = existsSync(REFERENCES);
     mkdirSync(REFERENCES, { recursive: true });
     writeFileSync(FIXTURE, "# Fixture\n");
 
