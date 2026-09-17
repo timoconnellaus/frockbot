@@ -1,11 +1,9 @@
 /// Comparing and copying decoded JSON, neither of which Dart gives for free.
 ///
-/// Equality: two things in a Card compare decoded JSON and must agree about
-/// what "the same" means — whether a press being made again is the press whose
-/// answer was lost (`press.dart`), and whether a record that arrived is the
-/// record already drawn (`client.dart`). Both are about a wire value, where a
-/// map is a bag of keys and not an identity, so both ask here rather than each
-/// deciding.
+/// Equality: whether a press being made again is the press whose answer was
+/// lost (`press.dart`) is asked of the context that control sent, which is a
+/// wire value — a map there is a bag of keys and not an identity, so the
+/// question is answered here rather than by whoever happens to ask it.
 ///
 /// Copying: the renderer's data model is a live thing it writes into, and it
 /// is handed the maps a read decoded. Without a copy at that handoff the record

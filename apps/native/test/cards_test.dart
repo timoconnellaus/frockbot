@@ -875,7 +875,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a notice at the drawn revision keeps what was typed', (
+    testWidgets('a notice rebuilds the surface from the record it re-read', (
       tester,
     ) async {
       final invalidations = ValueNotifier<int>(0);
@@ -901,13 +901,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'actually, no');
       await tester.pumpAndSettle();
-      // A notice says some durable state of the Bot's moved, and this card's
-      // record has not: the re-read comes back at the revision already drawn,
-      // and what only the renderer holds survives it.
+      // A notice says some durable state of the Bot's moved, never which
+      // record, so the card re-reads and rebuilds from what came back. The
+      // known cost of having one path: what only the renderer held — the text
+      // in flight — goes with the renderer it was in.
       invalidations.value++;
       await tester.pumpAndSettle();
       expect(reads, 2);
-      expect(find.text('actually, no'), findsOneWidget);
+      expect(find.text('actually, no'), findsNothing);
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('Approve'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 

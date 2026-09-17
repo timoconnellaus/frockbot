@@ -24,6 +24,15 @@
 ///    the same press.
 ///  * **What a stale answer costs.** A 409 means the surface moved under the
 ///    person. It is not a failure: the card re-reads and redraws, and says so.
+///
+/// What this costs today: every adopted record rebuilds the surface, so a
+/// notice arriving while someone is part-way through a `TextField` loses what
+/// they had typed. Keeping the live renderer for a record that had not changed
+/// was tried and taken back out — it is a second way to settle the card's
+/// state, and it kept dropping one part of it. The next catalog family, which
+/// is where controls that hold real typing live, is where to do it properly:
+/// by giving the renderer its input state back, rather than by deciding not to
+/// redraw.
 library;
 
 import 'dart:async';
@@ -165,52 +174,47 @@ class _CardChatCardState extends State<CardChatCard>
   /// Takes a record on: admitted, translated, and fed to a renderer of its
   /// own.
   ///
+  /// Every adopted record rebuilds the surface. There is no same-record path
+  /// that keeps the live renderer, because a card has one state to settle —
+  /// what is drawn, which press may still be retried, and what the last press
+  /// said — and two ways to settle it is one way to get it wrong. The cost is named in this module's header: a notice arriving while
+  /// someone is typing costs them what they had typed.
+  ///
   /// Adopting a record ends every read older than it. A record arrives two
   /// ways — a read, and the receipt a press carries back — and the receipt is
   /// the later truth about the surface whatever order the answers land in, so
   /// a read still in flight must not redraw over it.
   ///
-  /// An admitted record that is the record already drawn keeps its renderer
-  /// rather than getting a new one, because the renderer holds what the record
-  /// does not — text a person has typed, a disclosure they opened — and a
-  /// notice about some other durable state must not cost them it. The record
-  /// has to be the same whole record and not merely the same revision: the
-  /// shell writes a refusal onto a record without folding it, so a card that
-  /// has stopped updating comes back at the revision already drawn and must
-  /// still be refused. Admission decides that before the renderer is reused.
-  ///
-  /// Whichever way that goes, the card settles here in one `setState`: the
-  /// press path leans on adopting a record to put the surface back in the
-  /// person's hands, so a path that skipped it would leave the card dimmed and
-  /// unanswerable.
+  /// The card settles here in one `setState`: the press path leans on adopting
+  /// a record to put the surface back in the person's hands, so a path that
+  /// skipped it would leave the card dimmed and unanswerable. The press in
+  /// flight is not settled here — a read started before a press can land under
+  /// it, and that read must not hand the card back while the POST is still
+  /// out; `press` releases it when its own answer arrives.
   void adopt(CardView answer) {
     epoch++;
-    final drawn = card;
     final live = controller;
     SurfaceController? next;
     String? said;
     try {
       admitCardV1(answer);
-      if (drawn == answer && live != null) {
-        next = live;
-      } else {
-        next = SurfaceController(catalogs: [cardCatalogV1]);
-        for (final message in cardMessagesV1(answer)) {
-          next.handleMessage(core.A2uiMessage.fromJson(message));
-        }
+      next = SurfaceController(catalogs: [cardCatalogV1]);
+      for (final message in cardMessagesV1(answer)) {
+        next.handleMessage(core.A2uiMessage.fromJson(message));
       }
     } on CardRefusal catch (refused) {
       said = refused.message;
+      next?.dispose();
+      next = null;
     } catch (_) {
       // Anything the renderer would not take is the same answer as a budget:
       // the host says it cannot draw this, rather than drawing part of it.
       said = 'This card can’t be drawn by this app.';
+      next?.dispose();
+      next = null;
     }
-    final replaced = !identical(next, live);
-    if (replaced) {
-      unawaited(interactions?.cancel());
-      interactions = next?.onSubmit.listen(_interaction);
-    }
+    unawaited(interactions?.cancel());
+    interactions = next?.onSubmit.listen(_interaction);
     if (retryCommandId != null && answer.revision != retryRevision) {
       retryCommandId = null;
       retryPress = null;
@@ -222,7 +226,7 @@ class _CardChatCardState extends State<CardChatCard>
       failure = null;
       controller = next;
     });
-    if (replaced) live?.dispose();
+    live?.dispose();
   }
 
   /// What the renderer sends back: a press, or its own refusal to draw.
