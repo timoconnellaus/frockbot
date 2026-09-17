@@ -27,11 +27,14 @@ import 'package:genui/genui.dart';
 
 import 'core.dart';
 import 'data.dart';
+import 'rich_text.dart';
 import 'structure.dart';
 
 export 'common.dart';
 export 'core.dart';
 export 'data.dart';
+export 'links.dart';
+export 'rich_text.dart';
 export 'schemas.dart';
 export 'structure.dart';
 export 'tone.dart';
@@ -40,5 +43,6 @@ export 'tone.dart';
 final List<CatalogItem> frockCatalogItemsV1 = List.unmodifiable([
   ...frockCoreItemsV1,
   ...frockDataItemsV1,
+  ...frockRichTextItemsV1,
   ...frockStructureItemsV1,
 ]);
