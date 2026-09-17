@@ -123,8 +123,20 @@ An opt-in grouping a Bot creates or joins that carries its own shared Memory tie
 _Avoid_: Workspace, folder, team
 
 **Skill**:
-An instruction file under a Bot's instruction root on the Workspace that the Bot loads to learn how to do something. A Bot may write its own.
+An instruction directory under a Bot's instruction root on the Workspace — one `SKILL.md` and the references beside it — that the Bot loads to learn how to do something. A Bot may write its own.
 _Avoid_: Prompt, workflow, tool, instruction file
+
+**Reference**:
+One Markdown file under a Skill's `references/` directory, loaded on its own after the Skill's `SKILL.md` names it, so a large Skill costs the prompt only what a Turn reads ([ADR 0030](docs/adr/0030-a2ui-cards.md)).
+_Avoid_: Sub-skill, attachment, appendix
+
+**Card**:
+One A2UI surface in the conversation — its components, its data model and its revision — sent by a Bot through `send_to_user`, drawn by the client from the catalogs compiled into it, and updated in place until it settles. Authored by the Bot outright or by a Plugin from the values the Bot sends ([ADR 0030](docs/adr/0030-a2ui-cards.md)).
+_Avoid_: Widget, rich message, embed, component
+
+**Frock catalog**:
+FrockBot's own A2UI catalog beside the standard one: the components the client draws and the schema the model composes them from, generated from one source. Trust chrome is a Frock catalog component only the host draws, bound to an id only the kernel issues.
+_Avoid_: Component library, design system, custom widgets
 
 **Skill ref**:
 The name that identifies one Skill across a seam — its source and slug — carried instead of its text, so what runs is the Skill generation the Turn resolves.
