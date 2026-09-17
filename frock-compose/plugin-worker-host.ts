@@ -100,11 +100,26 @@ const CARD_SURFACE_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 /**
  * The surface id one card draw is minted under. It names the Plugin and the
  * card so a person reading durable state can tell what drew it, and the
- * random half is what makes it new.
+ * effect that drew it is what makes it new.
+ *
+ * Derived from the effect rather than random for the same reason the card's
+ * Approval ids are: a Turn interrupted before its tool result landed re-runs
+ * the same call under the same effect, and a freshly minted surface would
+ * name a card nobody is looking at while the one in the conversation — which
+ * the send deduped under that effect — kept a live-looking button forever. An
+ * effect id that will not fit the surface id the Card seam bounds falls back
+ * to a random half, because a surface id that does not decode draws nothing.
  */
-function mintedCardSurfaceIdV1(pluginId: string, cardId: string): string {
+function mintedCardSurfaceIdV1(
+  pluginId: string,
+  cardId: string,
+  effectId: string,
+): string {
+  const prefix = cardSurfacePrefixV1(pluginId, cardId);
+  const derived = `${prefix}${effectId.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
+  if (CARD_SURFACE_ID_V1.test(derived)) return derived;
   const unique = crypto.randomUUID().replaceAll("-", "").slice(0, 24);
-  return `${cardSurfacePrefixV1(pluginId, cardId)}${unique}`;
+  return `${prefix}${unique}`;
 }
 
 const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
@@ -1352,7 +1367,7 @@ export class PluginWorkerHost {
         }
         const surfaceId =
           (request.surfaceId as string | undefined) ??
-          mintedCardSurfaceIdV1(pluginId, card.id);
+          mintedCardSurfaceIdV1(pluginId, card.id, context.effectId);
         const invocation: PluginWorkerRenderCardInvocationV1 = {
           schemaVersion: 1,
           pluginId,

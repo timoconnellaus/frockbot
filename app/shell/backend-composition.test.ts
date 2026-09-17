@@ -27,6 +27,7 @@ import {
 } from "./backend-composition.js";
 import { approvalKeyV1 } from "./approvals.js";
 import {
+  CARD_APPROVAL_BINDING_PREFIX,
   cardApprovalBindingKeyV1,
   cardValuesDigestV1,
   createCardApprovalStoreV1,
@@ -620,6 +621,22 @@ describe("the Approvals a Plugin's Card asks for", () => {
       );
   }
 
+  /** Every card surface the Turn's log carries, in order. */
+  function cardSurfaceIdsOnLog(mounted: ShellMountedComposition): string[] {
+    const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
+    return (session?.events ?? [])
+      .filter(
+        (event) =>
+          event.type === "send/to-user" &&
+          (event as { payload?: { type?: string } }).payload?.type === "card",
+      )
+      .map(
+        (event) =>
+          (event as unknown as { payload: { surfaceId: string } }).payload
+            .surfaceId,
+      );
+  }
+
   /** The approvalId the card in the conversation actually points at. */
   function cardApprovalId(mounted: ShellMountedComposition): string {
     const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
@@ -671,6 +688,40 @@ describe("the Approvals a Plugin's Card asks for", () => {
       expect(asked).toHaveLength(1);
       const binding = bindingFor(values, surfaceId);
       expect(binding?.approvalIds).toEqual(asked);
+      expect(cardApprovalId(mounted)).toBe(asked[0]!);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a replayed draw of an unnamed surface redraws the surface it minted", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store);
+    try {
+      // The Bot names no surface, so the kernel mints one. An interrupted Turn
+      // re-runs the same call under the same effect id, and a second minted
+      // surface would leave the card the person is looking at stranded with a
+      // live-looking button while the Bot settled a card nobody can see.
+      const input = { data: { subject: "Hello" } };
+      const first = await draw(input, "effect-minted");
+      const again = await draw(input, "effect-minted");
+      const surfaceOf = (result: { content?: unknown }) =>
+        /surface "([^"]+)"/.exec(String(result.content))![1]!;
+      const surfaceId = surfaceOf(first);
+      expect(surfaceOf(again)).toBe(surfaceId);
+      expect(surfaceId.startsWith(cardSurfacePrefixV1(CARD_PLUGIN, "draft"))).toBe(
+        true,
+      );
+
+      const asked = approvalIdsOnLog(mounted);
+      expect(asked).toHaveLength(1);
+      expect(cardSurfaceIdsOnLog(mounted)).toEqual([surfaceId]);
+      expect(
+        [...values.keys()].filter((key) =>
+          key.startsWith(CARD_APPROVAL_BINDING_PREFIX),
+        ),
+      ).toEqual([cardApprovalBindingKeyV1(CARD_PLUGIN, surfaceId)]);
+      expect(bindingFor(values, surfaceId)?.approvalIds).toEqual(asked);
       expect(cardApprovalId(mounted)).toBe(asked[0]!);
     } finally {
       await mounted.dispose();

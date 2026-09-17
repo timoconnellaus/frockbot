@@ -62,14 +62,10 @@ function headerLine(name: string, value: string): string {
  */
 export function composeEmailMessageV1(
   request: EmailSendRequestV1,
-  from: { address: string; displayName?: string; messageId: string },
+  from: { address: string; messageId: string },
 ): string {
-  const sender =
-    from.displayName === undefined
-      ? from.address
-      : `${JSON.stringify(from.displayName)} <${from.address}>`;
   const headers = [
-    headerLine("From", sender),
+    headerLine("From", from.address),
     headerLine("To", request.to.join(", ")),
     ...(request.cc && request.cc.length > 0
       ? [headerLine("Cc", request.cc.join(", "))]
@@ -102,7 +98,6 @@ export function composeEmailMessageV1(
 export function createBindingEmailSenderV1(env: {
   SEND_EMAIL?: EmailBindingV1;
   EMAIL_SENDER_ADDRESS?: string;
-  EMAIL_SENDER_NAME?: string;
 }): EmailSenderV1 | undefined {
   const binding = env.SEND_EMAIL;
   const address = env.EMAIL_SENDER_ADDRESS;
@@ -110,13 +105,7 @@ export function createBindingEmailSenderV1(env: {
   return {
     async send(request) {
       const messageId = emailMessageIdV1(address);
-      const raw = composeEmailMessageV1(request, {
-        address,
-        ...(env.EMAIL_SENDER_NAME === undefined
-          ? {}
-          : { displayName: env.EMAIL_SENDER_NAME }),
-        messageId,
-      });
+      const raw = composeEmailMessageV1(request, { address, messageId });
       const recipients = [...request.to, ...(request.cc ?? [])];
       const undelivered: string[] = [];
       let delivered = 0;

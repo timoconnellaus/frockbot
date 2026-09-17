@@ -20,7 +20,10 @@
 //     recorded in the transaction that records the approval; the generation
 //     proposal — a cross-object call — runs after the commit, and is
 //     idempotent on what the Composition already holds.
-import { SEND_TO_USER_LIMITS_V1 } from "@frockbot/core/contracts";
+import {
+  SEND_TO_USER_LIMITS_V1,
+  pluginCardToolNameV1,
+} from "@frockbot/core/contracts";
 import type { CompositionMemberV1 } from "@frockbot/core/durable";
 import { decodeCompositionMemberV1 } from "@frockbot/core/durable";
 
@@ -309,10 +312,19 @@ export function pluginApprovalActionV1(
   const parts: string[] = [
     `${verb} the Plugin "${descriptor.displayName}" (${descriptor.id}, version ${descriptor.version}) on this Bot.`,
   ];
+  // A card is a tool the registry offers under the same name, so the sentence
+  // names it: a Plugin whose whole Bot-facing surface is cards would otherwise
+  // read as offering nothing at all.
+  const offered = [
+    ...descriptor.tools.map((tool) => tool.name),
+    ...(descriptor.cards ?? []).map((card) =>
+      pluginCardToolNameV1(descriptor.id, card.id),
+    ),
+  ];
   parts.push(
-    descriptor.tools.length === 0
+    offered.length === 0
       ? "It offers no tools."
-      : `It offers ${descriptor.tools.map((tool) => tool.name).join(", ")}.`,
+      : `It offers ${offered.join(", ")}.`,
   );
   if (descriptor.hooks.length > 0) {
     parts.push(`It wraps ${descriptor.hooks.join(", ")}.`);
@@ -320,13 +332,24 @@ export function pluginApprovalActionV1(
   if (descriptor.grants.length > 0) {
     parts.push(`It is granted ${descriptor.grants.join(", ")}.`);
   }
+  // `http` opens two members, not one: the declared hosts and the deployment's
+  // own sender. Both are said, because a Plugin that can ask this deployment
+  // to mail somebody must never read as reaching nothing.
+  const sendsEmail = descriptor.grants.includes("http");
   if (descriptor.network) {
+    if ("open" in descriptor.network) {
+      parts.push(
+        "It reaches the whole network, which means every Plugin on this account can.",
+      );
+    } else if (descriptor.network.hosts.length > 0) {
+      parts.push(`It reaches ${descriptor.network.hosts.join(", ")}.`);
+    } else if (!sendsEmail) {
+      parts.push("It reaches no host of its own.");
+    }
+  }
+  if (sendsEmail) {
     parts.push(
-      "open" in descriptor.network
-        ? "It reaches the whole network, which means every Plugin on this account can."
-        : descriptor.network.hosts.length === 0
-          ? "It reaches no host of its own."
-          : `It reaches ${descriptor.network.hosts.join(", ")}.`,
+      "It can ask this deployment to send email on the Bot's behalf, which a person approves message by message.",
     );
   }
   const action = parts.join(" ");

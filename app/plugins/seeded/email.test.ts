@@ -11,6 +11,7 @@ import {
   A2UI_LIMITS_V1,
   decodeA2uiAgentMessageV1,
   decodeSendToUserPayloadV1,
+  validateAgainstJsonSchemaV1,
   type A2uiComponentV1,
 } from "@frockbot/core/contracts";
 import { bindCardApprovalsV1 } from "@frockbot/app/shell/cards";
@@ -457,6 +458,33 @@ describe("the seeded email Plugin", () => {
         .map((byte) => byte.toString(16).padStart(2, "0"))
         .join(""),
     ).toBe(artifact.sourceHash);
+  });
+
+  // The card tool validates the Bot's values against this schema before the
+  // Plugin is called at all, so what the kernel refuses at send has to be
+  // refused here — a person must never be shown a card they cannot send.
+  test("the draft card refuses values the kernel would refuse at send", () => {
+    const schema = DEPLOYMENT_PLUGIN_CATALOG_V1.find(
+      (plugin) => plugin.pluginId === "email",
+    )!.descriptor.cards![0]!.dataSchema;
+    expect(() =>
+      validateAgainstJsonSchemaV1(
+        { to: draft.to, subject: draft.subject, body: draft.body },
+        schema,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateAgainstJsonSchemaV1(
+        { to: draft.to, subject: "", body: draft.body },
+        schema,
+      ),
+    ).toThrow(/subject must be at least 1 character/);
+    expect(() =>
+      validateAgainstJsonSchemaV1(
+        { to: draft.to, subject: draft.subject, body: "" },
+        schema,
+      ),
+    ).toThrow(/body must be at least 1 character/);
   });
 
   test("declares every tool the module exports, and nothing it does not", () => {

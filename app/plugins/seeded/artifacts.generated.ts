@@ -33,7 +33,7 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 8864,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "50fba5d3b9b9ac168c9a90e63a41ec80795788e9a43af86234fb156793cbbd16",
+      "736ab540629ac4941a58e136df0eecb299aa1f4186cadb4f389568dd8afc07f0",
     descriptor: {
       id: "email",
       displayName: "Email",
@@ -89,9 +89,9 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
                 maxItems: 16,
               },
               cc: { type: "array", items: { type: "string" }, maxItems: 16 },
-              subject: { type: "string", maxLength: 512 },
+              subject: { type: "string", minLength: 1, maxLength: 512 },
               inReplyTo: { type: "string", maxLength: 512 },
-              body: { type: "string", maxLength: 64000 },
+              body: { type: "string", minLength: 1, maxLength: 64000 },
             },
             required: ["to", "subject", "body"],
             additionalProperties: false,
