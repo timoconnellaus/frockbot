@@ -219,6 +219,11 @@ export async function skillDirectory(
   directory: URL,
 ): Promise<{ text: string; references: { path: string; text: string }[] }> {
   const text = await Bun.file(new URL("SKILL.md", directory)).text();
+  if (text.length > SKILL_MAX_FILE_BYTES) {
+    throw new Error(
+      `${directory.pathname}SKILL.md is larger than ${SKILL_MAX_FILE_BYTES} bytes`,
+    );
+  }
   const referencesDirectory = new URL("references/", directory);
   // A Skill with nothing beside it is an ordinary Skill, not a broken one.
   const names = existsSync(referencesDirectory)

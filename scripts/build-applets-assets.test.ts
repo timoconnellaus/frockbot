@@ -28,7 +28,11 @@ import {
   PLUGINS_SKILL_DOCUMENT_V1,
   PLUGINS_SKILL_REFERENCES_V1,
 } from "../app/skills/managed-plugins.generated";
-import { SKILL_MAX_REFERENCES } from "../app/skills/skill-md";
+import {
+  parseSkillDocumentV1,
+  SKILL_MAX_FILE_BYTES,
+  SKILL_MAX_REFERENCES,
+} from "../app/skills/skill-md";
 
 const made: string[] = [];
 
@@ -88,6 +92,14 @@ describe("the managed Skill generator", () => {
     await expect(skillDirectory(authored(files))).rejects.toThrow(
       `the bound is ${SKILL_MAX_REFERENCES}`,
     );
+  });
+
+  test("fails the build on a SKILL.md the loader would refuse as oversized", async () => {
+    const oversized = `${DOCUMENT}${"x".repeat(SKILL_MAX_FILE_BYTES)}`;
+    expect(parseSkillDocumentV1(oversized).status).toBe("malformed");
+    await expect(
+      skillDirectory(authored({ "SKILL.md": oversized })),
+    ).rejects.toThrow(`larger than ${SKILL_MAX_FILE_BYTES} bytes`);
   });
 
   test("a reference authored beside a SKILL.md reaches the generated module", async () => {
