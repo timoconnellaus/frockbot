@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   VOICE_ASSISTANT_DEVICE_HEADER,
   VOICE_ASSISTANT_INTERNAL_PATH,
@@ -54,6 +54,94 @@ afterEach(async () => {
     );
   }
   touched.clear();
+});
+
+/**
+ * What every probe budget in this file is multiplied by.
+ *
+ * The budgets below are written for a laptop, and a CI runner is not one: two
+ * cores, this file running beside three other jobs, and tests in this very
+ * file legitimately taking twenty-four seconds there. `sends acknowledgment
+ * audio while the model is still pending` spends the default eight seconds and
+ * has twice reported an empty result at the deadline — on 2026-09-17 against
+ * `26909074` and again against `caa29268` — and both times the identical
+ * assertion passed when the job was simply run again. A budget a passing run
+ * clears by a whisker is not a budget; it is a red `main` and a release that
+ * does not cut, which is exactly what those two produced.
+ *
+ * Scaling here rather than at each call site keeps every budget's intent
+ * intact — a site that asked for five times the default still gets five times
+ * it — and means a new probe inherits the allowance without its author having
+ * to know CI is slower. Locally nothing changes: the short budgets are the
+ * useful ones there, because a wait that would pass in ten seconds on a
+ * shared runner is a hang on a machine doing nothing else.
+ */
+const PROBE_BUDGET_FACTOR = process.env.CI ? 4 : 1;
+
+/**
+ * The most a single probe may wait, however it was scaled.
+ *
+ * A probe that is merely slow must fail on its own terms — its message names
+ * what it waited for and what it saw — rather than as a bare test timeout,
+ * which says only that time ran out. The ceiling keeps any one wait well
+ * inside `FILE_TEST_TIMEOUT_MS` below, and it is still far more than any of
+ * these waits has ever needed.
+ */
+const PROBE_BUDGET_CEILING_MS = 60_000;
+
+/**
+ * What a wait in this file is actually allowed, given what its call site asked
+ * for. Every wait goes through here — both the frame helper and the polling
+ * one — so the scaling belongs to waiting on this runner rather than to either
+ * helper, and a helper added later cannot miss it.
+ */
+function probeBudget(timeoutMs: number): number {
+  return Math.min(timeoutMs * PROBE_BUDGET_FACTOR, PROBE_BUDGET_CEILING_MS);
+}
+
+/** What a wait is allowed when its call site names no budget of its own. */
+const DEFAULT_PROBE_BUDGET_MS = 8_000;
+
+/**
+ * The most waits any single test here performs in sequence, counting the two
+ * inside `startCall`. The heaviest are `hanging up cancels the request…` and
+ * `a just-for-today request holds today…`, at ten apiece, none of which names
+ * a budget of its own.
+ */
+const WORST_CASE_WAITS_IN_ONE_TEST = 10;
+
+/**
+ * How long one test in this file may run.
+ *
+ * This must stay above the sum of the scaled waits a single test can perform,
+ * or the ceiling above stops meaning anything: the budgets compound within a
+ * test, and once they exceed the limit the first informative failure is
+ * swallowed by a bare test timeout, which is the failure the ceiling exists to
+ * avoid. So the figure is derived from the budgets rather than chosen — the
+ * worst-case sum, plus one more ceiling for the setting-up a test does between
+ * its waits — and it never drops below the shared default, which is right for
+ * the other files and only too small for this one.
+ */
+const SHARED_TEST_TIMEOUT_MS = 120_000;
+const FILE_TEST_TIMEOUT_MS = Math.max(
+  SHARED_TEST_TIMEOUT_MS,
+  WORST_CASE_WAITS_IN_ONE_TEST * probeBudget(DEFAULT_PROBE_BUDGET_MS) +
+    PROBE_BUDGET_CEILING_MS,
+);
+
+vi.setConfig({ testTimeout: FILE_TEST_TIMEOUT_MS });
+
+test("the runner's CI flag reaches the worker the budgets are scaled in", () => {
+  expect(
+    Object.hasOwn(process.env, "CI"),
+    "vitest.config.ts is no longer carrying CI into workerd, so every wait in this file has silently dropped back to its laptop budget — look at the miniflare bindings",
+  ).toBe(true);
+  expect(
+    probeBudget(DEFAULT_PROBE_BUDGET_MS),
+    "the CI flag is visible but the waits are not scaled by it — look at PROBE_BUDGET_FACTOR",
+  ).toBe(
+    process.env.CI ? DEFAULT_PROBE_BUDGET_MS * 4 : DEFAULT_PROBE_BUDGET_MS,
+  );
 });
 
 interface Opened {
@@ -129,13 +217,13 @@ async function open(
     frames,
     audio,
     closed,
-    waitFor(predicate, label, timeoutMs = 8_000) {
+    waitFor(predicate, label, timeoutMs = DEFAULT_PROBE_BUDGET_MS) {
       const seen = frames.find(predicate);
       if (seen) return Promise.resolve(seen);
       return new Promise((resolve, reject) => {
         const timer = setTimeout(
           () => reject(new Error(`timed out waiting for ${label}`)),
-          timeoutMs,
+          probeBudget(timeoutMs),
         );
         waiters.push({
           predicate,
@@ -187,51 +275,13 @@ async function settle(ms = 50): Promise<void> {
  * sends the idle status frame before it awaits `onCallEnd`, so a frame on the
  * socket does not yet mean the assistant's own bookkeeping has finished.
  */
-/**
- * What every probe budget in this file is multiplied by.
- *
- * The budgets below are written for a laptop, and a CI runner is not one: two
- * cores, this file running beside three other jobs, and tests in this very
- * file legitimately taking twenty-four seconds there. `sends acknowledgment
- * audio while the model is still pending` spends the default eight seconds and
- * has twice reported an empty result at the deadline — on 2026-09-17 against
- * `26909074` and again against `caa29268` — and both times the identical
- * assertion passed when the job was simply run again. A budget a passing run
- * clears by a whisker is not a budget; it is a red `main` and a release that
- * does not cut, which is exactly what those two produced.
- *
- * Scaling here rather than at each call site keeps every budget's intent
- * intact — a site that asked for five times the default still gets five times
- * it — and means a new probe inherits the allowance without its author having
- * to know CI is slower. Locally nothing changes: the short budgets are the
- * useful ones there, because a wait that would pass in ten seconds on a
- * shared runner is a hang on a machine doing nothing else.
- */
-const PROBE_BUDGET_FACTOR = process.env.CI ? 4 : 1;
-
-/**
- * The most a single probe may wait, however it was scaled.
- *
- * `vitest.config.ts` gives a test 120 seconds, and the longest budget written
- * below is forty — which multiplied would be 160, so a probe that was merely
- * slow would stop failing on its own terms and start failing as a test
- * timeout, with none of the value that says. Half the test's allowance leaves
- * room for the rest of a test that has already spent time getting to its
- * probe, and it is still far more than any of these have ever needed.
- */
-const PROBE_BUDGET_CEILING_MS = 60_000;
-
 async function eventually<T>(
   probe: () => Promise<T>,
   satisfied: (value: T) => boolean,
   label: string,
-  timeoutMs = 8_000,
+  timeoutMs = DEFAULT_PROBE_BUDGET_MS,
 ): Promise<T> {
-  const budget = Math.min(
-    timeoutMs * PROBE_BUDGET_FACTOR,
-    PROBE_BUDGET_CEILING_MS,
-  );
-  const deadline = Date.now() + budget;
+  const deadline = Date.now() + probeBudget(timeoutMs);
   let value = await probe();
   while (!satisfied(value)) {
     if (Date.now() >= deadline) {
