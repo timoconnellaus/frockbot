@@ -21,6 +21,7 @@ import {
   VOICE_TURN_BRIDGES_V1,
 } from "@frockbot/app/voice/assistant";
 import { SentenceChunker } from "agents/voice/text";
+import { VOICE_BY_CHARACTER_V1 } from "@frockbot/app/voice/voices";
 import {
   VoiceMemoryLedgerV1,
   VOICE_MEMORY_CHUNK_TURNS_V1,
@@ -381,8 +382,17 @@ describe("the voice session object", () => {
       botId: `voice-bot-${suffix}`,
     };
     const other = { ...identity, botId: `voice-other-${suffix}` };
-    await provisionBot(identity);
-    await provisionSiblingBot(other);
+    // The Flock draws a random character when none is given, and two random
+    // draws can match; the characters are named here so the two voices are
+    // known and always different.
+    await provisionBot({
+      ...identity,
+      avatar: { schemaVersion: 1, characterId: "sunny", primary: "#ffc928" },
+    });
+    await provisionSiblingBot({
+      ...other,
+      avatar: { schemaVersion: 1, characterId: "guardian", primary: "#3c3543" },
+    });
     const stub = assistant(identity.userId);
     await stub.probeSetScript({
       reply: "Right you are.",
@@ -395,9 +405,8 @@ describe("the voice session object", () => {
     expect(await stub.probeUtterance("are you there")).toBe(true);
     await opened.waitFor((f) => f.type === "transcript_end", "an answer");
     const first = await stub.probeSpokenVoices();
-    // Whatever character the Bot wears, it is a voice from the catalog and
-    // not the empty default.
-    expect(first.length).toBeGreaterThan(0);
+    // The Bot wears sunny, so it speaks in sunny's voice.
+    expect(first.at(-1)).toBe(VOICE_BY_CHARACTER_V1.sunny);
     const before = first.length;
     expect(await stub.probeUtterance("please handover now")).toBe(true);
     await eventually(
@@ -406,8 +415,9 @@ describe("the voice session object", () => {
       "the other Bot speaking",
     );
     const after = await stub.probeSpokenVoices();
-    // The Bots wear different characters, so they must not sound the same.
-    expect(after.at(-1)).not.toBe(first.at(-1));
+    // The hand-over moved the call to the Bot wearing guardian, and the voice
+    // moved with it.
+    expect(after.at(-1)).toBe(VOICE_BY_CHARACTER_V1.guardian);
     opened.socket.close();
   });
 

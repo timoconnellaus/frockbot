@@ -13,6 +13,7 @@ import {
   VOICE_TURN_BRIDGES_V1,
   pickVoiceBridgeV1,
   VOICE_TURN_MAX_STEPS_V1,
+  VOICE_TOOLS_V1,
   type VoiceAssistantHostV1,
   type VoiceAssistantPromptInputV1,
   type VoiceTurnChunkV1,
@@ -893,6 +894,25 @@ describe("the system prompt", () => {
       botId: "remy",
       switched: false,
     });
+  });
+
+  // Every tool the prompt tells the model to call has to exist, or the loop
+  // answers "Unknown tool". The call without a current Bot is the one that
+  // drifts, because it is only reached when a Bot cannot be resolved.
+  test.each([
+    ["with a Bot", { botId: "sunny", name: "Sunny" }],
+    ["without one", undefined],
+  ])("only names tools that exist, %s", (_label, bot) => {
+    const prompt = renderVoiceSystemPromptV1({
+      bots: [],
+      memory: { logDays: 30 },
+      now: new Date("2026-09-12T00:00:00.000Z"),
+      ...(bot ? { bot } : {}),
+    });
+    const known = new Set(VOICE_TOOLS_V1.map((tool) => tool.function.name));
+    const named = prompt.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? [];
+    expect(named.length).toBeGreaterThan(0);
+    for (const name of named) expect(known).toContain(name);
   });
 
   test("says when memory could not be read rather than pretending it is empty", () => {
