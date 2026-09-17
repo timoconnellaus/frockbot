@@ -92,15 +92,18 @@ class _CardChatCardState extends State<CardChatCard>
   /// The press in flight. One at a time.
   CardPress? pending;
 
-  /// The command id of a press that never got its answer, kept with the action
+  /// The command id of a press that never got its answer, kept with the press
   /// it belongs to until that press is proven to have landed — a receipt for
   /// this very command id, or a read showing the surface has moved — so
-  /// pressing the same control again is the same command and not a second one.
+  /// making that same press again is the same command and not a second one.
   /// A re-read that shows the same revision proves nothing and keeps it: an
   /// input-routed press never moves the revision, so dropping the id there
-  /// would let one press reach the Bot twice.
+  /// would let one press reach the Bot twice. The press is kept whole, because
+  /// only an identical press may reuse the id: the kernel drops a repeated
+  /// command id without reading it, so reusing one for a press carrying
+  /// different values would lose that press in silence.
   String? retryCommandId;
-  String? retryAction;
+  CardPress? retryPress;
   int? retryRevision;
   int epoch = 0;
 
@@ -184,7 +187,7 @@ class _CardChatCardState extends State<CardChatCard>
     interactions = next?.onSubmit.listen(_interaction);
     if (retryCommandId != null && answer.revision != retryRevision) {
       retryCommandId = null;
-      retryAction = null;
+      retryPress = null;
       retryRevision = null;
     }
     setState(() {
@@ -234,7 +237,7 @@ class _CardChatCardState extends State<CardChatCard>
     if (client == null || bot == null || drawn == null || pending != null) {
       return;
     }
-    final commandId = retryAction == action.name
+    final commandId = retryPress == action
         ? retryCommandId ?? randomId()
         : randomId();
     setState(() {
@@ -255,7 +258,7 @@ class _CardChatCardState extends State<CardChatCard>
       pending = null;
       if (retryCommandId == commandId) {
         retryCommandId = null;
-        retryAction = null;
+        retryPress = null;
         retryRevision = null;
       }
       adopt(receipt.card);
@@ -270,7 +273,7 @@ class _CardChatCardState extends State<CardChatCard>
       // what happened rather than blaming the press.
       if (error is RequestFailure && error.status == 409) {
         retryCommandId = null;
-        retryAction = null;
+        retryPress = null;
         retryRevision = null;
         // Read first, then say so: adopting a record clears whatever the last
         // press said about itself, and this is the one line that has to
@@ -285,7 +288,7 @@ class _CardChatCardState extends State<CardChatCard>
       // is kept against this control: pressing it again repeats the command
       // the kernel may already hold rather than minting a second one.
       retryCommandId = commandId;
-      retryAction = action.name;
+      retryPress = action;
       retryRevision = drawn.revision;
       setState(() {
         failure = error is RequestFailure

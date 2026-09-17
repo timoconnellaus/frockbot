@@ -608,6 +608,42 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('a different press after a lost answer is a new command', (
+      tester,
+    ) async {
+      final posts = <Map<String, Object?>>[];
+      var deliver = false;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body == null) return cardJson();
+        posts.add((body as Map).cast<String, Object?>());
+        if (!deliver) throw const RequestFailure('The connection dropped.', 0);
+        return {
+          'schemaVersion': 1,
+          'routed': 'approval',
+          'card': cardJson(revision: 2),
+        };
+      });
+      await tester.pumpWidget(host(api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(find.text('The connection dropped.'), findsOneWidget);
+      // Both buttons dispatch one action name and differ only by the decision
+      // they carry. Deciding the other way is a different press, so it must
+      // not borrow the lost id: the kernel drops a command id it has already
+      // seen without reading it, which would lose this decision in silence.
+      deliver = true;
+      await tester.tap(find.text('Decline'));
+      await tester.pumpAndSettle();
+      expect(posts, hasLength(2));
+      expect(
+        (posts[1]['event']! as Map)['context'],
+        containsPair('decision', 'denied'),
+      );
+      expect(posts[1]['commandId'], isNot(posts[0]['commandId']));
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('a refused press says why, from the receipt', (tester) async {
       final api = SettingsApi(MemoryStore(), (path, body) async {
         if (body == null) return cardJson();

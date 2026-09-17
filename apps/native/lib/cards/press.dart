@@ -20,6 +20,41 @@ class CardPress {
   /// What the control sent with it. `ApprovalActions` reads its `decision`.
   final Map<String, Object?>? context;
   const CardPress({required this.name, this.componentId, this.context});
+
+  /// Two presses are the same press when everything the POST would carry is
+  /// the same. The kernel dedupes an input-routed press by its command id, so
+  /// a retry may only reuse an id when the press being made is identical to
+  /// the one whose answer was lost — the same control carrying the same
+  /// values. A control pressed again with a different data model behind it is
+  /// a new press and mints a new id.
+  @override
+  bool operator ==(Object other) =>
+      other is CardPress &&
+      other.name == name &&
+      other.componentId == componentId &&
+      _sameJson(other.context, context);
+
+  @override
+  int get hashCode => Object.hash(name, componentId);
+}
+
+bool _sameJson(Object? a, Object? b) {
+  if (identical(a, b)) return true;
+  if (a is Map && b is Map) {
+    if (a.length != b.length) return false;
+    for (final key in a.keys) {
+      if (!b.containsKey(key) || !_sameJson(a[key], b[key])) return false;
+    }
+    return true;
+  }
+  if (a is List && b is List) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!_sameJson(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  return a == b;
 }
 
 /// Which press this card is waiting on, for the components that can say so.
