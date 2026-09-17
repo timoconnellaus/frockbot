@@ -145,6 +145,21 @@ describe("folding a surface", () => {
     expect(card.dataModel).toEqual({ b: 2 });
   });
 
+  test('a pointer of "/" names the empty key, as RFC 6901 says', () => {
+    const card = foldCardMessagesV1(
+      undefined,
+      [
+        created([], { a: 1 }),
+        message({
+          version: "v1.0",
+          updateDataModel: { surfaceId: SURFACE, path: "/", value: 2 },
+        }),
+      ],
+      CONTEXT,
+    );
+    expect(card.dataModel).toEqual({ a: 1, "": 2 });
+  });
+
   test("a root write that is not an object is refused", () => {
     expect(() =>
       foldCardMessagesV1(
@@ -423,6 +438,45 @@ describe("what one settled Turn writes", () => {
       }),
     });
     expect(records).toEqual({});
+  });
+
+  test("a first send refused by a budget still leaves a card to draw", async () => {
+    const records = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        events: [
+          sendEvent(SURFACE, [
+            {
+              version: "v1.0",
+              createSurface: {
+                surfaceId: SURFACE,
+                dataModel: { items: ["a"] },
+              },
+            },
+            {
+              version: "v1.0",
+              updateDataModel: {
+                surfaceId: SURFACE,
+                path: "/items/0",
+                value: "b",
+              },
+            },
+          ]),
+        ],
+      },
+      now: NOW,
+      read: reader({}),
+    });
+    const card = decodeCardRecordV1(records[cardKeyV1(SURFACE)]);
+    expect(card.revision).toBe(1);
+    expect(card.components).toEqual([]);
+    expect(card.dataModel).toEqual({});
+    expect(card.refusal).toBeTruthy();
+    expect(records[CARD_INDEX_KEY]).toEqual({
+      schemaVersion: 1,
+      surfaces: [SURFACE],
+    });
   });
 
   test("a fold past a budget says so on the card it did not change", async () => {

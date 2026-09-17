@@ -4,7 +4,12 @@ import { describe, expect, test } from "bun:test";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { approvalKeyV1 } from "@frockbot/app/shell/approvals";
-import { cardKeyV1, type CardRecordV1 } from "@frockbot/app/shell/cards";
+import {
+  cardKeyV1,
+  decodeCardActionReceiptV1,
+  CARD_REFUSAL_MAX_V1,
+  type CardRecordV1,
+} from "@frockbot/app/shell/cards";
 import { cardAction, CardStaleError, listCards } from "./bot.js";
 
 const IDENTITY: BotIdentity = { userId: "user-1", botId: "bot-1" };
@@ -31,7 +36,10 @@ function card(overrides: Partial<CardRecordV1> = {}): CardRecordV1 {
  * same map: these tests are about what the kernel decides, not about what a
  * Durable Object does when two writers race.
  */
-function harness(values: Map<string, unknown> = new Map()) {
+function harness(
+  values: Map<string, unknown> = new Map(),
+  mountError = "this deployment cannot mount a Plugin worker",
+) {
   const storage = {
     get: (key: string) => Promise.resolve(values.get(key)),
     put: (keyOrEntries: unknown, value?: unknown) => {
@@ -59,7 +67,7 @@ function harness(values: Map<string, unknown> = new Map()) {
       USER_CONFIGURATIONS: {
         idFromName: (name: string) => name,
         get: () => {
-          throw new Error("this deployment cannot mount a Plugin worker");
+          throw new Error(mountError);
         },
       },
     },
@@ -192,6 +200,21 @@ describe("the three routes", () => {
     expect(receipt.routed).toBe("plugin");
     expect(receipt.failure).toBeTruthy();
     expect(receipt.card.revision).toBe(2);
+  });
+
+  test("a plugin failure too long to carry still answers a readable receipt", async () => {
+    const { state } = harness(
+      new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]),
+      "x".repeat(CARD_REFUSAL_MAX_V1 * 4),
+    );
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure!.length).toBeLessThanOrEqual(CARD_REFUSAL_MAX_V1);
+    expect(() => decodeCardActionReceiptV1(receipt)).not.toThrow();
   });
 
   test("anything else becomes the Bot's next input, never the User's words", async () => {

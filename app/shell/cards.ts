@@ -28,7 +28,12 @@
  *  * **The Session's surfaces are bounded.** Cards do not tear down, so the
  *    index caps how many a Session may hold. A fold past a surface budget is
  *    refused whole and says so on the record it did not change: a card that
- *    silently stopped updating is worse than one that says it stopped.
+ *    silently stopped updating is worse than one that says it stopped. A first
+ *    send refused this way still writes an empty record carrying the refusal,
+ *    so the transcript has something to draw where the send sits. The one
+ *    exception is deliberate: when the index is already full there is nowhere
+ *    to put a record at all, and that send leaves no trace outside its own
+ *    Turn's log.
  */
 import {
   A2UI_LIMITS_V1,
@@ -50,8 +55,8 @@ export const CARD_INDEX_KEY = "shell:card-index";
 
 const MAX_ID_LENGTH = 256;
 const MAX_TIMESTAMP_LENGTH = 64;
-/** Why a fold was refused, in words for the card. */
-const MAX_REFUSAL_LENGTH = 256;
+/** Why a fold was refused, or why a press could not be answered, in words for the card. */
+export const CARD_REFUSAL_MAX_V1 = 256;
 
 export class CardDecodeError extends Error {
   constructor(message: string) {
@@ -213,7 +218,7 @@ export function decodeCardRecordV1(
       : {
           refusal: text(
             candidate.refusal,
-            MAX_REFUSAL_LENGTH,
+            CARD_REFUSAL_MAX_V1,
             `${label} refusal`,
           ),
         }),
@@ -250,12 +255,11 @@ export class CardBudgetError extends Error {
 
 /**
  * The tokens of a JSON Pointer, unescaped. An absent or empty pointer names
- * the whole data model; the specification's default of `/` is the same thing
- * said differently, and both land at the root here rather than at a key whose
- * name is the empty string, which no data model a Bot writes has.
+ * the whole data model; every other pointer resolves as RFC 6901 says, so `/`
+ * names the key whose name is the empty string rather than the root.
  */
 function pointerTokens(path: string | undefined): string[] {
-  if (path === undefined || path === "" || path === "/") return [];
+  if (path === undefined || path === "") return [];
   return path
     .slice(1)
     .split("/")
@@ -513,19 +517,39 @@ export async function cardTerminalRecordsV1(
       sessionId: input.run.sessionId,
       now: input.now,
     };
+    let folded: CardRecordV1;
     try {
-      records[key] = foldCardMessagesV1(current, send.messages, context);
+      folded = foldCardMessagesV1(current, send.messages, context);
     } catch (error) {
       if (!(error instanceof CardBudgetError)) throw error;
-      if (current === undefined) continue;
-      records[key] = {
-        ...current,
-        runId: input.run.runId,
-        updatedAt: input.now,
-        refusal: error.message.slice(0, MAX_REFUSAL_LENGTH),
-      } satisfies CardRecordV1;
+      const refusal = error.message.slice(0, CARD_REFUSAL_MAX_V1);
+      records[key] =
+        current === undefined
+          ? ({
+              schemaVersion: 1,
+              surfaceId: send.surfaceId,
+              runId: input.run.runId,
+              sessionId: input.run.sessionId,
+              components: [],
+              dataModel: {},
+              revision: 1,
+              createdAt: input.now,
+              updatedAt: input.now,
+              refusal,
+            } satisfies CardRecordV1)
+          : ({
+              ...current,
+              runId: input.run.runId,
+              updatedAt: input.now,
+              refusal,
+            } satisfies CardRecordV1);
+      if (current === undefined) {
+        surfaces.push(send.surfaceId);
+        movedIndex = true;
+      }
       continue;
     }
+    records[key] = folded;
     if (current === undefined) {
       surfaces.push(send.surfaceId);
       movedIndex = true;
@@ -765,7 +789,7 @@ function decodeCardViewV1(value: unknown, label = "card"): CardViewV1 {
       : {
           refusal: text(
             candidate.refusal,
-            MAX_REFUSAL_LENGTH,
+            CARD_REFUSAL_MAX_V1,
             `${label} refusal`,
           ),
         }),
@@ -815,7 +839,7 @@ export function decodeCardActionReceiptV1(
       : {
           failure: text(
             candidate.failure,
-            MAX_REFUSAL_LENGTH,
+            CARD_REFUSAL_MAX_V1,
             `${label} failure`,
           ),
         }),

@@ -32,6 +32,7 @@ import {
   foldCardMessagesV1,
   projectCardV1,
   CARD_PREFIX,
+  CARD_REFUSAL_MAX_V1,
   type CardActionCommandV1,
   type CardActionReceiptV1,
   type CardListViewV1,
@@ -56,6 +57,15 @@ export class CardStaleError extends Error {
     super(`card "${surfaceId}" has moved on`);
     this.name = "CardStaleError";
   }
+}
+
+/**
+ * Why a press could not be answered, bounded to what the receipt carries. A
+ * plugin that failed to mount can say so at any length; a press that worked
+ * must never come back as a refused receipt because the words were too long.
+ */
+function cardFailureV1(reason: string): string {
+  return reason.slice(0, CARD_REFUSAL_MAX_V1);
 }
 
 /**
@@ -92,9 +102,12 @@ async function readCard(
 
 /**
  * Fold the messages a Plugin handler answered with onto the Card, in one
- * transaction, and only if the surface has not moved in the meantime. The
- * handler's answer is decoded as A2UI here rather than in the worker host,
- * because this is where the Card's own budgets are.
+ * transaction, onto the record as it stands when the answer comes back. The
+ * revision the person pressed at is checked before the handler runs, and a
+ * handler's answer updates a surface rather than replacing one, so a Turn that
+ * moved the surface during the call does not invalidate it. The answer is
+ * decoded as A2UI here rather than in the worker host, because this is where
+ * the Card's own budgets are.
  */
 async function foldHandlerMessages(
   state: ShellBotStateV1,
@@ -110,10 +123,11 @@ async function foldHandlerMessages(
   } catch (error) {
     return {
       card: await readCard(state, surfaceId),
-      failure:
+      failure: cardFailureV1(
         error instanceof Error
           ? error.message
           : "the handler's messages were refused",
+      ),
     };
   }
   const key = cardKeyV1(surfaceId);
@@ -133,7 +147,7 @@ async function foldHandlerMessages(
       });
     } catch (error) {
       if (!(error instanceof CardBudgetError)) throw error;
-      return { card: current, failure: error.message };
+      return { card: current, failure: cardFailureV1(error.message) };
     }
     await transaction.put(key, folded);
     return { card: folded };
@@ -198,8 +212,9 @@ export async function cardAction(
         schemaVersion: 1,
         routed: "plugin",
         card: projectCardV1(card),
-        failure:
+        failure: cardFailureV1(
           error instanceof Error ? error.message : "the plugin was unavailable",
+        ),
       };
     }
     if (outcome.status !== "rendered") {
@@ -207,7 +222,9 @@ export async function cardAction(
         schemaVersion: 1,
         routed: "plugin",
         card: projectCardV1(card),
-        failure: outcome.reason ?? "the plugin handler changed nothing",
+        failure: cardFailureV1(
+          outcome.reason ?? "the plugin handler changed nothing",
+        ),
       };
     }
     const folded = await foldHandlerMessages(
