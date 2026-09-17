@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { JsonSchemaError, validateAgainstJsonSchemaV1 } from "./json-schema.ts";
+import {
+  assertEnforceableJsonSchemaV1,
+  JsonSchemaError,
+  validateAgainstJsonSchemaV1,
+} from "./json-schema.ts";
 
 const draft = {
   type: "object",
@@ -68,6 +72,39 @@ describe("the JSON Schema subset the kernel enforces", () => {
     expect(() => validateAgainstJsonSchemaV1("a", undefined)).toThrow(
       JsonSchemaError,
     );
+  });
+
+  // A bound the value walk's branch for the declared type never reads is a
+  // bound nobody enforces, which is the one thing this module promises not to
+  // let happen.
+  test("refuses a keyword that does not apply to the declared type", () => {
+    const list = { type: "array", items: { type: "string" }, maxLength: 3 };
+    expect(() => assertEnforceableJsonSchemaV1(list)).toThrow(
+      /does not enforce on type "array"/,
+    );
+    // Proof that it would otherwise be dropped in silence: the value walk
+    // admits a list past the bound the author thought they had written.
+    expect(() =>
+      validateAgainstJsonSchemaV1(["a", "b", "c", "d"], list),
+    ).not.toThrow();
+
+    for (const schema of [
+      { type: "string", minimum: 1 },
+      { type: "number", minLength: 1 },
+      { type: "string", required: ["a"] },
+      { type: "object", items: { type: "string" } },
+      { type: "boolean", enum: [true] },
+    ]) {
+      if (schema.type === "boolean") {
+        expect(() => assertEnforceableJsonSchemaV1(schema)).not.toThrow();
+        continue;
+      }
+      expect(() => assertEnforceableJsonSchemaV1(schema)).toThrow(
+        /does not enforce on type/,
+      );
+    }
+    // The email card's own schema keeps every keyword on the right type.
+    expect(() => assertEnforceableJsonSchemaV1(draft)).not.toThrow();
   });
 
   test("stops at the depth a card's values may nest", () => {

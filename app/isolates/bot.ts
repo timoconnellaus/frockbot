@@ -33,6 +33,7 @@ import {
   type IsolateConnectionV1,
   type IsolateMemoryOutcomeV1,
   type IsolateModelInvocationV1,
+  type IsolateCapabilityFailureV1,
   type IsolateEmailOutcomeV1,
   type IsolateScheduleOutcomeV1,
   type IsolateSettingsOutcomeV1,
@@ -67,6 +68,10 @@ import { createBotMemoryHost } from "@frockbot/app/shell/backend-memory";
 import { agentRuntime } from "@frockbot/app/shell/runtime-mount";
 import { admitRunEffect } from "@frockbot/app/shell/turn";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
+import {
+  approvalKeyV1,
+  decodeApprovalRecordV1,
+} from "@frockbot/app/shell/approvals";
 import {
   executionPackagesV1,
   type ActiveTurnV1,
@@ -852,14 +857,86 @@ export async function isolateEmail(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
 ): Promise<IsolateEmailOutcomeV1> {
+  if (!isolateCallAdmittedV1(state, input)) {
+    return {
+      status: "unavailable",
+      reason: "the Package is not running in this Bot's active Composition",
+    };
+  }
   const sender = state.env.EMAIL_SENDER;
-  if (!isolateCallAdmittedV1(state, input) || !sender) {
+  if (!sender) {
     return {
       status: "unavailable",
       reason: "this deployment has no sender bound, so it sends no email",
     };
   }
-  return sender.send(decodeIsolateEmailRequestV1(input.request));
+  const { approvalId, ...message } = decodeIsolateEmailRequestV1(input.request);
+  // The decision is the kernel's to require, not the model's to remember: a
+  // Bot that misread a denial, or that called before anybody answered, gets
+  // no message out. Claimed before the send rather than after it, so a
+  // deadline cut between the binding accepting the mail and this write can
+  // never let a retry send it twice.
+  const claim = await claimEmailApprovalV1(state, approvalId);
+  if (claim.status !== "claimed") return claim.failure;
+  const outcome = await sender.send(message);
+  // Nothing left, so nothing was spent: the decision is still good and the
+  // Bot may try again once the deployment can send.
+  if (outcome.status !== "sent") {
+    await state.ctx.storage.delete(emailApprovalUseKeyV1(approvalId));
+  }
+  return outcome;
+}
+
+/** Where one Approval's single permitted send is recorded as spent. */
+function emailApprovalUseKeyV1(approvalId: string): string {
+  return `shell:email-send:${approvalId}`;
+}
+
+/**
+ * Holds one send to one Approval this Bot recorded, approved, unexpired and
+ * not already spent. The read and the claim are one transaction, so two
+ * concurrent calls under one decision cannot both pass it.
+ */
+async function claimEmailApprovalV1(
+  state: ShellBotStateV1,
+  approvalId: string,
+): Promise<
+  | { status: "claimed" }
+  | { status: "refused"; failure: IsolateCapabilityFailureV1 }
+> {
+  const refused = (reason: string) =>
+    ({ status: "refused" as const, failure: { status: "unavailable" as const, reason } });
+  return state.ctx.storage.transaction(async (transaction) => {
+    const stored = await transaction.get<unknown>(approvalKeyV1(approvalId));
+    if (stored === undefined) {
+      return refused(
+        `no Approval "${approvalId}" was recorded on this Bot, so nothing authorizes this send`,
+      );
+    }
+    const approval = decodeApprovalRecordV1(stored);
+    if (approval.decision !== "approved") {
+      return refused(
+        `Approval "${approvalId}" is ${approval.decision}, so nothing was sent`,
+      );
+    }
+    if (Date.parse(approval.expiresAt) <= Date.now()) {
+      return refused(`Approval "${approvalId}" has expired, so nothing was sent`);
+    }
+    const used = await transaction.get<unknown>(
+      emailApprovalUseKeyV1(approvalId),
+    );
+    if (used !== undefined) {
+      return refused(
+        `Approval "${approvalId}" has already sent its message; nothing was sent twice`,
+      );
+    }
+    await transaction.put(emailApprovalUseKeyV1(approvalId), {
+      schemaVersion: 1,
+      approvalId,
+      at: new Date().toISOString(),
+    });
+    return { status: "claimed" as const };
+  });
 }
 
 export async function isolateSchedule(

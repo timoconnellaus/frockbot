@@ -273,6 +273,20 @@ describe("the egress policy of one Bot's enabled Plugins", () => {
       ]),
     ).toEqual({ hosts: [], open: true });
   });
+
+  // A Plugin holding `http` only so a kernel loopback is wired under it — the
+  // email Plugin — declares no host, and reaches nothing.
+  test("a Plugin declaring no host admits no request", () => {
+    const policy = pluginEgressPolicyV1([{ network: { hosts: [] } }]);
+    expect(policy).toEqual({ hosts: [], open: false });
+    expect(pluginEgressAdmitsV1(policy!, "https://api.cloudflare.com/x")).toEqual(
+      {
+        admitted: false,
+        reason:
+          'plugin egress to "api.cloudflare.com" is not declared by any enabled plugin on this account',
+      },
+    );
+  });
 });
 
 describe("the isolate model request record", () => {

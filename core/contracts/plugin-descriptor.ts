@@ -326,7 +326,9 @@ export function decodePluginNetworkV1(
     }
     return decoded;
   });
-  if (hosts.length === 0) throw new Error(`${label}.hosts must name a host`);
+  // An empty list is the http grant with no outbound network: a Plugin that
+  // opens a kernel loopback (`ctx.email`) and nothing else. It admits no host,
+  // so the approval card has no reach to name.
   if (new Set(hosts).size !== hosts.length) {
     throw new Error(`${label}.hosts contains duplicates`);
   }

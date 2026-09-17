@@ -299,6 +299,12 @@ export type IsolateWorkspaceOutcomeV1 =
  * which is what a card then says on its face.
  */
 export interface IsolateEmailRequestV1 {
+  /**
+   * The Approval whose decision authorizes this send. Required: the kernel,
+   * not the model and not the Plugin, is what holds a send to a decision a
+   * person actually gave, and one decision sends at most one message.
+   */
+  approvalId: string;
   to: string[];
   cc?: string[];
   subject: string;
@@ -307,8 +313,14 @@ export interface IsolateEmailRequestV1 {
   inReplyTo?: string;
 }
 
+/**
+ * `undelivered` names the addresses the provider refused after at least one
+ * envelope had already left. The message went, so it is a send and never
+ * a failure a caller could retry — retrying would send it twice.
+ */
 export type IsolateEmailOutcomeV1 =
-  { status: "sent"; messageId: string } | IsolateCapabilityFailureV1;
+  | { status: "sent"; messageId: string; undelivered?: string[] }
+  | IsolateCapabilityFailureV1;
 
 /** What one message may carry. A note to a person, not a mailing. */
 export const ISOLATE_EMAIL_LIMITS_V1 = {
@@ -1254,7 +1266,10 @@ export function decodeIsolateEmailRequestV1(
   label = "isolate email request",
 ): IsolateEmailRequestV1 {
   const value = record(input, label);
-  exactKeys(value, ["to", "subject", "body"], label, ["cc", "inReplyTo"]);
+  exactKeys(value, ["approvalId", "to", "subject", "body"], label, [
+    "cc",
+    "inReplyTo",
+  ]);
   const cc =
     value.cc === undefined
       ? undefined
@@ -1283,6 +1298,7 @@ export function decodeIsolateEmailRequestV1(
     }
   }
   return {
+    approvalId: boundedString(value.approvalId, `${label}.approvalId`, 256),
     to: emailAddresses(value.to, `${label}.to`, true),
     ...(cc === undefined ? {} : { cc }),
     subject,

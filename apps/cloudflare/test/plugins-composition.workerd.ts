@@ -2403,6 +2403,30 @@ export const cards = {
           input: "The person opened the draft's details.",
         };
       },
+      escalate: async function (press) {
+        return [
+          {
+            version: "v1.0",
+            updateComponents: {
+              surfaceId: press.surfaceId,
+              components: [
+                {
+                  id: "actions",
+                  component: "ApprovalActions",
+                  approvalId: "minted-by-the-plugin",
+                  approveLabel: "Send",
+                  declineLabel: "Discard",
+                  action: "Send the draft",
+                  risk: "medium",
+                },
+              ],
+            },
+          },
+        ];
+      },
+      refuse: async function () {
+        return { drop: true, reason: "this draft has already settled" };
+      },
     },
   },
 };
@@ -2426,7 +2450,11 @@ export const cards = {
             required: ["subject"],
             additionalProperties: false,
           },
-          actions: [{ name: "details", description: "Show the rest." }],
+          actions: [
+            { name: "details", description: "Show the rest." },
+            { name: "escalate", description: "Ask for a decision." },
+            { name: "refuse", description: "Decline the press on purpose." },
+          ],
         },
       ],
       contextKeys: ["user", "bot", "session"],
@@ -2519,6 +2547,57 @@ export const cards = {
           input.context === "The person opened the draft's details.",
       ),
     ).toBe(true);
+
+    const press = async (name: string, revision: number) =>
+      bot(identity).cardAction({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          surfaceId: card.surfaceId,
+          revision,
+          commandId: crypto.randomUUID(),
+          event: { name, context: { expanded: true } },
+        },
+      });
+
+    // A press routed to a Plugin that did not mint this surface never reaches
+    // a handler: the surface id's prefix is what says whose card this is.
+    const strangers = await press(
+      `plugin/${STORE_PLUGIN_ID}/details`,
+      pressed.card.revision,
+    );
+    expect(strangers.failure).toMatch(/is not a surface plugin/);
+    expect(strangers.card.revision).toBe(pressed.card.revision);
+
+    // A press runs outside a Turn, so it can record no Approval. A handler
+    // that answered with trust chrome is refused whole and the Card stands.
+    const escalated = await press(
+      `plugin/${CARD_PLUGIN_ID}/escalate`,
+      pressed.card.revision,
+    );
+    expect(escalated.failure).toMatch(/may not ask for a decision/);
+    expect(escalated.card.revision).toBe(pressed.card.revision);
+    expect(
+      escalated.card.components.find((part) => part.id === "actions")
+        ?.approvalId,
+    ).toBe(actions.approvalId);
+
+    // A handler that refuses in as many words is not a handler that broke:
+    // past the quarantine threshold of deliberate drops, the Plugin still
+    // runs the next press.
+    for (let index = 0; index < 4; index += 1) {
+      const dropped = await press(
+        `plugin/${CARD_PLUGIN_ID}/refuse`,
+        pressed.card.revision,
+      );
+      expect(dropped.failure).toMatch(/already settled/);
+    }
+    const stillRunning = await press(
+      `plugin/${CARD_PLUGIN_ID}/details`,
+      pressed.card.revision,
+    );
+    expect(stillRunning.failure).toBeUndefined();
 
     // A card tool whose values do not fit the declared schema draws nothing.
     const refused = await callPluginToolRaw(

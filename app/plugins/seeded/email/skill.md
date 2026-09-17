@@ -31,25 +31,35 @@ attributed to this Bot.
    you draw it.
 
 2. **Wait.** Their decision arrives as durable input on a later Turn, the way
-   every approval does. Nothing is sent in the meantime.
+   every approval does. The line names the decision *and* its id:
+   `[Approval] The decision on "card-approval-…" is approved.` Nothing is sent
+   in the meantime.
 
-3. **On approved**, call `email_send` with that `surfaceId`. It sends and
-   tells you it did. Then call `email_draft` again with the same `surfaceId`
-   and the same values: the card settles into a receipt — "Sent to nick@… —
-   Re: Following up" — where the controls were.
+3. **On approved**, call `email_send` with that `surfaceId` and the
+   `approvalId` from that line. The kernel checks the decision itself, so a
+   wrong or missing id sends nothing. It sends and tells you it did — and if
+   it names addresses it did not reach, tell the person; never send again.
+   Then call `email_draft` again with the same `surfaceId` and the same
+   values: the card settles into a receipt — "Sent to nick@… — Re: Following
+   up" — where the controls were.
 
 4. **On denied**, call `email_discard` with that `surfaceId`, then draw the
    card once more the same way. It settles into a discarded receipt.
 
 ## Rules
 
-- One card per email. To change a draft the person has not decided yet, call
-  `email_draft` again with the same `surfaceId` and the new values.
+- One card per email, and one email per card. A card that already holds a
+  draft is redrawn as it stands: to change what you are sending, call
+  `email_draft` with **no** `surfaceId` and draw a fresh card, because the
+  decision already asked for covers the draft as the person read it.
 - `to` and `cc` are plain addresses. `inReplyTo` is the `Message-Id` of the
   email you are answering, when you are answering one, and nothing otherwise.
 - `body` is plain text. What you write is what is sent; there is no template
   and nothing is added to it.
-- Never call `email_send` for a card the person has not approved. It answers
-  with an error, and the person sees nothing.
+- Never call `email_send` for a card the person has not approved. The kernel
+  refuses an Approval that is undecided, denied, expired or already spent, so
+  it answers with an error and the person sees nothing.
+- One decision sends one message. A second `email_send` under the same
+  `approvalId` is refused; nothing is ever sent twice.
 - A send that fails answers with the reason — most often that this deployment
   has no sender bound. Tell the person plainly; do not retry it in a loop.

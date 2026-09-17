@@ -25,7 +25,7 @@ export const tools: PluginTool[] = [
   {
     name: "email_send",
     description:
-      "Send the email a draft card is showing, after the person approved it. Takes the card's surfaceId. Draw the card again with the same surfaceId afterwards to settle it into a receipt.",
+      "Send the email a draft card is showing, after the person approved it. Takes the card's surfaceId and the approvalId the decision line named. Draw the card again with the same surfaceId afterwards to settle it into a receipt.",
     inputSchema: {
       type: "object",
       properties: {
@@ -33,8 +33,13 @@ export const tools: PluginTool[] = [
           type: "string",
           description: "The draft card's surface, as email_draft returned it.",
         },
+        approvalId: {
+          type: "string",
+          description:
+            'The id the approval decision line carried: [Approval] The decision on "<approvalId>" is approved.',
+        },
       },
-      required: ["surfaceId"],
+      required: ["surfaceId", "approvalId"],
     },
   },
   {
@@ -224,6 +229,14 @@ const draftCard: PluginCard = {
     const existing = await readState(ctx, surfaceId);
     const settled = existing && settledComponents(existing);
     if (settled) return surface(surfaceId, settled);
+    // A surface that already holds a draft is redrawn from what it holds,
+    // never from new values. The card asked for a decision when it was first
+    // drawn, and a redraw that changed the recipients would change what that
+    // pending decision covers; a different email is a different card, which
+    // the Bot gets by calling email_draft with no surfaceId.
+    if (existing) {
+      return surface(surfaceId, draftComponents(existing.draft, false));
+    }
     const draft = readDraft(data);
     if (draft.to.length === 0) {
       return { drop: true, reason: "a draft needs at least one recipient" };
@@ -260,9 +273,11 @@ export const cards = { draft: draftCard };
  * timeout must not send the same mail twice.
  */
 export const execute: PluginExecute = async (tool, input, ctx) => {
-  const surfaceId = String(
-    (input as { surfaceId?: unknown } | null)?.surfaceId ?? "",
-  );
+  const args = input as {
+    surfaceId?: unknown;
+    approvalId?: unknown;
+  } | null;
+  const surfaceId = String(args?.surfaceId ?? "");
   if (surfaceId.length === 0) throw new Error("surfaceId is required");
   const state = await readState(ctx, surfaceId);
   if (!state) throw new Error(`no draft is on card "${surfaceId}"`);
@@ -284,17 +299,31 @@ export const execute: PluginExecute = async (tool, input, ctx) => {
   if (state.status === "discarded") {
     throw new Error("that draft was discarded");
   }
+  const approvalId = String(args?.approvalId ?? "");
+  if (approvalId.length === 0) {
+    throw new Error(
+      'approvalId is required: pass the id the decision line named, as in [Approval] The decision on "<approvalId>" is approved.',
+    );
+  }
   const send = ctx.email;
   if (!send) throw new Error("the http grant is not open");
-  const outcome = await send(state.draft);
+  const outcome = await send({ ...state.draft, approvalId });
   if (outcome.status !== "sent") {
     throw new Error(outcome.reason);
   }
+  // Written the moment anything left. A partial send is still a send, and a
+  // second email_send on this surface answers "already sent" rather than
+  // delivering the mail again to whoever did receive it.
   await writeState(ctx, surfaceId, {
     status: "sent",
     draft: state.draft,
     messageId: outcome.messageId,
     at: new Date().toISOString(),
   });
-  return `Sent to ${state.draft.to.join(", ")} — ${state.draft.subject}. Draw the card again with email_draft, the same surfaceId and the same values to settle it into a receipt.`;
+  const undelivered = outcome.undelivered ?? [];
+  const missed =
+    undelivered.length === 0
+      ? ""
+      : ` It did not reach ${undelivered.join(", ")}; do not send it again, tell the person instead.`;
+  return `Sent to ${state.draft.to.join(", ")} — ${state.draft.subject}.${missed} Draw the card again with email_draft, the same surfaceId and the same values to settle it into a receipt.`;
 };

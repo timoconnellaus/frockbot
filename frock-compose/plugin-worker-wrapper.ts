@@ -742,8 +742,11 @@ export const BOT_ISOLATE_CARD_SOURCE = `function cardAnswer(value) {
     );
   }
   if (isRecord(value) && value.drop === true) {
+    // The handler refused on purpose. Marked so the kernel can tell this
+    // apart from a throw, an overrun or an answer it could not read, which
+    // are the only drops a Plugin's health is charged for.
     return Object.assign(
-      { schemaVersion: 1, status: "drop" },
+      { schemaVersion: 1, status: "drop", deliberate: true },
       typeof value.reason === "string" ? { reason: errorText(value.reason) } : {},
     );
   }
@@ -765,6 +768,7 @@ async function runRenderCard(invocation, resolve, contextFor) {
     }, invocation.deadlineMs);
     const answer = cardAnswer(value);
     delete answer.input;
+    delete answer.deliberate;
     return answer;
   } catch (error) {
     return { schemaVersion: 1, status: "drop", reason: errorText(error) };

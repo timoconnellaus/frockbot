@@ -23,7 +23,7 @@ import {
 } from "./bot.js";
 
 const IDENTITY: BotIdentity = { userId: "user-1", botId: "bot-1" };
-const SURFACE = "draft-email";
+const SURFACE = "email_draft.0123456789abcdef01234567";
 const NOW = "2026-09-17T10:00:00.000Z";
 
 function card(overrides: Partial<CardRecordV1> = {}): CardRecordV1 {

@@ -324,7 +324,9 @@ export function pluginApprovalActionV1(
     parts.push(
       "open" in descriptor.network
         ? "It reaches the whole network, which means every Plugin on this account can."
-        : `It reaches ${descriptor.network.hosts.join(", ")}.`,
+        : descriptor.network.hosts.length === 0
+          ? "It reaches no host of its own."
+          : `It reaches ${descriptor.network.hosts.join(", ")}.`,
     );
   }
   const action = parts.join(" ");

@@ -44,6 +44,8 @@ const { cards, execute, tools } = (await import(modulePath)) as {
 };
 
 const SURFACE = "email-draft-1";
+/** The id the kernel minted for this card's decision, as the Bot reads it. */
+const APPROVAL = "card-approval-1";
 
 const draft = {
   to: ["nick@example.com"],
@@ -59,7 +61,7 @@ const draft = {
 function context(
   options: {
     sent?:
-      | { status: "sent"; messageId: string }
+      | { status: "sent"; messageId: string; undelivered?: string[] }
       | { status: "unavailable"; reason: string };
   } = {},
 ) {
@@ -205,11 +207,12 @@ describe("the email Plugin's draft card", () => {
   test("sends once, settles into a receipt, and never sends a discarded draft", async () => {
     const { ctx, sends } = context();
     await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx);
-    expect(await execute("email_send", { surfaceId: SURFACE }, ctx)).toMatch(
+    expect(await execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx)).toMatch(
       /Sent to nick@example.com/,
     );
     expect(sends).toEqual([
       {
+        approvalId: APPROVAL,
         to: ["nick@example.com"],
         cc: ["sam@example.com"],
         subject: "Re: Following up",
@@ -218,7 +221,7 @@ describe("the email Plugin's draft card", () => {
       },
     ]);
     // A retried Turn must not send the same mail twice.
-    expect(await execute("email_send", { surfaceId: SURFACE }, ctx)).toMatch(
+    expect(await execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx)).toMatch(
       /Already sent/,
     );
     expect(sends).toHaveLength(1);
@@ -255,7 +258,7 @@ describe("the email Plugin's draft card", () => {
       summary: "Discarded — Re: Following up",
     });
     await expect(
-      execute("email_send", { surfaceId: SURFACE }, ctx),
+      execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx),
     ).rejects.toThrow(/discarded/);
     expect(sends).toHaveLength(0);
   });
@@ -266,7 +269,7 @@ describe("the email Plugin's draft card", () => {
     });
     await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx);
     await expect(
-      execute("email_send", { surfaceId: SURFACE }, ctx),
+      execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx),
     ).rejects.toThrow(/sends no email/);
   });
 
@@ -274,7 +277,7 @@ describe("the email Plugin's draft card", () => {
     const { ctx } = context();
     for (const state of ["draft", "sent"] as const) {
       if (state === "sent") {
-        await execute("email_send", { surfaceId: SURFACE }, ctx);
+        await execute("email_send", { surfaceId: SURFACE, approvalId: APPROVAL }, ctx);
       }
       const answer = (await cards.draft.render(
         { surfaceId: SURFACE, data: draft },
@@ -295,6 +298,67 @@ describe("the email Plugin's draft card", () => {
         A2UI_LIMITS_V1.componentsPerSurface,
       );
     }
+  });
+
+  test("will not send without the approvalId the decision line named", async () => {
+    const { ctx, sends } = context();
+    await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx);
+    await expect(
+      execute("email_send", { surfaceId: SURFACE }, ctx),
+    ).rejects.toThrow(/approvalId is required/);
+    expect(sends).toHaveLength(0);
+  });
+
+  test("a partial send is still a send, named and never retried", async () => {
+    const { ctx, sends } = context({
+      sent: {
+        status: "sent",
+        messageId: "<sent@x.co>",
+        undelivered: ["sam@example.com"],
+      },
+    });
+    await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx);
+    const said = await execute(
+      "email_send",
+      { surfaceId: SURFACE, approvalId: APPROVAL },
+      ctx,
+    );
+    expect(said).toMatch(/did not reach sam@example.com/);
+    // The state was written even though one address was refused, so the
+    // second call answers "already sent" rather than delivering again.
+    expect(
+      await execute(
+        "email_send",
+        { surfaceId: SURFACE, approvalId: APPROVAL },
+        ctx,
+      ),
+    ).toMatch(/Already sent/);
+    expect(sends).toHaveLength(1);
+  });
+
+  test("a redraw never changes what a pending decision covers", async () => {
+    const { ctx, sends } = context();
+    await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx);
+    const redrawn = componentsOf(
+      await cards.draft.render(
+        {
+          surfaceId: SURFACE,
+          data: { ...draft, to: ["someone-else@example.com"] },
+        },
+        ctx,
+      ),
+    );
+    const rows = named(redrawn, "rows").rows as { value: string }[];
+    expect(rows[0]!.value).toBe("nick@example.com");
+    expect(named(redrawn, "actions").action).toBe(
+      "Send an email to nick@example.com — Re: Following up",
+    );
+    await execute(
+      "email_send",
+      { surfaceId: SURFACE, approvalId: APPROVAL },
+      ctx,
+    );
+    expect((sends[0] as { to: string[] }).to).toEqual(["nick@example.com"]);
   });
 });
 

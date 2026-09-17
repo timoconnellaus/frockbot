@@ -202,6 +202,30 @@ export interface PluginWorkerViewInvocationV1 {
 }
 
 /**
+ * The prefix every surface of one Plugin's one card carries. A plugin id holds
+ * no `_` and neither id holds a `.`, so the pair a prefix names is the only
+ * pair that could have written it — which is what makes it something to check
+ * a surface id against on the draw and on the press alike. At most 98
+ * characters, leaving the uniqueness room inside the 128 the Card seam bounds
+ * a surface id to.
+ */
+export function cardSurfacePrefixV1(pluginId: string, cardId: string): string {
+  return `${pluginId}_${cardId}.`;
+}
+
+/**
+ * The Plugin a minted surface id names, or `undefined` for a surface no card
+ * draw minted. A Bot-drawn surface has no prefix and so belongs to no Plugin,
+ * which is what stops one Plugin's handler being handed another's card.
+ */
+export function cardSurfacePluginIdV1(surfaceId: string): string | undefined {
+  const separator = surfaceId.indexOf("_");
+  const dot = surfaceId.indexOf(".");
+  if (separator <= 0 || dot <= separator + 1) return undefined;
+  return surfaceId.slice(0, separator);
+}
+
+/**
  * One Card action routed to a Plugin (ADR 0030): the renderer's
  * `plugin/<pluginId>/<action>` reaching the handler that wrote the Card. The
  * surface's data model travels with it when the surface asked for it, so a
@@ -228,13 +252,24 @@ export interface PluginWorkerCardActionInvocationV1 {
  * opaque and bounded, or a drop with its reason. A handler that throws or
  * overruns is a drop, and the Card is left exactly as it was.
  *
+ * `deliberate` tells a well-formed refusal apart from a failure. The wrapper
+ * sets it only when the handler itself answered `{ drop: true }`, so a throw,
+ * a deadline overrun, an unreachable worker and an undecodable answer stay
+ * charged to the Plugin's health while a handler saying "not on this card"
+ * costs it nothing.
+ *
  * `input` is the one thing a handler may say to the Bot rather than to the
  * card: a line the kernel enqueues as the next user-lane Turn's pending
  * input, the way a conversation action on a Card is. A handler that only
  * redraws the surface costs no Turn, which is the point of the route.
  */
 export type PluginWorkerCardActionResultV1 =
-  | { schemaVersion: 1; status: "drop"; reason?: string }
+  | {
+      schemaVersion: 1;
+      status: "drop";
+      reason?: string;
+      deliberate?: true;
+    }
   | {
       schemaVersion: 1;
       status: "rendered";
@@ -805,7 +840,13 @@ export function decodePluginWorkerCardActionResultV1(
     throw new Error(`${label}.schemaVersion is unsupported`);
   }
   if (value.status === "drop") {
-    exactKeys(value, ["schemaVersion", "status"], label, ["reason"]);
+    exactKeys(value, ["schemaVersion", "status"], label, [
+      "reason",
+      "deliberate",
+    ]);
+    if (value.deliberate !== undefined && value.deliberate !== true) {
+      throw new Error(`${label}.deliberate must be true`);
+    }
     return {
       schemaVersion: 1,
       status: "drop",
@@ -818,6 +859,7 @@ export function decodePluginWorkerCardActionResultV1(
               MAX_FAILURE_REASON_V1,
             ),
           }),
+      ...(value.deliberate === true ? { deliberate: true as const } : {}),
     };
   }
   exactKeys(value, ["schemaVersion", "status", "messages"], label, ["input"]);

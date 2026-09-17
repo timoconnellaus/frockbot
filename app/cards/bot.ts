@@ -15,6 +15,7 @@ import type { BotIdentity } from "@frockbot/core/durable";
 import {
   a2uiByteLengthV1,
   A2UI_LIMITS_V1,
+  cardSurfacePluginIdV1,
   decodeA2uiAgentMessageV1,
   type A2uiAgentMessageV1,
   type PluginWorkerCardActionInvocationV1,
@@ -30,6 +31,7 @@ import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
 import {
   cardActionRouteV1,
   cardKeyV1,
+  CARD_APPROVAL_COMPONENT_V1,
   decodeCardIndexV1,
   CardBudgetError,
   CardDecodeError,
@@ -174,6 +176,19 @@ async function readCard(
   return decodeCardRecordV1(stored);
 }
 
+/** Whether one handler message carries trust chrome the press may not mint. */
+function messageAsksForDecisionV1(message: A2uiAgentMessageV1): boolean {
+  const components =
+    "createSurface" in message
+      ? message.createSurface.components
+      : "updateComponents" in message
+        ? message.updateComponents.components
+        : undefined;
+  return (components ?? []).some(
+    (component) => component.component === CARD_APPROVAL_COMPONENT_V1,
+  );
+}
+
 /**
  * Fold the messages a Plugin handler answered with onto the Card, in one
  * transaction, onto the record as it stands when the answer comes back. The
@@ -202,6 +217,18 @@ async function foldHandlerMessages(
           ? error.message
           : "the handler's messages were refused",
       ),
+    };
+  }
+  // A press runs outside a Turn, so there is nothing here that could record
+  // an Approval: `bindCardApprovalsV1` mints ids on the send path alone. A
+  // handler that returned trust chrome would therefore put a Plugin-chosen
+  // `approvalId` onto durable Card state, pointing a decision at an id the
+  // kernel never issued or — worse — at another card's live Approval. The
+  // Card is left exactly as it was and the refusal is the receipt's failure.
+  if (messages.some(messageAsksForDecisionV1)) {
+    return {
+      card: await readCard(state, surfaceId),
+      failure: cardFailureV1("a card action may not ask for a decision"),
     };
   }
   const key = cardKeyV1(surfaceId);
@@ -270,6 +297,21 @@ export async function cardAction(
     };
   }
   if (route.kind === "plugin") {
+    // The mirror of the draw's own check (`plugin-worker-host.ts`): a card
+    // record carries no owner, so the surface id's minted prefix is what says
+    // whose card this is. Without it a card drawn by one Plugin — or by the
+    // Bot itself — could hand another Plugin that surface, its context and
+    // its whole data model, and fold whatever came back onto it.
+    if (cardSurfacePluginIdV1(command.surfaceId) !== route.pluginId) {
+      return {
+        schemaVersion: 1,
+        routed: "plugin",
+        card: projectCardV1(card),
+        failure: cardFailureV1(
+          `card "${command.surfaceId}" is not a surface plugin "${route.pluginId}" drew`,
+        ),
+      };
+    }
     const runId = `card-action:${command.surfaceId}:${card.revision}`;
     /**
      * A handler that threw, overran or answered with something the Card
@@ -315,7 +357,13 @@ export async function cardAction(
       const failure = cardFailureV1(
         outcome.reason ?? "the plugin handler changed nothing",
       );
-      await chargeFailure(failure);
+      // A handler that refused in as many words is not a handler that broke.
+      // Only a throw, an overrun, an unreachable worker, an answer the
+      // kernel could not read, or a fold the Card's budgets refused counts
+      // toward quarantine (ADR 0030).
+      const deliberate =
+        outcome.status === "drop" && outcome.deliberate === true;
+      if (!deliberate) await chargeFailure(failure);
       return {
         schemaVersion: 1,
         routed: "plugin",

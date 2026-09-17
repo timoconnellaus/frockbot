@@ -66,6 +66,30 @@ const NUMERIC_KEYWORDS_V1 = [
   "maximum",
 ] as const;
 
+/** Keywords every type carries, whatever the value walk does with the value. */
+const ANY_TYPE_KEYWORDS_V1 = [
+  "type",
+  "title",
+  "description",
+  "default",
+  "enum",
+] as const;
+
+/**
+ * The keywords the value walk's branch for each type actually reads. A
+ * keyword on a type whose branch never consults it is a bound nobody would
+ * enforce, so it is refused here for the same reason an unknown keyword is.
+ */
+const TYPE_KEYWORDS_V1: Record<string, readonly string[]> = {
+  object: ["properties", "required", "additionalProperties"],
+  array: ["items", "minItems", "maxItems"],
+  string: ["minLength", "maxLength"],
+  number: ["minimum", "maximum"],
+  integer: ["minimum", "maximum"],
+  boolean: [],
+  null: [],
+};
+
 /**
  * Whether `schema` is a schema this module can enforce whole, raising
  * `JsonSchemaError` naming the part that it cannot.
@@ -102,6 +126,19 @@ export function assertEnforceableJsonSchemaV1(
     !KNOWN_TYPES_V1.includes(type as (typeof KNOWN_TYPES_V1)[number])
   ) {
     throw new JsonSchemaError(`${path} does not declare a known type`);
+  }
+  const applicable = TYPE_KEYWORDS_V1[type]!;
+  for (const keyword of Object.keys(declared)) {
+    if (
+      !ANY_TYPE_KEYWORDS_V1.includes(
+        keyword as (typeof ANY_TYPE_KEYWORDS_V1)[number],
+      ) &&
+      !applicable.includes(keyword)
+    ) {
+      throw new JsonSchemaError(
+        `${path} declares "${keyword}", which this deployment does not enforce on type "${type}"`,
+      );
+    }
   }
   for (const keyword of NUMERIC_KEYWORDS_V1) {
     if (

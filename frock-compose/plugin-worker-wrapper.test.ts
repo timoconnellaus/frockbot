@@ -959,6 +959,7 @@ type CardRun = (
   schemaVersion: number;
   status: string;
   reason?: string;
+  deliberate?: true;
   messages?: unknown[];
   input?: string;
 }>;
@@ -1144,6 +1145,66 @@ describe("the generated wrapper's card handlers", () => {
       status: "drop",
       reason: 'plugin "mail" declares no card action "send"',
     });
+  });
+
+  // The kernel charges a Plugin's health for a press that broke, and only for
+  // one. A well-formed refusal is marked so the two are telling apart on the
+  // wire rather than by guessing from the reason.
+  test("a handler's own refusal is marked deliberate; a failure never is", async () => {
+    expect(
+      await runCardAction(
+        pressInvocation(),
+        () =>
+          cardPlugin({
+            render: () => messages,
+            actions: {
+              details: () => ({ drop: true, reason: "already settled" }),
+            },
+          }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      deliberate: true,
+      reason: "already settled",
+    });
+    for (const actions of [
+      {
+        details: () => {
+          throw new Error("no draft today");
+        },
+      },
+      { details: () => undefined },
+    ]) {
+      const answer = await runCardAction(
+        pressInvocation(),
+        () => cardPlugin({ render: () => messages, actions }),
+        contextFor,
+      );
+      expect(answer.status).toBe("drop");
+      expect(answer.deliberate).toBeUndefined();
+    }
+    const late = await runCardAction(
+      pressInvocation({ deadlineMs: 25 }),
+      () =>
+        cardPlugin({ render: () => messages, actions: { details: never } }),
+      contextFor,
+    );
+    expect(late.status).toBe("drop");
+    expect(late.deliberate).toBeUndefined();
+  });
+
+  // A render answers `rendered` or `drop` and nothing else: the draw path has
+  // no health charge to spare, so the marker never travels on it.
+  test("a render's drop never carries the press path's marker", async () => {
+    expect(
+      await runRenderCard(
+        renderInvocation(),
+        () => cardPlugin({ render: () => ({ drop: true, reason: "no data" }) }),
+        contextFor,
+      ),
+    ).toEqual({ schemaVersion: 1, status: "drop", reason: "no data" });
   });
 
   test("a card must export a render function, and its id must be one", () => {

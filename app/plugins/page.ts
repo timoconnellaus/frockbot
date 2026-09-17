@@ -204,6 +204,7 @@ export function pluginNetworkCopyV1(
   if ("open" in network) {
     return "Needs open network access. Turning this on gives every plugin on this account open network access.";
   }
+  if (network.hosts.length === 0) return "Reaches no host of its own.";
   return `Reaches ${network.hosts.join(", ")}.`;
 }
 

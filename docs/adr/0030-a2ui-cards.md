@@ -359,6 +359,21 @@ serve`), the platform model over the remote Workers AI binding, asked
 6. Descriptor `cards` and `skills`, `renderCard` and `cardAction` on the
    Plugin worker, `plugin/` actions. The email card as the first seeded
    Plugin, sending through a Connection.
+
+   > Built 2026-09-17, step 6. `renderCard` and `cardAction` answer
+   > `rendered`/`drop` rather than the task's `ok`/`refused`, to match the
+   > view and trigger results already on the Plugin worker contract. A card
+   > action name is unique per Plugin rather than per card, because the wire
+   > namespace `plugin/<pluginId>/<action>` carries no card, so the wrapper
+   > finds the card by the action it declares. A seeded Plugin's artifact
+   > travels in the Worker bundle
+   > (`app/plugins/seeded/artifacts.generated.ts`, module text included)
+   > because a seeded artifact has no publisher to put it in R2, and is read
+   > back through the same content address by
+   > `createR2PackageArtifactStore`. Sending is a kernel loopback —
+   > `ctx.email` to `isolateEmail` to `app/email/sender.ts` — attributed to
+   > the Bot and holding no credential the Plugin can see, and inert until a
+   > deployment binds `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS`.
 7. The five first-party cards as locked Plugins; the old members mapped, then
    removed a release later.
 8. The rest of the Frock catalog, family by family, each with its reference.

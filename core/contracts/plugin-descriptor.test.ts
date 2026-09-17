@@ -184,13 +184,6 @@ describe("a plugin's network", () => {
       decodePluginDescriptorV1({
         ...base,
         grants: ["http"],
-        network: { hosts: [] },
-      }),
-    ).toThrow(/name a host/);
-    expect(() =>
-      decodePluginDescriptorV1({
-        ...base,
-        grants: ["http"],
         network: { open: false },
       }),
     ).toThrow(/open/);
@@ -205,6 +198,11 @@ describe("a plugin's network", () => {
     expect(pluginNetworkAdmitsHostV1(network, "notexample.com")).toBe(false);
     expect(pluginNetworkAdmitsHostV1(network, "api.other.test")).toBe(true);
     expect(pluginNetworkAdmitsHostV1(network, "x.api.other.test")).toBe(false);
+    // The `http` grant with no outbound network: a Plugin that opens a kernel
+    // loopback and nothing else. It admits no host at all.
+    expect(pluginNetworkAdmitsHostV1({ hosts: [] }, "api.example.com")).toBe(
+      false,
+    );
     expect(pluginNetworkAdmitsHostV1({ open: true }, "anything.invalid")).toBe(
       true,
     );

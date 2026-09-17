@@ -267,13 +267,22 @@ export interface PluginContext {
    * deployment that has bound no sender answers unavailable.
    */
   readonly email?: (request: {
+    /**
+     * The Approval whose decision authorizes this send. The kernel refuses a
+     * send whose Approval is missing, undecided, denied, expired or already
+     * spent, so one decision sends at most one message.
+     */
+    approvalId: string;
     to: string[];
     cc?: string[];
     subject: string;
     body: string;
     /** The `Message-Id` this answers, when it answers one. */
     inReplyTo?: string;
-  }) => Promise<{ status: "sent"; messageId: string } | CapabilityFailure>;
+  }) => Promise<
+    | { status: "sent"; messageId: string; undelivered?: string[] }
+    | CapabilityFailure
+  >;
   /** The `schedule` grant: a durable Routine operation attributed to this call. */
   readonly schedule?: (request: {
     callId: string;

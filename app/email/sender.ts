@@ -20,8 +20,15 @@ export interface EmailSendRequestV1 {
   inReplyTo?: string;
 }
 
+/**
+ * A send is reported by what actually left. One envelope out is a send, and a
+ * send is never retried — so a provider that refused recipient two after
+ * accepting recipient one answers `sent` and names the second in
+ * `undelivered`, rather than an `unavailable` a caller would try again and
+ * deliver twice. `unavailable` means nothing left at all.
+ */
 export type EmailSendOutcomeV1 =
-  | { status: "sent"; messageId: string }
+  | { status: "sent"; messageId: string; undelivered?: string[] }
   | { status: "unavailable"; reason: string };
 
 /** The deployment's sender. Structural, so no Package is imported to send. */
@@ -110,15 +117,27 @@ export function createBindingEmailSenderV1(env: {
           : { displayName: env.EMAIL_SENDER_NAME }),
         messageId,
       });
+      const recipients = [...request.to, ...(request.cc ?? [])];
+      const undelivered: string[] = [];
+      let delivered = 0;
+      let reason = "the message could not be sent";
       try {
         const { EmailMessage } = (await import("cloudflare:email")) as {
           EmailMessage: new (from: string, to: string, raw: string) => unknown;
         };
         // One message per recipient: the binding takes a single envelope
-        // recipient, and a partial send is reported as a failure rather than
-        // as a send the caller would read as complete.
-        for (const recipient of [...request.to, ...(request.cc ?? [])]) {
-          await binding.send(new EmailMessage(address, recipient, raw));
+        // recipient. Progress is recorded as it goes, because once one
+        // envelope has left the caller must never be told to try again.
+        for (const recipient of recipients) {
+          try {
+            await binding.send(new EmailMessage(address, recipient, raw));
+            delivered += 1;
+          } catch (error) {
+            undelivered.push(recipient);
+            reason = `the message could not be sent: ${
+              error instanceof Error ? error.message : String(error)
+            }`;
+          }
         }
       } catch (error) {
         return {
@@ -128,7 +147,12 @@ export function createBindingEmailSenderV1(env: {
           }`,
         };
       }
-      return { status: "sent", messageId };
+      if (delivered === 0) return { status: "unavailable", reason };
+      return {
+        status: "sent",
+        messageId,
+        ...(undelivered.length > 0 ? { undelivered } : {}),
+      };
     },
   };
 }

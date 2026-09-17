@@ -6,11 +6,14 @@
   "tools": [
     {
       "name": "email_send",
-      "description": "Send the email a draft card is showing, after the person approved it. Takes the card's surfaceId.",
+      "description": "Send the email a draft card is showing, after the person approved it. Takes the card's surfaceId and the approvalId the decision line named.",
       "inputSchema": {
         "type": "object",
-        "properties": { "surfaceId": { "type": "string" } },
-        "required": ["surfaceId"]
+        "properties": {
+          "surfaceId": { "type": "string" },
+          "approvalId": { "type": "string" }
+        },
+        "required": ["surfaceId", "approvalId"]
       }
     },
     {
@@ -25,7 +28,7 @@
   ],
   "hooks": [],
   "grants": ["http", "storage"],
-  "network": { "hosts": ["api.cloudflare.com"] },
+  "network": { "hosts": [] },
   "cards": [
     {
       "id": "draft",

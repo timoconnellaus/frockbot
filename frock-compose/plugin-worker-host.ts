@@ -59,6 +59,7 @@ import {
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
 import {
+  cardSurfacePrefixV1,
   pluginCardToolNameV1,
   validateAgainstJsonSchemaV1,
   type PluginCardV1,
@@ -95,17 +96,6 @@ export interface BotIsolateMemberV1 {
  */
 /** The `Identifier` a surface id is, as the Card seam bounds one. */
 const CARD_SURFACE_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-
-/**
- * The prefix every surface of one Plugin's one card carries. A plugin id holds
- * no `_` and neither id holds a `.`, so the pair a prefix names is the only
- * pair that could have written it — which is what makes it something to check
- * a Bot-supplied surface id against. At most 98 characters, leaving the
- * uniqueness room inside the 128 the Card seam bounds a surface id to.
- */
-function cardSurfacePrefixV1(pluginId: string, cardId: string): string {
-  return `${pluginId}_${cardId}.`;
-}
 
 /**
  * The surface id one card draw is minted under. It names the Plugin and the
