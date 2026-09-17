@@ -282,11 +282,12 @@ class _PluginsPageState extends State<PluginsPage> {
   Widget build(BuildContext context) {
     return ViewSurfacePage(
       title: botId != null
-          ? (botName == null ? 'Plugins' : 'Plugins · $botName')
+          ? 'Plugins'
           : capabilities
           ? 'Account features'
           : 'Plugins',
-      cardGroups: capabilities || botId != null,
+      cardGroups: capabilities && botId == null,
+      switchRows: botId != null,
       chrome: widget.chrome,
       store: store,
       userId: userId,

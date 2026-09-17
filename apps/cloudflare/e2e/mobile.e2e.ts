@@ -29,6 +29,8 @@ import {
   sem,
   sendMessage,
   setFakeOllamaChatMode,
+  openBotPage,
+  press,
 } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 import type { Page } from "@playwright/test";
@@ -207,22 +209,28 @@ test("the shell is usable on a phone", async ({
    * gear lived in the right panel's header, the right panel is a closed drawer
    * at this width, and so Name, Label, Description, Routines, the audit log
    * and template import had no route at all on a phone. In this client the
-   * Bot's name in the bar opens one page with all of it — its settings, then
-   * a row for its Routines and each of its Package pages — one tap from the
-   * conversation, with nothing else open.
+   * Bot's name in the bar opens its page — what it is doing, and a row for
+   * each of the rest — one tap from the conversation, and the gear on that
+   * page opens what it is.
    */
-  await sem(page, "bot-panel-toggle").click();
-  await expect(sem(page, "bot-settings")).toBeVisible();
-  await expect(sem(page, "routines-panel-toggle")).toBeVisible();
-  await expect(sem(page, "bot-settings-save")).toHaveCount(0);
+  await openBotPage(page);
+  await expect(sem(page, "bot-page-routines-all")).toBeVisible();
   await shot(page, "04-bot-page");
+  await expectNothingRunsOffTheEdge(page);
+  await expectWithinViewport(page, "bot-page-routines-all");
+
+  await press(sem(page, "bot-page-settings").first());
+  await expect(sem(page, "bot-settings")).toBeVisible();
+  await expect(sem(page, "bot-settings-save")).toHaveCount(0);
+  await page.waitForTimeout(700);
+  await shot(page, "04a-bot-settings");
   await expectNothingRunsOffTheEdge(page);
   await expectWithinViewport(page, "bot-name");
 
   // A Bot's Plugins are Bot settings, so a phone finds them here rather than
   // under the Profile: the row opens the Bot's own Plugins page.
-  await expect(sem(page, "plugins-panel-toggle")).toBeVisible();
-  await sem(page, "plugins-panel-toggle").click();
+  await expect(sem(page, "bot-settings-plugins")).toBeVisible();
+  await press(sem(page, "bot-settings-plugins"));
   await expect(sem(page, "plugins-document")).toBeVisible();
   // The page arrives with a transition; the shot is of where it lands.
   await page.waitForTimeout(700);
@@ -232,6 +240,8 @@ test("the shell is usable on a phone", async ({
   await expect(sem(page, "bot-settings")).toBeVisible();
 
   // And the way back gives the conversation the whole window again.
+  await page.goBack();
+  await expect(sem(page, "bot-page")).toBeVisible();
   await page.goBack();
   await expect(sem(page, "shell-conversation")).toBeVisible();
   await expect(sem(page, "bot-settings")).toHaveCount(0);

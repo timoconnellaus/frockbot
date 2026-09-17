@@ -203,6 +203,23 @@ class FirstRunApi extends NativeApi {
         ],
       };
     }
+    // The Bot's own settings, so the gear on its page opens a page rather than
+    // the surface's "couldn't load".
+    if (RegExp(r'^/api/bots/[^/]+/settings$').hasMatch(path)) {
+      return {
+        'schemaVersion': 1,
+        'botId': generalId,
+        'revision': 0,
+        'profile': {'name': 'General'},
+        'notifications': {'enabled': true},
+      };
+    }
+    // The settings read also asks how the Bot sounds; General has chosen
+    // nothing, so the record carries no voice at all (ADR 0031).
+    final voice = RegExp(r'^/api/bots/([^/]+)/voice$').firstMatch(path);
+    if (voice != null && body == null) {
+      return {'schemaVersion': 1, 'botId': voice.group(1), 'revision': 0};
+    }
     if (path.endsWith('/plugins') && plugins != null) {
       return {
         'schemaVersion': 1,
@@ -456,7 +473,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       final conversation = tester.state(find.byType(ConversationView));
-      await tester.tap(find.byTooltip('Plugins'));
+      // Plugins is behind the gear on the Bot page now, which is the panel's
+      // root at this width.
+      await tester.tap(identifiedBy(SettingsIds.botPageSettings).first);
+      await tester.pumpAndSettle();
+      await tester.tap(identifiedBy(SettingsIds.botPlugins).first);
       await tester.pumpAndSettle();
 
       for (final entry in {

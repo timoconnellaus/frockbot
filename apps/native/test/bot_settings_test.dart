@@ -76,6 +76,7 @@ Future<void> open(
   WidgetTester tester,
   BotSettingsController state, {
   void Function(SidebarProfile profile)? onPredict,
+  VoidCallback? onOpenPlugins,
 }) async {
   tester.view.physicalSize = const Size(390, 2200);
   tester.view.devicePixelRatio = 1;
@@ -85,7 +86,11 @@ Future<void> open(
       theme: FrockTheme.theme(Brightness.dark),
       home: Scaffold(
         body: SingleChildScrollView(
-          child: BotSettingsView(controller: state, onPredict: onPredict),
+          child: BotSettingsView(
+            controller: state,
+            onPredict: onPredict,
+            onOpenPlugins: onOpenPlugins,
+          ),
         ),
       ),
     ),
@@ -94,38 +99,112 @@ Future<void> open(
 }
 
 void main() {
-  testWidgets('the panel follows the GrokBot order and hides the rest', (
+  testWidgets('Settings is one page: character, About, behaviour, danger', (
     tester,
   ) async {
     final store = MemoryStore();
     final state = BotSettingsController(api(store, []), 'alpha');
     await open(tester, state);
     expect(find.text('Inspected avatar'), findsOneWidget);
+    expect(find.text('ABOUT'), findsOneWidget);
     expect(find.text('Name'), findsOneWidget);
     expect(find.text('Label'), findsOneWidget);
-    expect(find.text('Pinned'), findsOneWidget);
+    // Title is an About field like the others: there is no Advanced to open.
+    expect(find.text('Title'), findsOneWidget);
     expect(find.text('Description'), findsOneWidget);
-    expect(
-      find.text('Get notified when this Bot finishes or needs input'),
-      findsOneWidget,
-    );
+    expect(find.text('Advanced'), findsNothing);
+    expect(find.text('BEHAVIOUR'), findsOneWidget);
+    expect(find.text('Pinned'), findsOneWidget);
+    expect(find.text('Notifications'), findsOneWidget);
+    expect(find.text('Hidden from list'), findsOneWidget);
+    expect(find.text('Also turns notifications off'), findsOneWidget);
     // No button: a change is written as it is made.
     expect(find.text('Save settings'), findsNothing);
     expect(find.byType(FilledButton), findsNothing);
-    // Everything else is behind Advanced, closed.
-    expect(find.text('Title'), findsNothing);
+    // The Members sentence is gone with the expander that held it.
     expect(find.text('Members'), findsNothing);
-    await tester.tap(find.text('Advanced'));
-    await tester.pumpAndSettle();
-    expect(find.text('Title'), findsOneWidget);
-    expect(find.text('Hidden from sidebar'), findsOneWidget);
-    expect(find.text('Members'), findsOneWidget);
     // The Name field is the only place a name shows: no provenance row.
     expect(find.text('Identity'), findsNothing);
     expect(find.text('Named by you'), findsNothing);
     expect(find.text('Named by this Bot'), findsNothing);
     expect(tester.takeException(), isNull);
     state.dispose();
+  });
+
+  testWidgets('the Plugins row says how many are on, and which', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (path.startsWith('/api/settings')) return account();
+        if (path.endsWith('/plugins')) {
+          return {
+            'schemaVersion': 1,
+            'botId': 'alpha',
+            'revision': 0,
+            'plugins': [
+              {'pluginId': 'web', 'displayName': 'Web', 'on': true},
+              {'pluginId': 'image', 'displayName': 'Image', 'on': false},
+              {'pluginId': 'routines', 'displayName': 'Routines', 'on': true},
+            ],
+          };
+        }
+        return botSettings();
+      }),
+      'alpha',
+    );
+    await open(tester, state, onOpenPlugins: () {});
+    expect(find.text('CAPABILITIES'), findsOneWidget);
+    expect(find.text('2 on · Web, Routines'), findsOneWidget);
+    state.dispose();
+  });
+
+  testWidgets('flipping a Plugin re-reads the line that summarises them', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    var on = <String>['Web'];
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (path.startsWith('/api/settings')) return account();
+        if (path.endsWith('/plugins')) {
+          return {
+            'schemaVersion': 1,
+            'botId': 'alpha',
+            'revision': 0,
+            'plugins': [
+              for (final name in const ['Web', 'Routines'])
+                {
+                  'pluginId': name.toLowerCase(),
+                  'displayName': name,
+                  'on': on.contains(name),
+                },
+            ],
+          };
+        }
+        return botSettings();
+      }),
+      'alpha',
+    );
+    await open(tester, state, onOpenPlugins: () {});
+    expect(find.text('1 on · Web'), findsOneWidget);
+
+    // The Plugins surface turned one on and told the shell so.
+    on = ['Web', 'Routines'];
+    await state.refreshPlugins();
+    await tester.pumpAndSettle();
+    expect(find.text('2 on · Web, Routines'), findsOneWidget);
+    expect(find.text('1 on · Web'), findsNothing);
+    state.dispose();
+  });
+
+  test('what the Plugins and Model rows say', () {
+    expect(botPluginsSummaryV1(const []), 'None on');
+    expect(botPluginsSummaryV1(const ['Web']), '1 on · Web');
+    expect(botModelLabelV1(null), 'Follows the account model');
+    expect(botModelLabelV1('gpt-6'), 'gpt-6');
+    expect(botModelLabelV1(const {'model': 'gpt-6'}), 'gpt-6');
   });
 
   testWidgets('a name the Bot chose is not attributed in its settings', (
@@ -137,10 +216,8 @@ void main() {
       'alpha',
     );
     await open(tester, state);
-    await tester.tap(find.text('Advanced'));
-    await tester.pumpAndSettle();
     expect(find.text('Name'), findsOneWidget);
-    expect(find.text('Hidden from sidebar'), findsOneWidget);
+    expect(find.text('Hidden from list'), findsOneWidget);
     expect(find.text('Named by this Bot'), findsNothing);
     state.dispose();
   });
@@ -496,17 +573,15 @@ void main() {
   });
 
   group('hiding a Bot mutes it', () {
-    SwitchListTile notificationsSwitch(WidgetTester tester) =>
-        tester.widget<SwitchListTile>(
-          find.widgetWithText(SwitchListTile, 'Notifications'),
-        );
+    Switch notificationsSwitch(WidgetTester tester) => tester.widget<Switch>(
+      find.descendant(
+        of: byIdentifier(SettingsIds.botNotifications),
+        matching: find.byType(Switch),
+      ),
+    );
 
     Future<void> tapHidden(WidgetTester tester) async {
-      if (find.text('Hidden from sidebar').evaluate().isEmpty) {
-        await tester.tap(find.text('Advanced'));
-        await tester.pumpAndSettle();
-      }
-      await tester.tap(find.text('Hidden from sidebar'));
+      await tester.tap(find.text('Hidden from list'));
       await tester.pumpAndSettle();
     }
 

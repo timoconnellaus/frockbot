@@ -907,11 +907,6 @@
         "orientation": "column",
         "children": [
           {
-            "type": "text",
-            "text": "2 Routines \u00b7 1 unread",
-            "style": "status"
-          },
-          {
             "type": "group",
             "orientation": "column",
             "title": "Edit Morning brief",
@@ -1017,70 +1012,29 @@
                   },
                   {
                     "type": "action",
+                    "actionId": "run-routine",
+                    "label": "Run now",
+                    "input": {
+                      "kind": "run-routine",
+                      "routineId": "r1"
+                    }
+                  },
+                  {
+                    "type": "action",
+                    "actionId": "open-runs",
+                    "label": "Run log",
+                    "input": {
+                      "kind": "open-runs",
+                      "routineId": "r1"
+                    }
+                  },
+                  {
+                    "type": "action",
                     "actionId": "cancel-edit",
                     "label": "Cancel",
                     "input": {
                       "kind": "cancel-edit"
                     }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "type": "group",
-            "orientation": "column",
-            "title": "Morning brief",
-            "children": [
-              {
-                "type": "text",
-                "text": "0 9 * * * \u00b7 Australia/Sydney \u00b7 Last 3 Sep 2026, 9:00am \u00b7 Next 4 Sep 2026, 9:00am",
-                "style": "status"
-              },
-              {
-                "type": "text",
-                "text": "Summarise overnight email."
-              },
-              {
-                "type": "group",
-                "orientation": "row",
-                "children": [
-                  {
-                    "type": "action",
-                    "actionId": "edit-routine",
-                    "label": "Edit",
-                    "input": {
-                      "kind": "edit-routine",
-                      "routineId": "r1"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "set-routine-enabled",
-                    "label": "Pause",
-                    "input": {
-                      "kind": "set-routine-enabled",
-                      "routineId": "r1",
-                      "enabled": false
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "run-routine",
-                    "label": "Run now",
-                    "input": {
-                      "kind": "run-routine",
-                      "routineId": "r1"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "open-runs",
-                    "label": "Run log",
-                    "input": {
-                      "kind": "open-runs",
-                      "routineId": "r1"
-                    }
                   },
                   {
                     "type": "action",
@@ -1099,103 +1053,104 @@
           {
             "type": "group",
             "orientation": "column",
-            "title": "Inbound leads",
-            "children": [
-              {
-                "type": "text",
-                "text": "Webhook trigger \u00b7 Never run \u00b7 No next firing scheduled",
-                "style": "status"
-              },
-              {
-                "type": "text",
-                "text": "Triage the lead."
-              },
-              {
-                "type": "group",
-                "orientation": "row",
-                "children": [
-                  {
-                    "type": "action",
-                    "actionId": "edit-routine",
-                    "label": "Edit",
-                    "input": {
-                      "kind": "edit-routine",
-                      "routineId": "r2"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "set-routine-enabled",
-                    "label": "Pause",
-                    "input": {
-                      "kind": "set-routine-enabled",
-                      "routineId": "r2",
-                      "enabled": false
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "run-routine",
-                    "label": "Run now",
-                    "input": {
-                      "kind": "run-routine",
-                      "routineId": "r2"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "open-runs",
-                    "label": "Run log",
-                    "input": {
-                      "kind": "open-runs",
-                      "routineId": "r2"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "rotate-key",
-                    "label": "Rotate key",
-                    "input": {
-                      "kind": "rotate-key",
-                      "routineId": "r2"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "revoke-key",
-                    "label": "Revoke key",
-                    "style": "danger",
-                    "input": {
-                      "kind": "revoke-key",
-                      "routineId": "r2"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "delete-routine",
-                    "label": "Delete",
-                    "style": "danger",
-                    "input": {
-                      "kind": "delete-routine",
-                      "routineId": "r2"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "type": "group",
-            "orientation": "column",
-            "title": "Routine completions",
+            "title": "Scheduled",
             "children": [
               {
                 "type": "group",
                 "orientation": "column",
+                "title": "Morning brief",
                 "children": [
                   {
                     "type": "text",
-                    "text": "Morning brief \u00b7 Happened 3 times",
+                    "text": "0 9 * * * · Australia/Sydney · Last 3 Sep 2026, 9:00am · Next 4 Sep 2026, 9:00am",
+                    "style": "status"
+                  },
+                  {
+                    "type": "group",
+                    "orientation": "row",
+                    "children": [
+                      {
+                        "type": "action",
+                        "actionId": "edit-routine",
+                        "label": "Edit",
+                        "input": {
+                          "kind": "edit-routine",
+                          "routineId": "r1"
+                        }
+                      },
+                      {
+                        "type": "action",
+                        "actionId": "set-routine-enabled",
+                        "label": "Pause",
+                        "input": {
+                          "kind": "set-routine-enabled",
+                          "routineId": "r1",
+                          "enabled": false
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "group",
+            "orientation": "column",
+            "title": "Webhooks",
+            "children": [
+              {
+                "type": "group",
+                "orientation": "column",
+                "title": "Inbound leads",
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Webhook trigger · Never run · No next firing scheduled",
+                    "style": "status"
+                  },
+                  {
+                    "type": "group",
+                    "orientation": "row",
+                    "children": [
+                      {
+                        "type": "action",
+                        "actionId": "edit-routine",
+                        "label": "Edit",
+                        "input": {
+                          "kind": "edit-routine",
+                          "routineId": "r2"
+                        }
+                      },
+                      {
+                        "type": "action",
+                        "actionId": "set-routine-enabled",
+                        "label": "Pause",
+                        "input": {
+                          "kind": "set-routine-enabled",
+                          "routineId": "r2",
+                          "enabled": false
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "group",
+            "orientation": "column",
+            "title": "Completions",
+            "children": [
+              {
+                "type": "group",
+                "orientation": "column",
+                "title": "Morning brief",
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Happened 3 times",
                     "style": "status"
                   },
                   {
@@ -1203,25 +1158,27 @@
                     "text": "Nine unread, two need you."
                   },
                   {
-                    "type": "action",
-                    "actionId": "acknowledge-inbox",
-                    "label": "Mark read",
-                    "input": {
-                      "kind": "acknowledge-inbox",
-                      "entryId": "e1"
-                    }
+                    "type": "group",
+                    "orientation": "row",
+                    "children": [
+                      {
+                        "type": "action",
+                        "actionId": "acknowledge-inbox",
+                        "label": "Mark read",
+                        "input": {
+                          "kind": "acknowledge-inbox",
+                          "entryId": "e1"
+                        }
+                      }
+                    ]
                   }
                 ]
               },
               {
                 "type": "group",
                 "orientation": "column",
+                "title": "Inbound leads",
                 "children": [
-                  {
-                    "type": "text",
-                    "text": "Inbound leads",
-                    "style": "status"
-                  },
                   {
                     "type": "text",
                     "text": "Lead triaged."
@@ -1229,12 +1186,25 @@
                 ]
               },
               {
-                "type": "action",
-                "actionId": "acknowledge-inbox",
-                "label": "Mark all read",
-                "input": {
-                  "kind": "acknowledge-inbox"
-                }
+                "type": "group",
+                "orientation": "column",
+                "title": "Mark all read",
+                "children": [
+                  {
+                    "type": "group",
+                    "orientation": "row",
+                    "children": [
+                      {
+                        "type": "action",
+                        "actionId": "acknowledge-inbox",
+                        "label": "Mark all read",
+                        "input": {
+                          "kind": "acknowledge-inbox"
+                        }
+                      }
+                    ]
+                  }
+                ]
               }
             ]
           }
@@ -1671,7 +1641,7 @@
     "value": {
       "schemaVersion": 1,
       "commandId": "command-1",
-      "text": "Hello \ud83d\udc11 \u3053\u3093\u306b\u3061\u306f"
+      "text": "Hello 🐑 こんにちは"
     }
   },
   {

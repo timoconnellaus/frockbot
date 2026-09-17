@@ -9,6 +9,7 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../shell/sidebar.dart' show SidebarProfile;
 import '../theme/caret.dart';
+import '../theme/dialogs.dart';
 import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../theme/states.dart';
@@ -71,6 +72,11 @@ class BotSettingsController extends ChangeNotifier {
   Object? model;
   bool modelAvailable = false;
 
+  /// What the Plugins row says under its name: how many this Bot runs and
+  /// which. Null until the read lands, or where it could not be read — the row
+  /// is still the door, it just says nothing it does not know.
+  String? pluginsSummary;
+
   /// What the authority is known to hold: the last values a read reported or a
   /// command of ours landed. A command whose values match this is not sent —
   /// pinning a Bot is one round trip rather than three — and it is where the
@@ -118,6 +124,7 @@ class BotSettingsController extends ChangeNotifier {
       _savedNotifications = notifications;
       _savedModel = model;
       await _loadAccount();
+      await _loadPlugins();
     } catch (_) {
       message = 'Couldn’t load this Bot’s settings. Check your connection and try again.';
     } finally {
@@ -142,6 +149,29 @@ class BotSettingsController extends ChangeNotifier {
     } catch (_) {
       modelAvailable = false;
     }
+  }
+
+  /// What this Bot runs, for the Plugins row's own line. The Plugins surface
+  /// is the authority on it; this is the same read without the document.
+  Future<void> _loadPlugins() async {
+    try {
+      final answer = (await api.request('/api/bots/$botId/plugins'))! as Map;
+      pluginsSummary = botPluginsSummaryV1([
+        for (final row in (answer['plugins'] as List? ?? const []))
+          if (row is Map && row['on'] == true)
+            row['displayName'] as String? ?? '',
+      ]);
+    } catch (_) {
+      pluginsSummary = null;
+    }
+  }
+
+  /// Re-reads the Plugins line after the Plugins surface changed what this Bot
+  /// runs, so the row that summarises them cannot outlive the change.
+  Future<void> refreshPlugins() async {
+    if (!loaded) return;
+    await _loadPlugins();
+    _changed();
   }
 
   Future<wire.SettingsOptionsPage> options(String query, int? cursor) async {
@@ -400,7 +430,9 @@ class BotSettingsController extends ChangeNotifier {
     if (receipt['status'] != 'rejected') return;
     final failure = receipt['failure'];
     throw RequestFailure(
-      failure is String ? failure : 'Couldn’t save this Bot’s voice. Try again.',
+      failure is String
+          ? failure
+          : 'Couldn’t save this Bot’s voice. Try again.',
     );
   }
 
@@ -435,18 +467,42 @@ class BotSettingsController extends ChangeNotifier {
 /// page never loses one.
 const botSettingsAutosaveDelay = Duration(milliseconds: 700);
 
-/// The Bot settings surface: the right-hand panel at wide widths, the Bot's
-/// page on the phone. The order is GrokBot's — avatar, name, label, pinned,
-/// description, notifications — and everything else is under Advanced.
+/// What the Plugins row says about what this Bot runs.
+String botPluginsSummaryV1(List<String> on) {
+  final names = [
+    for (final name in on)
+      if (name.isNotEmpty) name,
+  ];
+  if (names.isEmpty) return 'None on';
+  return '${names.length} on · ${names.join(', ')}';
+}
+
+/// What the Model row says about the choice this Bot is on.
+String botModelLabelV1(Object? model) {
+  if (model == null) return 'Follows the account model';
+  if (model is String) return model;
+  if (model is Map) {
+    for (final key in const ['label', 'name', 'model', 'id']) {
+      final value = model[key];
+      if (value is String && value.isNotEmpty) return value;
+    }
+  }
+  return jsonEncode(model);
+}
+
+/// One Bot's Settings: what it is, rather than what it is doing.
+///
+/// Reached only from the gear on the Bot page, at every width. One grammar all
+/// the way down — a section label over a card of rows, the About fields on a
+/// card of their own — so nothing sits bare on the page but the labels and the
+/// line that says what became of the last write.
 ///
 /// There is no Save button. A switch is written the moment it is flipped and a
-/// field a moment after the person stops typing, which is what GrokBot does
-/// and what a settings page on a phone is expected to do; the one thing the
-/// surface says about it is a status line, so a write that failed is never
-/// silent.
+/// field a moment after the person stops typing, which is what a settings page
+/// on a phone is expected to do; the one thing the surface says about it is a
+/// status line, so a write that failed is never silent.
 class BotSettingsView extends StatefulWidget {
   final BotSettingsController controller;
-  final VoidCallback? onClose;
   final Future<void> Function()? onSaved;
 
   /// Draws a profile change where the Bot is listed — its tile, its group, its
@@ -455,31 +511,35 @@ class BotSettingsView extends StatefulWidget {
   /// and is about to send are predicted.
   final void Function(SidebarProfile profile)? onPredict;
 
-  /// What the host mounts between the Bot's own settings and Advanced: on the
-  /// phone, the rows for its Routines, its Applets and its Package pages.
+  /// The package settings cards the host mounts, drawn between Capabilities
+  /// and Danger — each Package's own section, in the same card grammar.
   final List<Widget> sections;
 
   /// This Bot's avatar, so the avatar here is the one the sidebar draws.
   final String? background;
   final String? primary;
 
-  /// Opens the colour sheet. The Flock owns what a Bot looks like, so the
+  /// Opens the character picker. The Flock owns what a Bot looks like, so the
   /// settings surface offers the gesture and nothing else.
   final VoidCallback? onEditAvatar;
 
+  /// Opens this Bot's Plugins, which is a page of its own: the row here says
+  /// what is on and the way in, and the switches live there.
+  final VoidCallback? onOpenPlugins;
+
   /// Archiving, restoring and deleting belong to the Flock, whose directory
-  /// they change, so the zone is handed in rather than rebuilt here. It is
+  /// they change, so the card is handed in rather than rebuilt here. It is
   /// built in `lib/flock/lifecycle.dart`, which owns that seam.
   final Widget? dangerZone;
   const BotSettingsView({
     super.key,
     required this.controller,
-    this.onClose,
     this.onSaved,
     this.onPredict,
     this.background,
     this.primary,
     this.onEditAvatar,
+    this.onOpenPlugins,
     this.dangerZone,
     this.sections = const [],
   });
@@ -490,7 +550,6 @@ class BotSettingsView extends StatefulWidget {
 
 class _BotSettingsViewState extends State<BotSettingsView> {
   final form = GlobalKey<FormState>();
-  bool advanced = false;
   Timer? _pending;
 
   /// Edited since the last save started. A change made while a save is in
@@ -567,10 +626,11 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     int? maxLength,
     int lines = 1,
     bool required = false,
+    bool last = false,
   }) => identified(
     id,
     Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.only(bottom: last ? 0 : 12),
       child: SteadyCaret(
         child: TextFormField(
           key: ValueKey('$id.${state.loads}'),
@@ -580,7 +640,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
           maxLength: maxLength,
           // The counter is news only as the budget runs out; a "7/100" under
           // every name is a ledger nobody asked for.
-          decoration: InputDecoration(labelText: label, helperText: hint),
+          decoration: InputDecoration(labelText: label, hintText: hint),
           buildCounter:
               (
                 context, {
@@ -604,33 +664,45 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     ),
   );
 
-  Widget _switch({
+  /// One behaviour: a glyph, what it is called, what flipping it also does,
+  /// and the switch at the end of the row.
+  Widget _switchRow({
     required String id,
+    required IconData icon,
     required String title,
-    required String detail,
+    String? subtitle,
     required bool value,
     required void Function(bool) onChanged,
     bool enabled = true,
     Future<bool> Function(bool next)? confirm,
-  }) => identified(
-    id,
-    Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: SwitchListTile(
-        contentPadding: const EdgeInsets.fromLTRB(2, 0, 0, 0),
-        visualDensity: VisualDensity.compact,
-        title: Text(title),
-        subtitle: Text(detail),
-        value: value,
-        onChanged: enabled
-            ? (next) async {
-                if (confirm != null && !await confirm(next)) return;
-                if (mounted) _chose(() => onChanged(next));
-              }
-            : null,
+  }) {
+    Future<void> flip(bool next) async {
+      if (confirm != null && !await confirm(next)) return;
+      if (mounted) _chose(() => onChanged(next));
+    }
+
+    // The identifier is the switch's, not the row's: a row whose own press is
+    // refused has nothing but the switch left to carry a node, and an id that
+    // moved between the two as the row enabled and disabled is an id no spec
+    // could select on twice.
+    return FrockRow(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      chevron: false,
+      onTap: enabled ? () => unawaited(flip(!value)) : null,
+      trailing: identified(
+        id,
+        Semantics(
+          label: subtitle ?? title,
+          child: Switch(
+            value: value,
+            onChanged: enabled ? (next) => unawaited(flip(next)) : null,
+          ),
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   /// Hiding a Bot that notifies turns its notifications off, so the person is
   /// told before it happens. A Bot already muted has nothing to warn about.
@@ -641,9 +713,12 @@ class _BotSettingsViewState extends State<BotSettingsView> {
           builder: (dialog) => identified(
             SettingsIds.botHideConfirm,
             AlertDialog(
+              insetPadding: frockDialogInset,
               title: const Text('Hide this Bot?'),
-              content: const Text(
-                'Hiding this Bot from the sidebar also turns off its notifications. Its new messages still show as unread.',
+              content: frockDialogBody(
+                const Text(
+                  'Hiding this Bot from the sidebar also turns off its notifications. Its new messages still show as unread.',
+                ),
               ),
               actions: [
                 TextButton(
@@ -677,7 +752,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
           onAction: state.load,
         );
       }
-      final type = Theme.of(context).textTheme;
+      final theme = Theme.of(context);
       return identified(
         SettingsIds.botSettings,
         Form(
@@ -688,160 +763,119 @@ class _BotSettingsViewState extends State<BotSettingsView> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // The panel names itself; the page's app bar already did.
-              if (widget.onClose != null) ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: Semantics(
-                        header: true,
-                        child: Text('Settings', style: type.titleMedium),
+              _character(context),
+              const FrockSectionLabel('About'),
+              Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _field(
+                        id: SettingsIds.botName,
+                        label: 'Name',
+                        value: state.name,
+                        maxLength: 100,
+                        required: true,
+                        onChanged: (next) => state.name = next,
                       ),
-                    ),
-                    identified(
-                      ShellIds.rightPanelClose,
-                      IconButton(
-                        tooltip: 'Close settings',
-                        onPressed: widget.onClose,
-                        icon: const Icon(Icons.close_rounded),
+                      _field(
+                        id: SettingsIds.botLabel,
+                        label: 'Label',
+                        hint: 'Research, marketing, admin',
+                        value: state.label,
+                        maxLength: 120,
+                        onChanged: (next) => state.label = next,
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-              ],
-              identified(
-                SettingsIds.botAvatar,
-                InkWell(
-                  onTap: widget.onEditAvatar,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Column(
-                      children: [
-                        CharacterAvatar(
-                          size: 76,
-                          characterId: widget.background,
-                          primary: widget.primary,
-                          // A preview at rest; the panel can stay open for
-                          // an hour and an idle loop here repaints the window.
-                          motion: CharacterMotion.quiet,
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          widget.onEditAvatar == null
-                              ? '${state.name.isEmpty ? 'This Bot' : state.name} avatar'
-                              : 'Change character',
-                          style: type.labelMedium?.copyWith(
-                            color: widget.onEditAvatar == null
-                                ? Theme.of(context).colorScheme.onSurfaceVariant
-                                : Theme.of(context).colorScheme.primary,
-                          ),
-                        ),
-                      ],
-                    ),
+                      _field(
+                        id: SettingsIds.botTitle,
+                        label: 'Title',
+                        hint: 'Chief of staff, night-shift researcher',
+                        value: state.title,
+                        maxLength: 120,
+                        onChanged: (next) => state.title = next,
+                      ),
+                      _field(
+                        id: SettingsIds.botDescription,
+                        label: 'Description',
+                        value: state.description,
+                        maxLength: 10000,
+                        lines: 4,
+                        last: true,
+                        onChanged: (next) => state.description = next,
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
-              _field(
-                id: SettingsIds.botName,
-                label: 'Name',
-                value: state.name,
-                maxLength: 100,
-                required: true,
-                onChanged: (next) => state.name = next,
+              const FrockSectionLabel('Behaviour'),
+              FrockRowGroup(
+                rows: [
+                  _switchRow(
+                    id: SettingsIds.botPinned,
+                    icon: Icons.push_pin_outlined,
+                    title: 'Pinned',
+                    value: state.pinned,
+                    onChanged: (next) => state.pinned = next,
+                  ),
+                  _switchRow(
+                    id: SettingsIds.botNotifications,
+                    icon: Icons.notifications_none_rounded,
+                    title: 'Notifications',
+                    subtitle: state.hidden
+                        ? 'Off while this Bot is hidden from the sidebar. Show it in the sidebar to turn notifications on.'
+                        : null,
+                    value: state.notifications,
+                    enabled: !state.hidden,
+                    onChanged: (next) => state.notifications = next,
+                  ),
+                  _switchRow(
+                    id: SettingsIds.botHidden,
+                    icon: Icons.visibility_off_outlined,
+                    title: 'Hidden from list',
+                    subtitle: 'Also turns notifications off',
+                    value: state.hidden,
+                    confirm: _confirmHide,
+                    onChanged: state.setHidden,
+                  ),
+                ],
               ),
-              _field(
-                id: SettingsIds.botLabel,
-                label: 'Label',
-                hint: 'Research, marketing, admin',
-                value: state.label,
-                maxLength: 120,
-                onChanged: (next) => state.label = next,
+              const FrockSectionLabel('Capabilities'),
+              FrockRowGroup(
+                rows: [
+                  if (widget.onOpenPlugins case final VoidCallback open)
+                    identified(
+                      SettingsIds.botPlugins,
+                      FrockRow(
+                        icon: Icons.extension_outlined,
+                        title: 'Plugins',
+                        subtitle: state.pluginsSummary,
+                        onTap: open,
+                      ),
+                    ),
+                  // How this Bot sounds (ADR 0031): its own page, because
+                  // the presets are a surface of their own and the row says
+                  // enough.
+                  botVoiceRow(
+                    context,
+                    controller: state,
+                    characterId: widget.background,
+                    primary: widget.primary,
+                  ),
+                  if (state.modelAvailable) _model(context),
+                ],
               ),
-              _switch(
-                id: SettingsIds.botPinned,
-                title: 'Pinned',
-                detail: 'Pin this Bot to the top of the sidebar. Unpin it to put it back in the list.',
-                value: state.pinned,
-                onChanged: (next) => state.pinned = next,
-              ),
-              _field(
-                id: SettingsIds.botDescription,
-                label: 'Description',
-                value: state.description,
-                maxLength: 10000,
-                lines: 4,
-                onChanged: (next) => state.description = next,
-              ),
-              _switch(
-                id: SettingsIds.botNotifications,
-                title: 'Notifications',
-                detail: state.hidden
-                    ? 'Off while this Bot is hidden from the sidebar. Show it in the sidebar to turn notifications on.'
-                    : 'Get notified when this Bot finishes or needs input',
-                value: state.notifications,
-                enabled: !state.hidden,
-                onChanged: (next) => state.notifications = next,
-              ),
-              // How this Bot sounds (ADR 0031): its own page, because the
-              // presets are a surface of their own and the row says enough.
-              BotVoiceRow(
-                controller: state,
-                characterId: widget.background,
-                primary: widget.primary,
-              ),
-              if (state.modelAvailable) _model(context),
               ...widget.sections,
-              const SizedBox(height: 8),
-              identified(
-                SettingsIds.botAdvanced,
-                ExpansionTile(
-                  title: Text(
-                    'Advanced',
-                    style: type.bodyMedium?.copyWith(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  initiallyExpanded: advanced,
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 2),
-                  childrenPadding: EdgeInsets.zero,
-                  dense: true,
-                  onExpansionChanged: (open) => setState(() => advanced = open),
-                  children: [
-                    _field(
-                      id: SettingsIds.botTitle,
-                      label: 'Title',
-                      hint: 'Chief of staff, night-shift researcher',
-                      value: state.title,
-                      maxLength: 120,
-                      onChanged: (next) => state.title = next,
-                    ),
-                    _switch(
-                      id: SettingsIds.botHidden,
-                      title: 'Hidden from sidebar',
-                      detail: 'Keeps this Bot out of the list without archiving it, and turns off its notifications.',
-                      value: state.hidden,
-                      confirm: _confirmHide,
-                      onChanged: state.setHidden,
-                    ),
-                    identified(
-                      SettingsIds.botMembers,
-                      const ListTile(
-                        contentPadding: EdgeInsets.symmetric(horizontal: 2),
-                        dense: true,
-                        title: Text('Members'),
-                        subtitle: Text(
-                          'This Bot uses what you enable for all of your Bots.',
-                        ),
-                      ),
-                    ),
-                    if (widget.dangerZone case final Widget zone) zone,
-                  ],
+              if (widget.dangerZone case final Widget zone) ...[
+                FrockSectionLabel(
+                  'Danger',
+                  padding: const EdgeInsets.fromLTRB(12, 18, 4, 6),
+                  color: theme.colorScheme.error,
                 ),
-              ),
+                zone,
+              ],
               _status(context),
             ],
           ),
@@ -849,6 +883,45 @@ class _BotSettingsViewState extends State<BotSettingsView> {
       );
     },
   );
+
+  /// The face at the top of the page, and the one gesture that changes it.
+  Widget _character(BuildContext context) {
+    final theme = Theme.of(context);
+    return identified(
+      SettingsIds.botAvatar,
+      InkWell(
+        onTap: widget.onEditAvatar,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 16, 0, 4),
+          child: Column(
+            children: [
+              CharacterAvatar(
+                size: 76,
+                characterId: widget.background,
+                primary: widget.primary,
+                // A preview at rest; the panel can stay open for an hour and
+                // an idle loop here repaints the window.
+                motion: CharacterMotion.quiet,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                widget.onEditAvatar == null
+                    ? '${state.name.isEmpty ? 'This Bot' : state.name} avatar'
+                    : 'Change character',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontSize: 12.5,
+                  color: widget.onEditAvatar == null
+                      ? theme.colorScheme.onSurfaceVariant
+                      : theme.colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   /// What the surface says about writing: nothing until something has been
   /// saved, then the one word, and a failure in the authority's own words.
@@ -859,7 +932,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
     return identified(
       SettingsIds.botSaveStatus,
       Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
         child: Semantics(
           liveRegion: true,
           child: AnimatedSwitcher(
@@ -883,35 +956,21 @@ class _BotSettingsViewState extends State<BotSettingsView> {
 
   Widget _model(BuildContext context) => identified(
     SettingsIds.botModel,
-    Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: FrockRowGroup(
-        rows: [
-          FrockRow(
-            icon: Icons.memory_rounded,
-            title: state.model == null
-                ? 'Follow the account model'
-                : 'This Bot’s own model',
-            subtitle: state.model == null
-                ? 'Change it to give this Bot a model of its own.'
-                : jsonEncode(state.model),
-            onTap: () async {
-              final choice = await Navigator.of(context)
-                  .push<wire.SettingChoice>(
-                    MaterialPageRoute(
-                      builder: (_) => ModelPicker(
-                        load: state.options,
-                        selected: state.model,
-                      ),
-                    ),
-                  );
-              if (choice != null) {
-                _chose(() => state.model = choice.value.value);
-              }
-            },
+    FrockRow(
+      icon: Icons.memory_rounded,
+      title: 'Model',
+      subtitle: botModelLabelV1(state.model),
+      onTap: () async {
+        final choice = await Navigator.of(context).push<wire.SettingChoice>(
+          MaterialPageRoute(
+            builder: (_) =>
+                ModelPicker(load: state.options, selected: state.model),
           ),
-        ],
-      ),
+        );
+        if (choice != null) {
+          _chose(() => state.model = choice.value.value);
+        }
+      },
     ),
   );
 }

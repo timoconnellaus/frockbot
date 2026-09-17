@@ -19,6 +19,8 @@ import '../applets/client.dart';
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
+import '../theme/dialogs.dart';
+import '../theme/rows.dart';
 
 /// The three lifecycle commands, and what each is called where a person reads
 /// it. The wire type is the key so nothing else has to know the strings.
@@ -274,9 +276,12 @@ Future<bool> confirmBotLifecycleChange({
             builder: (dialog) => identified(
               FlockIds.lifecycleConfirm,
               AlertDialog(
+                insetPadding: frockDialogInset,
                 title: Text('${words.title} $botName?'),
-                content: SingleChildScrollView(
-                  child: Text([words.body, ?applets].join('\n\n')),
+                content: frockDialogBody(
+                  SingleChildScrollView(
+                    child: Text([words.body, ?applets].join('\n\n')),
+                  ),
                 ),
                 actions: [
                   TextButton(
@@ -296,11 +301,14 @@ Future<bool> confirmBotLifecycleChange({
   );
 }
 
-/// The danger zone, as Bot settings' Advanced shows it: what this Bot's status
-/// is, and the one or two changes that status allows.
+/// The danger zone, as the foot of Bot Settings shows it: two rows on one
+/// card, under a Danger label the section draws.
 ///
 /// An archived Bot offers Restore and Delete; an active one offers Archive and
-/// Delete. Each asks its question first.
+/// Delete. Each asks its question first, in the one dialog every Bot
+/// confirmation uses. No tinted panel and no second sentence: the label over
+/// the card and the colour on Delete are the warning, and the rest of it is
+/// what the confirmation is for.
 class BotDangerZone extends StatefulWidget {
   final BotLifecycleCommands lifecycle;
   final String botId;
@@ -372,80 +380,64 @@ class _BotDangerZoneState extends State<BotDangerZone> {
       final notice = state.error ?? state.message;
       return identified(
         FlockIds.dangerZone,
-        Card(
-          margin: const EdgeInsets.symmetric(vertical: 8),
-          color: theme.colorScheme.errorContainer.withValues(alpha: 0.24),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Semantics(
-                  header: true,
-                  child: Text('Danger zone', style: theme.textTheme.titleSmall),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  widget.archived
-                      ? 'This Bot is archived. Its history is here whenever you want it back.'
-                      : 'Archiving stops new work and keeps the history. Deleting keeps nothing.',
-                  style: theme.textTheme.bodySmall,
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    if (widget.archived)
-                      identified(
-                        FlockIds.restoreBot,
-                        FilledButton.tonal(
-                          onPressed: locked
-                              ? null
-                              : () => _change('bot/restore'),
-                          child: const Text('Restore Bot'),
-                        ),
-                      )
-                    else
-                      identified(
-                        FlockIds.archiveBot,
-                        FilledButton.tonal(
-                          onPressed: locked
-                              ? null
-                              : () => _change('bot/archive'),
-                          child: const Text('Archive Bot'),
-                        ),
-                      ),
-                    identified(
-                      FlockIds.deleteBot,
-                      OutlinedButton(
-                        onPressed: locked ? null : () => _change('bot/delete'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: theme.colorScheme.error,
-                        ),
-                        child: const Text('Delete Bot'),
-                      ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FrockRowGroup(
+              rows: [
+                if (widget.archived)
+                  identified(
+                    FlockIds.restoreBot,
+                    FrockRow(
+                      icon: Icons.unarchive_outlined,
+                      title: 'Restore Bot',
+                      onTap: locked ? null : () => _change('bot/restore'),
                     ),
-                  ],
-                ),
-                if (notice != null) ...[
-                  const SizedBox(height: 12),
-                  Semantics(liveRegion: true, child: Text(notice)),
-                ],
-                if (state.pending)
-                  TextButton(
-                    onPressed: state.saving
-                        ? null
-                        : () async {
-                            if (await state.retry()) {
-                              await widget.onChanged?.call();
-                            }
-                          },
-                    child: const Text('Check change status'),
+                  )
+                else
+                  identified(
+                    FlockIds.archiveBot,
+                    FrockRow(
+                      icon: Icons.archive_outlined,
+                      title: 'Archive Bot',
+                      onTap: locked ? null : () => _change('bot/archive'),
+                    ),
                   ),
+                identified(
+                  FlockIds.deleteBot,
+                  FrockRow(
+                    icon: Icons.delete_outline_rounded,
+                    title: 'Delete Bot',
+                    color: theme.colorScheme.error,
+                    onTap: locked ? null : () => _change('bot/delete'),
+                  ),
+                ),
               ],
             ),
-          ),
+            if (notice != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(notice, style: theme.textTheme.bodySmall),
+                ),
+              ),
+            if (state.pending)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: state.saving
+                      ? null
+                      : () async {
+                          if (await state.retry()) {
+                            await widget.onChanged?.call();
+                          }
+                        },
+                  child: const Text('Check change status'),
+                ),
+              ),
+          ],
         ),
       );
     },

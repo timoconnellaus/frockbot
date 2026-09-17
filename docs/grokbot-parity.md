@@ -805,12 +805,15 @@ the rows whose status the code moved:
   any turn type (`agent.ts`), and as the Routines surface
   (`apps/native/lib/routines/page.dart`), where "next run" is now the moment the scheduler armed an alarm on, a
   firing appears in the per-Routine run log, and a webhook Routine's delivery URL
-  and key are shown once with rotate and revoke beside them. The silent half is
+  and key are shown once with rotate and revoke beside them on the one editor a
+  row opens — which is also where Run now, Run log and Delete live, the list
+  itself being rows under Scheduled and Webhooks carrying a pause switch each. The silent half is
   landed too: an automation Turn is absent from `GET /api/bots/:id/turns` and
   from the run lookup, reachable only through the run log, and a completed
   firing writes a `RoutineInboxEntryV1` in the transaction that settles it —
   `attribution: "Automation: <name>"`, `acknowledged: false` — surfaced by the
-  header badge and drawer (`apps/native/lib/routines/page.dart`) and cleared by
+  All Routines row's badge on the Bot page and the Completions card at the foot
+  of the Routines surface (`apps/native/lib/routines/page.dart`), and cleared by
   an explicit
   acknowledge command. What is still missing is the confirmation **card**:
   a Routine write answers with a receipt the settings surface re-renders, not
@@ -883,9 +886,12 @@ the rows whose status the code moved:
   Sprites SDK. **Row 25 is now `landed`**: `computer_screenshot`
   (`computer/agent.ts`) captures the Bot's own desktop through one
   guarded `exec` and writes the PNG back through `ComputerWorkspace.write`.
-  The hosted client's Bot-panel card renders that durable capture without
-  opening a viewer or waking the Computer. An explicit click
-  opens the shared full-window noVNC session with `view_only=1`; **Take control**
+  The hosted client's Computer card on the Bot page renders that durable
+  capture without opening a viewer or waking the Computer. Pressing the card
+  opens the Computer's own sub-page, and **Full window** there (**Full screen**
+  on a phone) opens the shared
+  noVNC session with `view_only=1`, which names the phase once as its app bar
+  subtitle; **Take control**
   first confirms that the Bot will be fenced, then makes the same session
   interactive, while Release, Escape, and close submit `releaseControl` through
   the Bot Durable Object. What is still absent is the _Bot-initiated_ ask,
@@ -1159,15 +1165,17 @@ than a silent absence. Row 44 is the only one.
   carry a badge, so its unread rolls into one aggregate on the "Show N hidden"
   entry.
 - **51** — landed in the GrokBot-aligned right panel. Its default content is
-  the selected Bot's Computer thumbnail and caption followed by the durable
-  Routines list and a `+` link to the Advanced editor. The panel header's only
-  Bot action is the settings cog; Settings owns its own title and back action.
-  The separate Bot info surface and Clock card were retired. Members and
-  Capability Assignment summary moved under Advanced; name provenance is no
-  longer user-facing because the editable Name field is the identity control.
-  The remaining old Computer, Routines, Members, and Notifications deep links
-  continue to resolve at their new homes. Playwright covers the default panel
-  and settings swap at 1351px and 390px.
+  the Bot page: the selected Bot's Computer card with a status line under it,
+  the last Routine firings with All Routines under them, its running Applets,
+  and the doors its Packages declare. The panel header's only Bot action is the
+  settings cog, and Settings is a sub-page of that panel with a back chevron of
+  its own. The separate Bot info surface and Clock card were retired, and so
+  were the Advanced expander and the Members sentence that lived in it: Title is
+  an About field like the others, Hidden from list is a behaviour switch, and
+  name provenance is no longer user-facing because the editable Name field is
+  the identity control. The remaining old Computer, Routines, Members and
+  Notifications deep links continue to resolve at their new homes. Playwright
+  covers the Bot page and the Settings sub-page at 1351px and 390px.
 
 - **53** — the card mechanism is landed; the policy that decides _which_
   actions need one is not. An `approval` payload on `send_to_user`

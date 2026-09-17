@@ -180,7 +180,7 @@ function appletUi(page: Page): FrameLocator {
 async function openCanvas(page: Page): Promise<void> {
   const canvas = canvasOf(page);
   if (await canvas.isVisible().catch(() => false)) return;
-  await press(sem(page, "applet-chip"));
+  await press(sem(page, "bot-page-applets-all"));
   await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await press(
     page.locator('[flt-semantics-identifier^="applet-row-"]').first(),
@@ -442,7 +442,7 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
       .first(),
   );
   await press(sem(page, "bot-panel-toggle"));
-  const chip = sem(page, "applet-chip");
+  const chip = sem(page, "bot-page-applets-all");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await shot(page, "phone-chip");
   await press(chip);

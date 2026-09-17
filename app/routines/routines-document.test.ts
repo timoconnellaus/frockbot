@@ -122,15 +122,14 @@ test("a Routine says what it fires on and when it last did and next will", () =>
 test("every control names the command it means", () => {
   const document = routinesDocumentV1(frame());
   const actions = walk(document.root).filter((node) => node.type === "action");
+  // The editor is first and holds everything one Routine can be asked when it
+  // is open; a row holds the two controls a row draws for itself.
   expect(
     actions.map((node) => (node.type === "action" ? node.input?.kind : "")),
   ).toEqual([
     "save-routine",
     "edit-routine",
     "set-routine-enabled",
-    "run-routine",
-    "open-runs",
-    "delete-routine",
     "acknowledge-inbox",
     "acknowledge-inbox",
   ]);
@@ -193,9 +192,20 @@ test("an empty Bot says so on both halves rather than drawing nothing", () => {
   const text = walk(document.root)
     .filter((node) => node.type === "text")
     .map((node) => (node.type === "text" ? node.text : ""));
-  expect(text[0]).toBe("0 Routines");
-  expect(text.some((line) => line.startsWith("No Routines yet."))).toBe(true);
-  expect(text.some((line) => line.startsWith("Nothing here yet."))).toBe(true);
+  const titles = walk(document.root)
+    .filter((node) => node.type === "group" && node.title !== undefined)
+    .map((node) => (node.type === "group" ? node.title : ""));
+  // No count line: the sections say what is armed, and a Bot with none says so
+  // as a named row rather than as a "0" or a sentence loose on the page.
+  expect(text.some((line) => line.startsWith("0 Routines"))).toBe(false);
+  expect(titles).toContain("No Routines yet");
+  expect(titles).toContain("Nothing here yet");
+  expect(text.some((line) => line.startsWith("A Routine runs this Bot"))).toBe(
+    true,
+  );
+  expect(text.some((line) => line.startsWith("Finished Routines leave"))).toBe(
+    true,
+  );
 });
 
 test("the revision moves only when what the document says changes", () => {
@@ -283,7 +293,7 @@ test("naming a Routine opens the editor on its own values and moves the revision
 });
 
 test("only a webhook Routine is offered a key, and only a keyed one a revoke", () => {
-  const scheduled = walk(routinesDocumentV1(frame()).root)
+  const scheduled = walk(routinesDocumentV1(frame({ editing: morning })).root)
     .filter((node) => node.type === "action")
     .map((node) => (node.type === "action" ? node.actionId : ""));
   expect(scheduled).not.toContain("rotate-key");
@@ -295,7 +305,9 @@ test("only a webhook Routine is offered a key, and only a keyed one a revoke", (
     trigger: { kind: "webhook" },
     nextRunAt: undefined,
   };
-  const minting = walk(routinesDocumentV1(frame({ routines: [fresh] })).root);
+  const minting = walk(
+    routinesDocumentV1(frame({ routines: [fresh], editing: fresh })).root,
+  );
   const mint = minting.find(
     (node) => node.type === "action" && node.actionId === "rotate-key",
   );
@@ -306,9 +318,11 @@ test("only a webhook Routine is offered a key, and only a keyed one a revoke", (
     ),
   ).toBe(false);
 
+  const keyedRoutine = { ...fresh, hookKeyVersion: 2 };
   const keyed = walk(
-    routinesDocumentV1(frame({ routines: [{ ...fresh, hookKeyVersion: 2 }] }))
-      .root,
+    routinesDocumentV1(
+      frame({ routines: [keyedRoutine], editing: keyedRoutine }),
+    ).root,
   );
   const rotate = keyed.find(
     (node) => node.type === "action" && node.actionId === "rotate-key",
@@ -352,4 +366,44 @@ test("a key rotation moves the revision, so the host reads the document again", 
       frame({ routines: [{ ...webhook, hookKeyVersion: 2 }] }),
     ),
   );
+});
+
+test("a Routine is filed under what fires it, and an empty half is not drawn", () => {
+  const both = walk(
+    routinesDocumentV1(frame({ routines: [morning, leads] })).root,
+  );
+  const sections = both
+    .filter((node) => node.type === "group" && node.title !== undefined)
+    .map((node) => (node.type === "group" ? node.title : ""));
+  expect(sections).toContain("Scheduled");
+  expect(sections).toContain("Webhooks");
+
+  const only = walk(routinesDocumentV1(frame()).root)
+    .filter((node) => node.type === "group" && node.title !== undefined)
+    .map((node) => (node.type === "group" ? node.title : ""));
+  expect(only).toContain("Scheduled");
+  expect(only).not.toContain("Webhooks");
+});
+
+test("a completion is a named row with its own way to mark it read", () => {
+  const document = routinesDocumentV1(frame());
+  // The completions card is the last thing on the surface, under its own
+  // label, and every one of its children is a row.
+  const root = document.root;
+  const last = root.type === "group" ? root.children.at(-1) : undefined;
+  expect(last?.type === "group" && last.title).toBe("Completions");
+  const entry = walk(last!).find(
+    (node) => node.type === "group" && node.title === "Morning brief",
+  );
+  expect(entry).toBeDefined();
+  const press = walk(entry!).find(
+    (node) => node.type === "action" && node.actionId === "acknowledge-inbox",
+  );
+  expect(press?.type === "action" && press.input?.entryId).toBe("e1");
+  expect(
+    last?.type === "group" &&
+      last.children.every(
+        (child) => child.type === "group" && child.title !== undefined,
+      ),
+  ).toBe(true);
 });

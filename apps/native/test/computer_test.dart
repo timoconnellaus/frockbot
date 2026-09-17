@@ -223,18 +223,60 @@ void main() {
   });
 
   group('the line under the screen', () {
-    test('says live, or how old the photograph is', () {
+    test('says live, or how old the photograph is, and always says one', () {
       final now = DateTime.parse('2026-09-05T01:00:12.000Z');
-      expect(computerScreenStatusLabelV1(streaming: true, now: now), 'Live');
       expect(
-        computerScreenStatusLabelV1(
+        computerCardStatusV1(
+          streaming: true,
+          unconfigured: false,
+          message: 'browsing github.com',
+          now: now,
+        ),
+        'Live · browsing github.com',
+      );
+      expect(
+        computerCardStatusV1(
           streaming: false,
+          unconfigured: false,
+          message: 'Ready to start',
           capturedAt: DateTime.parse('2026-09-05T01:00:00.000Z'),
           now: now,
         ),
-        'Snapshot · 12s ago',
+        'Ready · captured 12s ago',
       );
-      expect(computerScreenStatusLabelV1(streaming: false, now: now), isNull);
+      expect(
+        computerCardStatusV1(
+          streaming: false,
+          unconfigured: false,
+          message: 'Ready to start',
+          now: now,
+        ),
+        'Ready to start',
+      );
+      expect(
+        computerCardStatusV1(
+          streaming: false,
+          unconfigured: true,
+          message: 'This Bot has no computer.',
+          now: now,
+        ),
+        'No computer',
+      );
+    });
+
+    test('a refusal is said even when a photograph is on the card', () {
+      final now = DateTime.parse('2026-09-05T01:00:12.000Z');
+      expect(
+        computerCardStatusV1(
+          streaming: false,
+          unconfigured: false,
+          message: 'Ready to start',
+          failure: 'The Computer host answered 503',
+          capturedAt: DateTime.parse('2026-09-05T01:00:00.000Z'),
+          now: now,
+        ),
+        'The Computer host answered 503',
+      );
     });
 
     test('the age is a whole unit at every scale', () {
@@ -253,6 +295,31 @@ void main() {
     expect(driving, contains('view_only=0'));
     expect(Uri.parse(driving).path, Uri.parse(url).path);
     expect(viewerUrlForControlV1(driving, false), contains('view_only=1'));
+  });
+
+  /// Every surface that says one line about the Computer — the card, the
+  /// phone's page, the desktop panel's header — asks the controller for it, so
+  /// a refusal cannot be silent on one of them and said on the others.
+  test('a Computer that refused says that, not the phase it was in', () async {
+    var reads = 0;
+    final controller = ComputerController(
+      SettingsApi(MemoryStore(), (path, body) async {
+        if (path.endsWith('/commands')) {
+          throw const RequestFailure('The Computer host answered 503', 503);
+        }
+        if (reads++ > 0) {
+          throw const RequestFailure('The Computer host answered 503', 503);
+        }
+        return projection(message: 'Ready to start');
+      }),
+      'bot-1',
+    );
+    await controller.read();
+    expect(controller.said, 'Ready to start');
+    await controller.takeControl();
+    expect(controller.state.message, 'Ready to start');
+    expect(controller.said, 'The Computer host answered 503');
+    controller.dispose();
   });
 
   group('the card', () {
@@ -339,17 +406,23 @@ void main() {
       // Available, because the shell registers the panel entry from it: a
       // dependency being down must not read as a Bot with no Computer.
       expect(controller.available, isTrue);
-      expect(find.text('The Computer host answered 503'), findsOneWidget);
+      expect(
+        find.text('The Computer host answered 503'),
+        findsAtLeastNWidgets(1),
+      );
       expect(find.text('No computer'), findsNothing);
       // And it opens, because the full window is where the way out lives.
-      expect(tester.widget<InkWell>(find.byType(InkWell)).onTap, isNotNull);
+      expect(
+        tester.widget<InkWell>(find.byType(InkWell).first).onTap,
+        isNotNull,
+      );
       await close(tester, controller);
     });
 
     testWidgets('a read that answers nothing at all says that', (tester) async {
       final controller = await refused(tester, Exception('socket closed'));
       expect(controller.available, isTrue);
-      expect(find.text('Couldn’t read the computer.'), findsOneWidget);
+      expect(find.text('Couldn’t read the computer.'), findsAtLeastNWidgets(1));
       await close(tester, controller);
     });
 
@@ -386,7 +459,7 @@ void main() {
     ) async {
       final controller = await open(tester, projection());
       await tester.pump();
-      expect(find.textContaining('Snapshot ·'), findsOneWidget);
+      expect(find.textContaining('Ready · captured'), findsOneWidget);
       await close(tester, controller);
     });
 

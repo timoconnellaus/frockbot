@@ -190,11 +190,11 @@ function fileState(page: Page, path: string): Locator {
 }
 
 /**
- * The canvas, opened from the header control: it puts the selected Bot's
- * Applets in the sidebar (a pushed page on a phone), and a row opens one.
+ * The canvas, opened from the Bot page's All Applets row: it puts the selected
+ * Bot's Applets in the sidebar (a pushed page on a phone), and a row opens one.
  */
 async function openCanvas(page: Page): Promise<Locator> {
-  await press(sem(page, "applet-chip"));
+  await press(sem(page, "bot-page-applets-all").first());
   await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await press(
     page.locator('[flt-semantics-identifier^="applet-row-"]').first(),
@@ -223,7 +223,7 @@ test("a Bot creates an Applet, its Applets list opens the source, and deletion r
   await page.setViewportSize(DESKTOP);
 
   await expect(sem(page, "package-entry-applets-open")).toHaveCount(0);
-  await expect(sem(page, "applet-chip")).toHaveCount(1);
+  await expect(sem(page, "bot-page-applets-all")).toHaveCount(1);
 
   await runTool(
     page,
@@ -272,7 +272,7 @@ test("a Bot creates an Applet, its Applets list opens the source, and deletion r
 
   // The Bot's Applets list shows the durable Applet the Bot created.
   const appletId = await appletIdFromDirectory(page);
-  await press(sem(page, "applet-chip"));
+  await press(sem(page, "bot-page-applets-all"));
   await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   const row = sem(page, `applet-row-${appletId}`);
   await expect(row).toBeVisible();
@@ -292,8 +292,8 @@ test("a Bot creates an Applet, its Applets list opens the source, and deletion r
     { appletId },
     async () => !(await directoryHolds(page, "Weekly Todos")),
   );
-  await expect(sem(page, "applet-chip")).toBeVisible();
-  await press(sem(page, "applet-chip"));
+  await expect(sem(page, "bot-page-applets-all")).toBeVisible();
+  await press(sem(page, "bot-page-applets-all"));
   await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await expect(
     page.locator('[flt-semantics-identifier^="applet-row-"]'),
@@ -365,7 +365,7 @@ test("the Applets canvas fills the phone window", async ({
 
   // On a phone nothing opens itself: the focused Applet is a control in the
   // Bot page, not a screen the User did not ask for.
-  const chip = sem(page, "applet-chip");
+  const chip = sem(page, "bot-page-applets-all");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await expect(sem(page, "applet-canvas")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);

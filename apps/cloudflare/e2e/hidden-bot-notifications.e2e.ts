@@ -12,6 +12,7 @@ import {
   sem,
   settle,
   test,
+  openBotSettings,
 } from "./fixtures.ts";
 
 /** Press a named widget: the identifier's node, or the child that takes taps. */
@@ -20,8 +21,12 @@ function tap(scope: Page | Locator, identifier: string): Locator {
   return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
 }
 
+/**
+ * A named switch. The identifier is the switch's own, so it is the same node
+ * whether or not the row around it can be pressed.
+ */
 function toggle(page: Page, identifier: string): Locator {
-  return sem(page, identifier).locator('[role="switch"]');
+  return sem(page, identifier).first();
 }
 
 /** A named screenshot, kept with the run so a reviewer can see the surface. */
@@ -42,8 +47,8 @@ function row(page: Page, name: string): Locator {
     .filter({ hasText: name });
 }
 
-// Tall enough that Advanced and the switches inside it are on screen: a canvas
-// has nothing for Playwright to scroll into view.
+// Tall enough that the whole Settings page is on screen: a canvas has nothing
+// for Playwright to scroll into view.
 test.use({ viewport: { width: 1280, height: 1024 } });
 
 test("hiding a Bot asks first, turns notifications off with it, and leaves them off", async ({
@@ -54,6 +59,7 @@ test("hiding a Bot asks first, turns notifications off with it, and leaves them 
   await openApplication(page, userId);
   await createBot(page, "Quiet");
   await settle(page);
+  await openBotSettings(page);
 
   const notifications = toggle(page, "bot-notifications");
   const hidden = toggle(page, "bot-hidden-from-sidebar");
@@ -63,7 +69,6 @@ test("hiding a Bot asks first, turns notifications off with it, and leaves them 
   }
   await expect(notifications).toHaveAttribute("aria-checked", "true");
 
-  await tap(page, "bot-advanced").click();
   await settle(page);
   await expect(hidden).toHaveAttribute("aria-checked", "false");
 
@@ -113,11 +118,11 @@ test("hiding a Bot asks first, turns notifications off with it, and leaves them 
   await settle(page);
   await row(page, "Quiet").click();
   await settle(page);
+  await openBotSettings(page);
   await expect(toggle(page, "bot-notifications")).toHaveAttribute(
     "aria-checked",
     "false",
   );
-  await tap(page, "bot-advanced").click();
   await settle(page);
   await expect(toggle(page, "bot-hidden-from-sidebar")).toHaveAttribute(
     "aria-checked",
@@ -165,6 +170,7 @@ test.describe("a hide whose answer never arrives", () => {
     await openApplication(page, userId);
     await createBot(page, "Lost");
     await settle(page);
+    await openBotSettings(page);
 
     const notifications = toggle(page, "bot-notifications");
     const hidden = toggle(page, "bot-hidden-from-sidebar");
@@ -172,7 +178,6 @@ test.describe("a hide whose answer never arrives", () => {
       await notifications.click();
     }
     await expect(notifications).toHaveAttribute("aria-checked", "true");
-    await tap(page, "bot-advanced").click();
     await settle(page);
 
     // A flaky connection that drops the answer after the Worker committed it:
@@ -217,6 +222,7 @@ test.describe("a hide whose answer never arrives", () => {
     await settle(page);
     await row(page, "Lost").click();
     await settle(page);
+    await openBotSettings(page);
     await expect(toggle(page, "bot-notifications")).toHaveAttribute(
       "aria-checked",
       "false",

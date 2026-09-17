@@ -53,6 +53,10 @@ class ViewDocumentView extends StatefulWidget {
 
   /// Whether the root's titled groups are drawn as a grid of cards.
   final bool gridGroups;
+
+  /// Whether the root's titled groups are drawn as switch rows on one card
+  /// per kind, which is what a list of things to turn on and off is.
+  final bool switchRows;
   ViewDocumentView({
     super.key,
     required this.document,
@@ -60,6 +64,7 @@ class ViewDocumentView extends StatefulWidget {
     this.fields = const {},
     this.cardGroups = false,
     this.gridGroups = false,
+    this.switchRows = false,
     Map<String, ViewFrameBuilder>? frames,
   }) : frames = frames ?? hostViewFramesV1;
 
@@ -129,7 +134,11 @@ class _ViewDocumentViewState extends State<ViewDocumentView> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (widget.cardGroups)
+            if (widget.switchRows)
+              ViewSwitchRows(
+                node: (json['root']! as Map).cast<String, Object?>(),
+              )
+            else if (widget.cardGroups)
               ViewCardGroups(
                 node: (json['root']! as Map).cast<String, Object?>(),
               )

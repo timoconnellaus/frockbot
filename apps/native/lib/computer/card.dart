@@ -16,6 +16,8 @@ import 'package:flutter/material.dart';
 import '../orientation.dart';
 import '../shell/semantics.dart';
 import '../theme/frock_theme.dart';
+import '../theme/dialogs.dart';
+import '../theme/rows.dart';
 import '../theme/states.dart';
 import '../view/embed.dart';
 import '../view/host_frame.dart';
@@ -96,6 +98,20 @@ class ComputerOpening extends StatelessWidget {
   );
 }
 
+/// Which of the Computer's two in-place surfaces this is.
+///
+/// One widget for both, because both are the same live frame with the same
+/// streaming rules around it, and a second copy of those rules is how a card
+/// and a page come to disagree about whether the Bot is working.
+enum ComputerSurface {
+  /// The Bot page's card: the screen, and one line under it that always says
+  /// what the Computer is doing and offers the way in.
+  card,
+
+  /// The Computer sub-page: the screen, the two controls, and the capture.
+  page,
+}
+
 /// The card: the screen, and one line saying whether it is the desktop or a
 /// photograph of it.
 class ComputerCard extends StatefulWidget {
@@ -103,10 +119,22 @@ class ComputerCard extends StatefulWidget {
 
   /// A Turn is executing for this Bot right now.
   final bool turnRunning;
+  final ComputerSurface surface;
+
+  /// Whose Computer this is, so the full window can say so.
+  final String? botName;
+
+  /// Where the card's "Open" goes: the Computer sub-page, inside the panel on
+  /// a desktop and pushed on a phone. Without one the card opens the full
+  /// window itself, which is what it did before there was a sub-page.
+  final VoidCallback? onOpen;
   const ComputerCard({
     super.key,
     required this.controller,
     this.turnRunning = false,
+    this.surface = ComputerSurface.card,
+    this.botName,
+    this.onOpen,
   });
 
   @override
@@ -174,10 +202,46 @@ class _ComputerCardState extends State<ComputerCard> {
     final unconfigured =
         state.phase == 'unconfigured' && controller.failure == null;
     final screenshot = state.screenshots.firstOrNull;
-    final status = computerScreenStatusLabelV1(
+    final status = computerCardStatusV1(
       streaming: _streaming,
+      unconfigured: unconfigured,
+      message: state.message,
+      failure: controller.failure,
       capturedAt: screenshot?.capturedAt,
       now: _now,
+    );
+    final theme = Theme.of(context);
+    final open = unconfigured || controller.busy
+        ? null
+        : widget.onOpen ?? () => unawaited(_open(context));
+    final screen = Semantics(
+      button: !unconfigured,
+      label: widget.surface == ComputerSurface.page
+          ? 'Computer screen'
+          : 'Open computer in full window',
+      child: AspectRatio(
+        aspectRatio: 16 / 10,
+        child: Material(
+          clipBehavior: Clip.antiAlias,
+          color: theme.colorScheme.surfaceContainerHighest,
+          shape: widget.surface == ComputerSurface.page
+              ? RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: theme.colorScheme.outlineVariant),
+                )
+              : const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+                ),
+          child: InkWell(
+            onTap: widget.surface == ComputerSurface.page
+                ? (unconfigured || controller.busy
+                      ? null
+                      : () => unawaited(_open(context)))
+                : open,
+            child: _screen(context, opening, screenshot),
+          ),
+        ),
+      ),
     );
     return HostViewFrames(
       frames: {
@@ -186,62 +250,146 @@ class _ComputerCardState extends State<ComputerCard> {
       },
       child: identified(
         ComputerIds.card,
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // A card that says there is no Computer opens nothing: a
-            // full-window view repeating the same sentence is a tap that costs
-            // a step and answers nothing.
-            Semantics(
-              button: !unconfigured,
-              label: 'Open computer in full window',
-              child: AspectRatio(
-                aspectRatio: 16 / 10,
-                child: Material(
-                  clipBehavior: Clip.antiAlias,
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(
-                      color: Theme.of(context).colorScheme.outlineVariant,
+        widget.surface == ComputerSurface.page
+            ? _page(context, screen, screenshot)
+            : Card(
+                margin: EdgeInsets.zero,
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [screen, _statusRow(context, status, open)],
+                ),
+              ),
+      ),
+    );
+  }
+
+  /// The line the card always carries: a dot for live or idle, what the
+  /// Computer is doing, and the way in.
+  Widget _statusRow(BuildContext context, String status, VoidCallback? open) {
+    final theme = Theme.of(context);
+    return identified(
+      ComputerIds.status,
+      InkWell(
+        onTap: open,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+          child: Row(
+            children: [
+              Icon(
+                Icons.circle,
+                size: 8,
+                color: _streaming
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.outline,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+              if (open != null) ...[
+                const SizedBox(width: 8),
+                identified(
+                  SettingsIds.botPageComputer,
+                  Text(
+                    'Open',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.primary,
                     ),
                   ),
-                  child: InkWell(
-                    onTap: unconfigured || controller.busy
-                        ? null
-                        : () => unawaited(_open(context)),
-                    child: _screen(context, opening, screenshot),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: theme.colorScheme.primary,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The Computer sub-page: the live frame, the two things a person can do to
+  /// it, and the photograph it last filed.
+  Widget _page(
+    BuildContext context,
+    Widget screen,
+    ComputerScreenshot? screenshot,
+  ) {
+    final state = controller.state;
+    final human = state.phase == 'human-control';
+    final opening = state.phase == 'provisioning' || state.phase == 'updating';
+    final wide = MediaQuery.sizeOf(context).width > 640;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        screen,
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: identified(
+                human ? ComputerIds.releaseControl : ComputerIds.takeControl,
+                OutlinedButton(
+                  style: frockCompactButton(context).copyWith(
+                    minimumSize: WidgetStateProperty.all(const Size(0, 40)),
                   ),
+                  onPressed:
+                      controller.busy ||
+                          opening ||
+                          state.viewerUrl == null ||
+                          state.phase == 'taking-control'
+                      ? null
+                      : () => unawaited(
+                          human
+                              ? controller.releaseControl()
+                              : confirmComputerTakeControlV1(
+                                  context,
+                                  controller,
+                                ),
+                        ),
+                  child: Text(human ? 'Release control' : 'Take control'),
                 ),
               ),
             ),
-            if (status != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: identified(
-                  ComputerIds.status,
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.circle,
-                        size: 8,
-                        color: _streaming
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.outline,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        status,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton(
+                style: frockCompactButton(context).copyWith(
+                  minimumSize: WidgetStateProperty.all(const Size(0, 40)),
                 ),
+                onPressed: controller.busy
+                    ? null
+                    : () => unawaited(_open(context)),
+                child: Text(wide ? 'Full window' : 'Full screen'),
               ),
+            ),
           ],
         ),
-      ),
+        if (screenshot != null) ...[
+          const SizedBox(height: 12),
+          FrockRowGroup(
+            rows: [
+              FrockRow(
+                title: 'Last capture',
+                subtitle: computerSnapshotAgeLabelV1(
+                  _now.difference(screenshot.capturedAt),
+                ),
+                onTap: () => unawaited(_open(context)),
+              ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 
@@ -285,14 +433,20 @@ class _ComputerCardState extends State<ComputerCard> {
                     'disconnected' => 'Viewer disconnected',
                     _ => 'Computer',
                   }, style: Theme.of(context).textTheme.titleSmall),
-                  const SizedBox(height: 4),
-                  Text(
-                    // What refused, where something did: a projection nobody
-                    // could read is not a Computer that said anything.
-                    controller.failure ?? state.message,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                  // The card's own status row says the state under the frame,
+                  // so the frame does not say it a second time. The page and
+                  // the window have no such row, and do.
+                  if (widget.surface == ComputerSurface.page ||
+                      controller.failure != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      // What refused, where something did: a projection nobody
+                      // could read is not a Computer that said anything.
+                      controller.failure ?? state.message,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ],
         ),
       ),
@@ -305,7 +459,8 @@ class _ComputerCardState extends State<ComputerCard> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
-        builder: (_) => ComputerViewerPage(controller: controller),
+        builder: (_) =>
+            ComputerViewerPage(controller: controller, botName: widget.botName),
       ),
     );
     await controller.close();
@@ -316,7 +471,11 @@ class _ComputerCardState extends State<ComputerCard> {
 /// take over.
 class ComputerViewerPage extends StatefulWidget {
   final ComputerController controller;
-  const ComputerViewerPage({super.key, required this.controller});
+
+  /// Whose Computer this is, for the title. Absent where the surface that
+  /// opened it does not know — the card inside a Package page, say.
+  final String? botName;
+  const ComputerViewerPage({super.key, required this.controller, this.botName});
 
   @override
   State<ComputerViewerPage> createState() => _ComputerViewerPageState();
@@ -390,41 +549,15 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
     }
   }
 
-  /// Take control opens local confirmation and cannot reach the Bot until the
-  /// second, confirmed gesture.
-  Future<void> _confirmTakeControl() async {
-    final taken = await showDialog<bool>(
-      context: context,
-      builder: (context) => identified(
-        ComputerIds.takeControlConfirm,
-        AlertDialog(
-          title: const Text('Take control?'),
-          content: const Text(
-            'The Bot pauses while you are driving. Release control to give it '
-            'the keyboard back.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Take control'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (taken ?? false) await controller.takeControl();
-  }
+  Future<void> _confirmTakeControl() =>
+      confirmComputerTakeControlV1(context, controller);
 
   @override
   Widget build(BuildContext context) {
     final state = controller.state;
     // The one sentence this window has: what the Computer said, or what
     // refused to say it.
-    final said = controller.failure ?? state.message;
+    final said = controller.said;
     final human = state.phase == 'human-control';
     final opening = state.phase == 'provisioning' || state.phase == 'updating';
     final url = state.viewerUrl;
@@ -466,29 +599,34 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
       appBar: _landscape
           ? null
           : AppBar(
-              title: const Text('Computer'),
-              actions: actions,
-              // What the Computer is doing, under the chrome rather than inside it:
-              // an app bar is a few words wide on a phone, and the phase is a
-              // sentence.
-              bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(28),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: identified(
-                      ComputerIds.phase,
-                      Text(
-                        said,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
+              // What the Computer is doing, said once: as the subtitle of the
+              // one title, rather than as a strip under the chrome that
+              // repeated whatever the centre of the window already said.
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.botName == null
+                        ? 'Computer'
+                        : 'Computer · ${widget.botName}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  identified(
+                    ComputerIds.phase,
+                    Text(
+                      said,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
+              actions: actions,
             ),
       body: Stack(
         fit: StackFit.expand,
@@ -597,4 +735,40 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
       ),
     );
   }
+}
+
+/// Take control asks first, and cannot reach the Bot until the second,
+/// confirmed gesture. The card's page and the full window ask the same
+/// question, so they ask it from here.
+Future<void> confirmComputerTakeControlV1(
+  BuildContext context,
+  ComputerController controller,
+) async {
+  final taken = await showDialog<bool>(
+    context: context,
+    builder: (dialog) => identified(
+      ComputerIds.takeControlConfirm,
+      AlertDialog(
+        insetPadding: frockDialogInset,
+        title: const Text('Take control?'),
+        content: frockDialogBody(
+          const Text(
+            'The Bot pauses while you are driving. Release control to give it '
+            'the keyboard back.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialog).pop(true),
+            child: const Text('Take control'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (taken ?? false) await controller.takeControl();
 }

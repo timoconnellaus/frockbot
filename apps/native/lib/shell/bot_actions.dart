@@ -7,12 +7,14 @@
 ///
 /// A phone reaches them by a long press and by two swipes; a desktop by a
 /// secondary click and a control that appears on the row. Delete is not here:
-/// it is rare, it destroys, and it stays under Advanced on the Bot's page.
+/// it is rare, it destroys, and it stays in the Danger card at the foot of the
+/// Bot's Settings.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../theme/caret.dart';
+import '../theme/dialogs.dart';
 import 'semantics.dart';
 
 /// What one Bot row can be asked to do.
@@ -251,46 +253,50 @@ class _LabelPickerState extends State<_LabelPicker> {
   Widget build(BuildContext context) {
     final current = widget.current;
     return AlertDialog(
+      insetPadding: frockDialogInset,
       title: Text('Label ${widget.botName}'),
       content: identified(
         BotActionIds.labelPicker,
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (widget.choices.isNotEmpty) ...[
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final label in widget.choices)
-                    identified(
-                      BotActionIds.labelChoice(label),
-                      ChoiceChip(
-                        label: Text(label),
-                        selected: label.toLowerCase() == current.toLowerCase(),
-                        onSelected: (_) => Navigator.pop(context, label),
+        frockDialogBody(
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.choices.isNotEmpty) ...[
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final label in widget.choices)
+                      identified(
+                        BotActionIds.labelChoice(label),
+                        ChoiceChip(
+                          label: Text(label),
+                          selected:
+                              label.toLowerCase() == current.toLowerCase(),
+                          onSelected: (_) => Navigator.pop(context, label),
+                        ),
                       ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-            ],
-            SteadyCaret(
-              child: TextField(
-                controller: controller,
-                autofocus: widget.choices.isEmpty,
-                maxLength: 120,
-                textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(
-                  labelText: 'Label',
-                  hintText: 'Work, Home, Projects…',
-                  counterText: '',
+                  ],
                 ),
-                onSubmitted: (value) => Navigator.pop(context, value.trim()),
+                const SizedBox(height: 12),
+              ],
+              SteadyCaret(
+                child: TextField(
+                  controller: controller,
+                  autofocus: widget.choices.isEmpty,
+                  maxLength: 120,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(
+                    labelText: 'Label',
+                    hintText: 'Work, Home, Projects…',
+                    counterText: '',
+                  ),
+                  onSubmitted: (value) => Navigator.pop(context, value.trim()),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       actions: [

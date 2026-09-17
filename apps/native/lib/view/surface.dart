@@ -40,6 +40,9 @@ class ViewSurfacePage extends StatefulWidget {
   /// the Marketplace on a desktop: the list a phone scrolls, laid out wide.
   final bool gridGroups;
 
+  /// Whether the root's titled groups are drawn as switch rows on one card.
+  final bool switchRows;
+
   /// How wide the document is allowed to be. A column of settings reads best
   /// narrow; a grid of cards needs the room.
   final double maxWidth;
@@ -74,6 +77,7 @@ class ViewSurfacePage extends StatefulWidget {
     this.fields = const {},
     this.cardGroups = false,
     this.gridGroups = false,
+    this.switchRows = false,
     this.maxWidth = 680,
     this.onClose,
     this.chrome = true,
@@ -218,6 +222,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                           fields: widget.fields,
                           cardGroups: widget.cardGroups,
                           gridGroups: widget.gridGroups,
+                          switchRows: widget.switchRows,
                         ),
                       ),
                     ),

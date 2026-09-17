@@ -22,6 +22,7 @@ import {
   group,
   openApplication,
   press,
+  spokenText,
   sem,
 } from "./fixtures.ts";
 import type { Locator, Page } from "@playwright/test";
@@ -52,12 +53,11 @@ async function answer(
 }
 
 /**
- * Open the Routines surface through the Routines control in the chat header —
- * the one door to a Routine firing on the wide tiers, so it is the door this
- * spec uses.
+ * Open the Routines surface through the All Routines row on the Bot page —
+ * the one door to the list at every tier, so it is the door this spec uses.
  */
 async function openRoutines(page: Page): Promise<Locator> {
-  await press(sem(page, "routines-panel-toggle"));
+  await press(sem(page, "bot-page-routines-all").first());
   const document = sem(page, "routines-document");
   await expect(document).toBeVisible({ timeout: 60_000 });
   return document;
@@ -98,15 +98,15 @@ test("a refused schedule is said out loud, and the form keeps what to correct", 
   // The refusal is on the surface, in the host's own words. The reason the
   // route gave is not among them — the client does not carry a refusal's text
   // — so what this proves is that the press was answered rather than swallowed.
-  await expect(
-    document.getByText(
-      "That action couldn’t be completed. Refresh and try again.",
-    ),
-  ).toBeVisible();
+  await expect
+    .poll(async () => await spokenText(document))
+    .toContain("That action couldn’t be completed. Refresh and try again.");
 
   // Nothing was stored, and the form is still open with the value to correct.
   await expect(group(page, "Blursday brief")).toHaveCount(0);
-  await expect(document).toHaveAttribute("aria-label", /No Routines yet/u);
+  await expect
+    .poll(async () => await spokenText(document))
+    .toContain("No Routines yet");
   // Focused before it is read. Flutter mirrors a field's text into the DOM
   // input only while it is holding an editing session open on it, and it puts
   // the text nowhere in the semantics tree at all — so a settled field reads
@@ -151,8 +151,13 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
   const card = group(page, "Morning brief");
   await expect(card).toBeVisible({ timeout: 60_000 });
 
-  // One click used to be the whole of it. Now it asks, and says what goes.
-  await press(action(card, "delete-routine"));
+  // Delete is on the editor the row opens: a row is what is armed and the
+  // switch that pauses it, and everything else one Routine can be asked is
+  // one press further in. The press is aimed at the row's words rather than
+  // at its centre: the switch at the end of it is tappable too.
+  await card.click({ position: { x: 24, y: 20 } });
+  await expect(documentField(page, "routine.name")).toBeVisible();
+  await press(action(page, "delete-routine"));
   const confirm = sem(page, "routine-delete-confirm");
   await expect(confirm).toBeVisible();
   await expect(confirm).toContainText("run log");
@@ -166,8 +171,10 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
   await expect(card).toBeVisible();
 
   // Confirming is what deletes it.
-  await press(action(card, "delete-routine"));
+  await press(action(page, "delete-routine"));
   await confirm.getByText("Delete Routine").click();
   await expect(card).toHaveCount(0, { timeout: 60_000 });
-  await expect(document).toHaveAttribute("aria-label", /No Routines yet/u);
+  await expect
+    .poll(async () => await spokenText(document))
+    .toContain("No Routines yet");
 });

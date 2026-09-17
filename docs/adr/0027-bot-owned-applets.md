@@ -106,6 +106,6 @@ Applets. Nothing else in the account is touched.
   because the token is what names the Bot.
 - The native client's modal Applet picker is gone. The selected Bot's Applets
   are a mode of the left sidebar, and a pushed page on the phone, opened from
-  the header's Applets button and the Bot settings Applets row.
+  the All Applets row on the Bot page.
 - A User who wants a second Bot to build on an Applet asks the owner Bot to
   transfer it. Sharing an Applet with another User is still not planned.

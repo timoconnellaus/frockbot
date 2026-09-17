@@ -411,7 +411,7 @@ function fileState(page: Page, path: string): Locator {
  * Applets in the sidebar (a pushed page on a phone), and a row opens one.
  */
 async function openCanvas(page: Page) {
-  await press(sem(page, "applet-chip"));
+  await press(sem(page, "bot-page-applets-all"));
   await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await press(
     page.locator('[flt-semantics-identifier^="applet-row-"]').first(),
@@ -437,7 +437,7 @@ test("the Bot's Applets list opens the full-window draft and live canvas", async
 
   // The Package still declares its entry, but the header's Applets button is
   // the one Applets destination the shell presents.
-  await expect(sem(page, "applet-chip")).toHaveCount(1);
+  await expect(sem(page, "bot-page-applets-all")).toHaveCount(1);
   await expect(sem(page, `package-entry-${PACKAGE_ID}-open`)).toHaveCount(0);
   const canvas = await openCanvas(page);
   await expect.poll(() => stubs.focused()).toBe(APPLET_ID);
@@ -535,7 +535,7 @@ test("the canvas fills a phone window and Back restores the Bot page", async ({
   // tap from the conversation, on the Bot's name.
   await expect(sem(page, "applet-canvas")).toHaveCount(0);
   await press(sem(page, "bot-panel-toggle"));
-  const chip = sem(page, "applet-chip");
+  const chip = sem(page, "bot-page-applets-all");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
@@ -598,7 +598,7 @@ test("the Applets button lists the Bot's Applets, a Bot embeds one as a live car
 
   // One Applets control, before Computer and Routines, and what it opens is a
   // list rather than an Applet: the Bot's Applets, by name, in the sidebar.
-  const chip = sem(page, "applet-chip");
+  const chip = sem(page, "bot-page-applets-all");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await press(chip);
   const list = sem(page, "applet-list");

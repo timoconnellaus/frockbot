@@ -7,7 +7,12 @@ import 'frock_theme.dart';
 /// one column and the lines read as belonging to the words.
 class FrockRowGroup extends StatelessWidget {
   final List<Widget> rows;
-  const FrockRowGroup({super.key, required this.rows});
+
+  /// Where the hairline starts: the text's left edge. Forty-eight is a row
+  /// with the icon column; a card of rows that carry no glyph — a projection's
+  /// rows, which have no icons to name — starts the line at the padding.
+  final double indent;
+  const FrockRowGroup({super.key, required this.rows, this.indent = 48});
 
   @override
   Widget build(BuildContext context) => Card(
@@ -16,7 +21,7 @@ class FrockRowGroup extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (var index = 0; index < rows.length; index++) ...[
-          if (index > 0) const Divider(height: 1, indent: 48),
+          if (index > 0) Divider(height: 1, indent: indent),
           rows[index],
         ],
       ],
@@ -128,10 +133,15 @@ class FrockRow extends StatelessWidget {
 class FrockSectionLabel extends StatelessWidget {
   final String text;
   final EdgeInsets padding;
+
+  /// The one label that is not quiet: Danger, which wears the error colour so
+  /// the two rows under it are read before they are pressed.
+  final Color? color;
   const FrockSectionLabel(
     this.text, {
     super.key,
     this.padding = const EdgeInsets.fromLTRB(12, 18, 4, 6),
+    this.color,
   });
 
   @override
@@ -139,8 +149,9 @@ class FrockSectionLabel extends StatelessWidget {
     padding: padding,
     child: Text(
       text.toUpperCase(),
-      style: Theme.of(context).textTheme.labelSmall
-          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+        color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
     ),
   );
 }

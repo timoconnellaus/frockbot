@@ -15,6 +15,7 @@ import {
   sem,
   SHELL_TIMEOUT_MS,
   test,
+  openBotSettings,
 } from "./fixtures.ts";
 
 /**
@@ -139,12 +140,8 @@ test("deleting a Bot from its settings removes it for good", async ({
   await expect(sidebarRow(page, "Beta")).toHaveCount(1);
 
   // Beta is the Bot just created, so it is the one selected and the one the
-  // right panel is about. Lifecycle lives under Advanced.
-  await expect(sem(page, "bot-settings")).toBeVisible({
-    timeout: SHELL_TIMEOUT_MS,
-  });
-  await settle(page);
-  await tap(page, "bot-advanced").click();
+  // right panel is about. Lifecycle is the last card in its Settings.
+  await openBotSettings(page);
   await settle(page);
   await tap(page, "flock-delete-bot").click();
 

@@ -65,15 +65,16 @@ Widget _header() => MaterialApp(
     appBar: ChatHeader(
       name: 'Rosemary',
       connection: ConnectionState.connected,
-      onSettings: () {},
+      onOpenBot: () {},
       onComputer: () {},
-      onRoutines: () {},
-      onApplets: () {},
+      onTogglePanel: () {},
     ),
   ),
 );
 
-const _headerDoors = ['Applets', 'Computer', 'Routines', 'Bot settings'];
+/// What is left in the bar: the Computer, and the panel's own switch. The
+/// name beside them is a pill rather than a door of this shape.
+const _headerDoors = ['Computer', 'Show the panel'];
 
 void main() {
   test('a phone\'s glyph is Material\'s own size, a desk\'s compact', () {

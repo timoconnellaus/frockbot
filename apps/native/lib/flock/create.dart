@@ -22,7 +22,9 @@ import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
+import '../theme/dialogs.dart';
 import '../templates/page.dart';
 
 import '../theme/caret.dart';
@@ -437,7 +439,18 @@ class AvatarPickerSheet extends StatefulWidget {
     this.primary,
   });
 
-  /// Opens the sheet and answers with the colour that was saved, or nothing.
+  /// How wide the character dialog is where there is room for one. The grid
+  /// inside it is 236 — three swatches — so 420 is that with the dialog's own
+  /// padding either side and a little air.
+  static const double dialogWidth = 420;
+
+  /// Opens the picker and answers with the character that was saved, or
+  /// nothing.
+  ///
+  /// A bottom sheet is a phone's gesture. On a desktop it was a 375-point
+  /// phone sheet rising out of the bottom of a 1351-point window, with a drag
+  /// handle nobody could drag — so the wide tiers get a dialog and the phone
+  /// keeps the sheet. Both hold the same grid.
   static Future<AvatarSelection?> show(
     BuildContext context, {
     required NativeApi api,
@@ -445,18 +458,37 @@ class AvatarPickerSheet extends StatefulWidget {
     required String botName,
     String? background,
     String? primary,
-  }) => showModalBottomSheet<AvatarSelection>(
-    context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
-    builder: (sheet) => AvatarPickerSheet(
+  }) {
+    final picker = AvatarPickerSheet(
       api: api,
       botId: botId,
       botName: botName,
       background: background,
       primary: primary,
-    ),
-  );
+    );
+    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+        ShellTier.single) {
+      return showModalBottomSheet<AvatarSelection>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (sheet) => picker,
+      );
+    }
+    return showDialog<AvatarSelection>(
+      context: context,
+      builder: (dialog) => Dialog(
+        insetPadding: frockDialogInset,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: dialogWidth),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+            child: picker,
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   State<AvatarPickerSheet> createState() => _AvatarPickerSheetState();
@@ -526,72 +558,76 @@ class _AvatarPickerSheetState extends State<AvatarPickerSheet> {
   }
 
   @override
-  Widget build(BuildContext context) => identified(
-    FlockIds.colourSheet,
-    SafeArea(
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          0,
-          20,
-          24 + MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Semantics(
-              header: true,
-              child: Text(
-                '${widget.botName}’s character',
-                style: Theme.of(context).textTheme.titleLarge,
+  Widget build(BuildContext context) {
+    final sheet =
+        shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.single;
+    return identified(
+      FlockIds.colourSheet,
+      SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            sheet ? 20 : 0,
+            0,
+            sheet ? 20 : 0,
+            sheet ? 24 + MediaQuery.viewInsetsOf(context).bottom : 0,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Semantics(
+                header: true,
+                child: Text(
+                  '${widget.botName}’s character',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 236),
-              child: Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  for (final entry in characterCatalogV1.entries)
-                    _Swatch(
-                      id: entry.key,
-                      label: entry.value.label,
-                      chosen: entry.key == chosen,
-                      primary: entry.key == chosen ? primary : null,
-                      onTap: busy
-                          ? null
-                          : () => setState(() {
-                              chosen = entry.key;
-                              primary = _characterHex(entry.key);
-                            }),
-                    ),
-                ],
+              const SizedBox(height: 16),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 236),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final entry in characterCatalogV1.entries)
+                      _Swatch(
+                        id: entry.key,
+                        label: entry.value.label,
+                        chosen: entry.key == chosen,
+                        primary: entry.key == chosen ? primary : null,
+                        onTap: busy
+                            ? null
+                            : () => setState(() {
+                                chosen = entry.key;
+                                primary = _characterHex(entry.key);
+                              }),
+                      ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 14),
-            _ColourChoices(
-              selected: primary,
-              onChoose: busy
-                  ? null
-                  : (value) => setState(() => primary = value),
-            ),
-            const SizedBox(height: 18),
-            FilledButton(
-              onPressed: busy ? null : _save,
-              child: Text(busy ? 'Saving…' : 'Save character'),
-            ),
-            if (message != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Semantics(liveRegion: true, child: Text(message!)),
+              const SizedBox(height: 14),
+              _ColourChoices(
+                selected: primary,
+                onChoose: busy
+                    ? null
+                    : (value) => setState(() => primary = value),
               ),
-          ],
+              const SizedBox(height: 18),
+              FilledButton(
+                onPressed: busy ? null : _save,
+                child: Text(busy ? 'Saving…' : 'Save character'),
+              ),
+              if (message != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Semantics(liveRegion: true, child: Text(message!)),
+                ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 /// One background, shown as the avatar wearing it rather than as a colour chip:

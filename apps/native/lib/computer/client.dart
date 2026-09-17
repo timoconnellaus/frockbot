@@ -272,18 +272,32 @@ String computerSnapshotAgeLabelV1(Duration age) {
 
 /// The one line under the screen, in the reader's words.
 ///
-/// "Live" and "Snapshot · 12s ago" are the whole vocabulary: the question is
-/// whether they are watching the Bot or a photograph of it, and no answer that
-/// names a transport or a session answers that.
-String? computerScreenStatusLabelV1({
+/// It is always there, because the card's whole job is to answer "is this
+/// thing doing anything" before anyone clicks it — and a card with no line
+/// under it answered that with a photograph and no caption. Two states: the
+/// Bot's desktop as it is, or the last photograph of it and how old that is.
+String computerCardStatusV1({
   required bool streaming,
+  required bool unconfigured,
+  required String message,
+  String? failure,
   DateTime? capturedAt,
   DateTime? now,
 }) {
-  if (streaming) return 'Live';
-  if (capturedAt == null) return null;
-  return 'Snapshot · '
-      '${computerSnapshotAgeLabelV1((now ?? DateTime.now()).difference(capturedAt))}';
+  if (streaming) return message.isEmpty ? 'Live' : 'Live · $message';
+  // A Computer that refused says so, even when a photograph of it is still on
+  // the card: the age of that photograph is not what this thing is doing now.
+  if (failure != null && failure.isNotEmpty) return failure;
+  // A Computer the deployment says is not there, which is not the same as one
+  // this client could not reach: that one says what refused.
+  if (unconfigured) return 'No computer';
+  if (capturedAt != null) {
+    final age = computerSnapshotAgeLabelV1(
+      (now ?? DateTime.now()).difference(capturedAt),
+    );
+    return 'Ready · captured $age';
+  }
+  return message.isEmpty ? 'Ready' : message;
 }
 
 /// Changes only the viewer's client-visible input fence on one minted session.
@@ -325,6 +339,10 @@ class ComputerController extends ChangeNotifier {
   String? failure;
   Timer? _poll;
   bool _closed = false;
+
+  /// The one line every surface says about this Computer: what refused, or
+  /// what the Computer itself last said it was doing.
+  String get said => failure ?? state.message;
 
   String get _root => '/api/bots/${Uri.encodeComponent(botId)}/computer';
 

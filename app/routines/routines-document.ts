@@ -231,16 +231,23 @@ function routineFacts(routine: RoutineViewV1): string {
   return `${timing} · ${last} · ${next}`;
 }
 
+/**
+ * One Routine, as a row: what it is called, what it fires on and when it last
+ * did, the way in, and the switch that pauses it.
+ *
+ * Everything else a Routine can be asked — run it now, read its log, mint or
+ * revoke its key, delete it — is on the editor the row opens. A row is a
+ * place to see what is armed and to turn it off; six controls on each of them
+ * was a list nobody could read.
+ */
 function routineNode(routine: RoutineViewV1): ViewNode {
   const id = routine.routineId;
-  const webhook = routine.schedule === undefined;
   return {
     type: "group",
     orientation: "column",
     title: routine.name,
     children: [
       status(routineFacts(routine)),
-      { type: "text", text: routine.prompt.slice(0, 4000) },
       {
         type: "group",
         orientation: "row",
@@ -254,39 +261,6 @@ function routineNode(routine: RoutineViewV1): ViewNode {
             routineId: id,
             enabled: !routine.enabled,
           }),
-          press("run-routine", "Run now", {
-            kind: "run-routine",
-            routineId: id,
-          }),
-          press("open-runs", "Run log", { kind: "open-runs", routineId: id }),
-          // A key belongs to a triggered Routine — webhook or Plugin — and to
-          // nothing else, and the route refuses one for a scheduled Routine, so
-          // the controls are absent rather than offered and then refused.
-          ...(webhook
-            ? [
-                press(
-                  "rotate-key",
-                  routine.hookKeyVersion ? "Rotate key" : "Mint key",
-                  { kind: "rotate-key", routineId: id },
-                ),
-              ]
-            : []),
-          ...(webhook && routine.hookKeyVersion
-            ? [
-                press(
-                  "revoke-key",
-                  "Revoke key",
-                  { kind: "revoke-key", routineId: id },
-                  "danger",
-                ),
-              ]
-            : []),
-          press(
-            "delete-routine",
-            "Delete",
-            { kind: "delete-routine", routineId: id },
-            "danger",
-          ),
         ],
       },
     ],
@@ -372,7 +346,46 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
             "primary",
           ),
           ...(editing
-            ? [press("cancel-edit", "Cancel", { kind: "cancel-edit" })]
+            ? [
+                press("run-routine", "Run now", {
+                  kind: "run-routine",
+                  routineId: editing.routineId,
+                }),
+                press("open-runs", "Run log", {
+                  kind: "open-runs",
+                  routineId: editing.routineId,
+                }),
+                // A key belongs to a triggered Routine — webhook or Plugin —
+                // and to nothing else, and the route refuses one for a
+                // scheduled Routine, so the controls are absent rather than
+                // offered and then refused.
+                ...(webhook
+                  ? [
+                      press(
+                        "rotate-key",
+                        editing.hookKeyVersion ? "Rotate key" : "Mint key",
+                        { kind: "rotate-key", routineId: editing.routineId },
+                      ),
+                    ]
+                  : []),
+                ...(webhook && editing.hookKeyVersion
+                  ? [
+                      press(
+                        "revoke-key",
+                        "Revoke key",
+                        { kind: "revoke-key", routineId: editing.routineId },
+                        "danger",
+                      ),
+                    ]
+                  : []),
+                press("cancel-edit", "Cancel", { kind: "cancel-edit" }),
+                press(
+                  "delete-routine",
+                  "Delete",
+                  { kind: "delete-routine", routineId: editing.routineId },
+                  "danger",
+                ),
+              ]
             : []),
         ],
       },
@@ -380,25 +393,40 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
   };
 }
 
+/**
+ * One completion, as a row: what left it, what it said, and the press that
+ * marks it read.
+ *
+ * The attribution is the row's name rather than the first of its words,
+ * because a row is a named thing — and the press is the row's own, because
+ * acknowledging lives nowhere else in the client: a run log is a read.
+ */
 function inboxNode(entry: RoutineInboxEntryViewV1): ViewNode {
   const repeats = (entry.repeatCount ?? 1) > 1;
+  const said = [
+    entry.failure ? "Didn’t work" : undefined,
+    repeats ? `Happened ${entry.repeatCount} times` : undefined,
+  ].filter((part): part is string => part !== undefined);
   return {
     type: "group",
     orientation: "column",
+    title: entry.attribution,
     children: [
-      status(
-        `${entry.attribution}${entry.failure ? " · Didn’t work" : ""}${
-          repeats ? ` · Happened ${entry.repeatCount} times` : ""
-        }`,
-      ),
+      ...(said.length > 0 ? [status(said.join(" · "))] : []),
       { type: "text", text: entry.text.slice(0, 4000) },
       ...(entry.acknowledged
         ? []
         : [
-            press("acknowledge-inbox", "Mark read", {
-              kind: "acknowledge-inbox",
-              entryId: entry.entryId,
-            }),
+            {
+              type: "group",
+              orientation: "row",
+              children: [
+                press("acknowledge-inbox", "Mark read", {
+                  kind: "acknowledge-inbox",
+                  entryId: entry.entryId,
+                }),
+              ],
+            } as ViewNode,
           ]),
     ],
   };
@@ -406,37 +434,60 @@ function inboxNode(entry: RoutineInboxEntryViewV1): ViewNode {
 
 /** A `RoutinesFrame` as a `ViewDocument`. */
 export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
-  const unread = frame.unacknowledged;
-  const children: ViewNode[] = [
-    status(
-      `${frame.routines.length} ${
-        frame.routines.length === 1 ? "Routine" : "Routines"
-      }${unread > 0 ? ` · ${unread > 99 ? "99+" : unread} unread` : ""}`,
-    ),
-  ];
-  children.push(editorNode(frame));
-  // The root and the count above, the editor's group with its five fields and
-  // its two controls in their row, plus what the tail always costs: the empty
-  // or overflow line, the inbox's own group, its empty line and "Mark all
-  // read". Reserved up front so the last Routine admitted cannot be the reason
-  // the editor or the inbox does not fit.
-  let nodes = 16;
+  const children: ViewNode[] = [editorNode(frame)];
+  // The root, the editor's group with its six fields and its controls in their
+  // row, the two section groups, plus what the tail always costs: the empty or
+  // overflow line, the inbox's own group, its empty line and "Mark all read".
+  // Reserved up front so the last Routine admitted cannot be the reason the
+  // editor or the inbox does not fit.
+  let nodes = 24;
   let complete = true;
-  // The Routine's own group, its two lines, the controls' row and the six
-  // controls a webhook Routine puts in it.
-  const routineCost = 10;
+  // The Routine's own group, its line, the controls' row and the two controls
+  // in it.
+  const routineCost = 5;
+  const scheduled: ViewNode[] = [];
+  const triggered: ViewNode[] = [];
   for (const routine of frame.routines) {
     if (nodes + routineCost > NODE_LIMIT) {
       complete = false;
       break;
     }
     nodes += routineCost;
-    children.push(routineNode(routine));
+    (routine.schedule === undefined ? triggered : scheduled).push(
+      routineNode(routine),
+    );
+  }
+  // A section is drawn only where it holds something: an empty "Webhooks"
+  // label over nothing is a heading for a thing that does not exist.
+  if (scheduled.length > 0) {
+    children.push({
+      type: "group",
+      orientation: "column",
+      title: "Scheduled",
+      children: scheduled,
+    });
+  }
+  if (triggered.length > 0) {
+    children.push({
+      type: "group",
+      orientation: "column",
+      title: "Webhooks",
+      children: triggered,
+    });
   }
   if (frame.routines.length === 0) {
+    // A named thing with a line under it, so the empty surface is the same
+    // card grammar as the full one rather than a sentence loose on the page.
     children.push({
-      type: "text",
-      text: "No Routines yet. A Routine runs this Bot on a schedule, or when something calls its webhook.",
+      type: "group",
+      orientation: "column",
+      title: "No Routines yet",
+      children: [
+        {
+          type: "text",
+          text: "A Routine runs this Bot on a schedule, or when something calls its webhook.",
+        },
+      ],
     });
   }
   if (!complete) {
@@ -450,30 +501,46 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
   const shown = frame.inbox.slice(0, INBOX_LIMIT);
   const inbox: ViewNode[] = [];
   if (shown.length === 0) {
-    inbox.push(
-      status("Nothing here yet. Finished Routines leave their results here."),
-    );
+    inbox.push({
+      type: "group",
+      orientation: "column",
+      title: "Nothing here yet",
+      children: [status("Finished Routines leave their results here.")],
+    });
   }
   for (const entry of shown) {
-    const cost = entry.acknowledged ? 3 : 4;
+    const cost = entry.acknowledged ? 4 : 6;
     if (nodes + cost > NODE_LIMIT) break;
     nodes += cost;
     inbox.push(inboxNode(entry));
   }
   // "Mark all read" means what is on this document, not every unread entry the
   // object holds: with a Routine firing every minute, acknowledging everything
-  // marks a completion read that nobody has seen.
+  // marks a completion read that nobody has seen. It is the last row of the
+  // card rather than a button under it, because every other thing on this
+  // surface is a row.
   if (shown.some((entry) => !entry.acknowledged)) {
-    inbox.push(
-      press("acknowledge-inbox", "Mark all read", {
-        kind: "acknowledge-inbox",
-      }),
-    );
+    inbox.push({
+      type: "group",
+      orientation: "column",
+      title: "Mark all read",
+      children: [
+        {
+          type: "group",
+          orientation: "row",
+          children: [
+            press("acknowledge-inbox", "Mark all read", {
+              kind: "acknowledge-inbox",
+            }),
+          ],
+        },
+      ],
+    });
   }
   children.push({
     type: "group",
     orientation: "column",
-    title: "Routine completions",
+    title: "Completions",
     children: inbox,
   });
 

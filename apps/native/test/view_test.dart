@@ -214,6 +214,7 @@ Future<Harness> pump(
   Map<String, Object?> json, {
   Map<String, ViewFrameBuilder>? frames,
   bool cardGroups = false,
+  bool switchRows = false,
 }) async {
   final harness = Harness();
   await tester.pumpWidget(
@@ -226,6 +227,7 @@ Future<Harness> pump(
             controller: harness.controller,
             frames: frames,
             cardGroups: cardGroups,
+            switchRows: switchRows,
           ),
         ),
       ),
@@ -686,6 +688,93 @@ void main() {
       ),
       sampleViewDocumentV1,
     );
+  });
+
+  group('the shared switch-row renderer', () {
+    Map<String, Object?> switchRow(String title, String actionId) => {
+      'type': 'group',
+      'orientation': 'column',
+      'title': title,
+      'children': [
+        {'type': 'text', 'text': 'Every weekday at 9.'},
+        {
+          'type': 'group',
+          'orientation': 'row',
+          'children': [
+            {
+              'type': 'action',
+              'actionId': actionId,
+              'label': 'Turn off',
+              'input': {'kind': actionId, 'id': 'r1', 'enabled': false},
+            },
+          ],
+        },
+      ],
+    };
+
+    Map<String, Object?> action(String id) => {
+      'id': id,
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'kind': {
+            'type': 'string',
+            'enum': [id],
+          },
+          'id': {'type': 'string', 'maxLength': 128},
+          'enabled': {'type': 'boolean'},
+        },
+        'required': ['kind', 'id', 'enabled'],
+        'additionalProperties': false,
+      },
+    };
+
+    testWidgets('a row keeps a name that happens to hold a separator', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        document(
+          {
+            'type': 'group',
+            'orientation': 'column',
+            'children': [
+              {
+                'type': 'group',
+                'orientation': 'column',
+                'title': 'Scheduled',
+                'children': [
+                  switchRow('Standup · daily', 'set-routine-enabled'),
+                ],
+              },
+            ],
+          },
+          actions: [action('set-routine-enabled')],
+        ),
+        switchRows: true,
+      );
+      expect(find.text('Standup · daily'), findsOneWidget);
+      expect(find.text('Standup'), findsNothing);
+    });
+
+    testWidgets('a plugin kind moves out of the title and over the group', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        document(
+          {
+            'type': 'group',
+            'orientation': 'column',
+            'children': [switchRow('Web · Built in', 'set-package-enabled')],
+          },
+          actions: [action('set-package-enabled')],
+        ),
+        switchRows: true,
+      );
+      expect(find.text('Web'), findsOneWidget);
+      expect(find.text('BUILT IN'), findsOneWidget);
+    });
   });
 
   group('what the client draws for itself', () {

@@ -477,22 +477,37 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `SettingsPage` — `lib/settings/page.dart`: a host over `ViewDocumentView`,
   not a renderer of its own. `ModelPicker` at `lib/settings/model_picker.dart`
   is the host editor for the one field whose choices are a paged catalog.
-- `BotSettingsView` — `lib/settings/bot_settings.dart`: one Bot's identity,
-  notifications and model, written as they are edited rather than on a Save
-  button; in the `right-panel` slot at wide widths, and on the phone the top
-  of the Bot's page, above the rows for its Routines, Plugins, Applets and
-  Package pages
+- `BotPageView` — `lib/shell/bot_page.dart`: what a Bot is _doing_. The right
+  panel's root at the wide tiers and a pushed page on the phone, in one scroll:
+  the Computer card when the Bot has one, the last Routine firings with the way
+  to the whole list under them, the Applets it is running, and the doors its
+  Packages declare. The Bot's name in the conversation bar is the one way in at
+  every tier, and the gear in the page's own header is the one way to Settings
+- `BotSettingsView` — `lib/settings/bot_settings.dart`: what a Bot _is_ — its
+  character, its About fields, its behaviour switches, its Plugins and model,
+  the Package settings its Composition mounts, and the two danger rows — written
+  as they are edited rather than on a Save button. One level under the Bot page
+  at every width, in one card grammar: a section label over a `FrockRowGroup`,
+  with the About fields on a card of their own. There is no Advanced expander
+  and no Members tile
 - `ConnectionsPage` — `lib/connections/page.dart`: a host over
   `ViewDocumentView` for the accounts a User authorizes once for every Bot
 - `PluginsPage` — `lib/plugins/page.dart`: the same host over the Plugins
   document, plus the controller that carries enablement to the settings route.
-  A Bot's page is in the `right-panel` slot beside Routines and Bot settings,
-  keyed per Bot and drawn without chrome because the panel names it, and a row
-  on the Bot's page on the phone; the Profile's entry is the account's list
+  A Bot's page is reached from the Plugins row in its Settings at every tier —
+  a sub-page of the panel on a desktop, a pushed page on the phone — keyed per
+  Bot and drawn without chrome because the panel names it. It draws the document
+  as one card of switch rows (`ViewDocumentView.switchRows`) rather than a card
+  per Plugin; the Profile's entry is the account's list
 - `RoutinesView` — `lib/routines/page.dart`: what a Bot does on its own and
-  what it left behind, in the `right-panel` slot beside Bot settings and a page
-  on the phone. `RoutineRunsPage` (`lib/routines/runs.dart`) is one Routine's
-  firings, and one firing opens on the Work view.
+  what it left behind, reached from the All Routines row on the Bot page — a
+  sub-page of the panel on a desktop, a pushed page on the phone. The projection
+  files each Routine under Scheduled or Webhooks and the host draws those as
+  labelled cards of rows, each row a way into the one editor with a pause switch
+  at its end. `RoutineRunsPage` (`lib/routines/runs.dart`) is one Routine's
+  firings, and one firing opens on the Work view. `RoutineInboxController` reads
+  the completion inbox once for both the badge and the recent runs the Bot page
+  lists.
 - `AuditPage` — `lib/audit/page.dart`: every effect a Bot performed, filtered
   by kind, with an audited effect's Turn opening on the Work view
 - `SearchOverlay` — `lib/search/overlay.dart` over `lib/search/controller.dart`:
@@ -513,8 +528,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `AppletList` — `lib/applets/list.dart`: the selected Bot's Applets, each
   labelled Owner or Shared by its owner Bot. At the wider tiers it is the left
   sidebar's Applets mode, with a way back to the Bots; on the phone the same
-  list is a pushed page. The header's Applets button and the Bot page's
-  Applets row both open it. A row opens the Applet on the canvas; only an
+  list is a pushed page. The Bot page's All Applets row is the one door. A row opens the Applet on the canvas; only an
   owned row offers delete, which names the Bots that also use the Applet
   before it destroys its data and versions
 - `AppletChatCard` — `lib/applets/chat_card.dart`: a live Applet embedded in
@@ -524,7 +538,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `ComputerCard` → `ComputerViewerPage` — `lib/computer/card.dart`: the Bot's
   screen, live or as its last capture, and the full-window viewer it opens
 - `PackagePageFrame` — `lib/packages/frame.dart`: a first-party or Bot-authored
-  Package page, in Bot settings and behind a header entry
+  Package page, mounted in Bot Settings and behind a door on the Bot page
 - `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
 
 The thread's rules were ported from the Vue shell without change and with its
@@ -634,7 +648,8 @@ family, both reached with `?as=document`:
 - `app/routines/routines-document.ts` over a `RoutinesFrame`
   (`GET /api/bots/:botId/routines`, the one route in that group that takes a
   query parameter at all). The frame is one read where there were two —
-  the Routines a Bot holds and the completion inbox the header badge counts —
+  the Routines a Bot holds and the completion inbox the All Routines badge
+  counts —
   because a client that had to ask twice could show a list and a badge that
   disagreed. Five action kinds: three Routine commands the route already takes,
   the inbox command on the inbox route, and the run log, which
@@ -654,16 +669,18 @@ bytes instead — FNV-1a over what the document says — so `ViewSurfacePage`
 adopts a fresh controller exactly when what it is showing has changed and keeps
 the one it has when nothing did.
 
-The `right-panel` region now shows one entry at a time rather than stacking
-every registered builder: an entry registers with a label, the region draws a
-selector over them, and `ViewSurfacePage`'s `chrome` flag is off inside it
-because the region already carries the title. On the phone each entry is a page.
+The `right-panel` region shows one entry at a time rather than stacking every
+registered builder: an entry registers with a label, the panel's stack names
+which one is on screen (see the header and panel stack below), and
+`ViewSurfacePage`'s `chrome` flag is off inside it because the region already
+carries the title. On the phone each entry is a page.
 
 **The rest of PR 8.** The completions count is `RoutineInboxController`, worn
-as a badge by the Routines row on the phone's Bot page: a silent Routine firing
-is filtered out of the visible transcript, so a count is the only place that
-completion becomes visible. On the wide tiers the chat header's Routines
-control opens the same surface, which carries the count itself. A
+as a badge by the All Routines row on the Bot page at every tier: a silent
+Routine firing is filtered out of the visible transcript, so a count is the
+only place that completion becomes visible. The same controller's read feeds
+the recent firings listed above that row, so the rows and the badge come from
+one read of the inbox rather than two. A
 firing that spoke — an explicit `send_to_user`, or the message a broken firing
 commits in its place — is an ordinary message in the conversation instead; see
 [notifications](notifications.md). "Mark all read" means the
@@ -683,15 +700,21 @@ compaction bounds model context; there is no conversation creation or switching
 API. Older extra conversations are no longer exposed. The owner accepted their
 removal without migration on 2026-09-08.
 
-The native header is one row: Bot identity and direct Bot settings, then
-Applets, Computer and Routines as destinations. Applets is one entry rather
-than a strip of Applet buttons — it turns the sidebar into that Bot's Applets
-(a pushed page on the phone), so a header holding many Applets is still one
-control. The doors this
-Bot's Packages declare join the same row at the wider tiers, built straight from
-the Package catalog the shell holds (`ChatHeader.packageEntries`): they belong
-to one Bot, so they are never drawn over the list of every Bot. A phone's bar
-stays GrokBot's three things and those doors are rows on the Bot's page instead.
+The native header is one row and three things at every tier: the way back to
+the Bot list (a phone's), the Bot's name, and the Computer — plus the panel's
+own switch where there is a panel to hide. The name is the door to the Bot page,
+drawn as a pill on a phone and as a text button that fills on hover and focus at
+a desk; the Computer icon takes a cooler blue while the Bot is driving one.
+Routines, Plugins, Settings, Applets and the doors a Bot's Packages declare are
+rows on the Bot page rather than icons here: five doors in a bar was the same
+five doors the panel could have named, and a Package adding a sixth made the bar
+the Bot's navigation rather than its title.
+
+The right panel holds a small stack: the Bot page is its floor, a row pushes a
+sub-page onto it, the header grows a back chevron (`right-panel-back`) and names
+what it is showing, and the close empties the stack. A Bot switch empties it too.
+On a phone the same keys push routes instead, which is the same idea drawn
+twice.
 Bot messages have no avatar or tool-count row, and the thread draws no working
 row: the Bot's companion beside the composer takes the working pose and wears
 the typing badge while a Turn runs, and the thread only says something when a
@@ -750,8 +773,9 @@ conversation uses, so a new Bot's first Turn is admitted exactly as every other
 one is.
 
 `lifecycle.dart` is one retained `BotLifecycleCommand` per account, whichever
-surface issued it — `BotDangerZone` inside Bot settings' Advanced, or Manage
-Bots, which now shares it rather than keeping a second copy. The zone is
+surface issued it — `BotDangerZone`, which is the Danger card at the foot of Bot
+Settings, or Manage Bots, which now shares it rather than keeping a second
+copy. The zone is
 contributed by the Flock rather than rebuilt inside the settings surface,
 because the directory a delete changes is the Flock's. The route answers
 `pending` for a saga that has not settled, which is why the zone locks rather

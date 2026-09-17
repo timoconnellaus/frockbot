@@ -81,7 +81,7 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
   await expectReadyToSend(page);
 
   // The Routine, through the panel a person would use.
-  await press(sem(page, "routines-panel-toggle"));
+  await press(sem(page, "bot-page-routines-all"));
   const document = sem(page, "routines-document");
   await expect(document).toBeVisible({ timeout: 60_000 });
   await group(page, "New Routine").click();
@@ -100,7 +100,11 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
     // The Connection validated; the endpoint then refuses inference, which is
     // what a revoked key looks like to a firing.
     await setFakeOllamaChatMode(page, ollamaBaseUrl, "unauthorized");
-    await press(action(card, "run-routine"));
+    // Run now is on the editor the row opens, beside Save: a row is what is
+    // armed and the switch that pauses it.
+    await card.click({ position: { x: 24, y: 20 } });
+    await expect(documentField(page, "routine.name")).toBeVisible();
+    await press(action(page, "run-routine"));
 
     // Away from Sol before the firing settles, so the message lands somewhere
     // nobody is looking. Straight to another Bot from the sidebar, which is beside the

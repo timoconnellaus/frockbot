@@ -137,12 +137,12 @@ void main() {
     );
   }
 
-  testWidgets('the header’s Applets button turns the sidebar to the Bot’s '
+  testWidgets('the Bot page’s Applets row turns the sidebar to the Bot’s '
       'Applets, and back returns it to the Bots', (tester) async {
     final desk = await shell(tester);
     expect(identifiedBy(AppletIds.list), findsNothing);
 
-    await tester.tap(identifiedBy(AppletIds.chip));
+    await tester.tap(identifiedBy(SettingsIds.botPageAppletsAll));
     await tester.pumpAndSettle();
     // In the sidebar's place, not over the conversation, and no dialog.
     expect(
@@ -187,7 +187,7 @@ void main() {
     tester,
   ) async {
     final desk = await shell(tester);
-    await tester.tap(identifiedBy(AppletIds.chip));
+    await tester.tap(identifiedBy(SettingsIds.botPageAppletsAll));
     await tester.pumpAndSettle();
     await tester.tap(identifiedBy(AppletIds.row('todo.applet')));
     await tester.pumpAndSettle();
@@ -202,9 +202,9 @@ void main() {
     final phone = await shell(tester, size: const Size(390, 844));
     await tester.tap(identifiedBy(ShellIds.botPanelToggle));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(identifiedBy(AppletIds.chip));
+    await tester.ensureVisible(identifiedBy(SettingsIds.botPageAppletsAll));
     await tester.pumpAndSettle();
-    await tester.tap(identifiedBy(AppletIds.chip));
+    await tester.tap(identifiedBy(SettingsIds.botPageAppletsAll));
     await tester.pumpAndSettle();
     expect(identifiedBy(AppletIds.list), findsOneWidget);
     // The page's own back is the way out; there is no sidebar to return to.
@@ -220,7 +220,7 @@ void main() {
   testWidgets('a delete names the Bots the Applet is shared with, and goes to '
       'the Bot’s own route', (tester) async {
     final desk = await shell(tester);
-    await tester.tap(identifiedBy(AppletIds.chip));
+    await tester.tap(identifiedBy(SettingsIds.botPageAppletsAll));
     await tester.pumpAndSettle();
     await tester.tap(identifiedBy(AppletIds.delete('todo.applet')));
     await tester.pumpAndSettle();
