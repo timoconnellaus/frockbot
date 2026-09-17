@@ -15,6 +15,7 @@ import {
 } from "@frockbot/app/voice/ledger";
 import { provisionBot } from "./provision-bot.ts";
 import { VOICE_TURN_BRIDGES_V1 } from "@frockbot/app/voice/assistant";
+import { SentenceChunker } from "agents/voice/text";
 import {
   VoiceMemoryLedgerV1,
   VOICE_MEMORY_CHUNK_TURNS_V1,
@@ -408,6 +409,22 @@ describe("the voice session object", () => {
       expect(prompt).toContain("Australia/Sydney");
     }
     expect(await stub.probeChats()).toBe(2);
+  });
+
+  // What the bridge is for is the silence before the model speaks, and the
+  // SDK decides whether a phrase is a sentence worth speaking now or text to
+  // hold until the stream ends. Held text is spoken after the stall it was
+  // meant to cover, which for a turn that never answers is never. "Hang on."
+  // was eight characters and the SDK's floor is ten, so roughly one turn in
+  // six said nothing at all — and the test above failed whenever the call
+  // happened to pick it. The floor is the SDK's, so it is asserted against
+  // the SDK's own class and not against a number copied out of it.
+  test("every bridge phrase is a sentence the SDK speaks at once", () => {
+    for (const phrase of VOICE_TURN_BRIDGES_V1) {
+      // The turn yields the phrase with the trailing space that ends a
+      // sentence, and while the model is pending nothing follows it.
+      expect(new SentenceChunker().add(`${phrase} `)).toEqual([phrase]);
+    }
   });
 
   test("sends acknowledgment audio while the model is still pending", async () => {
