@@ -1962,7 +1962,19 @@ export async function execute() {
   ): Promise<string> {
     const contentHash = await sha256Hex(source);
     await env.APPLICATION_ARTIFACTS.put(`packages/${contentHash}.mjs`, source);
+    // What the User's Composition already carries, minus any earlier
+    // generation of this same probe Plugin. A proposal that dropped the
+    // deployment's seeded members would be re-seeded by the next
+    // `readComposition`, moving the pin out from under the generation this
+    // helper just returned.
+    const existing = (
+      await user(identity.userId).readComposition({
+        schemaVersion: 1,
+        userId: identity.userId,
+      })
+    ).current.members as CompositionMemberV1[];
     const members: CompositionMemberV1[] = [
+      ...existing.filter((member) => member.packageId !== pluginId),
       {
         packageId: pluginId,
         version: "0.0.1",
