@@ -1100,7 +1100,7 @@ Applets are off for every account until an admin turns them on. The switch is th
 6. **Flutter** — `apps/native/test/*.dart` plus `integration_test/settings_screens.dart`, which is a screenshot runner.
 7. **Gate scripts** — run under `typecheck`: `scripts/check-client-protocol.ts`, `scripts/check-layer-imports.ts`, `scripts/check-computer-host-imports.ts`, `scripts/generate-isolate-context-catalog.ts --check`, `scripts/build-applets-assets.ts --check` (the Applet and Plugin SDK scaffolds, the Applets and Plugins Skills and the two page HTMLs, as strings the Worker bundle can carry), then `scripts/typecheck.ts`.
 
-### Local validation and PR CI
+### Local validation
 
 Pre-commit formats staged files. `scripts/validate.ts` runs format, typecheck,
 unit, runtime, integration, browser and build categories before pushing. Each
@@ -1119,23 +1119,37 @@ Each run has an isolated Wrangler service registry. Pre-push fetches remote
 main before and after validation and rejects stale branches or new merge commits.
 See [local validation](local-validation.md) for commands and cache recovery.
 
-`.github/workflows/pr-gate.yml` checks branch ancestry without running tests.
-Main requires `PR gate` and strict branch freshness at merge time.
-`.github/workflows/ci.yml` retains the full suite for manual dispatch only.
+### Workflows
+
+Five workflows live in `.github/workflows/`:
+
+- `check.yml` (`Check`, plus `Flutter`) — what a pull request owes: the fast
+  tier (format, typecheck, `bun test`, the Computer host and Applet build
+  suites) beside Dart analysis, the Flutter tests and the Android badge unit
+  test. It needs no secret, so a fork's pull request runs it.
+- `main.yml` — everything a landed change owes, on the merge commit: the fast
+  tier again, then the Cloudflare workerd and integration suites, the real
+  build, and the browser suite across four runners. Green deploys staging when
+  `DEPLOY_STAGING` is `true`, cuts the next patch tag and starts `release.yml`
+  for it. A push touching only `docs/**` and root Markdown starts no run.
+- `release.yml` — the production pipeline for a `v*.*.*` tag, below.
+- `native.yml` — manual-only native qualification.
+- `mac-release.yml` — the Mac desktop app's own qualification and tag.
+
+Branch protection is recorded in
+[local validation](local-validation.md#github-configuration): the `main`
+ruleset requires the checks it names, branch freshness is not required, and
+nothing approves a production deploy.
 
 ### `.github/workflows/release.yml`
 
 Trigger: push of a tag matching `v*.*.*`.
 
-- `verify` (:16) — validates strict SemVer, then `typecheck`, `bun test`, and `bun run build` behind the pinned Flutter SDK, because the build compiles the web client.
-- `publish-npm` (:95) — `applets/sdk` is the only workspace it considers, and it publishes only because its manifest declares `frockbot.npm`. It rewrites that manifest to the tag version and sets `private: false`, resolves `workspace:` ranges to literals, requires npm ≥ 11.5.1, then `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success.
-- `github-release` (:233) — `gh release create --generate-notes --verify-tag`.
-- `deploy-marketing` (:255).
+- `verify` — validates strict SemVer, then `typecheck`, `bun test`, and `bun run build` behind the pinned Flutter SDK, because the build compiles the web client.
+- `publish-npm` (after `deploy-backend`) — `applets/sdk` is the only workspace it considers, and it publishes only because its manifest declares `frockbot.npm`. It rewrites that manifest to the tag version and sets `private: false`, resolves `workspace:` ranges to literals, requires npm ≥ 11.5.1, then `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success.
+- `github-release` — creates the Release for the tag with `--generate-notes --verify-tag`, attaching the web client archive and the application artifact an installer needs. The notarized disk image is attached only when `macos-release` produced one: notarization depends on Apple answering and used to take the whole Release with it when it did not.
+- `deploy-marketing`.
 - `deploy-backend` (environment `production`) — runs `bun run deployment:config hosted` and then `scripts/deployment-config.test.ts` as a gate, writes the artifact's own sha256 over the generated config's `DEFAULT_APPLICATION_HASH` placeholder, applies D1 migrations remotely, uploads the artifact, deploys the computer host and then the Applet build service, each with its own secrets file, runs `scripts/check-production-secrets.ts check --live` and `write-secrets-file`, then `wrangler deploy --secrets-file`. It rewrites no tracked `wrangler.jsonc`: the D1 identifier is in `deployments/hosted.json`, and the only in-place edit is to the generated config under `.deployment/`.
-
-### `.github/workflows/auto-merge.yml`
-
-On pull request `opened`, `reopened` and `ready_for_review`. Skips drafts and forks; runs `gh pr merge --auto --merge`. The branch ruleset on `main`, requiring `PR gate` and strict branch freshness, is what holds the merge.
 
 ### `.github/workflows/native.yml`
 

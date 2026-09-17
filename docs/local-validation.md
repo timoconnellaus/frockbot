@@ -119,8 +119,9 @@ boundaries and repeated ideas need human review.
 The pipeline depends on three settings outside the repository. Each is what
 holds a stage back; without it GitHub has nothing to wait for.
 
-- **The `main` ruleset** requires the `Check` status check, forbids deletion
-  and force-pushes, and requires a pull request. "Require branches to be up to
+- **The `main` ruleset** requires the `Check` and `Flutter` status checks, the
+  two jobs of `check.yml`; it forbids deletion and force-pushes, and requires a
+  pull request. "Require branches to be up to
   date" is off: it made every landed pull request invalidate every other one,
   and `main.yml` checks the merge commit itself. Auto-merge is not enabled on
   the repository; a maintainer merges. GitHub's merge queue, which would check
