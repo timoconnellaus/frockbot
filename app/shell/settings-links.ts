@@ -127,8 +127,10 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
     scope: "bot",
   },
 
-  // Former info-pane anchors that still have rows keep working at their new
-  // homes.
+  // Former info-pane anchors keep working at their new homes. `Members` is the
+  // exception the table deliberately keeps: the Bot page rework removed the
+  // Members tile, so the anchor now opens Bot settings without a row to scroll
+  // to, which is still better than a cited link that refuses to resolve.
   {
     anchor: "bot-info-members",
     surface: "bot-settings",

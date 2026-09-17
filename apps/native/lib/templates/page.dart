@@ -3,8 +3,8 @@
 /// Two hosts over `ViewDocumentView`, because the server projects two
 /// documents (`app/bot-template/templates-document.ts`): what this Bot has
 /// been packed into is per-Bot, and what this account has imported is not.
-/// They share one page and a tab apiece — the export section in Bot settings,
-/// the import section under Advanced.
+/// They share one page and a tab apiece, reached from Bot templates on the
+/// account sheet and from the create sheet.
 ///
 /// Which Bot a pack is of is never in the document: it is the Bot the host is
 /// showing, and the host names it when it turns the press into a command.

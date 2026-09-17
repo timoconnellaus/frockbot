@@ -378,9 +378,10 @@ class RoutineInboxController extends ChangeNotifier {
   final String botId;
   int unacknowledged = 0;
 
-  /// The firings the Bot page shows, newest first. The same read the badge
-  /// comes from: a completion is the only visible trace a Routine leaves, so
-  /// the rows and the count can never disagree about what happened.
+  /// The firings the Bot page shows, newest first. They come from the same
+  /// [load] the badge does — a completion is the only visible trace a Routine
+  /// leaves — so one read answers both. [adopt] then moves the count alone,
+  /// because the Routines surface hands over a count and not a list.
   List<RoutineRunSummary> runs = const [];
   bool loaded = false;
   bool _closed = false;

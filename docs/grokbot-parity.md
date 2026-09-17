@@ -805,12 +805,15 @@ the rows whose status the code moved:
   any turn type (`agent.ts`), and as the Routines surface
   (`apps/native/lib/routines/page.dart`), where "next run" is now the moment the scheduler armed an alarm on, a
   firing appears in the per-Routine run log, and a webhook Routine's delivery URL
-  and key are shown once with rotate and revoke beside them. The silent half is
+  and key are shown once with rotate and revoke beside them on the one editor a
+  row opens — which is also where Run now, Run log and Delete live, the list
+  itself being rows under Scheduled and Webhooks carrying a pause switch each. The silent half is
   landed too: an automation Turn is absent from `GET /api/bots/:id/turns` and
   from the run lookup, reachable only through the run log, and a completed
   firing writes a `RoutineInboxEntryV1` in the transaction that settles it —
   `attribution: "Automation: <name>"`, `acknowledged: false` — surfaced by the
-  header badge and drawer (`apps/native/lib/routines/page.dart`) and cleared by
+  All Routines row's badge on the Bot page and the Completions card at the foot
+  of the Routines surface (`apps/native/lib/routines/page.dart`), and cleared by
   an explicit
   acknowledge command. What is still missing is the confirmation **card**:
   a Routine write answers with a receipt the settings surface re-renders, not
@@ -883,9 +886,12 @@ the rows whose status the code moved:
   Sprites SDK. **Row 25 is now `landed`**: `computer_screenshot`
   (`computer/agent.ts`) captures the Bot's own desktop through one
   guarded `exec` and writes the PNG back through `ComputerWorkspace.write`.
-  The hosted client's Bot-panel card renders that durable capture without
-  opening a viewer or waking the Computer. An explicit click
-  opens the shared full-window noVNC session with `view_only=1`; **Take control**
+  The hosted client's Computer card on the Bot page renders that durable
+  capture without opening a viewer or waking the Computer. Pressing the card
+  opens the Computer's own sub-page, and **Full window** there (**Full screen**
+  on a phone) opens the shared
+  noVNC session with `view_only=1`, which names the phase once as its app bar
+  subtitle; **Take control**
   first confirms that the Bot will be fenced, then makes the same session
   interactive, while Release, Escape, and close submit `releaseControl` through
   the Bot Durable Object. What is still absent is the _Bot-initiated_ ask,

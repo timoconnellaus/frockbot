@@ -180,8 +180,10 @@ class ViewGridGroups extends StatelessWidget {
 /// * a switch or a way in of its own → a row, grouped under the kind its title
 ///   ends with ("Web · Built in" becomes Web, under Built in).
 /// * anything else → a card of its own, drawn by the shared renderer. That is
-///   the editor at the top of Routines and the completions at the foot of it:
-///   a form and a log are not rows and are not pretending to be.
+///   the editor at the top of Routines: a form is not a row and is not
+///   pretending to be. The completions at the foot of it are all titled groups,
+///   so they take the first branch and land as rows under a "Completions"
+///   label.
 class ViewSwitchRows extends StatelessWidget {
   final Map<String, Object?> node;
   const ViewSwitchRows({super.key, required this.node});

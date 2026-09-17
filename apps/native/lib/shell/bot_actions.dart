@@ -7,7 +7,8 @@
 ///
 /// A phone reaches them by a long press and by two swipes; a desktop by a
 /// secondary click and a control that appears on the row. Delete is not here:
-/// it is rare, it destroys, and it stays under Advanced on the Bot's page.
+/// it is rare, it destroys, and it stays in the Danger card at the foot of the
+/// Bot's Settings.
 library;
 
 import 'package:flutter/material.dart';

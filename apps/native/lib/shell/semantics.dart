@@ -456,7 +456,8 @@ abstract final class ComputerIds {
 /// The names follow what `package-iframe-ui.e2e.ts` selects on — the framed
 /// page and its attribution. An entry is named by the Package and the entry
 /// the manifest declared, because that pair is what a spec means when it says
-/// "the Applets button".
+/// "the Applets door" — a row under More on the Bot page, since this Bot's
+/// Package entries left the conversation bar.
 abstract final class PackageIds {
   static String entry(String packageId, String entryId) =>
       'package-entry-$packageId-$entryId';

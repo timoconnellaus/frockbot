@@ -1837,9 +1837,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   String? _botNameOf(String botId) =>
       bots.where((bot) => bot.botId.value == botId).map(_name).firstOrNull;
 
-  /// The selected Bot's Applets, from the header's Applets button or the Bot
-  /// page's row: the sidebar's Applets mode beside the conversation, and a
-  /// page on a phone. A row opens its Applet over whichever it is.
+  /// The selected Bot's Applets, from the All Applets row on the Bot page:
+  /// the sidebar's Applets mode beside the conversation, and a page on a
+  /// phone. A row opens its Applet over whichever it is.
   void _openApplets() {
     final bot = selected;
     final canvas = appletCanvas;

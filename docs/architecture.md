@@ -648,7 +648,8 @@ family, both reached with `?as=document`:
 - `app/routines/routines-document.ts` over a `RoutinesFrame`
   (`GET /api/bots/:botId/routines`, the one route in that group that takes a
   query parameter at all). The frame is one read where there were two —
-  the Routines a Bot holds and the completion inbox the header badge counts —
+  the Routines a Bot holds and the completion inbox the All Routines badge
+  counts —
   because a client that had to ask twice could show a list and a badge that
   disagreed. Five action kinds: three Routine commands the route already takes,
   the inbox command on the inbox route, and the run log, which
@@ -668,16 +669,18 @@ bytes instead — FNV-1a over what the document says — so `ViewSurfacePage`
 adopts a fresh controller exactly when what it is showing has changed and keeps
 the one it has when nothing did.
 
-The `right-panel` region now shows one entry at a time rather than stacking
-every registered builder: an entry registers with a label, the region draws a
-selector over them, and `ViewSurfacePage`'s `chrome` flag is off inside it
-because the region already carries the title. On the phone each entry is a page.
+The `right-panel` region shows one entry at a time rather than stacking every
+registered builder: an entry registers with a label, the panel's stack names
+which one is on screen (see the header and panel stack below), and
+`ViewSurfacePage`'s `chrome` flag is off inside it because the region already
+carries the title. On the phone each entry is a page.
 
 **The rest of PR 8.** The completions count is `RoutineInboxController`, worn
-as a badge by the Routines row on the phone's Bot page: a silent Routine firing
-is filtered out of the visible transcript, so a count is the only place that
-completion becomes visible. On the wide tiers the chat header's Routines
-control opens the same surface, which carries the count itself. A
+as a badge by the All Routines row on the Bot page at every tier: a silent
+Routine firing is filtered out of the visible transcript, so a count is the
+only place that completion becomes visible. The same controller's read feeds
+the recent firings listed above that row, so the rows and the badge come from
+one read of the inbox rather than two. A
 firing that spoke — an explicit `send_to_user`, or the message a broken firing
 commits in its place — is an ordinary message in the conversation instead; see
 [notifications](notifications.md). "Mark all read" means the
