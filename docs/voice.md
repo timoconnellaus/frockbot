@@ -339,8 +339,10 @@ measures amplitude from what it is playing.
 `voice/delegation` (`botId`, `botName`, `state` ∈ `asked | answering |
 finished`) tells the footer where a request to a Bot is: asked, its answer
 being put into words, done. Chrome only; nothing durable turns on it.
-`voice/speech` reports actual playback so an arriving Bot answer can wait for
-a natural pause in ordinary voice speech.
+`voice/speech` reports actual playback. The clients still send it and the
+server still accepts it, but nothing turns on it any more: deciding when a
+late answer may be spoken is the session's own job now, which is what
+`scheduling: "WHEN_IDLE"` asks for.
 
 ### Status
 

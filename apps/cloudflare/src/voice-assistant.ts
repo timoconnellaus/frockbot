@@ -1057,11 +1057,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   /**
-   * One line per step of a call, as `wrangler tail` and Workers Logs show
-   * it. The happy path is otherwise silent — the SDK logs only its own
-   * failures, and a refusal reaches the client without a trace — so a call
-   * that went nowhere used to look, from every log, like a call nobody made.
-   * Never the words spoken: lengths and ids only.
+   * One line per step of a call, as `wrangler tail` and Workers Logs show it.
+   * Nothing else logs: a refusal reaches the client without a trace, and a
+   * call that went nowhere would otherwise look, from every log, like a call
+   * nobody made. Never the words spoken: lengths and ids only.
    */
   protected trace(
     connection: Connection,

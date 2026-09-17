@@ -229,16 +229,6 @@ export function decodeVoiceDictationServerFrameV1(
 export type VoiceAssistantStatusV1 =
   "idle" | "listening" | "thinking" | "speaking";
 
-/**
- * How long a client's unwithdrawn "speaker playing" report is believed.
- *
- * Not a guess at how long speech takes: it is the bound past which a device
- * whose quiet report never comes back — a route change mid-answer, a dropped
- * callback — stops being able to hold every Bot answer for the rest of the
- * call. It only frees the floor; it says nothing about what was heard.
- */
-export const VOICE_ASSISTANT_PLAYBACK_ACK_TIMEOUT_MS_V1 = 90_000;
-
 export type VoiceAssistantClientMessageV1 =
   | { schemaVersion: 1; type: "voice/sleep" }
   | { schemaVersion: 1; type: "voice/wake" }
