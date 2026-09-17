@@ -18,11 +18,13 @@ import '../test/cards_input_test.dart' as input;
 import '../test/cards_links_test.dart' as links;
 import '../test/cards_media_test.dart' as media;
 import '../test/cards_rich_text_test.dart' as rich_text;
+import '../test/cards_row_test.dart' as row;
 import '../test/cards_structure_test.dart' as structure;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   structure.main();
+  row.main();
   data.main();
   rich_text.main();
   media.main();
