@@ -149,6 +149,7 @@ function detailComponents(draft: Draft, full: boolean): unknown[] {
 }
 
 function draftComponents(draft: Draft, full: boolean): unknown[] {
+  const [rows, more] = detailComponents(draft, full);
   return [
     {
       id: "root",
@@ -161,13 +162,14 @@ function draftComponents(draft: Draft, full: boolean): unknown[] {
       label: "Ready to send",
       tone: "pending",
     },
-    ...detailComponents(draft, full),
+    rows,
     {
       id: "body",
       component: "CollapsibleText",
       text: draft.body,
       collapsedLines: 6,
     },
+    more,
     {
       id: "actions",
       component: "ApprovalActions",

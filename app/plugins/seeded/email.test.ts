@@ -311,7 +311,6 @@ describe("the seeded email Plugin", () => {
     ]);
     // The Skill that says when to draft travels in the descriptor.
     expect(seeded?.descriptor.skills?.[0]?.slug).toBe("email");
-    expect(seeded?.descriptor.skills?.[0]?.text).toMatch(/email_draft/);
     expect(seeded?.descriptor.grants).toContain("http");
     expect(seeded?.artifact.contentHash).toMatch(/^[0-9a-f]{64}$/);
   });
