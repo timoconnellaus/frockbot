@@ -21,10 +21,16 @@ import type {
 import {
   botInstructionRootV1,
   countSkillDocumentsV1,
+  countSkillReferencesV1,
   userInstructionRootV1,
   type SkillOwnerV1,
 } from "./catalog.js";
-import { renderSkillDocumentV1, skillDocumentPathV1 } from "./skill-md.js";
+import {
+  renderSkillDocumentV1,
+  skillDocumentPathV1,
+  skillReferencePathV1,
+  SKILL_MAX_REFERENCES,
+} from "./skill-md.js";
 import {
   checkSkillQuotaV1,
   skillCountLimitV1,
@@ -165,6 +171,123 @@ export async function writeSkillDocumentV1(
     mediaType: "text/markdown",
   };
   const outcome = await files.write(request);
+  if (outcome.status !== "ok") {
+    return {
+      status: "refused",
+      reason: `the write was ${outcome.status}: ${outcome.reason}`,
+    };
+  }
+  return {
+    status: "written",
+    path: relativePath,
+    generationId: outcome.generation.generationId,
+    contentHash,
+    replaced: existing.status === "ok",
+  };
+}
+
+/**
+ * Writes one reference beside a Skill the same root already holds (ADR 0030).
+ *
+ * The path is derived, never passed: `skillReferencePathV1` composes it from
+ * the Skill's slug and one file name, so a reference can only ever land inside
+ * its own Skill's `references/` directory and a Bot cannot write an
+ * instruction anywhere else by naming a path. The Skill itself must be there —
+ * a reference with no `SKILL.md` above it is a file nothing can ever load, and
+ * writing one would leave a Bot believing it had authored an instruction.
+ *
+ * The quota is the same one: a reference's bytes are bounded like a Skill's,
+ * and the count it is checked against is the Skill's references rather than the
+ * root's Skills, because a reference grows a Skill and not the catalog.
+ */
+export async function writeSkillReferenceV1(
+  files: WorkspaceFilesV1,
+  owner: SkillOwnerV1,
+  writer: SkillDocumentWriterV1,
+  draft: { slug: string; reference: string; text: string },
+  options: {
+    scope?: SkillQuotaScopeV1;
+    quota?: SkillQuotaConfigV1;
+    onIntent?(intent: { path: string; contentHash: string }): Promise<void>;
+  } = {},
+): Promise<SkillWriteOutcomeV1> {
+  const quota = options.quota ?? SKILL_QUOTA_DEFAULTS_V1;
+  const scope = options.scope ?? "bot";
+  const root =
+    scope === "user"
+      ? userInstructionRootV1(owner)
+      : botInstructionRootV1(owner);
+  const documentPath = skillDocumentPathV1(draft.slug);
+  let relativePath: string;
+  try {
+    relativePath = skillReferencePathV1(draft.slug, draft.reference);
+  } catch (error) {
+    return {
+      status: "refused",
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+  const document = await files.stat({ root, path: documentPath });
+  if (document.status === "not-found") {
+    return {
+      status: "refused",
+      reason: `no Skill "${draft.slug}" is written there yet; write its SKILL.md first`,
+    };
+  }
+  if (document.status !== "ok") {
+    return {
+      status: "refused",
+      reason: `the instruction root is unavailable: ${document.reason}`,
+    };
+  }
+  const path = { root, path: relativePath };
+  const existing = await files.stat(path);
+  if (existing.status !== "ok" && existing.status !== "not-found") {
+    return {
+      status: "refused",
+      reason: `the instruction root is unavailable: ${existing.reason}`,
+    };
+  }
+  const counted = await countSkillReferencesV1(files, root, documentPath);
+  if (counted.status !== "ok") {
+    return {
+      status: "refused",
+      reason: `${counted.reason}, so the Skill's reference bound cannot be enforced`,
+    };
+  }
+  if (existing.status !== "ok" && counted.count >= SKILL_MAX_REFERENCES) {
+    return {
+      status: "refused",
+      reason: `Skill "${draft.slug}" holds ${counted.count} references; the bound is ${SKILL_MAX_REFERENCES}`,
+    };
+  }
+  const bytes = new TextEncoder().encode(draft.text);
+  const verdict = checkSkillQuotaV1(
+    {
+      bytes: bytes.byteLength,
+      // A reference never grows the root's Skill count, so the count half of
+      // the quota is satisfied by construction and the bytes half is not.
+      existingSkills: 0,
+      replaces: true,
+      scope,
+    },
+    quota,
+  );
+  if (verdict.status === "refused") {
+    return { status: "refused", reason: verdict.reason };
+  }
+
+  const contentHash = await sha256HexV1(draft.text);
+  await options.onIntent?.({ path: relativePath, contentHash });
+
+  const outcome = await files.write({
+    path,
+    bytes,
+    writer,
+    expectedGenerationId:
+      existing.status === "ok" ? existing.entry.generation.generationId : null,
+    mediaType: "text/markdown",
+  });
   if (outcome.status !== "ok") {
     return {
       status: "refused",

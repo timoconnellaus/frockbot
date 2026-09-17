@@ -93,6 +93,49 @@ describe("the Skill catalog", () => {
     await dispose();
   });
 
+  test("records the references each Skill offered, with their generations", async () => {
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/SKILL.md",
+        text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+        writer: BOT_WRITER,
+      },
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/references/forms.md",
+        text: "# Forms",
+        writer: BOT_WRITER,
+      },
+    ]);
+    const { session, dispose } = await openSession();
+    const catalog = new SkillCatalog(OWNER, workspace);
+
+    await catalog.refresh(4, session);
+
+    const injected = session.events.find(
+      (event) => event.type === "skill/injected",
+    );
+    expect(
+      injected?.type === "skill/injected" ? injected.skills[0] : undefined,
+    ).toMatchObject({
+      path: "skills/standup/SKILL.md",
+      references: [
+        {
+          path: "skills/standup/references/forms.md",
+          generationId: expect.any(String),
+        },
+      ],
+    });
+    // A Skill with nothing beside it records nothing, as it records no `by`.
+    expect(
+      injected?.type === "skill/injected"
+        ? injected.skills[1]?.references
+        : "absent",
+    ).toBeUndefined();
+    await dispose();
+  });
+
   test("a managed Skill the host withholds is neither listed nor refused", async () => {
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(OWNER, new FakeWorkspace(), ["applets"]);
@@ -192,6 +235,91 @@ describe("the skill_load tool", () => {
     expect(refused.isError).toBe(true);
     expect(refused.content).toContain('"path"');
     expect(refused.content).toContain('{"path":"managed/add-connector"}');
+    await dispose();
+  });
+
+  test("reads one reference of a loaded Skill, and refuses anything else", async () => {
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/SKILL.md",
+        text: skillMarkdown(
+          "standup",
+          "Use this when standing up.",
+          "Read forms.md before you fill one in.",
+        ),
+        writer: BOT_WRITER,
+      },
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/references/forms.md",
+        text: "# Forms\nOne per person.",
+        writer: BOT_WRITER,
+      },
+    ]);
+    const { session, dispose } = await openSession();
+    const catalog = new SkillCatalog(OWNER, workspace);
+    await catalog.refresh(4, session);
+    const tool = createSkillLoadTool(catalog);
+
+    // The body names what can be loaded, and the tool says how to ask for it.
+    const body = await tool.execute({ path: "bot/standup" }, CONTEXT);
+    expect(body.isError).toBe(false);
+    expect(body.content).toContain("References: forms.md");
+
+    const reference = await tool.execute(
+      { path: "bot/standup", reference: "forms.md" },
+      CONTEXT,
+    );
+    expect(reference.isError).toBe(false);
+    expect(reference.content).toContain("One per person.");
+
+    const missing = await tool.execute(
+      { path: "bot/standup", reference: "layout.md" },
+      CONTEXT,
+    );
+    expect(missing.isError).toBe(true);
+    expect(missing.content).toContain('no reference "layout.md"');
+    await dispose();
+  });
+
+  test("reads a Plugin Skill's reference out of the artifact, without a Workspace", async () => {
+    const workspace = new FakeWorkspace();
+    const { session, dispose } = await openSession();
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [
+        {
+          pluginId: "email-card",
+          skills: [
+            {
+              slug: "drafting",
+              text: skillMarkdown(
+                "Draft an email",
+                "Use this when drafting.",
+                "Body.",
+              ),
+              references: [{ path: "forms.md", text: "# Forms" }],
+            },
+          ],
+        },
+      ],
+    );
+    await catalog.refresh(4, session);
+    const tool = createSkillLoadTool(catalog);
+
+    const reference = await tool.execute(
+      { path: "plugin/email-card/drafting", reference: "forms.md" },
+      CONTEXT,
+    );
+
+    expect(reference.isError).toBe(false);
+    expect(reference.content).toContain("# Forms");
+    expect(workspace.calls.some((call) => call.startsWith("read:"))).toBe(
+      false,
+    );
     await dispose();
   });
 });
@@ -401,6 +529,100 @@ describe("the skill_write tool", () => {
     expect(tool.validate?.({ name: "a" })).toBe(false);
     const result = await tool.execute({ name: "a", description: "b" }, CONTEXT);
     expect(result.isError).toBe(true);
+    expect(workspace.calls).toEqual([]);
+    await dispose();
+  });
+
+  test("writes a reference into the Skill's own directory, and nowhere else", async () => {
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/SKILL.md",
+        text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+        writer: BOT_WRITER,
+      },
+    ]);
+    const { session, sessions, dispose } = await openSession();
+    const tool = createSkillWriteTool(
+      { owner: OWNER, reads: workspace, files: workspace },
+      WRITER,
+      sessions,
+    );
+
+    const written = await tool.execute(
+      { slug: "standup", reference: "forms.md", body: "# Forms" },
+      CONTEXT,
+    );
+
+    expect(written.isError).toBe(false);
+    expect(written.content).toContain("skills/standup/references/forms.md");
+    expect(
+      session.events.find((event) => event.type === "skill/write-intent"),
+    ).toMatchObject({ path: "skills/standup/references/forms.md" });
+    // It is loadable on the next Turn, as one of that Skill's references.
+    const catalog = new SkillCatalog(OWNER, workspace);
+    await catalog.refresh(5, session);
+    const skill = catalog
+      .current()
+      .skills.find((candidate) => candidate.path.startsWith("skills/"));
+    expect(await catalog.reference(skill!, "forms.md")).toMatchObject({
+      status: "ok",
+      text: "# Forms",
+    });
+    await dispose();
+  });
+
+  test("refuses a reference that is not one .md file inside its Skill", async () => {
+    const workspace = new FakeWorkspace();
+    const { sessions, dispose } = await openSession();
+    const tool = createSkillWriteTool(
+      { owner: OWNER, reads: workspace, files: workspace },
+      WRITER,
+      sessions,
+    );
+
+    for (const reference of ["../escape.md", "nested/forms.md", "forms.txt"]) {
+      const refused = await tool.execute(
+        { slug: "standup", reference, body: "#" },
+        CONTEXT,
+      );
+      expect(refused.isError).toBe(true);
+      expect(refused.content).toContain(".md file name");
+    }
+    // And a reference whose Skill is not written yet has nothing to belong to.
+    const orphan = await tool.execute(
+      { slug: "standup", reference: "forms.md", body: "#" },
+      CONTEXT,
+    );
+    expect(orphan.isError).toBe(true);
+    expect(orphan.content).toContain("write its SKILL.md first");
+    expect(workspace.calls.some((call) => call.startsWith("write:"))).toBe(
+      false,
+    );
+    await dispose();
+  });
+
+  test("refuses a Plugin's Skill the way it refuses a managed one", async () => {
+    const workspace = new FakeWorkspace();
+    const { sessions, dispose } = await openSession();
+    const tool = createSkillWriteTool(
+      { owner: OWNER, reads: workspace, files: workspace },
+      WRITER,
+      sessions,
+    );
+
+    const refused = await tool.execute(
+      {
+        name: "Draft",
+        description: "Use this when drafting.",
+        body: "Body.",
+        scope: "plugin",
+      },
+      CONTEXT,
+    );
+
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toContain("plugin skills are not editable");
     expect(workspace.calls).toEqual([]);
     await dispose();
   });

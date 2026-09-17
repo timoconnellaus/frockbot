@@ -77,6 +77,34 @@ describe("a Skill ref crossing a seam", () => {
       expect(parseSkillRefV1(value)).toBeUndefined();
     }
   });
+
+  test("names a Plugin's Skill by its Plugin as well as its slug", () => {
+    const ref = {
+      schemaVersion: 1 as const,
+      source: "plugin" as const,
+      pluginId: "email-card",
+      slug: "drafting",
+    };
+    expect(formatSkillRefV1(ref)).toBe("plugin/email-card/drafting");
+    expect(parseSkillRefV1("plugin/email-card/drafting")).toEqual(ref);
+    expect(decodeSkillRefV1(ref)).toEqual(ref);
+  });
+
+  test("refuses a plugin ref with no Plugin, and a Plugin on any other source", () => {
+    expect(parseSkillRefV1("plugin/drafting")).toBeUndefined();
+    expect(parseSkillRefV1("plugin/Email/drafting")).toBeUndefined();
+    expect(() =>
+      decodeSkillRefV1({ schemaVersion: 1, source: "plugin", slug: "d" }),
+    ).toThrow(/pluginId is invalid/u);
+    expect(() =>
+      decodeSkillRefV1({
+        schemaVersion: 1,
+        source: "bot",
+        pluginId: "email-card",
+        slug: "d",
+      }),
+    ).toThrow(/unknown fields/u);
+  });
 });
 
 describe("the list one Turn invokes", () => {

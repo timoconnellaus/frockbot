@@ -449,6 +449,25 @@
     "value": null
   },
   {
+    "name": "SkillRef plugin without its Plugin",
+    "schema": "SkillRef",
+    "value": {
+      "schemaVersion": 1,
+      "source": "plugin",
+      "slug": "drafting"
+    }
+  },
+  {
+    "name": "SkillRef names a Plugin it does not come from",
+    "schema": "SkillRef",
+    "value": {
+      "schemaVersion": 1,
+      "source": "bot",
+      "pluginId": "email-card",
+      "slug": "drafting"
+    }
+  },
+  {
     "name": "TurnCommand wrong shape",
     "schema": "TurnCommand",
     "value": null

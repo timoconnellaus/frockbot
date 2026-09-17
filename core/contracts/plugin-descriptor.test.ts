@@ -260,6 +260,80 @@ describe("a plugin's services, triggers and settings", () => {
     ).toThrow(/name/);
   });
 
+  test("skills carry a slug, a document and the references beside it", () => {
+    const descriptor = decodePluginDescriptorV1({
+      ...base,
+      skills: [
+        {
+          slug: "drafting",
+          text: "---\nname: Draft\ndescription: Use this when drafting.\n---\nBody.\n",
+          references: [{ path: "forms.md", text: "# Forms" }],
+        },
+      ],
+    });
+    expect(descriptor.skills).toEqual([
+      {
+        slug: "drafting",
+        text: "---\nname: Draft\ndescription: Use this when drafting.\n---\nBody.\n",
+        references: [{ path: "forms.md", text: "# Forms" }],
+      },
+    ]);
+  });
+
+  test("skills are bounded, uniquely named, and reference one .md file each", () => {
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [{ slug: "Draft", text: "x" }],
+      }),
+    ).toThrow(/slug is invalid/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [
+          { slug: "drafting", text: "x" },
+          { slug: "drafting", text: "y" },
+        ],
+      }),
+    ).toThrow(/duplicate slugs/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: Array.from({ length: 9 }, (_, index) => ({
+          slug: `s${index}`,
+          text: "x",
+        })),
+      }),
+    ).toThrow(/bounded array/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [
+          {
+            slug: "drafting",
+            text: "x",
+            references: [{ path: "../etc/passwd", text: "x" }],
+          },
+        ],
+      }),
+    ).toThrow(/path is invalid/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [
+          {
+            slug: "drafting",
+            text: "x",
+            references: Array.from({ length: 33 }, (_, index) => ({
+              path: `r${index}.md`,
+              text: "x",
+            })),
+          },
+        ],
+      }),
+    ).toThrow(/bounded array/);
+  });
+
   test("a settings schema describes an object and is bounded", () => {
     expect(
       decodePluginDescriptorV1({

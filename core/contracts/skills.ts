@@ -9,24 +9,29 @@
 // `plugin-skills`: the kernel holds the name and no opinion about the file.
 //
 /** Where a Skill comes from. */
-export type SkillRefSourceV1 = "bot" | "user" | "managed";
+export type SkillRefSourceV1 = "bot" | "user" | "managed" | "plugin";
 
 /** The declared sources, in the catalog's canonical ordering. */
 export const SKILL_REF_SOURCES_V1: readonly SkillRefSourceV1[] = [
   "bot",
   "user",
   "managed",
+  "plugin",
 ];
 
 /**
  * One Skill named for invocation.
  *
- * Every source is unique on its slug alone, so refs are globally unique and
+ * The three durable sources are unique on their slug alone. A `plugin` Skill
+ * carries its Plugin as well, because two Plugins may ship the same slug and
+ * neither owns it; the pair is unique, so refs are still globally unique and
  * there is no shadowing rule.
  */
 export interface SkillRefV1 {
   schemaVersion: 1;
   source: SkillRefSourceV1;
+  /** Present exactly when `source` is `plugin`: the Plugin that ships it. */
+  pluginId?: string;
   slug: string;
 }
 
@@ -34,15 +39,19 @@ export interface SkillRefV1 {
 export const MAX_INVOKED_SKILLS_V1 = 3;
 
 const SKILL_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** The descriptor's own Plugin id rule; a ref names a Plugin the same way. */
+const SKILL_PLUGIN_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 
 /** True when a slug is well formed. Total; never throws. */
 export function isSkillRefSlugV1(value: unknown): value is string {
   return typeof value === "string" && SKILL_SLUG_PATTERN.test(value);
 }
 
-/** The canonical string form: `bot/<slug>`. */
+/** The canonical string form: `bot/<slug>`, or `plugin/<pluginId>/<slug>`. */
 export function formatSkillRefV1(ref: SkillRefV1): string {
-  return `${ref.source}/${ref.slug}`;
+  return ref.source === "plugin"
+    ? `plugin/${ref.pluginId}/${ref.slug}`
+    : `${ref.source}/${ref.slug}`;
 }
 
 /**
@@ -56,10 +65,13 @@ export function parseSkillRefV1(value: unknown): SkillRefV1 | undefined {
     (candidate) => candidate === segments[0],
   );
   if (!source) return undefined;
-  if (segments.length !== 2) return undefined;
-  const slug = segments[1] ?? "";
+  if (segments.length !== (source === "plugin" ? 3 : 2)) return undefined;
+  const slug = segments[segments.length - 1] ?? "";
   if (!SKILL_SLUG_PATTERN.test(slug)) return undefined;
-  return { schemaVersion: 1, source, slug };
+  if (source !== "plugin") return { schemaVersion: 1, source, slug };
+  const pluginId = segments[1] ?? "";
+  if (!SKILL_PLUGIN_ID_PATTERN.test(pluginId)) return undefined;
+  return { schemaVersion: 1, source, pluginId, slug };
 }
 
 /**
@@ -74,7 +86,11 @@ export function decodeSkillRefV1(
     throw new Error(`${label} must be an object`);
   }
   const candidate = value as Record<string, unknown>;
-  const allowed = new Set(["schemaVersion", "source", "slug"]);
+  const allowed = new Set(
+    candidate.source === "plugin"
+      ? ["schemaVersion", "source", "pluginId", "slug"]
+      : ["schemaVersion", "source", "slug"],
+  );
   for (const key of Reflect.ownKeys(candidate)) {
     if (typeof key !== "string" || !allowed.has(key)) {
       throw new Error(`${label} has unknown fields`);
@@ -90,7 +106,21 @@ export function decodeSkillRefV1(
   if (!isSkillRefSlugV1(candidate.slug)) {
     throw new Error(`${label}.slug is invalid`);
   }
-  return { schemaVersion: 1, source, slug: candidate.slug };
+  if (source !== "plugin") {
+    return { schemaVersion: 1, source, slug: candidate.slug };
+  }
+  if (
+    typeof candidate.pluginId !== "string" ||
+    !SKILL_PLUGIN_ID_PATTERN.test(candidate.pluginId)
+  ) {
+    throw new Error(`${label}.pluginId is invalid`);
+  }
+  return {
+    schemaVersion: 1,
+    source,
+    pluginId: candidate.pluginId,
+    slug: candidate.slug,
+  };
 }
 
 /**

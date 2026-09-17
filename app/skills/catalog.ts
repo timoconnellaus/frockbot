@@ -52,10 +52,17 @@ import {
 } from "@frockbot/core/concurrency";
 import { loadManagedSkillsV1, MANAGED_SKILL_DOCUMENTS_V1 } from "./managed.js";
 import {
+  loadPluginSkillsV1,
+  type PluginSkillContributionV1,
+} from "./plugin.js";
+import {
   SKILL_FILE_NAME,
   isSkillDocumentPathV1,
   parseSkillDocumentV1,
+  skillReferenceNameForV1,
   SKILL_MAX_FILE_BYTES,
+  SKILL_MAX_REFERENCES,
+  SKILL_REFERENCES_DIRECTORY,
 } from "./skill-md.js";
 
 /** The Bot whose instruction root is being loaded, and its User. */
@@ -79,6 +86,25 @@ export const SKILL_MAX_COUNT_LIST_PAGES = 256;
 /** Most Skills carried in one catalog. Beyond this, the rest are refused. */
 export const SKILL_MAX_CATALOG_ENTRIES = 200;
 
+/**
+ * One Markdown file a Skill offers beside its `SKILL.md` (ADR 0030).
+ *
+ * The catalog carries the index, never the bodies: a reference is loaded on
+ * demand by `skill_load`, so a Skill with thirty-two of them costs a Turn that
+ * reads none of them nothing.
+ */
+export interface SkillReferenceV1 {
+  /** Listed the way the Skill's own path is: relative to the root, or synthetic. */
+  path: string;
+  generationId: string;
+  /**
+   * The bytes, for a source that carries them in the artifact rather than on
+   * the Workspace — managed and plugin Skills. A Workspace reference is read
+   * through the same `WorkspaceReadsV1` its listing came through.
+   */
+  text?: string;
+}
+
 /** One Skill this Turn may use, with the exact generation it came from. */
 export interface LoadedSkillV1 {
   /**
@@ -87,6 +113,13 @@ export interface LoadedSkillV1 {
    * is not a durable-root file at all.
    */
   path: string;
+  /**
+   * Which root, or which artifact, the Skill came out of. The ref carries the
+   * same word but is optional — a `SKILL.md` in a directory that is not a
+   * well-formed slug has no ref — and reading a reference needs to know where
+   * to read it from, so the source is recorded whether or not it is nameable.
+   */
+  source: SkillRefSourceV1;
   /**
    * The ref that names this Skill for invocation and for `skill_load`.
    *
@@ -105,6 +138,8 @@ export interface LoadedSkillV1 {
   name: string;
   description: string;
   body: string;
+  /** The references beside the `SKILL.md`, in path order; empty when none. */
+  references: SkillReferenceV1[];
   generationId: string;
   contentHash: string;
 }
@@ -344,6 +379,71 @@ export async function loadSkillCatalogV1(
     .filter((entry) => isSkillDocumentPathV1(entry.path.path))
     .sort((left, right) => left.path.path.localeCompare(right.path.path));
 
+  // A Skill is a directory (ADR 0030): the Markdown files under its own
+  // `references/` are listed by the same walk the `SKILL.md` was, so they cost
+  // no further read here — the index is the listing, and a body is read only
+  // when `skill_load` asks for one.
+  const referencesByDocument = new Map<string, WorkspaceEntryV1[]>();
+  for (const entry of entries) {
+    const path = entry.path.path;
+    const cut = path.lastIndexOf(`/${SKILL_REFERENCES_DIRECTORY}/`);
+    if (cut < 0) continue;
+    const documentPath = `${path.slice(0, cut + 1)}${SKILL_FILE_NAME}`;
+    if (skillReferenceNameForV1(documentPath, path) === undefined) continue;
+    const listed = referencesByDocument.get(documentPath) ?? [];
+    listed.push(entry);
+    referencesByDocument.set(documentPath, listed);
+  }
+
+  /**
+   * The references of one Skill, or the reason the Skill is refused whole.
+   *
+   * Whole, because a partially loaded Skill is a Skill whose `SKILL.md` names
+   * a reference the Bot cannot read: the index in the body is the contract,
+   * and half of it is worse than none of it.
+   */
+  const referencesOf = (
+    documentPath: string,
+  ):
+    | { status: "ok"; references: SkillReferenceV1[] }
+    | { status: "refused"; kind: SkillRefusalKindV1; reason: string } => {
+    const listed = (referencesByDocument.get(documentPath) ?? []).sort(
+      (left, right) => left.path.path.localeCompare(right.path.path),
+    );
+    if (listed.length > SKILL_MAX_REFERENCES) {
+      return {
+        status: "refused",
+        kind: "oversized",
+        reason: `the Skill offers ${listed.length} references; the bound is ${SKILL_MAX_REFERENCES}`,
+      };
+    }
+    const references: SkillReferenceV1[] = [];
+    for (const entry of listed) {
+      const source = sourceOf(entry);
+      // The same rule, the same predicate: a reference is loaded as an
+      // instruction exactly when its Skill would be.
+      if (!isLoadableSkillSourceV1(source, owner)) {
+        return {
+          status: "refused",
+          kind: "authority",
+          reason: `its reference ${source.path.path} was written by ${describeWriter(source)}; only this Bot or its User may write an instruction`,
+        };
+      }
+      if (source.generation.size > SKILL_MAX_FILE_BYTES) {
+        return {
+          status: "refused",
+          kind: "oversized",
+          reason: `its reference ${source.path.path} is ${source.generation.size} bytes; the bound is ${SKILL_MAX_FILE_BYTES}`,
+        };
+      }
+      references.push({
+        path: source.path.path,
+        generationId: source.generation.generationId,
+      });
+    }
+    return { status: "ok", references };
+  };
+
   // The bodies are independent objects, and reading them one after another
   // made a root cost one round trip per SKILL.md on the turn-start critical
   // path. Every candidate that the checks above a read would admit is fetched
@@ -427,9 +527,19 @@ export async function loadSkillCatalogV1(
       catalog.refusals.push({ path, kind: "malformed", reason: parsed.reason });
       continue;
     }
+    const references = referencesOf(path);
+    if (references.status !== "ok") {
+      catalog.refusals.push({
+        path,
+        kind: references.kind,
+        reason: references.reason,
+      });
+      continue;
+    }
     const slug = skillSlugFromDocumentPathV1(path);
     catalog.skills.push({
       path,
+      source: refSource,
       ...(slug
         ? { ref: { schemaVersion: 1 as const, source: refSource, slug } }
         : {}),
@@ -439,11 +549,51 @@ export async function loadSkillCatalogV1(
       name: parsed.document.name,
       description: parsed.document.description,
       body: parsed.document.body,
+      references: references.references,
       generationId: source.generation.generationId,
       contentHash: source.generation.contentHash,
     });
   }
   return catalog;
+}
+
+/**
+ * How many references one Skill already holds under a root, or why that is not
+ * knowable.
+ *
+ * The write path needs it and the load path does not: loading walks the whole
+ * listing anyway, while a write knows only the Skill it is writing into. Same
+ * shape as `countSkillDocumentsV1`, and for the same reason — an incomplete
+ * count is not a smaller count.
+ */
+export async function countSkillReferencesV1(
+  reads: WorkspaceReadsV1,
+  root: WorkspaceInstructionRootV1,
+  documentPath: string,
+): Promise<SkillCountOutcomeV1> {
+  let count = 0;
+  let cursor: string | undefined;
+  for (let page = 0; page < SKILL_MAX_COUNT_LIST_PAGES; page += 1) {
+    const outcome = await reads.list(
+      cursor === undefined ? { root } : { root, cursor },
+    );
+    if (outcome.status !== "ok") {
+      return {
+        status: "unavailable",
+        reason: `the instruction root could not be listed: ${outcome.reason}`,
+      };
+    }
+    count += outcome.entries.filter(
+      (entry) =>
+        skillReferenceNameForV1(documentPath, entry.path.path) !== undefined,
+    ).length;
+    if (!outcome.cursor) return { status: "ok", count };
+    cursor = outcome.cursor;
+  }
+  return {
+    status: "unavailable",
+    reason: `the instruction root did not finish listing within ${SKILL_MAX_COUNT_LIST_PAGES} pages`,
+  };
 }
 
 /**
@@ -463,6 +613,8 @@ export interface SkillCatalogCapsV1 {
   bot: number;
   user: number;
   managed: number;
+  /** Across every Plugin this Bot runs, not per Plugin. */
+  plugin: number;
   totalBytes: number;
 }
 
@@ -470,6 +622,7 @@ export const SKILL_CATALOG_CAPS_V1: SkillCatalogCapsV1 = {
   bot: 40,
   user: 40,
   managed: 8,
+  plugin: 16,
   totalBytes: 16_384,
 };
 
@@ -494,7 +647,9 @@ function catalogCostOf(skill: LoadedSkillV1): number {
 }
 
 function orderingKeyOf(skill: LoadedSkillV1): string {
-  return skill.ref ? skill.ref.slug : `\uffff${skill.path}`;
+  // The whole ref, so two Plugins shipping one slug order by their Plugin. The
+  // source prefix is constant inside a source, so nothing else moves.
+  return skill.ref ? formatSkillRefV1(skill.ref) : `\uffff${skill.path}`;
 }
 
 /**
@@ -569,6 +724,13 @@ export async function loadFullSkillCatalogV1(
   options: {
     managed?: boolean;
     withheldManagedSlugs?: readonly string[];
+    /**
+     * The Skills the Plugins this Bot runs contribute. The host resolves which
+     * Plugins those are — a Plugin's Skill goes exactly where its tools go —
+     * so an absent list is a Turn with no Plugin Skills, not a filter applied
+     * here.
+     */
+    pluginSkills?: readonly PluginSkillContributionV1[];
     caps?: SkillCatalogCapsV1;
   } = {},
 ): Promise<SkillCatalogV1> {
@@ -593,6 +755,9 @@ export async function loadFullSkillCatalogV1(
         (document) => !withheld.includes(document.slug),
       ),
     );
+  }
+  if (options.pluginSkills && options.pluginSkills.length > 0) {
+    sources.plugin = await loadPluginSkillsV1(options.pluginSkills);
   }
   return assembleSkillCatalogV1(owner, sources, options.caps);
 }

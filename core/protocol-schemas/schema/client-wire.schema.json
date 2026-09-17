@@ -724,23 +724,52 @@
       "additionalProperties": false
     },
     "SkillRef": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "source": {
+              "enum": ["bot", "user", "managed"]
+            },
+            "slug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+            }
+          },
+          "required": ["schemaVersion", "source", "slug"],
+          "additionalProperties": false
         },
-        "source": {
-          "enum": ["bot", "user", "managed"]
-        },
-        "slug": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 64,
-          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "source": {
+              "const": "plugin"
+            },
+            "pluginId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+            },
+            "slug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+            }
+          },
+          "required": ["schemaVersion", "source", "pluginId", "slug"],
+          "additionalProperties": false
         }
-      },
-      "required": ["schemaVersion", "source", "slug"],
-      "additionalProperties": false
+      ]
     },
     "TurnCommand": {
       "type": "object",

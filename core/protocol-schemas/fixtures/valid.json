@@ -308,6 +308,16 @@
     }
   },
   {
+    "name": "SkillRef plugin valid",
+    "schema": "SkillRef",
+    "value": {
+      "schemaVersion": 1,
+      "source": "plugin",
+      "pluginId": "email-card",
+      "slug": "drafting"
+    }
+  },
+  {
     "name": "TurnCommand valid",
     "schema": "TurnCommand",
     "value": {

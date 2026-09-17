@@ -202,6 +202,7 @@
     "./skills/bot": "./skills/bot.ts",
     "./skills/catalog": "./skills/catalog.ts",
     "./skills/managed": "./skills/managed.ts",
+    "./skills/plugin": "./skills/plugin.ts",
     "./skills/quota": "./skills/quota.ts",
     "./skills/skill-md": "./skills/skill-md.ts",
     "./skills/testing": "./skills/testing.ts",

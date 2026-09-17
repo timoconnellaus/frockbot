@@ -23,8 +23,14 @@ export const SKILL_MAX_FRONTMATTER_KEYS = 32;
 export const SKILL_FILE_NAME = "SKILL.md";
 /** The directory, relative to the instruction root, a written Skill lands in. */
 export const SKILL_DIRECTORY = "skills";
+/** The directory, inside a Skill's own, holding its references (ADR 0030). */
+export const SKILL_REFERENCES_DIRECTORY = "references";
+/** Most references one Skill may carry; past it the Skill is refused whole. */
+export const SKILL_MAX_REFERENCES = 32;
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** A reference's file name: one Markdown file, never a path. */
+const REFERENCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\.md$/;
 
 /** One parsed `SKILL.md`. `body` is the markdown recipe after the frontmatter. */
 export interface SkillDocumentV1 {
@@ -143,6 +149,57 @@ export function skillDocumentPathV1(slug: string): string {
     throw new Error("skill slug must be lowercase letters, digits, or hyphens");
   }
   return `${SKILL_DIRECTORY}/${slug}/${SKILL_FILE_NAME}`;
+}
+
+/**
+ * True when a name is one a reference may carry: a single Markdown file, never
+ * a path. The charset admits no separator and no leading dot, so a reference
+ * can only ever name a file inside its own Skill's `references/` directory.
+ */
+export function isSkillReferenceNameV1(name: unknown): name is string {
+  return typeof name === "string" && REFERENCE_NAME.test(name);
+}
+
+/**
+ * The path a named reference occupies beside a Skill document. The inverse of
+ * {@link skillReferenceNameForV1}, and the one place the layout is written —
+ * a synthetic `managed/` or `plugin/` path is built from it too.
+ */
+export function skillReferencePathForV1(
+  documentPath: string,
+  name: string,
+): string {
+  if (!isSkillDocumentPathV1(documentPath)) {
+    throw new Error("a reference needs the path of its SKILL.md");
+  }
+  if (!REFERENCE_NAME.test(name)) {
+    throw new Error("skill reference must be a single .md file name");
+  }
+  return `${documentPath.slice(0, -SKILL_FILE_NAME.length)}${SKILL_REFERENCES_DIRECTORY}/${name}`;
+}
+
+/** The relative path a reference of this Skill occupies inside the root. */
+export function skillReferencePathV1(slug: string, name: string): string {
+  return skillReferencePathForV1(skillDocumentPathV1(slug), name);
+}
+
+/**
+ * The reference name a path carries for the Skill at `documentPath`, or
+ * `undefined` when the path is not one of that Skill's references.
+ *
+ * A Skill's directory is whatever holds its `SKILL.md`, so this is derived
+ * from that path rather than from a slug: an instruction root is an ordinary
+ * durable root and a `SKILL.md` can sit anywhere.
+ */
+export function skillReferenceNameForV1(
+  documentPath: string,
+  candidatePath: string,
+): string | undefined {
+  if (!isSkillDocumentPathV1(documentPath)) return undefined;
+  const prefix = `${documentPath.slice(0, -SKILL_FILE_NAME.length)}${SKILL_REFERENCES_DIRECTORY}/`;
+  if (!candidatePath.startsWith(prefix)) return undefined;
+  const name = candidatePath.slice(prefix.length);
+  return REFERENCE_NAME.test(name) ? name : undefined;
 }
 
 /** True when a slug is well formed. Total; never throws. */

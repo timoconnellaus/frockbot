@@ -10,6 +10,7 @@ import {
   renderSkillCatalogPromptV1,
   SKILL_MAX_CATALOG_ENTRIES,
 } from "./catalog.js";
+import { SKILL_MAX_FILE_BYTES, SKILL_MAX_REFERENCES } from "./skill-md.js";
 import { FakeWorkspace, skillMarkdown } from "./testing.js";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
@@ -271,6 +272,113 @@ describe("the Skills loader", () => {
     expect(
       renderSkillCatalogPromptV1({ owner: OWNER, skills: [], refusals: [] }),
     ).toBe("");
+  });
+
+  test("lists the Markdown beside a Skill as its references, and nothing else", async () => {
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/SKILL.md",
+        text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+        writer: BOT_WRITER,
+      },
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/references/forms.md",
+        text: "# Forms",
+        writer: BOT_WRITER,
+      },
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/references/notes.txt",
+        text: "not markdown",
+        writer: BOT_WRITER,
+      },
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/scratch.md",
+        text: "beside the Skill, not under references/",
+        writer: BOT_WRITER,
+      },
+    ]);
+
+    const catalog = await loadSkillCatalogV1(workspace, OWNER);
+
+    expect(catalog.skills[0]?.references).toEqual([
+      {
+        path: "skills/standup/references/forms.md",
+        generationId: expect.any(String),
+      },
+    ]);
+    // The index is the listing: no reference body is read to assemble it.
+    expect(workspace.calls).toEqual([
+      "list:bot-instructions:user-1:bot-1",
+      "read:skills/standup/SKILL.md",
+    ]);
+  });
+
+  test("refuses a Skill whole when a reference is past a bound or not the Bot's", async () => {
+    const seeds = (
+      extra: Parameters<typeof FakeWorkspace.seeded>[0],
+    ): Parameters<typeof FakeWorkspace.seeded>[0] => [
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/SKILL.md",
+        text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+        writer: BOT_WRITER,
+      },
+      ...extra,
+    ];
+
+    const tooMany = await FakeWorkspace.seeded(
+      seeds(
+        Array.from({ length: SKILL_MAX_REFERENCES + 1 }, (_, index) => ({
+          root: OWN_ROOT,
+          path: `skills/standup/references/r${index}.md`,
+          text: "#",
+          writer: BOT_WRITER,
+        })),
+      ),
+    );
+    const overCount = await loadSkillCatalogV1(tooMany, OWNER);
+    expect(overCount.skills).toEqual([]);
+    expect(overCount.refusals[0]).toMatchObject({
+      path: "skills/standup/SKILL.md",
+      kind: "oversized",
+    });
+
+    const tooLarge = await FakeWorkspace.seeded(
+      seeds([
+        {
+          root: OWN_ROOT,
+          path: "skills/standup/references/big.md",
+          text: "x".repeat(SKILL_MAX_FILE_BYTES + 1),
+          writer: BOT_WRITER,
+        },
+      ]),
+    );
+    expect(
+      (await loadSkillCatalogV1(tooLarge, OWNER)).refusals[0],
+    ).toMatchObject({
+      kind: "oversized",
+      reason: expect.stringContaining("big.md"),
+    });
+
+    const foreign = await FakeWorkspace.seeded(
+      seeds([
+        {
+          root: OWN_ROOT,
+          path: "skills/standup/references/forms.md",
+          text: "# Forms",
+          writer: { kind: "first-party", packageId: "memory" },
+        },
+      ]),
+    );
+    const refusedWriter = await loadSkillCatalogV1(foreign, OWNER);
+    // Whole: a Skill whose index names a file the Bot may not read as an
+    // instruction is not half-loaded.
+    expect(refusedWriter.skills).toEqual([]);
+    expect(refusedWriter.refusals[0]).toMatchObject({ kind: "authority" });
   });
 });
 

@@ -37,6 +37,7 @@ import {
   loadSkillCatalogV1,
   skillRefForLoadedSkillV1,
 } from "@frockbot/app/skills/catalog";
+import type { PluginSkillContributionV1 } from "@frockbot/app/skills/plugin";
 import { writeSkillDocumentV1 } from "@frockbot/app/skills/write";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { admitTurnV1 } from "@frockbot/app/composition/bot";
@@ -51,6 +52,7 @@ import {
   APPLETS_SKILL_SLUG_V1,
   PLUGINS_SKILL_SLUG_V1,
 } from "@frockbot/app/skills/managed";
+import { readBotPluginRosterV1 } from "@frockbot/app/plugins/worker-bot";
 import { PACKAGE_IFRAME_FOCUS_TOOL_V2 } from "@frockbot/core/contracts";
 import {
   projectClientTurnV1,
@@ -116,6 +118,43 @@ async function withheldManagedSkillSlugs(
 }
 
 /**
+ * The Skills the Plugins this Bot runs contribute (ADR 0030).
+ *
+ * A Plugin's Skill goes exactly where its tools go: the User's Composition
+ * installs the Plugin and this Bot's enable map switches it on, and only then
+ * is its Skill in the Turn's catalog. That is the same roster the Plugin
+ * worker mounts from, read here rather than re-derived.
+ *
+ * A roster that cannot be read contributes nothing, for the reason a feature
+ * gate that cannot be read is off: listing a Skill for a Plugin that may not
+ * be running would teach the model about tools the Turn does not have.
+ */
+async function enabledPluginSkillsV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): Promise<PluginSkillContributionV1[]> {
+  let roster: Awaited<ReturnType<typeof readBotPluginRosterV1>>;
+  try {
+    roster = await readBotPluginRosterV1(state, identity);
+  } catch {
+    return [];
+  }
+  return roster.members.flatMap((member) =>
+    roster.enabled.includes(member.packageId) &&
+    member.descriptor.skills &&
+    member.descriptor.skills.length > 0
+      ? [
+          {
+            pluginId: member.packageId,
+            displayName: member.descriptor.displayName,
+            skills: member.descriptor.skills,
+          },
+        ]
+      : [],
+  );
+}
+
+/**
  * The Skills seam one admitted Turn runs under, or `undefined` when the Bot's
  * Workspace file surface is unavailable.
  */
@@ -141,6 +180,7 @@ export async function createBotSkillsHost(
       runId: turn.runId,
     },
     withheldManagedSlugs: await withheldManagedSkillSlugs(state, features),
+    pluginSkills: await enabledPluginSkillsV1(state, identity),
   };
 }
 
@@ -227,6 +267,9 @@ export async function listSkills(
         state,
         userAccountFeaturesReaderV1(state, identity),
       ),
+      // And the same Plugin roster, so the popover offers exactly the Skills
+      // the Turn would load and never one from a Plugin this Bot has off.
+      pluginSkills: await enabledPluginSkillsV1(state, identity),
     },
   );
   const entries: ClientSkillCatalogEntryV1[] = [];
