@@ -8,7 +8,10 @@
 // `BotCapabilities`), and only the Turn's
 // surrounding configuration is fixture.
 import { DurableObject } from "cloudflare:workers";
-import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
+import {
+  ISOLATE_CONTRACT_VERSION,
+  decodePluginDescriptorV1,
+} from "@frockbot/core/contracts";
 import type {
   LlmProvider,
   LlmStreamEvent,
@@ -243,7 +246,10 @@ function probePackageDescriptor(hooks: string[]) {
       "schedule_surface",
       "context_keys",
     ].map((name) => ({ name, description: name, inputSchema: {} })),
-    contractVersion: 4,
+    // Deliberately one contract behind: the host serves the current version
+    // and the one below it, so this proves a Plugin built against the
+    // previous contract still mounts.
+    contractVersion: ISOLATE_CONTRACT_VERSION - 1,
     hooks,
     grants: ["ai", "http", "schedule", "memory", "workspace", "storage"],
     // The probe's `reach_network` tool reaches for a host outside this list,
@@ -297,7 +303,7 @@ const PROBE_PROVIDER_DESCRIPTOR = decodePluginDescriptorV1({
   displayName: "Probe provider",
   version: "0.0.1",
   tools: [{ name: "provider_ping", description: "Answers", inputSchema: {} }],
-  contractVersion: 5,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   hooks: ["agent/tool-exposure"],
   grants: [],
   provides: [{ name: "greeting", version: 1 }],
@@ -315,7 +321,7 @@ const PROBE_CONSUMER_DESCRIPTOR = decodePluginDescriptorV1({
       inputSchema: {},
     },
   ],
-  contractVersion: 5,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   hooks: ["agent/tool-exposure"],
   grants: [],
   consumes: [{ name: "greeting", version: 1 }],
@@ -372,7 +378,7 @@ const PROBE_TRIGGER_DESCRIPTOR = decodePluginDescriptorV1({
   tools: [
     { name: "trigger_noop", description: "Does nothing", inputSchema: {} },
   ],
-  contractVersion: 4,
+  contractVersion: ISOLATE_CONTRACT_VERSION,
   hooks: [],
   grants: [],
   // The descriptor names every trigger the module exports: a report that

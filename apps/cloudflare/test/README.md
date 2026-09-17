@@ -119,12 +119,21 @@ the page rather than the viewport:
   tests, and still fails each test on the console errors reported while it ran.
   `chat.e2e.ts` is the worked example — every test in it makes a Bot of its own
   and shares everything above that.
-- A widget that is off screen is absent from Flutter's semantics tree
-  altogether, not merely hidden, so a spec scrolls its target into view before
-  asserting on it or on the switch it holds — and scrolls back to something it
-  passed earlier before reading that again, because a sweep down a list leaves
-  the list sitting at its last row. `bot-plugins.e2e.ts` is the worked example
-  and does both.
+- A Flutter list publishes semantics only for the rows at or near the
+  viewport: a row beyond that window is not hidden, it is absent from the tree,
+  so there is no node to locate and none for `scrollIntoView` to take hold of.
+  A spec therefore walks a long list *in order*, scrolling each row into view,
+  which builds the next one — it cannot jump to the last. The scroll itself
+  lands because Flutter on the web publishes a scrollable as a real
+  overflow-scrolling element and forwards the browser's scroll back to the
+  framework, so `scrollIntoViewIfNeeded` on a node that already exists moves
+  the list. A sweep also leaves the list on its last row, so a spec scrolls
+  back to anything it passed before reading that again. `bot-plugins.e2e.ts` is
+  the worked example and does both. The other way out is to take the scroll out
+  of the path — `provisionThroughUi` sets a window tall enough that the row it
+  presses is on screen, and `enablePackage` filters the catalogue with its
+  search box — which is what to reach for when the target starts out beyond the
+  window, with no node to scroll to.
 
 `e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`,
 seeds `dist/artifacts/foundation-v1.mjs` into the local

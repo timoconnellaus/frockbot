@@ -870,14 +870,11 @@ export async function openBotSettings(page: Page): Promise<void> {
 /**
  * Turn a Package on from its Plugins row.
  *
- * The wheel is the only way down a Flutter list: it is a canvas, so there is
- * nothing for `scrollIntoView` to scroll. The loop stops on the control
- * *existing* rather than on its box reaching a coordinate — a row that is off
- * screen is not in the accessibility tree at all, so presence is the signal,
- * and once the node exists Playwright's own scroll-into-view covers the last
- * few pixels of the press. Steering by a measured gap does not converge: the
- * semantics boxes are rebuilt behind the paint, so each correction is computed
- * from a stale position and the list oscillates past the row forever.
+ * The search box, not a scroll: a Flutter list publishes semantics only for
+ * the rows at or near the viewport, so a row further down the catalogue has no
+ * node at all — nothing to locate and nothing for `scrollIntoView` to take
+ * hold of. Filtering brings the one row this wants to the top of a short list,
+ * which takes the scroll out of the path entirely.
  */
 export async function enablePackage(page: Page, title: string): Promise<void> {
   if (title === "Ollama Cloud") {
