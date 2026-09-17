@@ -57,7 +57,7 @@ These hold regardless of how the code is organised.
 
 ## Working here
 
-- Pre-commit formats staged files. Pre-push runs the fast tier (`format`, `typecheck`, `unit`) and reuses passes only for the exact commit with a clean code checkout; the slow tier runs on `main` after the merge. Run `bun run validate` in full when a change touches the runtime, the integration seams or the browser client, and `bun run validate:<category>` to record individual passes. See [`docs/local-validation.md`](docs/local-validation.md) for cache and GitHub operation.
+- Pre-commit formats staged files. Pre-push runs the fast tier (`format`, `typecheck`, `unit`) and reuses a pass whenever that category's inputs are unchanged, with a clean code checkout; the slow tier runs on `main` after the merge. Run `bun run validate` in full when a change touches the runtime, the integration seams or the browser client, and `bun run validate:<category>` to record individual passes. See [`docs/local-validation.md`](docs/local-validation.md) for cache and GitHub operation.
 - Skip no-mistakes steps that cannot find anything in the diff, with `no-mistakes axi run --skip <steps>`:
   - Documentation-only (see the exception below): skip the gate and push directly.
   - Tests only, or config with no runtime effect such as `.github/` or `.no-mistakes.yaml`: `--skip test,document`.

@@ -207,6 +207,19 @@ export async function validate(
   // Beside the receipts rather than among them: this is scratch for one run,
   // and the receipt directory is now long-lived.
   const registry = mkdtempSync(join(root, ".local-validation", "registry-"));
+  // The registry directory and the lock exist for as long as a child can still
+  // read them, so nothing may be removed while one is alive. The first failure
+  // stops the rest: live children are killed and categories that have not
+  // started do not, rather than being left to run against a deleted registry
+  // with the lock already released.
+  const live = new Set<ReturnType<typeof Bun.spawn>>();
+  let failure: unknown;
+  const stop = (error: unknown): void => {
+    // The first failure is the one worth reporting; what the kill below
+    // provokes in the others is a consequence of it, not a second cause.
+    failure ??= error;
+    for (const child of live) child.kill();
+  };
   /**
    * One category: decide whether its receipt still stands, run its commands if
    * not, and record the result. Commands within a category are independent by
@@ -218,6 +231,7 @@ export async function validate(
    * unreadable. Each command's output is printed as one block when it ends.
    */
   const runCategory = async (name: string): Promise<void> => {
+    if (failure !== undefined) return;
     if (snapshot(root) !== sha)
       throw new Error("Commit changed during validation");
     const key = createHash("sha256")
@@ -266,11 +280,12 @@ export async function validate(
           stdout: "pipe",
           stderr: "pipe",
         });
+        live.add(child);
         const [stdout, stderr, code] = await Promise.all([
           new Response(child.stdout).text(),
           new Response(child.stderr).text(),
           child.exited,
-        ]);
+        ]).finally(() => live.delete(child));
         const output = stdout + stderr;
         if (output.trim())
           console.log(
@@ -300,12 +315,16 @@ export async function validate(
     // these one after another on one core of many.
     const parallel = names.filter((name) => !SHARED_ARTIFACT.has(name));
     const serial = names.filter((name) => SHARED_ARTIFACT.has(name));
-    await Promise.all([
+    const tasks = [
       ...parallel.map((name) => runCategory(name)),
       (async () => {
         for (const name of serial) await runCategory(name);
       })(),
-    ]);
+    ];
+    // Every task is settled before the `finally` below removes the registry
+    // and the lock, so no child outlives what it reads.
+    await Promise.all(tasks.map((task) => task.catch(stop)));
+    if (failure !== undefined) throw failure;
     if (snapshot(root) !== sha)
       throw new Error("Commit changed during validation");
   } finally {

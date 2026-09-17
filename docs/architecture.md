@@ -1104,8 +1104,11 @@ Applets are off for every account until an admin turns them on. The switch is th
 
 Pre-commit formats staged files. `scripts/validate.ts` runs format, typecheck,
 unit, runtime, integration, browser and build categories before pushing. Each
-successful category records a receipt for the exact commit and toolchain in
-`.local-validation/`; a clean code checkout is required before and after checks.
+successful category records a receipt in `.local-validation/receipts/`, keyed on
+the content of that category's inputs and the toolchain rather than on the
+commit, so a commit that changes nothing a category reads reuses it; a clean
+code checkout is required before and after checks. Categories run concurrently,
+except the three that share the artifact build.
 Each run has an isolated Wrangler service registry. Pre-push fetches remote
 main before and after validation and rejects stale branches or new merge commits.
 See [local validation](local-validation.md) for commands and cache recovery.
