@@ -186,8 +186,11 @@ What is accepted back matters more than what is asked for, because the prompt
 is a request and the guards are the property. A tidied transcript is refused —
 and the raw text stands — when it is empty, unchanged, meaningfully longer
 (added information) or shorter (summarised), begins like a model talking to
-us, had a question that is no longer a question, or dropped every negation or
-every uncertainty the raw text carried. The refusal is named in the log line,
+us, arrives inside a code fence or a pair of quotation marks the transcript
+does not itself carry, had a question that is no longer a question, or dropped
+every negation or every uncertainty the raw text carried. Nothing is
+unwrapped or rewritten on the way in: every branch either accepts the model's
+text as it stands or keeps the person's own. The refusal is named in the log line,
 so "tidying is off" and "tidying keeps eating people's negations" do not look
 the same in production.
 

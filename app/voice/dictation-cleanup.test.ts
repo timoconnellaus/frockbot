@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   cleanupMaxTokensV1,
-  stripWrappingV1,
   voiceDictationCleanupBodyV1,
   voiceDictationCleanupResultV1,
   voiceDictationCleanupWorthwhileV1,
@@ -152,6 +151,16 @@ describe("refusing a tidied transcript", () => {
     expect(result).toEqual({ status: "kept", reason: "grew" });
   });
 
+  // The slack has to be small at the short end too: a dictated sentence is
+  // where a destination and a time nobody said fit most easily.
+  test("keeps the raw text when a short transcript gained a detail", () => {
+    const result = voiceDictationCleanupResultV1(
+      "Check the Friday flights",
+      "Check the Friday flights to Melbourne at 4:35pm.",
+    );
+    expect(result).toEqual({ status: "kept", reason: "grew" });
+  });
+
   test("still tidies a question that stays a question", () => {
     const result = voiceDictationCleanupResultV1(
       "um what time does the uh the Friday flight get in?",
@@ -202,21 +211,35 @@ describe("refusing a tidied transcript", () => {
   });
 });
 
-describe("unwrapping what the model returned", () => {
-  test("takes the text out of a code fence", () => {
-    expect(stripWrappingV1("```\nCheck the flights.\n```")).toBe(
-      "Check the flights.",
+describe("an answer the model wrapped instead of handing back", () => {
+  const raw = "um so check the Friday flights before the weekend";
+
+  test("keeps the raw text when the answer came in a code fence", () => {
+    expect(
+      voiceDictationCleanupResultV1(
+        raw,
+        "```\nCheck the Friday flights before the weekend.\n```",
+      ),
+    ).toEqual({ status: "kept", reason: "meta" });
+  });
+
+  test("keeps the raw text when the answer came in quotation marks", () => {
+    expect(
+      voiceDictationCleanupResultV1(
+        raw,
+        '"Check the Friday flights before the weekend."',
+      ),
+    ).toEqual({ status: "kept", reason: "meta" });
+  });
+
+  // Quoting is only a formatting mistake when the person did not quote
+  // anything themselves.
+  test("accepts quotation marks that are part of what was said", () => {
+    const quoted = '"Book it," she said, um, "before Friday, please."';
+    const result = voiceDictationCleanupResultV1(
+      quoted,
+      '"Book it," she said, "before Friday, please."',
     );
-  });
-
-  test("takes off a wrapping pair of quotes", () => {
-    expect(stripWrappingV1('"Check the flights."')).toBe("Check the flights.");
-  });
-
-  // Only an unambiguous wrapping pair comes off: a transcript that quotes
-  // somebody keeps its quotation marks.
-  test("leaves quotation marks that are part of what was said", () => {
-    const said = '"Book it," she said, "before Friday."';
-    expect(stripWrappingV1(said)).toBe(said);
+    expect(result.status).toBe("cleaned");
   });
 });

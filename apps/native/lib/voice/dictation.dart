@@ -87,6 +87,19 @@ class DictationDraftRange {
   /// Whether the person has edited inside the transcript, which stops it.
   bool get fenced => _fenced;
 
+  /// Whether the span this range owns can still be found in [current].
+  ///
+  /// Read-only on purpose: it is asked while the composer is being built, and
+  /// a predicate that fenced as a side effect of being looked at would be a
+  /// worse bug than the one it answers. The lazy fence in [next] is enough for
+  /// writing; this is for deciding whether a write would land at all.
+  bool holds(String current) {
+    if (_fenced) return false;
+    if (current == _compose(_transcript)) return true;
+    if (_transcript.isEmpty) return true;
+    return current.contains(_transcript);
+  }
+
   /// The draft [transcript] makes of [current], or null once fenced.
   String? next(String current, String transcript) {
     if (_fenced) return null;
@@ -201,9 +214,16 @@ class DictationController extends ChangeNotifier {
   String? get notice => _notice;
 
   /// Whether the draft currently holds a tidied transcript that [revertCleanup]
-  /// can put back. False once the person has edited inside the span, because
-  /// from then on the range is fenced and nothing may be written to it.
-  bool get cleaned => _rawTranscript != null && !_range.fenced;
+  /// can put back. Asked of the draft as it stands rather than of the fence,
+  /// which only closes on the next write: once the capture is over there is no
+  /// next write, so an edit inside the tidied span — or a Send that empties the
+  /// composer — would otherwise leave the offer drawn over nothing.
+  bool get cleaned {
+    final context = _context;
+    if (_rawTranscript == null || context == null || _disposed) return false;
+    return _range.holds(readDraft(context));
+  }
+
   Object? get context => _context;
   double get micLevel => level.value;
   bool get active => _state.active;
@@ -388,11 +408,16 @@ class DictationController extends ChangeNotifier {
 
   /// Puts the raw transcript back, for a person who preferred their own words.
   ///
-  /// Available until they edit inside the span, at which point the range is
-  /// fenced and this does nothing rather than overwriting what they typed.
+  /// Available until they edit inside the span, at which point the draft no
+  /// longer holds it and this does nothing rather than overwriting what they
+  /// typed. The raw transcript is only given up once it has actually been
+  /// written back, so a refused revert leaves the person exactly where they
+  /// were.
   void revertCleanup() {
     final raw = _rawTranscript;
-    if (raw == null || _disposed || _range.fenced) return;
+    final context = _context;
+    if (raw == null || context == null || _disposed) return;
+    if (!_range.holds(readDraft(context))) return;
     _rawTranscript = null;
     _segments
       ..clear()

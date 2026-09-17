@@ -233,7 +233,7 @@ export function voiceDictationCleanupResultV1(
   const source = raw.trim();
   if (!source) return { status: "kept", reason: "empty-input" };
 
-  const text = stripWrappingV1(answer).trim();
+  const text = answer.trim();
   if (!text) return { status: "kept", reason: "empty-output" };
   if (text === source) return { status: "kept", reason: "unchanged" };
 
@@ -241,12 +241,16 @@ export function voiceDictationCleanupResultV1(
   if (META_PREFIXES_V1.some((prefix) => lower.startsWith(prefix))) {
     return { status: "kept", reason: "meta" };
   }
+  if (wrappedV1(text, source)) return { status: "kept", reason: "meta" };
 
   // Tidying removes; it does not add. A little growth is legitimate —
   // punctuation, capitalisation and the newlines of a list — so the bound is
   // generous, but prose that arrives longer than it left was written, not
-  // tidied.
-  if (text.length > source.length * 1.15 + 32) {
+  // tidied. The slack scales with the transcript rather than being a flat
+  // allowance: a constant that is reasonable for a paragraph is most of the
+  // budget for a single dictated sentence, and a sentence is exactly where an
+  // invented destination or time would fit inside it.
+  if (text.length > source.length * 1.15 + Math.min(32, source.length * 0.25)) {
     return { status: "kept", reason: "grew" };
   }
   // The floor catches summarising. A transcript that really was mostly "um"
@@ -301,18 +305,21 @@ function hasWordV1(haystack: string, word: string): boolean {
 }
 
 /**
- * Removes a code fence or a pair of quotation marks the model wrapped the
- * text in.
+ * Whether the model fenced or quoted its answer instead of handing back the
+ * tidied text.
  *
- * This is unwrapping, not rewriting: a transcript that genuinely begins and
- * ends with a quotation mark keeps it, because the pair is only stripped when
- * nothing inside would be left unbalanced.
+ * Both are the same mistake as a preamble: the model is formatting a reply to
+ * us rather than tidying, which is what `meta` already names. Nothing is
+ * unwrapped, because unwrapping would rehabilitate a malformed answer and
+ * change the model's text before any guard compared it with the source — the
+ * one thing this file otherwise never does.
+ *
+ * A pair of quotation marks only counts when the transcript itself carries
+ * none. That refuses a tidied line the person genuinely said in quotes, which
+ * is the right way round: they keep their own words.
  */
-export function stripWrappingV1(answer: string): string {
-  let text = answer.trim();
-  const fence = /^```[a-z]*\n([\s\S]*?)\n?```$/i.exec(text);
-  if (fence) text = fence[1]!.trim();
+function wrappedV1(text: string, source: string): boolean {
+  if (text.startsWith("```")) return true;
   const quoted = /^"([\s\S]*)"$/.exec(text);
-  if (quoted && !quoted[1]!.includes('"')) text = quoted[1]!.trim();
-  return text;
+  return quoted !== null && !quoted[1]!.includes('"') && !source.includes('"');
 }

@@ -338,6 +338,24 @@ void main() {
   // is about the same question asked from different directions: can the
   // tidied text ever cost the person words they already have?
   group('the tidy-up after a capture', () {
+    /// A finished capture whose span holds the tidied text.
+    Future<Harness> tidied() async {
+      final harness = Harness();
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      harness.say('segment', {'text': 'um so check the Friday flights'});
+      await settle();
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('cleaning');
+      harness.say('cleaned', {'text': 'Check the Friday flights.'});
+      harness.say('final');
+      await settle();
+      expect(harness.drafts.draftFor('bot-a'), 'Check the Friday flights.');
+      return harness;
+    }
+
     test('replaces the capture\'s own span and leaves the rest alone', () async {
       final harness = Harness();
       harness.drafts.setDraft('bot-a', 'typed first');
@@ -453,6 +471,49 @@ void main() {
       await settle();
 
       expect(harness.drafts.draftFor('bot-a'), '');
+      harness.controller.dispose();
+    });
+
+    // The offer has to be withdrawn by the draft itself. Once the capture is
+    // over nothing writes again, so a fence that only closes on the next write
+    // would leave "Use what I said" drawn over a span that is no longer there.
+    test('an edit inside the tidied span withdraws the revert offer', () async {
+      final harness = await tidied();
+      expect(harness.controller.cleaned, isTrue);
+
+      harness.drafts.setDraft('bot-a', 'Check the SATURDAY flights.');
+      expect(harness.controller.cleaned, isFalse);
+
+      harness.controller.revertCleanup();
+      expect(harness.drafts.draftFor('bot-a'), 'Check the SATURDAY flights.');
+      harness.controller.dispose();
+    });
+
+    test('sending the draft withdraws the revert offer', () async {
+      final harness = await tidied();
+      harness.drafts.setDraft('bot-a', '');
+      expect(harness.controller.cleaned, isFalse);
+
+      harness.controller.revertCleanup();
+      expect(harness.drafts.draftFor('bot-a'), '');
+      harness.controller.dispose();
+    });
+
+    // Typing after the tidied text is not editing it: the span is still there,
+    // so the offer stands and revert swaps only what the capture owns.
+    test('typing after the tidied text keeps the revert offer', () async {
+      final harness = await tidied();
+      harness.drafts.setDraft(
+        'bot-a',
+        'Check the Friday flights. and the hotel',
+      );
+      expect(harness.controller.cleaned, isTrue);
+
+      harness.controller.revertCleanup();
+      expect(
+        harness.drafts.draftFor('bot-a'),
+        'um so check the Friday flights and the hotel',
+      );
       harness.controller.dispose();
     });
 
