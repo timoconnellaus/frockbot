@@ -129,8 +129,10 @@ resting on a row a long list may never have published:
   therefore takes the scroll out of the path and brings what it asserts on into
   the window instead: `provisionThroughUi` and `bot-plugins.e2e.ts` set a window
   tall enough to hold every row they read, saying in a comment what the height
-  is counted from, and `enablePackage` filters the catalogue with its search box
-  so the row it presses is at the top of a short list. The rule is about
+  stands on — the cards `bot-plugins.e2e.ts` counts, the rows
+  `provisionThroughUi` is known to clear — and `enablePackage` filters the
+  catalogue with its search box so the row it presses is at the top of a short
+  list. The rule is about
   reaching a node that is not in the tree, not about scrolling as such: when
   what you need is already there, scrolling to it is fine, and two specs do it
   — `profile.e2e.ts` asserts the `Africa / Abidjan` entry visible and then

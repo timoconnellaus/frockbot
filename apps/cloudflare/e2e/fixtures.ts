@@ -1067,7 +1067,12 @@ export async function provisionThroughUi(
   // back, so a row can be absent for a dozen consecutive scroll steps while
   // its neighbours are present throughout. Nothing about turning a Package on
   // is a claim about the size of the window, so the size a spec means is the
-  // one it set, and this is not it.
+  // one it set, and this is not it. The height is empirical rather than
+  // counted off a row: 1800px is what this path is known to clear today —
+  // the catalogue row `enablePackage` toggles and the rows the provider and
+  // default-model steps press, each in the tree when it is pressed. A step
+  // that adds rows to any of those lists means measuring again here, not
+  // assuming there is headroom left.
   const viewport = page.viewportSize();
   await page.setViewportSize({ width: 1280, height: 1800 });
   await openApplication(page, options.userId);
