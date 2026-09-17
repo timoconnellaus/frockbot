@@ -19,6 +19,7 @@ import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
 import '../applets/chat_card.dart';
+import '../cards/approvals.dart';
 import '../cards/chat_card.dart';
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
@@ -26,11 +27,11 @@ import '../client/transport.dart';
 import '../flock/avatar.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
+import 'approvals.dart';
 import 'composer.dart';
 import 'lifecycle.dart';
 import 'run_view.dart';
 import 'semantics.dart';
-import 'send_payload.dart';
 import 'skill_menu.dart';
 import 'starters.dart';
 import 'transcript.dart';
@@ -38,7 +39,6 @@ import 'transcript.dart';
 class ChatPane extends StatefulWidget {
   final ChatController controller;
   final Future<void> Function() onReconnect;
-  final ApprovalsController? approvals;
   final SkillMenuController? skills;
 
   /// Opens the run view. The shell decides whether that is the right panel or
@@ -53,7 +53,6 @@ class ChatPane extends StatefulWidget {
   final String? Function(String botId)? backgroundOf;
   final String? Function(String botId)? primaryOf;
   final String? Function(String botId)? nameOf;
-  final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
@@ -95,14 +94,12 @@ class ChatPane extends StatefulWidget {
     super.key,
     required this.controller,
     required this.onReconnect,
-    this.approvals,
     this.skills,
     this.onOpenRun,
     this.onOpenExchange,
     this.backgroundOf,
     this.primaryOf,
     this.nameOf,
-    this.onOpenSettings,
     this.onMessageActions,
     this.unreadFromMessageId,
     this.onReadLatest,
@@ -178,11 +175,6 @@ class _ChatPaneState extends State<ChatPane> {
     super.initState();
     editor.text = controller.draft;
     controller.addListener(_update);
-    widget.approvals?.addListener(_repaint);
-  }
-
-  void _repaint() {
-    if (mounted) setState(() {});
   }
 
   /// Mirrors the controller's draft into the composer. A live composing range
@@ -354,7 +346,6 @@ class _ChatPaneState extends State<ChatPane> {
             pendingText: c.visiblePendingText,
             loading: c.loading,
             hasEarlier: c.before != null,
-            approvals: widget.approvals,
             storageKey: 'history-${c.botId}',
             bottomSpace: c.stoppable
                 ? null
@@ -375,7 +366,6 @@ class _ChatPaneState extends State<ChatPane> {
             nameOf: widget.nameOf,
             onRetryTurn: c.canSend ? _retry : null,
             onOpenBilling: widget.onOpenBilling,
-            onOpenSettings: widget.onOpenSettings,
             onMessageActions: widget.onMessageActions,
             unreadFromMessageId: widget.unreadFromMessageId,
             onReadLatest: widget.onReadLatest,
@@ -497,7 +487,6 @@ class _ChatPaneState extends State<ChatPane> {
   @override
   void dispose() {
     controller.removeListener(_update);
-    widget.approvals?.removeListener(_repaint);
     editor.dispose();
     focus.dispose();
     gaze.dispose();
@@ -519,7 +508,6 @@ class ConversationView extends StatefulWidget {
   final String? Function(String botId)? backgroundOf;
   final String? Function(String botId)? primaryOf;
   final String? Function(String botId)? nameOf;
-  final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
@@ -563,7 +551,6 @@ class ConversationView extends StatefulWidget {
     this.backgroundOf,
     this.primaryOf,
     this.nameOf,
-    this.onOpenSettings,
     this.onMessageActions,
     this.unreadFromMessageId,
     this.onReadLatest,
@@ -674,20 +661,23 @@ class _ConversationViewState extends State<ConversationView>
       api: widget.api,
       botId: widget.botId,
       invalidations: session.controller.invalidations,
-      child: ChatPane(
+      // What `ApprovalActions` reads to say what was decided. The decision is
+      // the kernel's record, not the Card's, so the component that draws it
+      // reads the Bot's own approvals projection (ADR 0030 step 7).
+      child: CardApprovalsScope(
+        approvals: approvals,
+        child: ChatPane(
       background: widget.background,
       primary: widget.primary,
       starters: starters,
       controller: session.controller,
       onReconnect: session.channel.connect,
-      approvals: approvals,
       skills: skills,
       onOpenRun: widget.onOpenRun,
       onOpenExchange: widget.onOpenExchange,
       backgroundOf: widget.backgroundOf,
       primaryOf: widget.primaryOf,
       nameOf: widget.nameOf,
-      onOpenSettings: widget.onOpenSettings,
       onMessageActions: widget.onMessageActions,
       unreadFromMessageId: widget.unreadFromMessageId,
       onReadLatest: widget.onReadLatest,
@@ -702,6 +692,7 @@ class _ConversationViewState extends State<ConversationView>
       canRevertDictation: widget.canRevertDictation,
       onRevertDictation: widget.onRevertDictation,
       dictationLevel: widget.dictationLevel,
+        ),
       ),
     ),
   );

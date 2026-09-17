@@ -1,0 +1,28 @@
+{
+  "id": "attachments",
+  "displayName": "Attachment cards",
+  "version": "1",
+  "contractVersion": 5,
+  "tools": [],
+  "hooks": [],
+  "grants": [],
+  "cards": [
+    {
+      "id": "file",
+      "displayName": "Attachment",
+      "description": "Show a file the Bot is handing the person, with a way to open it.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "minLength": 1, "maxLength": 2048 },
+          "name": { "type": "string", "maxLength": 256 },
+          "mediaType": { "type": "string", "maxLength": 128 }
+        },
+        "required": ["url"],
+        "additionalProperties": false
+      },
+      "actions": []
+    }
+  ],
+  "contextKeys": ["user", "bot", "session"]
+}

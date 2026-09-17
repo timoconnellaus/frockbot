@@ -727,10 +727,12 @@ export interface SkillCatalogCapsV1 {
 export const SKILL_CATALOG_CAPS_V1: SkillCatalogCapsV1 = {
   bot: 40,
   user: 40,
-  // Seven managed Skills ship today — `a2ui` is the seventh (ADR 0030) — and
-  // the five first-party cards become locked Plugins that may each bring one
-  // of their own. Twelve leaves room for all five without the cap silently
-  // dropping the newest of them; past that, a managed Skill is being added
+  // Seven managed Skills ship today — `a2ui` is the seventh (ADR 0030). The
+  // five first-party cards are locked Plugins now (step 7) and brought none:
+  // `send_to_user` already tells the Bot what an approval, a question, an
+  // attachment, a credential request and an agent card are, and a Skill each
+  // would be five entries in every prompt repeating it. Twelve stays, as the
+  // headroom a managed Skill is added into; past that, one is being added
   // without anyone deciding it should be.
   managed: 12,
   plugin: 16,

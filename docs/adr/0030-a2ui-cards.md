@@ -403,6 +403,101 @@ serve`), the platform model over the remote Workers AI binding, asked
 
 7. The five first-party cards as locked Plugins; the old members mapped, then
    removed a release later.
+
+   > Built 2026-09-18, step 7. Five locked seeded Plugins, one card each:
+   > `approvals`/`decision` for `approval`, `questions`/`ask` for `widget`,
+   > `attachments`/`file` for `attachment`, `credentials`/`request` for
+   > `secret-request`, `agents`/`note` for `agent-card`. Each declares no tool
+   > of its own, holds no grant, and ships no Skill — `send_to_user` already
+   > tells the Bot what these five are, and a Skill each would be five entries
+   > in every prompt repeating it, so `scripts/build-seeded-plugins.ts` makes
+   > `skill.md` optional and `SKILL_CATALOG_CAPS_V1.managed` stays at 12 as
+   > headroom rather than as a count.
+   >
+   > **The send is still the kernel's; only its face moved.** The payload is
+   > recorded on the Turn's log exactly as before, because that log is where
+   > `approvalTerminalRecordsV1` mints the Approval, where a Machine command
+   > and a Plugin intent find the id they are keyed by, where `delivery.ts`
+   > decides the Turn is over and where a notification finds its words. The
+   > Card is drawn beside it. So an `approval` maps with
+   > `PluginCardSendV1.approvalIds` — the kernel's own list — and
+   > `bindCardApprovalsV1` binds the surface's `ApprovalActions` to the
+   > `approvalId` the Bot chose rather than minting a second decision over one
+   > question; a draw that carries kernel ids asks for no Approval of its own
+   > and records no binding, because the decision is already on the log. Every
+   > other draw mints, exactly as a User's Plugin does.
+   >
+   > **The seam.** `app/shell/first-party-cards.ts` maps a payload to a draw
+   > and decides nothing else; `AgentRuntimeV1.firstPartyCards` is how it is
+   > reached — set by the Plugin host when it mounts a generation
+   > (`createShellCompositionHost`), read by the Shell's send, the way
+   > `credentials` is set by the feature that owns it. Four places record one
+   > of the five and all four call it: `send_to_user`, the Plugin-authoring
+   > ask, the Machine command ask and the Bot-template card. The draw itself
+   > is `ActivePluginWorker.drawCard`, which is the card tool's own body
+   > extracted — same schema check, same minted surface, same `renderCard`,
+   > same `sendCard` — so first-party is not a shorter path by a single line.
+   >
+   > One thing the live Turn found: the card send has to carry its **own
+   > occurrence**. `recordSendToUserV1` dedupes a send by its occurrence id, so
+   > a card recorded under the tool call's effect id is the _same send_ as the
+   > payload and the second of the two is dropped in silence — the approval
+   > landed and no card ever folded. The draw now runs under
+   > `<effectId>:card`, derived rather than minted so a replayed call
+   > recomputes the same occurrence, the same surface and the same ids.
+   >
+   > **What the client lost.** `apps/native/lib/shell/send_payload.dart` drew
+   > each of the five with a widget of its own; all five are gone, along with
+   > `_Card`, `_Widget`, `_Attachment`, `_Approval` and `_SecretRequest`, and
+   > the `approvals` and `onOpenSettings` parameter chains behind them
+   > (`transcript.dart`, `chat_pane.dart`, `app_shell.dart`). They draw
+   > _nothing_ now rather than "this client cannot display that message", and
+   > `transcript.dart` skips them before it builds a bubble, so a send whose
+   > face is a Card leaves no empty one behind. That is the duplication step 5
+   > reported, removed: the screenshots show one card per send.
+   >
+   > Two things moved rather than died. `ApprovalsController` is now
+   > `apps/native/lib/shell/approvals.dart` and reaches the catalog through
+   > `CardApprovalsScope`, because an Approval settles without its surface
+   > moving — somebody answers on another device, or the alarm expires it — so
+   > `ApprovalActions` draws "You approved this." from the Bot's own approvals
+   > projection rather than leaving a live-looking button over a decision that
+   > is already recorded, and re-reads it after a press the kernel routed to an
+   > Approval. And `ShellIds.approve`/`deny` moved onto the catalog component's
+   > two buttons, so the accessibility tree and `plugins-publish.e2e.ts` name
+   > the same controls they always did.
+   >
+   > **Three deviations, taken deliberately.** A draw that could not happen
+   > writes _nothing_: no plain line beside the send. A `send_to_user` text
+   > payload is conversation and goes into the Bot's own history, so a fallback
+   > line would come back to the model as a second message saying what it just
+   > asked — two records of one send, which is the thing this step removes.
+   > Every environment binds the Plugin worker loader, and a locked Plugin that
+   > cannot mount is an outage the decision above already accepts. Second, the
+   > credential card has no "Open Settings" button: no catalog component opens
+   > an in-app route — a card's only link handling is the host's external
+   > opener, which admits `https` and nothing else — so the card names the door
+   > in words, and a host-drawn settings component is the follow-up rather than
+   > a button that does nothing. Third, the question card _answers_: the old
+   > bubble drew its options as dead pills and left the person to type one
+   > back, and `ChoiceChips` raising a conversation action is what the decision
+   > above already calls "what a `widget` answer is today". A one-option
+   > question is a `Button` rather than a chip row, because `ChoiceChips` holds
+   > two or more.
+   >
+   > **The live Turn.** Local `development` stack (`bun scripts/native-dev.ts
+serve`), the platform model over the remote Workers AI binding. Asked
+   > for an approval to delete the staging bucket, then for a report as an
+   > attachment. Both folded at revision 1 with no refusal —
+   > `approvals_decision.…` as `Column`, `CardHeader`, `Markdown`,
+   > `ApprovalActions`, and `attachments_file.…` as `Column`, `FileAttachment`
+   > — and the transcript shows one bubble per send at 412 and 1440
+   > (`docs/screenshots/cards/first-party-phone.png`,
+   > `first-party-desktop.png`). The Plugins panel lists all five as
+   > first-party and Always on with no switch, which `bot-plugins.e2e.ts` now
+   > asserts; that spec also scrolls a card into the tree before reading it,
+   > because the panel outgrew one screen when they joined it.
+
 8. The rest of the Frock catalog, family by family, each with its reference.
 
    > Built 2026-09-18, step 8. Eighteen components in five families, on top of

@@ -321,7 +321,15 @@ export function createShellCompositionHost(
                     reason: `surface "${send.surfaceId}" has a decision still pending on the values it was drawn with; draw a new card rather than changing what that decision covers`,
                   };
                 }
-                const reused = live?.approvalIds ?? [];
+                // The kernel's own ids, when the kernel is the one drawing.
+                // A locked first-party card maps an `approval` send whose
+                // record is already on the log under the id the Bot chose, so
+                // the Card is bound to *that* decision rather than asked to
+                // mint a second one over the same question. Every other draw
+                // passes nothing here and the seam mints, which is what stops
+                // a Plugin naming a decision it was not given.
+                const kernelIds = send.approvalIds;
+                const reused = kernelIds ?? live?.approvalIds ?? [];
                 // The unguessable half of this card's Approval ids, from the
                 // Bot's own secret, the Session and the effect that records the
                 // send: the same effect of the same Session recomputes it, and
@@ -340,6 +348,15 @@ export function createShellCompositionHost(
                     reused[index] ??
                     (seed === undefined ? "" : cardApprovalIdV1(seed, index)),
                 );
+                // A kernel-drawn card whose surface asks for more decisions
+                // than the kernel recorded would leave a control bound to
+                // nothing, so it is refused rather than drawn half-live.
+                if (kernelIds && bound.approvalIds.some((id) => id === "")) {
+                  return {
+                    status: "refused" as const,
+                    reason: `plugin "${send.pluginId}" drew more decisions on card "${send.cardId}" than the kernel recorded for it`,
+                  };
+                }
                 // A decision the person already gave, on this surface, that
                 // nothing has spent yet. A *different* effect redrawing over
                 // it would mint a new id, ask for the decision a second time
@@ -378,7 +395,7 @@ export function createShellCompositionHost(
                 // whatever a later call claims it does, so the draw is refused
                 // rather than recorded.
                 const decision = send.decision;
-                if (bound.approvalIds.length > 0) {
+                if (bound.approvalIds.length > 0 && kernelIds === undefined) {
                   const unbound =
                     digest === undefined
                       ? "without declaring the values it covers"
@@ -394,8 +411,10 @@ export function createShellCompositionHost(
                     };
                   }
                 }
+                // Nothing to ask for on a kernel-drawn card: the decision
+                // is already on the log, under the words the send carried.
                 const cardApprovals =
-                  decision === undefined
+                  decision === undefined || kernelIds !== undefined
                     ? []
                     : bound.approvalIds.map((approvalId) => ({
                         approvalId,
@@ -545,7 +564,38 @@ export function createShellCompositionHost(
                 );
               }
             }
-            active.push(await prepared.commit());
+            const worker = await prepared.commit();
+            active.push(worker);
+            // How the Shell's send seam reaches the locked first-party cards
+            // (ADR 0030 step 7). The host has the Plugin worker and the Shell
+            // has the send; neither may import the other, so the draw is put
+            // on the runtime here, exactly as the credential lease is.
+            runtime.services.firstPartyCards = {
+              draw: (request, context) =>
+                worker
+                  .drawCard(
+                    request.pluginId,
+                    request.cardId,
+                    {
+                      data: request.data,
+                      ...(request.approvalIds === undefined
+                        ? {}
+                        : { approvalIds: request.approvalIds }),
+                    },
+                    context,
+                  )
+                  .then((outcome) =>
+                    outcome.status === "drawn"
+                      ? {
+                          status: "drawn" as const,
+                          surfaceId: outcome.surfaceId,
+                        }
+                      : {
+                          status: "unavailable" as const,
+                          reason: outcome.reason,
+                        },
+                  ),
+            };
           } catch (error) {
             failures.push(memberFailure(error));
           }

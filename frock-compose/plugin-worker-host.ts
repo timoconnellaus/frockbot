@@ -303,6 +303,20 @@ export interface PluginCardSendV1 {
   decision?: PluginCardDecisionV1;
   /** The A2UI messages the Plugin drew, still undecoded. */
   messages: Record<string, unknown>[];
+  /**
+   * The Approvals the kernel has *already* recorded for this draw, in the
+   * order the surface's `ApprovalActions` are to be bound to them (ADR 0030
+   * step 7).
+   *
+   * It is present only on a draw the kernel itself asked for: the locked
+   * first-party cards, where the decision is the one the old `approval`
+   * payload put on the log under the id the Bot chose. Binding to it rather
+   * than minting keeps an existing Bot's own `approvalId` — the id its
+   * Machine command, its Plugin intent and its next Turn's durable input are
+   * all keyed by — the id the card decides. Absent everywhere else, where the
+   * seam mints, which is what stops a Plugin naming a decision.
+   */
+  approvalIds?: readonly string[];
   context: ToolExecutionContext;
 }
 
@@ -313,6 +327,28 @@ export interface PluginCardSendV1 {
  */
 export type PluginCardSendOutcomeV1 =
   { status: "sent"; approvals: number } | { status: "refused"; reason: string };
+
+/** What one caller asks a card to be drawn with. */
+export interface PluginCardDrawRequestV1 {
+  data: Record<string, unknown>;
+  /** A surface this card already drew, to update it in place. */
+  surfaceId?: string;
+  /** See `PluginCardSendV1.approvalIds`: the kernel's own, never a Plugin's. */
+  approvalIds?: readonly string[];
+}
+
+/**
+ * How one draw ended, in the four kinds the caller has to tell apart: it
+ * landed; the Plugin refused it in as many words; the Plugin broke; or the
+ * seam would not record it. The card's tool turns each into a sentence for
+ * the model, and the Shell's first-party seam turns each into the fallback
+ * line the person reads.
+ */
+export type PluginCardDrawOutcomeV1 =
+  | { status: "drawn"; surfaceId: string; approvals: number }
+  | { status: "dropped"; reason: string }
+  | { status: "failed"; reason: string }
+  | { status: "refused"; reason: string };
 
 export const BOT_ISOLATE_DEFAULT_LIMITS: BotIsolateLimits = {
   cpuMs: 5_000,
@@ -365,6 +401,21 @@ export interface ActivePluginWorker {
   cardAction(
     invocation: PluginWorkerCardActionInvocationV1,
   ): Promise<PluginWorkerCardActionResultV1>;
+  /**
+   * Draws one of a Plugin's declared cards outside the Bot's tool registry.
+   *
+   * The Shell's send seam is the caller: the five first-party payload members
+   * are locked Plugins now, and an old `send_to_user` member is mapped onto
+   * one of them here (ADR 0030 step 7). It is the very same draw the card's
+   * tool makes — the same schema check, the same minted surface, the same
+   * `renderCard`, the same send — so first-party is not a shorter path.
+   */
+  drawCard(
+    pluginId: string,
+    cardId: string,
+    request: PluginCardDrawRequestV1,
+    context: ToolExecutionContext,
+  ): Promise<PluginCardDrawOutcomeV1>;
   /**
    * Runs one declared tool outside any Turn: a control on a Plugin's settings
    * section is the User's own click, so the call is made here rather than
@@ -628,6 +679,11 @@ export class PluginWorkerHost {
                 schemaVersion: 1,
                 status: "drop",
                 reason: `plugin "${invocation.pluginId}" did not mount in this generation`,
+              }),
+            drawCard: (pluginId: string) =>
+              Promise.resolve<PluginCardDrawOutcomeV1>({
+                status: "refused",
+                reason: `plugin "${pluginId}" did not mount in this generation`,
               }),
             executeTool: (invocation: PluginWorkerToolInvocationV1) =>
               Promise.resolve<IsolateToolResultV1>({
@@ -910,6 +966,35 @@ export class PluginWorkerHost {
             } catch (error) {
               return drop(errorMessage(error));
             }
+          },
+          drawCard: async (
+            pluginId: string,
+            cardId: string,
+            request: PluginCardDrawRequestV1,
+            context: ToolExecutionContext,
+          ): Promise<PluginCardDrawOutcomeV1> => {
+            if (disposed) {
+              return {
+                status: "refused",
+                reason:
+                  "the plugin worker for this generation is no longer mounted",
+              };
+            }
+            // Off the Bot's own running set, not the mounted one: a Plugin
+            // this Bot does not run draws nothing here either, and a card it
+            // does not declare is not a card.
+            const card = running
+              .find((candidate) => candidate.member.packageId === pluginId)
+              ?.member.descriptor.cards?.find(
+                (candidate) => candidate.id === cardId,
+              );
+            if (!card) {
+              return {
+                status: "refused",
+                reason: `plugin "${pluginId}" draws no card "${cardId}" for this Bot`,
+              };
+            }
+            return this.drawCard(pluginId, entrypoint, card, request, context);
           },
           executeTool: async (
             invocation: PluginWorkerToolInvocationV1,
@@ -1351,6 +1436,132 @@ export class PluginWorkerHost {
    * and records the send on the Turn's log. The Plugin never names a surface,
    * which is what stops one Plugin's card drawing over another's.
    */
+  /**
+   * One draw of one card, whoever asked for it.
+   *
+   * The card's tool is one caller; the Shell's own send seam is the other,
+   * because the five first-party cards are locked Plugins and an old
+   * `send_to_user` member is mapped onto one of them (ADR 0030 step 7). Both
+   * go through this: the values are validated against the card's declared
+   * schema, the surface id is the kernel's, the Plugin draws, and the send is
+   * recorded by the app. Nothing about the first-party path is shorter than
+   * the path a customisation takes.
+   */
+  private async drawCard(
+    pluginId: string,
+    entrypoint: PluginWorkerEntrypoint,
+    card: PluginCardV1,
+    request: PluginCardDrawRequestV1,
+    context: ToolExecutionContext,
+  ): Promise<PluginCardDrawOutcomeV1> {
+    const sendCard = this.options.sendCard;
+    if (!sendCard) {
+      return {
+        status: "refused",
+        reason: "this host records no sends, so no card can be drawn",
+      };
+    }
+    const deadlineMs = Math.min(
+      this.options.deadlineMs ?? BOT_ISOLATE_DEFAULT_DEADLINE_MS,
+      ISOLATE_MAX_DEADLINE_MS,
+    );
+    const options = this.options;
+    try {
+      validateAgainstJsonSchemaV1(request.data, card.dataSchema, "data");
+    } catch (error) {
+      return { status: "refused", reason: errorMessage(error) };
+    }
+    // Only a surface this card itself minted may be named again. Without
+    // this the model could hand over another Plugin's surface id and draw
+    // over its card, because a card record carries no owner of its own.
+    if (
+      request.surfaceId !== undefined &&
+      (!CARD_SURFACE_ID_V1.test(request.surfaceId) ||
+        !request.surfaceId.startsWith(cardSurfacePrefixV1(pluginId, card.id)))
+    ) {
+      return {
+        status: "refused",
+        reason: "surfaceId is not a surface this card drew",
+      };
+    }
+    const surfaceId =
+      request.surfaceId ??
+      (await mintedCardSurfaceIdV1(
+        pluginId,
+        card.id,
+        context.sessionId,
+        context.effectId,
+      ));
+    const invocation: PluginWorkerRenderCardInvocationV1 = {
+      schemaVersion: 1,
+      pluginId,
+      cardId: card.id,
+      surfaceId,
+      data: request.data,
+      botId: options.botId,
+      sessionId: context.sessionId,
+      runId: options.runId,
+      turnId: options.turnId,
+      generationId: context.compositionGenerationId,
+      deadlineMs,
+    };
+    // A draw that threw, overran, reached no worker or answered
+    // undecodably is charged to the Plugin exactly as a press is; the
+    // charge is beside the tool error, never instead of it.
+    const chargeDraw = async (message: string): Promise<void> => {
+      try {
+        await options.recordCardFailure?.({
+          pluginId,
+          cardId: card.id,
+          message,
+        });
+      } catch {
+        // Recording a failure must not be what fails the draw.
+      }
+    };
+    let rendered;
+    try {
+      rendered = decodePluginWorkerRenderCardResultV1(
+        await raceDeadline(
+          () => entrypoint.renderCard(invocation),
+          deadlineMs,
+          context.signal,
+        ),
+        `plugin "${pluginId}" render card result`,
+      );
+    } catch (error) {
+      const message = errorMessage(error);
+      // A Turn the person stopped, or one that ran out of time, is not
+      // the Plugin failing; only its own deadline overrun is.
+      if (!(error instanceof RaceAbortedError)) await chargeDraw(message);
+      return { status: "failed", reason: message };
+    }
+    if (rendered.status !== "rendered") {
+      const reason = rendered.reason ?? "the plugin refused";
+      // A draw that refused in as many words is not a draw that broke.
+      if (rendered.deliberate !== true) await chargeDraw(reason);
+      return { status: "dropped", reason };
+    }
+    const outcome = await sendCard({
+      pluginId,
+      cardId: card.id,
+      surfaceId,
+      ...(rendered.covers === undefined ? {} : { covers: rendered.covers }),
+      ...(rendered.decision === undefined
+        ? {}
+        : { decision: rendered.decision }),
+      ...(request.approvalIds === undefined
+        ? {}
+        : { approvalIds: request.approvalIds }),
+      messages: rendered.messages,
+      context,
+    });
+    if (outcome.status !== "sent") {
+      return { status: "refused", reason: outcome.reason };
+    }
+    return { status: "drawn", surfaceId, approvals: outcome.approvals };
+  }
+
   private cardDefinition(
     pluginId: string,
     entrypoint: PluginWorkerEntrypoint,
@@ -1358,11 +1569,6 @@ export class PluginWorkerHost {
   ): ToolDefinition | undefined {
     const sendCard = this.options.sendCard;
     if (!sendCard) return undefined;
-    const deadlineMs = Math.min(
-      this.options.deadlineMs ?? BOT_ISOLATE_DEFAULT_DEADLINE_MS,
-      ISOLATE_MAX_DEADLINE_MS,
-    );
-    const options = this.options;
     const name = pluginCardToolNameV1(pluginId, card.id);
     return {
       name,
@@ -1392,120 +1598,54 @@ export class PluginWorkerHost {
           data?: unknown;
           surfaceId?: unknown;
         };
-        try {
-          validateAgainstJsonSchemaV1(request.data, card.dataSchema, "data");
-        } catch (error) {
-          return {
-            content: `${name} was refused: ${errorMessage(error)}`,
-            isError: true,
-          };
-        }
-        // Only a surface this card itself minted may be named again. Without
-        // this the model could hand over another Plugin's surface id and draw
-        // over its card, because a card record carries no owner of its own.
         if (
           request.surfaceId !== undefined &&
-          (typeof request.surfaceId !== "string" ||
-            !CARD_SURFACE_ID_V1.test(request.surfaceId) ||
-            !request.surfaceId.startsWith(
-              cardSurfacePrefixV1(pluginId, card.id),
-            ))
+          typeof request.surfaceId !== "string"
         ) {
           return {
             content: `${name} was refused: surfaceId is not a surface this card drew`,
             isError: true,
           };
         }
-        const surfaceId =
-          (request.surfaceId as string | undefined) ??
-          (await mintedCardSurfaceIdV1(
-            pluginId,
-            card.id,
-            context.sessionId,
-            context.effectId,
-          ));
-        const invocation: PluginWorkerRenderCardInvocationV1 = {
-          schemaVersion: 1,
+        const outcome = await this.drawCard(
           pluginId,
-          cardId: card.id,
-          surfaceId,
-          data: request.data as Record<string, unknown>,
-          botId: options.botId,
-          sessionId: context.sessionId,
-          runId: options.runId,
-          turnId: options.turnId,
-          generationId: context.compositionGenerationId,
-          deadlineMs,
-        };
-        // A draw that threw, overran, reached no worker or answered
-        // undecodably is charged to the Plugin exactly as a press is; the
-        // charge is beside the tool error, never instead of it.
-        const chargeDraw = async (message: string): Promise<void> => {
-          try {
-            await options.recordCardFailure?.({
-              pluginId,
-              cardId: card.id,
-              message,
-            });
-          } catch {
-            // Recording a failure must not be what fails the draw.
-          }
-        };
-        let rendered;
-        try {
-          rendered = decodePluginWorkerRenderCardResultV1(
-            await raceDeadline(
-              () => entrypoint.renderCard(invocation),
-              deadlineMs,
-              context.signal,
-            ),
-            `plugin "${pluginId}" render card result`,
-          );
-        } catch (error) {
-          const message = errorMessage(error);
-          // A Turn the person stopped, or one that ran out of time, is not
-          // the Plugin failing; only its own deadline overrun is.
-          if (!(error instanceof RaceAbortedError)) await chargeDraw(message);
-          return {
-            content: `${name} failed in its plugin: ${message}`,
-            isError: true,
-          };
-        }
-        if (rendered.status !== "rendered") {
-          const reason = rendered.reason ?? "the plugin refused";
-          // A draw that refused in as many words is not a draw that broke.
-          if (rendered.deliberate !== true) await chargeDraw(reason);
-          return {
-            content: `${name} drew nothing: ${reason}`,
-            isError: true,
-          };
-        }
-        const outcome = await sendCard({
-          pluginId,
-          cardId: card.id,
-          surfaceId,
-          ...(rendered.covers === undefined ? {} : { covers: rendered.covers }),
-          ...(rendered.decision === undefined
-            ? {}
-            : { decision: rendered.decision }),
-          messages: rendered.messages,
+          entrypoint,
+          card,
+          {
+            data: request.data as Record<string, unknown>,
+            ...(request.surfaceId === undefined
+              ? {}
+              : { surfaceId: request.surfaceId }),
+          },
           context,
-        });
-        if (outcome.status !== "sent") {
+        );
+        if (outcome.status === "refused") {
           return {
             content: `${name} was refused: ${outcome.reason}`,
             isError: true,
           };
         }
+        if (outcome.status === "failed") {
+          return {
+            content: `${name} failed in its plugin: ${outcome.reason}`,
+            isError: true,
+          };
+        }
+        if (outcome.status === "dropped") {
+          return {
+            content: `${name} drew nothing: ${outcome.reason}`,
+            isError: true,
+          };
+        }
         if (outcome.approvals > 0) {
           return {
-            content: `The "${card.displayName}" card is in the conversation as surface "${surfaceId}", asking the user to decide. This Turn is over; their decision arrives as input on a later Turn.`,
+            content: `The "${card.displayName}" card is in the conversation as surface "${outcome.surfaceId}", asking the user to decide. This Turn is over; their decision arrives as input on a later Turn.`,
             isError: false,
             endsTurn: true,
           };
         }
         return {
-          content: `The "${card.displayName}" card is in the conversation as surface "${surfaceId}". Call ${name} again with that surfaceId to update it.`,
+          content: `The "${card.displayName}" card is in the conversation as surface "${outcome.surfaceId}". Call ${name} again with that surfaceId to update it.`,
           isError: false,
         };
       },

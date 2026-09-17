@@ -194,6 +194,42 @@ export interface SeededPluginWordsV1 {
 
 /** How each seeded Plugin is described on the Plugins page, and how it ships. */
 const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
+  // The five locked card Plugins (ADR 0030 step 7). Each draws one of the
+  // rich things a Bot could say in the conversation before Cards existed, so
+  // the deployment's own cards go through the path a User's Plugin goes
+  // through. They are `locked` because the conversation cannot lose the
+  // ability to ask for a decision, hand over a file, or say a credential is
+  // missing: a switch on one of these would be a switch on the Bot's voice.
+  agents: {
+    displayName: "Agent cards",
+    description:
+      "Draws what one of your Bots tells you about a Bot \u2014 a staged template, a hand-off. Always on.",
+    seed: "locked",
+  },
+  approvals: {
+    displayName: "Approval cards",
+    description:
+      "Draws the card that asks you to allow or refuse one action, and shows what you decided. The decision itself is FrockBot's own record, never this plugin's. Always on.",
+    seed: "locked",
+  },
+  attachments: {
+    displayName: "Attachment cards",
+    description:
+      "Draws a file one of your Bots is handing you, with a way to open it. Always on.",
+    seed: "locked",
+  },
+  credentials: {
+    displayName: "Credential cards",
+    description:
+      "Draws the card that says a credential is missing and where you add it. A secret never crosses the conversation. Always on.",
+    seed: "locked",
+  },
+  questions: {
+    displayName: "Question cards",
+    description:
+      "Draws a question with up to six answers and sends the one you pick back to your Bot. Always on.",
+    seed: "locked",
+  },
   email: {
     displayName: "Email",
     description:
