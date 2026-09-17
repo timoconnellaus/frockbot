@@ -313,12 +313,12 @@ export async function cardAction(
   };
 }
 
-/** The Plugin handler behind one `plugin/<pluginId>/<action>` name. */
 /**
- * What the handler is handed for one press. The data model travels only when
- * the surface was created asking for it: a client may post one regardless,
- * and a surface that did not ask is not made to answer about a model the
- * kernel never compared against its own.
+ * The invocation one press builds for the Plugin handler behind it.
+ *
+ * The data model travels only when the surface was created asking for it: a
+ * client may post one regardless, and a surface that did not ask is not made
+ * to answer about a model the kernel never compared against its own.
  */
 export function cardActionInvocationV1(
   identity: BotIdentity,
@@ -350,6 +350,7 @@ export function cardActionInvocationV1(
   };
 }
 
+/** The Plugin handler behind one `plugin/<pluginId>/<action>` name. */
 function runPluginCardAction(
   state: ShellBotStateV1,
   identity: BotIdentity,

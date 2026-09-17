@@ -212,27 +212,28 @@ export interface StoredPendingInputV1 {
  * The inputs one drain carries, under the pending-input bound.
  *
  * The bound exists so a burst cannot hand a single Turn an unbounded prompt,
- * and it used to be a flat `slice(-16)` over everything queued. But the four
- * input kinds are not interchangeable. A dropped `wake` still has an inbox
- * entry, so the user can read it and nothing is lost; an `approval`, a
- * `machine-result` or a `superseded-turn` writes no entry anywhere, so
- * dropping one silently loses a decision the user made or a result a machine
- * produced. Those are kept whole and the cap falls on the wakes alone — the
- * only kind that can be dropped and still be read.
+ * and it used to be a flat `slice(-16)` over everything queued. But the input
+ * kinds are not interchangeable. An `approval`, a `machine-result` and a
+ * `superseded-turn` are each minted by the kernel and bounded by it, and each
+ * writes no entry anywhere, so dropping one silently loses a decision the user
+ * made or a result a machine produced. Those are kept whole. The cap falls on
+ * the two kinds nothing else bounds: a `wake`, which still has an inbox entry
+ * the user can read, and a `card-action`, which a person mints by pressing a
+ * control as often as they like — the press is still on the card in the
+ * transcript. Both are trimmed together, newest first, so the most recent
+ * presses are the ones the Bot reads.
  */
 export function retainedPendingInputsV1(
   inputs: readonly PendingBotInputV1[],
 ): PendingBotInputV1[] {
   if (inputs.length <= ROUTINE_PENDING_INPUT_LIMIT) return [...inputs];
-  const durable = inputs.filter((input) => input.kind !== "wake");
+  const trimmable = (input: PendingBotInputV1) =>
+    input.kind === "wake" || input.kind === "card-action";
+  const durable = inputs.filter((input) => !trimmable(input));
   const budget = ROUTINE_PENDING_INPUT_LIMIT - durable.length;
   if (budget <= 0) return durable;
-  const keptWakes = new Set(
-    inputs.filter((input) => input.kind === "wake").slice(-budget),
-  );
-  return inputs.filter(
-    (input) => input.kind !== "wake" || keptWakes.has(input),
-  );
+  const kept = new Set(inputs.filter(trimmable).slice(-budget));
+  return inputs.filter((input) => !trimmable(input) || kept.has(input));
 }
 
 /**

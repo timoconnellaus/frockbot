@@ -40,8 +40,9 @@
 //    transaction settling the Turn.
 //  * **262,144 bytes for one listing.** Those two multiply — 32 surfaces at a
 //    full record each is megabytes across two RPC hops — so a read of a
-//    Session's cards stops at this and says on the view that it did. A card
-//    left out is still readable once the ones above it settle.
+//    Session's cards stops at this and says on the view that it did: the
+//    listing carries the newest cards that fit and sets `truncated` when it
+//    stopped, and a card it left out is read by its id.
 //
 // A message past any of them is refused whole, not truncated: a partial
 // surface misrepresents what its author said.

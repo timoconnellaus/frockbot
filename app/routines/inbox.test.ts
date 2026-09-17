@@ -547,6 +547,75 @@ describe("the pending-input cap", () => {
     );
   });
 
+  /**
+   * A card action is the one kind a person mints directly, as often as they
+   * press. It belongs on the trimmed side of the rule with the wakes, not on
+   * the retained side with what the kernel bounds for itself.
+   */
+  test("a burst of card presses cannot push out what the kernel minted", async () => {
+    const store = storage();
+    const inbox = new RoutineInboxStore(store);
+    for (let index = 0; index < ROUTINE_PENDING_INPUT_LIMIT + 24; index += 1) {
+      await inbox.enqueue({
+        schemaVersion: 1,
+        kind: "card-action",
+        surfaceId: "surface-1",
+        name: "add",
+        context: `{"item":${index}}`,
+        createdAt: new Date(Date.parse(NOW) + index).toISOString(),
+      });
+    }
+    await inbox.enqueue({
+      schemaVersion: 1,
+      kind: "approval",
+      approvalId: "ap-1",
+      decision: "approved",
+      createdAt: NOW,
+    });
+    await inbox.enqueue({
+      schemaVersion: 1,
+      kind: "machine-result",
+      commandId: "cmd-1",
+      machineId: "mac-1",
+      outcome: "ok",
+      preview: "done",
+      createdAt: NOW,
+    });
+    await inbox.enqueue({
+      schemaVersion: 1,
+      kind: "superseded-turn",
+      runId: "run-9",
+      unfinishedWork: true,
+      createdAt: NOW,
+    });
+
+    const drained = await inbox.drainInto("chat-run-1");
+    expect(drained).toHaveLength(ROUTINE_PENDING_INPUT_LIMIT);
+    expect(drained.filter((input) => input.kind === "approval")).toHaveLength(
+      1,
+    );
+    expect(
+      drained.filter((input) => input.kind === "machine-result"),
+    ).toHaveLength(1);
+    expect(
+      drained.filter((input) => input.kind === "superseded-turn"),
+    ).toHaveLength(1);
+    const presses = drained.filter((input) => input.kind === "card-action");
+    expect(presses).toHaveLength(ROUTINE_PENDING_INPUT_LIMIT - 3);
+    // The presses kept are the most recent ones: the last thing a person
+    // pressed is the thing the Bot should answer about.
+    expect(
+      presses.map((press) =>
+        press.kind === "card-action" ? press.context : undefined,
+      ),
+    ).toContain(`{"item":${ROUTINE_PENDING_INPUT_LIMIT + 23}}`);
+    expect(
+      presses.map((press) =>
+        press.kind === "card-action" ? press.context : undefined,
+      ),
+    ).not.toContain('{"item":0}');
+  });
+
   test("keeps every durable input even when they alone exceed the bound", () => {
     const approvals = Array.from(
       { length: ROUTINE_PENDING_INPUT_LIMIT + 3 },
