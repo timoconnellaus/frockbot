@@ -21,6 +21,10 @@ abstract final class ShellIds {
   static const conversation = 'shell-conversation';
   static const rightPanel = 'shell-right-panel';
   static const rightPanelClose = 'right-panel-close';
+
+  /// The panel's way back out of a sub-page to the Bot page under it. Only
+  /// there while the panel holds a stack; the phone pops a route instead.
+  static const rightPanelBack = 'right-panel-back';
   static const rightPanelToggle = 'right-panel-toggle';
   static const scrim = 'shell-scrim';
   static const botPanelToggle = 'bot-panel-toggle';
@@ -122,6 +126,7 @@ abstract final class VoiceIds {
   static const footerAnimation = 'voice-footer-animation';
   static const mute = 'voice-mute';
   static const end = 'voice-end';
+
   /// The fixed voice control at the far right of the composer (ADR 0029).
   /// Unlike the morphing action beside it, it is always this one thing.
   /// Voice mode, which replaces the thread while the call is with this Bot
@@ -191,13 +196,36 @@ abstract final class SettingsIds {
   static const botDescription = 'bot-description';
   static const botNotifications = 'bot-notifications';
   static const botModel = 'bot-model';
-  static const botAdvanced = 'bot-advanced';
   static const botTitle = 'bot-title';
   static const botHidden = 'bot-hidden-from-sidebar';
   static const botHideConfirm = 'bot-hide-confirm';
-  static const botMembers = 'bot-info-members';
   static const botSaveStatus = 'bot-settings-status';
+
+  /// The Bot page: what the Bot is doing, and the doors to the rest of it.
   static const botPage = 'bot-page';
+
+  /// The gear in the Bot page's header, the one way into Settings.
+  static const botPageSettings = 'bot-page-settings';
+
+  /// The Computer section's "Open" on the Bot page.
+  static const botPageComputer = 'bot-page-computer';
+
+  /// The row under the recent runs, which opens the whole Routines surface
+  /// and carries the unacknowledged badge.
+  static const botPageRoutinesAll = 'bot-page-routines-all';
+
+  /// One recent Routine run on the Bot page, which opens its run log.
+  static String botPageRun(String entryId) => 'bot-page-run-$entryId';
+
+  /// The row under the running Applets, which opens the whole list.
+  static const botPageAppletsAll = 'bot-page-applets-all';
+
+  /// One running Applet on the Bot page. Not the Applet list's own row id:
+  /// the list is a page of its own and both can be on screen at once.
+  static String botPageApplet(String appletId) => 'bot-page-applet-$appletId';
+
+  /// Settings' door to this Bot's Plugins, and to its model.
+  static const botPlugins = 'bot-settings-plugins';
 
   static String modelOption(String label) => 'model-option-$label';
 }
@@ -249,25 +277,20 @@ abstract final class PluginIds {
 
   /// The Profile's entry: the account's list, what is installed.
   static const profileEntry = 'profile-plugins';
-
-  /// The Bot's door: the header button beside Routines on a desktop, the row
-  /// on the Bot's page on a phone. A Bot's switches are Bot settings.
-  static const panelToggle = 'plugins-panel-toggle';
 }
 
 /// Routines: what a Bot does on its own, and what it left behind.
 ///
 /// The names follow what `routines.e2e.ts` selects on — the section, a
 /// Routine's card, its controls and the delete confirmation — so that spec can
-/// be rewritten against Flutter Web with the same intent. The panel toggle is
-/// the one door to the surface — the chat header's Routines control on the
-/// wide tiers, the Bot page's row on a phone — and the drawer is one
+/// be rewritten against Flutter Web with the same intent. The one door to the
+/// surface is the All Routines row on the Bot page
+/// ([SettingsIds.botPageRoutinesAll]) at every tier, and the drawer is one
 /// acknowledgement per entry.
 abstract final class RoutineIds {
   static const document = 'routines-document';
   static const refresh = 'routines-refresh';
   static const panel = 'routines-panel';
-  static const panelToggle = 'routines-panel-toggle';
   static const inboxDrawer = 'routine-inbox-drawer';
   static const runLog = 'routine-run-log';
   static const confirmDelete = 'routine-delete-confirm';
@@ -381,12 +404,11 @@ abstract final class SearchIds {
 /// — the canvas region, its progress line, the App/Code toggle, one file
 /// button and the failure's retry — so both specs can be rewritten against
 /// Flutter Web with the same intent rather than re-derived from the widgets.
-/// [chip] is the one door to the selected Bot's Applet list, on the header's
-/// Applets button and on the Bot page's Applets row: the list is the sidebar's
+/// The one door to the selected Bot's Applet list is the All Applets row on
+/// its page ([SettingsIds.botPageAppletsAll]): the list is the sidebar's
 /// Applets mode on a wide window and a page of its own on a phone.
 abstract final class AppletIds {
   static const canvas = 'applet-canvas';
-  static const chip = 'applet-chip';
   static const progress = 'applet-canvas-progress';
   static const failure = 'applet-canvas-failure';
   static const retry = 'applet-canvas-retry';

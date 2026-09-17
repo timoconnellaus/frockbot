@@ -26,6 +26,7 @@ import '../client/transport.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
 import '../connections/page.dart';
+import '../flock/avatar.dart';
 import '../flock/create.dart';
 import '../flock/lifecycle.dart';
 import '../machines/page.dart';
@@ -62,6 +63,7 @@ import '../voice/protocol.dart' show voiceUnavailableMessage;
 import '../voice/socket.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'bot_actions.dart';
+import 'bot_page.dart';
 import 'chat_pane.dart';
 import 'chat_header.dart';
 import 'desktop_layout.dart';
@@ -224,10 +226,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// they had put away on screen. Any newer choice of theirs clears this.
   bool runBorrowedPanel = false;
 
-  /// Which right-panel entry is on. The region holds two — the Bot's settings
-  /// and its Routines — and shows one, because a column is a place to read one
-  /// thing rather than a stack of everything a feature registered.
-  String panelKey = 'bot-settings';
+  /// What the panel is showing over the Bot page.
+  ///
+  /// The Bot page is the panel's floor and is never in here: an empty stack is
+  /// that page. A sub-page — Settings, All Routines, the Computer, Plugins, a
+  /// Package's own page — is pushed onto it, and the panel header grows a back
+  /// chevron for as long as there is something to go back to. A Bot switch
+  /// empties it, because a sub-page of one Bot is not a sub-page of another.
+  final List<String> panelStack = [];
+
+  /// The Package page the `package` entry is showing, which is chosen when the
+  /// door is pressed rather than registered per page.
+  PackageEntryPage? panelPackage;
 
   /// Voice. The footer and both captures live here rather than in the pane
   /// because they outlive it: a call survives a Bot switch, a page and a
@@ -867,6 +877,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       exchangeController = null;
       exchangeListenable = null;
       panelOpen = false;
+      panelStack.clear();
+      panelPackage = null;
     });
     _adoptBotPanels(botId);
     unawaited(
@@ -903,24 +915,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     slots.register(
       ShellSlot.rightPanel,
       'bot-settings',
-      (context) => SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            BotSettingsView(
-              controller: controller,
-              onSaved: _readBackBotSettings,
-              onPredict: (profile) => predictProfile(botId, profile),
-              background: _background(botId),
-              primary: _primary(botId),
-              onEditAvatar: () => unawaited(_editAvatar(botId, name)),
-              dangerZone: _dangerZone(botId, name),
-            ),
-            ..._packageSettings(botId),
-          ],
-        ),
-      ),
+      (context) => _botSettings(botId, controller),
       label: 'Settings',
     );
     slots.register(
@@ -936,7 +931,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onOpenRun: _openRun,
         onInbox: inbox.adopt,
       ),
-      label: 'Routines',
+      label: 'All Routines',
     );
     // What this Bot could run, and whether it does: Bot settings, so it sits
     // beside Routines and Settings rather than under the Profile.
@@ -997,13 +992,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         slots.register(
           ShellSlot.rightPanel,
           'computer',
-          (context) => SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            child: ComputerCard(
-              controller: machine,
-              turnRunning: workingRunId != null,
-            ),
-          ),
+          (context) => _computerPanel(machine, botId),
           label: 'Computer',
         );
       }
@@ -1023,21 +1012,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     for (final entry in packageIframeEntriesV1(catalog))
       if (appletCanvas == null || entry.entry.label.toLowerCase() != 'applets')
         entry,
-  ];
-
-  /// The doors this Bot's Packages declare, as buttons for its own bar.
-  /// A Package naming an icon this client does not have still gets a
-  /// button, so a declared door is never silently missing.
-  List<Widget> _packageEntryActions() => [
-    for (final entry in _packageEntries())
-      identified(
-        PackageIds.entry(entry.contribution.packageId, entry.entry.id),
-        IconButton(
-          tooltip: entry.entry.label,
-          icon: Icon(_packageIcon(entry.entry.icon)),
-          onPressed: () => _openPackagePage(entry),
-        ),
-      ),
   ];
 
   /// The Composition this Bot is showing, and the one signal a pushed page
@@ -1064,40 +1038,51 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final held = catalog;
     final bot = selected;
     if (held == null || bot == null) return;
-    _push(
-      Scaffold(
-        appBar: AppBar(title: Text(entry.entry.label)),
-        body: SafeArea(
-          top: false,
-          child: identified(
-            PackageIds.page(entry.contribution.packageId, entry.page.id),
-            Padding(
+    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+        ShellTier.single) {
+      _push(
+        Scaffold(
+          appBar: AppBar(title: Text(entry.entry.label)),
+          body: SafeArea(
+            top: false,
+            child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              child: PackagePageFrame(
-                api: widget.api,
-                catalog: held,
-                contribution: entry.contribution,
-                page: entry.page,
-                botId: bot.botId.value,
-                slot: entry.slot,
-                layout: PackageFrameLayout.fill,
-                surfaceTitle: entry.entry.label,
-                states: {
-                  packageIframeAppletsStateV2: appletsBridgeStateV2(
-                    appletCanvas,
-                  ),
-                },
-                onFocus: (appletId) async {
-                  await appletCanvas?.setFocus(appletId);
-                  if (mounted) _openPanel('applet');
-                },
-              ),
+              child: _packagePage(entry, held, bot.botId.value),
             ),
           ),
         ),
-      ),
-    );
+      );
+      return;
+    }
+    // A Package door is one of the Bot page's rows, so it opens where the
+    // other rows do: inside the panel, over the page it was pressed on.
+    setState(() => panelPackage = entry);
+    _openPanel('package', push: true);
   }
+
+  /// One Package page, framed and attributed, wherever it is drawn.
+  Widget _packagePage(
+    PackageEntryPage entry,
+    PackageCatalog held,
+    String botId,
+  ) => identified(
+    PackageIds.page(entry.contribution.packageId, entry.page.id),
+    PackagePageFrame(
+      api: widget.api,
+      catalog: held,
+      contribution: entry.contribution,
+      page: entry.page,
+      botId: botId,
+      slot: entry.slot,
+      layout: PackageFrameLayout.fill,
+      surfaceTitle: entry.entry.label,
+      states: {packageIframeAppletsStateV2: appletsBridgeStateV2(appletCanvas)},
+      onFocus: (appletId) async {
+        await appletCanvas?.setFocus(appletId);
+        if (mounted) _openPanel('applet');
+      },
+    ),
+  );
 
   /// The page takes over the frame pre-mounted behind the conversation.
   Widget _appletCanvas(
@@ -1362,68 +1347,242 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ),
       );
     }
-    final keys = slots.keys(ShellSlot.rightPanel);
-    if (keys.isEmpty) return null;
-    final key = keys.contains(panelKey) ? panelKey : keys.first;
+    if (bot == null) return null;
+    final key = panelStack.isEmpty ? null : panelStack.last;
+    final body = key == null
+        ? _botPageView(bot)
+        : key == 'package'
+        ? _packagePanel(bot)
+        : slots.buildOne(context, ShellSlot.rightPanel, key);
+    if (body == null) return null;
     return identified(
       ShellIds.slot(ShellSlot.rightPanel.id),
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // The panel names what it holds and offers the way out. Choosing
-          // what it holds is the chat header's job: its icons are the one set
-          // of doors, and a second row of them here was the same doors twice.
-          SizedBox(
-            height: 52,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      slots.labelOf(ShellSlot.rightPanel, key) ?? key,
-                      style: Theme.of(context).textTheme.titleSmall
-                          ?.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  identified(
-                    ShellIds.rightPanelClose,
-                    IconButton(
-                      tooltip: 'Close the panel',
-                      onPressed: () => setState(() {
-                        panelOpen = false;
-                        panelCollapsed = true;
-                      }),
-                      style: IconButton.styleFrom(
-                        foregroundColor: Theme.of(context)
-                            .colorScheme
-                            .onSurfaceVariant,
-                        iconSize: 18,
-                        minimumSize: const Size(32, 32),
-                        fixedSize: const Size(32, 32),
-                        padding: EdgeInsets.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _panelHeader(bot, key),
           const Divider(height: 1),
-          Expanded(child: slots.buildOne(context, ShellSlot.rightPanel, key)!),
+          Expanded(child: body),
         ],
       ),
     );
   }
 
+  /// The panel's own bar: the Bot's face and the gear at the root, a back
+  /// chevron and the sub-page's name over it. The close is always the last
+  /// thing in it, and closing empties the stack — reopening the panel is
+  /// opening the Bot page, never whatever was last read three Bots ago.
+  Widget _panelHeader(wire.BotRegistration bot, String? key) {
+    final theme = Theme.of(context);
+    final botId = bot.botId.value;
+    final phase = key == 'computer' ? computer?.state.message : null;
+    return SizedBox(
+      height: 52,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(key == null ? 16 : 8, 0, 8, 0),
+        child: Row(
+          children: [
+            if (key == null) ...[
+              CharacterAvatar(
+                size: 28,
+                characterId: _background(botId),
+                primary: _primary(botId),
+                motion: CharacterMotion.quiet,
+              ),
+              const SizedBox(width: 10),
+            ] else
+              identified(
+                ShellIds.rightPanelBack,
+                IconButton(
+                  tooltip: 'Back',
+                  onPressed: () => setState(panelStack.removeLast),
+                  style: _panelControl(theme),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+              ),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // A heading of its own, rather than a leaf the engine merges
+                  // into the row beside it: what the panel is showing is the
+                  // one thing a reader needs read out first.
+                  Semantics(
+                    header: true,
+                    child: Text(
+                      key == null ? _name(bot) : _panelTitle(key) ?? _name(bot),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (phase != null && phase.isNotEmpty)
+                    Text(
+                      phase,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+            if (key == null)
+              identified(
+                SettingsIds.botPageSettings,
+                IconButton(
+                  tooltip: 'Bot settings',
+                  onPressed: () => _openPanel('bot-settings', push: true),
+                  style: _panelControl(theme),
+                  icon: const Icon(Icons.settings_outlined),
+                ),
+              ),
+            identified(
+              ShellIds.rightPanelClose,
+              IconButton(
+                tooltip: 'Close the panel',
+                onPressed: () => setState(() {
+                  panelOpen = false;
+                  panelCollapsed = true;
+                  panelStack.clear();
+                  panelPackage = null;
+                }),
+                style: _panelControl(theme),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  ButtonStyle _panelControl(ThemeData theme) => IconButton.styleFrom(
+    foregroundColor: theme.colorScheme.onSurfaceVariant,
+    iconSize: 18,
+    minimumSize: const Size(32, 32),
+    fixedSize: const Size(32, 32),
+    padding: EdgeInsets.zero,
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  );
+
+  /// What the panel calls the sub-page it is showing.
+  String? _panelTitle(String key) => key == 'package'
+      ? panelPackage?.entry.label
+      : slots.labelOf(ShellSlot.rightPanel, key);
+
+  Widget? _packagePanel(wire.BotRegistration bot) {
+    final entry = panelPackage;
+    final held = catalog;
+    if (entry == null || held == null) return null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      child: _packagePage(entry, held, bot.botId.value),
+    );
+  }
+
+  /// The Bot page itself, wherever it is drawn: the panel's root, and the
+  /// page a phone pushes from the name in its bar.
+  ///
+  /// Everything it reads lives on the shell, and a pushed page is outside the
+  /// shell's own `setState` — so the listenables it watches are what make the
+  /// Computer arriving, an Applet being built or a Composition mounting show
+  /// up on a page that is already open.
+  Widget _botPageView(wire.BotRegistration bot) {
+    final botId = bot.botId.value;
+    return ListenableBuilder(
+      listenable: Listenable.merge([slots, catalogRevision, avatarRevision]),
+      builder: (context, _) => BotPageView(
+        botName: _name(bot),
+        computer: computer,
+        turnRunning: workingRunId != null,
+        onOpenComputer: computer?.available == true
+            ? () => _openPanel('computer', push: true)
+            : null,
+        inbox: routineInbox,
+        onOpenRun: (run) => _openRoutineRun(botId, run),
+        onOpenRoutines: () => _openPanel('routines', push: true),
+        applets: appletCanvas,
+        onOpenApplet: (appletId) => unawaited(_openApplet(appletId)),
+        onOpenApplets: _openApplets,
+        doors: [
+          for (final entry in _packageEntries())
+            BotPageDoor(
+              identifier: PackageIds.entry(
+                entry.contribution.packageId,
+                entry.entry.id,
+              ),
+              icon: _packageIcon(entry.entry.icon),
+              label: entry.entry.label,
+              onTap: () => _openPackagePage(entry),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// One firing's run log, from the row on the Bot page. It is the same page
+  /// the Routines surface's "Run log" opens, because it is the same log.
+  void _openRoutineRun(String botId, RoutineRunSummary run) => _push(
+    RoutineRunsPage(
+      api: widget.api,
+      botId: botId,
+      routineId: run.routineId,
+      onOpenRun: _openRun,
+    ),
+  );
+
+  /// Settings, wherever it is drawn: the panel's sub-page, and the page the
+  /// gear pushes on a phone.
+  Widget _botSettings(String botId, BotSettingsController controller) =>
+      ListenableBuilder(
+        listenable: Listenable.merge([catalogRevision, avatarRevision]),
+        builder: (context, _) {
+          final name = _botNameOf(botId) ?? botId;
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                BotSettingsView(
+                  controller: controller,
+                  onSaved: _readBackBotSettings,
+                  onPredict: (profile) => predictProfile(botId, profile),
+                  background: _background(botId),
+                  primary: _primary(botId),
+                  onEditAvatar: () => unawaited(_editAvatar(botId, name)),
+                  onOpenPlugins: () => _openPanel('plugins', push: true),
+                  dangerZone: _dangerZone(botId, name),
+                  sections: _packageSettings(botId),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+  /// The Computer sub-page: the live frame and the two things a person can do
+  /// to it. The phase is the header's subtitle, said once.
+  Widget _computerPanel(ComputerController machine, String botId) =>
+      SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        child: ComputerCard(
+          controller: machine,
+          turnRunning: workingRunId != null,
+          surface: ComputerSurface.page,
+          botName: _botNameOf(botId),
+        ),
+      );
+
   /// Opens one right-panel entry. On the phone the panel is a page: a drawer
   /// over a full-width conversation is the same thing with less room and a
   /// scrim in the way.
-  void _openPanel(String key) {
+  void _openPanel(String key, {bool push = false}) {
     // The Applet is never a panel: it is a full window at every width.
     if (key == 'applet') {
       _pushApplet();
@@ -1440,7 +1599,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       exchangeController?.dispose();
       exchangeController = null;
       exchangeListenable = null;
-      panelKey = key;
+      // A door pressed inside the panel pushes; one pressed from outside it —
+      // the header, the search palette — is a fresh place to be, so the stack
+      // under it is thrown away first.
+      if (!push) panelStack.clear();
+      if (key == 'bot-page') {
+        panelStack.clear();
+      } else if (panelStack.isEmpty || panelStack.last != key) {
+        panelStack.add(key);
+      }
       panelOpen = true;
       panelCollapsed = false;
     });
@@ -1717,6 +1884,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  /// The same doors, as a phone's pages.
+  ///
+  /// The panel's stack and a phone's route stack are the same idea drawn twice:
+  /// the Bot page is the floor, and every key below pushes over it.
   void _pushPanel(String key) {
     final bot = selected;
     final controller = botSettings;
@@ -1742,6 +1913,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           userId: widget.userId,
           botId: bot.botId.value,
           botName: _name(bot),
+          onOpenRun: _openRun,
           onInbox: routineInbox?.adopt,
         ),
       );
@@ -1752,128 +1924,97 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     if (key == 'computer' && computer != null) {
+      _push(_computerPage(bot, computer!));
+      return;
+    }
+    if (controller == null) return;
+    if (key == 'bot-settings') {
       _push(
         Scaffold(
-          appBar: AppBar(title: const Text('Computer')),
+          appBar: AppBar(title: const Text('Settings')),
           body: SafeArea(
             top: false,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              child: ComputerCard(
-                controller: computer!,
-                turnRunning: workingRunId != null,
-              ),
-            ),
+            child: _botSettings(bot.botId.value, controller),
           ),
         ),
       );
       return;
     }
-    if (controller == null) return;
-    _push(_botPage(bot, controller));
+    _push(_botPage(bot));
   }
 
-  /// The Bot's page, GrokBot's: one scroll from its face to its danger zone.
-  ///
-  /// Its settings, then the rows for what else it holds — Routines, Applets,
-  /// the pages its Packages mount — then Advanced. The Computer's row is read
-  /// off the slot registry live and the Package rows off `catalogRevision`, so
-  /// either arriving after the page opened appears on it rather than on the
-  /// next visit.
-  Widget _botPage(wire.BotRegistration bot, BotSettingsController controller) {
-    final botId = bot.botId.value;
-    return Scaffold(
-      appBar: AppBar(),
-      body: SafeArea(
-        top: false,
-        child: identified(
-          SettingsIds.botPage,
-          ListenableBuilder(
-            listenable: Listenable.merge([
-              slots,
-              catalogRevision,
-              avatarRevision,
-            ]),
-            builder: (context, _) => SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  BotSettingsView(
-                    controller: controller,
-                    onSaved: _readBackBotSettings,
-                    onPredict: (profile) => predictProfile(botId, profile),
-                    background: _background(botId),
-                    primary: _primary(botId),
-                    onEditAvatar: () =>
-                        unawaited(_editAvatar(botId, _name(bot))),
-                    dangerZone: _dangerZone(botId, _name(bot)),
-                    sections: _botRows(),
+  /// The Computer as a phone's page: the frame, the controls, and the phase
+  /// as the bar's subtitle rather than a strip under it.
+  Widget _computerPage(wire.BotRegistration bot, ComputerController machine) =>
+      AnimatedBuilder(
+        animation: machine,
+        builder: (context, _) => Scaffold(
+          appBar: AppBar(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Computer'),
+                Text(
+                  machine.failure ?? machine.state.message,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  ..._packageSettings(botId),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
+          body: SafeArea(
+            top: false,
+            child: _computerPanel(machine, bot.botId.value),
           ),
         ),
-      ),
-    );
-  }
+      );
 
-  /// What the Bot holds besides its settings, one row each.
-  List<Widget> _botRows() {
-    final inbox = routineInbox;
-    final canvas = appletCanvas;
-    final entries = _packageEntries();
-    return [
-      const SizedBox(height: 16),
-      FrockRowGroup(
-        rows: [
+  /// The Bot's page on a phone: its name and its face in the bar, the gear in
+  /// the corner, and the same scroll the panel's root draws.
+  Widget _botPage(wire.BotRegistration bot) {
+    final botId = bot.botId.value;
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: ListenableBuilder(
+          listenable: avatarRevision,
+          builder: (context, _) => Row(
+            children: [
+              CharacterAvatar(
+                size: 28,
+                characterId: _background(botId),
+                primary: _primary(botId),
+                motion: CharacterMotion.quiet,
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  _name(bot),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
           identified(
-            RoutineIds.panelToggle,
-            FrockRow(
-              icon: Icons.history_rounded,
-              title: 'Routines',
-              trailing: inbox == null
-                  ? null
-                  : AnimatedBuilder(
-                      animation: inbox,
-                      builder: (context, _) => inbox.unacknowledged > 0
-                          ? Badge(label: Text(inbox.badge))
-                          : const SizedBox.shrink(),
-                    ),
-              onTap: () => _openPanel('routines'),
+            SettingsIds.botPageSettings,
+            IconButton(
+              tooltip: 'Bot settings',
+              onPressed: () => _pushPanel('bot-settings'),
+              icon: const Icon(Icons.settings_outlined),
             ),
           ),
-          identified(
-            PluginIds.panelToggle,
-            FrockRow(
-              icon: Icons.extension_outlined,
-              title: 'Plugins',
-              onTap: () => _openPanel('plugins'),
-            ),
-          ),
-          if (canvas != null)
-            identified(
-              AppletIds.chip,
-              FrockRow(
-                icon: Icons.widgets_outlined,
-                title: 'Applets',
-                onTap: _openApplets,
-              ),
-            ),
-          for (final entry in entries)
-            identified(
-              PackageIds.entry(entry.contribution.packageId, entry.entry.id),
-              FrockRow(
-                icon: _packageIcon(entry.entry.icon),
-                title: entry.entry.label,
-                onTap: () => _openPackagePage(entry),
-              ),
-            ),
+          const SizedBox(width: 4),
         ],
       ),
-    ];
+      body: SafeArea(top: false, child: _botPageView(bot)),
+    );
   }
 
   /// The Package pages mounted in Bot settings, drawn under the Bot's own
@@ -1974,6 +2115,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Closes the open Bot's pages, panels and controllers, leaving no Bot open.
   void _closeOpenBot() {
     Navigator.of(context).popUntil((route) => route.isFirst);
+    panelStack.clear();
+    panelPackage = null;
     slots.remove(ShellSlot.rightPanel, 'bot-settings');
     slots.remove(ShellSlot.rightPanel, 'routines');
     slots.remove(ShellSlot.rightPanel, 'plugins');
@@ -2091,12 +2234,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             // the call still running would be a trap.
                             voiceMode: voiceHere,
                             onBack: single && !voiceHere ? _openBack : null,
-                            onOpenBot: single
-                                ? () => _pushPanel('bot-settings')
-                                : null,
-                            onSettings: single
-                                ? null
-                                : () => _openPanel('bot-settings'),
+                            phone: single,
+                            onOpenBot: () => _openPanel('bot-page'),
                             computerRunning:
                                 computer?.available == true &&
                                 (computer!.state.running ||
@@ -2104,24 +2243,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onComputer: computer?.available == true
                                 ? () => _openPanel('computer')
                                 : null,
-                            onRoutines: single
-                                ? null
-                                : () => _openPanel('routines'),
-                            onPlugins: single
-                                ? null
-                                : () => _openPanel('plugins'),
                             onTogglePanel: single || rightPanel == null
                                 ? null
                                 : _togglePanel,
                             panelShown: tier == ShellTier.triple
                                 ? !panelCollapsed
                                 : panelOpen,
-                            packageEntries: single
-                                ? const []
-                                : _packageEntryActions(),
-                            onApplets: single || appletCanvas == null
-                                ? null
-                                : _openApplets,
                           ),
                     conversationOpen: bot != null && conversationOpen,
                     onBack: _openBack,
@@ -2391,7 +2518,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       Navigator.of(context).popUntil((route) => route.isFirst);
       switch (action) {
         case 'chat-settings':
-          _openPanel('bot-settings');
+          _openPanel('bot-page');
+          _openPanel('bot-settings', push: true);
         case 'settings':
           _openSettings();
         case 'computer':

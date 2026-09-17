@@ -52,10 +52,9 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
 /**
  * Show the Computer in the right panel.
  *
- * The chat header's icons are the doors into the panel — Settings, Routines,
- * the Applet canvas, the Computer — and an icon button's name is its tooltip.
- * The header's is the first in the document; the panel it opens names itself
- * too, once it is showing.
+ * The chat header keeps two icons — the Computer and the panel's own switch —
+ * and an icon button's name is its tooltip. The header's is the first in the
+ * document; the sub-page it opens names itself in the panel header.
  */
 async function openComputerPanel(page: Page): Promise<void> {
   await page
@@ -74,15 +73,22 @@ test("the right-panel card shows the Computer and expands on first click", async
   await openApplication(page, userId);
   await createBot(page, "Watched");
 
+  // The Bot page's card says what the Computer is doing before anything is
+  // pressed: a dot, the state, and the way in.
+  const status = sem(page, "computer-screen-status");
+  await expect(status).toBeVisible({ timeout: 60_000 });
+  // The row is one merged node — a dot, the state and the way in — so what it
+  // says is its accessible name rather than its text.
+  await expect(status).toHaveAttribute("aria-label", /Ready to start/u);
+  await expect(sem(page, "bot-page-computer")).toBeVisible();
+
   await openComputerPanel(page);
   const card = sem(page, "computer-card");
-  // The card is a button that says what it is for, and under the screen it
-  // says what the Computer is doing — here, waiting to be started.
-  await expect(card).toContainText("Open computer in full window");
-  await expect(card).toContainText("Ready to start");
-  // Nothing is being watched: no minted session, so no frame, and the status
-  // line under the screen is absent rather than claiming a stale photograph.
-  await expect(sem(page, "computer-screen-status")).toHaveCount(0);
+  // The sub-page is the screen and its two controls; the phase is the panel
+  // header's subtitle rather than a line under the frame.
+  await expect(
+    page.getByRole("button", { name: "Full window", exact: true }),
+  ).toBeVisible();
   await expect(page.locator("iframe")).toHaveCount(0);
   await page.screenshot({
     path: testInfo.outputPath("computer-presence-desktop.png"),
@@ -108,7 +114,12 @@ test("the right-panel card shows the Computer and expands on first click", async
   // it was, and the card now carries what the window learned.
   await page.goBack();
   await expect(card).toBeVisible();
-  await expect(card).toContainText(NO_HOST);
+  // The frame is one merged node — the screen, what it is, and what refused —
+  // so what it says is its accessible name rather than its text.
+  await expect(card).toHaveAttribute("aria-label", NO_HOST);
+  // Said once: the window's title carries the phase as its subtitle, and the
+  // 28-point strip that repeated it is gone.
+  await expect(sem(page, "computer-phase")).toHaveCount(0);
 });
 
 test("the right-panel Computer card fits the mobile shell", async ({
@@ -169,8 +180,8 @@ test("a deployment with no Computer says so and opens nothing", async ({
 
   await openComputerPanel(page);
   const card = sem(page, "computer-card");
-  await expect(card).toContainText("No computer");
-  await expect(card).toContainText("This Bot has no computer");
+  await expect(card).toHaveAttribute("aria-label", /No computer/u);
+  await expect(card).toHaveAttribute("aria-label", /This Bot has no computer/u);
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("computer-presence-unconfigured.png"),

@@ -5,6 +5,9 @@ import {
   composerInput,
   answerInputs,
   openApplication,
+  openBotPage,
+  openBotSettings,
+  press,
 } from "./fixtures.ts";
 
 for (const width of [390, 1280]) {
@@ -62,15 +65,14 @@ test("General's research and recurring starters follow its live feature switches
   await expect(sem(page, "starter-research")).toBeVisible();
   await expect(sem(page, "starter-recurring")).toBeVisible();
   for (const [title, id] of [
-    ["Web · Built in", "research"],
-    ["Routines · Built in", "recurring"],
+    ["Web", "research"],
+    ["Routines", "recurring"],
   ]) {
     for (const enabled of [false, true]) {
-      const node = '[flt-semantics-identifier="plugins-panel-toggle"]';
-      await page
-        .locator(`${node}[flt-tappable], ${node} [flt-tappable]`)
-        .first()
-        .click();
+      // The Bot's Plugins are two levels under its page: the gear, then the
+      // Plugins row. The conversation is a column beside all of it.
+      await openBotSettings(page);
+      await press(sem(page, "bot-settings-plugins"));
       const toggle = page
         .getByRole("switch", { name: title, exact: true })
         .first();
@@ -78,10 +80,7 @@ test("General's research and recurring starters follow its live feature switches
       await page.waitForTimeout(700);
       await toggle.click();
       await expect(toggle).toHaveAttribute("aria-checked", String(enabled));
-      await page
-        .locator(`${node}[flt-tappable], ${node} [flt-tappable]`)
-        .first()
-        .click();
+      await openBotPage(page);
       if (enabled) await expect(sem(page, `starter-${id}`)).toBeVisible();
       else await expect(sem(page, `starter-${id}`)).toHaveCount(0);
       await expect(sem(page, "starter-project")).toBeVisible();

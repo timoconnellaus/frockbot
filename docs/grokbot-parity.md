@@ -1159,15 +1159,17 @@ than a silent absence. Row 44 is the only one.
   carry a badge, so its unread rolls into one aggregate on the "Show N hidden"
   entry.
 - **51** — landed in the GrokBot-aligned right panel. Its default content is
-  the selected Bot's Computer thumbnail and caption followed by the durable
-  Routines list and a `+` link to the Advanced editor. The panel header's only
-  Bot action is the settings cog; Settings owns its own title and back action.
-  The separate Bot info surface and Clock card were retired. Members and
-  Capability Assignment summary moved under Advanced; name provenance is no
-  longer user-facing because the editable Name field is the identity control.
-  The remaining old Computer, Routines, Members, and Notifications deep links
-  continue to resolve at their new homes. Playwright covers the default panel
-  and settings swap at 1351px and 390px.
+  the Bot page: the selected Bot's Computer card with a status line under it,
+  the last Routine firings with All Routines under them, its running Applets,
+  and the doors its Packages declare. The panel header's only Bot action is the
+  settings cog, and Settings is a sub-page of that panel with a back chevron of
+  its own. The separate Bot info surface and Clock card were retired, and so
+  were the Advanced expander and the Members sentence that lived in it: Title is
+  an About field like the others, Hidden from list is a behaviour switch, and
+  name provenance is no longer user-facing because the editable Name field is
+  the identity control. The remaining old Computer, Routines, Members and
+  Notifications deep links continue to resolve at their new homes. Playwright
+  covers the Bot page and the Settings sub-page at 1351px and 390px.
 
 - **53** — the card mechanism is landed; the policy that decides _which_
   actions need one is not. An `approval` payload on `send_to_user`

@@ -1,9 +1,9 @@
-// The Bot's own Plugins page, driven from its header (ADR 0026).
+// The Bot's own Plugins page, driven from its Settings (ADR 0026).
 //
-// A Bot's Plugins are Bot settings, so the door is the Plugins button in the
-// Bot's header and the page opens in the panel beside the conversation; the
-// Profile keeps only what applies to the whole account. This spec walks the
-// product path — check the Profile names no Bot, open the panel, flip Web off
+// A Bot's Plugins are Bot settings, so the door is the Plugins row in the Bot's
+// Settings and the page opens in the panel beside the conversation; the Profile
+// keeps only what applies to the whole account. This spec walks the product
+// path — check the Profile names no Bot, open the page, flip Web off
 // — and then reads the same Bot's page back to prove the switch is what the
 // Bot serves, not what the widget last painted.
 import type { Locator, Page } from "@playwright/test";
@@ -12,6 +12,7 @@ import {
   createBot,
   expect,
   openApplication,
+  openBotSettings,
   openProfileMenu,
   sem,
   SHELL_TIMEOUT_MS,
@@ -40,20 +41,21 @@ function says(scope: Page | Locator, text: string): Locator {
 }
 
 /**
- * The switch on one first-party card.
+ * The switch on one Plugin's row.
  *
- * A card's switch reaches the accessibility tree as a `switch` node whose
- * accessible name is the card's own title, which is how a reader tells the
- * five of them apart.
+ * A row's switch reaches the accessibility tree as a `switch` node whose
+ * accessible name is the Plugin's name — the kind it belongs to is the label
+ * over the group now, rather than a suffix on every row.
  */
 function cardSwitch(page: Page, title: string): Locator {
   return page.getByRole("switch", { name: title, exact: true }).first();
 }
 
 async function openBotPlugins(page: Page): Promise<void> {
-  // The Bot's own door: the Plugins button in its header, which opens the
-  // panel beside the conversation at this width.
-  await tap(page, "plugins-panel-toggle").click();
+  // The Bot's own door: the Plugins row in its Settings, which is one level
+  // under its page — the panel's root beside the conversation at this width.
+  await openBotSettings(page);
+  await tap(page, "bot-settings-plugins").click();
   await expect(sem(page, "plugins-document")).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
@@ -85,7 +87,7 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   });
   await settle(page);
   await expect(says(page, "Plugins · Plugged")).toHaveCount(0);
-  await expect(cardSwitch(page, "Web · Built in")).toHaveCount(0);
+  await expect(cardSwitch(page, "Web")).toHaveCount(0);
   await testInfo.attach("profile-plugins-page.png", {
     body: await page.screenshot(),
     contentType: "image/png",
@@ -115,7 +117,7 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   });
 
   // Web is on for a Bot nobody has switched.
-  const web = cardSwitch(page, "Web · Built in");
+  const web = cardSwitch(page, "Web");
   await expect(web).toHaveAttribute("aria-checked", "true");
   await web.click();
   await expect(web).toHaveAttribute("aria-checked", "false", {
@@ -134,11 +136,11 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   });
   await settle(page);
   await openBotPlugins(page);
-  await expect(cardSwitch(page, "Web · Built in")).toHaveAttribute(
+  await expect(cardSwitch(page, "Web")).toHaveAttribute(
     "aria-checked",
     "false",
   );
-  await expect(cardSwitch(page, "Routines · Built in")).toHaveAttribute(
+  await expect(cardSwitch(page, "Routines")).toHaveAttribute(
     "aria-checked",
     "true",
   );
@@ -151,10 +153,7 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   await createBot(page, "Untouched");
   await settle(page);
   await openBotPlugins(page);
-  await expect(cardSwitch(page, "Web · Built in")).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
+  await expect(cardSwitch(page, "Web")).toHaveAttribute("aria-checked", "true");
   await testInfo.attach("second-bot-plugins.png", {
     body: await page.screenshot(),
     contentType: "image/png",

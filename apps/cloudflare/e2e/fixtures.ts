@@ -844,6 +844,30 @@ export async function press(scope: Locator): Promise<void> {
 }
 
 /**
+ * Open the Bot page: what the selected Bot is doing, and the doors to the rest
+ * of it.
+ *
+ * The Bot's name in the conversation bar is the one way in at every tier — the
+ * right panel's root on a desktop, a pushed page on a phone — so this is how
+ * every spec reaches anything the Bot owns outside its thread.
+ */
+export async function openBotPage(page: Page): Promise<void> {
+  await press(sem(page, "bot-panel-toggle").first());
+  await expect(sem(page, "bot-page").first()).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
+}
+
+/** Open the Bot's Settings, which is behind the gear on its page. */
+export async function openBotSettings(page: Page): Promise<void> {
+  await openBotPage(page);
+  await press(sem(page, "bot-page-settings").first());
+  await expect(sem(page, "bot-settings")).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
+}
+
+/**
  * Turn a Package on from its Plugins row.
  *
  * The wheel is the only way down a Flutter list: it is a canvas, so there is

@@ -62,17 +62,17 @@ void main() {
       expect(identifiedBy(AppletIds.canvas), findsNothing);
       expect(find.text('Applet'), findsNothing);
 
-      // The way in: the header's Applets control at a desk, the row on the
-      // Bot's page on a phone. Both open the Bot's Applet list — the sidebar's
-      // Applets mode, or a page — and a row there opens the Applet.
+      // The way in is the same row at both widths: All Applets, on the Bot
+      // page — the panel's root at a desk, a pushed page on a phone. It opens
+      // the Bot's Applet list, and a row there opens the Applet.
       if (width > 640) {
-        await tester.tap(identifiedBy(AppletIds.chip));
+        await tester.tap(identifiedBy(SettingsIds.botPageAppletsAll));
       } else {
         await tester.tap(identifiedBy(ShellIds.botPanelToggle));
         await tester.pumpAndSettle();
-        await tester.ensureVisible(identifiedBy(AppletIds.chip));
+        await tester.ensureVisible(identifiedBy(SettingsIds.botPageAppletsAll));
         await tester.pumpAndSettle();
-        await tester.tap(identifiedBy(AppletIds.chip));
+        await tester.tap(identifiedBy(SettingsIds.botPageAppletsAll));
       }
       await tester.pumpAndSettle();
       await tester.tap(identifiedBy(AppletIds.row('todo.applet')));

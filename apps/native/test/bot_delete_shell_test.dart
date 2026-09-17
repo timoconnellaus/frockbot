@@ -131,11 +131,11 @@ class Shell {
   Future<void> requestDelete(WidgetTester tester) async {
     await tester.tap(byIdentifier(ShellIds.botPanelToggle).first);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(byIdentifier(SettingsIds.botAdvanced));
+    // The Bot page is the door; Settings is behind its gear, and the danger
+    // rows are the last card on it.
+    await tester.tap(byIdentifier(SettingsIds.botPageSettings).first);
     await tester.pumpAndSettle();
-    await tester.tap(byIdentifier(SettingsIds.botAdvanced));
-    await tester.pumpAndSettle();
-    final delete = find.widgetWithText(OutlinedButton, 'Delete Bot');
+    final delete = byIdentifier(FlockIds.deleteBot);
     await tester.ensureVisible(delete);
     await tester.pumpAndSettle();
     await tester.tap(delete);
@@ -209,8 +209,8 @@ void main() {
       if (tier == 'triple') {
         expect(find.byKey(const ValueKey('bot-alpha')), findsOneWidget);
       } else {
-        // The phone's list remains underneath the pushed settings page.
-        expect(byIdentifier(SettingsIds.botPage), findsOneWidget);
+        // The pushed Settings page is still the one on screen.
+        expect(byIdentifier(SettingsIds.botSettings), findsOneWidget);
       }
       expect(shell.store.values['selection.u'], 'alpha');
       await shell.dispose(tester);

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
@@ -21,8 +22,7 @@ void main() {
                 appBar: ChatHeader(
                   name: 'Rosemary',
                   connection: connection,
-                  onSettings: () {},
-                  onRoutines: () {},
+                  onOpenBot: () {},
                 ),
               ),
             ),
@@ -78,8 +78,7 @@ void main() {
               name: 'Bot',
               computerRunning: running,
               onComputer: () {},
-              onSettings: () {},
-              onRoutines: () {},
+              onOpenBot: () {},
             ),
           ),
         ),
@@ -112,8 +111,8 @@ void main() {
           appBar: ChatHeader(
             name: 'Bob',
             textScale: 1,
-            onSettings: () {},
-            onRoutines: () {},
+            onOpenBot: () {},
+            onComputer: () {},
             onTogglePanel: () => toggles++,
             panelShown: shown,
           ),
@@ -127,7 +126,7 @@ void main() {
       // Rightmost: against the column it shows and hides.
       expect(
         tester.getTopRight(toggle).dx,
-        greaterThan(tester.getTopRight(find.byTooltip('Bot settings')).dx),
+        greaterThan(tester.getTopRight(find.byTooltip('Computer')).dx),
       );
       await tester.tap(find.byTooltip('Hide the panel'));
       expect(toggles, 1);
@@ -139,54 +138,47 @@ void main() {
 
   for (final width in [320.0, 390.0]) {
     for (final scale in [0.85, 1.0, 2.0, 3.0]) {
-      testWidgets(
-        'direct header destinations at $width px and ${scale}x text',
-        (tester) async {
-          tester.view.physicalSize = Size(width, 900);
-          tester.view.devicePixelRatio = 1;
-          addTearDown(tester.view.resetPhysicalSize);
-          addTearDown(tester.view.resetDevicePixelRatio);
-          final opened = <String>[];
-          await tester.pumpWidget(
-            MaterialApp(
-              theme: FrockTheme.theme(Brightness.dark),
-              home: MediaQuery(
-                data: MediaQueryData(textScaler: TextScaler.linear(scale)),
-                child: Scaffold(
-                  appBar: ChatHeader(
-                    name: 'My very long research assistant',
-                    textScale: scale,
-                    connection: ConnectionState.reconnecting,
-                    onSettings: () => opened.add('Settings'),
-                    onComputer: () => opened.add('Computer'),
-                    onRoutines: () => opened.add('Routines'),
-                    onApplets: () => opened.add('Applet'),
-                  ),
+      testWidgets('three things in the bar at $width px and ${scale}x text', (
+        tester,
+      ) async {
+        tester.view.physicalSize = Size(width, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final opened = <String>[];
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+              child: Scaffold(
+                appBar: ChatHeader(
+                  name: 'My very long research assistant',
+                  textScale: scale,
+                  connection: ConnectionState.reconnecting,
+                  onOpenBot: () => opened.add('Bot'),
+                  onComputer: () => opened.add('Computer'),
+                  onTogglePanel: () => opened.add('Panel'),
                 ),
               ),
             ),
-          );
-          await tester.pumpAndSettle();
-          expect(tester.takeException(), isNull);
-          await tester.tap(find.byTooltip('Bot settings'));
-          for (final name in ['Computer', 'Routines']) {
-            await tester.tap(find.byTooltip(name));
-          }
-          expect(byIdentifier(AppletIds.chip), findsOneWidget);
-          await tester.tap(find.byTooltip('Applets'));
-          expect(opened, ['Settings', 'Computer', 'Routines', 'Applet']);
-          expect(tester.widget<AppBar>(find.byType(AppBar)).bottom, isNull);
-          expect(
-            tester.getCenter(find.byTooltip('Applets')).dx,
-            lessThan(tester.getCenter(find.byTooltip('Computer')).dx),
-          );
-          expect(
-            tester.getCenter(find.byTooltip('Computer')).dy,
-            tester.getCenter(find.byTooltip('Bot settings')).dy,
-          );
-          expect(find.byType(PopupMenuButton<String>), findsNothing);
-        },
-      );
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.tap(byIdentifier(ShellIds.botPanelToggle));
+        await tester.tap(find.byTooltip('Computer'));
+        await tester.tap(byIdentifier(ShellIds.rightPanelToggle));
+        expect(opened, ['Bot', 'Computer', 'Panel']);
+        // No strip under the bar, and no overflow menu behind it: the icons
+        // that used to be here are rows on the Bot's page now.
+        expect(tester.widget<AppBar>(find.byType(AppBar)).bottom, isNull);
+        expect(find.byTooltip('Routines'), findsNothing);
+        expect(find.byTooltip('Plugins'), findsNothing);
+        expect(find.byTooltip('Bot settings'), findsNothing);
+        expect(find.byTooltip('Applets'), findsNothing);
+        expect(find.byType(PopupMenuButton<String>), findsNothing);
+      });
     }
   }
 
@@ -210,6 +202,7 @@ void main() {
                 appBar: ChatHeader(
                   name: 'My very long research assistant',
                   textScale: scale,
+                  phone: true,
                   onBack: () => opened.add('Bots'),
                   onOpenBot: () => opened.add('Bot'),
                   onComputer: () => opened.add('Computer'),
@@ -227,13 +220,11 @@ void main() {
         await tester.tap(byIdentifier(ShellIds.botPanelToggle));
         await tester.tap(find.byTooltip('Computer'));
         expect(opened, ['Bots', 'Bot', 'Computer']);
-        // The pill is what carries the name: one tap target, not two.
-        expect(find.byTooltip('Bot settings'), findsOneWidget);
       },
     );
   }
 
-  testWidgets('the Plugins door sits in the header beside Routines', (
+  testWidgets('the name is the one door, and it is named for the Bot', (
     tester,
   ) async {
     var opened = 0;
@@ -241,33 +232,45 @@ void main() {
       MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),
         home: Scaffold(
-          appBar: ChatHeader(
-            name: 'Rosemary',
-            onSettings: () {},
-            onRoutines: () {},
-            onPlugins: () => opened += 1,
-          ),
+          appBar: ChatHeader(name: 'Rosemary', onOpenBot: () => opened += 1),
         ),
       ),
     );
     await tester.pump();
-    expect(find.byTooltip('Plugins'), findsOneWidget);
-    await tester.tap(find.byTooltip('Plugins'));
+    expect(find.byTooltip('Open Rosemary'), findsOneWidget);
+    await tester.tap(byIdentifier(ShellIds.botPanelToggle));
     expect(opened, 1);
   });
 
-  testWidgets('a header given no Plugins callback draws no Plugins door', (
+  testWidgets('a phone wears the pill; a desk fills it on hover', (
     tester,
   ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: Scaffold(
-          appBar: ChatHeader(name: 'Rosemary', onOpenBot: () {}),
-        ),
+    Widget header({required bool phone}) => MaterialApp(
+      theme: FrockTheme.theme(Brightness.dark),
+      home: Scaffold(
+        appBar: ChatHeader(name: 'Rosemary', phone: phone, onOpenBot: () {}),
       ),
     );
+    Color? fill() => tester
+        .widget<TextButton>(find.byType(TextButton))
+        .style
+        ?.backgroundColor
+        ?.resolve(const <WidgetState>{});
+
+    await tester.pumpWidget(header(phone: true));
     await tester.pump();
-    expect(find.byTooltip('Plugins'), findsNothing);
+    expect(fill(), isNot(Colors.transparent));
+
+    await tester.pumpWidget(header(phone: false));
+    await tester.pump();
+    expect(fill(), Colors.transparent);
+
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await pointer.addPointer(
+      location: tester.getCenter(find.byType(TextButton)),
+    );
+    addTearDown(pointer.removePointer);
+    await tester.pump();
+    expect(fill(), isNot(Colors.transparent));
   });
 }

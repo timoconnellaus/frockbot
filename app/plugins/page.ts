@@ -290,12 +290,10 @@ function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
 
 /** A Bot's Plugins frame as a `ViewDocument`. */
 export function botPluginsDocumentV1(frame: BotPluginsFrameV1): ViewDocument {
-  const children: ViewNode[] = [
-    {
-      type: "text",
-      text: "What this Bot can do. Each card explains what the plugin does and what it reaches; a switch is for this Bot only.",
-    },
-  ];
+  // No lead paragraph: the rows say what each Plugin does, and a sentence
+  // above them explaining that a switch is per-Bot is a caption on a surface
+  // that is only ever reached from one Bot's Settings.
+  const children: ViewNode[] = [];
   let nodes = 2;
   let complete = true;
   for (const row of frame.plugins) {

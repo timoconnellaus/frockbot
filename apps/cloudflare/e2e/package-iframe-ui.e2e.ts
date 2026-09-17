@@ -19,6 +19,7 @@ import {
   openApplication,
   press,
   sem,
+  openBotSettings,
 } from "./fixtures.ts";
 
 const CONTENT_HASH = "a".repeat(64);
@@ -226,8 +227,10 @@ test("a sandboxed Package page works at desktop and phone widths", async ({
   await openApplication(page, userId);
   await createBot(page, "Framed");
 
-  // At this width the Bot's own panel is the third column and its Settings
-  // entry is what the Package page mounts into, so there is nothing to open.
+  // At this width the Bot's own panel is the third column, and the Package
+  // page mounts into its Settings — one level under the Bot page, behind the
+  // gear.
+  await openBotSettings(page);
   const host = sem(page, `package-page-${PACKAGE_ID}-${PAGE_ID}`);
   await expect(host).toBeVisible({ timeout: 60_000 });
   // Whose page this is, said by the shell rather than by the page. The
@@ -265,10 +268,9 @@ test("a sandboxed Package page works at desktop and phone widths", async ({
   // The phone: the panel is a page rather than a column, and the same framed
   // page is in it.
   await page.setViewportSize(PHONE);
-  // One tap. The panel toggle is Bot settings on a phone rather than a menu
-  // with Settings in it, so there is nothing between the gesture and the page
-  // the Package mounts into.
-  await press(sem(page, "bot-panel-toggle"));
+  // Two taps, and neither is a menu: the name opens the Bot page and the gear
+  // on it opens the Settings the Package mounts into.
+  await openBotSettings(page);
   await expect(host).toBeVisible({ timeout: 60_000 });
   await expect(
     frame.contentFrame().getByText("bridge:24", { exact: true }),

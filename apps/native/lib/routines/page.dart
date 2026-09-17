@@ -272,6 +272,7 @@ class _RoutinesViewState extends State<RoutinesView> {
     RoutineIds.panel,
     ViewSurfacePage(
       title: 'Routines',
+      switchRows: true,
       store: widget.store,
       userId: widget.userId,
       documentId: RoutineIds.document,
@@ -376,6 +377,12 @@ class RoutineInboxController extends ChangeNotifier {
   final NativeApi api;
   final String botId;
   int unacknowledged = 0;
+
+  /// The firings the Bot page shows, newest first. The same read the badge
+  /// comes from: a completion is the only visible trace a Routine leaves, so
+  /// the rows and the count can never disagree about what happened.
+  List<RoutineRunSummary> runs = const [];
+  bool loaded = false;
   bool _closed = false;
   RoutineInboxController(this.api, this.botId);
 
@@ -386,7 +393,14 @@ class RoutineInboxController extends ChangeNotifier {
       final answer = await api.request(
         '/api/bots/${Uri.encodeComponent(botId)}/routines/inbox',
       );
-      final count = (answer as Map?)?['unacknowledged'];
+      final read = answer as Map?;
+      final entries = read?['entries'];
+      if (entries is List) {
+        runs = routineRunSummariesV1(entries);
+        loaded = true;
+        if (!_closed) notifyListeners();
+      }
+      final count = read?['unacknowledged'];
       if (count is int) adopt(count);
     } catch (_) {
       // A count that cannot be read is not a count of zero: the badge keeps
@@ -407,3 +421,91 @@ class RoutineInboxController extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// One firing, as the Bot page says it: which Routine, when, and whether it
+/// wants anything.
+class RoutineRunSummary {
+  final String entryId;
+  final String routineId;
+  final String name;
+  final DateTime at;
+
+  /// The firing did not work, so the row is the thing to press. Everything
+  /// else is a receipt.
+  final bool needsYou;
+  const RoutineRunSummary({
+    required this.entryId,
+    required this.routineId,
+    required this.name,
+    required this.at,
+    required this.needsYou,
+  });
+}
+
+/// The inbox's entries as the Bot page reads them.
+///
+/// The attribution is the only place the Routine's name survives into the
+/// inbox — "Automation: Morning brief" — so it is read back off it rather than
+/// by asking the Routines route for a second list the two could disagree
+/// about.
+List<RoutineRunSummary> routineRunSummariesV1(List<Object?> entries) => [
+  for (final raw in entries)
+    if (raw is Map &&
+        raw['entryId'] is String &&
+        raw['routineId'] is String &&
+        raw['createdAt'] is String)
+      RoutineRunSummary(
+        entryId: raw['entryId']! as String,
+        routineId: raw['routineId']! as String,
+        name: routineRunNameV1(raw['attribution'] as String? ?? ''),
+        at:
+            DateTime.tryParse(raw['createdAt']! as String)?.toLocal() ??
+            DateTime.now(),
+        needsYou: raw['failure'] == true,
+      ),
+];
+
+/// What the inbox called the thing that fired, without the machinery's prefix.
+String routineRunNameV1(String attribution) {
+  const prefix = 'Automation: ';
+  final name = attribution.startsWith(prefix)
+      ? attribution.substring(prefix.length)
+      : attribution;
+  return name.isEmpty ? 'Routine' : name;
+}
+
+/// When a firing happened, in the words a person uses for the last week:
+/// "Today 7:02 am", "Yesterday 6:00 pm", "Mon 9:00 am", then the date.
+String routineRunWhenV1(DateTime at, DateTime now) {
+  final day = DateTime(at.year, at.month, at.day);
+  final today = DateTime(now.year, now.month, now.day);
+  final days = today.difference(day).inDays;
+  final clock = routineRunClockV1(at);
+  if (days == 0) return 'Today $clock';
+  if (days == 1) return 'Yesterday $clock';
+  if (days > 1 && days < 7) return '${_weekdays[at.weekday - 1]} $clock';
+  return '${at.day} ${_months[at.month - 1]} $clock';
+}
+
+/// The twelve-hour clock this app says times in.
+String routineRunClockV1(DateTime at) {
+  final hour = at.hour % 12 == 0 ? 12 : at.hour % 12;
+  final minute = at.minute.toString().padLeft(2, '0');
+  return '$hour:$minute ${at.hour < 12 ? 'am' : 'pm'}';
+}
+
+const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const _months = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];

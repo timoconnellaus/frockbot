@@ -2,7 +2,14 @@
 // tests cover the split and the ordering; what only the real app can show is
 // that the durable field written by the settings panel is the one the sidebar
 // reads back, and that the Bot leaves the list rather than appearing twice.
-import { createBot, expect, openApplication, sem, test } from "./fixtures.ts";
+import {
+  createBot,
+  expect,
+  openApplication,
+  openBotSettings,
+  sem,
+  test,
+} from "./fixtures.ts";
 import type { Locator, Page } from "@playwright/test";
 
 /** Every pinned tile above the list. */
@@ -40,10 +47,12 @@ test("pinning a Bot from its settings moves it to a tile above the list", async 
   await expect(tiles(page)).toHaveCount(0);
   await expect(row(page, "Beta")).toHaveCount(1);
 
-  // Beta is the Bot just created, so its panel is the one already open. The
-  // switch is the tappable node inside the named row, and its own
-  // `aria-checked` is how the engine says which way it is set.
-  const pinned = sem(page, "bot-pinned").locator('[role="switch"]');
+  // Beta is the Bot just created, so its page is the one the panel is on;
+  // Pinned is a behaviour, which is Settings. The switch is the tappable node
+  // inside the named row, and its own `aria-checked` is how the engine says
+  // which way it is set.
+  await openBotSettings(page);
+  const pinned = sem(page, "bot-pinned");
   await expect(pinned).toHaveAttribute("aria-checked", "false");
   // Flipping the switch is the save: there is nothing else to press.
   await pinned.click();

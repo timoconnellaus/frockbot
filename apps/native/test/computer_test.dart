@@ -223,18 +223,45 @@ void main() {
   });
 
   group('the line under the screen', () {
-    test('says live, or how old the photograph is', () {
+    test('says live, or how old the photograph is, and always says one', () {
       final now = DateTime.parse('2026-09-05T01:00:12.000Z');
-      expect(computerScreenStatusLabelV1(streaming: true, now: now), 'Live');
       expect(
-        computerScreenStatusLabelV1(
+        computerCardStatusV1(
+          streaming: true,
+          unconfigured: false,
+          message: 'browsing github.com',
+          now: now,
+        ),
+        'Live · browsing github.com',
+      );
+      expect(
+        computerCardStatusV1(
           streaming: false,
+          unconfigured: false,
+          message: 'Ready to start',
           capturedAt: DateTime.parse('2026-09-05T01:00:00.000Z'),
           now: now,
         ),
-        'Snapshot · 12s ago',
+        'Ready · captured 12s ago',
       );
-      expect(computerScreenStatusLabelV1(streaming: false, now: now), isNull);
+      expect(
+        computerCardStatusV1(
+          streaming: false,
+          unconfigured: false,
+          message: 'Ready to start',
+          now: now,
+        ),
+        'Ready to start',
+      );
+      expect(
+        computerCardStatusV1(
+          streaming: false,
+          unconfigured: true,
+          message: 'This Bot has no computer.',
+          now: now,
+        ),
+        'No computer',
+      );
     });
 
     test('the age is a whole unit at every scale', () {
@@ -339,17 +366,23 @@ void main() {
       // Available, because the shell registers the panel entry from it: a
       // dependency being down must not read as a Bot with no Computer.
       expect(controller.available, isTrue);
-      expect(find.text('The Computer host answered 503'), findsOneWidget);
+      expect(
+        find.text('The Computer host answered 503'),
+        findsAtLeastNWidgets(1),
+      );
       expect(find.text('No computer'), findsNothing);
       // And it opens, because the full window is where the way out lives.
-      expect(tester.widget<InkWell>(find.byType(InkWell)).onTap, isNotNull);
+      expect(
+        tester.widget<InkWell>(find.byType(InkWell).first).onTap,
+        isNotNull,
+      );
       await close(tester, controller);
     });
 
     testWidgets('a read that answers nothing at all says that', (tester) async {
       final controller = await refused(tester, Exception('socket closed'));
       expect(controller.available, isTrue);
-      expect(find.text('Couldn’t read the computer.'), findsOneWidget);
+      expect(find.text('Couldn’t read the computer.'), findsAtLeastNWidgets(1));
       await close(tester, controller);
     });
 
@@ -386,7 +419,7 @@ void main() {
     ) async {
       final controller = await open(tester, projection());
       await tester.pump();
-      expect(find.textContaining('Snapshot ·'), findsOneWidget);
+      expect(find.textContaining('Ready · captured'), findsOneWidget);
       await close(tester, controller);
     });
 

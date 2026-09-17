@@ -23,27 +23,20 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
 
+  /// Whether this is a phone's bar, where the name is always a pill and the
+  /// panel is a page rather than a column.
+  final bool phone;
+
   /// Back to the Bot list. The phone's, where the conversation is a page.
   final VoidCallback? onBack;
 
-  /// Opens the Bot's page from its name. The phone's: at wider tiers the
-  /// settings icon opens the panel's entry instead.
+  /// Opens the Bot's page from its name, at every tier: the right panel's root
+  /// on a desktop, a pushed page on a phone. It is the one door to everything
+  /// else this Bot holds.
   final VoidCallback? onOpenBot;
-  final VoidCallback? onSettings;
   final VoidCallback? onComputer;
   final bool computerRunning;
-  final VoidCallback? onRoutines;
-
-  /// The Bot's Plugins: what it could run and whether it does. Bot settings,
-  /// so it is a door beside Routines and never a Profile entry.
-  final VoidCallback? onPlugins;
   final ConnectionState connection;
-  final VoidCallback? onApplets;
-
-  /// The doors this Bot's Packages declare, already built and identified.
-  /// They belong to the Bot, so they are drawn in the Bot's own bar rather
-  /// than over the list of every Bot.
-  final List<Widget> packageEntries;
 
   /// Shows or hides the panel beside the conversation. Null on a phone, where
   /// the panel's entries are pages and there is no column to hide.
@@ -59,16 +52,12 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     super.key,
     required this.name,
     this.textScale = 1,
+    this.phone = false,
     this.onBack,
     this.onOpenBot,
-    this.onSettings,
     this.onComputer,
     this.computerRunning = false,
-    this.onRoutines,
-    this.onPlugins,
     this.connection = ConnectionState.initializing,
-    this.onApplets,
-    this.packageEntries = const [],
     this.onTogglePanel,
     this.panelShown = false,
     this.voiceMode = false,
@@ -144,40 +133,16 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               child: identified(
                 ShellIds.botPanelToggle,
                 Tooltip(
-                  message: 'Bot settings',
-                  child: TextButton(
-                    onPressed: onOpenBot,
-                    style: TextButton.styleFrom(
-                      backgroundColor: scheme.onSurface.withValues(alpha: 0.06),
-                      foregroundColor: scheme.onSurface,
-                      shape: const StadiumBorder(),
-                      padding: const EdgeInsets.fromLTRB(12, 5, 9, 5),
-                      minimumSize: const Size(0, 34),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
+                  message: 'Open $name',
+                  child: _BotNameButton(
+                    phone: phone,
+                    onPressed: onOpenBot!,
                     child: title,
                   ),
                 ),
               ),
             ),
-      actions: voiceMode
-          ? [
-              if (onComputer != null)
-                _destination(
-                  'Computer',
-                  ChatIconKind.computer,
-                  onComputer,
-                  color: computerRunning ? computerRunningColor : null,
-                ),
-              const SizedBox(width: 4),
-            ]
-          : [
-        ...packageEntries,
-        if (onApplets != null)
-          identified(
-            AppletIds.chip,
-            _destination('Applets', ChatIconKind.applet, onApplets),
-          ),
+      actions: [
         if (onComputer != null)
           _destination(
             'Computer',
@@ -185,24 +150,9 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             onComputer,
             color: computerRunning ? computerRunningColor : null,
           ),
-        if (onRoutines != null)
-          identified(
-            RoutineIds.panelToggle,
-            _destination('Routines', ChatIconKind.routines, onRoutines),
-          ),
-        if (onPlugins != null)
-          identified(
-            PluginIds.panelToggle,
-            _destination('Plugins', ChatIconKind.plugins, onPlugins),
-          ),
-        if (onSettings != null)
-          identified(
-            ShellIds.botPanelToggle,
-            _destination('Bot settings', ChatIconKind.settings, onSettings),
-          ),
         // The wide tiers' one switch for the panel beside the conversation:
         // rightmost, against the column it shows and hides.
-        if (onTogglePanel != null)
+        if (onTogglePanel != null && !voiceMode)
           identified(
             ShellIds.rightPanelToggle,
             _destination(
@@ -242,6 +192,52 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       );
     },
   );
+}
+
+/// The Bot's name, which is the door to its page.
+///
+/// A phone wears the pill all the time: it is the only affordance in that bar
+/// saying the name can be pressed. At a desk there is a pointer to say it
+/// instead, so the fill arrives on hover and on focus and the resting bar is
+/// the name and nothing else.
+class _BotNameButton extends StatefulWidget {
+  final bool phone;
+  final VoidCallback onPressed;
+  final Widget child;
+  const _BotNameButton({
+    required this.phone,
+    required this.onPressed,
+    required this.child,
+  });
+
+  @override
+  State<_BotNameButton> createState() => _BotNameButtonState();
+}
+
+class _BotNameButtonState extends State<_BotNameButton> {
+  bool _lit = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final filled = widget.phone || _lit;
+    return TextButton(
+      onPressed: widget.onPressed,
+      onHover: widget.phone ? null : (over) => setState(() => _lit = over),
+      onFocusChange: widget.phone ? null : (has) => setState(() => _lit = has),
+      style: TextButton.styleFrom(
+        backgroundColor: filled
+            ? scheme.onSurface.withValues(alpha: 0.06)
+            : Colors.transparent,
+        foregroundColor: scheme.onSurface,
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.fromLTRB(12, 5, 9, 5),
+        minimumSize: const Size(0, 34),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: widget.child,
+    );
+  }
 }
 
 class _DelayedConnectionDot extends StatefulWidget {

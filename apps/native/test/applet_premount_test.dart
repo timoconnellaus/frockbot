@@ -121,9 +121,9 @@ void main() {
       await tester.tap(identifiedBy(ShellIds.botPanelToggle));
       await tester.pumpAndSettle();
       // The row sits under the settings, below the fold on a phone.
-      await tester.ensureVisible(identifiedBy(AppletIds.chip));
+      await tester.ensureVisible(identifiedBy(SettingsIds.botPageAppletsAll));
       await tester.pumpAndSettle();
-      await tester.tap(identifiedBy(AppletIds.chip));
+      await tester.tap(identifiedBy(SettingsIds.botPageAppletsAll));
       await tester.pumpAndSettle();
       // A page with its own back, not a sidebar mode: a phone has no column.
       expect(identifiedBy(AppletIds.list), findsOneWidget);

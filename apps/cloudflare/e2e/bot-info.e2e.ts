@@ -6,24 +6,12 @@ import {
   createBot,
   expect,
   openApplication,
+  openBotPage,
+  press,
   sem,
   SHELL_TIMEOUT_MS,
   test,
 } from "./fixtures.ts";
-
-/**
- * Press a named widget.
- *
- * A `Semantics(identifier:)` around a widget that lays itself out reaches the
- * accessibility tree as a container with `pointer-events: none`, and the node
- * that takes the tap is its child. Clicking the identifier itself would land
- * on the canvas behind it, so this presses whichever of the two the engine
- * made tappable.
- */
-function tap(scope: Page | Locator, identifier: string) {
-  const node = `[flt-semantics-identifier="${identifier}"]`;
-  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
-}
 
 /**
  * Let a surface finish arriving before pressing anything on it.
@@ -52,28 +40,14 @@ function says(scope: Page | Locator, text: string) {
 }
 
 /**
- * One of the chat header's doors into the right panel, by its name.
+ * One of the chat header's two icons, by its name.
  *
- * The header's icons are the only way of choosing what the panel holds; the
- * panel itself names its entry and offers the way out, nothing more. An icon
- * button's name is its tooltip, and the header's is the first in the document.
+ * The bar keeps the Bot's name, the Computer and the panel's own switch; every
+ * other door is a row on the Bot page. An icon button's name is its tooltip,
+ * and the header's is the first in the document.
  */
 function door(page: Page, label: string) {
   return page.getByRole("button", { name: label, exact: true }).first();
-}
-
-/**
- * The panel, showing the entry it names.
- *
- * The name is one line of text at the top of the region, but the engine
- * merges a leaf that heads a group into the group's accessible name rather
- * than its text content, so the word is read from the label and not from the
- * text.
- */
-function panelNamed(page: Page, label: string) {
-  return sem(page, "shell-right-panel")
-    .locator(`[aria-label="${label}"]`)
-    .first();
 }
 
 /**
@@ -91,7 +65,7 @@ async function horizontalOverflow(page: Page): Promise<number> {
   );
 }
 
-test("the default panel composes Computer and Routines and swaps to Settings", async ({
+test("the panel opens on the Bot page and its rows push onto it", async ({
   page,
   userId,
 }) => {
@@ -100,37 +74,50 @@ test("the default panel composes Computer and Routines and swaps to Settings", a
   await createBot(page, "Observed");
   await settle(page);
 
-  // At this width the region is a column the shell draws, and every feature
-  // that filled it is one press away in the chat header. The region names the
-  // entry it is showing, and only that one.
+  // At this width the region is a column the shell draws, and the Bot page is
+  // its floor: the Bot's name at the top of it, and no way back from there.
   const panel = sem(page, "shell-right-panel");
   await expect(panel).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  // Bot settings is the entry the region opens on.
-  await expect(panelNamed(page, "Settings")).toBeVisible();
-  await expect(sem(page, "bot-settings")).toBeVisible();
+  await expect(
+    says(sem(page, "shell-right-panel"), "Observed").first(),
+  ).toBeVisible();
+  await expect(sem(page, "bot-page").first()).toBeVisible();
+  await expect(sem(page, "right-panel-back")).toHaveCount(0);
 
   await settle(page);
   await door(page, "Computer").click();
   await expect(sem(page, "computer-card")).toBeVisible({ timeout: 60_000 });
-  await expect(panelNamed(page, "Computer")).toBeVisible();
+  await expect(
+    says(sem(page, "shell-right-panel"), "Computer").first(),
+  ).toBeVisible();
   // The card is the whole statement: no caption repeats it underneath.
   await expect(says(page, "Observed's screen")).toHaveCount(0);
 
   await settle(page);
-  await door(page, "Routines").click();
-  await expect(sem(page, "routines-document")).toBeVisible({ timeout: 60_000 });
-  await expect(panelNamed(page, "Routines")).toBeVisible();
-  await expect(says(page, "No Routines yet.").first()).toBeVisible();
-
+  await press(sem(page, "right-panel-back"));
   await settle(page);
-  await tap(page, "bot-panel-toggle").click();
-  await expect(sem(page, "bot-settings")).toBeVisible();
-  await expect(panelNamed(page, "Settings")).toBeVisible();
+  await press(sem(page, "bot-page-routines-all"));
+  await expect(sem(page, "routines-document")).toBeVisible({ timeout: 60_000 });
+  await expect(
+    says(sem(page, "shell-right-panel"), "All Routines").first(),
+  ).toBeVisible();
+  await expect(says(page, "No Routines yet").first()).toBeVisible();
+
+  // The chevron goes back one level; the name in the bar goes all the way.
+  await settle(page);
+  await press(sem(page, "right-panel-back"));
+  await expect(sem(page, "bot-page").first()).toBeVisible();
+  await settle(page);
+  await press(sem(page, "bot-page-settings").first());
+  await expect(sem(page, "bot-settings")).toBeVisible({ timeout: 60_000 });
+  await settle(page);
+  await openBotPage(page);
+  await expect(sem(page, "bot-settings")).toHaveCount(0);
 
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
 });
 
-test("the default panel and Settings fit the mobile shell", async ({
+test("the Bot page and Settings fit the mobile shell", async ({
   page,
   userId,
 }) => {
@@ -139,18 +126,15 @@ test("the default panel and Settings fit the mobile shell", async ({
   await settle(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
-  // On a phone the right panel is not a column: its entries are pages, and the
-  // toggle beside the conversation title is how one is chosen. A panel that
-  // opened itself over the conversation is the layout this replaced, so
-  // nothing is on screen until it is asked for.
-  await expect(sem(page, "bot-settings")).toHaveCount(0);
+  // On a phone the panel is not a column: its entries are pages, and the name
+  // pill beside the conversation title is how the first of them is opened.
+  await expect(sem(page, "bot-page")).toHaveCount(0);
   await settle(page);
-  // One tap. The header names its three destinations separately now, so the
-  // Bot settings control opens Bot settings rather than a chooser of what the
-  // region holds.
-  await tap(page, "bot-panel-toggle").click();
-  await expect(sem(page, "bot-settings")).toBeVisible({ timeout: 60_000 });
+  await openBotPage(page);
   await expect(says(page, "Pocket's screen")).toHaveCount(0);
+  await settle(page);
+  await press(sem(page, "bot-page-settings").first());
+  await expect(sem(page, "bot-settings")).toBeVisible({ timeout: 60_000 });
 
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
 });
