@@ -6,6 +6,7 @@ import type {
 import {
   botInstructionRootV1,
   countSkillDocumentsV1,
+  countSkillReferencesV1,
   loadSkillCatalogV1,
   renderSkillCatalogPromptV1,
   SKILL_MAX_CATALOG_ENTRIES,
@@ -267,6 +268,11 @@ describe("the Skills loader", () => {
       '<skill name="Daily standup" source="bot" ref="bot/standup" path="skills/standup/SKILL.md" by="your User">Use this when assembling the &lt;weekday&gt; standup.</skill>',
     );
     expect(rendered).toContain("Mentioning a Skill is not running it.");
+    // The closing sentence names every source the block can list, including
+    // the one whose name and description are a Plugin author's bytes.
+    expect(rendered).toContain(
+      "the plugin ones come from a Plugin your User's Bot runs",
+    );
     // Progressive disclosure: the body is never in the prompt.
     expect(rendered).not.toContain("Secret body text.");
     expect(
@@ -314,6 +320,50 @@ describe("the Skills loader", () => {
     expect(workspace.calls).toEqual([
       "list:bot-instructions:user-1:bot-1",
       "read:skills/standup/SKILL.md",
+    ]);
+  });
+
+  test("refuses a Skill whole when the listing was cut before its references", async () => {
+    const workspace = new FakeWorkspace();
+    for (let index = 1; index <= 7; index += 1) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `skills/skill-${index}/SKILL.md`,
+        text: skillMarkdown(`skill-${index}`, "Use this when cut.", "Body."),
+        writer: BOT_WRITER,
+      });
+      for (const name of ["a.md", "b.md"]) {
+        await workspace.seed({
+          root: OWN_ROOT,
+          path: `skills/skill-${index}/references/${name}`,
+          text: "# Reference",
+          writer: BOT_WRITER,
+        });
+      }
+    }
+    // Two entries a page: the bounded walk ends inside the sixth Skill, after
+    // its `SKILL.md` and before the `references/` beside it.
+    workspace.listPageSize = 2;
+
+    const catalog = await loadSkillCatalogV1(workspace, OWNER);
+
+    expect(catalog.skills.map((skill) => skill.path)).toEqual([
+      "skills/skill-1/SKILL.md",
+      "skills/skill-2/SKILL.md",
+      "skills/skill-3/SKILL.md",
+      "skills/skill-4/SKILL.md",
+      "skills/skill-5/SKILL.md",
+    ]);
+    expect(catalog.skills.map((skill) => skill.references.length)).toEqual([
+      2, 2, 2, 2, 2,
+    ]);
+    // The sixth is refused whole rather than loaded off a partial index.
+    expect(catalog.refusals).toEqual([
+      {
+        path: "skills/skill-6/SKILL.md",
+        kind: "unreadable",
+        reason: expect.stringContaining("did not finish listing"),
+      },
     ]);
   });
 
@@ -409,6 +459,47 @@ describe("counting a root against the Skill quota", () => {
     expect(
       workspace.calls.filter((call) => call.startsWith("list:")),
     ).toHaveLength(3);
+  });
+
+  test("counts one Skill's references inside that Skill's own directory", async () => {
+    const workspace = new FakeWorkspace();
+    // A root far bigger than the count's page bound can walk end to end.
+    for (let index = 0; index < 300; index += 1) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `notes/note-${String(index).padStart(3, "0")}.md`,
+        text: "Not a Skill.",
+        writer: BOT_WRITER,
+      });
+    }
+    await workspace.seed({
+      root: OWN_ROOT,
+      path: "skills/standup/SKILL.md",
+      text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+      writer: BOT_WRITER,
+    });
+    for (const name of ["a.md", "b.md"]) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `skills/standup/references/${name}`,
+        text: "# Reference",
+        writer: BOT_WRITER,
+      });
+    }
+    workspace.listPageSize = 1;
+
+    const counted = await countSkillReferencesV1(
+      workspace,
+      OWN_ROOT,
+      "skills/standup/SKILL.md",
+    );
+
+    // The question is about one directory, so the walk reads one directory:
+    // the rest of the root never enters it, and never exhausts its pages.
+    expect(counted).toEqual({ status: "ok", count: 2 });
+    expect(
+      workspace.calls.filter((call) => call.startsWith("list:")),
+    ).toHaveLength(2);
   });
 
   test("the walk is bounded by Skills, so a huge root is still countable", async () => {

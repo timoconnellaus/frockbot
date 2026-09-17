@@ -64,6 +64,7 @@ export async function loadPluginSkillsV1(
   const skills: LoadedSkillV1[] = [];
   const refusals: SkillRefusalV1[] = [];
   for (const contribution of contributions) {
+    const attribution = `Plugin "${contribution.displayName ?? contribution.pluginId}"`;
     for (const document of contribution.skills) {
       const path = pluginSkillPathV1(contribution.pluginId, document.slug);
       if (!isSkillSlugV1(document.slug)) {
@@ -110,6 +111,7 @@ export async function loadPluginSkillsV1(
         }
         references.push({
           path: skillReferencePathForV1(path, reference.path),
+          by: attribution,
           generationId: await sha256Hex(reference.text),
           text: reference.text,
         });
@@ -128,7 +130,7 @@ export async function loadPluginSkillsV1(
           pluginId: contribution.pluginId,
           slug: document.slug,
         },
-        by: `Plugin "${contribution.displayName ?? contribution.pluginId}"`,
+        by: attribution,
         name: parsed.document.name,
         description: parsed.document.description,
         body: parsed.document.body,

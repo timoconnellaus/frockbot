@@ -207,6 +207,10 @@ export class SkillCatalog {
           ? {
               references: skill.references.map((reference) => ({
                 path: reference.path,
+                // Whose reference it is, when it is not this Bot's own: the
+                // file beside a `SKILL.md` can have a different writer, and a
+                // Turn that read it must say which.
+                ...(reference.by ? { by: reference.by } : {}),
                 generationId: reference.generationId,
               })),
             }
@@ -298,12 +302,11 @@ export class SkillCatalog {
     skill: LoadedSkillV1,
     name: string,
   ): Promise<
-    | { status: "ok"; path: string; text: string }
+    | { status: "ok"; path: string; by?: string; text: string }
     | { status: "refused"; reason: string }
   > {
     const reference = skill.references.find(
       (candidate) =>
-        candidate.path === name ||
         skillReferenceNameForV1(skill.path, candidate.path) === name,
     );
     if (!reference) {
@@ -312,8 +315,14 @@ export class SkillCatalog {
         reason: `Skill "${skill.name}" offers no reference "${name}" on this Turn.`,
       };
     }
+    const by = reference.by;
     if (reference.text !== undefined) {
-      return { status: "ok", path: reference.path, text: reference.text };
+      return {
+        status: "ok",
+        path: reference.path,
+        ...(by ? { by } : {}),
+        text: reference.text,
+      };
     }
     const root =
       skill.source === "user"
@@ -335,6 +344,7 @@ export class SkillCatalog {
     return {
       status: "ok",
       path: reference.path,
+      ...(by ? { by } : {}),
       text: new TextDecoder().decode(read.file.bytes),
     };
   }
@@ -657,16 +667,16 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
         return {
           content: [
             `# ${skill.name} · ${wanted}`,
-            `Path: ${reference.path}`,
+            `${reference.by ? `By: ${reference.by}\n` : ""}Path: ${reference.path}`,
             "",
             reference.text,
           ].join("\n"),
           isError: false,
         };
       }
-      const offered = skill.references.map(
+      const offered = skill.references.flatMap(
         (reference) =>
-          skillReferenceNameForV1(skill.path, reference.path) ?? reference.path,
+          skillReferenceNameForV1(skill.path, reference.path) ?? [],
       );
       return {
         content: [
@@ -728,14 +738,11 @@ export function createSkillWriteTool(
       "Write a Skill: a Markdown recipe stored under your own instruction root, or under your User's shared root where all of their Bots can read it. It becomes visible to you on your next Turn, not this one.",
     inputSchema: SKILL_WRITE_INPUT_SCHEMA as unknown as Record<string, unknown>,
     idempotent: false,
-    validate: (input: unknown) => {
-      try {
-        decodeSkillWriteInputV1(input);
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    // Deliberately permissive, as `skill_load`'s is: the decoder's shape rules
+    // are the guidance, and a bare `false` here would replace every one of
+    // them with the generic `Invalid input for tool: skill_write`. A wrong
+    // shape reaches `execute`, which says what was wrong.
+    validate: (input: unknown) => !!input && typeof input === "object",
     execute: async (input: unknown, context: ToolExecutionContext) => {
       let decoded: SkillWriteInputV1;
       try {

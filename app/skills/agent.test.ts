@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { SessionStore, type Session } from "@frockbot/core/contracts";
+import {
+  LoopHookListV1,
+  SessionStore,
+  type Session,
+  type ToolDefinition,
+  type ToolExecutionResult,
+} from "@frockbot/core/contracts";
+import { frockbotToolCallV1, ToolRegistry } from "@frockbot/core/tools";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import {
   createSkillLoadTool,
@@ -8,11 +15,12 @@ import {
   openSkillTurnPositionV1,
   SkillCatalog,
 } from "./agent.ts";
-import { botInstructionRootV1 } from "./catalog.ts";
+import { botInstructionRootV1, userInstructionRootV1 } from "./catalog.ts";
 import { FakeWorkspace, skillMarkdown } from "./testing.ts";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
 const OWN_ROOT = botInstructionRootV1(OWNER);
+const USER_ROOT = userInstructionRootV1(OWNER);
 const WRITER = { sessionId: "user-1:bot-1", turnId: "turn-4", runId: "run-9" };
 const BOT_WRITER = { kind: "bot" as const, botId: "bot-1", ...WRITER };
 
@@ -25,6 +33,28 @@ const CONTEXT = {
   effectId: "tool:1:1:0",
   signal: new AbortController().signal,
 };
+
+/**
+ * Calls a tool the way a Turn does: through the registry, so a `validate` that
+ * denies the call answers the registry's flat message rather than the tool's
+ * own refusal.
+ */
+async function callThroughRegistry(
+  tool: ToolDefinition,
+  input: unknown,
+): Promise<ToolExecutionResult> {
+  const tools = new ToolRegistry(new LoopHookListV1());
+  tools.register(tool);
+  const call = frockbotToolCallV1({
+    id: "provider-call",
+    name: tool.name,
+    input,
+  });
+  const context = { ...CONTEXT, toolCall: call };
+  const prepared = await tools.prepare(call, context);
+  if (prepared.kind !== "ready") return prepared.result;
+  return tools.executePrepared(prepared, context);
+}
 
 async function openSession(): Promise<{
   session: Session;
@@ -285,6 +315,67 @@ describe("the skill_load tool", () => {
     await dispose();
   });
 
+  test("names the writer of a reference its Skill did not have", async () => {
+    // The shared root: the Bot wrote the Skill, its User wrote the file beside
+    // it, and both pass the same predicate.
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: USER_ROOT,
+        path: "skills/standup/SKILL.md",
+        text: skillMarkdown(
+          "standup",
+          "Use this when standing up.",
+          "Read forms.md before you fill one in.",
+        ),
+        writer: BOT_WRITER,
+      },
+      {
+        root: USER_ROOT,
+        path: "skills/standup/references/forms.md",
+        text: "# Forms\nOne per person.",
+        writer: { kind: "user", userId: "user-1" },
+      },
+    ]);
+    const { session, dispose } = await openSession();
+    const catalog = new SkillCatalog(OWNER, workspace);
+    await catalog.refresh(4, session);
+    const tool = createSkillLoadTool(catalog);
+
+    const reference = await tool.execute(
+      { path: "user/standup", reference: "forms.md" },
+      CONTEXT,
+    );
+    expect(reference.isError).toBe(false);
+    expect(reference.content).toContain("By: your User");
+
+    const injected = session.events.find(
+      (event) => event.type === "skill/injected",
+    );
+    const recorded =
+      injected?.type === "skill/injected"
+        ? injected.skills.find(
+            (skill) => skill.path === "skills/standup/SKILL.md",
+          )
+        : undefined;
+    expect(recorded?.by).toBeUndefined();
+    expect(recorded?.references).toEqual([
+      {
+        path: "skills/standup/references/forms.md",
+        by: "your User",
+        generationId: expect.any(String),
+      },
+    ]);
+
+    // One spelling: the name the tool advertises, and not the path beside it.
+    const byPath = await tool.execute(
+      { path: "user/standup", reference: "skills/standup/references/forms.md" },
+      CONTEXT,
+    );
+    expect(byPath.isError).toBe(true);
+    expect(byPath.content).toContain("offers no reference");
+    await dispose();
+  });
+
   test("reads a Plugin Skill's reference out of the artifact, without a Workspace", async () => {
     const workspace = new FakeWorkspace();
     const { session, dispose } = await openSession();
@@ -528,9 +619,15 @@ describe("the skill_write tool", () => {
       WRITER,
       sessions,
     );
-    expect(tool.validate?.({ name: "a" })).toBe(false);
-    const result = await tool.execute({ name: "a", description: "b" }, CONTEXT);
+    // Through the registry, because a `validate` that denied the call would
+    // replace the decoder's reason with `Invalid input for tool: skill_write`.
+    const result = await callThroughRegistry(tool, {
+      name: "a",
+      description: "b",
+    });
     expect(result.isError).toBe(true);
+    expect(result.content).toContain("skill_write was refused");
+    expect(result.content).not.toContain("Invalid input for tool");
     expect(workspace.calls).toEqual([]);
     await dispose();
   });
@@ -584,10 +681,13 @@ describe("the skill_write tool", () => {
     );
 
     for (const reference of ["../escape.md", "nested/forms.md", "forms.txt"]) {
-      const refused = await tool.execute(
-        { slug: "standup", reference, body: "#" },
-        CONTEXT,
-      );
+      // Through the registry: the shape rule is guidance only if the model
+      // actually receives it.
+      const refused = await callThroughRegistry(tool, {
+        slug: "standup",
+        reference,
+        body: "#",
+      });
       expect(refused.isError).toBe(true);
       expect(refused.content).toContain(".md file name");
     }

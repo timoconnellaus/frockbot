@@ -314,6 +314,7 @@ export async function loadManagedSkillsV1(
     for (const reference of declared) {
       references.push({
         path: skillReferencePathForV1(path, reference.path),
+        by: MANAGED_SKILL_ATTRIBUTION,
         generationId: await sha256Hex(reference.text),
         text: reference.text,
       });

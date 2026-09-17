@@ -100,9 +100,17 @@ export class FakeWorkspace implements WorkspaceFilesV1 {
     if (this.listFailure) return Promise.resolve({ ...this.listFailure });
     const key = workspaceRootKeyV1(request.root);
     const all = [...this.#files.values()]
-      .filter((stored) => workspaceRootKeyV1(stored.entry.path.root) === key)
+      .filter(
+        (stored) =>
+          workspaceRootKeyV1(stored.entry.path.root) === key &&
+          (request.prefix === undefined ||
+            stored.entry.path.path.startsWith(request.prefix)),
+      )
       .map((stored) => stored.entry)
-      .sort((left, right) => left.path.path.localeCompare(right.path.path));
+      // Path order, as the object store lists: `SKILL.md` before the
+      // `references/` beside it. A locale collation would order those the
+      // other way round and hide what a cut listing does to a caller.
+      .sort((left, right) => (left.path.path < right.path.path ? -1 : 1));
     const start = request.cursor ? Number(request.cursor) : 0;
     const size = request.limit ?? this.listPageSize;
     const entries = all.slice(start, start + size);

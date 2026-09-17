@@ -60,6 +60,7 @@ import {
   isSkillDocumentPathV1,
   parseSkillDocumentV1,
   skillReferenceNameForV1,
+  skillReferencesPrefixV1,
   SKILL_MAX_FILE_BYTES,
   SKILL_MAX_REFERENCES,
   SKILL_REFERENCES_DIRECTORY,
@@ -97,6 +98,13 @@ export interface SkillReferenceV1 {
   /** Listed the way the Skill's own path is: relative to the root, or synthetic. */
   path: string;
   generationId: string;
+  /**
+   * Who wrote this reference, when it was not this Bot. A reference is an
+   * instruction, so it carries the attribution its Skill does: the `SKILL.md`
+   * and the file beside it can have different writers, and the one the Turn
+   * actually reads is the one that must be named.
+   */
+  by?: string;
   /**
    * The bytes, for a source that carries them in the artifact rather than on
    * the Workspace — managed and plugin Skills. A Workspace reference is read
@@ -355,6 +363,7 @@ export async function loadSkillCatalogV1(
   const catalog = emptySkillCatalogV1(owner);
   const entries: WorkspaceEntryV1[] = [];
   let cursor: string | undefined;
+  let listedWhole = false;
   for (let page = 0; page < SKILL_MAX_LIST_PAGES; page += 1) {
     const outcome = await reads.list(
       cursor === undefined ? { root } : { root, cursor },
@@ -371,9 +380,25 @@ export async function loadSkillCatalogV1(
       return catalog;
     }
     entries.push(...outcome.entries);
-    if (!outcome.cursor) break;
+    if (!outcome.cursor) {
+      listedWhole = true;
+      break;
+    }
     cursor = outcome.cursor;
   }
+
+  // The walk is bounded, so a root larger than it can list is cut somewhere.
+  // `frontier` is the furthest path the listing reached; a listing in path
+  // order that got past a Skill's whole `references/` prefix saw all of it,
+  // and every other Skill's index may be missing files that lie beyond the
+  // cut. `referencesOf` refuses those whole rather than load a partial index.
+  const frontier = listedWhole
+    ? undefined
+    : entries.reduce(
+        (furthest, entry) =>
+          entry.path.path > furthest ? entry.path.path : furthest,
+        "",
+      );
 
   const candidates = entries
     .filter((entry) => isSkillDocumentPathV1(entry.path.path))
@@ -407,6 +432,17 @@ export async function loadSkillCatalogV1(
   ):
     | { status: "ok"; references: SkillReferenceV1[] }
     | { status: "refused"; kind: SkillRefusalKindV1; reason: string } => {
+    const prefix = skillReferencesPrefixV1(documentPath);
+    if (
+      frontier !== undefined &&
+      !(frontier > prefix && !frontier.startsWith(prefix))
+    ) {
+      return {
+        status: "refused",
+        kind: "unreadable",
+        reason: `the ${refSource} instruction root did not finish listing within ${SKILL_MAX_LIST_PAGES} pages, so the Skill's references could not be indexed`,
+      };
+    }
     const listed = (referencesByDocument.get(documentPath) ?? []).sort(
       (left, right) => left.path.path.localeCompare(right.path.path),
     );
@@ -438,6 +474,9 @@ export async function loadSkillCatalogV1(
       }
       references.push({
         path: source.path.path,
+        ...(attributionFor(source, owner)
+          ? { by: attributionFor(source, owner) as string }
+          : {}),
         generationId: source.generation.generationId,
       });
     }
@@ -571,11 +610,12 @@ export async function countSkillReferencesV1(
   root: WorkspaceInstructionRootV1,
   documentPath: string,
 ): Promise<SkillCountOutcomeV1> {
+  const prefix = skillReferencesPrefixV1(documentPath);
   let count = 0;
   let cursor: string | undefined;
   for (let page = 0; page < SKILL_MAX_COUNT_LIST_PAGES; page += 1) {
     const outcome = await reads.list(
-      cursor === undefined ? { root } : { root, cursor },
+      cursor === undefined ? { root, prefix } : { root, prefix, cursor },
     );
     if (outcome.status !== "ok") {
       return {
@@ -588,6 +628,9 @@ export async function countSkillReferencesV1(
         skillReferenceNameForV1(documentPath, entry.path.path) !== undefined,
     ).length;
     if (!outcome.cursor) return { status: "ok", count };
+    // Past the bound the answer cannot change, so the walk stops wherever it
+    // is rather than paging a root that a listing prefix already narrowed.
+    if (count > SKILL_MAX_REFERENCES) return { status: "ok", count };
     cursor = outcome.cursor;
   }
   return {
@@ -799,7 +842,7 @@ export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
     "<agent_skills>",
     ...entries,
     "</agent_skills>",
-    "These are your Skills: recipes you wrote, or your User wrote, for you; the managed ones ship with FrockBot.",
+    "These are your Skills: recipes you wrote, or your User wrote, for you; the managed ones ship with FrockBot, and the plugin ones come from a Plugin your User's Bot runs.",
     'Only names, refs, paths and descriptions are listed above. Call skill_load with the ref in its "path" field to read a Skill\'s full instructions before you follow it.',
     "Mentioning a Skill is not running it.",
   ].join("\n");

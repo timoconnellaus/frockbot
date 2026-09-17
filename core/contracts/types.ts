@@ -605,7 +605,12 @@ export interface SessionEventMap {
        * visible in durable state rather than only in the body that named it.
        * Absent when the Skill offered none.
        */
-      references?: Array<{ path: string; generationId: string }>;
+      references?: Array<{
+        path: string;
+        /** Who wrote the reference, when it was not the reading Bot. */
+        by?: string;
+        generationId: string;
+      }>;
     }>;
     refusals: Array<{ path: string; reason: string }>;
   };
@@ -1962,8 +1967,19 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           entry.references.forEach((reference, position) => {
             const referenceLabel = `${label}.references[${position}]`;
             const listed = eventRecord(reference, referenceLabel);
-            requireEventKeys(listed, ["path", "generationId"], referenceLabel);
+            requireEventKeys(
+              listed,
+              [
+                "path",
+                ...(listed.by === undefined ? [] : ["by"]),
+                "generationId",
+              ],
+              referenceLabel,
+            );
             eventString(listed.path, `${referenceLabel}.path`);
+            if (listed.by !== undefined) {
+              eventString(listed.by, `${referenceLabel}.by`);
+            }
             eventString(listed.generationId, `${referenceLabel}.generationId`);
           });
         }

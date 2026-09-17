@@ -171,21 +171,30 @@ export function isSkillReferenceNameV1(name: unknown): name is string {
 }
 
 /**
+ * The directory a Skill's references live in, as a path prefix. The one place
+ * the layout is written; every path form below is derived from it.
+ */
+export function skillReferencesPrefixV1(documentPath: string): string {
+  if (!isSkillDocumentPathV1(documentPath)) {
+    throw new Error("a reference needs the path of its SKILL.md");
+  }
+  return `${documentPath.slice(0, -SKILL_FILE_NAME.length)}${SKILL_REFERENCES_DIRECTORY}/`;
+}
+
+/**
  * The path a named reference occupies beside a Skill document. The inverse of
- * {@link skillReferenceNameForV1}, and the one place the layout is written —
- * a synthetic `managed/` or `plugin/` path is built from it too.
+ * {@link skillReferenceNameForV1} — a synthetic `managed/` or `plugin/` path
+ * is built from it too.
  */
 export function skillReferencePathForV1(
   documentPath: string,
   name: string,
 ): string {
-  if (!isSkillDocumentPathV1(documentPath)) {
-    throw new Error("a reference needs the path of its SKILL.md");
-  }
+  const prefix = skillReferencesPrefixV1(documentPath);
   if (!isReferenceName(name)) {
     throw new Error("skill reference must be a single .md file name");
   }
-  return `${documentPath.slice(0, -SKILL_FILE_NAME.length)}${SKILL_REFERENCES_DIRECTORY}/${name}`;
+  return `${prefix}${name}`;
 }
 
 /** The relative path a reference of this Skill occupies inside the root. */
@@ -206,7 +215,7 @@ export function skillReferenceNameForV1(
   candidatePath: string,
 ): string | undefined {
   if (!isSkillDocumentPathV1(documentPath)) return undefined;
-  const prefix = `${documentPath.slice(0, -SKILL_FILE_NAME.length)}${SKILL_REFERENCES_DIRECTORY}/`;
+  const prefix = skillReferencesPrefixV1(documentPath);
   if (!candidatePath.startsWith(prefix)) return undefined;
   const name = candidatePath.slice(prefix.length);
   return isReferenceName(name) ? name : undefined;

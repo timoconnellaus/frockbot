@@ -94,6 +94,9 @@ describe("the managed Skill source", () => {
     expect(loaded.skills[0]?.references).toEqual([
       {
         path: "managed/a2ui/references/forms.md",
+        // A reference is an instruction, so it carries the attribution its
+        // Skill does: these bytes are the artifact's, not the Bot's.
+        by: "FrockBot",
         generationId: expect.any(String),
         text: "# Forms",
       },
