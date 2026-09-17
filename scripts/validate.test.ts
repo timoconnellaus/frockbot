@@ -226,16 +226,30 @@ try {
     stdout: "pipe",
     stderr: "pipe",
   });
-  while (!existsSync(marker)) await Bun.sleep(25);
-  const child = Number(readFileSync(marker, "utf8"));
+  // `Bun.write` creates the file and then fills it, so existence alone is not
+  // a value: read until the content parses, and give up loudly rather than
+  // hanging if the child never gets that far.
+  const deadline = Date.now() + 15_000;
+  let child = 0;
+  while (!child) {
+    if (Date.now() > deadline) {
+      throw new Error("the validator's child never recorded its pid");
+    }
+    const recorded = existsSync(marker) ? readFileSync(marker, "utf8") : "";
+    child = Number.parseInt(recorded, 10) || 0;
+    if (!child) await Bun.sleep(25);
+  }
   validator.kill("SIGINT");
   expect(await validator.exited).not.toBe(0);
   expect(await new Response(validator.stderr).text()).toContain(
     "interrupted by SIGINT",
   );
-  // The child is gone, rather than still holding ports and scratch after the
-  // developer got their prompt back.
+  // The child, and the process group it leads, are gone rather than still
+  // holding ports and scratch after the developer got their prompt back. The
+  // group is the claim: that is what the capture path put the child into and
+  // what the interrupt has to reach.
   expect(() => process.kill(child, 0)).toThrow();
+  expect(() => process.kill(-child, 0)).toThrow();
   // And the run cleaned up after itself, which only happens if it unwound
   // rather than being cut down where it stood.
   expect(existsSync(join(root, ".local-validation", "running"))).toBe(false);

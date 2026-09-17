@@ -35,11 +35,18 @@ the Bun and Node versions/platform. A receipt therefore survives an amend, a
 reorder or a rebase that touches nothing the category reads; only changing an
 input re-runs it. Code and configuration must be committed before validation,
 including untracked source. Root Markdown files, `docs/`, and gitignored local
-working files may remain dirty and are an input to no category, so a
-documentation-only commit reuses every receipt. Markdown elsewhere can contain
-runtime prompts and is treated as code. `runtime` additionally excludes
-`apps/native/`, `apps/marketing/` and `apps/admin-portal/`, which nothing it
-runs imports; every other category depends on everything else by default. The
+working files may remain dirty; they are an input to no category whose command
+reads only code, so a documentation-only commit reuses those receipts. Markdown
+elsewhere can contain runtime prompts and is treated as code. `format` is the
+exception and takes every tracked path, prose included, because `prettier
+--check .` checks the repository rather than a suite, and `.prettierignore`
+exempts neither `docs/` nor root Markdown: a documentation-only commit
+therefore still re-runs `format`. That is the line to check when changing a
+category's command — a command that reads the repository itself cannot take the
+prose exclusion, because prose can change its result. `runtime` additionally
+excludes `apps/native/`, `apps/marketing/` and `apps/admin-portal/`, which
+nothing it runs imports; every other category depends on everything else that
+is not prose by default. The
 checkout is checked before and after execution. Receipts accumulate rather than
 replace one another, and nothing removes them; two commits with identical inputs
 share one file, so the directory grows more slowly than the per-commit scheme it
