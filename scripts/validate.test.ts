@@ -13,6 +13,7 @@ import {
   categories,
   ignoredWorkingPath,
   inputFingerprint,
+  isCategoryInput,
   prePushCategories,
   pushCommits,
   requireLinearBranch,
@@ -166,6 +167,14 @@ test("no category treats prose as an input", async () => {
   git(root, "commit", "-qm", "documentation only");
   await validate(root, ["probe"]);
   expect(probeRuns(root)).toBe("1");
+});
+
+test("the input rules exclude prose without excluding nested code", () => {
+  expect(isCategoryInput("unit", "docs/plan.md")).toBe(false);
+  expect(isCategoryInput("unit", "README.md")).toBe(false);
+  expect(isCategoryInput("unit", "apps/cloudflare/skill.md")).toBe(true);
+  expect(isCategoryInput("unit", "apps/native/lib/main.dart")).toBe(true);
+  expect(isCategoryInput("runtime", "apps/native/lib/main.dart")).toBe(false);
 });
 
 test("the workerd suite does not read the Flutter client, and the rest do", () => {

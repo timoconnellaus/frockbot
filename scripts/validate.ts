@@ -56,43 +56,33 @@ export const categories: Record<string, string[][]> = {
 export const prePushCategories = ["format", "typecheck", "unit"];
 
 /**
- * Git pathspecs naming what a category's result depends on. A receipt is keyed
- * on the content at these paths, not on the commit that carried it, so
- * amending a message, reordering commits, or rebasing onto a base that touched
- * nothing a category reads all reuse the previous run.
+ * What a category's result depends on, as a predicate over tracked paths at
+ * `HEAD`. A receipt is keyed on the content at those paths, not on the commit
+ * that carried it, so amending a message, reordering commits, or rebasing onto
+ * a base that touched nothing a category reads all reuse the previous run.
  *
- * `DEFAULT_INPUTS` is everything `ignoredWorkingPath` does not ignore, and it
- * is what a category gets when it names nothing here. That direction matters:
- * a new category, or a new top-level directory, re-runs until someone proves
- * it can be excluded, rather than being silently skipped.
- */
-const DEFAULT_INPUTS = [
-  ".",
-  ":(exclude)docs/",
-  // Root-level Markdown only, matching `ignoredWorkingPath`. The two magic
-  // words share one set — `:(exclude):(glob)` is two pathspecs, and the second
-  // silently fails to exclude anything. `glob` stops `*` from crossing a
-  // slash, so a Package's `apps/x/skill.md` stays an input: Markdown outside
-  // `docs/` is code here.
-  ":(exclude,glob)*.md",
-];
-
-/**
- * `runtime` is the one category narrower than the default, and only because
- * two independent things say so: nothing under `apps/cloudflare`, `core`,
- * `app` or `providers` imports these directories, and `main.yml` says of the
- * same suite that it "never needs Flutter". The Flutter client reaches the
- * other slow categories through the built artifact — `test:integration` reads
+ * A category that names no exclusions reads everything `ignoredWorkingPath`
+ * does not ignore. That direction matters: a new category, or a new top-level
+ * directory, re-runs until someone proves it can be excluded, rather than
+ * being silently skipped.
+ *
+ * `runtime` is the one category narrower than that, and only because two
+ * independent things say so: nothing under `apps/cloudflare`, `core`, `app` or
+ * `providers` imports these directories, and `main.yml` says of the same suite
+ * that it "never needs Flutter". The Flutter client reaches the other slow
+ * categories through the built artifact — `test:integration` reads
  * `../native/lib` directly — so none of them may borrow this list.
  */
-const CATEGORY_INPUTS: Record<string, string[]> = {
-  runtime: [
-    ...DEFAULT_INPUTS,
-    ":(exclude)apps/native/",
-    ":(exclude)apps/marketing/",
-    ":(exclude)apps/admin-portal/",
-  ],
+const CATEGORY_EXCLUSIONS: Record<string, string[]> = {
+  runtime: ["apps/native/", "apps/marketing/", "apps/admin-portal/"],
 };
+
+export function isCategoryInput(name: string, path: string): boolean {
+  if (ignoredWorkingPath(path)) return false;
+  return !CATEGORY_EXCLUSIONS[name]?.some((directory) =>
+    path.startsWith(directory),
+  );
+}
 
 /**
  * Categories that build the deployable artifact, and so cannot run beside each
@@ -119,21 +109,22 @@ const EXCLUSIVE = new Set(["build"]);
 const RECEIPT_LIFETIME_MS = 14 * 24 * 60 * 60 * 1000;
 
 /**
- * The content of everything `name` reads, as one hash. `snapshot` has already
- * proven the work tree matches `HEAD` everywhere that is not ignored, so the
- * committed tree is the thing being validated.
+ * The content of everything `name` reads, as one hash. `snapshot` has proven
+ * the work tree matches `HEAD` everywhere `ignoredWorkingPath` does not
+ * ignore, which is why `HEAD` is the thing to hash: the index says nothing
+ * about what is being validated, and a staged-then-reverted change would key a
+ * receipt on content no command ever saw.
+ *
+ * Each `ls-tree` line carries the blob's object id, so this hashes content
+ * rather than names. It takes no pathspec — the filtering is `isCategoryInput`
+ * — because pathspec magic and the tree listing do not mix.
  */
 export function inputFingerprint(root: string, name: string): string {
-  const paths = CATEGORY_INPUTS[name] ?? DEFAULT_INPUTS;
-  // `ls-files -s`, not `ls-tree`: only the pathspec machinery behind
-  // `ls-files` understands `:(exclude)`, and `ls-tree` rejects it outright.
-  // It reads the index, which `snapshot` has just proven matches `HEAD`
-  // everywhere `ignoredWorkingPath` does not ignore — and those paths are
-  // excluded here anyway. Each line carries the blob's object id, so this
-  // hashes content rather than names.
-  return createHash("sha256")
-    .update(git(root, "ls-files", "-s", "--", ...paths))
-    .digest("hex");
+  const inputs = git(root, "ls-tree", "-r", "-z", "HEAD")
+    .split("\0")
+    .filter((line) => line)
+    .filter((line) => isCategoryInput(name, line.slice(line.indexOf("\t") + 1)));
+  return createHash("sha256").update(inputs.join("\n")).digest("hex");
 }
 
 export function ignoredWorkingPath(path: string): boolean {
