@@ -135,4 +135,18 @@ void main() {
     await captureFamily(tester, 'family-media-link');
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('a link with no host still names where it goes', (tester) async {
+    watchLinks();
+    await drawFamily(tester, [
+      {
+        'id': 'root',
+        'component': 'LinkPreview',
+        'url': 'https://',
+        'title': 'Somewhere',
+      },
+    ]);
+    expect(find.text('the web'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

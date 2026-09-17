@@ -56,9 +56,9 @@ final frockCardHeader = CatalogItem(
         ),
         if (data['status'] != null) ...[
           const SizedBox(width: 10),
-          // A third of the line, at most: the pill says a state in two or
-          // three words, and a header whose pill had eaten the title would be
-          // a card that no longer says what it is about.
+          // Half the line, at most: the pill says a state in two or three
+          // words, and a header whose pill had eaten the title would be a
+          // card that no longer says what it is about.
           Flexible(
             flex: 1,
             child: Align(

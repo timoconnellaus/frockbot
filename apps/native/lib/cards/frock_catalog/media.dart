@@ -221,8 +221,9 @@ final frockLinkPreview = CatalogItem(
     final theme = Theme.of(itemContext.buildContext);
     final url = frockString(data['url']) ?? '';
     final image = frockString(data['imageUrl']);
-    final site =
-        frockString(data['site']) ?? Uri.tryParse(url)?.host ?? 'the web';
+    final site = [frockString(data['site']), Uri.tryParse(url)?.host]
+        .firstWhere((it) => it != null && it.isNotEmpty, orElse: () => null) ??
+        'the web';
     return InkWell(
       onTap: url.startsWith('https://') ? () => frockOpenLinkV1(url) : null,
       borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
