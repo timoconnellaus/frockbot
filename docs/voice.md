@@ -458,18 +458,20 @@ kept for tests.
 `new_sqlite_classes` migration `v7`. It records, before any external call:
 
 - `session:<callId>` — call start, device, caps consumed.
-- `turn:<turnId>` — each admitted utterance with its idempotency key
+- `turn:<turnId>` — each admitted turn with its idempotency key
   `voice-turn:<userId>:<callId>:<sequence>` and its outcome. A turn that was
   admitted but never answered (eviction mid-model-call) is marked `abandoned`
-  on the next start; a model call is never replayed without its key.
+  on the next start; a model call is never replayed without its key. A turn
+  that was a Bot's answer arriving rather than the person speaking carries an
+  `event` of kind `bot-answer`; its `transcript` is the message the assistant
+  was given and its `answer` what it chose to say, empty when it chose
+  nothing.
 - `delegation:<runId>` — a Bot delegation: target Bot, text, `runId` derived
-  as `sha256(userId, callId, turnId, botId, text)` joined by NUL (so a
-  retried tool call admits
-  the same Bot Turn once), state
+  as `sha256` over `userId`, `callId`, `turnId`, `botId` and `text` joined by
+  NUL (so a retried tool call admits the same Bot Turn once), and state
   `admitted | settled | spoken | cancelled | expired` — `spoken` is told to
   the assistant, with the id of the event turn that told it; `cancelled` is a
-  request whose call ended first — and, for a turn that was a Bot's answer
-  arriving rather than the person speaking, the turn record's `event`.
+  request whose call ended first.
 
 Delegations use the Bot's `runVoice` door and the existing agent lane.
 The command records the call, voice Turn and request IDs before dispatch;
@@ -511,22 +513,23 @@ data, said so in the message itself and in the system prompt, and the event
 turn itself runs with no tools at all. The message is still part of this
 call's history, so the person's later turns — which do carry the tools — see
 it; the quoted-data marking, not the missing tools, is what keeps a Bot's
-words from being read as instructions. The system prompt says what such a message is and that saying nothing is a
-choice it may make. No bridge fills the
-silence, because nobody asked a question just now. What it says is spoken
+words from being read as instructions. The system prompt says what such a
+message is and that saying nothing is a choice it may make. No bridge fills
+the silence, because nobody asked a question just now. What it says is spoken
 once it is whole; a person who starts talking meanwhile aborts it and their
 turn takes the floor. The event turn holds the announce floor while it runs
 and is bounded: a model request still going after twenty seconds is aborted
 and the turn settles `timeout`, so a stalled request cannot hold the floor —
-and every later answer with it — for the rest of the call. The delegation is marked `spoken` the moment the turn is
-admitted — told once, whatever is then said, and never re-announced, so an
-aborted answer is the one and only event turn for that answer and its message
-stays once in the history — and the turn record keeps what was said, or that
-nothing was. An answer with no call to be told on
-(the call ended, or the day's turns are spent) is dropped: `cancelled` in the
-ledger, on record in the Bot's own conversation. Nothing is composed ahead of
-time, cached, or acknowledged by the phone: the old read-out queue, its
-playback receipt and its lead-in were removed on 2026-09-17 in favour of this.
+and every later answer with it — for the rest of the call. The delegation is
+marked `spoken` the moment the turn is admitted — told once, whatever is then
+said, and never re-announced, so an aborted answer is the one and only event
+turn for that answer and its message stays once in the history — and the turn
+record keeps what was said, or that nothing was. An answer with no call to be
+told on (the call ended, or the day's turns are spent) is dropped:
+`cancelled` in the ledger, on record in the Bot's own conversation. Nothing is
+composed ahead of time, cached, or acknowledged by the phone: the old read-out
+queue, its playback receipt and its lead-in were removed on 2026-09-17 in
+favour of this.
 
 Conversation context is bounded and **call-scoped**: the prompt carries the
 newest 12 messages of _this call_, built from the ledger's own `turn:` records
@@ -658,7 +661,10 @@ Ending a call queues one durable job (`voice:memory:job:<callId>`) and a
 `turn:` records are the source, and a call whose job is not `applied` keeps its
 turns out of the ledger's retention sweep. So a call of any length costs one
 small record, nothing that was said is copied or clipped, and a call long
-enough to exceed a storage value cannot exist.
+enough to exceed a storage value cannot exist. The turns that told the
+assistant a Bot's answer are left out: a Bot answering is not something the
+person said, and what the assistant made of it is not theirs either. They are
+still in the call's own history, so later turns know what was told.
 
 The task claims the job (`pending` → `spending`, inside the memory ledger's
 serializing chain — that transition _is_ the claim, so a duplicate end
@@ -666,7 +672,9 @@ notification finds nothing to claim and makes no second model call), asks the
 configured chat model for a JSON update, and applies it. A call longer than 40
 turns is read in as many requests as it takes, each advancing a durable
 cursor, so a request made in the tenth minute is read exactly like one made in
-the first.
+the first. The cursor is a turn ordinal in the ledger's own sequence, not a
+count of what was read — the excluded turns leave gaps in it, and an in-call
+memory write stamps the same numbers, so the two order against each other.
 
 End-of-call and recovery scheduling deduplicate the initial callback. A running
 callback queues continuations and retries with a fresh scheduler row: reusing
