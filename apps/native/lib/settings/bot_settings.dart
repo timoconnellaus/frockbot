@@ -36,6 +36,11 @@ class BotSettingsController extends ChangeNotifier {
   int revision = 0;
   int accountRevision = 0;
 
+  /// The voice record's own revision. Voice is fenced separately from the
+  /// profile (`/api/bots/:id/voice`), so a profile save never moves it and a
+  /// voice save never moves [revision].
+  int voiceRevision = 0;
+
   /// How many reads have replaced what the fields show. A field is keyed on
   /// this rather than on the revision: a save moves the revision on every
   /// command, and re-keying a field mid-edit throws away its focus and the
@@ -98,11 +103,11 @@ class BotSettingsController extends ChangeNotifier {
       sidebarOrder = (profile['sidebarOrder'] as num?)?.toInt();
       notifications =
           ((answer['notifications'] as Map?)?['enabled'] ?? true) == true;
-      // The voice travels with the Bot's own record; a deployment whose
-      // server does not send one yet simply leaves the character's default.
-      voice =
-          BotVoiceAppearanceV1.fromJson(answer['voice']) ??
-          BotVoiceAppearanceV1.fromJson(profile['voice']);
+      // The voice has its own record and revision beside the profile; an
+      // absent `voice` means the Bot speaks in its character's default.
+      final voiceAnswer = (await api.request('/api/bots/$botId/voice'))! as Map;
+      voiceRevision = (voiceAnswer['revision'] as num?)?.toInt() ?? 0;
+      voice = BotVoiceAppearanceV1.fromJson(voiceAnswer['voice']);
       model =
           ((answer['packageValues'] as Map?)?['custom-models']
               as Map?)?['model'];
@@ -320,7 +325,7 @@ class BotSettingsController extends ChangeNotifier {
     voice = next;
     _changed();
     try {
-      await _command({
+      await _voiceCommand({
         'schemaVersion': 1,
         'type': 'bot/update-voice',
         'commandId': randomId(),
@@ -359,6 +364,35 @@ class BotSettingsController extends ChangeNotifier {
       revision = current['revision']! as int;
       _settle(await _send(command));
     }
+  }
+
+  /// The voice's own fenced write, to its own route, with the same one
+  /// re-fence on conflict as [_command].
+  Future<void> _voiceCommand(Map<String, Object?> command) async {
+    Future<Map<String, Object?>> send() async {
+      final answer = await api.request(
+        '/api/bots/$botId/voice',
+        body: {...command, 'expectedRevision': voiceRevision},
+      );
+      return (answer! as Map).cast<String, Object?>();
+    }
+
+    Map<String, Object?> receipt;
+    try {
+      receipt = await send();
+    } on RequestFailure catch (failure) {
+      if (failure.status != 409) rethrow;
+      final current = (await api.request('/api/bots/$botId/voice'))! as Map;
+      voiceRevision = (current['revision'] as num?)?.toInt() ?? voiceRevision;
+      receipt = await send();
+    }
+    final settled = receipt['revision'];
+    if (settled is int) voiceRevision = settled;
+    if (receipt['status'] != 'rejected') return;
+    final failure = receipt['failure'];
+    throw RequestFailure(
+      failure is String ? failure : 'Couldn’t save this Bot’s voice. Try again.',
+    );
   }
 
   Future<Map<String, Object?>> _send(Map<String, Object?> command) async {
