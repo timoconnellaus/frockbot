@@ -237,6 +237,47 @@ fold into A2UI is a later decision, taken when a slot needs something
   at step 1; if it lags, the seam decodes 1.0 and the renderer is fed what it
   speaks until it catches up, and the Frock catalog never depends on the
   difference.
+
+  > Built 2026-09-17, step 1. It lags, and by one version more than the bullet
+  > assumed. `genui` is 0.10.3 on pub.dev (published 2026-09-12) and depends on
+  > `a2ui_core` `^0.1.0`; the published `a2ui_core` is 0.1.1 (2026-08-14). Both
+  > speak **v0.9** — not v0.9.1, and not the v1.0 candidate.
+  > `A2uiMessage.fromJson` in `a2ui_core/lib/src/core/messages.dart` refuses any
+  > envelope whose `version` is not the literal `v0.9`, and 0.10.3's changelog
+  > points `basicCatalogId` at
+  > `https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json`. The
+  > specification's own version table calls v0.9.1 the current production
+  > release and v1.0 a candidate that adds client-to-server RPC
+  > (`actionResponse`), action ids, and renames `theme` to `surfaceProperties`.
+  >
+  > The four agent-to-client names the decision uses are safe: `createSurface`,
+  > `updateComponents`, `updateDataModel` and `deleteSurface` are v0.9 names
+  > that v1.0 keeps, and `a2ui_core` decodes exactly those four keys into
+  > `CreateSurfaceMessage`, `UpdateComponentsMessage`, `UpdateDataModelMessage`
+  > and `DeleteSurfaceMessage`. The renderer-to-agent side is thinner than the
+  > decision assumes. Its only outbound is `UserActionEvent`
+  > (`genui/lib/src/model/ui_models.dart`), carrying the action's `name`, the
+  > component that raised it and its context, dispatched from a component's
+  > `action` property as `{ event: { name, context } }` — so the action route
+  > and its three kinds work on what ships today. There is no
+  > `callAgentFunction`, `rendererFunctionResponse` or `error` message in
+  > 0.10.3, so the Card's one action kind with a reply is the part the seam
+  > carries itself until the renderer catches up. What the bullet already says
+  > is what happens: the seam decodes 1.0, the renderer is fed what it speaks,
+  > and the Frock catalog never depends on the difference.
+  >
+  > The SDK floors clear ours with room: `genui` asks Dart `>=3.10.0 <4.0.0`
+  > and Flutter `>=3.35.7`, `a2ui_core` asks Dart `>=3.10.0 <4.0.0`, and
+  > `apps/native/pubspec.yaml` pins Dart `>=3.13.0 <3.14.0` on Flutter
+  > `3.47.0`.
+  >
+  > Relied on: <https://pub.dev/packages/genui/changelog>,
+  > <https://pub.dev/packages/a2ui_core/changelog>, <https://a2ui.org/>,
+  > <https://github.com/flutter/genui/tree/main/packages/genui>,
+  > <https://github.com/a2ui-project/a2ui/tree/main/dart/a2ui_core>; the Dart
+  > quoted above is from the published `genui` 0.10.3 and `a2ui_core` 0.1.1
+  > archives.
+
 - `PluginDescriptorV1` gains `cards` and `skills`; the Plugin worker gains
   `renderCard` and `cardAction`; the seeded catalog gains five locked entries.
 - The Skills Package gains directories, `reference`, reference writes and the
