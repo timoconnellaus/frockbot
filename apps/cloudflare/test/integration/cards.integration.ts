@@ -197,9 +197,9 @@ describe("A2UI cards through the gateway", () => {
       "title",
       "send",
     ]);
-    expect(
-      byId.components.find((part) => part.id === "title")?.text,
-    ).toBe("Re: hello");
+    expect(byId.components.find((part) => part.id === "title")?.text).toBe(
+      "Re: hello",
+    );
 
     // A press at a revision the surface has moved past is refused, not
     // applied to a card the person was not looking at.
@@ -269,7 +269,10 @@ describe("A2UI cards through the gateway", () => {
       schemaVersion: 1,
       surfaceId: "draft",
       revision: card.revision,
-      event: { name: "approval/never-issued", context: { decision: "approved" } },
+      event: {
+        name: "approval/never-issued",
+        context: { decision: "approved" },
+      },
     });
     expect(invented.status).toBe(404);
 
@@ -279,7 +282,10 @@ describe("A2UI cards through the gateway", () => {
       schemaVersion: 1,
       surfaceId: "draft",
       revision: card.revision,
-      event: { name: "approval/not a valid id!", context: { decision: "approved" } },
+      event: {
+        name: "approval/not a valid id!",
+        context: { decision: "approved" },
+      },
     });
     expect(nearMiss.status).toBe(400);
 
@@ -373,7 +379,10 @@ describe("A2UI cards through the gateway", () => {
     expect(refused.refusal ?? "").toContain("deleted");
 
     // A surface this Bot never drew is not found.
-    const missing = await asUser(userId, `/api/bots/${botId}/cards/never-drawn`);
+    const missing = await asUser(
+      userId,
+      `/api/bots/${botId}/cards/never-drawn`,
+    );
     expect(missing.status).toBe(404);
   });
 
@@ -411,9 +420,9 @@ describe("A2UI cards through the gateway", () => {
     }
 
     const full = await listCards(userId, botId);
-    expect(full.cards.filter((card) => card.deleted === undefined)).toHaveLength(
-      32,
-    );
+    expect(
+      full.cards.filter((card) => card.deleted === undefined),
+    ).toHaveLength(32);
 
     await expectOkJson(
       await cardTurn(

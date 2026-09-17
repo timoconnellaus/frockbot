@@ -388,9 +388,7 @@ describe("the generated wrapper's invocation decoders", () => {
       decodeCardActionInvocation({ ...action, capabilities: [] }),
     ).toThrow(/invalid fields/);
     const { turnId: _turnId, ...missing } = action;
-    expect(() => decodeCardActionInvocation(missing)).toThrow(
-      /invalid fields/,
-    );
+    expect(() => decodeCardActionInvocation(missing)).toThrow(/invalid fields/);
   });
 });
 

@@ -188,7 +188,11 @@ describe("folding a surface", () => {
       [
         message({
           version: "v1.0",
-          updateDataModel: { surfaceId: SURFACE, path: "/items/2", value: null },
+          updateDataModel: {
+            surfaceId: SURFACE,
+            path: "/items/2",
+            value: null,
+          },
         }),
       ],
       later,
@@ -200,7 +204,11 @@ describe("folding a surface", () => {
       [
         message({
           version: "v1.0",
-          updateDataModel: { surfaceId: SURFACE, path: "/items/2", value: null },
+          updateDataModel: {
+            surfaceId: SURFACE,
+            path: "/items/2",
+            value: null,
+          },
         }),
         message({
           version: "v1.0",
