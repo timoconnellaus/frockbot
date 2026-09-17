@@ -133,6 +133,21 @@ describe("folding a surface", () => {
     });
   });
 
+  test("a delete through a member that is not there changes nothing", () => {
+    const card = foldCardMessagesV1(
+      undefined,
+      [
+        created([], { keep: 1 }),
+        message({
+          version: "v1.0",
+          updateDataModel: { surfaceId: SURFACE, path: "/a/b", value: null },
+        }),
+      ],
+      CONTEXT,
+    );
+    expect(card.dataModel).toEqual({ keep: 1 });
+  });
+
   test("a pointer with no path replaces the whole model", () => {
     const card = foldCardMessagesV1(
       undefined,
@@ -496,6 +511,7 @@ describe("what one settled Turn writes", () => {
       schemaVersion: 1,
       surfaceId: SURFACE,
       runId: "run-1",
+      foldedRunId: "run-1",
       sessionId: "user-1:bot-1",
       components: [],
       dataModel: {},
@@ -517,6 +533,73 @@ describe("what one settled Turn writes", () => {
       read: reader({ [cardKeyV1(SURFACE)]: existing }),
     });
     expect(records).toEqual({});
+  });
+
+  test("a press folding a handler's answer does not unguard the Turn", async () => {
+    const settled = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        events: [
+          sendEvent(SURFACE, [
+            {
+              version: "v1.0",
+              createSurface: {
+                surfaceId: SURFACE,
+                components: [{ id: "root", component: "Text", text: "Ready" }],
+              },
+            },
+          ]),
+        ],
+      },
+      now: NOW,
+      read: reader({}),
+    });
+    const drawn = decodeCardRecordV1(settled[cardKeyV1(SURFACE)]);
+    // What a press on a `plugin/<id>/<action>` control folds: the handler's
+    // messages, under the run id `foldHandlerMessages` names the press with.
+    const pressed = foldCardMessagesV1(
+      drawn,
+      [
+        message({
+          version: "v1.0",
+          updateComponents: {
+            surfaceId: SURFACE,
+            components: [{ id: "root", component: "Text", text: "Sent" }],
+          },
+        }),
+      ],
+      {
+        surfaceId: SURFACE,
+        runId: `card-action:${SURFACE}:${drawn.revision}`,
+        sessionId: "user-1:bot-1",
+        now: "2026-09-17T10:30:00.000Z",
+      },
+    );
+    expect(pressed.revision).toBe(2);
+    const resettled = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        events: [
+          sendEvent(SURFACE, [
+            {
+              version: "v1.0",
+              createSurface: {
+                surfaceId: SURFACE,
+                components: [{ id: "root", component: "Text", text: "Ready" }],
+              },
+            },
+          ]),
+        ],
+      },
+      now: "2026-09-17T11:00:00.000Z",
+      read: reader({
+        [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces: [SURFACE] },
+        [cardKeyV1(SURFACE)]: pressed,
+      }),
+    });
+    expect(resettled).toEqual({});
   });
 
   test("a Session already holding its surfaces draws no more", async () => {

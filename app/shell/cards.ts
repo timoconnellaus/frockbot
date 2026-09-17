@@ -71,8 +71,14 @@ export class CardDecodeError extends Error {
 export interface CardRecordV1 {
   schemaVersion: 1;
   surfaceId: string;
-  /** The Turn whose fold last changed it. */
+  /** The Turn whose fold last changed it. Any writer may be the last one. */
   runId: string;
+  /**
+   * The Turn that last folded its own sends onto it, written only when a Turn
+   * settles. A press folding a handler's answer never touches it, so a
+   * recovered Turn still knows it has already folded.
+   */
+  foldedRunId?: string;
   sessionId: string;
   /** The adjacency list, in the order the components were first seen. */
   components: A2uiComponentV1[];
@@ -207,7 +213,14 @@ export function decodeCardRecordV1(
       "createdAt",
       "updatedAt",
     ],
-    ["catalogId", "sendDataModel", "surfaceProperties", "deleted", "refusal"],
+    [
+      "foldedRunId",
+      "catalogId",
+      "sendDataModel",
+      "surfaceProperties",
+      "deleted",
+      "refusal",
+    ],
     label,
   );
   if (candidate.schemaVersion !== 1) {
@@ -226,6 +239,15 @@ export function decodeCardRecordV1(
     schemaVersion: 1,
     surfaceId: surfaceIdentifier(candidate.surfaceId, `${label} surfaceId`),
     runId: text(candidate.runId, MAX_ID_LENGTH, `${label} runId`),
+    ...(candidate.foldedRunId === undefined
+      ? {}
+      : {
+          foldedRunId: text(
+            candidate.foldedRunId,
+            MAX_ID_LENGTH,
+            `${label} foldedRunId`,
+          ),
+        }),
     sessionId: text(candidate.sessionId, MAX_ID_LENGTH, `${label} sessionId`),
     components: candidate.components as A2uiComponentV1[],
     dataModel: record(candidate.dataModel, `${label} dataModel`),
@@ -392,7 +414,8 @@ function deleteMember(
 
 /**
  * Write `value` at `path` in `model`. `null` deletes the member, as the
- * specification says; a numeric token against a list indexes it, and `-` at
+ * specification says, and a delete through a member that is not there leaves
+ * the model exactly as it was; a numeric token against a list indexes it, and `-` at
  * the leaf appends. A pointer through a scalar is a write with nowhere to
  * land, and is refused rather than made to fit.
  */
@@ -419,6 +442,7 @@ function writeAtPointer(
   for (const token of tokens.slice(0, -1)) {
     const child = readMember(cursor, token, path);
     if (child === undefined) {
+      if (value === null) return model;
       const created: Record<string, unknown> = {};
       writeMember(cursor, token, created, path);
       cursor = created;
@@ -521,6 +545,9 @@ export function foldCardMessagesV1(
         schemaVersion: 1,
         surfaceId: card.surfaceId,
         runId: card.runId,
+        ...(card.foldedRunId === undefined
+          ? {}
+          : { foldedRunId: card.foldedRunId }),
         sessionId: card.sessionId,
         components: [...(created.components ?? [])],
         dataModel: { ...(created.dataModel ?? {}) },
@@ -611,9 +638,11 @@ export interface CardTerminalInputV1 {
  * settles it, and the surface index they advance.
  *
  * Re-settling the same Turn folds the same messages onto a record that already
- * carries them: `runId` says which Turn last folded, and a record already at
- * this one is left exactly as it is, so a recovered Turn never bumps a
- * revision twice and never invalidates an action a person has in flight.
+ * carries them: `foldedRunId` says which Turn last settled onto it, written
+ * only here, and a record already at this one is left exactly as it is, so a
+ * recovered Turn never bumps a revision twice and never invalidates an action
+ * a person has in flight. `runId` is not that fact — a press folding a
+ * handler's answer rewrites it — so the guard never reads it.
  */
 export async function cardTerminalRecordsV1(
   input: CardTerminalInputV1,
@@ -633,7 +662,7 @@ export async function cardTerminalRecordsV1(
     const existing = await input.read<unknown>(key);
     const current =
       existing === undefined ? undefined : decodeCardRecordV1(existing);
-    if (current?.runId === input.run.runId) continue;
+    if (current?.foldedRunId === input.run.runId) continue;
     if (
       current === undefined &&
       surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession
@@ -668,12 +697,14 @@ export async function cardTerminalRecordsV1(
               createdAt: input.now,
               updatedAt: input.now,
               refusal,
+              foldedRunId: input.run.runId,
             } satisfies CardRecordV1)
           : ({
               ...current,
               runId: input.run.runId,
               updatedAt: input.now,
               refusal,
+              foldedRunId: input.run.runId,
             } satisfies CardRecordV1);
       if (current === undefined) {
         surfaces.push(send.surfaceId);
@@ -681,7 +712,7 @@ export async function cardTerminalRecordsV1(
       }
       continue;
     }
-    records[key] = folded;
+    records[key] = { ...folded, foldedRunId: input.run.runId };
     if (current === undefined) {
       surfaces.push(send.surfaceId);
       movedIndex = true;
