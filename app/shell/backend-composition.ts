@@ -109,6 +109,12 @@ export interface ShellIsolateMountOptions {
     pluginId: string;
     phase: "resolve" | "mount" | "health" | "hook";
     message: string;
+    /**
+     * What the Plugin was doing, when it was not a Turn's own work: a card
+     * press or a card draw. It is the wording of the notice the person reads,
+     * never the count, which is the same either way.
+     */
+    card?: "press" | "draw";
   }): Promise<{ fatal: boolean }>;
 }
 
@@ -315,6 +321,25 @@ export function createShellCompositionHost(
                     reason: `surface "${send.surfaceId}" has a decision still pending on the values it was drawn with; draw a new card rather than changing what that decision covers`,
                   };
                 }
+                // A decision the person already gave, on this surface, that
+                // nothing has spent yet. Redrawing over it would mint a new
+                // id, ask for the decision a second time and leave the one
+                // they gave bound to nothing — so the draw is refused, the
+                // same way a redraw changing what a pending decision covers
+                // is. Once the decision has been used, or declined, the
+                // surface draws on: that is the receipt.
+                if (!live) {
+                  const decided = await approvals?.settled(
+                    send.pluginId,
+                    send.surfaceId,
+                  );
+                  if (decided) {
+                    return {
+                      status: "refused" as const,
+                      reason: `surface "${send.surfaceId}" carries a decision the user already approved and nothing has acted on yet; draw a new card rather than redrawing one they have decided`,
+                    };
+                  }
+                }
                 const reused = live?.approvalIds ?? [];
                 // The unguessable half of this card's Approval ids, from the
                 // Bot's own secret, the Session and the effect that records the
@@ -442,6 +467,18 @@ export function createShellCompositionHost(
                   status: "sent" as const,
                   approvals: bound.approvalIds.length,
                 };
+              },
+              // A card draw that failed counts toward the Plugin's
+              // quarantine, exactly as a press that failed does. The verdict
+              // is not acted on: the model already read the tool error and
+              // the Turn carries on without the card.
+              recordCardFailure: async (failure) => {
+                await isolate.onPluginFailure?.({
+                  pluginId: failure.pluginId,
+                  phase: "hook",
+                  message: failure.message,
+                  card: "draw",
+                });
               },
               recordHookFailure: async (failure) => {
                 const session = runtime.services.sessions.get(

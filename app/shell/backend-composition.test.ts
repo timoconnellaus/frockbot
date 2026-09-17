@@ -31,6 +31,7 @@ import { approvalKeyV1 } from "./approvals.js";
 import {
   CARD_APPROVAL_BINDING_PREFIX,
   cardApprovalBindingKeyV1,
+  cardApprovalUseKeyV1,
   cardValuesDigestV1,
   createCardApprovalStoreV1,
   type CardApprovalStoreV1,
@@ -442,7 +443,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
               consumes: [],
               triggers: [],
               views: [],
-              cards: ["draft"],
+              cards: [{ id: "draft", actions: [] }],
             },
           ],
         }),
@@ -541,6 +542,16 @@ describe("the Approvals a Plugin's Card asks for", () => {
       decision: "pending",
       decidedBy: "pending",
     });
+  }
+
+  /** The decision a person gave on a card, as the Approval record holds it. */
+  function decide(
+    values: Map<string, unknown>,
+    approvalId: string,
+    decision: "approved" | "denied",
+  ): void {
+    (values.get(approvalKeyV1(approvalId)) as { decision: string }).decision =
+      decision;
   }
 
   async function mountCards(
@@ -915,6 +926,82 @@ describe("the Approvals a Plugin's Card asks for", () => {
       // The card stands exactly as it was, and no second decision was asked.
       expect(approvalIdsOnLog(mounted)).toEqual(minted);
       expect(cardApprovalId(mounted)).toBe(minted[0]!);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  // A decision the person gave is theirs until something acts on it. A redraw
+  // would mint a second id, ask again for what they already answered, and
+  // leave the answer they gave bound to nothing.
+  test("a redraw of a surface they already approved is refused", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store);
+    try {
+      const first = await draw({ data: { subject: "Hello" } });
+      const surfaceId = /surface "([^"]+)"/.exec(String(first.content))![1]!;
+      const minted = approvalIdsOnLog(mounted);
+      recordPendingApproval(values, minted[0]!);
+      decide(values, minted[0]!, "approved");
+
+      const again = await draw({ data: { subject: "Hello" }, surfaceId });
+      expect(again.isError).toBe(true);
+      expect(String(again.content)).toMatch(/already approved/);
+      // Their decision is untouched: one ask, one binding, still theirs to
+      // spend, and the card still points at it.
+      expect(approvalIdsOnLog(mounted)).toEqual(minted);
+      expect(bindingFor(values, surfaceId)?.approvalIds).toEqual(minted);
+      expect(cardApprovalId(mounted)).toBe(minted[0]!);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a redraw after that decision was spent draws again", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store);
+    try {
+      const first = await draw({ data: { subject: "Hello" } });
+      const surfaceId = /surface "([^"]+)"/.exec(String(first.content))![1]!;
+      const minted = approvalIdsOnLog(mounted);
+      recordPendingApproval(values, minted[0]!);
+      decide(values, minted[0]!, "approved");
+      // The send happened under that decision, so it is spent: the receipt
+      // the Plugin draws next is an ordinary redraw.
+      values.set(cardApprovalUseKeyV1(minted[0]!), {
+        schemaVersion: 1,
+        approvalId: minted[0]!,
+        at: new Date().toISOString(),
+      });
+
+      const again = await draw({ data: { subject: "Hello" }, surfaceId });
+      expect(again).toMatchObject({ isError: false });
+      expect(cardSurfaceIdsOnLog(mounted)).toEqual([surfaceId, surfaceId]);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  // The registry holds a dashed plugin id's card under an underscored tool
+  // name, and a refusal that names the tool has to name the one that exists.
+  test("a refusal from the send seam names the card tool the registry holds", async () => {
+    const { store } = cardApprovalStorage();
+    const { mounted, draw, sessionId } = await mountCards(store);
+    try {
+      // The step the loop opened has ended, so there is nowhere to record a
+      // send: the seam refuses, naming the tool it was recording for.
+      mounted.runtime.services.sessions.get(sessionId)?.append({
+        type: "step/end",
+        turn: 1,
+        step: 1,
+        outcome: "completed",
+      });
+      const refused = await draw({ data: { subject: "Hello" } });
+      expect(refused.isError).toBe(true);
+      expect(String(refused.content)).toContain(
+        `${pluginCardToolNameV1(CARD_PLUGIN, "draft")} has no open step`,
+      );
+      expect(String(refused.content)).not.toContain(`${CARD_PLUGIN}_draft`);
     } finally {
       await mounted.dispose();
     }

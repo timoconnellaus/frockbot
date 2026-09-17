@@ -220,6 +220,14 @@ export interface PluginWorkerHostOptions {
   /** Durably records a hook the worker skipped, before the loop continues. */
   recordHookFailure(failure: IsolateHookFailureV1): Promise<void>;
   /**
+   * Charges one card draw that failed to the Plugin's health, the way a press
+   * that failed is charged (ADR 0030): a throw, a deadline overrun, an
+   * unreachable worker and an answer the kernel could not read all count
+   * toward quarantine, while a draw that refused in as many words does not.
+   * The model still reads the tool error; this is the count beside it.
+   */
+  recordCardFailure?(failure: PluginCardFailureV1): Promise<void>;
+  /**
    * Puts one Card on the Turn's log, exactly as `send_to_user` would. The
    * host has the Plugin worker and the app has the Session, so the send is
    * the app's to record; a host without one registers no card tools, which
@@ -255,6 +263,13 @@ export interface PluginWorkerHostOptions {
    * no tools here and is left out of every hook's enabled list.
    */
   enabled?: readonly string[];
+}
+
+/** One card draw a Plugin could not answer, charged to its health. */
+export interface PluginCardFailureV1 {
+  pluginId: string;
+  cardId: string;
+  message: string;
 }
 
 /** One Card a Plugin's card tool asks the app to record on the Turn's log. */
@@ -1020,10 +1035,21 @@ export class PluginWorkerHost {
     ) {
       return `plugin "${pluginId}" triggers do not match its declared triggers (declared:${declaredTriggers.join(",")} reported:${reportedTriggers.join(",")})`;
     }
+    // A card and the actions it owns, as one comparable line each: a press
+    // names no card, so a module owning an action the descriptor puts on
+    // another card — or on no card at all — would route a press to a handler
+    // the descriptor never said owned it.
+    const cardLine = (card: { id: string; actions: readonly string[] }) =>
+      `${card.id}(${[...card.actions].toSorted().join("|")})`;
     const declaredCards = (descriptor.cards ?? [])
-      .map((card) => card.id)
+      .map((card) =>
+        cardLine({
+          id: card.id,
+          actions: card.actions.map((action) => action.name),
+        }),
+      )
       .toSorted();
-    const reportedCards = [...reported.cards].toSorted();
+    const reportedCards = reported.cards.map(cardLine).toSorted();
     if (
       declaredCards.length !== reportedCards.length ||
       declaredCards.some((name, index) => name !== reportedCards[index])
@@ -1401,6 +1427,20 @@ export class PluginWorkerHost {
           generationId: context.compositionGenerationId,
           deadlineMs,
         };
+        // A draw that threw, overran, reached no worker or answered
+        // undecodably is charged to the Plugin exactly as a press is; the
+        // charge is beside the tool error, never instead of it.
+        const chargeDraw = async (message: string): Promise<void> => {
+          try {
+            await options.recordCardFailure?.({
+              pluginId,
+              cardId: card.id,
+              message,
+            });
+          } catch {
+            // Recording a failure must not be what fails the draw.
+          }
+        };
         let rendered;
         try {
           rendered = decodePluginWorkerRenderCardResultV1(
@@ -1412,14 +1452,19 @@ export class PluginWorkerHost {
             `plugin "${pluginId}" render card result`,
           );
         } catch (error) {
+          const message = errorMessage(error);
+          await chargeDraw(message);
           return {
-            content: `${name} failed in its plugin: ${errorMessage(error)}`,
+            content: `${name} failed in its plugin: ${message}`,
             isError: true,
           };
         }
         if (rendered.status !== "rendered") {
+          const reason = rendered.reason ?? "the plugin refused";
+          // A draw that refused in as many words is not a draw that broke.
+          if (rendered.deliberate !== true) await chargeDraw(reason);
           return {
-            content: `${name} drew nothing: ${rendered.reason ?? "the plugin refused"}`,
+            content: `${name} drew nothing: ${reason}`,
             isError: true,
           };
         }

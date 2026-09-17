@@ -17,6 +17,13 @@ export interface PluginFailureNoticeV1 {
   pluginId: string;
   phase: PluginFailurePhaseV1;
   message: string;
+  /**
+   * What the Plugin was doing, when it was not a Turn's own work: a card the
+   * person pressed, or a card the Bot asked it to draw. A press is not a
+   * Turn, so a notice about one must not say a Turn was lost. It changes the
+   * words the person reads and nothing else: the count is the same.
+   */
+  card?: "press" | "draw";
 }
 
 /** What the mount host does with the failure: carry on without the Plugin, or not. */
@@ -26,6 +33,30 @@ function locked(pluginId: string): boolean {
   return DEPLOYMENT_PLUGIN_CATALOG_V1.some(
     (plugin) => plugin.pluginId === pluginId && plugin.seed === "locked",
   );
+}
+
+/** What failed, in the words the notice uses. */
+function failureWords(failure: PluginFailureNoticeV1): string {
+  switch (failure.card) {
+    case "press":
+      return "could not answer a card press";
+    case "draw":
+      return "could not draw a card";
+    default:
+      return phaseWords(failure.phase);
+  }
+}
+
+/** What a locked Plugin's failure cost, in the words the notice uses. */
+function lockedCost(failure: PluginFailureNoticeV1): string {
+  switch (failure.card) {
+    case "press":
+      return "It is always on for this Bot, and the card was left exactly as it was.";
+    case "draw":
+      return "It is always on for this Bot, and the card could not be drawn.";
+    default:
+      return "It is always on for this Bot, so the Turn could not continue without it.";
+  }
 }
 
 function phaseWords(phase: PluginFailurePhaseV1): string {
@@ -64,7 +95,7 @@ export async function notePluginFailureV1(
       runId: turn.runId,
       createdAt: now().toISOString(),
       title: "A required plugin failed",
-      body: `The plugin "${failure.pluginId}" ${phaseWords(failure.phase)}: ${failure.message}. It is always on for this Bot, so the Turn could not continue without it.`.slice(
+      body: `The plugin "${failure.pluginId}" ${failureWords(failure)}: ${failure.message}. ${lockedCost(failure)}`.slice(
         0,
         2_000,
       ),
@@ -102,7 +133,7 @@ export async function notePluginFailureV1(
     runId: turn.runId,
     createdAt: now().toISOString(),
     title: "A plugin was skipped",
-    body: `The plugin "${failure.pluginId}" ${phaseWords(failure.phase)}: ${failure.message}. This Bot carried on without it.${
+    body: `The plugin "${failure.pluginId}" ${failureWords(failure)}: ${failure.message}. This Bot carried on without it.${
       quarantined
         ? ""
         : ` ${health.consecutiveFailures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failing Turns in a row before it is turned off.`

@@ -661,6 +661,7 @@ function declaredCards(module, pluginId) {
   if (!isRecord(module.cards)) {
     throw new Error('plugin "' + pluginId + '" "cards" must be an object');
   }
+  const owner = {};
   return Object.keys(module.cards).map(function (cardId) {
     if (!CARD_ID.test(cardId)) {
       throw new Error('plugin "' + pluginId + '" declared a card with an invalid id');
@@ -669,6 +670,7 @@ function declaredCards(module, pluginId) {
     if (!isRecord(card) || typeof card.render !== "function") {
       throw new Error('plugin "' + pluginId + '" card "' + cardId + '" must export a render function');
     }
+    const actions = [];
     if (card.actions !== undefined) {
       if (!isRecord(card.actions)) {
         throw new Error('plugin "' + pluginId + '" card "' + cardId + '" actions must be an object');
@@ -677,9 +679,18 @@ function declaredCards(module, pluginId) {
         if (typeof card.actions[name] !== "function") {
           throw new Error('plugin "' + pluginId + '" card action "' + name + '" must be a function');
         }
+        // A press names no card, so one action name on two cards would be two
+        // handlers behind one press and the one reached would be whichever
+        // card was scanned first. The descriptor refuses it; so does the
+        // mount, and a module that does it runs nothing at all.
+        if (Object.hasOwn(owner, name)) {
+          throw new Error('plugin "' + pluginId + '" declares card action "' + name + '" on both "' + owner[name] + '" and "' + cardId + '"');
+        }
+        owner[name] = cardId;
+        actions.push(name);
       }
     }
-    return cardId;
+    return { id: cardId, actions: actions };
   });
 }
 function declaredViews(module, pluginId) {
@@ -729,7 +740,11 @@ export const BOT_ISOLATE_VIEW_SOURCE = `async function runView(invocation, resol
  * `{ messages, input }` when it also has a line for the Bot's next Turn — and
  * anything else is a drop with its reason, so a Card is never half-redrawn.
  * A press names no card: `plugin/<pluginId>/<action>` is the plugin's
- * namespace, and the descriptor already refuses one action name on two cards.
+ * namespace, so the press is resolved against the card the module declared
+ * that action on. One name on two cards fails the mount, and the host checks
+ * the declaration against the descriptor at health, so the card a press
+ * reaches is the one the descriptor says owns it — never whichever card the
+ * module happened to be scanned in first.
  */
 export const BOT_ISOLATE_CARD_SOURCE = `function cardAnswer(value) {
   if (Array.isArray(value)) {
@@ -756,7 +771,10 @@ export const BOT_ISOLATE_CARD_SOURCE = `function cardAnswer(value) {
 async function runRenderCard(invocation, resolve, contextFor) {
   try {
     const plugin = resolve(invocation.pluginId);
-    if (!plugin.cards.includes(invocation.cardId)) {
+    const declared = plugin.cards.find(function (candidate) {
+      return candidate.id === invocation.cardId;
+    });
+    if (!declared) {
       throw new Error('plugin "' + invocation.pluginId + '" did not declare card "' + invocation.cardId + '"');
     }
     const context = contextFor(invocation, plugin, invocation.deadlineMs);
@@ -767,8 +785,10 @@ async function runRenderCard(invocation, resolve, contextFor) {
       );
     }, invocation.deadlineMs);
     const answer = cardAnswer(value);
+    // A draw has no line for the Bot; only a press does. The deliberate flag
+    // stays: a draw that refused in as many words is charged nothing, and
+    // everything else is charged to the Plugin's health.
     delete answer.input;
-    delete answer.deliberate;
     // What this draw is about, in the Plugin's own words. A card that asks
     // for a decision and names none of these is refused at the seam, so the
     // decision a person gives can never cover values they were not shown.
@@ -790,13 +810,13 @@ async function runRenderCard(invocation, resolve, contextFor) {
 async function runCardAction(invocation, resolve, contextFor) {
   try {
     const plugin = resolve(invocation.pluginId);
-    const cardId = plugin.cards.find(function (candidate) {
-      const actions = plugin.module.cards[candidate].actions;
-      return !!actions && Object.hasOwn(actions, invocation.action);
+    const owner = plugin.cards.find(function (candidate) {
+      return candidate.actions.includes(invocation.action);
     });
-    if (cardId === undefined) {
+    if (owner === undefined) {
       throw new Error('plugin "' + invocation.pluginId + '" declares no card action "' + invocation.action + '"');
     }
+    const cardId = owner.id;
     const context = contextFor(invocation, plugin, invocation.deadlineMs);
     const value = await withIsolateDeadline(function () {
       return plugin.module.cards[cardId].actions[invocation.action](

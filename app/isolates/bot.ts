@@ -74,6 +74,7 @@ import {
 } from "@frockbot/app/shell/approvals";
 import {
   cardApprovalBindingKeyV1,
+  cardApprovalUseKeyV1,
   cardValuesDigestV1,
   decodeCardApprovalRecordV1,
 } from "@frockbot/app/shell/cards";
@@ -897,14 +898,9 @@ export async function isolateEmail(
   // Nothing left, so nothing was spent: the decision is still good and the
   // Bot may try again once the deployment can send.
   if (outcome.status !== "sent") {
-    await state.ctx.storage.delete(emailApprovalUseKeyV1(approvalId));
+    await state.ctx.storage.delete(cardApprovalUseKeyV1(approvalId));
   }
   return outcome;
-}
-
-/** Where one Approval's single permitted send is recorded as spent. */
-function emailApprovalUseKeyV1(approvalId: string): string {
-  return `shell:email-send:${approvalId}`;
 }
 
 /**
@@ -966,14 +962,14 @@ async function claimEmailApprovalV1(
       );
     }
     const used = await transaction.get<unknown>(
-      emailApprovalUseKeyV1(approvalId),
+      cardApprovalUseKeyV1(approvalId),
     );
     if (used !== undefined) {
       return refused(
         `Approval "${approvalId}" has already sent its message; nothing was sent twice`,
       );
     }
-    await transaction.put(emailApprovalUseKeyV1(approvalId), {
+    await transaction.put(cardApprovalUseKeyV1(approvalId), {
       schemaVersion: 1,
       approvalId,
       at: new Date().toISOString(),

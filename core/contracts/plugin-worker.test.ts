@@ -119,7 +119,7 @@ const healthyPlugin = {
   consumes: [],
   triggers: ["forecast_ready"],
   views: ["weather.settings"],
-  cards: ["draft"],
+  cards: [{ id: "draft", actions: ["details"] }],
 };
 
 describe("plugin worker health", () => {

@@ -42,6 +42,10 @@ const MAX_PLUGIN_VIEWS_V1 = 16;
 const MAX_PLUGIN_CARDS_V1 = 16;
 /** A card id, as the descriptor bounds it. */
 const PLUGIN_CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
+/** A card action name, as the descriptor bounds it. */
+const PLUGIN_CARD_ACTION_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+/** Actions one card may declare, matching the descriptor's bound. */
+const MAX_PLUGIN_CARD_ACTIONS_V1 = 16;
 /** A rendered view, serialized. A card, not a page. */
 export const MAX_PLUGIN_VIEW_DOCUMENT_BYTES_V1 = 256_000;
 const MAX_PLUGINS_V1 = 64;
@@ -137,8 +141,20 @@ export interface PluginWorkerPluginHealthV1 {
   triggers: string[];
   /** The surfaces the module renders, by id; the descriptor's `views` must match. */
   views: string[];
-  /** The cards the module draws, by id; the descriptor's `cards` must match. */
-  cards: string[];
+  /**
+   * The cards the module draws and the actions each one owns; the descriptor's
+   * `cards` must match, name for name. A press names no card — the namespace
+   * is `plugin/<pluginId>/<action>` — so which card owns an action is what
+   * says whose handler a press reaches, and it is checked here rather than
+   * assumed.
+   */
+  cards: PluginWorkerCardHealthV1[];
+}
+
+/** One card a module declared, with the actions it owns. */
+export interface PluginWorkerCardHealthV1 {
+  id: string;
+  actions: string[];
 }
 
 export interface PluginWorkerHealthV1 {
@@ -311,9 +327,14 @@ export interface PluginWorkerRenderCardInvocationV1 {
  * holding — would otherwise have the kernel bind a decision to values the
  * person never saw. A draw that asks for a decision and declares none of
  * these is refused at the seam.
+ *
+ * `deliberate` means the same here as it does on a press: a draw that refused
+ * in as many words costs the Plugin's health nothing, while a throw, an
+ * overrun, an unreachable worker and an answer the kernel could not read are
+ * all charged toward quarantine.
  */
 export type PluginWorkerRenderCardResultV1 =
-  | { schemaVersion: 1; status: "drop"; reason?: string }
+  | { schemaVersion: 1; status: "drop"; reason?: string; deliberate?: true }
   | {
       schemaVersion: 1;
       status: "rendered";
@@ -671,13 +692,36 @@ function decodePluginHealthEntryV1(
     throw new Error(`${itemLabel}.cards must be a bounded array`);
   }
   const cards = plugin.cards.map((card, cardIndex) => {
-    const cardId = boundedString(card, `${itemLabel}.cards[${cardIndex}]`, 32);
+    const cardLabel = `${itemLabel}.cards[${cardIndex}]`;
+    const entry = record(card, cardLabel);
+    exactKeys(entry, ["id", "actions"], cardLabel);
+    const cardId = boundedString(entry.id, `${cardLabel}.id`, 32);
     if (!PLUGIN_CARD_ID.test(cardId)) {
-      throw new Error(`${itemLabel}.cards[${cardIndex}] is invalid`);
+      throw new Error(`${cardLabel}.id is invalid`);
     }
-    return cardId;
+    if (
+      !Array.isArray(entry.actions) ||
+      entry.actions.length > MAX_PLUGIN_CARD_ACTIONS_V1
+    ) {
+      throw new Error(`${cardLabel}.actions must be a bounded array`);
+    }
+    const actions = entry.actions.map((action, actionIndex) => {
+      const name = boundedString(
+        action,
+        `${cardLabel}.actions[${actionIndex}]`,
+        64,
+      );
+      if (!PLUGIN_CARD_ACTION_NAME.test(name)) {
+        throw new Error(`${cardLabel}.actions[${actionIndex}] is invalid`);
+      }
+      return name;
+    });
+    if (new Set(actions).size !== actions.length) {
+      throw new Error(`${cardLabel}.actions contains duplicates`);
+    }
+    return { id: cardId, actions };
   });
-  if (new Set(cards).size !== cards.length) {
+  if (new Set(cards.map((card) => card.id)).size !== cards.length) {
     throw new Error(`${itemLabel}.cards contains duplicates`);
   }
   return {
@@ -977,7 +1021,13 @@ export function decodePluginWorkerRenderCardResultV1(
     throw new Error(`${label}.schemaVersion is unsupported`);
   }
   if (value.status === "drop") {
-    exactKeys(value, ["schemaVersion", "status"], label, ["reason"]);
+    exactKeys(value, ["schemaVersion", "status"], label, [
+      "reason",
+      "deliberate",
+    ]);
+    if (value.deliberate !== undefined && value.deliberate !== true) {
+      throw new Error(`${label}.deliberate must be true`);
+    }
     return {
       schemaVersion: 1,
       status: "drop",
@@ -990,6 +1040,7 @@ export function decodePluginWorkerRenderCardResultV1(
               MAX_FAILURE_REASON_V1,
             ),
           }),
+      ...(value.deliberate === true ? { deliberate: true as const } : {}),
     };
   }
   exactKeys(value, ["schemaVersion", "status", "messages"], label, [

@@ -325,7 +325,14 @@ export async function cardAction(
         await notePluginFailureV1(
           state,
           { runId, generationId: card.runId },
-          { pluginId: route.pluginId, phase: "hook", message: reason },
+          {
+            pluginId: route.pluginId,
+            phase: "hook",
+            message: reason,
+            // A press is not a Turn, and the notice the person reads must
+            // not tell them one was lost.
+            card: "press",
+          },
         );
       } catch {
         // Recording a failure must not be what fails the press.

@@ -78,7 +78,11 @@ import {
   type A2uiJsonObjectV1,
   type A2uiJsonValueV1,
 } from "@frockbot/core/contracts";
-import { approvalKeyV1, decodeApprovalRecordV1 } from "./approvals.js";
+import {
+  approvalKeyV1,
+  decodeApprovalRecordV1,
+  type ApprovalRecordV1,
+} from "./approvals.js";
 
 /** One `CardRecordV1`, keyed by the surface the Bot named. */
 export const CARD_PREFIX = "shell:card:";
@@ -1239,6 +1243,18 @@ export function cardApprovalBindingKeyV1(
 }
 
 /**
+ * Where one card Approval's single permitted use is recorded as spent.
+ *
+ * The capability that acts on a decision claims it here, once. The store
+ * reads the same key: a surface whose decision is approved and unspent may
+ * not be redrawn, because redrawing it would leave the person's answer bound
+ * to a card nobody is looking at any more.
+ */
+export function cardApprovalUseKeyV1(approvalId: string): string {
+  return `shell:card-approval-used:${approvalId}`;
+}
+
+/**
  * What the Approvals on one surface authorize.
  *
  * The Approval record says a person answered; this says *what they answered
@@ -1306,6 +1322,16 @@ export interface CardApprovalStoreV1 {
    * asked, and reusing its id would leave a card that cannot be decided.
    */
   live(
+    pluginId: string,
+    surfaceId: string,
+  ): Promise<CardApprovalRecordV1 | undefined>;
+  /**
+   * The binding of this surface when a person has already approved one of its
+   * Approvals and nothing has spent that decision yet, or nothing. A declined
+   * decision, an expired one and one that has been acted on are all settled
+   * business: the surface may be redrawn over them.
+   */
+  settled(
     pluginId: string,
     surfaceId: string,
   ): Promise<CardApprovalRecordV1 | undefined>;
@@ -1407,6 +1433,38 @@ export function createCardApprovalStoreV1(storage: {
   // One read per store, and one mint: two sends racing the first draw would
   // otherwise seed their ids from two different secrets.
   let secret: Promise<string> | undefined;
+  /**
+   * The binding of one surface when any Approval it names is in the state the
+   * caller is asking about. The Approval records themselves are the authority,
+   * so the binding never has to be kept in step with a decision it does not
+   * own; a binding whose Approval was never recorded holds nothing, because
+   * the Turn that drew that card never settled and nobody was ever asked.
+   */
+  const holding = async (
+    pluginId: string,
+    surfaceId: string,
+    matches: (
+      approval: ApprovalRecordV1,
+      approvalId: string,
+    ) => Promise<boolean>,
+  ): Promise<CardApprovalRecordV1 | undefined> => {
+    const stored = decodeCardApprovalRecordV1(
+      await storage.get<unknown>(cardApprovalBindingKeyV1(pluginId, surfaceId)),
+    );
+    if (!stored) return undefined;
+    for (const approvalId of stored.approvalIds) {
+      const record = await storage.get<unknown>(approvalKeyV1(approvalId));
+      if (record === undefined) continue;
+      let approval;
+      try {
+        approval = decodeApprovalRecordV1(record);
+      } catch {
+        continue;
+      }
+      if (await matches(approval, approvalId)) return stored;
+    }
+    return undefined;
+  };
   return {
     secret() {
       secret ??= (async () => {
@@ -1421,29 +1479,23 @@ export function createCardApprovalStoreV1(storage: {
       return secret;
     },
     async live(pluginId, surfaceId) {
-      const stored = decodeCardApprovalRecordV1(
-        await storage.get<unknown>(
-          cardApprovalBindingKeyV1(pluginId, surfaceId),
-        ),
-      );
-      if (!stored) return undefined;
-      for (const approvalId of stored.approvalIds) {
-        const record = await storage.get<unknown>(approvalKeyV1(approvalId));
-        if (record === undefined) continue;
-        let approval;
-        try {
-          approval = decodeApprovalRecordV1(record);
-        } catch {
-          continue;
-        }
-        if (
+      return holding(
+        pluginId,
+        surfaceId,
+        async (approval) =>
           approval.decision === "pending" &&
-          Date.parse(approval.expiresAt) > Date.now()
-        ) {
-          return stored;
-        }
-      }
-      return undefined;
+          Date.parse(approval.expiresAt) > Date.now(),
+      );
+    },
+    async settled(pluginId, surfaceId) {
+      return holding(pluginId, surfaceId, async (approval, approvalId) => {
+        if (approval.decision !== "approved") return false;
+        if (Date.parse(approval.expiresAt) <= Date.now()) return false;
+        return (
+          (await storage.get<unknown>(cardApprovalUseKeyV1(approvalId))) ===
+          undefined
+        );
+      });
     },
     // Idempotent: a replayed card send recomputes the same ids over the same
     // values, and rewriting the binding it already wrote would only move its

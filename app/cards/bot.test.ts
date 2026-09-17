@@ -50,6 +50,7 @@ function harness(
   values: Map<string, unknown> = new Map(),
   mountError = "this deployment cannot mount a Plugin worker",
 ) {
+  const notices: { title: string; body: string }[] = [];
   const storage = {
     get: (key: string) => Promise.resolve(values.get(key)),
     put: (keyOrEntries: unknown, value?: unknown) => {
@@ -81,9 +82,15 @@ function harness(
         },
       },
     },
-    authority: { validateIdentity: () => Promise.resolve() },
+    authority: {
+      validateIdentity: () => Promise.resolve(),
+      recordNotification: (notification: { title: string; body: string }) => {
+        notices.push(notification);
+        return Promise.resolve();
+      },
+    },
   } as unknown as ShellBotStateV1;
-  return { state, values };
+  return { state, values, notices };
 }
 
 describe("reading a Bot's Cards", () => {
@@ -358,6 +365,23 @@ describe("the three routes", () => {
     expect(receipt.routed).toBe("plugin");
     expect(receipt.failure).toBeTruthy();
     expect(receipt.card.revision).toBe(2);
+  });
+
+  // A press is not a Turn: nothing was lost when one fails, so the notice the
+  // person reads must not tell them a Turn could not continue.
+  test("a failed press is noticed as a press, not as a lost Turn", async () => {
+    const { state, notices } = harness(
+      new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]),
+    );
+    await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.body).toContain("could not answer a card press");
+    expect(notices[0]?.body).not.toContain("was skipped for this Turn");
   });
 
   test("a plugin failure too long to carry still answers a readable receipt", async () => {

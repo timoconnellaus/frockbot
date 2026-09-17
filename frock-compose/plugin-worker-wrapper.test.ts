@@ -67,7 +67,10 @@ const declarations = new Function(
   declaredServices: (module: unknown, pluginId: string) => unknown;
   declaredTriggers: (module: unknown, pluginId: string) => string[];
   declaredViews: (module: unknown, pluginId: string) => string[];
-  declaredCards: (module: unknown, pluginId: string) => string[];
+  declaredCards: (
+    module: unknown,
+    pluginId: string,
+  ) => { id: string; actions: string[] }[];
 };
 
 function invocation(overrides: Record<string, unknown> = {}) {
@@ -972,11 +975,21 @@ const { runRenderCard, runCardAction } = new Function(
 describe("the generated wrapper's card handlers", () => {
   const messages = [{ version: "v1.0", createSurface: { surfaceId: "s-1" } }];
 
+  /**
+   * One mounted Plugin holding one card, declared the way the mount declares
+   * it: the press path resolves against what `declaredCards` returned, so the
+   * test hands it exactly that rather than a list of its own.
+   */
   function cardPlugin(
     card: Record<string, unknown>,
-    cards: string[] = ["draft"],
+    cards?: { id: string; actions: string[] }[],
   ) {
-    return { pluginId: "mail", cards, module: { cards: { draft: card } } };
+    const module = { cards: { draft: card } };
+    return {
+      pluginId: "mail",
+      cards: cards ?? declarations.declaredCards(module, "mail"),
+      module,
+    };
   }
 
   function renderInvocation(overrides: Record<string, unknown> = {}) {
@@ -1082,7 +1095,10 @@ describe("the generated wrapper's card handlers", () => {
     expect(
       await runRenderCard(
         renderInvocation(),
-        () => cardPlugin({ render: () => messages }, ["other"]),
+        () =>
+          cardPlugin({ render: () => messages }, [
+            { id: "other", actions: [] },
+          ]),
         contextFor,
       ),
     ).toEqual({
@@ -1224,16 +1240,85 @@ describe("the generated wrapper's card handlers", () => {
     expect(late.deliberate).toBeUndefined();
   });
 
-  // A render answers `rendered` or `drop` and nothing else: the draw path has
-  // no health charge to spare, so the marker never travels on it.
-  test("a render's drop never carries the press path's marker", async () => {
+  // A draw is charged to the Plugin's health exactly as a press is, so it
+  // carries the same marker: a render that refused in as many words costs it
+  // nothing, and everything else counts.
+  test("a render's own refusal is marked deliberate; a failure never is", async () => {
     expect(
       await runRenderCard(
         renderInvocation(),
         () => cardPlugin({ render: () => ({ drop: true, reason: "no data" }) }),
         contextFor,
       ),
-    ).toEqual({ schemaVersion: 1, status: "drop", reason: "no data" });
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      deliberate: true,
+      reason: "no data",
+    });
+    const broke = await runRenderCard(
+      renderInvocation(),
+      () =>
+        cardPlugin({
+          render: () => {
+            throw new Error("no draft today");
+          },
+        }),
+      contextFor,
+    );
+    expect(broke.status).toBe("drop");
+    expect(broke.deliberate).toBeUndefined();
+  });
+
+  test("a press resolves to the card that declared it, not to key order", async () => {
+    // Two cards, each holding a handler called `details`. Nothing may resolve
+    // this by scan order, so the mount refuses the module outright.
+    const twoOwners = {
+      cards: {
+        draft: { render: () => messages, actions: { details: () => messages } },
+        reply: { render: () => messages, actions: { details: () => messages } },
+      },
+    };
+    expect(() => declarations.declaredCards(twoOwners, "mail")).toThrow(
+      /declares card action "details" on both "draft" and "reply"/,
+    );
+
+    // And when they are spelled apart, the press reaches the card that owns
+    // the name even though another card is scanned first.
+    const drew: string[] = [];
+    const module = {
+      cards: {
+        draft: {
+          render: () => messages,
+          actions: {
+            open: () => {
+              drew.push("draft");
+              return messages;
+            },
+          },
+        },
+        reply: {
+          render: () => messages,
+          actions: {
+            details: () => {
+              drew.push("reply");
+              return messages;
+            },
+          },
+        },
+      },
+    };
+    const answer = await runCardAction(
+      pressInvocation(),
+      () => ({
+        pluginId: "mail",
+        cards: declarations.declaredCards(module, "mail"),
+        module,
+      }),
+      contextFor,
+    );
+    expect(answer.status).toBe("rendered");
+    expect(drew).toEqual(["reply"]);
   });
 
   test("a card must export a render function, and its id must be one", () => {
@@ -1242,7 +1327,7 @@ describe("the generated wrapper's card handlers", () => {
         { cards: { draft: { render: () => undefined } } },
         "mail",
       ),
-    ).toEqual(["draft"]);
+    ).toEqual([{ id: "draft", actions: [] }]);
     expect(declarations.declaredCards({}, "mail")).toEqual([]);
     expect(() =>
       declarations.declaredCards({ cards: { draft: {} } }, "mail"),
