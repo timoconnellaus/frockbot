@@ -29,7 +29,9 @@
 //    draws stays readable; a Session is a conversation, not a canvas. A Bot
 //    that draws past it does not lose the new card: the oldest indexed
 //    surface the drawing Turn is not itself writing is tombstoned with a
-//    refusal saying it made room for a newer one, whichever Turn drew it.
+//    refusal saying it made room for a newer one, whichever Turn drew it. A
+//    single Turn drawing past the cap spends the oldest surface it has itself
+//    already folded, and `app/shell/cards.ts` states what that costs.
 //    The tombstones eviction leaves behind answer to this same bound: once
 //    the records the index no longer lists outnumber it, the stalest are
 //    dropped on read, and a surface the index still lists never is — trimming

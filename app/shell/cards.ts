@@ -27,22 +27,34 @@
  *    moved under them.
  *
  *  * **The Session's surfaces are bounded.** Cards do not tear down, so the
- *    index caps how many a Session may hold. A fold past a surface budget is
- *    refused whole and says so on the record it did not change: a card that
- *    silently stopped updating is worse than one that says it stopped. A first
- *    send refused this way still writes an empty record carrying the refusal,
- *    so the transcript has something to draw where the send sits. The index is
- *    the bound and a stored record is not: a surface the index does not list
- *    is new to the Session however much of it is still in storage. When the
- *    index is already full, the oldest surface this Turn is not itself
- *    writing is tombstoned with a refusal saying it made room, and the new
- *    card is written and indexed normally — so the order a Turn named its
- *    surfaces in never changes which card it costs, and a Turn never destroys
- *    a fold it just computed. Trimming loses a row and never a fact, because
- *    the send that drew the trimmed card is still on its Turn's log. So no card send ever leaves no
- *    trace, not even a Turn drawing more surfaces than a Session may hold. A
- *    send that can only be refused takes no slot and evicts nothing: the fold
- *    is decided before the index is touched. The records eviction leaves
+ *    index caps how many a Session may hold, and this is the one statement of
+ *    what that costs. A fold past a byte or component budget is refused whole
+ *    and says so on the record it did not change: a card that silently stopped
+ *    updating is worse than one that says it stopped. A first send refused
+ *    this way still writes an empty record carrying the refusal, so the
+ *    transcript has something to draw where the send sits. The index is the
+ *    bound and a stored record is not: a surface the index does not list is
+ *    new to the Session however much of it is still in storage.
+ *
+ *    The fold is decided before the index is touched, so a refused send never
+ *    evicts another card; it does take a slot when one is free, and that is
+ *    deliberate — an indexed refusal is readable by surface id and is not a
+ *    record the listing's retention may drop.
+ *
+ *    When the index is full and a new surface arrives, the oldest indexed
+ *    surface this Turn is not itself writing is tombstoned with a refusal
+ *    saying it made room, and the new card is written and indexed normally.
+ *    Only a Turn whose own sends outnumber the cap can exhaust that: it then
+ *    spends the oldest surface it has already folded in this same Turn,
+ *    destroying a fold it just computed, so past the cap the order a Turn
+ *    named its surfaces in decides which of its cards survives — and a new
+ *    surface named before this Turn has folded anything is refused outright,
+ *    with a record saying the Session is full of cards this Turn is drawing.
+ *    Every one of those paths writes a record, so no card send ever leaves no
+ *    trace, not even a Turn drawing more surfaces than a Session may hold.
+ *
+ *    Trimming loses a row and never a fact, because the send that drew the
+ *    trimmed card is still on its Turn's log. The records eviction leaves
  *    behind answer to the same bound, dropped on read once the surfaces the
  *    index no longer lists outnumber the ones it may.
  */
@@ -665,11 +677,10 @@ export interface CardTerminalInputV1 {
 /**
  * Where in `surfaces` the card making room for a newer one is, or -1.
  *
- * The oldest surface this Turn is not itself writing goes first, so the order
- * a Turn named its surfaces in never changes which card it destroys. Only when
- * every indexed surface is one this Turn is writing — reachable only when the
- * Turn's own sends outnumber the cap — does it spend one of its own, and then
- * the oldest it has already folded and will not fold again.
+ * The two tiers the module header states: the oldest surface this Turn is not
+ * itself writing, and failing that — reachable only when the Turn's own sends
+ * outnumber the cap — the oldest it has already folded and will not fold
+ * again. -1 when it has folded none yet, which is the refusal.
  */
 function evictionVictimV1(
   surfaces: readonly string[],
@@ -749,8 +760,8 @@ export async function cardTerminalRecordsV1(
       sessionId: input.run.sessionId,
       now: input.now,
     };
-    // The fold decides first and the index second: a send that can only be
-    // refused writes its refusal and costs no other card its slot.
+    // The fold decides first and the index second, as the module header says:
+    // a send that can only be refused writes its refusal and evicts nothing.
     let folded: CardRecordV1;
     try {
       folded = foldCardMessagesV1(current, send.messages, context);
@@ -762,9 +773,8 @@ export async function cardTerminalRecordsV1(
         input,
         error.message,
       );
-      // A refused send takes a slot only if one is free: it never costs
-      // another card its life, because the card it could not change is
-      // already in storage saying why.
+      // It still takes a slot when one is free, so the refusal is readable by
+      // surface id and is not a record the listing's retention may drop.
       if (
         !surfaces.includes(send.surfaceId) &&
         surfaces.length < A2UI_LIMITS_V1.surfacesPerSession
