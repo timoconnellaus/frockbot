@@ -27,7 +27,12 @@ interface ProbeSession {
 
 /** What the scripted model does with a transcript. */
 export interface VoiceProbeScript {
-  /** Transcripts containing this word become an `ask_bot` call to `botId`. */
+  /**
+   * Transcripts containing this word become an `ask` call. Since ADR 0029
+   * the work goes to the Bot the call is on, so `botId` no longer chooses a
+   * target — it only says the script expects a delegation at all, and the
+   * test opens the call on the Bot it means.
+   */
   delegateWord?: string;
   botId?: string;
   /** The whole model reply, so a test can choose its sentences. */
@@ -58,6 +63,9 @@ export interface VoiceProbeScript {
   /** Transcripts containing this word become a `forget` tool call. */
   forgetWord?: string;
   forget?: string;
+  /** Transcripts containing this word hand the call to `switchBotId`. */
+  switchWord?: string;
+  switchBotId?: string;
 }
 
 /** One scheduled row, with its payload as JSON. */
@@ -363,6 +371,14 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
       );
     }
     if (
+      script.switchWord &&
+      script.switchBotId &&
+      body.tools !== undefined &&
+      last.content.includes(script.switchWord)
+    ) {
+      return tool("switch_bot", { bot_id: script.switchBotId });
+    }
+    if (
       script.forgetWord &&
       body.tools !== undefined &&
       last.content.includes(script.forgetWord)
@@ -385,11 +401,8 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
                     index: 0,
                     id: "call_1",
                     function: {
-                      name: "ask_bot",
-                      arguments: JSON.stringify({
-                        bot_id: script.botId,
-                        message: last.content,
-                      }),
+                      name: "ask",
+                      arguments: JSON.stringify({ message: last.content }),
                     },
                   },
                 ],
