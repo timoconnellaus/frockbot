@@ -73,6 +73,29 @@ Map<String, Object?> cardJson({
   'refusal': ?refusal,
 };
 
+/// A card the person types into: the standard catalog's `TextField` bound to
+/// the data model, with the approval buttons under it. What is typed lives in
+/// the renderer's data model and never in the record.
+Map<String, Object?> replyCardJson({int revision = 1}) => cardJson(
+  revision: revision,
+  sendDataModel: true,
+  components: [
+    {
+      'id': 'root',
+      'component': 'Column',
+      'children': ['reply', 'actions'],
+    },
+    {
+      'id': 'reply',
+      'component': 'TextField',
+      'value': {'path': '/reply'},
+      'label': 'Reply',
+    },
+    {'id': 'actions', 'component': 'ApprovalActions', 'approvalId': 'ap-1'},
+  ],
+  dataModel: {'reply': ''},
+);
+
 Widget host(SettingsApi api, {String surfaceId = 'draft-1'}) => MaterialApp(
   theme: FrockTheme.theme(Brightness.dark),
   home: Scaffold(
@@ -714,6 +737,133 @@ void main() {
       invalidations.value++;
       await tester.pumpAndSettle();
       expect(reads, 2);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a read still in flight never redraws over a receipt', (
+      tester,
+    ) async {
+      final held = Completer<Object?>();
+      final invalidations = ValueNotifier<int>(0);
+      addTearDown(invalidations.dispose);
+      var reads = 0;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body == null) {
+          reads++;
+          // The first read answers at once; the one a notice starts is held
+          // open so the press below overtakes it.
+          if (reads == 1) return cardJson();
+          return held.future;
+        }
+        return {
+          'schemaVersion': 1,
+          'routed': 'plugin',
+          'card': cardJson(
+            revision: 2,
+            components: [
+              {
+                'id': 'root',
+                'component': 'Receipt',
+                'title': 'Following up',
+                'status': 'Held',
+                'summary': 'Nothing was sent.',
+              },
+            ],
+          ),
+          'failure': 'the plugin handler stopped without saying why',
+        };
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: CardChatScope(
+              api: api,
+              botId: 'bot-1',
+              invalidations: invalidations,
+              child: const CardChatCard(surfaceId: 'draft-1'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      invalidations.value++;
+      await tester.pump();
+      expect(reads, 2);
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(find.text('Following up'), findsOneWidget);
+      // The read was started before the press and answers after it, carrying
+      // the revision the press has already moved past.
+      held.complete(cardJson());
+      await tester.pumpAndSettle();
+      expect(find.text('Following up'), findsOneWidget);
+      expect(find.text('Approve'), findsNothing);
+      expect(
+        find.text('the plugin handler stopped without saying why'),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a notice at the drawn revision keeps what was typed', (
+      tester,
+    ) async {
+      final invalidations = ValueNotifier<int>(0);
+      addTearDown(invalidations.dispose);
+      var reads = 0;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        reads++;
+        return replyCardJson();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: CardChatScope(
+              api: api,
+              botId: 'bot-1',
+              invalidations: invalidations,
+              child: const CardChatCard(surfaceId: 'draft-1'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'actually, no');
+      await tester.pumpAndSettle();
+      // A notice says some durable state of the Bot's moved, and this card's
+      // record has not: the re-read comes back at the revision already drawn,
+      // and what only the renderer holds survives it.
+      invalidations.value++;
+      await tester.pumpAndSettle();
+      expect(reads, 2);
+      expect(find.text('actually, no'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a press carries the data model the person edited', (
+      tester,
+    ) async {
+      Map<String, Object?>? sent;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body == null) return replyCardJson();
+        sent = (body as Map).cast<String, Object?>();
+        return {
+          'schemaVersion': 1,
+          'routed': 'input',
+          'card': replyCardJson(revision: 2),
+        };
+      });
+      await tester.pumpWidget(host(api));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'actually, no');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      // The typed value lives in the renderer's data model and nowhere else,
+      // so the press has to read it from there.
+      expect(sent!['dataModel'], {'reply': 'actually, no'});
       await tester.pumpWidget(const SizedBox());
     });
   });

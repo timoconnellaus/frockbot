@@ -163,9 +163,29 @@ class _CardChatCardState extends State<CardChatCard>
   }
 
   /// Takes a record on: admitted, translated, and fed to a renderer of its
-  /// own. The record is the whole of the surface's state, so a fresh
-  /// controller per read is a redraw and never a loss.
+  /// own.
+  ///
+  /// Adopting a record ends every read older than it. A record arrives two
+  /// ways — a read, and the receipt a press carries back — and the receipt is
+  /// the later truth about the surface whatever order the answers land in, so
+  /// a read still in flight must not redraw over it.
+  ///
+  /// A record at the revision already drawn is the record already drawn: every
+  /// fold bumps the revision (`app/shell/cards.ts`), so the surface cannot
+  /// have moved without it. That record keeps its renderer rather than getting
+  /// a new one, because the renderer holds what the record does not — text a
+  /// person has typed, a disclosure they opened — and a notice about some
+  /// other durable state must not cost them it.
   void adopt(CardView answer) {
+    epoch++;
+    final drawn = card;
+    if (drawn != null &&
+        controller != null &&
+        drawn.surfaceId == answer.surfaceId &&
+        drawn.revision == answer.revision) {
+      if (failure != null) setState(() => failure = null);
+      return;
+    }
     final previous = controller;
     final previousInteractions = interactions;
     SurfaceController? next;
@@ -229,6 +249,21 @@ class _CardChatCardState extends State<CardChatCard>
     }
   }
 
+  /// The data model as the renderer holds it, which is the one the person has
+  /// been editing: genui writes a control's value into the live surface's data
+  /// model, and nothing writes it back to the record the read decoded. So a
+  /// press that carries "the data model" asks the renderer for it rather than
+  /// re-sending what was read.
+  Map<String, Object?>? liveDataModel() {
+    final live = controller;
+    if (live == null) return null;
+    final value = live
+        .contextFor(widget.surfaceId)
+        .dataModel
+        .getValue<Object?>(DataPath.root);
+    return value is Map ? value.cast<String, Object?>() : null;
+  }
+
   /// One press, to the kernel, against the revision it was drawn at.
   Future<void> press(CardPress action) async {
     final client = api;
@@ -251,7 +286,7 @@ class _CardChatCardState extends State<CardChatCard>
         revision: drawn.revision,
         name: action.name,
         context: action.context,
-        dataModel: drawn.sendDataModel ? drawn.dataModel : null,
+        dataModel: drawn.sendDataModel ? liveDataModel() : null,
         commandId: commandId,
       );
       if (!mounted) return;
