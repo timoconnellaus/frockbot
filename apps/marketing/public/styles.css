@@ -739,6 +739,198 @@
   .split-heading-bottom {
     align-items: end;
   }
+  .tinker .split-heading > div > p,
+  .open-page .split-heading > div > p {
+    max-width: 520px;
+    color: var(--muted);
+    font-size: 1.05rem;
+    line-height: 1.65;
+  }
+  .open-page .split-heading > div > p + p {
+    margin-top: 14px;
+  }
+  .tinker-actions,
+  .open-actions {
+    margin-top: 28px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .button-outline {
+    background: transparent;
+    color: var(--ink);
+    box-shadow: inset 0 0 0 2px var(--ink);
+  }
+  .button-outline:hover {
+    background: var(--ink);
+    color: #fff;
+  }
+  .hero-soon {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 18px;
+    color: #8d8896;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .hero-soon b {
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid rgb(255 255 255 / 18%);
+    color: #cfcbd6;
+    font-weight: 600;
+  }
+  /* Open-source page: diagrams, code and terminal blocks */
+  .open-figure {
+    margin-top: 48px;
+    border: 1px solid rgb(30 29 39 / 10%);
+    border-radius: 24px;
+    background: #fff;
+    padding: 28px;
+    overflow: hidden;
+  }
+  .open-figure svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .open-figure figcaption {
+    margin-top: 16px;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  .open-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 48px;
+    align-items: start;
+  }
+  .code-block,
+  .terminal {
+    margin: 0;
+    border-radius: 20px;
+    background: var(--ink);
+    color: #e9e6ef;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    padding: 22px 24px;
+    overflow-x: auto;
+    white-space: pre;
+    tab-size: 2;
+  }
+  .code-block .k {
+    color: #ff7aa2;
+  }
+  .code-block .s {
+    color: #ffd47a;
+  }
+  .code-block .c {
+    color: #8d8896;
+  }
+  .terminal .p {
+    color: #8d8896;
+  }
+  .terminal .ok {
+    color: #7ee2a8;
+  }
+  .terminal .cmd {
+    color: #fff;
+    font-weight: 700;
+  }
+  .hook-chain {
+    display: grid;
+    gap: 10px;
+    margin-top: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .hook-chain li {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 12px;
+    align-items: baseline;
+    padding: 12px 16px;
+    border-radius: 14px;
+    background: var(--cream);
+    font-size: 0.92rem;
+    line-height: 1.45;
+  }
+  .hook-chain li b {
+    font-family: "Caveat", cursive;
+    font-size: 1.3rem;
+    color: var(--pink);
+  }
+  .hook-chain li code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    color: var(--ink);
+    background: #fff;
+    padding: 2px 7px;
+    border-radius: 6px;
+  }
+  .provider-wall {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 40px;
+  }
+  .provider-wall span {
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid rgb(30 29 39 / 10%);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .provider-wall span.more {
+    background: var(--ink);
+    color: #fff;
+    border-color: var(--ink);
+  }
+  .open-page .legal-hero::after {
+    display: none;
+  }
+  .open-page .split-heading,
+  .open-page .split-heading-bottom {
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .open-split {
+      grid-template-columns: 1fr;
+    }
+    .open-figure {
+      padding: 18px;
+      border-radius: 18px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .open-figure svg {
+      min-width: 900px;
+    }
+    .open-figure figcaption {
+      position: sticky;
+      left: 0;
+    }
+    .open-figure::before {
+      content: "Scroll sideways \2192";
+      position: sticky;
+      left: 0;
+      display: block;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+  }
   .use-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);

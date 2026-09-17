@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="FrockBot is an open-source, always-on agent harness: persistent Bots on their own cloud computer, 40 model providers, everything-is-a-plugin, and a one-command install into your own Cloudflare account."
+    />
+    <meta name="theme-color" content="#1e1d27" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="FrockBot, open all the way down" />
+    <meta
+      property="og:description"
+      content="Always-on Bots with their own cloud computer. MIT licensed. Bring your own model. Everything is a plugin. One command to run it yourself."
+    />
+    <meta property="og:image" content="https://frockbot.com/assets/hero.png" />
+    <meta property="og:url" content="https://frockbot.com/open/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://frockbot.com/open/" />
+    <link rel="icon" href="/assets/favicon.png" />
+    <link rel="apple-touch-icon" href="/assets/app-icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/script.js" defer></script>
+    <title>Open source · FrockBot</title>
+  </head>
+  <body class="open-page">
+    <svg class="svg-sprite" aria-hidden="true">
+      <symbol id="github-mark" viewBox="0 0 24 24">
+        <path
+          d="M12 .7C5.73.7.65 5.78.65 12.05c0 5.02 3.25 9.28 7.76 10.78.57.1.78-.25.78-.55v-2.16c-3.16.69-3.83-1.34-3.83-1.34-.52-1.31-1.26-1.66-1.26-1.66-1.03-.7.08-.69.08-.69 1.14.08 1.74 1.17 1.74 1.17 1.01 1.74 2.66 1.24 3.31.95.1-.73.4-1.24.72-1.53-2.52-.29-5.17-1.26-5.17-5.62 0-1.24.44-2.25 1.17-3.05-.12-.29-.51-1.44.11-3 0 0 .95-.3 3.12 1.16a10.8 10.8 0 0 1 5.68 0c2.17-1.47 3.12-1.16 3.12-1.16.62 1.56.23 2.71.11 3 .73.8 1.17 1.81 1.17 3.05 0 4.37-2.65 5.32-5.18 5.61.41.35.77 1.05.77 2.12v3.14c0 .3.21.66.78.55a11.4 11.4 0 0 0 7.75-10.78C23.35 5.78 18.27.7 12 .7Z"
+        />
+      </symbol>
+    </svg>
+    <header class="site-header">
+      <div class="container nav-shell">
+        <a class="brand" href="/" aria-label="FrockBot home">
+          <img src="/assets/app-icon.png" alt="" width="48" height="48" />
+          <span class="brand-name"
+            >Frock<span class="brand-accent">Bot</span></span
+          >
+        </a>
+        <button
+          class="menu-button"
+          type="button"
+          aria-expanded="false"
+          aria-controls="site-nav"
+        >
+          <span></span><span></span><span></span
+          ><span class="sr-only">Toggle navigation</span>
+        </button>
+        <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
+          <a href="/">Home</a>
+          <a href="#shape">The shape</a>
+          <a href="#models">Models</a>
+          <a href="#plugins">Plugins</a>
+          <a href="#run">Run it yourself</a>
+          <a
+            class="github-logo-link"
+            href="https://github.com/timoconnellaus/frockbot"
+            aria-label="FrockBot source code on GitHub"
+          >
+            <svg aria-hidden="true">
+              <use href="#github-mark" />
+            </svg>
+          </a>
+          <a
+            class="button button-small"
+            href="https://github.com/timoconnellaus/frockbot"
+            >Star on GitHub <span aria-hidden="true">→</span></a
+          >
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="legal-hero" aria-labelledby="open-title">
+        <div class="container legal-hero-shell">
+          <div>
+            <p class="eyebrow">For the tinkerers</p>
+            <h1 id="open-title">Open,<br /><em>all the way down.</em></h1>
+            <p class="legal-intro">
+              An always-on agent with its own cloud computer, the kind that
+              usually costs US$200 a month, except this one is MIT licensed,
+              runs on the model you choose, treats every capability as a plugin,
+              and installs into your own Cloudflare account with one command.
+            </p>
+            <p class="open-actions">
+              <a
+                class="button"
+                href="https://github.com/timoconnellaus/frockbot#run-your-own"
+                >Read the install guide <span aria-hidden="true">→</span></a
+              >
+              <a class="button button-outline" href="https://bot.frockbot.com"
+                >Or use the hosted one for US$20</a
+              >
+            </p>
+          </div>
+          <img
+            src="/assets/characters/guardian.png"
+            alt="Guardian, the black sheep of the FrockBot flock"
+            width="180"
+            height="180"
+          />
+        </div>
+      </section>
+
+      <section class="section" id="shape" aria-labelledby="shape-title">
+        <div class="container">
+          <div class="split-heading">
+            <div>
+              <p class="section-label">The shape</p>
+              <h2 id="shape-title">Always<br /><em>on.</em></h2>
+            </div>
+            <p>
+              A Bot is a persistent Durable Object with a conversation, memory,
+              routines, tools, and a desktop on a shared cloud computer. It
+              keeps working after you close the laptop and comes back only when
+              it needs an approval.
+            </p>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <span class="feature-number">01</span
+              ><img
+                class="feature-character"
+                src="/assets/characters/sunny.png"
+                alt=""
+              />
+              <h3>Persistent by default</h3>
+              <p>
+                Every Bot is its own Durable Object. History, notes and
+                instructions survive across sessions, deploys and devices.
+              </p>
+            </article>
+            <article class="feature-card feature-card-pink">
+              <span class="feature-number">02</span
+              ><img
+                class="feature-character"
+                src="/assets/characters/cow.png"
+                alt=""
+              />
+              <h3>A real computer</h3>
+              <p>
+                Browser, filesystem and terminal on a Fly Sprite. Each Bot gets
+                its own desktop and folders. Watch the screen or take control.
+              </p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-number">03</span
+              ><img
+                class="feature-character"
+                src="/assets/characters/chill.png"
+                alt=""
+              />
+              <h3>Routines and triggers</h3>
+              <p>
+                Cron schedules, webhooks and connected-app events wake a Bot and
+                run a Turn without you in the loop.
+              </p>
+            </article>
+            <article class="feature-card feature-card-dark">
+              <span class="feature-number">04</span
+              ><img
+                class="feature-character"
+                src="/assets/characters/nudge.png"
+                alt=""
+              />
+              <h3>Approvals in the loop</h3>
+              <p>
+                Spending, sending, publishing a plugin: each is an approval card
+                on the Turn's own log. Allow once, or always.
+              </p>
+            </article>
+          </div>
+          <figure class="open-figure" aria-labelledby="arch-caption">
+            <svg
+              viewBox="0 0 1100 600"
+              role="img"
+              aria-labelledby="arch-caption"
+              font-family="Manrope, system-ui, sans-serif"
+            >
+              <defs>
+                <marker
+                  id="arr"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0L10 5 0 10z" fill="#6d6974" />
+                </marker>
+                <marker
+                  id="arr-pink"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0L10 5 0 10z" fill="#ec386b" />
+                </marker>
+              </defs>
+              <!-- clients -->
+              <g fill="#1e1d27" font-size="14" font-weight="700">
+                <rect
+                  x="20"
+                  y="60"
+                  width="130"
+                  height="44"
+                  rx="12"
+                  fill="#faf7f2"
+                  stroke="#e6e1da"
+                />
+                <text x="85" y="87" text-anchor="middle" fill="#1e1d27">
+                  Web
+                </text>
+                <rect
+                  x="20"
+                  y="118"
+                  width="130"
+                  height="44"
+                  rx="12"
+                  fill="#faf7f2"
+                  stroke="#e6e1da"
+                />
+                <text x="85" y="145" text-anchor="middle" fill="#1e1d27">
+                  Mac
+                </text>
+                <rect
+                  x="20"
+                  y="176"
+                  width="130"
+                  height="44"
+                  rx="12"
+                  fill="#faf7f2"
+                  stroke="#e6e1da"
+                />
+                <text x="85" y="203" text-anchor="middle" fill="#1e1d27">
+                  Phone
+                </text>
+                <text
+                  x="85"
+                  y="42"
+                  text-anchor="middle"
+                  font-size="12"
+                  fill="#6d6974"
+                  font-weight="700"
+                  letter-spacing="1.5"
+                >
+                  YOU
+                </text>
+              </g>
+              <!-- triggers -->
+              <g font-size="13" font-weight="600" fill="#1e1d27">
+                <rect
+                  x="20"
+                  y="300"
+                  width="130"
+                  height="90"
+                  rx="12"
+                  fill="#fff"
+                  stroke="#e6e1da"
+                  stroke-dasharray="5 4"
+                />
+                <text x="85" y="326" text-anchor="middle">Cron</text>
+                <text x="85" y="348" text-anchor="middle">Webhooks</text>
+                <text x="85" y="370" text-anchor="middle">App events</text>
+                <text
+                  x="85"
+                  y="282"
+                  text-anchor="middle"
+                  font-size="12"
+                  fill="#6d6974"
+                  font-weight="700"
+                  letter-spacing="1.5"
+                >
+                  WHILE YOU'RE OUT
+                </text>
+              </g>
+              <!-- gateway -->
+              <rect
+                x="205"
+                y="60"
+                width="120"
+                height="330"
+                rx="16"
+                fill="#1e1d27"
+              />
+              <text
+                x="265"
+                y="220"
+                text-anchor="middle"
+                fill="#fff"
+                font-size="14"
+                font-weight="700"
+                transform="rotate(-90 265 220)"
+              >
+                Worker gateway
+              </text>
+              <line
+                x1="150"
+                y1="82"
+                x2="205"
+                y2="120"
+                stroke="#6d6974"
+                stroke-width="1.5"
+                marker-end="url(#arr)"
+              />
+              <line
+                x1="150"
+                y1="140"
+                x2="205"
+                y2="150"
+                stroke="#6d6974"
+                stroke-width="1.5"
+                marker-end="url(#arr)"
+              />
+              <line
+                x1="150"
+                y1="198"
+                x2="205"
+                y2="180"
+                stroke="#6d6974"
+                stroke-width="1.5"
+                marker-end="url(#arr)"
+              />
+              <line
+                x1="150"
+                y1="345"
+                x2="205"
+                y2="345"
+                stroke="#6d6974"
+                stroke-width="1.5"
+                marker-end="url(#arr)"
+              />
+              <!-- user + bots -->
+              <rect
+                x="380"
+                y="30"
+                width="380"
+                height="550"
+                rx="20"
+                fill="#faf7f2"
+                stroke="#e6e1da"
+              />
+              <text
+                x="400"
+                y="58"
+                font-size="12"
+                fill="#6d6974"
+                font-weight="700"
+                letter-spacing="1.5"
+              >
+                ONE USER · DURABLE OBJECTS
+              </text>
+              <line
+                x1="325"
+                y1="200"
+                x2="380"
+                y2="200"
+                stroke="#6d6974"
+                stroke-width="1.5"
+                marker-end="url(#arr)"
+              />
+              <g font-size="14" font-weight="700" fill="#1e1d27">
+                <rect
+                  x="400"
+                  y="76"
+                  width="340"
+                  height="60"
+                  rx="14"
+                  fill="#fff"
+                  stroke="#e6e1da"
+                />
+                <image
+                  href="/assets/characters/sunny.png"
+                  x="410"
+                  y="82"
+                  width="48"
+                  height="48"
+                />
+                <text x="470" y="101">Sunny</text>
+                <text
+                  x="470"
+                  y="121"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  memory · routines · tools · approvals
+                </text>
+                <rect
+                  x="400"
+                  y="146"
+                  width="340"
+                  height="60"
+                  rx="14"
+                  fill="#fff"
+                  stroke="#e6e1da"
+                />
+                <image
+                  href="/assets/characters/pixel.png"
+                  x="410"
+                  y="152"
+                  width="48"
+                  height="48"
+                />
+                <text x="470" y="171">Pixel</text>
+                <text
+                  x="470"
+                  y="191"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  its own conversation and log
+                </text>
+                <rect
+                  x="400"
+                  y="216"
+                  width="340"
+                  height="60"
+                  rx="14"
+                  fill="#fff"
+                  stroke="#e6e1da"
+                />
+                <image
+                  href="/assets/characters/cow.png"
+                  x="410"
+                  y="222"
+                  width="48"
+                  height="48"
+                />
+                <text x="470" y="241">Cow</text>
+                <text
+                  x="470"
+                  y="261"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  one Durable Object per Bot
+                </text>
+              </g>
+              <!-- plugin worker -->
+              <line
+                x1="570"
+                y1="276"
+                x2="570"
+                y2="318"
+                stroke="#ec386b"
+                stroke-width="2"
+                marker-start="url(#arr-pink)"
+                marker-end="url(#arr-pink)"
+              />
+              <text
+                x="580"
+                y="302"
+                font-size="11"
+                font-weight="700"
+                fill="#ec386b"
+              >
+                6 hooks, every Turn
+              </text>
+              <rect
+                x="400"
+                y="318"
+                width="340"
+                height="242"
+                rx="14"
+                fill="#1e1d27"
+              />
+              <text
+                x="570"
+                y="346"
+                text-anchor="middle"
+                fill="#fff"
+                font-size="14"
+                font-weight="700"
+              >
+                Plugin worker
+              </text>
+              <text
+                x="570"
+                y="364"
+                text-anchor="middle"
+                font-size="11"
+                font-weight="500"
+                fill="#cfcbd6"
+              >
+                one Dynamic Worker per User · 5 s CPU per hook chain
+              </text>
+              <line
+                x1="570"
+                y1="380"
+                x2="570"
+                y2="548"
+                stroke="#3a3846"
+                stroke-width="1"
+              />
+              <g font-size="11" font-weight="500" fill="#e9e6ef">
+                <text
+                  x="416"
+                  y="394"
+                  font-size="10.5"
+                  font-weight="700"
+                  fill="#ff7aa2"
+                  letter-spacing="1.2"
+                >
+                  CAN CHANGE
+                </text>
+                <text x="416" y="416">the system prompt</text>
+                <text x="416" y="436">which tools the model sees</text>
+                <text x="416" y="456">each model request</text>
+                <text x="416" y="476">a tool call, before it runs</text>
+                <text x="416" y="496">a tool result, after it runs</text>
+                <text x="416" y="516">whether the Turn ends</text>
+                <text x="416" y="540" fill="#8d8896">
+                  and add tools of its own
+                </text>
+                <text
+                  x="584"
+                  y="394"
+                  font-size="10.5"
+                  font-weight="700"
+                  fill="#ff7aa2"
+                  letter-spacing="1.2"
+                >
+                  CAN REACH
+                </text>
+                <text x="584" y="416">its own key-value store</text>
+                <text x="584" y="436">the Bot's memory and files</text>
+                <text x="584" y="456">the model the Bot chose</text>
+                <text x="584" y="476">only the hosts it declared</text>
+                <text x="584" y="496">schedules, connections</text>
+                <text x="584" y="516">its settings section</text>
+                <text x="584" y="540" fill="#8d8896">
+                  nothing it wasn't granted
+                </text>
+              </g>
+              <!-- right column -->
+              <g font-size="14" font-weight="700" fill="#1e1d27">
+                <rect
+                  x="810"
+                  y="40"
+                  width="270"
+                  height="96"
+                  rx="16"
+                  fill="#fde6ee"
+                  stroke="#f7c3d4"
+                />
+                <text x="830" y="70">Computer</text>
+                <text
+                  x="830"
+                  y="92"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  Fly Sprite · browser, files, terminal
+                </text>
+                <text
+                  x="830"
+                  y="112"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  a desktop per Bot · watch or take over
+                </text>
+                <rect
+                  x="810"
+                  y="160"
+                  width="270"
+                  height="96"
+                  rx="16"
+                  fill="#fff"
+                  stroke="#e6e1da"
+                />
+                <text x="830" y="190">Model providers</text>
+                <text
+                  x="830"
+                  y="212"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  40 in the box · a model per Bot
+                </text>
+                <text
+                  x="830"
+                  y="232"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  keys never leave the Worker
+                </text>
+                <rect
+                  x="810"
+                  y="280"
+                  width="270"
+                  height="96"
+                  rx="16"
+                  fill="#fff"
+                  stroke="#e6e1da"
+                />
+                <text x="830" y="310">Connected apps</text>
+                <text
+                  x="830"
+                  y="332"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  Gmail · Calendar · Drive
+                </text>
+                <text
+                  x="830"
+                  y="352"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  GitHub · Slack · Notion
+                </text>
+                <rect
+                  x="810"
+                  y="400"
+                  width="270"
+                  height="76"
+                  rx="16"
+                  fill="#fff"
+                  stroke="#e6e1da"
+                  stroke-dasharray="5 4"
+                />
+                <text x="830" y="430">Declared hosts</text>
+                <text
+                  x="830"
+                  y="452"
+                  font-size="12"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  https only · named per plugin
+                </text>
+              </g>
+              <line
+                x1="760"
+                y1="110"
+                x2="810"
+                y2="88"
+                stroke="#6d6974"
+                stroke-width="1.5"
+                marker-end="url(#arr)"
+              />
+              <line
+                x1="760"
+                y1="180"
+                x2="810"
+                y2="208"
+                stroke="#6d6974"
+                stroke-width="1.5"
+                marker-end="url(#arr)"
+              />
+              <line
+                x1="760"
+                y1="250"
+                x2="810"
+                y2="328"
+                stroke="#6d6974"
+                stroke-width="1.5"
+                marker-end="url(#arr)"
+              />
+              <line
+                x1="740"
+                y1="440"
+                x2="810"
+                y2="438"
+                stroke="#ec386b"
+                stroke-width="1.5"
+                stroke-dasharray="5 4"
+                marker-end="url(#arr-pink)"
+              />
+            </svg>
+            <figcaption id="arch-caption">
+              Every request passes one Worker gateway. Each User owns a Durable
+              Object, each Bot owns another, and every plugin the User enabled
+              mounts into one Dynamic Worker beside them. On every Turn the Bot
+              calls that worker once per open hook, so a plugin can rewrite the
+              prompt, hide or add tools, change a model request, veto a tool
+              call or reshape its result, and decide whether the Turn ends. It
+              reaches storage, memory, the model and the network through
+              loopback stubs the Bot mints for that Turn, and only the hosts it
+              declared. A plugin that throws or overruns is skipped and the Turn
+              carries on.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section
+        class="section pricing"
+        id="models"
+        aria-labelledby="models-title"
+      >
+        <div class="container">
+          <div class="split-heading split-heading-bottom">
+            <div>
+              <p class="section-label">Models</p>
+              <h2 id="models-title">Bring your<br /><em>own model.</em></h2>
+            </div>
+            <div>
+              <p>
+                Forty providers ship in the box: Anthropic, OpenAI, Google,
+                DeepSeek, Mistral, Groq, OpenRouter, Bedrock, Vertex, Workers
+                AI, and the rest, including OAuth sign-in where a provider
+                offers it. Pick a model per Bot. Keys never leave the Worker.
+              </p>
+              <p>
+                The hosted deployment also includes metered models on the same
+                balance as the computer. A deployment with no keys at all still
+                works: Auto resolves to a Workers AI model on the account's own
+                binding.
+              </p>
+            </div>
+          </div>
+          <div class="provider-wall" aria-label="Model providers included">
+            <span>Anthropic</span>
+            <span>OpenAI</span>
+            <span>OpenAI Codex</span>
+            <span>Google</span>
+            <span>Google Vertex AI</span>
+            <span>DeepSeek</span>
+            <span>Mistral</span>
+            <span>Groq</span>
+            <span>Cerebras</span>
+            <span>Fireworks</span>
+            <span>Together</span>
+            <span>OpenRouter</span>
+            <span>Amazon Bedrock</span>
+            <span>Azure OpenAI</span>
+            <span>Cloudflare Workers AI</span>
+            <span>Cloudflare AI Gateway</span>
+            <span>Vercel AI Gateway</span>
+            <span>xAI</span>
+            <span>GitHub Copilot</span>
+            <span>Hugging Face</span>
+            <span>NVIDIA</span>
+            <span>Baseten</span>
+            <span>MiniMax</span>
+            <span>Moonshot AI</span>
+            <span>Kimi</span>
+            <span>Qwen</span>
+            <span>Xiaomi</span>
+            <span>Z.AI</span>
+            <span>Ant Ling</span>
+            <span>Radius</span>
+            <span>OpenCode Zen</span>
+            <span>OpenCode Go</span>
+            <span class="more">+ 8 regional endpoints</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="plugins" aria-labelledby="plugins-title">
+        <div class="container">
+          <div class="split-heading split-heading-bottom">
+            <div>
+              <p class="section-label">Plugins</p>
+              <h2 id="plugins-title">
+                Everything a Bot does<br /><em>is a plugin.</em>
+              </h2>
+            </div>
+            <div>
+              <p>
+                Plugins wrap the agent loop. They declare hooks on the loop's
+                events, register tools under their own namespace, keep their own
+                storage, and name the hosts they may reach. Each User's plugins
+                mount into one Dynamic Worker with a hard CPU budget and a
+                loopback into the kernel; a plugin that throws or overruns is
+                quarantined and the Turn carries on.
+              </p>
+              <p>
+                Bots can write plugins too. Publishing one never runs it: the
+                Bot puts an approval card in front of you naming the tools,
+                hooks, grants and hosts it wants, and nothing mounts until you
+                say so.
+              </p>
+              <p class="open-actions">
+                <a
+                  class="button button-outline"
+                  href="https://github.com/timoconnellaus/frockbot/blob/main/docs/adr/0026-plugins.md"
+                  >ADR 0026: Plugins <span aria-hidden="true">→</span></a
+                >
+                <a
+                  class="button button-outline"
+                  href="https://github.com/timoconnellaus/frockbot/blob/main/docs/architecture.md"
+                  >Architecture <span aria-hidden="true">→</span></a
+                >
+              </p>
+            </div>
+          </div>
+          <div class="open-split">
+            <pre
+              class="code-block"
+              aria-label="A plugin, in full"
+            ><span class="c">// plugin.ts: one tool, one hook, its own storage</span>
+<span class="k">import type</span> { PluginExecute, PluginHooks, PluginTool }
+  <span class="k">from</span> <span class="s">"@frockbot/applet-sdk/plugin"</span>;
+
+<span class="k">export const</span> tools: PluginTool[] = [{
+  name: <span class="s">"note_add"</span>,
+  description: <span class="s">"Keep one short note for this Bot."</span>,
+  inputSchema: { type: <span class="s">"object"</span>,
+    properties: { text: { type: <span class="s">"string"</span> } },
+    required: [<span class="s">"text"</span>] },
+}];
+
+<span class="k">export const</span> execute: PluginExecute = <span class="k">async</span> (tool, input, ctx) => {
+  <span class="k">const</span> stored = <span class="k">await</span> ctx.storage?.get({ key: <span class="s">"notes"</span> });
+  <span class="k">const</span> notes = stored?.status === <span class="s">"available"</span> ? stored.value : [];
+  <span class="k">await</span> ctx.storage?.put({ key: <span class="s">"notes"</span>, value: [...notes, input.text] });
+  <span class="k">return</span> <span class="s">`Kept it. ${notes.length + 1} note(s) now.`</span>;
+};
+
+<span class="k">export const</span> hooks: PluginHooks = {
+  <span class="s">"agent/tool-exposure"</span>: (payload) =>
+    payload.tools.filter((t) => t.name !== <span class="s">"image_generate"</span>),
+};</pre>
+            <ol class="hook-chain" aria-label="The six hooks, in Turn order">
+              <li>
+                <b>1</b
+                ><span
+                  ><code>system-prompt/assemble</code> add to or rewrite the
+                  prompt before the model sees it</span
+                >
+              </li>
+              <li>
+                <b>2</b
+                ><span
+                  ><code>agent/tool-exposure</code> hide, rename or add tools
+                  for this Turn</span
+                >
+              </li>
+              <li>
+                <b>3</b
+                ><span
+                  ><code>agent/request</code> change the model, the messages or
+                  the options on each request</span
+                >
+              </li>
+              <li>
+                <b>4</b
+                ><span
+                  ><code>tools/pre-execute</code> inspect or veto a tool call
+                  before it runs</span
+                >
+              </li>
+              <li>
+                <b>5</b
+                ><span
+                  ><code>tools/post-execute</code> reshape a result before it
+                  reaches the model</span
+                >
+              </li>
+              <li>
+                <b>6</b
+                ><span
+                  ><code>agent/turn-stopping</code> keep the Turn going, or let
+                  it end</span
+                >
+              </li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <section class="section pricing" id="run" aria-labelledby="run-title">
+        <div class="container">
+          <div class="split-heading split-heading-bottom">
+            <div>
+              <p class="section-label">Run it yourself</p>
+              <h2 id="run-title">One command.<br /><em>Your account.</em></h2>
+            </div>
+            <div>
+              <p>
+                <code>bun run setup</code> installs the same code frockbot.com
+                runs into a Cloudflare account you own: Workers, Durable
+                Objects, R2, Vectorize and Containers, with Cloudflare Access as
+                the sign-in and no billing at all. You need a Workers Paid plan,
+                one domain on the account, a free Zero Trust team, and a Fly
+                token for the computer. Model, voice and connected-app keys are
+                optional and each one only unlocks its own thing.
+              </p>
+              <p>
+                The web client and the container images are published with every
+                release, so there is no Docker and no Flutter on your machine. A
+                Mac app is built; the phone apps are on the way.
+              </p>
+              <p class="open-actions">
+                <a
+                  class="button"
+                  href="https://github.com/timoconnellaus/frockbot#run-your-own"
+                  >Read the install guide <span aria-hidden="true">→</span></a
+                >
+                <a
+                  class="button button-outline"
+                  href="https://github.com/timoconnellaus/frockbot/releases"
+                  >Releases <span aria-hidden="true">→</span></a
+                >
+              </p>
+            </div>
+          </div>
+          <pre
+            class="terminal"
+            aria-label="The installer"
+          ><span class="p">$</span> <span class="cmd">git clone --branch &lt;tag&gt; --depth 1 https://github.com/timoconnellaus/frockbot.git</span>
+<span class="p">$</span> <span class="cmd">cd frockbot &amp;&amp; bun install &amp;&amp; bunx wrangler login</span>
+<span class="p">$</span> <span class="cmd">bun run setup</span>
+<span class="ok">✓</span> account          Workers Paid plan found
+<span class="ok">✓</span> profile          simple: Cloudflare Access sign-in, no billing
+<span class="ok">✓</span> resources        Durable Objects, R2, Vectorize, Containers
+<span class="ok">✓</span> internal secrets generated and stored
+<span class="ok">✓</span> your keys        OPENAI_API_KEY, ELEVENLABS_API_KEY, COMPOSIO_API_KEY (each optional)
+<span class="ok">✓</span> Access           bot.example.com and ui.bot.example.com
+<span class="ok">✓</span> client           web client and container images pulled from the release
+<span class="ok">✓</span> deploy           https://bot.example.com</pre>
+        </div>
+      </section>
+
+      <section class="cta" aria-labelledby="cta-title">
+        <div class="container cta-shell">
+          <div>
+            <h2 id="cta-title">
+              Read the source.<br />Then <em>change it.</em>
+            </h2>
+            <p>
+              MIT licensed. Issues, ADRs and the constitution are all in the
+              open.
+            </p>
+          </div>
+          <div class="cta-action">
+            <a
+              class="button button-white"
+              href="https://github.com/timoconnellaus/frockbot"
+              >Open the repo →</a
+            >
+            <small>No wool required</small>
+          </div>
+          <div class="cta-flock" aria-hidden="true">
+            <img src="/assets/characters/chill.png" alt="" />
+            <img src="/assets/characters/cat.png" alt="" />
+            <img src="/assets/characters/goat.png" alt="" />
+            <img src="/assets/characters/pixel.png" alt="" />
+            <img src="/assets/characters/sunny.png" alt="" />
+            <img src="/assets/characters/dog.png" alt="" />
+            <img src="/assets/characters/cow.png" alt="" />
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-shell">
+        <a class="brand" href="/" aria-label="FrockBot home">
+          <img src="/assets/app-icon.png" alt="" width="44" height="44" />
+          <span class="brand-name"
+            >Frock<span class="brand-accent">Bot</span></span
+          >
+        </a>
+        <div class="footer-links">
+          <span>© <span id="year">2026</span> FrockBot</span>
+          <a href="mailto:hello@frockbot.com">Contact</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="/terms/">Terms</a>
+          <a href="https://bot.frockbot.com">Open app</a>
+          <a
+            class="github-logo-link"
+            href="https://github.com/timoconnellaus/frockbot"
+            aria-label="FrockBot source code on GitHub"
+          >
+            <svg aria-hidden="true">
+              <use href="#github-mark" />
+            </svg>
+          </a>
+          <span>Open source.</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
