@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -188,11 +189,12 @@ test("commands that dirty source never earn a receipt", async () => {
   categories.probe = [
     [process.execPath, "-e", 'await Bun.write("source.ts","changed")'],
   ];
-  const sha = snapshot(root);
   await expect(validate(root, ["probe"])).rejects.toThrow("source.ts");
   expect(
-    await Bun.file(join(root, ".local-validation", sha, "probe.json")).exists(),
-  ).toBe(false);
+    readdirSync(join(root, ".local-validation", "receipts")).filter((entry) =>
+      entry.startsWith("probe-"),
+    ),
+  ).toEqual([]);
 });
 
 test("deletions are ignored and outgoing commits are deduplicated", () => {
