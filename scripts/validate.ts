@@ -346,22 +346,23 @@ export async function validate(
             }
           };
           live.add(kill);
-          const captured: string[] = [];
-          // In pipe order, so the echoed halves land where the caller's own
-          // redirection expects them: diagnostics stay on the error stream.
+          // In pipe order, so each half lands where the caller's own
+          // redirection expects it — diagnostics stay on the error stream —
+          // whether it is echoed as it arrives or held and printed at the end.
+          const sinks = [process.stdout, process.stderr];
+          const captured: string[][] = [[], []];
           const readers = [child.stdout, child.stderr].map((stream) =>
             (stream as ReadableStream<Uint8Array>).getReader(),
           );
           const drained = Promise.all(
             readers.map(async (reader, index) => {
-              const sink = index === 0 ? process.stdout : process.stderr;
               const decoder = new TextDecoder();
               for (;;) {
                 const { done, value } = await reader.read();
                 if (done) return;
                 const text = decoder.decode(value, { stream: true });
-                if (echoLive) sink.write(text);
-                else captured.push(text);
+                if (echoLive) sinks[index]!.write(text);
+                else captured[index]!.push(text);
               }
             }),
           ).catch(() => {});
@@ -377,9 +378,13 @@ export async function validate(
           await Promise.all(
             readers.map((reader) => reader.cancel().catch(() => {})),
           );
-          const output = captured.join("").trimEnd();
-          if (output.trim())
-            console.log(`\n--- ${name}: ${command.join(" ")} ---\n${output}`);
+          captured.forEach((chunks, index) => {
+            const output = chunks.join("").trimEnd();
+            if (output.trim())
+              sinks[index]!.write(
+                `\n--- ${name}: ${command.join(" ")} ---\n${output}\n`,
+              );
+          });
           if (code !== 0) {
             // Kill here rather than when the category settles: the run is
             // already doomed, and a sibling suite left to finish is a wait
