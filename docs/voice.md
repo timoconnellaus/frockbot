@@ -256,7 +256,14 @@ session speaks a bridge (`VOICE_TURN_BRIDGES_V1`: "One second.", "Let me
 check.", "Just a moment." and three more, never the same one twice running
 within a call, `pickVoiceBridgeV1`) — whether the
 silence is initial context loading, the model connecting, or a first step
-that went to a tool and a second step still composing. It is emitted at most
+that went to a tool and a second step still composing. Every phrase is at
+least `VOICE_TURN_BRIDGE_MIN_CHARS_V1` characters long, because the SDK's
+sentence chunker holds anything shorter in its buffer until the stream ends:
+a held bridge is spoken after the stall it was for, which for a turn that
+never answers is never. "Hang on." was eight characters, so until
+2026-09-17 about one turn in six filled its stall with silence; the Worker
+suite now asserts each phrase against the SDK's own `SentenceChunker`.
+It is emitted at most
 once per turn, and never for a turn that answers inside the delay: a tool
 that comes back quickly gets the answer spoken, not a filler and then the
 answer. The footer shows the Bot thinking from the moment the transcript

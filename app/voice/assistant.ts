@@ -87,15 +87,33 @@ export const VOICE_ANSWER_MAX_CHARS_V1 = 1_200;
 export const VOICE_TURN_BRIDGE_V1 = "One second.";
 
 /**
+ * The shortest a bridge phrase may be, counted with its full stop.
+ *
+ * The SDK streams a turn's text through its own sentence chunker, and that
+ * chunker holds a candidate shorter than ten characters in its buffer rather
+ * than emitting it — the rule that stops "Dr." and "U.S." becoming sentences
+ * of their own (`SentenceChunker`, `MIN_SENTENCE_LENGTH`). A buffered
+ * sentence is spoken only when the stream ends, which for the bridge is the
+ * one moment it must not wait for: the bridge exists because the model has
+ * said nothing yet. "Hang on." was eight characters, so roughly one turn in
+ * six filled its stall with silence instead of a voice. Every phrase is now
+ * long enough to leave the chunker at once, and the assistant's own test
+ * holds the list to that against the SDK's class rather than this number.
+ */
+export const VOICE_TURN_BRIDGE_MIN_CHARS_V1 = 10;
+
+/**
  * The things the bridge may say. One phrase every time is a recording; a
  * small set, never the same one twice running, is a person. Each is a beat
- * long and promises nothing about what follows.
+ * long and promises nothing about what follows — and each is at least
+ * [VOICE_TURN_BRIDGE_MIN_CHARS_V1] characters, or it would never be spoken
+ * in time to fill the silence it is for.
  */
 export const VOICE_TURN_BRIDGES_V1: readonly string[] = [
   VOICE_TURN_BRIDGE_V1,
   "Let me check.",
   "Just a moment.",
-  "Hang on.",
+  "Hang on a sec.",
   "Looking now.",
   "One moment.",
 ];

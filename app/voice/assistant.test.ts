@@ -9,6 +9,7 @@ import {
   VOICE_ANSWER_MAX_CHARS_V1,
   VOICE_PROMPT_MAX_LOG_FACTS_V1,
   VOICE_TURN_BRIDGE_V1,
+  VOICE_TURN_BRIDGE_MIN_CHARS_V1,
   VOICE_TURN_BRIDGES_V1,
   pickVoiceBridgeV1,
   VOICE_TURN_MAX_STEPS_V1,
@@ -193,17 +194,33 @@ describe("the bridge phrase", () => {
     );
   });
 
+  // The bridge only works if it is spoken while the model is still silent.
+  // The SDK feeds a turn's text through a sentence chunker that holds a
+  // candidate it judges too short, and releases it only when the stream ends
+  // — which, for a stalled turn, is long after the silence the bridge was
+  // for. "Hang on." was such a phrase, so roughly one turn in six filled its
+  // stall with nothing at all. The SDK's own class is not a dependency of
+  // this package, so the Worker suite pins the rule against it; here the
+  // list is held to the length that rule requires.
+  test("every phrase is long enough for a chunker to speak at once", () => {
+    for (const phrase of VOICE_TURN_BRIDGES_V1) {
+      expect(phrase.length).toBeGreaterThanOrEqual(
+        VOICE_TURN_BRIDGE_MIN_CHARS_V1,
+      );
+    }
+  });
+
   test("a turn says the bridge it was given", async () => {
     const pending = Promise.withResolvers<ReadableStream<Uint8Array>>();
     const h = host([], { chat: () => pending.promise });
     const turn = runVoiceTurnV1(
       h,
-      { ...baseInput("slow"), bridge: "Hang on." },
+      { ...baseInput("slow"), bridge: "Hang on a sec." },
       () => {},
     );
     expect((await turn.next()).value).toEqual({
       kind: "bridge",
-      text: "Hang on. ",
+      text: "Hang on a sec. ",
     });
     pending.resolve(sse([text("Done.")]));
     await collect(turn);
