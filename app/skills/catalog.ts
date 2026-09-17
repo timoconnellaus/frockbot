@@ -62,6 +62,7 @@ import {
   parseSkillDocumentV1,
   skillReferenceNameForV1,
   skillReferencesPrefixV1,
+  SKILL_DIRECTORY,
   SKILL_MAX_FILE_BYTES,
   SKILL_MAX_REFERENCES,
   SKILL_REFERENCES_DIRECTORY,
@@ -99,15 +100,32 @@ export const SKILL_LIST_PAGE_LIMIT = WORKSPACE_MAX_LIST_ENTRIES;
 /**
  * Most `list` pages walked before enumeration stops.
  *
- * Derived, not chosen: a root that stays inside its own declared bounds must
- * list end to end, and those bounds are `SKILL_MAX_CATALOG_ENTRIES` Skills of
- * one `SKILL.md` plus `SKILL_MAX_REFERENCES` files each. A root larger than
- * that is still cut, and the cut is a recorded refusal.
+ * Derived, not chosen: a walk that stays inside the Skill directory's own
+ * declared bounds must list end to end, and those bounds are
+ * `SKILL_MAX_CATALOG_ENTRIES` Skills of one `SKILL.md` plus
+ * `SKILL_MAX_REFERENCES` files each. Because the walk is narrowed to
+ * {@link SKILL_WALK_PREFIX}, every page it pays for is a Skill's own file —
+ * the Bot's notes and an installer's leavings elsewhere in the root cost the
+ * turn-start path nothing. More Skill files than this is still cut, and the
+ * cut is a recorded refusal.
  */
 export const SKILL_MAX_LIST_PAGES = Math.ceil(
   (SKILL_MAX_CATALOG_ENTRIES * (1 + SKILL_MAX_REFERENCES)) /
     SKILL_LIST_PAGE_LIMIT,
 );
+
+/**
+ * The part of an instruction root the turn-start walk lists.
+ *
+ * A Skill is written at `skills/<slug>/SKILL.md` and its references beside it,
+ * so that subtree is the whole of what the catalog can load. An instruction
+ * root is an ordinary durable root — a Bot's notes and an installer's leavings
+ * live there too — and listing all of it made every unrelated file cost a
+ * ledger lookup on the turn-start path. A `SKILL.md` outside this prefix is
+ * not a Skill this loader offers; a directory inside it that is not a
+ * well-formed slug still is, loadable by path with no ref.
+ */
+export const SKILL_WALK_PREFIX = SKILL_DIRECTORY;
 
 /**
  * One Markdown file a Skill offers beside its `SKILL.md` (ADR 0030).
@@ -154,10 +172,10 @@ export interface LoadedSkillV1 {
    * The ref that names this Skill for invocation and for `skill_load`.
    *
    * Optional only for a `bot` Skill whose directory is not a well-formed slug:
-   * an instruction root is an ordinary durable root, so a `SKILL.md` can sit
-   * anywhere, and such a Skill is still listed and still loadable by path — it
-   * just has no name the composer can attach. Every managed Skill always has
-   * one.
+   * an instruction root is an ordinary durable root, so a directory under
+   * {@link SKILL_WALK_PREFIX} can be named anything, and such a Skill is still
+   * listed and still loadable by path — it just has no name the composer can
+   * attach. Every managed Skill always has one.
    */
   ref?: SkillRefV1;
   /**
@@ -303,15 +321,16 @@ export type SkillCountOutcomeV1 =
   { status: "ok"; count: number } | { status: "unavailable"; reason: string };
 
 /**
- * Counts the `SKILL.md` files under a root, walking the listing with the
+ * Counts the `SKILL.md` files a root holds, walking the listing with the
  * store's own cursor.
  *
- * Only an entry whose last segment is `SKILL.md`, inside a directory, counts —
- * `isSkillDocumentPathV1` decides it. An instruction root is an ordinary durable
- * root — a Bot's notes, an installer's leavings, and a Skill's own supporting
- * files all live there — so counting *files* would refuse a Skill on a quota
- * about Skills, and would make the page bound a bound on files rather than on
- * what the quota measures.
+ * Narrowed to {@link SKILL_WALK_PREFIX}, because the quota must measure what
+ * the catalog can load and the loader walks no further than that either. Inside
+ * it, only an entry whose last segment is `SKILL.md` counts —
+ * `isSkillDocumentPathV1` decides it — because a Skill's own supporting files
+ * live there too, and counting *files* would refuse a Skill on a quota about
+ * Skills, and would make the page bound a bound on files rather than on what
+ * the quota measures.
  *
  * `stopAfter` is what keeps the bound on Skills. The only question the quota
  * asks is whether the root already holds more than it allows, so once the
@@ -332,7 +351,9 @@ export async function countSkillDocumentsV1(
   let cursor: string | undefined;
   for (let page = 0; page < SKILL_MAX_COUNT_LIST_PAGES; page += 1) {
     const outcome = await reads.list(
-      cursor === undefined ? { root } : { root, cursor },
+      cursor === undefined
+        ? { root, prefix: SKILL_WALK_PREFIX }
+        : { root, prefix: SKILL_WALK_PREFIX, cursor },
     );
     if (outcome.status !== "ok") {
       return {
@@ -389,8 +410,13 @@ export async function loadSkillCatalogV1(
   for (let page = 0; page < SKILL_MAX_LIST_PAGES; page += 1) {
     const outcome = await reads.list(
       cursor === undefined
-        ? { root, limit: SKILL_LIST_PAGE_LIMIT }
-        : { root, cursor, limit: SKILL_LIST_PAGE_LIMIT },
+        ? { root, prefix: SKILL_WALK_PREFIX, limit: SKILL_LIST_PAGE_LIMIT }
+        : {
+            root,
+            prefix: SKILL_WALK_PREFIX,
+            cursor,
+            limit: SKILL_LIST_PAGE_LIMIT,
+          },
     );
     if (outcome.status !== "ok") {
       // "unavailable" is an ordinary answer, not an error condition: an

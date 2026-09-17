@@ -10,6 +10,7 @@ import {
   loadSkillCatalogV1,
   renderSkillCatalogPromptV1,
   SKILL_MAX_CATALOG_ENTRIES,
+  SKILL_MAX_LIST_PAGES,
 } from "./catalog.js";
 import { SKILL_MAX_FILE_BYTES, SKILL_MAX_REFERENCES } from "./skill-md.js";
 import { FakeWorkspace, skillMarkdown } from "./testing.js";
@@ -323,6 +324,37 @@ describe("the Skills loader", () => {
     ]);
   });
 
+  test("walks only the Skill directory, so unrelated files cost the Turn nothing", async () => {
+    const workspace = new FakeWorkspace();
+    // More unrelated files than the walk has pages, sorted before `skills/`:
+    // a walk over the whole root would be cut before it ever reached the Skill.
+    for (let index = 0; index < SKILL_MAX_LIST_PAGES + 3; index += 1) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `notes/n${index}.md`,
+        text: "a Bot's own note, not an instruction",
+        writer: BOT_WRITER,
+      });
+    }
+    await workspace.seed({
+      root: OWN_ROOT,
+      path: "skills/standup/SKILL.md",
+      text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+      writer: BOT_WRITER,
+    });
+    // One entry per page, whatever the loader asks for.
+    workspace.listMaxEntries = 1;
+
+    const catalog = await loadSkillCatalogV1(workspace, OWNER);
+    expect(catalog.skills.map((skill) => skill.name)).toEqual(["standup"]);
+    expect(catalog.refusals).toEqual([]);
+    // One page for the one Skill file, and no read of anything beside it.
+    expect(workspace.calls).toEqual([
+      "list:bot-instructions:user-1:bot-1",
+      "read:skills/standup/SKILL.md",
+    ]);
+  });
+
   test("refuses a Skill whole when the listing was cut before its references", async () => {
     const workspace = new FakeWorkspace();
     for (let index = 1; index <= 7; index += 1) {
@@ -481,6 +513,7 @@ describe("the Skills loader", () => {
 describe("counting a root against the Skill quota", () => {
   test("counts Skills, not the files that sit beside them", async () => {
     const workspace = new FakeWorkspace();
+    // Notes outside the Skill directory are not a Skill and are never walked.
     for (let index = 0; index < 250; index += 1) {
       await workspace.seed({
         root: OWN_ROOT,
@@ -496,15 +529,25 @@ describe("counting a root against the Skill quota", () => {
         text: skillMarkdown(`s${index}`, "Use this when counting.", "Body."),
         writer: BOT_WRITER,
       });
+      // A Skill's own supporting files are walked, and are not Skills.
+      for (let beside = 0; beside < 30; beside += 1) {
+        await workspace.seed({
+          root: OWN_ROOT,
+          path: `skills/s${index}/references/r${String(beside).padStart(2, "0")}.md`,
+          text: "Beside the Skill.",
+          writer: BOT_WRITER,
+        });
+      }
     }
 
     const counted = await countSkillDocumentsV1(workspace, OWN_ROOT);
 
     expect(counted).toEqual({ status: "ok", count: 5 });
-    // Walked with the store's own cursor: one listing, three pages of 100.
+    // Walked with the store's own cursor: 155 files under the Skill directory,
+    // two pages of 100, and not one of the 250 notes outside it.
     expect(
       workspace.calls.filter((call) => call.startsWith("list:")),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
   });
 
   test("counts one Skill's references inside that Skill's own directory", async () => {
