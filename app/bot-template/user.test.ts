@@ -97,6 +97,7 @@ function botSettings(): BotSettingsViewV1 {
 const bots: TemplateBotReaderV1 = {
   readSettings: () => Promise.resolve(botSettings()),
   readAvatar: () => Promise.resolve(avatar),
+  readVoice: () => Promise.resolve(undefined),
   readSkills: () =>
     Promise.resolve([
       {

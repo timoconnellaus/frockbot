@@ -22,8 +22,8 @@ Optional keys. Each is asked for once and each can be skipped with Enter; a skip
 
 | Key                   | What it enables                                                    |
 | --------------------- | ------------------------------------------------------------------ |
-| `OPENAI_API_KEY`      | dictation in the composer, and the voice session's listening       |
-| `ELEVENLABS_API_KEY`  | the voice session: hearing you and speaking back                   |
+| `OPENAI_API_KEY`      | dictation in the composer                                          |
+| `GEMINI_API_KEY`      | the voice session: hearing you and speaking back                   |
 | `FCM_SERVICE_ACCOUNT` | push notifications to an Android app you build yourself            |
 | `COMPOSIO_API_KEY`    | Connected apps: a Bot using your Gmail, Slack, Notion and the rest |
 | `DEBUG_TOKEN`         | the read-only `/api/debug` operator surface                        |

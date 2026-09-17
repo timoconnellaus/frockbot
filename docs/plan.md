@@ -136,7 +136,7 @@ A second deployment profile anyone installs into their own Cloudflare account wi
 
 ## Not now
 
-Billing, package publishing, a Plugin marketplace, avatar wearables, and Applet sharing between Users. Each is an addition to the target, not a change to it. Voice exists; its next shape — a voice layer scoped to one Bot rather than an account-wide assistant — is [ADR 0029](adr/0029-voice-per-bot.md).
+Billing, package publishing, a Plugin marketplace, avatar wearables, and Applet sharing between Users. Each is an addition to the target, not a change to it. Voice exists, scoped to one Bot ([ADR 0029](adr/0029-voice-per-bot.md)) and, since [ADR 0031](adr/0031-voice-gemini-live.md), one Gemini Live session that is the Bot's other mode rather than a layer over its chat model.
 
 ## Billing implementation awaiting launch
 

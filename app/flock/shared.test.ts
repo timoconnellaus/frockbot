@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   decodeBotIdentityDirectoryViewV1,
+  decodeUpdateVoiceCommandV1,
+  decodeVoiceIdentityViewV1,
   decodeBotIdentityViewV1,
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
@@ -346,5 +348,95 @@ describe("stored Bot directory migration", () => {
         migrateStoredBotDirectoryV1({ schemaVersion: 1, revision: 0 }),
       ),
     ).toThrow("unknown or missing field");
+  });
+});
+
+describe("a Bot's voice", () => {
+  const voice = {
+    schemaVersion: 1 as const,
+    voiceName: "Sulafat",
+    delivery: { accent: "australian", turnLength: "terse" as const },
+  };
+  const command = {
+    schemaVersion: 1 as const,
+    type: "bot/update-voice" as const,
+    commandId: "voice-1",
+    expectedRevision: 0,
+    botId: "alpha",
+    voice,
+  };
+
+  test("decodes the command and refuses anything beside it", () => {
+    expect(decodeUpdateVoiceCommandV1(command)).toEqual(command);
+    expect(() =>
+      decodeUpdateVoiceCommandV1({ ...command, type: "bot/update-voices" }),
+    ).toThrow("unsupported update voice command");
+    expect(() =>
+      decodeUpdateVoiceCommandV1({ ...command, extra: true }),
+    ).toThrow("unknown or missing field");
+    // The voice tables decide, and their refusal arrives as a Flock error so
+    // every seam in this Package fails the same way.
+    expect(() =>
+      decodeUpdateVoiceCommandV1({
+        ...command,
+        voice: { ...voice, voiceName: "Siri" },
+      }),
+    ).toThrow("voice name is not one the deployment offers");
+    expect(() =>
+      decodeUpdateVoiceCommandV1({
+        ...command,
+        voice: { ...voice, delivery: { accent: "klingon" } },
+      }),
+    ).toThrow("voice accent is invalid");
+  });
+
+  test("carries an optional voice on the registration and the create command", () => {
+    const avatar = randomAvatarAppearanceV1(() => 0);
+    const registration = {
+      schemaVersion: 1 as const,
+      botId: "alpha",
+      registeredAt: "2026-08-29T00:00:00.000Z",
+      initialName: "Alpha",
+      avatar,
+    };
+    // Absent is the ordinary case: the Bot sounds like its character.
+    expect(decodeBotRegistrationV1(registration).voice).toBeUndefined();
+    expect(decodeBotRegistrationV1({ ...registration, voice })).toEqual({
+      ...registration,
+      voice,
+    });
+    expect(() =>
+      decodeBotRegistrationV1({
+        ...registration,
+        voice: { ...voice, surprise: true },
+      }),
+    ).toThrow("voice appearance has an unknown key");
+    const create = {
+      schemaVersion: 1 as const,
+      type: "bot/create" as const,
+      commandId: "create-1",
+      expectedRevision: 0,
+      botId: "alpha",
+      name: "Alpha",
+      avatar,
+      voice,
+    };
+    expect(decodeCreateBotCommandV1(create)).toMatchObject({ voice });
+  });
+
+  test("decodes the identity view, with or without a chosen voice", () => {
+    const record = {
+      schemaVersion: 1 as const,
+      botId: "alpha",
+      revision: 2,
+    };
+    expect(decodeVoiceIdentityViewV1(record)).toEqual(record);
+    expect(decodeVoiceIdentityViewV1({ ...record, voice })).toEqual({
+      ...record,
+      voice,
+    });
+    expect(() =>
+      decodeVoiceIdentityViewV1({ ...record, revision: -1 }),
+    ).toThrow("revision is invalid");
   });
 });

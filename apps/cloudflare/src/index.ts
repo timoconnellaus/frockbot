@@ -27,6 +27,7 @@ import {
   type FlockBootstrapViewV1,
   decodeFlockReceiptV1,
   decodeAvatarIdentityViewV1,
+  decodeVoiceIdentityViewV1,
   BotNotFoundError,
   decodeBotIdentityDirectoryViewV1,
   FLOCK_DIRECTORY_LIMIT,
@@ -283,11 +284,10 @@ interface Env {
   VOICE_ASSISTANTS: DurableObjectNamespace<VoiceAssistant>;
   /** The composer's dictation upstream. Absent closes dictation, visibly. */
   OPENAI_API_KEY?: string;
-  /** The voice session's speech. Absent closes the assistant, visibly. */
-  ELEVENLABS_API_KEY?: string;
-  /** The ElevenLabs voice the assistant speaks with; George when unset. */
-  ELEVENLABS_VOICE_ID?: string;
-  VOICE_ASSISTANT_STT?: string;
+  /** The voice session itself: Gemini Live. Absent closes it, visibly. */
+  GEMINI_API_KEY?: string;
+  /** A local Live stand-in for the test harness; never set in production. */
+  VOICE_ASSISTANT_UPSTREAM_URL?: string;
   VOICE_ASSISTANT_MODEL?: string;
   /**
    * The model that tidies a dictated transcript. Unset takes the ordinary
@@ -535,6 +535,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       }),
     readAvatar: (request) => rpc.readAvatar(request),
     updateAvatar: (request) => rpc.updateAvatar(request),
+    readVoice: (request) => rpc.readVoice(request),
+    updateVoice: (request) => rpc.updateVoice(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     readBotPluginsFrame: (request) => rpc.readBotPluginsFrame(request),
@@ -665,6 +667,8 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     executeBotLifecycle: (request) => rpc.executeBotLifecycle(request),
     createBot: (request) => rpc.createBot(request),
     updateBotAvatar: (request) => rpc.updateBotAvatar(request),
+    readBotVoice: (request) => rpc.readBotVoice(request),
+    updateBotVoice: (request) => rpc.updateBotVoice(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
     readConnectionsFrame: (request) => rpc.readConnectionsFrame(request),
@@ -2260,6 +2264,16 @@ const createGatewayBackendContributions = (env: Env) =>
           }),
         ),
       ),
+    readVoice: async (userId, botId) =>
+      decodeVoiceIdentityViewV1(
+        rpcJsonSnapshot(
+          await botStateStub(env, userId, botId).readVoice({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        ),
+      ),
     executeConnection: (userId, command) =>
       userConfigurationStub(env, userId).executeConnection({
         schemaVersion: 1,
@@ -2513,6 +2527,17 @@ const createGatewayBackendContributions = (env: Env) =>
       decodeFlockReceiptV1(
         rpcJsonSnapshot(
           await userConfigurationStub(env, userId).updateBotAvatar({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        ),
+      ),
+    updateVoice: async (userId, botId, command) =>
+      decodeFlockReceiptV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).updateBotVoice({
             schemaVersion: 1,
             userId,
             botId,

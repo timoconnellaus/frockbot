@@ -14,8 +14,8 @@ import {
   VOICE_DICTATION_DAILY_CLEANUPS_V1,
   VOICE_DICTATION_DAILY_SECONDS_V1,
   VOICE_ASSISTANT_DAILY_DELEGATIONS_V1,
-  VOICE_ASSISTANT_DAILY_STT_SECONDS_V1,
-  VOICE_ASSISTANT_DAILY_TTS_CHARACTERS_V1,
+  VOICE_ASSISTANT_DAILY_AUDIO_IN_SECONDS_V1,
+  VOICE_ASSISTANT_DAILY_AUDIO_OUT_SECONDS_V1,
   VOICE_ASSISTANT_DAILY_TURNS_V1,
   VOICE_ASSISTANT_MAX_DELEGATIONS_PER_TURN_V1,
   VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1,
@@ -60,29 +60,19 @@ export interface VoiceCallRecordV1 {
 
 export type VoiceTurnStateV1 = "admitted" | "answered" | "failed" | "abandoned";
 
-/**
- * A turn the person did not speak: a Bot handing back the answer to a request
- * the assistant made on their behalf earlier in the same call. The assistant
- * takes it the way it takes an utterance — a model turn, spoken or not — so
- * the conversation carries what the Bot said and what was made of it.
- */
-export interface VoiceTurnEventV1 {
-  kind: "bot-answer";
-  botId: string;
-  botName: string;
-  runId: string;
-}
-
 export interface VoiceTurnRecordV1 {
   schemaVersion: 1;
   turnId: string;
   callId: string;
   /** The model call's idempotency key. Never re-sent after recovery. */
   key: string;
-  /** What the person said, or for an event turn, what the assistant was told. */
+  /**
+   * What the person said, as the session transcribed it. Written when the turn
+   * is admitted and again when it settles: the model often starts answering
+   * before the input transcription has caught up, and the later text is the
+   * fuller one.
+   */
   transcript: string;
-  /** Absent on a spoken turn. */
-  event?: VoiceTurnEventV1;
   admittedAt: string;
   state: VoiceTurnStateV1;
   answer?: string;
@@ -126,20 +116,20 @@ export interface VoiceDelegationRecordV1 {
   failure?: string;
   settledAt?: string;
   /**
-   * The event turn that told the assistant this answer, and when. `spoken`
-   * means handed to the assistant on the call it was asked on, whatever the
-   * assistant then chose to say; an answer is never carried to another call.
+   * When the answer was handed to the live session, as a late function
+   * response on the call it was asked on. An answer is never carried to
+   * another call.
    */
-  spokenTurnId?: string;
   spokenAt?: string;
 }
 
 export interface VoiceMeterV1 {
   schemaVersion: 1;
   day: string;
-  /** Awake transcription seconds, reserved ahead in windows and reconciled. */
-  sttSeconds: number;
-  ttsCharacters: number;
+  /** Seconds of the person's audio bridged to the model, counted as sent. */
+  audioInSeconds: number;
+  /** Seconds of the model's audio bridged to the client, counted as sent. */
+  audioOutSeconds: number;
   turns: number;
   delegations: number;
   /** Dictation provider seconds, reserved and reconciled the same way. */
@@ -149,8 +139,8 @@ export interface VoiceMeterV1 {
 }
 
 export interface VoiceMeterCapsV1 {
-  sttSeconds: number;
-  ttsCharacters: number;
+  audioInSeconds: number;
+  audioOutSeconds: number;
   turns: number;
   delegations: number;
   dictationSeconds: number;
@@ -158,8 +148,8 @@ export interface VoiceMeterCapsV1 {
 }
 
 export const VOICE_METER_CAPS_V1: VoiceMeterCapsV1 = {
-  sttSeconds: VOICE_ASSISTANT_DAILY_STT_SECONDS_V1,
-  ttsCharacters: VOICE_ASSISTANT_DAILY_TTS_CHARACTERS_V1,
+  audioInSeconds: VOICE_ASSISTANT_DAILY_AUDIO_IN_SECONDS_V1,
+  audioOutSeconds: VOICE_ASSISTANT_DAILY_AUDIO_OUT_SECONDS_V1,
   turns: VOICE_ASSISTANT_DAILY_TURNS_V1,
   delegations: VOICE_ASSISTANT_DAILY_DELEGATIONS_V1,
   dictationSeconds: VOICE_DICTATION_DAILY_SECONDS_V1,
@@ -447,8 +437,6 @@ export class VoiceLedgerV1 {
     connectionId: string;
     transcript: string;
     at: Date;
-    /** Set when this is a Bot's answer arriving, not the person speaking. */
-    event?: VoiceTurnEventV1;
   }): Promise<
     | { status: "admitted"; turn: VoiceTurnRecordV1 }
     | { status: "refused"; reason: string }
@@ -475,7 +463,6 @@ export class VoiceLedgerV1 {
       admittedAt: input.at.toISOString(),
       state: "admitted",
       delegations: 0,
-      ...(input.event ? { event: input.event } : {}),
     };
     await this.storage.put(VOICE_CALL_KEY_V1, {
       ...call,
@@ -490,14 +477,22 @@ export class VoiceLedgerV1 {
     return { status: "admitted", turn };
   }
 
+  /**
+   * Closes a turn out. The transcript is written again because the session
+   * transcribes what the person said while the model is already answering it:
+   * whatever has arrived by the end is the fullest record of the turn there
+   * will be, and memory reads this.
+   */
   async settleTurn(
     turnId: string,
     outcome: { answer: string } | { failure: string },
+    transcript?: string,
   ): Promise<void> {
     const turn = await this.storage.get<VoiceTurnRecordV1>(turnKey(turnId));
     if (!turn) return;
     await this.storage.put(turnKey(turnId), {
       ...turn,
+      ...(transcript !== undefined && transcript.trim() ? { transcript } : {}),
       ...("answer" in outcome
         ? { state: "answered" as const, answer: outcome.answer }
         : { state: "failed" as const, failure: outcome.failure }),
@@ -640,20 +635,16 @@ export class VoiceLedgerV1 {
   }
 
   /**
-   * The assistant was told this answer, on the call it was asked on. What it
-   * then said, if anything, is the event turn's own record.
+   * The answer went back to the live session as a late function response, on
+   * the call it was asked on. What the model then says with it is the model's
+   * own business: this records only that it was handed over, once.
    */
-  async markDelegationSpoken(
-    runId: string,
-    turnId: string,
-    at: Date,
-  ): Promise<boolean> {
+  async markDelegationSpoken(runId: string, at: Date): Promise<boolean> {
     const delegation = await this.readDelegation(runId);
     if (!delegation || delegation.state !== "settled") return false;
     await this.storage.put(delegationKey(runId), {
       ...delegation,
       state: "spoken",
-      spokenTurnId: turnId,
       spokenAt: at.toISOString(),
     });
     return true;
@@ -723,34 +714,42 @@ export class VoiceLedgerV1 {
 
   async meter(at: Date): Promise<VoiceMeterV1> {
     const day = voiceMeterDayV1(at);
-    return (
-      (await this.storage.get<VoiceMeterV1>(meterKey(day))) ?? {
-        schemaVersion: 1,
-        day,
-        sttSeconds: 0,
-        ttsCharacters: 0,
-        turns: 0,
-        delegations: 0,
-        dictationSeconds: 0,
-        dictationCleanups: 0,
-      }
-    );
+    const stored = await this.storage.get<VoiceMeterV1>(meterKey(day));
+    return {
+      schemaVersion: 1,
+      day,
+      audioInSeconds: stored?.audioInSeconds ?? 0,
+      audioOutSeconds: stored?.audioOutSeconds ?? 0,
+      turns: stored?.turns ?? 0,
+      delegations: stored?.delegations ?? 0,
+      dictationSeconds: stored?.dictationSeconds ?? 0,
+      dictationCleanups: stored?.dictationCleanups ?? 0,
+    };
   }
 
   async addMeter(
     at: Date,
     delta: Partial<
-      Pick<VoiceMeterV1, "sttSeconds" | "ttsCharacters" | "dictationSeconds">
+      Pick<
+        VoiceMeterV1,
+        "audioInSeconds" | "audioOutSeconds" | "dictationSeconds"
+      >
     >,
   ): Promise<VoiceMeterV1> {
     const meter = await this.meter(at);
     const next: VoiceMeterV1 = {
       ...meter,
-      sttSeconds: Math.max(0, meter.sttSeconds + (delta.sttSeconds ?? 0)),
-      ttsCharacters: meter.ttsCharacters + (delta.ttsCharacters ?? 0),
+      audioInSeconds: Math.max(
+        0,
+        meter.audioInSeconds + (delta.audioInSeconds ?? 0),
+      ),
+      audioOutSeconds: Math.max(
+        0,
+        meter.audioOutSeconds + (delta.audioOutSeconds ?? 0),
+      ),
       dictationSeconds: Math.max(
         0,
-        (meter.dictationSeconds ?? 0) + (delta.dictationSeconds ?? 0),
+        meter.dictationSeconds + (delta.dictationSeconds ?? 0),
       ),
     };
     await this.storage.put(meterKey(meter.day), next);
@@ -767,7 +766,7 @@ export class VoiceLedgerV1 {
    */
   async reserveSeconds(
     at: Date,
-    kind: "sttSeconds" | "dictationSeconds",
+    kind: "dictationSeconds",
     seconds: number,
   ): Promise<
     { status: "reserved"; meter: VoiceMeterV1 } | { status: "refused" }
@@ -783,7 +782,7 @@ export class VoiceLedgerV1 {
   /** Gives back the part of a reserved window that was not used. */
   async refundSeconds(
     at: Date,
-    kind: "sttSeconds" | "dictationSeconds",
+    kind: "dictationSeconds",
     seconds: number,
   ): Promise<void> {
     if (seconds <= 0) return;
@@ -819,11 +818,15 @@ export class VoiceLedgerV1 {
   /** The first cap the day has hit, or nothing. */
   async exceededCap(at: Date): Promise<keyof VoiceMeterCapsV1 | undefined> {
     const meter = await this.meter(at);
-    if (meter.sttSeconds >= this.caps.sttSeconds) return "sttSeconds";
-    if (meter.ttsCharacters >= this.caps.ttsCharacters) return "ttsCharacters";
+    if (meter.audioInSeconds >= this.caps.audioInSeconds) {
+      return "audioInSeconds";
+    }
+    if (meter.audioOutSeconds >= this.caps.audioOutSeconds) {
+      return "audioOutSeconds";
+    }
     if (meter.turns >= this.caps.turns) return "turns";
     if (meter.delegations >= this.caps.delegations) return "delegations";
-    if ((meter.dictationSeconds ?? 0) >= this.caps.dictationSeconds) {
+    if (meter.dictationSeconds >= this.caps.dictationSeconds) {
       return "dictationSeconds";
     }
     return undefined;

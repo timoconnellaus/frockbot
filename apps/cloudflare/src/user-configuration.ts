@@ -68,6 +68,9 @@ import {
   decodeAvatarIdentityViewV1,
   decodeFlockReceiptV1,
   decodeUpdateAvatarCommandV1,
+  decodeUpdateVoiceCommandV1,
+  decodeBotVoiceForFlockV1,
+  decodeVoiceIdentityViewV1,
   BotNotFoundError,
 } from "@frockbot/app/flock/shared";
 import {
@@ -1915,6 +1918,76 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return receipt;
   }
 
+  /** The Bot's own voice record, read through unchanged. */
+  async readBotVoice(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const userId = request.userId as string;
+    const botId = request.botId as string;
+    await this.assertFlockIdentity(userId);
+    return decodeVoiceIdentityViewV1(
+      rpcJsonSnapshotV1(
+        await this.botVoiceStub(userId, botId).readVoice({
+          schemaVersion: 1,
+          userId,
+          botId,
+        }),
+      ),
+    );
+  }
+
+  /**
+   * The voice half of the avatar mirror, and for the same reason: the Bot
+   * object holds the revision and decides, and the User's directory — which is
+   * what the voice session reads when it opens a call — is told afterwards.
+   * What is mirrored is the voice the Bot reports, read back from it, so a
+   * replayed command cannot drag the directory back to an older voice.
+   */
+  async updateBotVoice(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeUpdateVoiceCommandV1),
+    });
+    const userId = request.userId as string;
+    const botId = request.botId as string;
+    const command = request.command as ReturnType<
+      typeof decodeUpdateVoiceCommandV1
+    >;
+    await this.assertFlockIdentity(userId);
+    const bot = this.botVoiceStub(userId, botId);
+    const receipt = decodeFlockReceiptV1(
+      rpcJsonSnapshotV1(
+        await bot.updateVoice({ schemaVersion: 1, userId, botId, command }),
+      ),
+    );
+    if (receipt.status === "applied") {
+      const identity = decodeVoiceIdentityViewV1(
+        rpcJsonSnapshotV1(
+          await bot.readVoice({ schemaVersion: 1, userId, botId }),
+        ),
+      );
+      if (identity.voice) {
+        await (
+          await this.flockContribution()
+        ).mirrorVoice(botId, identity.voice);
+      }
+    }
+    return receipt;
+  }
+
+  /** The Bot object's voice surface. */
+  private botVoiceStub(userId: string, botId: string) {
+    const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+    // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+    return this.env.BOT_STATES.get(id) as unknown as {
+      readVoice(input: unknown): Promise<unknown>;
+      updateVoice(input: unknown): Promise<unknown>;
+    };
+  }
+
   async getBotRegistration(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
@@ -2050,6 +2123,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       return this.env.BOT_STATES.get(id) as unknown as {
         readConfiguration(input: unknown): Promise<unknown>;
         readAvatar(input: unknown): Promise<unknown>;
+        readVoice(input: unknown): Promise<unknown>;
         listOwnSkillDocuments(input: unknown): Promise<unknown>;
         listRoutines(input: unknown): Promise<unknown>;
       };
@@ -2075,6 +2149,19 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             }),
           ),
         ).avatar,
+      // A Bot that never chose a voice exports without one, so the importing
+      // deployment resolves its own character default rather than inheriting
+      // a voice nobody picked.
+      readVoice: async (userId, botId) =>
+        decodeVoiceIdentityViewV1(
+          rpcJsonSnapshotV1(
+            await botState(userId, botId).readVoice({
+              schemaVersion: 1,
+              userId,
+              botId,
+            }),
+          ),
+        ).voice,
       readSkills: async (userId, botId) => {
         const documents = rpcJsonSnapshotV1(
           await botState(userId, botId).listOwnSkillDocuments({
@@ -2165,6 +2252,11 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
             ? {}
             : { description: command.description }),
           avatar: command.avatar,
+          // The template carried opaque slugs; this deployment is the one that
+          // decides whether it offers them, so it decodes them here.
+          ...(command.voice === undefined
+            ? {}
+            : { voice: decodeBotVoiceForFlockV1(command.voice) }),
         });
         return receipt.status === "applied"
           ? { status: "applied" as const }

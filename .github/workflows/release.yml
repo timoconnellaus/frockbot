@@ -1488,7 +1488,7 @@ jobs:
           # missing on every release (v0.7.16, run 34562782289) even though
           # production has them.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
@@ -1676,12 +1676,12 @@ jobs:
           # the service, so without it no Applet can be built or published.
           APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           # Required: the composer's dictation upstream (OpenAI Realtime) and
-          # the voice session's speech (ElevenLabs). The hosted product must
+          # the voice session itself (Gemini Live). The hosted product must
           # work with zero User configuration, so a release without either
           # stops here rather than shipping a microphone that answers "not
           # set up" (docs/voice.md).
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # Optional: authorizes the read-only /api/debug operator surface.
           # Absent and the deployed Worker simply 404s those routes.
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}

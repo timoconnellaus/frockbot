@@ -713,6 +713,31 @@ class MemoryConfiguration
   ) {
     return this.updateAvatar(request);
   }
+  readVoice(request: Parameters<BotConfigurationBinding["readVoice"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      revision: 0,
+    });
+  }
+  updateVoice(request: Parameters<BotConfigurationBinding["updateVoice"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      status: "applied" as const,
+      revision: request.command.expectedRevision + 1,
+    });
+  }
+  readBotVoice(
+    request: Parameters<UserConfigurationBinding["readBotVoice"]>[0],
+  ) {
+    return this.readVoice(request);
+  }
+  updateBotVoice(
+    request: Parameters<UserConfigurationBinding["updateBotVoice"]>[0],
+  ) {
+    return this.updateVoice(request);
+  }
   private compositionGeneration(
     botId: string,
     generationId: string,
@@ -1087,6 +1112,19 @@ function createTestGateway(
           }),
         updateAvatar: (userId, botId, command) =>
           configurationFor(userId).updateAvatar({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        readVoice: (userId, botId) =>
+          configurationFor(userId).readVoice({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        updateVoice: (userId, botId, command) =>
+          configurationFor(userId).updateVoice({
             schemaVersion: 1,
             userId,
             botId,

@@ -81,6 +81,22 @@ export interface StoredRunSubagentOriginV1 {
   parentRunId: string;
 }
 
+/**
+ * A Turn this Bot handed off to itself so the Turn that asked could reply
+ * without waiting for the work — the `subagent` tool.
+ *
+ * `depth` is the whole of the recursion bound and it travels on the record
+ * rather than in memory: the Turn this origin belongs to is the one that may
+ * not hand off again, and it has to be able to tell after an eviction.
+ */
+export interface StoredRunHandoffOriginV1 {
+  kind: "handoff";
+  /** The run whose `subagent` call asked for this Turn. */
+  parentRunId: string;
+  /** How many hand-offs deep this Turn is. One is the only value today. */
+  depth: number;
+}
+
 /** A same-User Bot asking this Bot a question. */
 export interface StoredRunBotOriginV1 {
   kind: "bot";
@@ -110,8 +126,15 @@ export interface StoredRunVoiceOriginV1 {
 export type StoredRunOriginV1 =
   | StoredRunRoutineOriginV1
   | StoredRunSubagentOriginV1
+  | StoredRunHandoffOriginV1
   | StoredRunBotOriginV1
   | StoredRunVoiceOriginV1;
+
+/**
+ * How deep a hand-off chain may go. One: a Turn a person or a Routine started
+ * may hand off, and the Turn it hands to may not.
+ */
+export const STORED_RUN_HANDOFF_MAX_DEPTH = 1;
 
 const STORED_RUN_ORIGIN_TRIGGERS: readonly StoredRunTriggerV1[] = [
   "cron",
@@ -462,6 +485,32 @@ function decodeStoredRunOrigin(
       kind: "subagent",
       taskId: candidate.taskId,
       parentRunId: candidate.parentRunId,
+    };
+  }
+  if (candidate.kind === "handoff") {
+    requireExactOriginFields(
+      candidate,
+      ["kind", "parentRunId", "depth"],
+      runId,
+    );
+    if (!boundedString(candidate.parentRunId, 128)) {
+      throw new Error(`run "${runId}" has an invalid admission origin id`);
+    }
+    // One hand-off deep is the whole of what the tool admits, so a record
+    // claiming more depth than the tool can produce is not a record this codec
+    // wrote.
+    if (
+      typeof candidate.depth !== "number" ||
+      !Number.isSafeInteger(candidate.depth) ||
+      candidate.depth < 1 ||
+      candidate.depth > STORED_RUN_HANDOFF_MAX_DEPTH
+    ) {
+      throw new Error(`run "${runId}" has an invalid admission origin depth`);
+    }
+    return {
+      kind: "handoff",
+      parentRunId: candidate.parentRunId,
+      depth: candidate.depth,
     };
   }
   if (candidate.kind === "bot") {

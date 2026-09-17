@@ -242,6 +242,7 @@ void main() {
         'type': 'voice/delegation',
         'botId': 'researcher',
         'botName': 'Scout',
+        'runId': 'run-scout',
         'state': 'asked',
       }),
     );
@@ -256,6 +257,7 @@ void main() {
         'type': 'voice/delegation',
         'botId': 'researcher',
         'botName': 'Scout',
+        'runId': 'run-scout',
         'state': 'answering',
       }),
     );
@@ -270,6 +272,55 @@ void main() {
     expect(harness.controller.delegationState, isNull);
     harness.controller.dispose();
   });
+
+  test(
+    'two hand-offs to the same Bot are two entries, each its own Turn',
+    () async {
+      final harness = Harness();
+      await harness.live();
+      void delegation(String runId, String state) {
+        harness.socket.deliver(
+          jsonEncode({
+            'schemaVersion': 1,
+            'type': 'voice/delegation',
+            'botId': 'researcher',
+            'botName': 'Scout',
+            'runId': runId,
+            'state': state,
+          }),
+        );
+      }
+
+      // Every voice hand-off is the call's own Bot, so a ledger kept per Bot
+      // would collapse these two onto one entry and lose the first Turn.
+      delegation('run-one', 'asked');
+      await settle();
+      delegation('run-two', 'asked');
+      await settle();
+      expect(harness.controller.delegations.map((entry) => entry.runId), [
+        'run-one',
+        'run-two',
+      ]);
+
+      harness.controller.pause();
+      delegation('run-one', 'finished');
+      await settle();
+      delegation('run-two', 'finished');
+      await settle();
+      expect(harness.controller.delegations.map((entry) => entry.runId), [
+        'run-one',
+        'run-two',
+      ]);
+      expect(
+        harness.controller.delegations.every((entry) => entry.finished),
+        isTrue,
+      );
+      expect(harness.controller.finishedWhilePaused, 2);
+
+      await harness.controller.end(reason: 'end-button');
+      harness.controller.dispose();
+    },
+  );
 
   test('a call the server has already ended is not a notice', () async {
     final harness = Harness();

@@ -30,6 +30,9 @@ declare const validators: {
   isSessionRevokeCommand(
     value: unknown,
   ): value is ProtocolTypes["SessionRevokeCommand"];
+  isBotVoiceAppearance(
+    value: unknown,
+  ): value is ProtocolTypes["BotVoiceAppearance"];
   isAvatarAppearance(
     value: unknown,
   ): value is ProtocolTypes["AvatarAppearance"];
@@ -53,6 +56,8 @@ declare const validators: {
   isBotAvatarCommand(
     value: unknown,
   ): value is ProtocolTypes["BotAvatarCommand"];
+  isVoiceIdentity(value: unknown): value is ProtocolTypes["VoiceIdentity"];
+  isBotVoiceCommand(value: unknown): value is ProtocolTypes["BotVoiceCommand"];
   isFlockReceipt(value: unknown): value is ProtocolTypes["FlockReceipt"];
   isSkillRef(value: unknown): value is ProtocolTypes["SkillRef"];
   isTurnCommand(value: unknown): value is ProtocolTypes["TurnCommand"];

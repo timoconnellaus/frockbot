@@ -36,6 +36,7 @@ import {
   TemplateDecodeError,
   type TemplateShareRecordV1,
   type TemplateAvatarAppearanceV1,
+  type TemplateVoiceAppearanceV1,
 } from "@frockbot/core/template";
 import {
   buildBotTemplateV1,
@@ -116,6 +117,11 @@ export interface TemplateBotReaderV1 {
     userId: string,
     botId: string,
   ): Promise<TemplateAvatarAppearanceV1>;
+  /** This Bot's chosen voice, or undefined when it never chose one. */
+  readVoice(
+    userId: string,
+    botId: string,
+  ): Promise<TemplateVoiceAppearanceV1 | undefined>;
   /** Own-root Skills, bodies included. Managed and plugin Skills never appear. */
   readSkills(
     userId: string,
@@ -146,6 +152,7 @@ export interface TemplateImportWriterV1 {
     name: string;
     description?: string;
     avatar: TemplateAvatarAppearanceV1;
+    voice?: TemplateVoiceAppearanceV1;
   }): Promise<{ status: "applied" | "rejected"; failure?: string }>;
   installPackage(input: {
     userId: string;
@@ -404,8 +411,9 @@ export class BotTemplateUserBackendContribution {
     summary: TemplateExportSummaryV1;
   }> {
     const settings = await this.host.bots.readSettings(userId, botId);
-    const [avatar, skills, routines] = await Promise.all([
+    const [avatar, voice, skills, routines] = await Promise.all([
       this.host.bots.readAvatar(userId, botId),
+      this.host.bots.readVoice(userId, botId),
       this.host.bots.readSkills(userId, botId),
       this.host.bots.readRoutines(userId, botId),
     ]);
@@ -430,6 +438,7 @@ export class BotTemplateUserBackendContribution {
           : { description: settings.profile.description }),
       },
       avatar,
+      ...(voice === undefined ? {} : { voice }),
       skills,
       routines,
       packages,
@@ -711,6 +720,7 @@ export class BotTemplateUserBackendContribution {
             ? {}
             : { description: plan.profile.description }),
           avatar: plan.avatar,
+          ...(plan.voice === undefined ? {} : { voice: plan.voice }),
         });
         if (receipt.status === "rejected") {
           throw new Error(receipt.failure ?? "the Flock refused bot/create");

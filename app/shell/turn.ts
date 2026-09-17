@@ -225,6 +225,12 @@ export async function executeTurn(
     ...(input.command.origin?.kind === "subagent"
       ? { subagentTaskId: input.command.origin.taskId }
       : {}),
+    // How deep a `subagent` hand-off this Turn is. The tool reads it to refuse
+    // a second level, so it has to come off the durable record rather than from
+    // the Turn that asked, which is gone by the time this one runs.
+    ...(input.command.origin?.kind === "handoff"
+      ? { handoffDepth: input.command.origin.depth }
+      : {}),
     ...(input.command.origin?.kind === "bot"
       ? {
           inboundAgent: {

@@ -116,17 +116,18 @@ a person spoke on a call are readable:
 
 - `currentCall` — the live call, if one is open.
 - `turns[]` — every turn still retained (24 hours), oldest first, each with
-  its `transcript` (what the person said), `answer` (what the assistant said
-  back), `state`, and how many `delegations` it made. A turn with an `event`
-  of kind `bot-answer` is not the person speaking: it is a Bot's answer being
-  told to the assistant, its `transcript` is the message the assistant was
-  given, and its `answer` is what the assistant chose to say — empty when it
-  chose to say nothing.
+  its `transcript` (what the person said, as the Live session transcribed it),
+  `answer` (what the session said back, from its own output transcription),
+  `state`, and how many `delegations` it made. A turn is admitted the moment
+  the model starts answering and its transcript is written again when it
+  settles, because the session often finishes transcribing the person while it
+  is already speaking.
 - `delegations[]` — every question handed to a Bot, oldest first: `text` is the
   assistant's paraphrase that became the Bot's `voice-…` run, `runId` is that
   run (read it with `run`), `answer`/`failure` is what settled, and `state`
-  says what became of it. `settled` is answered and on its way to the
-  assistant; `spoken` is told to the assistant, by the turn in `spokenTurnId`;
+  says what became of it. `settled` is answered and on its way to the session;
+  `spoken` is handed back to it as that function call's own late response,
+  at `spokenAt`;
   `cancelled` is a request whose call ended first — the Bot's reply is in the
   Bot's own thread and is never read out on a later call. Nothing is owed
   across calls: a new call opens listening, whatever the last one left.

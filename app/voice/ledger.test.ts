@@ -173,8 +173,8 @@ describe("voice ledger turns", () => {
 
   test("the daily turn cap refuses", async () => {
     const { ledger: l } = ledger({
-      sttSeconds: 10,
-      ttsCharacters: 10,
+      audioInSeconds: 10,
+      audioOutSeconds: 10,
       turns: 1,
       delegations: 10,
       dictationSeconds: 10,
@@ -274,18 +274,13 @@ describe("voice ledger delegations", () => {
     // Settling twice does not overwrite the first outcome.
     await l.settleDelegation(runId, { failure: "late" }, later(200));
     expect((await l.readDelegation(runId))?.answer).toBe("done");
-    // Told to the assistant, by the event turn that carried it: once.
-    expect(await l.markDelegationSpoken(runId, "call-1:2", later(300))).toBe(
-      true,
-    );
+    // Handed back to the live session: once, whatever it then says.
+    expect(await l.markDelegationSpoken(runId, later(300))).toBe(true);
     expect(await l.readDelegation(runId)).toMatchObject({
       state: "spoken",
-      spokenTurnId: "call-1:2",
       spokenAt: later(300).toISOString(),
     });
-    expect(await l.markDelegationSpoken(runId, "call-1:3", later(400))).toBe(
-      false,
-    );
+    expect(await l.markDelegationSpoken(runId, later(400))).toBe(false);
     // Dropping applies to a settled answer nobody can be told, not to one
     // already told.
     await l.dropDelegation(runId);
@@ -381,38 +376,45 @@ describe("voice ledger delegations", () => {
     );
   });
 
-  test("a Bot's answer arriving is a turn of its own kind", async () => {
+  test("a turn's transcript is written again when it settles", async () => {
+    // The session starts answering before it has finished transcribing what
+    // the person said, so the turn is admitted on whatever has arrived and
+    // the fuller text lands with the outcome. Memory reads this record.
     const { ledger: l } = ledger();
     await liveCall(l);
-    const event = await l.admitTurn({
+    const admitted = await l.admitTurn({
       connectionId: "c1",
-      transcript: "[Bot answer] Remy has answered: done",
+      transcript: "book the",
       at: later(100),
-      event: {
-        kind: "bot-answer",
-        botId: "remy",
-        botName: "Remy",
-        runId: "voice-1",
-      },
     });
-    if (event.status !== "admitted") throw new Error();
-    expect((await l.readTurn(event.turn.turnId))?.event).toEqual({
-      kind: "bot-answer",
-      botId: "remy",
-      botName: "Remy",
-      runId: "voice-1",
+    if (admitted.status !== "admitted") throw new Error();
+    await l.settleTurn(
+      admitted.turn.turnId,
+      { answer: "Booked." },
+      "book the flights to Sydney",
+    );
+    expect(await l.readTurn(admitted.turn.turnId)).toMatchObject({
+      transcript: "book the flights to Sydney",
+      answer: "Booked.",
+      state: "answered",
     });
-    // It costs a model turn like any other, and sits in the call's history.
-    expect((await l.meter(t0)).turns).toBe(1);
-    expect((await l.turnsForCall("call-1")).map((t) => t.turnId)).toEqual([
-      event.turn.turnId,
-    ]);
+    // An empty later transcript never erases what was admitted.
+    const second = await l.admitTurn({
+      connectionId: "c1",
+      transcript: "and the hotel",
+      at: later(200),
+    });
+    if (second.status !== "admitted") throw new Error();
+    await l.settleTurn(second.turn.turnId, { answer: "Done." }, "   ");
+    expect((await l.readTurn(second.turn.turnId))?.transcript).toBe(
+      "and the hotel",
+    );
   });
 
   test("per-turn and daily caps refuse further delegations", async () => {
     const { ledger: l } = ledger({
-      sttSeconds: 1e9,
-      ttsCharacters: 1e9,
+      audioInSeconds: 1e9,
+      audioOutSeconds: 1e9,
       turns: 1e9,
       delegations: 2,
       dictationSeconds: 1e9,
@@ -510,53 +512,70 @@ describe("voice ledger recovery", () => {
     );
   });
 
-  test("meters accumulate per UTC day and roll over", async () => {
+  test("the two audio meters accumulate per UTC day and roll over", async () => {
     const { ledger: l } = ledger();
-    await l.addMeter(t0, { sttSeconds: 30 });
-    await l.addMeter(t0, { sttSeconds: 12, ttsCharacters: 400 });
+    await l.addMeter(t0, { audioInSeconds: 30 });
+    await l.addMeter(t0, { audioInSeconds: 12, audioOutSeconds: 400 });
     expect(await l.meter(t0)).toMatchObject({
       day: "2026-09-10",
-      sttSeconds: 42,
-      ttsCharacters: 400,
+      audioInSeconds: 42,
+      audioOutSeconds: 400,
     });
     const tomorrow = new Date("2026-09-11T00:00:01.000Z");
-    expect((await l.meter(tomorrow)).sttSeconds).toBe(0);
+    expect((await l.meter(tomorrow)).audioInSeconds).toBe(0);
+  });
+
+  test("each direction is capped on its own, because output costs more", async () => {
+    const { ledger: l } = ledger({
+      audioInSeconds: 100,
+      audioOutSeconds: 10,
+      turns: 1e9,
+      delegations: 1e9,
+      dictationSeconds: 1e9,
+    });
+    await l.addMeter(t0, { audioInSeconds: 90 });
+    expect(await l.exceededCap(t0)).toBeUndefined();
+    await l.addMeter(t0, { audioOutSeconds: 10 });
+    expect(await l.exceededCap(t0)).toBe("audioOutSeconds");
   });
 });
 
 describe("voice ledger spend windows", () => {
   test("reserves ahead, refuses past the cap, and refunds what was not used", async () => {
+    // Dictation is the one thing still booked in windows: its upstream bills
+    // by the second it is open, where the voice session bills the audio that
+    // actually crossed it.
     const { ledger: l } = ledger({
-      sttSeconds: 150,
-      ttsCharacters: 1e9,
+      audioInSeconds: 1e9,
+      audioOutSeconds: 1e9,
       turns: 1e9,
       delegations: 1e9,
-      dictationSeconds: 1e9,
+      dictationSeconds: 150,
     });
-    expect((await l.reserveSeconds(t0, "sttSeconds", 60)).status).toBe(
+    expect((await l.reserveSeconds(t0, "dictationSeconds", 60)).status).toBe(
       "reserved",
     );
-    expect((await l.reserveSeconds(t0, "sttSeconds", 60)).status).toBe(
+    expect((await l.reserveSeconds(t0, "dictationSeconds", 60)).status).toBe(
       "reserved",
     );
-    expect((await l.meter(t0)).sttSeconds).toBe(120);
+    expect((await l.meter(t0)).dictationSeconds).toBe(120);
     // The third window would cross the cap: refused, nothing booked.
-    expect((await l.reserveSeconds(t0, "sttSeconds", 60)).status).toBe(
+    expect((await l.reserveSeconds(t0, "dictationSeconds", 60)).status).toBe(
       "refused",
     );
-    expect((await l.meter(t0)).sttSeconds).toBe(120);
-    await l.refundSeconds(t0, "sttSeconds", 45);
-    expect((await l.meter(t0)).sttSeconds).toBe(75);
+    expect((await l.meter(t0)).dictationSeconds).toBe(120);
+    await l.refundSeconds(t0, "dictationSeconds", 45);
+    expect((await l.meter(t0)).dictationSeconds).toBe(75);
     // A refund never goes below zero.
-    await l.refundSeconds(t0, "sttSeconds", 500);
-    expect((await l.meter(t0)).sttSeconds).toBe(0);
+    await l.refundSeconds(t0, "dictationSeconds", 500);
+    expect((await l.meter(t0)).dictationSeconds).toBe(0);
   });
 });
 
 describe("voice dictation lease", () => {
   const caps = {
-    sttSeconds: 1e9,
-    ttsCharacters: 1e9,
+    audioInSeconds: 1e9,
+    audioOutSeconds: 1e9,
     turns: 1e9,
     delegations: 1e9,
     dictationSeconds: 100,
@@ -699,8 +718,8 @@ describe("voice ledger debug snapshot", () => {
 describe("the dictation tidy-up allowance", () => {
   test("books each tidy-up and refuses the one past the cap", async () => {
     const { ledger: l } = ledger({
-      sttSeconds: 10,
-      ttsCharacters: 10,
+      audioInSeconds: 10,
+      audioOutSeconds: 10,
       turns: 10,
       delegations: 10,
       dictationSeconds: 10,
@@ -716,8 +735,8 @@ describe("the dictation tidy-up allowance", () => {
   // starts today with the whole allowance.
   test("the allowance is per day", async () => {
     const { ledger: l } = ledger({
-      sttSeconds: 10,
-      ttsCharacters: 10,
+      audioInSeconds: 10,
+      audioOutSeconds: 10,
       turns: 10,
       delegations: 10,
       dictationSeconds: 10,
@@ -734,8 +753,8 @@ describe("the dictation tidy-up allowance", () => {
   // cap deliberately stays out of the call-level check.
   test("spending the tidy-up allowance does not close the day's calls", async () => {
     const { ledger: l } = ledger({
-      sttSeconds: 10,
-      ttsCharacters: 10,
+      audioInSeconds: 10,
+      audioOutSeconds: 10,
       turns: 10,
       delegations: 10,
       dictationSeconds: 10,

@@ -36,9 +36,12 @@ import { appletRpcSnapshotV1 } from "@frockbot/app/applets-host/records";
 import {
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
+  decodeVoiceIdentityViewV1,
   type BotDirectoryViewV1,
   type CreateBotCommandV1,
   type FlockReceiptV1,
+  type UpdateVoiceCommandV1,
+  type VoiceIdentityViewV1,
 } from "@frockbot/app/flock/shared";
 import {
   decodeTemplateShareReceiptV1,
@@ -480,6 +483,12 @@ export interface UserConfigurationRpcV1 {
     effectId: string,
   ): Promise<void>;
   listBots(userId: string): Promise<BotDirectoryViewV1>;
+  readBotVoice(userId: string, botId: string): Promise<VoiceIdentityViewV1>;
+  updateBotVoice(
+    userId: string,
+    botId: string,
+    command: UpdateVoiceCommandV1,
+  ): Promise<FlockReceiptV1>;
   createBot(
     userId: string,
     command: CreateBotCommandV1,
@@ -578,6 +587,8 @@ export function userConfigurationV1(
     settleToolCredential(input: unknown): Promise<void>;
     listBots(input: unknown): Promise<unknown>;
     createBot(input: unknown): Promise<unknown>;
+    readBotVoice(input: unknown): Promise<unknown>;
+    updateBotVoice(input: unknown): Promise<unknown>;
     executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
     listMachines(input: unknown): Promise<unknown>;
     describeMachineTarget(input: unknown): Promise<unknown>;
@@ -633,6 +644,14 @@ export function userConfigurationV1(
     createBot: async (userId, command) =>
       decodeFlockReceiptV1(
         await rpc.createBot({ schemaVersion: 1, userId, command }),
+      ),
+    readBotVoice: async (userId, botId) =>
+      decodeVoiceIdentityViewV1(
+        await rpc.readBotVoice({ schemaVersion: 1, userId, botId }),
+      ),
+    updateBotVoice: async (userId, botId, command) =>
+      decodeFlockReceiptV1(
+        await rpc.updateBotVoice({ schemaVersion: 1, userId, botId, command }),
       ),
     executeTemplateCommand: async (userId, command) =>
       decodeTemplateShareReceiptV1(

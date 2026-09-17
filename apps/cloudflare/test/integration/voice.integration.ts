@@ -109,12 +109,18 @@ describe("voice through the gateway", () => {
       "refusal",
     );
     expect(refusal.code).toBe("unconfigured");
-    await seen.waitFor(
-      (f) =>
-        f.type === "status" &&
-        f.status === "idle" &&
-        seen.seen.indexOf(f) > seen.seen.indexOf(refusal),
-      "idle after refusal",
+    // The refusal is the answer, and the session never left idle to give it:
+    // a call that cannot be made is not started, so the person is told once
+    // and the surface has nothing to come back from. Since ADR 0031 there is
+    // no status frame after the refusal, so what is held to here is that no
+    // frame ever claimed the call was under way.
+    expect(
+      seen.seen
+        .filter((frame) => frame.type === "status")
+        .map((frame) => frame.status),
+    ).toEqual(["idle"]);
+    expect(seen.seen.indexOf(refusal)).toBeGreaterThan(
+      seen.seen.findIndex((frame) => frame.type === "status"),
     );
     socket.close();
     expect((await asUser(userId, "/")).status).toBe(200);

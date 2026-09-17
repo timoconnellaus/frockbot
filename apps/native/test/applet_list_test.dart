@@ -74,6 +74,11 @@ class AppletListApi extends NativeApi {
     if (path.contains('/settings') && path.startsWith('/api/bots/')) {
       return {...botSettings(), 'botId': path.split('/')[3]};
     }
+    // The settings read also asks how the Bot sounds; these Bots have chosen
+    // nothing, so the record carries no voice at all (ADR 0031).
+    if (path.endsWith('/voice') && path.startsWith('/api/bots/')) {
+      return {'schemaVersion': 1, 'botId': path.split('/')[3], 'revision': 0};
+    }
     if (path.startsWith('/api/settings')) return account();
     throw const FormatException('offline fixture');
   }

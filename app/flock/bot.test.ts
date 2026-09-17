@@ -307,3 +307,81 @@ describe("Flock Bot contribution", () => {
     ).rejects.toThrow("unknown or missing field");
   });
 });
+
+describe("a Bot's voice record", () => {
+  const voice = {
+    schemaVersion: 1 as const,
+    voiceName: "Sulafat",
+    delivery: { accent: "australian" as const },
+  };
+  const contribution = (storage: MemoryStorage) =>
+    createFlockBotBackendContribution({
+      storage,
+      materializeSettings: () => Promise.resolve(),
+      archiveEligible: () => Promise.resolve(true),
+      tearDown: () => Promise.resolve("complete"),
+    });
+
+  test("starts unset, so the character default answers for the Bot", async () => {
+    const storage = new MemoryStorage();
+    expect(
+      await contribution(storage).readVoice(registration, "user-1"),
+    ).toEqual({ schemaVersion: 1, botId: "alpha", revision: 0 });
+  });
+
+  test("seeds from the registration when the Bot was registered with one", async () => {
+    const storage = new MemoryStorage();
+    expect(
+      await contribution(storage).readVoice(
+        { ...registration, voice },
+        "user-1",
+      ),
+    ).toMatchObject({ revision: 0, voice });
+  });
+
+  test("applies, fences and replays the update exactly as the avatar does", async () => {
+    const storage = new MemoryStorage();
+    const command = {
+      schemaVersion: 1 as const,
+      type: "bot/update-voice" as const,
+      commandId: "voice-1",
+      expectedRevision: 0,
+      botId: "alpha",
+      voice,
+    };
+    const first = await contribution(storage).updateVoice(
+      registration,
+      "user-1",
+      command,
+    );
+    expect(first).toMatchObject({ status: "applied", revision: 1 });
+    // A replay is answered from the stored receipt without touching the record.
+    expect(
+      await contribution(storage).updateVoice(registration, "user-1", command),
+    ).toEqual(first);
+    expect(
+      await contribution(storage).readVoice(registration, "user-1"),
+    ).toMatchObject({ revision: 1, voice });
+    await expect(
+      contribution(storage).updateVoice(registration, "user-1", {
+        ...command,
+        commandId: "stale",
+      }),
+    ).rejects.toBeInstanceOf(FlockConflictError);
+  });
+
+  test("changing a voice never touches the avatar's revision", async () => {
+    const storage = new MemoryStorage();
+    await contribution(storage).updateVoice(registration, "user-1", {
+      schemaVersion: 1,
+      type: "bot/update-voice",
+      commandId: "voice-1",
+      expectedRevision: 0,
+      botId: "alpha",
+      voice,
+    });
+    expect(
+      await contribution(storage).read(registration, "user-1"),
+    ).toMatchObject({ revision: 0 });
+  });
+});

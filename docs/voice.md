@@ -3,11 +3,17 @@
 Two voice features, two transports, one credential rule: provider keys never
 leave the Worker.
 
-| Feature                                 | Route                                | Server                                                                    | Providers                                                                                                            |
-| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                                                           |
-| Continuous voice session (one Bot)      | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | ElevenLabs Scribe v2 Realtime (streaming partials, VAD commit) → Frock AI gateway (chat) → ElevenLabs Flash v2.5 TTS |
-| Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                                                                    |
+| Feature                                 | Route                                | Server                                                                    | Provider                                                                 |
+| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`               |
+| Continuous voice session (one Bot)      | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | Gemini Live, model `gemini-3.8-live`: one bidirectional session per call |
+| Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                        |
+
+Since [ADR 0031](adr/0031-voice-gemini-live.md) the continuous session is one
+`bidiGenerateContent` socket and nothing else. The cascade it replaced — ears,
+a chat model and a mouth, three providers and three bills — is gone, and so is
+the Cloudflare voice SDK: the object writes the client's frames itself. The
+wire the clients speak did not change with it.
 
 Both WebSocket routes are authenticated exactly like `/api/bots/:id/state-channel`:
 the browser's better-auth cookie, or the native app's `Authorization: Bearer
@@ -16,10 +22,12 @@ and forwards the upgrade with `x-frockbot-user-id` set by itself; nothing below
 the gateway re-verifies and nothing below it is reachable another way. There is
 no `/agents/*` route.
 
-The pure parts — protocol decoders, the durable ledger, the speech gate, the
-context assembly, the realtime upstream vocabulary and both transcription
-adapters — live in `app/voice/` and
-import no Cloudflare SDK. The two Worker modules above are the adapters.
+The pure parts — the protocol decoders, the Gemini Live wire
+(`app/voice/gemini-live.ts`), the durable ledger, the instruction and the
+tools, the session's memory — live in `app/voice/` and import no Cloudflare
+SDK. The two Worker modules above are the adapters. What the Live API actually
+does, observed rather than remembered, is in
+[`voice-gemini-probe.md`](voice-gemini-probe.md).
 
 ## A call talks to one Bot
 
@@ -45,49 +53,63 @@ and `<your-recent-conversation>` (the tail of its thread). The account
 directory is still in the prompt, but only so a hand-over can be asked for by
 name, and it lists the other Bots rather than this one.
 
-The tools narrow with it. `ask`, `status`, `read_history`, `search_history`
-and `cancel` take no `bot_id` and mean this Bot; the loop supplies the target,
-not the model. `switch_bot` is the one that moves it: it writes the call
-record before the voice changes, tells the client so the screen follows, and
-rebuilds the prompt context. The person can move it too, without saying
-anything, by pressing voice on another Bot: a `voice/target` frame on a live
-call is a hand-over and goes the same way `switch_bot` does. A delegation the
-previous Bot still owes is left open on purpose — it belongs to the call, not
-the target — and is read out in that Bot's own voice when it lands.
+The tools narrow with it. `subagent`, `status`, `read_history`,
+`search_history` and `cancel` take no `bot_id` and mean this Bot; the object
+supplies the target, not the model. `switch_bot` is the one that moves it: it
+writes the call record when the tool runs, and the session itself is replaced
+once the model's own turn has ended, so a sign-off said before or after the
+call is not cut off. The client is told, so the screen follows. The person can
+move it too, without saying anything, by pressing voice on another Bot: a
+`voice/target` frame on a live call is a hand-over, and that one moves the
+session at once because nothing is mid-sentence. A subagent the previous Bot
+still owes is left open on purpose — it belongs to the call, not the target —
+and its result is still told when it lands.
 
-The two layers are unchanged: the voice layer answers in a second or two from
-what it holds, and real work is still a Bot Turn on the `agent` lane, so the
-person is never waiting on one.
+What is no longer two layers is the deciding. The model keeps talking while
+the object runs a function call, because every declaration is
+`NON_BLOCKING`, so nothing has to be classified as short or long in advance:
+`subagent` is the model's own judgement that something will take more than a
+moment, and real work is still a Bot Turn on the `agent` lane.
 
 ## Each Bot has a voice
 
-`app/voice/voices.ts` is the deployment's curated list and the default voice
-for every character in the avatar cast, so a Bot whose owner has only ever
-picked a look already sounds unlike its siblings. The list is curated rather
-than free text: a setting that took any ElevenLabs id would be a way to bill
-the account for a voice nobody vetted, and a typo would be a call that cannot
-speak at all. `ELEVENLABS_VOICE_ID` remains the fallback.
+`app/voice/appearance.ts` holds the whole of it: Gemini's thirty prebuilt
+voices with Google's own one-word characterisation of each, a default voice
+per character in the avatar cast, and `BotVoiceAppearanceV1` — a `voiceName`
+and a `delivery`. A Bot whose owner has only ever picked a look already sounds
+unlike its siblings.
 
-The SDK reads `tts` once and speaks every sentence through it, so the voice
-cannot be chosen by handing it a different provider. It is chosen per sentence
-from the call that is speaking — which is also the only place that knows a
-read-out belongs to another Bot — and one provider is made and kept per voice
-the object has spoken as.
+The split mirrors the provider's. `voiceName` is a fixed field and goes into
+`speechConfig.voiceConfig.prebuiltVoiceConfig`; everything else about how a
+Bot sounds is prose, because prose is the only thing Gemini Live takes.
+`renderVoiceInstructionV1` turns the stored slugs — accent, attitude, pace,
+turn length, humour, filler words, formality, and the person's own words — into
+the "How you sound" block of the persona, and `resolveBotVoiceV1` answers with
+the Bot's own appearance or its character's default. Neither is ever
+undefined: Gemini always has a voice to give.
 
-A Bot's own stored `voiceId` override is not built yet; `resolveVoiceIdV1`
-takes it and nothing writes it.
+Two things follow from that. A voice cannot be changed mid-session — the
+instruction and the `speechConfig` are set once, at setup — so a hand-over
+opens a new session rather than swapping a provider, which is why
+`switch_bot` waits for the spoken turn to end. And style steering is
+empirical: Google documents an audio-tag vocabulary for its TTS models, not
+for Live, so which descriptors bite is something
+`apps/cloudflare/test/voice-gemini-probe.ts` and a pair of ears decide, not a
+catalog check. There is nothing here to hold against a provider account: a
+voice name is either one of the thirty or it is refused by the decoder.
 
-Every id in that file is held against this deployment's ElevenLabs account by
-`scripts/check-voice-catalog.ts`, which runs in the staging deploy before the
-deploy itself — the first place the key exists. That check is not ceremony:
-most of the provider's well-known "premade" ids are absent from this account,
-and an id the account cannot reach does not fail loudly — the sentence simply
-never becomes sound, which is why no test suite can see it either (they all
-script the speech provider). An id the account cannot reach, and a character
-whose default is not in the catalog, each fail the job; a name that has
-drifted from the account's own is reported without failing, because the voice
-still speaks. A voice that is verified to exist has still not been listened
-to, so audition after editing the list — that part no machine can do.
+**Choosing one.** Settings › Voice under a Bot
+(`apps/native/lib/settings/voice_settings.dart`) is the same two halves: a
+timbre picked from the thirty, and a delivery picked from presets, with the
+person's own words last. It saves as the About card does — the moment a
+choice is made, and a moment after the last keystroke — and there is no
+preview, because no endpoint speaks a sample: the way to hear a change is to
+call. It reads and writes `GET`/`POST /api/bots/:botId/voice`
+(`VoiceIdentityV1`, and a `bot/update-voice` command fenced on the Bot's own
+voice revision, which is separate from its avatar's). The Bot Durable Object
+is the authority and the User's directory mirrors what it reports wearing:
+[`app/flock/README.md`](../app/flock/README.md#the-voice-mirror) owns that
+half.
 
 ## Capabilities
 
@@ -95,10 +117,10 @@ to, so audition after editing the list — that part no machine can do.
 
 - `dictation` is true when `OPENAI_API_KEY` (or the test override
   `VOICE_DICTATION_UPSTREAM_URL`) is set.
-- `assistant` is true when `ELEVENLABS_API_KEY` is set, the `AI` binding
-  exists, and the chosen STT provider's key is present (see "Ears": that is
-  the same ElevenLabs key by default, `OPENAI_API_KEY` under
-  `VOICE_ASSISTANT_STT=openai`).
+- `assistant` is true when `GEMINI_API_KEY` (or the test override
+  `VOICE_ASSISTANT_UPSTREAM_URL`) is set. The `AI` binding is wanted for the
+  end-of-call memory update and does not gate the control: a deployment
+  without it can still hold a conversation.
 
 Both keys are **required production secrets**: a release without them fails
 the secrets gate, because the hosted product must work with zero User
@@ -276,11 +298,11 @@ half a second — and the relay maps
 
 ## Assistant protocol (v1)
 
-The server is a Cloudflare Agents SDK `withVoice(Agent)` class, so the wire is
-the `@cloudflare/voice` protocol version 1 plus a handful of custom JSON
-messages the SDK passes through. Everything below is what a client implements;
-the browser client and the Flutter client implement it directly (no SDK on the
-client), so both speak the same frames.
+The wire is protocol version 1 — the frames the Cloudflare voice SDK used to
+write — plus a handful of custom JSON messages of ours. Since ADR 0031 the
+Durable Object writes them itself; the browser client and the Flutter client
+implement the same frames directly, and none of the three shares code with the
+others. `app/voice/shared.ts` is where a frame is spelled once.
 
 ### Handshake
 
@@ -291,7 +313,8 @@ client), so both speak the same frames.
    then `{type:"start_call",preferred_format:"pcm16"}`. The same frame sent
    once the call is live is a hand-over instead; who the call is on is above.
 3. Server answers `{type:"audio_config",format:"pcm16",sampleRate:24000}` then,
-   once speech recognition is ready, `{type:"status",status:"listening"}`. It
+   once the Live session has acknowledged its setup,
+   `{type:"status",status:"listening"}`. It
    also sends `voice/target` back — on admission and again on every hand-over
    — naming the Bot the call is actually on, which is the only authority on
    that; a client that guessed could name a Bot the audio never reached.
@@ -312,23 +335,29 @@ the server ends the older call (that client sees `status: idle` and a
 ### Audio up
 
 Binary frames: PCM16 little-endian, mono, **16 kHz**. Frame size is the
-client's choice; 40 ms (1280 bytes) is what both clients send. Audio sent
-between `start_call` and `listening` is buffered by the SDK (bounded, 960 KB)
-and fed to the transcriber in order. The server resamples every frame to the
-24 kHz the upstream insists on (`app/voice/pcm-resample.ts`); the clients never
-change rate.
+client's choice; 40 ms (1280 bytes) is what both clients send. Each frame is
+base64'd into one `realtimeInput.audio` message at `audio/pcm;rate=16000`,
+which is the rate Gemini Live wants, so nothing is resampled anywhere. Audio
+that arrives before the session has acknowledged its setup is held in order
+(bounded, 10 s) and sent the moment it is ready, so the first syllable after a
+wake is not the one that goes missing.
 
 ### Audio down
 
 Binary frames: PCM16 little-endian, mono, **24 kHz**, arbitrary chunk
-boundaries (a chunk may end on an odd byte; carry the byte). The client plays
-them in order and measures amplitude from what it is playing.
+boundaries (a chunk may end on an odd byte; carry the byte). This is Gemini's
+own output rate, sent on as it arrives. The client plays them in order and
+measures amplitude from what it is playing.
 
-`voice/delegation` (`botId`, `botName`, `state` ∈ `asked | answering |
-finished`) tells the footer where a request to a Bot is: asked, its answer
-being put into words, done. Chrome only; nothing durable turns on it.
-`voice/speech` reports actual playback so an arriving Bot answer can wait for
-a natural pause in ordinary voice speech.
+`voice/delegation` (`botId`, `botName`, `runId`, `state` ∈ `asked |
+answering | finished`) tells the voice surface where a request to a Bot is:
+asked, its answer being put into words, done. `runId` is the Turn the request
+became, so the activity slot opens that Work. Chrome only; nothing durable
+turns on it.
+`voice/speech` reports actual playback. The clients still send it and the
+server still accepts it, but nothing turns on it any more: deciding when a
+late answer may be spoken is the session's own job now, which is what
+`scheduling: "WHEN_IDLE"` asks for.
 
 ### Status
 
@@ -339,169 +368,165 @@ speaker now. Transcript frames (`transcript`, `transcript_interim`,
 
 ### Ears
 
-The session listens through ElevenLabs Scribe v2 Realtime: the adapter is
-`ElevenLabsSTT` from `@cloudflare/voice-elevenlabs`, and
-`app/voice/scribe-transcriber.ts` holds the assistant's settings for it —
-`pcm_16000` as both clients send it (nothing is resampled),
-`commit_strategy=vad` with `vad_silence_threshold_secs` 0.5, provider logging
-off. Partial transcripts stream while the person is still speaking (the SDK
-forwards them as `transcript_interim`, which the footer ignores), the first
-partial of a segment is the speech-start the SDK's barge-in hangs on, and the
-committed segment is the turn — so the model can be reading the words before
-the sentence is over, and the turn begins about half a second after it is.
-`VOICE_ASSISTANT_STT=openai` switches back to OpenAI `gpt-transcribe` with
-server VAD (700 ms of silence, and no text at all before the commit), which
-then needs `OPENAI_API_KEY`; the capability probe reports the assistant only
-when the chosen provider's key and the ElevenLabs key are both present.
+There is no transcriber. The session hears the audio itself, decides where a
+turn ends with its own voice detector, and answers in its own voice; the
+`inputTranscription` and `outputTranscription` it returns are what the client's
+transcript frames carry and what the ledger's turn records are built from.
+Input transcription usually arrives _after_ the model has started answering,
+which is why a turn's transcript is written again when the turn settles: the
+fullest text there will ever be is the one at the end.
 
 ### Barge-in
 
-Two detectors, both stop playback:
+The model's own detector is the one that matters. When it hears the person
+over a reply the session sends `serverContent.interrupted`, and the object
+answers the client with `{type:"playback_interrupt"}` and stops forwarding
+what is left of that turn — audio already queued is for a moment that has
+passed.
 
-- Server: the transcriber's speech-start — Scribe's first partial of a new
-  segment; OpenAI's `input_audio_buffer.speech_started` when listening
-  through it — aborts the reply and sends `playback_interrupt`.
-- Client: the local energy gate sees a sustained onset (stricter than the
-  wake onset) while the reply is playing (`status` is `speaking`, or the
-  speaker still has audio after the server moved on) → stop the speaker
-  immediately and send `{type:"interrupt"}`. Background noise below the
-  adapted floor does not trip it; this is an energy heuristic, not verified
-  speech detection.
+The client keeps its local energy gate, and it still stops its own speaker
+immediately on a sustained onset and sends `{type:"interrupt"}`. That frame
+does not cancel anything upstream: the model will reach the same conclusion
+from the audio a moment later. What it does is stop this call forwarding the
+rest of the turn, so the two never disagree about what the person is hearing.
+Background noise below the adapted floor does not trip it; this is an energy
+heuristic, not verified speech detection.
 
-While the reply plays the client sends **silent** frames at the usual cadence
-and holds the last 500 ms of real audio, so the upstream's detector never
-hears the speaker's own echo and takes it for the person. On a client barge-in
-the interrupt goes first, then the held audio, then live frames — so the
-server's `speech-started` follows the client's `interrupted`, and the person's
-words are transcribed from their first syllable.
+Unlike the cascade, the client no longer sends silence while a reply plays —
+the session is hearing the room the whole time and handles the speaker's echo
+itself, with the device's own echo cancellation in front of it.
 
-An interrupt stops audio and the assistant's own reply, including a tool step
-the model had not reached yet — an interrupt during the acknowledgment settles
-the turn without delegating. It never cancels a Bot Turn the assistant already
-delegated: that work is durable in the Bot.
+An interrupt never cancels a Bot Turn the session already started with
+`subagent`: that work is durable in the Bot.
 
-### The turn stays thin
+### A turn is the model's own
 
-Everything between the end of the person's words and the first sound is
-what they wait through, so the turn does as little as it can in that gap.
-The Bot activity look-ups behind the system prompt and `list_bots` go to
-every Bot's object together, not one after another; the Bot lookup behind
-`status`, `ask` and `cancel` is one directory read. When the
-turn has said nothing after 2.5 seconds (`VOICE_TURN_ACK_DELAY_MS_V1`) the
-session speaks a bridge (`VOICE_TURN_BRIDGES_V1`: "One second.", "Let me
-check.", "Just a moment." and three more, never the same one twice running
-within a call, `pickVoiceBridgeV1`) — whether the
-silence is initial context loading, the model connecting, or a first step
-that went to a tool and a second step still composing. It is emitted at most
-once per turn, and never for a turn that answers inside the delay: a tool
-that comes back quickly gets the answer spoken, not a filler and then the
-answer. Every phrase is at least `VOICE_TURN_BRIDGE_MIN_CHARS_V1` characters
-long, because the SDK's sentence chunker holds anything shorter in its buffer
-until the stream ends: a held bridge is spoken after the stall it was for,
-which for a turn that never answers is never. "Hang on." was eight
-characters, so until 2026-09-17 about one turn in six filled its stall with
-silence; the Worker suite now asserts each phrase against the SDK's own
-`SentenceChunker`. The footer shows the Bot thinking from the moment the transcript
-lands, and that motion carries an ordinary turn — a model step, a quick
-tool, a second step — so the filler is for the stall past it (changed
-2026-09-15; before that a tool step was always bridged, at one second). The prompt
-also asks the model to acknowledge checks and delegations briefly. The
-bridge is spoken, not answered, so a turn that ends in the bridge alone still
-settles as `no_output`. `VOICE_ASSISTANT_MODEL` pins a
-gateway model for voice turns (`workers-ai/@cf/...` or a provider the gateway
-holds a key for) instead of the platform's Auto route; the `turn` trace line
-says which was used, and `model-first-text` says how long the model took to
-say its first word — the bridge is timed separately on `turn-bridge`, so a
-tool-first turn never reads as a fast first token.
+There is no turn loop here any more, and nothing to fill a silence with: the
+model hears the person and starts speaking, and what used to be the gap — a
+transcriber committing, a chat model connecting, a first token — is inside one
+session that was already open. The bridges, the acknowledgment delay and the
+`model-first-text` timing went with the cascade.
 
-The call loads the User's Profile timezone with its memory and Bot directory.
-Every turn renders a fresh clock in the system prompt: the full UTC instant
-and the local date, time and UTC offset, including daylight saving. An unset
-timezone defaults to UTC. Relative dates such as "today" use that local
-clock, and time-sensitive delegations must carry the resolved dates and zone.
+What the object still does on a turn is bookkeeping, and it does it in order:
+the first sound or word of a model turn admits a ledger turn (which is what
+the day's allowance counts and what memory reads), the turn is settled when
+the session says the turn is over, and the transcript is written again with
+it.
+
+A function call runs while the model keeps talking. Every declaration is
+`NON_BLOCKING`, the object runs the call and answers it with
+`scheduling: "WHEN_IDLE"`, so the result is spoken at the next pause rather
+than over whatever is being said now. A call the model withdraws
+(`toolCallCancellation`) is dropped rather than answered.
+
+The instruction is rendered once, at setup, because a Live session cannot be
+re-instructed: everything the model will need for the whole call goes in then
+— who it is, how it sounds, its memory, the tail of its thread, the account's
+directory, the person's timezone and the clock. It is ordered the way Google's
+Live guidance asks: **who you are**, then **how this conversation goes**, then
+**rules you do not break**. Relative dates such as "today" use the person's
+local clock, and time-sensitive work handed to `subagent` carries the resolved
+dates and zone.
 
 ### A reply that fails
 
-A turn that produces no text, or a sentence the speech provider answers with
-nothing (a refused key, a spent quota), reaches the client as the SDK's
-`{type:"error",message}` followed by `status: listening`. The server is still
-listening, so the client shows the sentence on the footer for four seconds and
-keeps the call; it does **not** hang up. The provider is wrapped so that a
-sentence with no audio throws rather than returns (`app/voice/tts-guard.ts`);
-without that the turn settles as answered and the silence has no record.
+A turn that makes no sound at all reaches the client as
+`{type:"error",message}` and the call goes on — the client shows the sentence
+on the footer for four seconds and does **not** hang up. Two things produce
+it: a turn that has said nothing eight seconds after it began, and a turn that
+reaches its end having bridged no audio. The voice surface has no notice band
+of its own — nothing on it moves — so a call being looked at shows that
+sentence nowhere, and the call's trace is where it is read.
 
-The one turn that produces no answer and yet carries no error frame is the
-bridge-only turn: once a bridge phrase has been spoken the SDK has seen text,
-so it treats the turn as a success even though the ledger settles it as
-`no_output`. The person hears the bridge and then nothing, and the call goes
-back to listening with no footer message; only the `turn` trace line records
-the dead end.
+The old speech-provider wrapper (`tts-guard.ts`) was the same guard in the
+only place that could see it then; this is the only place that can see it now.
 
-An error frame that carries a `code` is a different thing: the SDK sends one
-only when the call itself has failed — speech recognition lost, a startup that
-never worked — and has already torn the call down behind it. The client ends
-the call and shows the failure, rather than leaving a live-looking footer over
-a socket nobody is listening on.
+A session that closes on its own is the other failure. The object tells the
+client one sentence, keeps the call, and leaves the person able to speak
+again; the one close it treats specially is **1008**, which is the Live API's
+answer to a resumption handle it has forgotten (see Sleep and wake).
 
-A Bot answer that settles while an utterance, reply, or playback is in flight
-waits for a natural pause, then becomes a turn of the call: the assistant is
-told the answer, in the person's seat and marked as what it is, and decides
-what to say — one or two sentences, or nothing. Since ADR 0029 it is told in
-one of two shapes. Work the Bot on the call started is its own, and comes back
-with no name and an instruction to speak in the first person — "Done, the
-flights are booked", not "Sunny answered about the flights". An answer from a
-Bot the call has since handed over from keeps its name, because there the
-person really is being told about somebody else, and it is spoken in that
-Bot's voice so they hear who is answering before they are told; the borrowed
-voice is given back with the floor. There is no queue of answers
-across calls. A call that ends takes its open requests with it, so an answer
-that arrives after a hang-up is never read out, on that call or the next; the
-Bot's reply stays in the Bot's own conversation, where the person can read it.
-A socket that drops without `end_call` keeps the call inside the rejoin
-window, and an answer arriving then waits for the same device to come back to
-the same conversation; the alarm that ends an abandoned call cancels it. A
-person who starts talking while the answer's turn is being written takes the
-floor: the turn is aborted, its words are never spoken, and the answer is not
-owed again.
+An error frame that carries a `code` still means the call itself has failed
+and has been torn down behind it; the client ends the call and shows the
+failure rather than leaving a live-looking footer over a socket nobody is
+listening on.
+
+A `subagent` result that settles while the call is live goes back to the
+session as that function call's own late response, scheduled `WHEN_IDLE`, and
+the model decides what to say with it — one or two sentences, or nothing. It
+is told in one of two shapes. Work the Bot on the call started is its own and
+comes back with no name and an instruction to speak in the first person —
+"Done, the flights are booked", not "Sunny answered about the flights". An
+answer from a Bot the call has since handed over from keeps its name, because
+there the person really is being told about somebody else. Either way the
+words are marked as quoted data rather than instructions.
+
+If the session that made the call has been replaced since — a wake, a
+hand-over — there is no function call left to answer, and the result goes in as
+a turn of the conversation instead, saying in its own words that it is a Bot's
+answer quoted as data. With no live session at all the answer waits and the
+attempt is booked again. There is no queue of answers across calls: a call
+that ends takes its open requests with it, and an answer that arrives after a
+hang-up is never read out — the Bot's reply stays in the Bot's own
+conversation, where the person can read it. A socket that drops without
+`end_call` keeps the call inside the rejoin window, and an answer arriving
+then waits for the same device to come back to the same conversation; the
+alarm that ends an abandoned call cancels it.
 
 ### Sleep and wake (cost control)
 
-The SDK forwards every audio frame to the transcriber, and the upstream bills
-every second it hears, silence included. It also needs the silence _after_
-speech to decide a turn has ended (half a second of it,
-`vad_silence_threshold_secs`; 700 ms, `silence_duration_ms`, through OpenAI),
-so a client must never cut audio a few hundred milliseconds after a phrase.
-The policy:
+A Live session bills the audio that crosses it, in both directions, and output
+costs about 3.6x input. So the session is closed when nobody is talking, and
+nothing at all is spent in between — no listening, no deliberating, no
+subagent admitted.
 
 - The client runs an energy gate on every frame: an adaptive noise floor, an
   onset that needs several consecutive loud frames, and a 500 ms pre-roll
   ring. It is an energy gate, not verified speech detection; it decides only
-  when to **wake** a sleeping upstream and when to **barge in**.
-- While the upstream is awake the client sends a frame every 40 ms, speech
-  and silence alike, through pauses inside a sentence and while the assistant
-  is thinking. While the reply plays the frames are silent ones (see
-  Barge-in). Turn boundaries are the server's to find.
-- When `status` is `listening` (no reply in flight) and the gate has been
-  closed for **20 s** continuously, the client stops sending frames and sends
-  `{type:"voice/sleep",schemaVersion:1}`. The server closes the upstream STT
-  session. Capture continues locally.
+  when to **wake** a closed session and when to stop its own speaker.
+- While the session is open the client sends a frame every 40 ms, speech and
+  silence alike, through pauses inside a sentence and while the model is
+  answering. Turn boundaries are the session's to find.
+- When `status` is `listening` and the gate has been closed for **20 s**
+  continuously, the client stops sending frames and sends
+  `{type:"voice/sleep",schemaVersion:1}`. The object closes the Live socket and
+  keeps its newest resumption handle. Capture continues locally.
 - On the next onset the client sends `{type:"voice/wake",schemaVersion:1}`,
   then the last **500 ms** of audio from its pre-roll ring, then live frames.
-  The server opens a new STT session, buffers frames until it is ready, and
-  drains them in order. No syllable is lost.
-- The server also sleeps on its own after 30 s without an audio frame while
-  awake, so a client that never says `voice/sleep` still stops the meter.
+  The object reopens the session with the handle, buffers frames until the
+  setup is acknowledged, and drains them in order. No syllable is lost, and
+  the model remembers the conversation: a resumed session answered a question
+  about a fact established only in the session before it.
+- A handle the server no longer knows closes the socket with **1008**. That is
+  the only signal that the window has passed, so the object reopens fresh and
+  carries the tail of the call into the new instruction under
+  `<where-we-were>` — the person is not asked to start again.
+  `VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1` stays our own policy about a device
+  coming back, not a guess at Google's window, because Google states none.
+- `goAway` — the server saying it is about to close — reconnects with the
+  handle immediately rather than letting the person hear the drop.
+- The object also sleeps on its own after 30 s without an audio frame, so a
+  client that never says `voice/sleep` still stops the meter.
+- **Pause** is the person doing the same thing deliberately: the client sends
+  `voice/sleep`, stops the reply that is playing, and — unlike the gate's own
+  sleep — wakes for nothing but Resume, which sends `voice/wake`. Pause starts
+  nothing and cancels nothing: a `subagent` Turn already admitted is the Bot's
+  work, not this socket's, so it carries on, and what finishes meanwhile is
+  counted on the Resume control.
 - Server reports `{type:"voice/state",schemaVersion:1,upstream:"awake"|"asleep"|"starting",muted:boolean}`.
 
 Between `voice/sleep` and `voice/wake` the client sends no audio. While
 asleep, `status` stays `listening` on both sides; the footer keeps animating
 from the local microphone.
 
+A search the model was running dies with the socket: grounding runs inside the
+session. Acceptable, and stated so in ADR 0031 — the person asks again.
+
 ### Mute
 
 `{type:"voice/mute",schemaVersion:1,muted:true}`: the client stops sending
-frames; the server sleeps the STT session at once. `muted:false` resumes gating;
-the next speech onset wakes the upstream as above. Mute does not end the call
+frames; the server closes the Live session at once. `muted:false` resumes
+gating; the next speech onset reopens it as above. Mute does not end the call
 and does not stop playback of a reply already in flight.
 
 A client keeps two inputs apart: the person's own mute toggle, and a
@@ -512,9 +537,9 @@ rather than unmuting them.
 
 ### End
 
-`{type:"end_call"}` then close. The server closes the STT session, aborts any
-reply in flight, releases keep-alive, and answers `status: idle`. Closing the
-socket without `end_call` closes the STT session and settles its meter the
+`{type:"end_call"}` then close. The server closes the Live session, settles
+its meters, and answers `status: idle`. Closing the
+socket without `end_call` closes the Live session and settles its meters the
 same way, but does **not** end the call: the call record survives the 60 s
 rejoin window so a client back from a network change continues the same
 conversation, and an alarm ends it if nobody comes back (see "Session
@@ -541,53 +566,38 @@ the socket is not the account's.
 
 The object writes one `voice assistant {json}` line per step, readable in
 `wrangler tail` and Workers Logs: `connected`, `refused-identity` (the socket
-was not the account's and was closed with `4403`), `call-admitted`, `upstream`
-(`starting` | `awake` | `asleep`), `listening`, `listening-without-call` (the
-SDK started listening with no call record, so nothing was booked), `utterance`
-(length and whether it reached the model, never the words), `turn`,
-`turn-dropped` (a transcript arrived with no identity or no call record and was
-never given to the model — the reason says which), `model-first-text` (the
-model's first word, with `ms` since the turn began: everything before it is
-what the person waited through in silence), `turn-bridge` (the turn said
-a bridge phrase because nothing had been said within the acknowledgment
-delay, with `ms` since the turn began — filler, not the model's own
-words), `turn-settled` (the outcome, the
-delegation count and the answer's length, or a failure classification — never
-a provider's error sentence — and `ms`, the turn's whole model time),
-`speech-suppressed` (the speech allowance is used up, so a sentence of the
-reply was never turned into audio — the cap and the sentence's length, never
-its words), `tts-failed` (the speech provider answered a sentence with no
-audio — the sentence's length; the SDK has told the client and moved on),
-`refused` (with the code and sentence the client was sent), `stt-failed`,
-`speech-started` (the transcription service's own voice detector heard
-someone), `interrupted` (the SDK stopped the reply in flight: preceded by
-`speech-started`, the upstream's detector cut it; on its own, the phone's
-local energy gate sent `interrupt` — and since the phone sends silence while
-the reply plays, a `speech-started` _after_ it is the person's own barge-in
-being heard), `delegation-held` (a Bot answer settled mid-reply and waits for
-it to finish), `answer-dropped` (a Bot answer arrived for a call that is over,
-or the day's turns were spent; it stays in the Bot's conversation), `turn` and
-`turn-settled` with `event: "bot-answer"` (the assistant being told a Bot's
-answer, and what it decided: `outcome: silent` is a choice, not a failure),
-`answer-unspoken` (the assistant's words for an answer never became sound),
-`audio` (the first synthesized chunk of each sentence reached
-the socket — the sentence's length in characters, the chunk's bytes, the
-running chunk count, the turn and `sinceTurnMs`, how long after the turn began
-this sentence's sound left; the first `audio` of a turn is its time to first
-word; a reply with a `turn-settled` but no `audio` and no `tts-failed` never
-became sound), `call-ended` (with the call's total synthesized chunks, bytes
-and sentences) and `closed` (the client's code and reason). Every line carries the connection id, and — once
-`onConnect` accepted the socket — the device key; `refused-identity` carries
-the device key from the header it just rejected, and the `closed` line for a
-refused socket has none. Once admitted, every line also carries the call id
-and elapsed milliseconds. A call that reaches `listening` and then `closed`
-with no `utterance` in between means nothing reached transcription; read the
-`upstream` lines first. No `awake` line (with or without `stt-failed`) means the STT
-socket never became ready — the connect stalled or was refused — and the
-`closed` code and reason then say who gave up. An `awake` line and still no
-`utterance` means the upstream heard nothing it would transcribe, or the client
-left before the turn detector committed a transcript. Only the `closed` code
-and reason say which side closed the socket.
+was not the account's and was closed with `4403`), `call-admitted` (with the
+Bot and the voice it opened on), `upstream` (`starting` | `awake` | `asleep`,
+and whether this one is a resume and how many lines of handover it carried),
+`upstream-failed` (the session could not be opened at all), `upstream-closed`
+(the session went on its own, with the code — `1008` is a handle the server
+has forgotten), `upstream-goaway` (the server is about to close it), `listening`,
+`turn` (a model turn admitted, and how many characters of the person's words
+had been transcribed by then — never the words), `turn-settled` (its
+milliseconds, the answer's length and the audio bridged for it; an answer of
+zero bytes is a turn that never became sound), `turn-silent` (a turn that had
+said nothing after the guard's window, so the client was told), `tool` (a
+function call, by name and id, never its arguments), `tool-cancelled`,
+`interrupted` (with `source`: `model` when the session's own detector heard
+someone, `client` when the phone's energy gate did), `call-switched` (with the
+Bot and voice the session reopened as), `answer-told` (a subagent result went
+back, under its own call id or as a turn), `answer-dropped` (a result arrived
+for a call that is over, or the day's turns were spent; it stays in the Bot's
+conversation), `usage` (the session's own token counts at a turn's end),
+`refused` (with the code and sentence the client was sent), `call-ended` (with
+the call's total audio chunks, bytes and turns), `call-memory` and `closed`
+(the client's code and reason). Every line carries the connection id, and —
+once `onConnect` accepted the socket — the device key; `refused-identity`
+carries the device key from the header it just rejected, and the `closed` line
+for a refused socket has none. Once admitted, every line also carries the call
+id and elapsed milliseconds.
+
+A call that reaches `listening` and then `closed` with no `turn` in between
+means nothing the person said ever produced an answer; read the `upstream`
+lines first. No `awake` line means the session never acknowledged its setup —
+the connect stalled or was refused — and `upstream-failed` or `upstream-closed`
+then says why. Only the `closed` code and reason say which side closed the
+client's socket.
 
 No trace line carries the words. What a person said, what each Bot answered
 and what became of each request are readable afterwards from the ledger
@@ -598,8 +608,9 @@ expires no delegation. The fields are documented in
 
 ### Text turns
 
-`{type:"text_message",text}` runs a turn without STT. Not used by the footer;
-kept for tests.
+`{type:"text_message",text}` sends the words to the session as a whole turn
+(`clientContent` with `turnComplete`), so the model answers them aloud without
+anyone speaking. Not used by the footer; kept for tests.
 
 ## Durable ledger
 
@@ -607,14 +618,13 @@ kept for tests.
 `new_sqlite_classes` migration `v7`. It records, before any external call:
 
 - `session:<callId>` — call start, device, caps consumed.
-- `turn:<turnId>` — each admitted turn with its idempotency key
-  `voice-turn:<userId>:<callId>:<sequence>` and its outcome. A turn that was
-  admitted but never answered (eviction mid-model-call) is marked `abandoned`
-  on the next start; a model call is never replayed without its key. A turn
-  that was a Bot's answer arriving rather than the person speaking carries an
-  `event` of kind `bot-answer`; its `transcript` is the message the assistant
-  was given and its `answer` what it chose to say, empty when it chose
-  nothing.
+- `turn:<turnId>` — each model turn, admitted the moment the model starts
+  answering, with its key `voice-turn:<userId>:<callId>:<sequence>` and its
+  outcome. Its `transcript` is what the session had transcribed of the person
+  by then, written again when the turn settles because the fuller text
+  usually arrives while the model is already speaking; its `answer` is the
+  session's own output transcription. A turn admitted and never settled (an
+  eviction, a session that dropped) is marked `abandoned` on the next start.
 - `delegation:<runId>` — a Bot delegation: target Bot, text, `runId` derived
   as `sha256` over `userId`, `callId`, `turnId`, `botId` and `text` joined by
   NUL (so a retried tool call admits the same Bot Turn once), and state
@@ -622,13 +632,12 @@ kept for tests.
   the assistant, with the id of the event turn that told it; `cancelled` is a
   request whose call ended first.
 
-Delegations use the Bot's `runVoice` door and the existing agent lane.
+A `subagent` call uses the Bot's `runVoice` door and the existing agent lane.
 The command records the call, voice Turn and request IDs before dispatch;
 the target Bot admits the same `runId` once. Active conversations and Routines
 finish normally, then queued voice requests run in FIFO order with User work
 prioritised. A voice request does not supersede existing work. Ending or
-interrupting the voice call does not cancel accepted Bot work. The assistant's
-`cancel` tool requires an explicit request to stop the call's own Bot and
+interrupting the voice call does not cancel accepted Bot work. The `cancel` tool requires an explicit request to stop the call's own Bot and
 records intent before sending its authenticated stop command.
 
 The Bot receives `reply_to_request`, whose `reply/to-caller` event addresses
@@ -651,41 +660,22 @@ same ID, with bounded retries and an explicit failure when exhausted.
 `onStart` recreates pending checks from the ledger; a request whose call is no
 longer the live one is cancelled on waking.
 
-A settled answer is handed to the assistant as one turn of the call it was
-asked on (`announceDelegation`, then the event turn). The turn is admitted and
-metered like a spoken one, marked as a Bot's answer, and carries the request
-in the person's own words from the retained spoken turn — "[Bot answer] Bob,
-asked earlier in this conversation about "can you ask Bob what the weather
-is?", has answered, in its own words: …" — so the assistant can say "about the
-weather" rather than recite its own paraphrase. The Bot's words are quoted as
-data, said so in the message itself and in the system prompt, and the event
-turn itself runs with no tools at all. The message is still part of this
-call's history, so the person's later turns — which do carry the tools — see
-it; the quoted-data marking, not the missing tools, is what keeps a Bot's
-words from being read as instructions. The system prompt says what such a
-message is and that saying nothing is a choice it may make. No bridge fills
-the silence, because nobody asked a question just now. What it says is spoken
-once it is whole; a person who starts talking meanwhile aborts it and their
-turn takes the floor. The event turn holds the announce floor while it runs
-and is bounded: a model request still going after twenty seconds is aborted
-and the turn settles `timeout`, so a stalled request cannot hold the floor —
-and every later answer with it — for the rest of the call. The delegation is
-marked `spoken` the moment the turn is admitted — told once, whatever is then
-said, and never re-announced, so an aborted answer is the one and only event
-turn for that answer and its message stays once in the history — and the turn
-record keeps what was said, or that nothing was. An answer with no call to be
-told on (the call ended, or the day's turns are spent) is dropped:
-`cancelled` in the ledger, on record in the Bot's own conversation. Nothing is
-composed ahead of time, cached, or acknowledged by the phone: the old read-out
-queue, its playback receipt and its lead-in were removed on 2026-09-17 in
-favour of this.
+A settled answer goes back to the live session as that function call's own
+late response (`announceDelegation`), scheduled `WHEN_IDLE` so the model says
+it at the next pause and decides for itself whether it is worth saying. The
+delegation is marked `spoken` the moment it is handed over — told once,
+whatever is then said. Nothing is composed ahead of time, cached, or
+acknowledged by the phone; there is no event turn and no announce floor,
+because the model already has one of its own. With no live session the answer
+waits and the attempt is booked again; with a different call, or a day of
+turns that is spent, it is dropped — `cancelled` in the ledger, on record in
+the Bot's own conversation.
 
-Conversation context is bounded and **call-scoped**: the prompt carries the
-newest 12 messages of _this call_, built from the ledger's own `turn:` records
-rather than the SDK's `cf_voice_messages` table, which is per User and would
-otherwise carry the last conversation — and a Bot answer that settles late —
-into the next one as if it had just been said. The SDK's table is still
-written (`saveMessage` is the mixin's own bookkeeping) and simply not read.
+Conversation context is the session's own: it remembers the call it is having,
+and a resumption handle carries that across a pause. The ledger's `turn:`
+records are read for two things only — the `<where-we-were>` handover when a
+session has to be reopened fresh, and the end-of-call memory update. Nothing
+from a previous call reaches a new one that way.
 The User Memory profile and the last 30 days of its log are read at call start
 through `MemoryStore` over the User Durable Object's generation ledger (so
 retractions and shards resolve as they do for Bots), and Project memory is
@@ -920,21 +910,27 @@ record could not be read, so the assistant promises nothing), `call-memory`
 `call-abandoned` (the rejoin window passed with nobody back).
 
 Caps meter what costs money, never how long the footer has been open: a
-session may stay open silently for hours because a sleeping upstream costs
+session may stay open silently for hours because a closed Live socket costs
 nothing. What is counted per account, durably, per UTC day:
 
-- upstream STT seconds — the time an STT session is awake, booked in 60 s
-  windows the moment the upstream starts opening, renewed while it stays awake,
-  and refunded for the unused part when it sleeps (bounded at 240 min/day; a
-  window past the cap shuts the upstream for the day and tells the client);
-- dictation seconds, booked and renewed the same way (bounded at 120 min/day);
+- **audio seconds in** — the person's own audio actually bridged to the
+  session, at 32 000 B/s (16 kHz PCM16), bounded at 240 min/day;
+- **audio seconds out** — the model's audio actually bridged to the client, at
+  48 000 B/s (24 kHz PCM16), bounded at 240 min/day and capped separately
+  because output costs about 3.6x input;
+- dictation seconds, booked in 60 s windows and refunded on release (bounded
+  at 120 min/day);
 - dictation tidy-ups, one model call per capture, booked before the model is
   asked and never refunded (bounded at 400/day);
-- TTS characters sent to ElevenLabs (bounded at 200k/day);
-- model turns, including the turn that tells the assistant a Bot's answer (bounded at 600/day), and Bot delegations (bounded at 8 per turn burst, 200/day).
+- model turns (bounded at 600/day), and Bot delegations (bounded at 8 per
+  burst, 200/day).
 
-Exceeding a cap answers `voice/refusal` with `quota` on the next upstream wake
-or turn and leaves the footer open; the day rolls at UTC midnight. One live
+The two audio meters are written in five-second blocks rather than per frame:
+every frame would be a storage write forty times a second in each direction,
+and a block keeps the day's arithmetic honest to within one block. Whatever is
+left in a part-block is written when the session sleeps or the call ends.
+Exceeding a cap shuts the session, answers `voice/refusal` with `quota` and
+leaves the footer open; the day rolls at UTC midnight. One live
 call per account: a second device supersedes the first. Transport rotation
 (a socket that is replaced by a newer one from the same device within 60 s,
 for instance after a network change) rejoins the same durable call record
@@ -942,31 +938,31 @@ rather than opening a new one. Raw audio is never stored anywhere.
 
 ## Credentials
 
-| Name                            | Where             | Required | What it enables                                                                                                                                                                                     |
-| ------------------------------- | ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPENAI_API_KEY`                | Worker secret     | optional | Composer dictation, and the continuous session's STT only when `VOICE_ASSISTANT_STT=openai`. Absent: dictation reports that voice is unavailable.                                                   |
-| `ELEVENLABS_API_KEY`            | Worker secret     | optional | The continuous voice session's ears (Scribe v2 Realtime) and speech, so it needs speech-to-text as well as text-to-speech permission. Absent: starting a session reports that voice is unavailable. |
-| `VOICE_ASSISTANT_STT`           | Worker var        | optional | `openai` listens through `gpt-transcribe`; anything else (and unset) is Scribe.                                                                                                                     |
-| `ELEVENLABS_VOICE_ID`           | Worker var        | optional | Voice id; default is ElevenLabs "George" (`JBFqnCBsd6RMkjVDRZzb`).                                                                                                                                  |
-| `VOICE_ASSISTANT_MODEL`         | Worker var        | optional | Pins a gateway model for voice turns (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`); unset, turns take the platform's Auto route.                                                     |
-| `VOICE_DICTATION_CLEANUP_MODEL` | Worker var        | optional | The model that tidies a dictated transcript. Unset takes the default route; no `AI` binding means no tidying and the raw transcript stands.                                                         |
-| `VOICE_DICTATION_UPSTREAM_URL`  | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                                                                          |
+| Name                            | Where             | Required | What it enables                                                                                                                             |
+| ------------------------------- | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`                | Worker secret     | yes      | Composer dictation. Absent: dictation reports that voice is unavailable.                                                                    |
+| `GEMINI_API_KEY`                | Worker secret     | yes      | The continuous voice session: one Gemini Live socket per call, ears, words and voice together. Absent: starting a session is refused.       |
+| `VOICE_ASSISTANT_MODEL`         | Worker var        | optional | Pins the gateway model the end-of-call memory update is asked; the platform's Auto route when unset. The call has no chat model.            |
+| `VOICE_DICTATION_CLEANUP_MODEL` | Worker var        | optional | The model that tidies a dictated transcript. Unset takes the default route; no `AI` binding means no tidying and the raw transcript stands. |
+| `VOICE_DICTATION_UPSTREAM_URL`  | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                  |
+| `VOICE_ASSISTANT_UPSTREAM_URL`  | test harness only | —        | Points the voice session at a local fake; never set in production.                                                                          |
 
 Declared in `apps/cloudflare/src/production-secrets.ts`, carried by the release
-workflow, listed in `.dev.vars.example`. The `AI` binding is still required
-for the continuous session — it is the Frock AI gateway transport for the chat
-model — but nothing is transcribed through it any more.
+workflow, listed in `.dev.vars.example`. The release gate refuses to find
+either harness door live. The `AI` binding is still wanted — it is the Frock AI
+gateway transport for the end-of-call memory update — but it no longer gates
+the control: a deployment without it can hold a conversation and simply
+remembers nothing afterwards.
 
-What listening costs: from OpenAI's pricing page on 2026-09-11,
-`gpt-live-transcribe`, which dictation needs for its live deltas, is $0.017
-per minute of audio, and `gpt-transcribe` — the assistant's ears only under
-`VOICE_ASSISTANT_STT=openai` — is $0.0045, which puts the assistant's
-240 min/day cap at about $1.08 a day through that path. By default the
-assistant's listening bills ElevenLabs for Scribe v2 Realtime instead; that
-rate is not recorded here, so size the cap against the ElevenLabs plan's
-realtime speech-to-text price. The assistant meters _awake_ seconds rather
-than seconds of speech, because a session that is awake is being charged
-whether or not anyone is talking.
+The key never leaves the Worker. A browser-style WebSocket carries no headers
+of ours, so the Live endpoint takes the key on its query string, which is why
+the Durable Object is the only thing that ever builds that URL.
+
+What talking costs: Gemini Live is billed per minute of audio in each
+direction, and at the 2026-09-15 GA prices output is about 3.6x input, which
+is why the two meters are separate and why the session is closed the moment
+nobody is talking. The cascade it replaced billed three providers for the same
+minute.
 
 ## Clients
 
@@ -1063,9 +1059,29 @@ collapses so the Bot fills the window, and Back disappears — including the
 Android system gesture, which ends the call instead of leaving a page with a
 call running behind it. A hand-over moves the page to the new Bot, but only
 when the call was the thing on screen, so somebody who walked to another Bot
-while the call carried on is not dragged out of it. The enlarged character and
-an on-page mute are not built, which is why the account-wide footer still
-carries mute, End and the meter.
+while the call carried on is not dragged out of it.
+
+**The voice surface.** Since ADR 0031 a call does not share the thread, so
+voice mode _replaces_ it: `apps/native/lib/voice/voice_mode.dart` is drawn
+where the transcript and the composer would be, and neither is drawn at all.
+There are no captions, for the same reason — the call is spoken, and the
+words of it are not a second record. A call with a Bot other than the one on
+screen keeps the small account-wide footer instead, which is why that footer
+still carries mute, End and the meter.
+
+Every band of the surface has a fixed height, so nothing moves as the state
+changes: the character in its ring, the Bot's name, and one word under it —
+`Listening`, `Speaking`, or `Paused`, which is all a paused call says. Under
+that is the activity slot, itself fixed, holding one chip per `subagent`
+hand-off the call has made: `Working` while the Turn runs, and `Work` once it
+settles, which opens the Turn the hand-off became — the `voice/delegation`
+frame names the `runId`, so that is the only Turn a chip can open. The bottom
+bar is Pause, the meter and End, and while paused it is a wide Resume — badged
+with how many hand-offs finished while nobody was listening — and End. An
+on-page mute is still not built: Pause is the control that stops the line.
+The bar above keeps the Bot's name, a `Voice` mark saying why the thread is
+gone, and the Computer; every other door leads out of a call that has no way
+out but ending it.
 
 **Starting.** The footer is on screen in the frame of the press, and the
 sidebar control takes its active colour on pointer-down, before the tap
@@ -1120,12 +1136,14 @@ rest and follows Flutter's ticker lifecycle. Reduced motion snaps to the
 level and state without the machine's own motion. Controls keep 48-point
 touch targets in both themes.
 
-### SDK frames a client must ignore
+### Frames a client must ignore
 
-Beside the messages above, the Agents SDK sends `cf_agent_identity`,
+The Cloudflare voice SDK used to send `cf_agent_identity`,
 `cf_agent_mcp_servers`, `diagnostic`, `metrics`, `turn_metrics` and
-`completion_outcome` text frames. Both clients drop any type they do not
-know rather than ending the call over it.
+`completion_outcome` text frames. Nothing sends them now, and both clients
+still know the names: the rule that matters is that a client drops any type it
+does not know rather than ending the call over it, which is what lets the
+server's frames change without a client release.
 
 ## Verification
 
@@ -1133,7 +1151,12 @@ What was run on 2026-09-10 in the crew worktree, with the results as they
 came back. Except for the live run recorded directly below, nothing here
 involved a real microphone or a real provider.
 
-The counts and scenario lists in this section are that evidence, unchanged:
+Read the whole section as history. It describes the cascade, and ADR 0031
+replaced it on 2026-09-17; the suites it counts were rewritten with it, and
+what runs now is the bun tests over `app/voice/gemini-live.ts`, the assistant's
+instruction and tools, and the workerd suite driving a whole call against a
+scripted Live upstream. The counts and scenario lists below are the evidence as
+it stood:
 they predate the reply-failure and latency work described under "A reply that
 fails", which adds bun tests for the speech guard, two voice workerd scenarios
 (a sentence that never becomes sound; a Bot answer held over one reply and
@@ -1155,10 +1178,20 @@ guards (run with no model at all), workerd scenarios for the frame order and
 for each way the tidy-up can fail leaving the raw transcript, Flutter tests
 for the span replacement, the revert and a late result after Send, and
 composer widget tests for the offer. The
-numbers below are therefore understated; the next run of the suites should replace them wholesale rather
-than add to them.
+numbers below are therefore understated, and they now also predate the Gemini
+Live session itself; the next run of the suites should replace them wholesale
+rather than add to them.
 
-### The live endpoint, 2026-09-11
+### The live endpoint, 2026-09-11 (historical)
+
+Everything in this section is the cascade: ElevenLabs Scribe listening,
+`gpt-transcribe` under the old `VOICE_ASSISTANT_STT=openai`, and a chat model
+between them. ADR 0031 replaced all three with one Gemini Live session on
+2026-09-17, so the frames below are a record of what was once proven and not a
+description of what runs. The Live API's own observed shapes are in
+[`voice-gemini-probe.md`](voice-gemini-probe.md).
+
+#### What was seen then
 
 `gpt-live-transcribe` was driven against
 `wss://api.openai.com/v1/realtime?intent=transcription` with the session frame

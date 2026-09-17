@@ -12,7 +12,9 @@ import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../theme/states.dart';
+import '../voice/appearance.dart';
 import 'model_picker.dart';
+import 'voice_settings.dart';
 
 /// One Bot's own settings: its identity, how it reaches you, and the model it
 /// runs on.
@@ -25,6 +27,7 @@ class BotSettingsController extends ChangeNotifier {
   final String botId;
   bool busy = false;
   bool saving = false;
+  Future<bool> _voiceWrites = Future.value(false);
 
   /// Whether a read has landed. A Bot that has never been edited is at
   /// revision 0, so the revision cannot double as this.
@@ -33,6 +36,11 @@ class BotSettingsController extends ChangeNotifier {
   String? message;
   int revision = 0;
   int accountRevision = 0;
+
+  /// The voice record's own revision. Voice is fenced separately from the
+  /// profile (`/api/bots/:id/voice`), so a profile save never moves it and a
+  /// voice save never moves [revision].
+  int voiceRevision = 0;
 
   /// How many reads have replaced what the fields show. A field is keyed on
   /// this rather than on the revision: a save moves the revision on every
@@ -53,6 +61,10 @@ class BotSettingsController extends ChangeNotifier {
   /// it read rather than saving the Bot back to the end of its group.
   int? sidebarOrder;
   bool notifications = true;
+
+  /// How this Bot sounds (ADR 0031), or null when it has chosen nothing and
+  /// speaks in its character's default voice.
+  BotVoiceAppearanceV1? voice;
 
   /// The Bot's model override, as the `custom-models` Package stores it, and
   /// null when this Bot follows the account model.
@@ -92,6 +104,11 @@ class BotSettingsController extends ChangeNotifier {
       sidebarOrder = (profile['sidebarOrder'] as num?)?.toInt();
       notifications =
           ((answer['notifications'] as Map?)?['enabled'] ?? true) == true;
+      // The voice has its own record and revision beside the profile; an
+      // absent `voice` means the Bot speaks in its character's default.
+      final voiceAnswer = (await api.request('/api/bots/$botId/voice'))! as Map;
+      voiceRevision = (voiceAnswer['revision'] as num?)?.toInt() ?? 0;
+      voice = BotVoiceAppearanceV1.fromJson(voiceAnswer['voice']);
       model =
           ((answer['packageValues'] as Map?)?['custom-models']
               as Map?)?['model'];
@@ -296,6 +313,50 @@ class BotSettingsController extends ChangeNotifier {
     }
   }
 
+  /// How this Bot sounds, saved as the person changes it.
+  ///
+  /// One command, fenced like every other configuration write. It is its own
+  /// save rather than part of [save] because the voice page is a page of its
+  /// own: nothing else on it can be dirty at the same time.
+  ///
+  /// The voice page saves on every tap, so a second choice made while the
+  /// first is still in flight queues behind it rather than being dropped.
+  Future<bool> saveVoice(BotVoiceAppearanceV1 next) {
+    final write = _voiceWrites.then((_) => _writeVoice(next));
+    _voiceWrites = write;
+    return write;
+  }
+
+  Future<bool> _writeVoice(BotVoiceAppearanceV1 next) async {
+    saving = true;
+    message = null;
+    final previous = voice;
+    voice = next;
+    _changed();
+    try {
+      await _voiceCommand({
+        'schemaVersion': 1,
+        'type': 'bot/update-voice',
+        'commandId': randomId(),
+        'botId': botId,
+        'voice': next.toJson(),
+      });
+      message = 'Saved.';
+      return true;
+    } on RequestFailure catch (failure) {
+      voice = previous;
+      message = failure.message;
+      return false;
+    } catch (_) {
+      voice = previous;
+      message = 'Couldn’t save this Bot’s voice. Try again.';
+      return false;
+    } finally {
+      saving = false;
+      _changed();
+    }
+  }
+
   /// One fenced command, and the revision it left behind.
   ///
   /// A conflict is re-fenced once against the revision the authority now
@@ -312,6 +373,35 @@ class BotSettingsController extends ChangeNotifier {
       revision = current['revision']! as int;
       _settle(await _send(command));
     }
+  }
+
+  /// The voice's own fenced write, to its own route, with the same one
+  /// re-fence on conflict as [_command].
+  Future<void> _voiceCommand(Map<String, Object?> command) async {
+    Future<Map<String, Object?>> send() async {
+      final answer = await api.request(
+        '/api/bots/$botId/voice',
+        body: {...command, 'expectedRevision': voiceRevision},
+      );
+      return (answer! as Map).cast<String, Object?>();
+    }
+
+    Map<String, Object?> receipt;
+    try {
+      receipt = await send();
+    } on RequestFailure catch (failure) {
+      if (failure.status != 409) rethrow;
+      final current = (await api.request('/api/bots/$botId/voice'))! as Map;
+      voiceRevision = (current['revision'] as num?)?.toInt() ?? voiceRevision;
+      receipt = await send();
+    }
+    final settled = receipt['revision'];
+    if (settled is int) voiceRevision = settled;
+    if (receipt['status'] != 'rejected') return;
+    final failure = receipt['failure'];
+    throw RequestFailure(
+      failure is String ? failure : 'Couldn’t save this Bot’s voice. Try again.',
+    );
   }
 
   Future<Map<String, Object?>> _send(Map<String, Object?> command) async {
@@ -694,6 +784,13 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                 value: state.notifications,
                 enabled: !state.hidden,
                 onChanged: (next) => state.notifications = next,
+              ),
+              // How this Bot sounds (ADR 0031): its own page, because the
+              // presets are a surface of their own and the row says enough.
+              BotVoiceRow(
+                controller: state,
+                characterId: widget.background,
+                primary: widget.primary,
               ),
               if (state.modelAvailable) _model(context),
               ...widget.sections,

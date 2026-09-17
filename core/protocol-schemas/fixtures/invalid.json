@@ -444,6 +444,49 @@
     }
   },
   {
+    "name": "BotVoiceAppearance without a delivery",
+    "schema": "BotVoiceAppearance",
+    "value": {
+      "schemaVersion": 1,
+      "voiceName": "Sulafat"
+    }
+  },
+  {
+    "name": "VoiceIdentity with a delivery field it does not carry",
+    "schema": "VoiceIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "revision": 2,
+      "voice": {
+        "schemaVersion": 1,
+        "voiceName": "Sulafat",
+        "delivery": {
+          "volume": "loud"
+        }
+      }
+    }
+  },
+  {
+    "name": "BotVoiceCommand with the wrong type",
+    "schema": "BotVoiceCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/update-avatar",
+      "commandId": "command-1",
+      "expectedRevision": 2,
+      "botId": "default",
+      "voice": {
+        "schemaVersion": 1,
+        "voiceName": "Sulafat",
+        "delivery": {
+          "accent": "australian",
+          "turnLength": "terse"
+        }
+      }
+    }
+  },
+  {
     "name": "SkillRef wrong shape",
     "schema": "SkillRef",
     "value": null

@@ -56,6 +56,11 @@ class PremountApi extends NativeApi {
     if (path.endsWith('/bots/bot-1/settings')) {
       return {...botSettings(), 'botId': 'bot-1'};
     }
+    // The settings read also asks how the Bot sounds; this one has chosen
+    // nothing, so the record carries no voice at all (ADR 0031).
+    if (path.endsWith('/bots/bot-1/voice')) {
+      return {'schemaVersion': 1, 'botId': 'bot-1', 'revision': 0};
+    }
     if (path.startsWith('/api/settings')) return account();
     throw const FormatException('offline fixture');
   }

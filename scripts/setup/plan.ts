@@ -428,14 +428,14 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
   },
   {
     name: "OPENAI_API_KEY",
-    enables: "dictation in the composer, and the voice session's listening",
+    enables: "dictation in the composer",
     where: "https://platform.openai.com/api-keys",
     workers: ["app"],
   },
   {
-    name: "ELEVENLABS_API_KEY",
+    name: "GEMINI_API_KEY",
     enables: "the voice session: hearing you and speaking back",
-    where: "https://elevenlabs.io/app/settings/api-keys",
+    where: "https://aistudio.google.com/apikey",
     workers: ["app"],
   },
   {

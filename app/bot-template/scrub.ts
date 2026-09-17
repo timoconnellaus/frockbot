@@ -31,6 +31,7 @@ import {
   type TemplatePackageV1,
   type TemplateRoutineV1,
   type TemplateAvatarAppearanceV1,
+  type TemplateVoiceAppearanceV1,
   type TemplateSkillV1,
 } from "@frockbot/core/template";
 import type {
@@ -109,6 +110,12 @@ export interface TemplateSourceV1 {
    * photograph — so it travels.
    */
   avatar: TemplateAvatarAppearanceV1;
+  /**
+   * How this Bot sounds, when it chose (ADR 0031). Slugs and a prebuilt voice
+   * name — nothing said aloud and nothing deployment-specific — so it travels
+   * with the avatar.
+   */
+  voice?: TemplateVoiceAppearanceV1;
   skills: readonly TemplateSkillCandidateV1[];
   routines: readonly TemplateRoutineCandidateV1[];
   packages: readonly TemplatePackageCandidateV1[];
@@ -295,6 +302,7 @@ export function buildBotTemplateV1(
         ? { description: source.profile.description.slice(0, 10_000) }
         : {}),
       avatar: { kind: "avatar", recipe: source.avatar },
+      ...(source.voice === undefined ? {} : { voice: source.voice }),
     },
     skills,
     routines,

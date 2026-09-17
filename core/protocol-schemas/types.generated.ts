@@ -75,6 +75,20 @@ export type SessionRevokeCommand = {
   action: "sign-out";
   sessionId: Identifier;
 };
+export type BotVoiceAppearance = {
+  schemaVersion: 1;
+  voiceName: string;
+  delivery: {
+    accent?: string;
+    attitude?: string;
+    pace?: string;
+    turnLength?: string;
+    humour?: string;
+    disfluency?: string;
+    formality?: string;
+    custom?: string;
+  };
+};
 export type AvatarAppearance = {
   schemaVersion: 1;
   characterId: string;
@@ -88,6 +102,7 @@ export type BotRegistration = {
   initialDescription?: string;
   avatar: AvatarAppearance;
   createdBy?: BotWriter;
+  voice?: BotVoiceAppearance;
 };
 export type BotDirectory = {
   schemaVersion: 1;
@@ -128,6 +143,7 @@ export type BotCreateCommand = {
   name: string;
   description?: string;
   avatar?: AvatarAppearance;
+  voice?: BotVoiceAppearance;
 };
 export type BotLifecycleReceipt = {
   schemaVersion: 1;
@@ -150,6 +166,20 @@ export type BotAvatarCommand = {
   expectedRevision: number;
   botId: BotId;
   avatar: AvatarAppearance;
+};
+export type VoiceIdentity = {
+  schemaVersion: 1;
+  botId: BotId;
+  revision: number;
+  voice?: BotVoiceAppearance;
+};
+export type BotVoiceCommand = {
+  schemaVersion: 1;
+  type: "bot/update-voice";
+  commandId: Identifier;
+  expectedRevision: number;
+  botId: BotId;
+  voice: BotVoiceAppearance;
 };
 export type FlockReceipt = {
   schemaVersion: 1;
@@ -905,6 +935,7 @@ export interface ProtocolTypes {
   AuthExchangeCommand: AuthExchangeCommand;
   AuthSessionView: AuthSessionView;
   SessionRevokeCommand: SessionRevokeCommand;
+  BotVoiceAppearance: BotVoiceAppearance;
   AvatarAppearance: AvatarAppearance;
   BotRegistration: BotRegistration;
   BotDirectory: BotDirectory;
@@ -916,6 +947,8 @@ export interface ProtocolTypes {
   BotLifecycleReceipt: BotLifecycleReceipt;
   AvatarIdentity: AvatarIdentity;
   BotAvatarCommand: BotAvatarCommand;
+  VoiceIdentity: VoiceIdentity;
+  BotVoiceCommand: BotVoiceCommand;
   FlockReceipt: FlockReceipt;
   SkillRef: SkillRef;
   TurnCommand: TurnCommand;

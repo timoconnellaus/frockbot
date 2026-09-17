@@ -14,6 +14,7 @@ import {
   migrateStoredBotDirectoryV1,
   randomAvatarAppearanceV1,
   type AvatarAppearanceV1,
+  type BotVoiceAppearanceV1,
   type BotDirectoryViewV1,
   type BotLifecycleCommandV1,
   type BotLifecycleDirectoryViewV1,
@@ -195,6 +196,39 @@ export class FlockUserBackendContribution {
     });
   }
 
+  /**
+   * Records how a Bot sounds now, after the Bot itself accepted the change.
+   *
+   * The same mirror the avatar has, for the same reason: the Bot object is the
+   * authority and holds the revision, but the voice session reads the User's
+   * directory, so a change that lived only in the Bot would never be heard.
+   */
+  async mirrorVoice(
+    botId: string,
+    voice: BotVoiceAppearanceV1,
+  ): Promise<BotDirectoryViewV1> {
+    return this.host.storage.transaction(async (storage) => {
+      const currentValue = await storage.get<unknown>(DIRECTORY_KEY);
+      const current =
+        currentValue === undefined
+          ? initialDirectory()
+          : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(currentValue));
+      const found = current.bots.find((bot) => bot.botId === botId);
+      if (!found) return structuredClone(current);
+      if (JSON.stringify(found.voice) === JSON.stringify(voice))
+        return structuredClone(current);
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        bots: current.bots.map((bot) =>
+          bot.botId === botId ? { ...bot, voice: structuredClone(voice) } : bot,
+        ),
+      } satisfies BotDirectoryViewV1;
+      await storage.put(DIRECTORY_KEY, next);
+      return structuredClone(next);
+    });
+  }
+
   async registration(botId: string): Promise<BotRegistrationV1> {
     const found = (await this.listBots()).bots.find(
       (bot) => bot.botId === botId,
@@ -269,7 +303,7 @@ export class FlockUserBackendContribution {
     current: BotDirectoryViewV1,
     bot: Pick<
       CreateBotCommandV1,
-      "botId" | "name" | "description" | "createdBy" | "avatar"
+      "botId" | "name" | "description" | "createdBy" | "avatar" | "voice"
     >,
   ): Promise<BotDirectoryViewV1> {
     // A new Bot carries neither a model nor a grant. Both resolve from the
@@ -289,6 +323,9 @@ export class FlockUserBackendContribution {
       avatar: structuredClone(
         bot.avatar ?? randomAvatarAppearanceV1(this.host.random),
       ),
+      // No random voice: a Bot nobody gave one to sounds like its character,
+      // which is decided when it speaks rather than frozen at registration.
+      ...(bot.voice === undefined ? {} : { voice: structuredClone(bot.voice) }),
     };
     const next = {
       ...current,

@@ -227,11 +227,8 @@ String encodeVoiceMuteV1(bool muted) =>
 /// The SDK's own `start_call` frame carries only a preferred format, so the
 /// target is said separately, just before it. A call that never names one
 /// talks to the account's General Bot.
-String encodeVoiceTargetV1(String botId) => jsonEncode({
-  'schemaVersion': 1,
-  'type': 'voice/target',
-  'botId': botId,
-});
+String encodeVoiceTargetV1(String botId) =>
+    jsonEncode({'schemaVersion': 1, 'type': 'voice/target', 'botId': botId});
 
 String encodeVoiceSpeechV1(bool playing) => jsonEncode({
   'schemaVersion': 1,
@@ -312,8 +309,11 @@ final class AssistantVoiceTargetV1 extends AssistantServerFrameV1 {
 final class AssistantDelegationV1 extends AssistantServerFrameV1 {
   final String botId;
   final String botName;
+
+  /// The Turn the request became, so the activity slot can open its Work.
+  final String runId;
   final VoiceDelegationStateV1 state;
-  const AssistantDelegationV1(this.botId, this.botName, this.state);
+  const AssistantDelegationV1(this.botId, this.botName, this.runId, this.state);
 }
 
 /// One JSON text frame from the assistant socket.
@@ -368,8 +368,14 @@ AssistantServerFrameV1? decodeAssistantServerFrameV1(String raw) {
         'finished' => VoiceDelegationStateV1.finished,
         _ => null,
       };
-      if (botId is! String || botName is! String || state == null) return null;
-      return AssistantDelegationV1(botId, botName, state);
+      final runId = value['runId'];
+      if (botId is! String ||
+          botName is! String ||
+          runId is! String ||
+          state == null) {
+        return null;
+      }
+      return AssistantDelegationV1(botId, botName, runId, state);
     case 'welcome':
       final version = value['protocol_version'];
       return AssistantWelcomeV1(version is int ? version : 0);

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart' hide ConnectionState;
 
 import '../client/chat_controller.dart';
+import '../voice/voice_mode.dart' show VoiceHeaderPill;
 import 'semantics.dart';
 import 'chat_icons.dart';
 
@@ -49,6 +50,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onTogglePanel;
   final bool panelShown;
 
+  /// Whether this Bot is the one on the call (ADR 0031). The bar keeps the
+  /// name, a mark that says why the thread is gone, and the Computer: every
+  /// other door leads out of a call that has no way out but ending it.
+  final bool voiceMode;
+
   const ChatHeader({
     super.key,
     required this.name,
@@ -65,6 +71,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.packageEntries = const [],
     this.onTogglePanel,
     this.panelShown = false,
+    this.voiceMode = false,
   });
 
   double get _toolbarHeight => 52 * textScale.clamp(1, 3);
@@ -95,7 +102,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             ),
           ),
         ),
-        if (onOpenBot != null) ...[
+        if (voiceMode) ...[
+          const SizedBox(width: 8),
+          const VoiceHeaderPill(),
+        ],
+        if (onOpenBot != null && !voiceMode) ...[
           const SizedBox(width: 3),
           Icon(
             Icons.expand_more_rounded,
@@ -123,7 +134,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       // right: 4 of trailing space plus the icon's own margin inside its
       // 40-wide button.
       titleSpacing: onBack == null ? 14 : 4,
-      title: onOpenBot == null
+      title: onOpenBot == null || voiceMode
           ? title
           : Align(
               alignment: Alignment.centerLeft,
@@ -149,7 +160,18 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 ),
               ),
             ),
-      actions: [
+      actions: voiceMode
+          ? [
+              if (onComputer != null)
+                _destination(
+                  'Computer',
+                  ChatIconKind.computer,
+                  onComputer,
+                  color: computerRunning ? computerRunningColor : null,
+                ),
+              const SizedBox(width: 4),
+            ]
+          : [
         ...packageEntries,
         if (onApplets != null)
           identified(

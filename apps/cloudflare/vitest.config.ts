@@ -57,6 +57,11 @@ const workerdBindings = {
   // A leak canary: a Bot isolate — and an Applet facet — must never see
   // a host binding.
   SECRET_TOKEN: "host-only-secret",
+  // The voice session's upstream, pointed at a stand-in. The object still
+  // builds the URL and puts its key on it; `voice-assistant-probe.ts`
+  // answers the open with one half of a `WebSocketPair`.
+  VOICE_ASSISTANT_UPSTREAM_URL: "wss://voice-upstream.invalid/live",
+  GEMINI_API_KEY: "workerd-gemini-key",
   // The Applet viewer door's signing secret. Fixed, so a test can mint
   // the token a page presents and forge one that must be refused.
   APPLET_VIEWER_SECRET: "workerd-applet-viewer-secret-0123456789ab",

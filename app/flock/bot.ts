@@ -6,6 +6,7 @@ import {
   decodeBotLifecycleViewV1,
   decodeBotRegistrationV1,
   decodeAvatarIdentityViewV1,
+  decodeVoiceIdentityViewV1,
   decodeStoredBotLifecycleReceiptV1,
   decodeStoredFlockReceiptV1,
   flockCommandFingerprint,
@@ -16,11 +17,17 @@ import {
   type FlockReceiptV1,
   type AvatarIdentityViewV1,
   type UpdateAvatarCommandV1,
+  type VoiceIdentityViewV1,
+  type UpdateVoiceCommandV1,
 } from "./shared.js";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 
 const IDENTITY_KEY = "flock:avatar:v1";
 const RECEIPT_PREFIX = "flock:avatar-receipt:";
+// A Bot's voice is its own record with its own revision, so changing how a Bot
+// sounds never races a change to how it looks (ADR 0031).
+const VOICE_KEY = "flock:voice:v1";
+const VOICE_RECEIPT_PREFIX = "flock:voice-receipt:";
 const LIFECYCLE_KEY = "flock:lifecycle:v1";
 const LIFECYCLE_RECEIPT_PREFIX = "flock:lifecycle-receipt:";
 export interface FlockBotTransaction {
@@ -179,6 +186,99 @@ export class FlockBotBackendContribution {
       } satisfies FlockReceiptV1;
       await storage.put({
         [IDENTITY_KEY]: next,
+        [receiptKey]: { fingerprint, receipt },
+      });
+      return receipt;
+    });
+  }
+
+  /**
+   * The Bot's voice record, seeded once from the registration.
+   *
+   * Lazy rather than written in `materialize`: a Bot registered before voices
+   * existed has no record, and seeding it on the first read costs one write
+   * instead of a migration. An absent `voice` is not a gap to fill — it means
+   * nobody chose, and the character default answers for the Bot.
+   */
+  private async materializeVoice(
+    registration: BotRegistrationV1,
+    userId: string,
+  ): Promise<VoiceIdentityViewV1> {
+    // The avatar path owns the tombstone check and the lifecycle record; voice
+    // rides on it rather than repeating the rule.
+    await this.materialize(registration, userId);
+    return this.host.storage.transaction(async (storage) => {
+      const existingValue = await storage.get<unknown>(VOICE_KEY);
+      if (existingValue !== undefined) {
+        const existing = decodeVoiceIdentityViewV1(existingValue);
+        if (existing.botId !== registration.botId)
+          throw new Error("voice identity does not match Bot registration");
+        return existing;
+      }
+      const initial = {
+        schemaVersion: 1,
+        botId: registration.botId,
+        revision: 0,
+        ...(registration.voice === undefined
+          ? {}
+          : { voice: structuredClone(registration.voice) }),
+      } satisfies VoiceIdentityViewV1;
+      await storage.put(VOICE_KEY, initial);
+      return initial;
+    });
+  }
+
+  async readVoice(
+    registration: BotRegistrationV1,
+    userId: string,
+  ): Promise<VoiceIdentityViewV1> {
+    return structuredClone(await this.materializeVoice(registration, userId));
+  }
+
+  /** `bot/update-voice`, fenced and receipted exactly as the avatar update is. */
+  async updateVoice(
+    registration: BotRegistrationV1,
+    userId: string,
+    command: UpdateVoiceCommandV1,
+  ): Promise<FlockReceiptV1> {
+    if (registration.botId !== command.botId)
+      throw new Error("voice command does not match Bot registration");
+    await this.materializeVoice(registration, userId);
+    const fingerprint = flockCommandFingerprint(command);
+    return this.host.storage.transaction(async (storage) => {
+      await this.assertActive(storage, registration.botId);
+      const receiptKey = `${VOICE_RECEIPT_PREFIX}${command.commandId}`;
+      const storedValue = await storage.get<unknown>(receiptKey);
+      const stored =
+        storedValue === undefined
+          ? undefined
+          : decodeStoredFlockReceiptV1(storedValue);
+      if (stored) {
+        if (stored.fingerprint !== fingerprint)
+          throw new FlockDecodeError(
+            `command ID collision: ${command.commandId}`,
+          );
+        return structuredClone(stored.receipt);
+      }
+      const currentValue = await storage.get<unknown>(VOICE_KEY);
+      if (currentValue === undefined)
+        throw new Error("voice identity was not materialized");
+      const current = decodeVoiceIdentityViewV1(currentValue);
+      if (current.revision !== command.expectedRevision)
+        throw new FlockConflictError(current.revision);
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        voice: structuredClone(command.voice),
+      } satisfies VoiceIdentityViewV1;
+      const receipt = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        status: "applied",
+        revision: next.revision,
+      } satisfies FlockReceiptV1;
+      await storage.put({
+        [VOICE_KEY]: next,
         [receiptKey]: { fingerprint, receipt },
       });
       return receipt;
