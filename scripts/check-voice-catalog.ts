@@ -159,23 +159,24 @@ export function voiceCatalogAuditReportV1(audit: VoiceCatalogAuditV1): string {
   return lines.join("\n");
 }
 
+const MAX_VOICE_PAGES_V1 = 20;
+
 /**
  * Reads every voice the account can reach, following its pagination.
  *
  * The provider's list is cursor-based: each page carries the token for the
- * next one, and a page without a token is the last. A token already followed
- * ends the walk too — this runs inside the deploy job with no timeout of its
- * own, so a provider that keeps handing back the same cursor must stop the
- * loop rather than hang it.
+ * next one, and a page without a token is the last. The walk is capped as
+ * well — this runs inside the deploy job with no timeout of its own, so a
+ * provider that never stops handing back cursors must end the loop rather
+ * than hang it.
  */
 export async function fetchAccountVoicesV1(
   apiKey: string,
   doFetch: typeof fetch = fetch,
 ): Promise<AccountVoiceV1[]> {
   const voices: AccountVoiceV1[] = [];
-  const followed = new Set<string>();
   let pageToken: string | undefined;
-  do {
+  for (let page = 0; page < MAX_VOICE_PAGES_V1; page++) {
     const query = new URLSearchParams({ page_size: "100" });
     if (pageToken) query.set("next_page_token", pageToken);
     const response = await doFetch(
@@ -197,10 +198,9 @@ export async function fetchAccountVoicesV1(
         voices.push({ voiceId: voice.voice_id, name: voice.name ?? "" });
       }
     }
-    if (pageToken) followed.add(pageToken);
-    const next = body.next_page_token ?? undefined;
-    pageToken = next && !followed.has(next) ? next : undefined;
-  } while (pageToken);
+    pageToken = body.next_page_token ?? undefined;
+    if (!pageToken) break;
+  }
   return voices;
 }
 

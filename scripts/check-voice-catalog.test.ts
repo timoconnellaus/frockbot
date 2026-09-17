@@ -140,10 +140,11 @@ describe("reading the account's voices", () => {
     expect(asked).toHaveLength(2);
   });
 
-  // Nothing else bounds this loop and it runs inside the deploy job, so a
-  // provider that keeps handing back the cursor it just gave must end the
-  // walk rather than spin until the runner's own limit kills the job.
-  test("stops when the account repeats a page token", async () => {
+  // Nothing else bounds this loop and it runs inside the deploy job, so an
+  // account that never stops handing back a cursor — a fresh one each time,
+  // not a repeat — must end the walk rather than spin until the runner's own
+  // limit kills the job.
+  test("stops after a bounded number of pages", async () => {
     const asked: string[] = [];
     const voices = await fetchAccountVoicesV1("key", (async (url: string) => {
       asked.push(url);
@@ -153,15 +154,12 @@ describe("reading the account's voices", () => {
         json: async () => ({
           voices: [{ voice_id: `v${asked.length}`, name: "Bec" }],
           has_more: true,
-          next_page_token: "stuck",
+          next_page_token: `page-${asked.length}`,
         }),
       };
     }) as unknown as typeof fetch);
-    expect(asked).toHaveLength(2);
-    expect(voices).toEqual([
-      { voiceId: "v1", name: "Bec" },
-      { voiceId: "v2", name: "Bec" },
-    ]);
+    expect(asked).toHaveLength(20);
+    expect(voices).toHaveLength(20);
   });
 
   // A key without voices_read returns 401, which must not read as "the
