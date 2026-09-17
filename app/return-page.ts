@@ -66,13 +66,13 @@ ${page.script}
 <style nonce="${nonce}">
   :root {
     --window: #1f1e24; --raised: #2c2a33; --border: #3a3742;
-    --text: #f4f2f6; --muted: #aaa6b1; --accent: #ec386b; --accent-hover: #f04d7b;
+    --text: #f4f2f6; --muted: #aaa6b1; --accent: #db4b6d; --accent-hover: #ed5c7c;
     --glow: rgba(236, 56, 107, .22); --shadow: rgba(0, 0, 0, .45);
   }
   @media (prefers-color-scheme: light) {
     :root {
       --window: #faf8fb; --raised: #ffffff; --border: #dfd9e3;
-      --text: #1f1e24; --muted: #625c6b; --accent: #bd1e50; --accent-hover: #d02a5f;
+      --text: #1f1e24; --muted: #625c6b; --accent: #c23359; --accent-hover: #b11f4b;
       --glow: rgba(189, 30, 80, .14); --shadow: rgba(31, 30, 36, .12);
     }
   }

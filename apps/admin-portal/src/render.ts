@@ -88,8 +88,8 @@ const STYLES = `
   --text: #f4f2f6;
   --muted: #aaa6b1;
   --subtle: #8d8896;
-  --pink: #ec386b;
-  --pink-dark: #d92d5f;
+  --pink: #db4b6d;
+  --pink-dark: #c93a5f;
   --good: #46b98a;
   --warn: #e3a33c;
   --bad: #e5565b;
