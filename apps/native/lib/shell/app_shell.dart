@@ -1376,7 +1376,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget _panelHeader(wire.BotRegistration bot, String? key) {
     final theme = Theme.of(context);
     final botId = bot.botId.value;
-    final phase = key == 'computer' ? computer?.state.message : null;
+    final phase = key == 'computer' ? computer?.said : null;
     return SizedBox(
       height: 52,
       child: Padding(
@@ -1957,7 +1957,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               children: [
                 const Text('Computer'),
                 Text(
-                  machine.failure ?? machine.state.message,
+                  machine.said,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(

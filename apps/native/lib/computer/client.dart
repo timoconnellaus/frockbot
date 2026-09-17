@@ -340,6 +340,10 @@ class ComputerController extends ChangeNotifier {
   Timer? _poll;
   bool _closed = false;
 
+  /// The one line every surface says about this Computer: what refused, or
+  /// what the Computer itself last said it was doing.
+  String get said => failure ?? state.message;
+
   String get _root => '/api/bots/${Uri.encodeComponent(botId)}/computer';
 
   void _changed() {

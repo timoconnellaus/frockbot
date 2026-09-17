@@ -297,6 +297,31 @@ void main() {
     expect(viewerUrlForControlV1(driving, false), contains('view_only=1'));
   });
 
+  /// Every surface that says one line about the Computer — the card, the
+  /// phone's page, the desktop panel's header — asks the controller for it, so
+  /// a refusal cannot be silent on one of them and said on the others.
+  test('a Computer that refused says that, not the phase it was in', () async {
+    var reads = 0;
+    final controller = ComputerController(
+      SettingsApi(MemoryStore(), (path, body) async {
+        if (path.endsWith('/commands')) {
+          throw const RequestFailure('The Computer host answered 503', 503);
+        }
+        if (reads++ > 0) {
+          throw const RequestFailure('The Computer host answered 503', 503);
+        }
+        return projection(message: 'Ready to start');
+      }),
+      'bot-1',
+    );
+    await controller.read();
+    expect(controller.said, 'Ready to start');
+    await controller.takeControl();
+    expect(controller.state.message, 'Ready to start');
+    expect(controller.said, 'The Computer host answered 503');
+    controller.dispose();
+  });
+
   group('the card', () {
     Future<ComputerController> open(
       WidgetTester tester,

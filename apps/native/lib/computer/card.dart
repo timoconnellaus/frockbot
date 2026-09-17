@@ -557,7 +557,7 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
     final state = controller.state;
     // The one sentence this window has: what the Computer said, or what
     // refused to say it.
-    final said = controller.failure ?? state.message;
+    final said = controller.said;
     final human = state.phase == 'human-control';
     final opening = state.phase == 'provisioning' || state.phase == 'updating';
     final url = state.viewerUrl;
