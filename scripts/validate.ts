@@ -103,6 +103,15 @@ const SHARED_ARTIFACT = new Set(["integration", "e2e"]);
 const EXCLUSIVE = new Set(["build"]);
 
 /**
+ * How long a captured command's pipes may still be read after the process
+ * itself has exited. Exit is the authority on when a command is done: a pipe
+ * closes only once every descendant that inherited the write end has let go,
+ * and a killed package-manager wrapper can leave one behind forever. Whatever
+ * has arrived by the end of this window is what gets printed.
+ */
+const CAPTURE_DRAIN_MS = 2_000;
+
+/**
  * The content of everything `name` reads, as one hash. `snapshot` has proven
  * the work tree matches `HEAD` everywhere `ignoredWorkingPath` does not
  * ignore, which is why `HEAD` is the thing to hash: the index says nothing
@@ -205,13 +214,13 @@ export async function validate(
   // stops the rest by killing every live child; a concurrent category is
   // already spawned by then, so only the kill path stops one, while the guard
   // in `runCategory` holds back work that has genuinely not begun.
-  const live = new Set<{ kill: () => void }>();
+  const live = new Set<() => void>();
   let failure: unknown;
   const stop = (error: unknown): void => {
     // The first failure is the one worth reporting; what the kill below
     // provokes in the others is a consequence of it, not a second cause.
     failure ??= error;
-    for (const child of live) child.kill();
+    for (const kill of live) kill();
   };
   /**
    * Wait for every job before propagating the first failure, so nothing
@@ -231,7 +240,9 @@ export async function validate(
    *
    * A captured command's output is printed as one block when it ends, so
    * concurrent categories cannot interleave; otherwise it inherits the
-   * terminal and streams live.
+   * terminal and streams live. Capture is also why a command gets its own
+   * process group: what `stop` must reach is not the package-manager wrapper
+   * but the workers below it, which are what hold the pipe open.
    */
   const runCategory = async (name: string): Promise<void> => {
     if (failure !== undefined) return;
@@ -275,32 +286,42 @@ export async function validate(
           stdin: "inherit",
         } as const;
         const child = captureOutput
-          ? Bun.spawn(command, { ...options, stdout: "pipe", stderr: "pipe" })
+          ? Bun.spawn(command, {
+              ...options,
+              stdout: "pipe",
+              stderr: "pipe",
+              detached: true,
+            })
           : Bun.spawn(command, {
               ...options,
               stdout: "inherit",
               stderr: "inherit",
             });
-        live.add(child);
-        const code = await (async () => {
-          if (
-            child.stdout instanceof ReadableStream &&
-            child.stderr instanceof ReadableStream
-          ) {
-            const [stdout, stderr, exited] = await Promise.all([
-              new Response(child.stdout).text(),
-              new Response(child.stderr).text(),
-              child.exited,
-            ]);
-            const output = stdout + stderr;
-            if (output.trim())
-              console.log(
-                `\n--- ${name}: ${command.join(" ")} ---\n${output.trimEnd()}`,
-              );
-            return exited;
+        const kill = (): void => {
+          try {
+            process.kill(captureOutput ? -child.pid : child.pid, "SIGTERM");
+          } catch {
+            /* Already gone. */
           }
-          return child.exited;
-        })().finally(() => live.delete(child));
+        };
+        live.add(kill);
+        const captured: string[] = [];
+        const drained = captureOutput
+          ? Promise.all(
+              [child.stdout, child.stderr].map(async (stream) => {
+                const decoder = new TextDecoder();
+                for await (const chunk of stream as ReadableStream<Uint8Array>)
+                  captured.push(decoder.decode(chunk, { stream: true }));
+              }),
+            ).catch(() => {})
+          : undefined;
+        const code = await child.exited.finally(() => live.delete(kill));
+        if (drained) {
+          await Promise.race([drained, Bun.sleep(CAPTURE_DRAIN_MS)]);
+          const output = captured.join("").trimEnd();
+          if (output.trim())
+            console.log(`\n--- ${name}: ${command.join(" ")} ---\n${output}`);
+        }
         if (code !== 0) throw new Error(`${name} failed; no success recorded`);
       }),
     );

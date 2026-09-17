@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -52,6 +53,7 @@ afterEach(() => {
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
   delete categories.probe;
+  delete categories.sleeper;
 });
 
 test("documentation exceptions do not ignore nested prompts or new code", () => {
@@ -167,6 +169,30 @@ test("no category treats prose as an input", async () => {
   git(root, "commit", "-qm", "documentation only");
   await validate(root, ["probe"]);
   expect(probeRuns(root)).toBe("1");
+});
+
+test("a killed category's surviving descendants cannot wedge the run", async () => {
+  const root = fixture();
+  // `sleeper` leaks a grandchild into a process group of its own — what
+  // `wrangler dev` deliberately does — so the kill that `probe`'s failure
+  // provokes cannot reach it, and it holds the inherited pipe open long after
+  // the command it was spawned from is gone. Exit, not end-of-pipe, is what
+  // says a command is done.
+  categories.probe = [[process.execPath, "-e", "process.exit(1)"]];
+  categories.sleeper = [
+    [
+      process.execPath,
+      "-e",
+      'Bun.spawn(["sleep", "10"], { stdout: "inherit", stderr: "inherit", detached: true }); await Bun.sleep(10_000);',
+    ],
+  ];
+  const started = Date.now();
+  await expect(validate(root, ["probe", "sleeper"])).rejects.toThrow(
+    "probe failed",
+  );
+  expect(Date.now() - started).toBeLessThan(6_000);
+  expect(existsSync(join(root, ".local-validation", "running"))).toBe(false);
+  expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual([]);
 });
 
 test("the input rules exclude prose without excluding nested code", () => {
