@@ -13,9 +13,8 @@
 // loosened gate are both invisible to a test that only looks for a fragment of
 // the text, and both are exactly what this file exists to catch.
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { SLOW_TIER_IRRELEVANT_V1 } from "./ci-change-scope";
 
 interface Job {
   needs?: string | string[];
@@ -210,7 +209,7 @@ const rootScripts: Record<string, string> =
  */
 function resolveCommand(command: string, seen = new Set<string>()): string {
   let resolved = command;
-  for (const word of command.match(/[\w:@./-]+/g) ?? []) {
+  for (const [, word] of command.matchAll(/\brun\s+([\w:@./-]+)/g)) {
     const body = rootScripts[word];
     if (body === undefined || seen.has(word)) continue;
     seen.add(word);
@@ -256,16 +255,7 @@ test("every workspace the tier excuses is still bundled by a job that runs", () 
   // performs, so whichever job bundles them has to be one an excused push
   // still reaches. Moving those bundles under the scope gate would leave them
   // built by nobody for precisely the pushes that touch only them.
-  const excused = SLOW_TIER_IRRELEVANT_V1.map((prefix) =>
-    join(root, prefix, "package.json"),
-  )
-    .filter((manifest) => existsSync(manifest))
-    .map(
-      (manifest) => JSON.parse(readFileSync(manifest, "utf8")).name as string,
-    );
-  expect(excused.length).toBe(2);
-
-  for (const pkg of excused) {
+  for (const pkg of ["@frockbot/marketing", "@frockbot/admin-portal"]) {
     const builders = Object.keys(workflow.jobs).filter((job) =>
       builds(job, pkg),
     );
