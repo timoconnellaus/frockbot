@@ -27,7 +27,12 @@ interface ProbeSession {
 
 /** What the scripted model does with a transcript. */
 export interface VoiceProbeScript {
-  /** Transcripts containing this word become an `ask_bot` call to `botId`. */
+  /**
+   * Transcripts containing this word become an `ask` call. Since ADR 0029
+   * the work goes to the Bot the call is on, so `botId` no longer chooses a
+   * target — it only says the script expects a delegation at all, and the
+   * test opens the call on the Bot it means.
+   */
   delegateWord?: string;
   botId?: string;
   /** The whole model reply, so a test can choose its sentences. */
@@ -58,6 +63,9 @@ export interface VoiceProbeScript {
   /** Transcripts containing this word become a `forget` tool call. */
   forgetWord?: string;
   forget?: string;
+  /** Transcripts containing this word hand the call to `switchBotId`. */
+  switchWord?: string;
+  switchBotId?: string;
 }
 
 /** One scheduled row, with its payload as JSON. */
@@ -127,6 +135,8 @@ export interface VoiceTraceLine {
 export class WorkerdVoiceAssistant extends VoiceAssistant {
   #sessions: ProbeSession[] = [];
   #synthesized: string[] = [];
+  #streamed: string[] = [];
+  #spokenVoices: string[] = [];
   #chats: Record<string, unknown>[] = [];
   #script: VoiceProbeScript = {};
   #dropDispatches = 0;
@@ -213,21 +223,39 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     }
   }
 
-  protected override createTts() {
+  protected override createTts(voiceId?: string) {
+    // Read at stream time, not here: the base class builds its provider while
+    // its own fields initialize, before this subclass's are.
+    const self = this;
+    const speak = async (text: string, signal?: AbortSignal) => {
+      this.#synthesized.push(text);
+      // Which voice each sentence was spoken in, so a test can prove a Bot
+      // sounds like itself and that a hand-over changes who is heard.
+      this.#spokenVoices.push(voiceId ?? "");
+      // A real provider is an HTTP request carrying this signal: a held
+      // sentence waits, and an interrupt part way through it rejects then
+      // and there rather than handing back audio for a moment that has
+      // passed.
+      if (this.#ttsHeld) await Promise.race([this.#ttsHeld, aborts(signal)]);
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+      if (this.#script.failTts) throw new Error("speech provider unavailable");
+      if (this.#script.silentTts) return null;
+      // 20 ms of silence at 24 kHz: enough to be a real binary frame.
+      return new ArrayBuffer(24_000 * 2 * 0.02);
+    };
     return {
-      synthesize: async (text: string, signal?: AbortSignal) => {
-        this.#synthesized.push(text);
-        // A real provider is an HTTP request carrying this signal: a held
-        // sentence waits, and an interrupt part way through it rejects then
-        // and there rather than handing back audio for a moment that has
-        // passed.
-        if (this.#ttsHeld) await Promise.race([this.#ttsHeld, aborts(signal)]);
-        if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-        if (this.#script.failTts)
-          throw new Error("speech provider unavailable");
-        if (this.#script.silentTts) return null;
-        // 20 ms of silence at 24 kHz: enough to be a real binary frame.
-        return new ArrayBuffer(24_000 * 2 * 0.02);
+      synthesize: speak,
+      /**
+       * The real provider streams, and the SDK takes a different path when
+       * the object it is handed can: the fake streams too, so the suite runs
+       * the path a deployment with a key actually runs. One chunk per
+       * sentence, so what reaches the socket is what the buffered path sent,
+       * and the record below is the only difference a test can see.
+       */
+      synthesizeStream: async function* (text: string, signal?: AbortSignal) {
+        self.#streamed.push(text);
+        const audio = await speak(text, signal);
+        if (audio) yield audio;
       },
     };
   }
@@ -310,6 +338,27 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
       const reply =
         this.#script.answerReply ??
         (() => {
+          // Since ADR 0029 the event comes in two shapes. The current Bot's
+          // own work is told in the first person with no name; another
+          // Bot's still carries one. A real model chooses its words; this
+          // one keeps the distinction visible so a test can assert it.
+          const mine = /^The work you started earlier/.test(
+            last.content.slice(VOICE_BOT_ANSWER_MARKER_V1.length).trim(),
+          );
+          if (mine) {
+            const result = /is finished\. The result: "(.*?)" Say it as/s.exec(
+              last.content,
+            )?.[1];
+            const stopped = /could not be finished: "(.*?)" Say it as/s.exec(
+              last.content,
+            )?.[1];
+            // Deliberately not "Done:" — the tool-result reply already
+            // starts that way, and a test that wants to prove a read-out
+            // has *not* happened yet must be able to tell them apart.
+            return result
+              ? `Finished: ${result}`
+              : `I could not finish that: ${stopped ?? ""}`;
+          }
           const bot =
             new RegExp(
               `^${VOICE_BOT_ANSWER_MARKER_V1.replace(/[[\]]/g, "\\$&")} (.*?), asked`,
@@ -363,6 +412,14 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
       );
     }
     if (
+      script.switchWord &&
+      script.switchBotId &&
+      body.tools !== undefined &&
+      last.content.includes(script.switchWord)
+    ) {
+      return tool("switch_bot", { bot_id: script.switchBotId });
+    }
+    if (
       script.forgetWord &&
       body.tools !== undefined &&
       last.content.includes(script.forgetWord)
@@ -385,11 +442,8 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
                     index: 0,
                     id: "call_1",
                     function: {
-                      name: "ask_bot",
-                      arguments: JSON.stringify({
-                        bot_id: script.botId,
-                        message: last.content,
-                      }),
+                      name: "ask",
+                      arguments: JSON.stringify({ message: last.content }),
                     },
                   },
                 ],
@@ -441,6 +495,16 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   async probeSynthesized(): Promise<string[]> {
     return [...this.#synthesized];
+  }
+
+  /** Sentences the SDK asked for as a stream rather than in one piece. */
+  async probeStreamed(): Promise<string[]> {
+    return [...this.#streamed];
+  }
+
+  /** The voice id each synthesized sentence was spoken in, in order. */
+  async probeSpokenVoices(): Promise<string[]> {
+    return [...this.#spokenVoices];
   }
 
   async probeChats(): Promise<number> {

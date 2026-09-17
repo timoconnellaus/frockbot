@@ -9,9 +9,12 @@ import {
   VOICE_ANSWER_MAX_CHARS_V1,
   VOICE_PROMPT_MAX_LOG_FACTS_V1,
   VOICE_TURN_BRIDGE_V1,
+  VOICE_TURN_BRIDGE_MIN_CHARS_V1,
   VOICE_TURN_BRIDGES_V1,
   pickVoiceBridgeV1,
   VOICE_TURN_MAX_STEPS_V1,
+  VOICE_ACCOUNT_TOOLS_V1,
+  VOICE_TOOLS_V1,
   type VoiceAssistantHostV1,
   type VoiceAssistantPromptInputV1,
   type VoiceTurnChunkV1,
@@ -75,8 +78,8 @@ describe("the chat completion stream parser", () => {
         sse([
           text("Hel"),
           text("lo"),
-          toolCall(0, "call_1", "ask_bot", '{"bot_id":'),
-          toolArgs(0, '"remy","message":"plan"}'),
+          toolCall(0, "call_1", "ask", "{"),
+          toolArgs(0, '"message":"plan"}'),
           toolCall(1, "call_2", "list_bots", "{}"),
           { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
         ]),
@@ -89,8 +92,8 @@ describe("the chat completion stream parser", () => {
         type: "tool-call",
         call: {
           id: "call_1",
-          name: "ask_bot",
-          arguments: '{"bot_id":"remy","message":"plan"}',
+          name: "ask",
+          arguments: '{"message":"plan"}',
         },
       },
       {
@@ -126,13 +129,16 @@ function host(
 ): VoiceAssistantHostV1 & {
   bodies: Record<string, unknown>[];
   asked: string[];
+  switched: string[];
 } {
   const bodies: Record<string, unknown>[] = [];
   const asked: string[] = [];
+  const switched: string[] = [];
   let step = 0;
   return {
     bodies,
     asked,
+    switched,
     chat: async (body) => {
       bodies.push(body);
       const events = steps[Math.min(step, steps.length - 1)]!();
@@ -162,6 +168,22 @@ function host(
       return `Asked ${botId}.`;
     },
     cancelBot: async (botId) => `Stopped ${botId}.`,
+    switchBot: async (botId) => {
+      const bot = { remy: "Remy", finch: "Finch" }[botId];
+      if (!bot) {
+        return {
+          status: "refused" as const,
+          message: `There is no Bot called ${botId}.`,
+        };
+      }
+      switched.push(botId);
+      return {
+        status: "switched" as const,
+        botId,
+        name: bot,
+        message: `You are now ${bot}.`,
+      };
+    },
     recallProject: async (projectId) => `Project ${projectId}: nothing yet.`,
     remember: async ({ text, kind }) => `Kept ${kind}: ${text}`,
     forget: async (text) => `Dropped ${text}`,
@@ -174,6 +196,9 @@ const baseInput = (transcript: string) => ({
   history: [] as { role: "user" | "assistant"; content: string }[],
   transcript,
   signal: new AbortController().signal,
+  // Every call talks to one Bot (ADR 0029); the fake directory's first Bot
+  // stands in for it, and a test that switches names the other one.
+  botId: "remy",
 });
 
 describe("the bridge phrase", () => {
@@ -193,17 +218,33 @@ describe("the bridge phrase", () => {
     );
   });
 
+  // The bridge only works if it is spoken while the model is still silent.
+  // The SDK feeds a turn's text through a sentence chunker that holds a
+  // candidate it judges too short, and releases it only when the stream ends
+  // — which, for a stalled turn, is long after the silence the bridge was
+  // for. "Hang on." was such a phrase, so roughly one turn in six filled its
+  // stall with nothing at all. The SDK's own class is not a dependency of
+  // this package, so the Worker suite pins the rule against it; here the
+  // list is held to the length that rule requires.
+  test("every phrase is long enough for a chunker to speak at once", () => {
+    for (const phrase of VOICE_TURN_BRIDGES_V1) {
+      expect(phrase.length).toBeGreaterThanOrEqual(
+        VOICE_TURN_BRIDGE_MIN_CHARS_V1,
+      );
+    }
+  });
+
   test("a turn says the bridge it was given", async () => {
     const pending = Promise.withResolvers<ReadableStream<Uint8Array>>();
     const h = host([], { chat: () => pending.promise });
     const turn = runVoiceTurnV1(
       h,
-      { ...baseInput("slow"), bridge: "Hang on." },
+      { ...baseInput("slow"), bridge: "Hang on a sec." },
       () => {},
     );
     expect((await turn.next()).value).toEqual({
       kind: "bridge",
-      text: "Hang on. ",
+      text: "Hang on a sec. ",
     });
     pending.resolve(sse([text("Done.")]));
     await collect(turn);
@@ -270,12 +311,7 @@ describe("one voice turn", () => {
   test("runs tools, feeds results back, and speaks the second answer", async () => {
     const h = host([
       () => [
-        toolCall(
-          0,
-          "c1",
-          "ask_bot",
-          '{"bot_id":"remy","message":"plan my week"}',
-        ),
+        toolCall(0, "c1", "ask", '{"bot_id":"remy","message":"plan my week"}'),
       ],
       () => [text("I've asked Remy to plan your week.")],
     ]);
@@ -312,16 +348,11 @@ describe("one voice turn", () => {
     const h = host(
       [
         () => [
-          toolCall(
-            0,
-            "read",
-            "read_bot_history",
-            '{"bot_id":"remy","limit":2}',
-          ),
+          toolCall(0, "read", "read_history", '{"bot_id":"remy","limit":2}'),
           toolCall(
             1,
             "search",
-            "search_bot_history",
+            "search_history",
             '{"bot_id":"remy","query":"calendar"}',
           ),
         ],
@@ -392,14 +423,14 @@ describe("one voice turn", () => {
   });
 
   test.each([
-    ['{"bot_id":"remy","limit":0}', "read_bot_history"],
-    ['{"bot_id":"remy","limit":1.5}', "read_bot_history"],
-    ['{"bot_id":"remy","limit":9}', "read_bot_history"],
-    ['{"bot_id":"remy","limit":"2"}', "read_bot_history"],
-    ['{"bot_id":"remy","query":""}', "search_bot_history"],
+    ['{"bot_id":"remy","limit":0}', "read_history"],
+    ['{"bot_id":"remy","limit":1.5}', "read_history"],
+    ['{"bot_id":"remy","limit":9}', "read_history"],
+    ['{"bot_id":"remy","limit":"2"}', "read_history"],
+    ['{"bot_id":"remy","query":""}', "search_history"],
     [
       JSON.stringify({ bot_id: "remy", query: "x".repeat(257) }),
-      "search_bot_history",
+      "search_history",
     ],
   ])(
     "refuses invalid history arguments before touching a Bot: %s",
@@ -432,9 +463,7 @@ describe("one voice turn", () => {
   test("an ownership refusal stays a read failure and never falls back to asking the Bot", async () => {
     const h = host(
       [
-        () => [
-          toolCall(0, "foreign", "read_bot_history", '{"bot_id":"foreign"}'),
-        ],
+        () => [toolCall(0, "foreign", "read_history", '{"bot_id":"foreign"}')],
         () => [text("That Bot is not in your account.")],
       ],
       {
@@ -454,7 +483,7 @@ describe("one voice turn", () => {
   test("a tool that throws becomes a result the model hears, not a failed turn", async () => {
     const h = host(
       [
-        () => [toolCall(0, "c1", "bot_status", '{"bot_id":"ghost"}')],
+        () => [toolCall(0, "c1", "status", '{"bot_id":"ghost"}')],
         () => [text("I couldn't find that Bot.")],
       ],
       {
@@ -489,7 +518,7 @@ describe("one voice turn", () => {
     const h = host([
       () => [
         text("Let me check. "),
-        toolCall(0, "c1", "bot_status", '{"bot_id":"remy"}'),
+        toolCall(0, "c1", "status", '{"bot_id":"remy"}'),
       ],
       () => [text("Remy is idle.")],
     ]);
@@ -514,12 +543,7 @@ describe("one voice turn", () => {
     controller.abort();
     pending.resolve(
       sse([
-        toolCall(
-          0,
-          "c1",
-          "ask_bot",
-          '{"bot_id":"remy","message":"check emails"}',
-        ),
+        toolCall(0, "c1", "ask", '{"bot_id":"remy","message":"check emails"}'),
       ]),
     );
     expect(await collect(turn)).toEqual([]);
@@ -541,12 +565,7 @@ describe("one voice turn", () => {
     expect((await turn.next()).value?.kind).toBe("bridge");
     pending.resolve(
       sse([
-        toolCall(
-          0,
-          "c1",
-          "ask_bot",
-          '{"bot_id":"remy","message":"check emails"}',
-        ),
+        toolCall(0, "c1", "ask", '{"bot_id":"remy","message":"check emails"}'),
       ]),
     );
     expect(await collect(turn)).toEqual([
@@ -558,7 +577,7 @@ describe("one voice turn", () => {
 
   test("refuses to delegate past the per-turn bound", async () => {
     const calls = Array.from({ length: 9 }, (_, i) =>
-      toolCall(i, `c${i}`, "ask_bot", `{"bot_id":"remy","message":"job ${i}"}`),
+      toolCall(i, `c${i}`, "ask", `{"bot_id":"remy","message":"job ${i}"}`),
     );
     const h = host([() => calls, () => [text("Done asking.")]]);
     let result: VoiceTurnResultV1 | undefined;
@@ -694,6 +713,8 @@ describe("the system prompt", () => {
       })),
     ];
     const prompt = renderVoiceSystemPromptV1({
+      // A call wears a Bot (ADR 0029), and the answer rule is that Bot's.
+      bot: { botId: "sunny", name: "Sunny" },
       bots: [
         {
           botId: "remy",
@@ -719,6 +740,42 @@ describe("the system prompt", () => {
     expect(prompt).toContain("reply with nothing at all");
     expect(prompt).not.toContain("<answers>");
     expect(prompt).toContain("2026-09-10");
+  });
+
+  // ADR 0029. The voice layer wears one Bot and speaks as it, so work that
+  // Bot started comes back as its own: no narrator, no name. An answer from
+  // a Bot the call has since handed over from still carries one, because
+  // there the person really is being told about somebody else.
+  test("the current Bot's own work comes back in the first person, unnamed", () => {
+    const own = renderVoiceBotAnswerEventV1({
+      botName: "Sunny",
+      question: "can you book the flights?",
+      answer: "Booked, both legs.",
+      own: true,
+    });
+    expect(own).toContain("The work you started earlier");
+    expect(own).toContain("Say it as your own, in the first person");
+    expect(own).not.toContain("Sunny");
+    expect(own).toContain('"Booked, both legs."');
+    expect(own.startsWith(VOICE_BOT_ANSWER_MARKER_V1)).toBe(true);
+
+    const failed = renderVoiceBotAnswerEventV1({
+      botName: "Sunny",
+      question: "book the flights",
+      failure: "the airline site was down",
+      own: true,
+    });
+    expect(failed).toContain("could not be finished");
+    expect(failed).not.toContain("Sunny");
+
+    // Another Bot's answer is still somebody else's, and is named.
+    expect(
+      renderVoiceBotAnswerEventV1({
+        botName: "Sunny",
+        question: "book the flights",
+        answer: "Booked.",
+      }),
+    ).toContain("Sunny");
   });
 
   test("a Bot's answer is one message, marked, with the request in the person's words", () => {
@@ -796,6 +853,26 @@ describe("the system prompt", () => {
     });
   });
 
+  // A call the account has no Bot for is answered by the account-wide
+  // assistant (ADR 0029). The tools that mean a Bot would refer to nobody,
+  // so they are never offered — every one of them would come back as a
+  // failure for the whole call, under a prompt telling the model to try.
+  test("a call with no Bot is never handed the tools that mean one", async () => {
+    const h = host([() => [text("There is nobody to ask yet.")]]);
+    await collect(
+      runVoiceTurnV1(h, { ...baseInput("plan my week"), botId: "" }, () => {}),
+    );
+    const offered = (
+      h.bodies[0]!.tools as { function: { name: string } }[]
+    ).map((tool) => tool.function.name);
+    expect(offered).toEqual(
+      VOICE_ACCOUNT_TOOLS_V1.map((tool) => tool.function.name),
+    );
+    for (const name of ["ask", "status", "cancel", "switch_bot"]) {
+      expect(offered).not.toContain(name);
+    }
+  });
+
   test("a turn nobody is waiting on is not bridged, however long the model takes", async () => {
     const pending = Promise.withResolvers<ReadableStream<Uint8Array>>();
     const h = host([], { chat: () => pending.promise });
@@ -834,6 +911,59 @@ describe("the system prompt", () => {
       delegations: 0,
       outcome: "no_output",
     });
+  });
+
+  // Every tool the prompt tells the model to call has to exist and be one of
+  // the tools that call is actually given, or the loop answers "Unknown tool"
+  // or fails every attempt. The call without a current Bot is the one that
+  // drifts, because it is only reached when a Bot cannot be resolved.
+  test.each([
+    ["with a Bot", { botId: "sunny", name: "Sunny" }, VOICE_TOOLS_V1],
+    ["without one", undefined, VOICE_ACCOUNT_TOOLS_V1],
+  ])("only names tools it is given, %s", (_label, bot, tools) => {
+    const prompt = renderVoiceSystemPromptV1({
+      bots: [],
+      memory: { logDays: 30 },
+      now: new Date("2026-09-12T00:00:00.000Z"),
+      ...(bot ? { bot } : {}),
+    });
+    const offered = new Set<string>(tools.map((tool) => tool.function.name));
+    // How the prompt names a tool: in backticks, or as a snake_case word.
+    // A bare word like "ask" is left out on purpose — it is also English,
+    // and the rules for a call with no Bot use it as such.
+    const named = [
+      ...(prompt.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? []),
+      ...[...prompt.matchAll(/`([a-z_]+)`/g)].map((match) => match[1]!),
+    ];
+    for (const name of named) expect(offered).toContain(name);
+  });
+
+  // The header says "the other Bots … you cannot act as them". Listed among
+  // them, a Bot can pick its own id for switch_bot and be told, mid-turn,
+  // that it is already the one talking to them.
+  test("the directory is the other Bots, never the one speaking", () => {
+    const prompt = renderVoiceSystemPromptV1({
+      bot: { botId: "sunny", name: "Sunny" },
+      bots: [
+        { botId: "sunny", name: "Sunny" },
+        { botId: "remy", name: "Remy" },
+      ],
+      memory: { logDays: 30 },
+      now: new Date("2026-09-12T00:00:00.000Z"),
+    });
+    expect(prompt).toContain("- remy: Remy");
+    expect(prompt).not.toContain("- sunny: Sunny");
+  });
+
+  test("a Bot with no siblings is told there is nobody to hand over to", () => {
+    const prompt = renderVoiceSystemPromptV1({
+      bot: { botId: "sunny", name: "Sunny" },
+      bots: [{ botId: "sunny", name: "Sunny" }],
+      memory: { logDays: 30 },
+      now: new Date("2026-09-12T00:00:00.000Z"),
+    });
+    expect(prompt).toContain("no other Bots on this account");
+    expect(prompt).not.toContain("<bots>");
   });
 
   test("says when memory could not be read rather than pretending it is empty", () => {

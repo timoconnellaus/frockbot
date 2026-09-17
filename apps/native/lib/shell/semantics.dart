@@ -122,6 +122,9 @@ abstract final class VoiceIds {
   static const footerAnimation = 'voice-footer-animation';
   static const mute = 'voice-mute';
   static const end = 'voice-end';
+  /// The fixed voice control at the far right of the composer (ADR 0029).
+  /// Unlike the morphing action beside it, it is always this one thing.
+  static const composerVoice = 'composer-voice';
   static const composerDictate = 'composer-dictate';
   static const composerDictationStop = 'composer-dictation-stop';
   static const composerDictationLevel = 'composer-dictation-level';

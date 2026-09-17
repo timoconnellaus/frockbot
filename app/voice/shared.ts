@@ -193,7 +193,17 @@ export type VoiceAssistantClientMessageV1 =
    * while the person is still hearing something waits for it rather than
    * cutting it off. `playing` is sound actually leaving the device.
    */
-  | { schemaVersion: 1; type: "voice/speech"; playing: boolean };
+  | { schemaVersion: 1; type: "voice/speech"; playing: boolean }
+  /**
+   * Which Bot this call is talking to (ADR 0029).
+   *
+   * The SDK's own `start_call` frame carries only a preferred format, so the
+   * target is said separately: the client sends this before `start_call` to
+   * open the call on a Bot, and the server sends the same shape back when
+   * `switch_bot` retargets it, so the screen follows the voice. A call that
+   * never says one talks to General.
+   */
+  | { schemaVersion: 1; type: "voice/target"; botId: string };
 
 export type VoiceAssistantRefusalCodeV1 =
   "exclusive" | "superseded" | "quota" | "unconfigured";
@@ -201,6 +211,12 @@ export type VoiceAssistantRefusalCodeV1 =
 export type VoiceAssistantUpstreamStateV1 = "asleep" | "starting" | "awake";
 
 export type VoiceAssistantServerMessageV1 =
+  /**
+   * Which Bot the call is talking to (ADR 0029). The same shape the client
+   * sends to open a call on a Bot, sent back when the call is admitted and
+   * whenever `switch_bot` moves it, so the screen follows the voice.
+   */
+  | { schemaVersion: 1; type: "voice/target"; botId: string }
   | {
       schemaVersion: 1;
       type: "voice/refusal";
@@ -269,6 +285,13 @@ export function decodeVoiceAssistantClientMessageV1(
       playing: value.playing === true,
     };
   }
+  if (value.type === "voice/target") {
+    // An empty or non-string id is not a target: the call keeps the Bot it
+    // has rather than being pointed at nothing.
+    const botId = typeof value.botId === "string" ? value.botId.trim() : "";
+    if (!botId) return undefined;
+    return { schemaVersion: 1, type: "voice/target", botId };
+  }
   return undefined;
 }
 
@@ -294,6 +317,14 @@ export function decodeVoiceAssistantServerFrameV1(
   }
   const value = parsed as Record<string, unknown>;
   const type = typeof value.type === "string" ? value.type : "";
+  if (type === "voice/target") {
+    const botId = typeof value.botId === "string" ? value.botId.trim() : "";
+    if (!botId) return undefined;
+    return {
+      kind: "custom",
+      message: { schemaVersion: 1, type: "voice/target", botId },
+    };
+  }
   if (type === "voice/refusal") {
     const code = value.code;
     if (

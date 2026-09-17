@@ -173,6 +173,14 @@ class ShellLayout extends StatelessWidget {
   final VoidCallback onDismiss;
   final bool conversationOpen;
   final VoidCallback onBack;
+
+  /// Whether the Bot on screen is in voice mode (ADR 0029).
+  ///
+  /// The way out of a Bot is to end the call first, so Back does that
+  /// instead of leaving the page — including the Android system gesture,
+  /// which is the one people reach for and must not be swallowed.
+  final bool voiceMode;
+  final VoidCallback? onEndVoice;
   const ShellLayout({
     super.key,
     this.header,
@@ -184,6 +192,8 @@ class ShellLayout extends StatelessWidget {
     required this.onDismiss,
     required this.conversationOpen,
     required this.onBack,
+    this.voiceMode = false,
+    this.onEndVoice,
   });
 
   @override
@@ -203,9 +213,14 @@ class ShellLayout extends StatelessWidget {
       final drawnPanel = tier == ShellTier.dual && panelOpen && panel != null;
       final divider = FrockTheme.hairline(Theme.of(context).colorScheme);
       return PopScope(
-        canPop: !drawnPanel,
+        canPop: !drawnPanel && !voiceMode,
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop && drawnPanel) onDismiss();
+          if (didPop) return;
+          if (drawnPanel) {
+            onDismiss();
+            return;
+          }
+          if (voiceMode) onEndVoice?.call();
         },
         child: Stack(
           fit: StackFit.expand,
@@ -219,9 +234,14 @@ class ShellLayout extends StatelessWidget {
                     bottom: false,
                     child: Row(
                       children: [
+                        // In voice mode the Bot fills the window (ADR 0029):
+                        // the list of every other Bot is not what the person
+                        // is doing, and the call is.
                         _Column(
-                          width: shellSidebarWidth,
-                          border: Border(right: BorderSide(color: divider)),
+                          width: voiceMode ? 0 : shellSidebarWidth,
+                          border: voiceMode
+                              ? null
+                              : Border(right: BorderSide(color: divider)),
                           // The Mac's title strip is the app's inset now
                           // ([DesktopTitleBarPadding]), read by the safe area
                           // above; the column draws nothing for it.
@@ -278,9 +298,16 @@ class ShellLayout extends StatelessWidget {
   /// it and Back slides it away. The right panel's entries are pages of their
   /// own at this width, so there is no drawer to reason about.
   Widget _single(BuildContext context) => PopScope(
-    canPop: !conversationOpen,
+    canPop: !conversationOpen && !voiceMode,
     onPopInvokedWithResult: (didPop, _) {
-      if (!didPop && conversationOpen) onBack();
+      if (didPop) return;
+      // In voice mode the gesture ends the call rather than leaving the Bot:
+      // to leave, you hang up first.
+      if (voiceMode) {
+        onEndVoice?.call();
+        return;
+      }
+      if (conversationOpen) onBack();
     },
     child: _PageSwitch(
       forward: conversationOpen,
@@ -343,7 +370,10 @@ class _PageSwitch extends StatelessWidget {
 
 class _Column extends StatelessWidget {
   final double width;
-  final Border border;
+
+  /// Absent for a column that is collapsed to nothing: a hairline with no
+  /// column beside it is a stray line down the window.
+  final Border? border;
   final Widget child;
   const _Column({
     required this.width,

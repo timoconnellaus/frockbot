@@ -5,6 +5,8 @@
 import { env } from "cloudflare:workers";
 import { expect } from "vitest";
 
+import type { AvatarAppearanceV1 } from "@frockbot/app/flock/shared";
+
 /** The provider, model, and Package the bootstrap enables account-wide. */
 export const PROVISIONED_MODEL = {
   packageId: "provider-ollama-cloud",
@@ -26,6 +28,8 @@ export async function provisionBot(
   identity: {
     userId: string;
     botId: string;
+    /** The Bot's look. Left out, the Flock draws one at random. */
+    avatar?: AvatarAppearanceV1;
   },
   /**
    * The Connection's key. Defaults to the one the Ollama Cloud stub accepts; a
@@ -114,6 +118,7 @@ export async function provisionBot(
       expectedRevision: await flockRevision(identity.userId),
       botId: identity.botId,
       name: "Workerd Bot",
+      avatar: identity.avatar,
     },
   });
 }
@@ -130,6 +135,8 @@ export async function flockRevision(userId: string): Promise<number> {
 export async function provisionSiblingBot(identity: {
   userId: string;
   botId: string;
+  /** The Bot's look. Left out, the Flock draws one at random. */
+  avatar?: AvatarAppearanceV1;
 }): Promise<void> {
   await user(identity.userId).createBot({
     schemaVersion: 1,
@@ -141,6 +148,7 @@ export async function provisionSiblingBot(identity: {
       expectedRevision: await flockRevision(identity.userId),
       botId: identity.botId,
       name: "Workerd Sibling",
+      avatar: identity.avatar,
     },
   });
 }

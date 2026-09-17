@@ -187,6 +187,17 @@ class Composer extends StatefulWidget {
   /// Commits the dictation into the editable draft. It never sends.
   final VoidCallback? onStopDictation;
 
+  /// Starts or ends a voice call with this Bot (ADR 0029).
+  ///
+  /// Its own control, to the right of the one that morphs between dictate,
+  /// send and stop: voice is not a mode of the draft, and a target that moved
+  /// under the thumb would be pressed by accident. Absent on a client with no
+  /// microphone, like dictation.
+  final VoidCallback? onVoice;
+
+  /// Whether this Bot is the one a voice call is open on right now.
+  final bool voiceActive;
+
   /// Whether this composer's Bot is the one being dictated into.
   final DictationState dictationState;
   bool get dictating => dictationState.active;
@@ -206,6 +217,8 @@ class Composer extends StatefulWidget {
     required this.skills,
     this.onDictate,
     this.onStopDictation,
+    this.onVoice,
+    this.voiceActive = false,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
   });
@@ -282,6 +295,40 @@ class _ComposerState extends State<Composer> {
         draftSendable(widget.editor.text.trim())) {
       widget.onSend();
     }
+  }
+
+  /// The voice control: always this one thing, whatever the draft is doing.
+  ///
+  /// It does not morph with the action beside it (ADR 0029), so the target
+  /// under the thumb never moves. While a call is open on this Bot it reads
+  /// as pressed and ends the call, which is the same control doing the
+  /// opposite rather than a second one appearing somewhere else.
+  Widget _voiceButton(BuildContext context) {
+    final theme = Theme.of(context);
+    final active = widget.voiceActive;
+    return identified(
+      VoiceIds.composerVoice,
+      IconButton(
+        key: const ValueKey('composer-voice'),
+        tooltip: active ? 'End voice' : 'Talk to this Bot',
+        isSelected: active,
+        onPressed: widget.onVoice,
+        style: IconButton.styleFrom(
+          minimumSize: Size.square(chatControlExtent),
+          fixedSize: Size.square(chatControlExtent),
+          padding: EdgeInsets.zero,
+          iconSize: chatIconSize,
+          shape: const CircleBorder(),
+          backgroundColor: active
+              ? theme.colorScheme.primary
+              : Colors.transparent,
+          foregroundColor: active
+              ? theme.colorScheme.onPrimary
+              : theme.colorScheme.onSurfaceVariant,
+        ),
+        icon: const Icon(Icons.graphic_eq_rounded),
+      ),
+    );
   }
 
   Widget _actionButton(
@@ -561,6 +608,10 @@ class _ComposerState extends State<Composer> {
                               ),
                       ),
                     ),
+                    // Voice, to the right of the morph and never part of it
+                    // (ADR 0029). It is the same target whatever the draft is
+                    // doing, so the thumb can find it without looking.
+                    if (widget.onVoice != null) corner(_voiceButton(context)),
                   ],
                 ),
               ],

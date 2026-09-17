@@ -37,7 +37,9 @@ import {
   type VoiceAssistantHostV1,
   type VoiceAssistantPromptInputV1,
   type VoiceBotSummaryV1,
+  type VoiceCurrentBotV1,
 } from "@frockbot/app/voice/assistant";
+import { resolveVoiceIdV1 } from "@frockbot/app/voice/voices";
 import {
   VoiceLedgerV1,
   voiceCallIsStaleV1,
@@ -49,6 +51,7 @@ import {
 } from "@frockbot/app/voice/ledger";
 import {
   renderVoiceBotStatusV1,
+  VOICE_HISTORY_DEFAULT_LIMIT_V1,
   VOICE_HISTORY_MAX_LIMIT_V1,
 } from "@frockbot/app/voice/history";
 import type { SearchIndexResultsV1 } from "@frockbot/app/search/shared";
@@ -104,11 +107,15 @@ import {
 } from "@frockbot/app/voice/shared";
 import { MemoryStore } from "@frockbot/app/memory/store";
 import {
+  botMemoryRootV1,
   projectMemoryRootV1,
   userMemoryRootV1,
   isMemoryProjectIdV1,
 } from "@frockbot/app/memory/roots";
-import { decodeDirectoryViewV1 } from "@frockbot/app/flock/shared";
+import {
+  decodeDirectoryViewV1,
+  decodeFlockBootstrapViewV1,
+} from "@frockbot/app/flock/shared";
 import type {
   ClientRunLookupV1,
   ClientRunV1,
@@ -284,6 +291,23 @@ interface ConnectionIdentity {
 
 interface LiveCall {
   callId: string;
+  /** The socket that holds this call, so a switch can retarget its record. */
+  connectionId: string;
+  /**
+   * The Bot this call is talking to (ADR 0029): who the voice layer is
+   * wearing, whose tools the narrowed ones mean, and whose voice speaks.
+   * `switch_bot` moves both of these and the durable record together.
+   */
+  botId: string;
+  botName: string;
+  /** The voice this call's Bot speaks in; the deployment's when it has none. */
+  voiceId?: string;
+  /**
+   * The voice the next sentence is in, when it is not the call's own: a Bot
+   * answer read out on behalf of the Bot that answered it. Cleared as soon as
+   * that read-out is done, so the call goes back to its own voice.
+   */
+  speakingVoiceId?: string;
   /** When the call was admitted, so every later line can say how far in. */
   startedAt: number;
   /**
@@ -437,6 +461,14 @@ export class VoiceAssistant extends VoiceAgentBase<
 > {
   #calls = new Map<string, LiveCall>();
   /**
+   * The Bot a socket asked for before its call was admitted (ADR 0029).
+   *
+   * The SDK's `start_call` frame carries only a preferred format, so the
+   * target arrives as its own message just before it. Held per connection
+   * until the call is admitted, then it lives in the call record.
+   */
+  #targets = new Map<string, string>();
+  /**
    * Answers being handed to the assistant right now, by run id. Two signals
    * for one answer — the Bot's wake and the scheduled look-up — arrive
    * together; the second finds the first here and does nothing.
@@ -469,7 +501,87 @@ export class VoiceAssistant extends VoiceAgentBase<
   >();
 
   tts: (TTSProvider & Partial<StreamingTTSProvider>) | undefined =
-    this.guardTts(this.createTts());
+    this.guardTts(this.speakingTts());
+
+  /**
+   * One provider per voice this object has spoken as (ADR 0029).
+   *
+   * A call speaks in its Bot's voice, and a Bot's answer arriving from a
+   * delegation is read out in the answering Bot's, so one object can need
+   * several. Each is a cheap object over the same key; the first sentence in
+   * a new voice may pay a connection, which the bridge covers.
+   */
+  #ttsByVoice = new Map<
+    string,
+    (TTSProvider & Partial<StreamingTTSProvider>) | undefined
+  >();
+
+  /**
+   * The provider the SDK holds: one object that picks the voice per sentence.
+   *
+   * The SDK reads `tts` once and speaks every sentence through it, so the
+   * choice cannot be made by handing it a different provider. It is made here
+   * instead, from the call that is speaking, which is also the only place
+   * that knows a read-out belongs to another Bot.
+   */
+  private speakingTts():
+    (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
+    // A deployment with no speech provider at all has no voices either; the
+    // seam is asked once so a test subclass can refuse the same way. What it
+    // answers with also says whether this deployment's provider streams: the
+    // SDK reads `synthesizeStream` off this object before any call exists, so
+    // the capability cannot be discovered per sentence, and every voice is the
+    // same provider class over a different id.
+    const probe = this.createTts();
+    if (!probe) return undefined;
+    const self = this;
+    const speaking: TTSProvider & Partial<StreamingTTSProvider> = {
+      async synthesize(text, signal) {
+        const voice = self.ttsForVoice(self.speakingVoiceId());
+        if (!voice) return null;
+        return voice.synthesize(text, signal);
+      },
+    };
+    if (probe.synthesizeStream)
+      speaking.synthesizeStream = async function* (text, signal) {
+        const voice = self.ttsForVoice(self.speakingVoiceId());
+        if (!voice) return;
+        // A voice whose provider cannot stream still speaks, in one piece.
+        if (!voice.synthesizeStream) {
+          const audio = await voice.synthesize(text, signal);
+          if (audio) yield audio;
+          return;
+        }
+        yield* voice.synthesizeStream(text, signal);
+      };
+    return speaking;
+  }
+
+  /** The provider for one voice, made once and kept. */
+  private ttsForVoice(
+    voiceId: string | undefined,
+  ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
+    const key = voiceId ?? "";
+    if (this.#ttsByVoice.has(key)) return this.#ttsByVoice.get(key);
+    const made = this.createTts(voiceId);
+    this.#ttsByVoice.set(key, made);
+    return made;
+  }
+
+  /**
+   * Whose voice the next sentence is in.
+   *
+   * The live call's Bot, unless something is being read out on behalf of
+   * another Bot — an answer that settled while this call was talking to
+   * somebody else — in which case it is that Bot's, so the person hears who
+   * is actually answering.
+   */
+  private speakingVoiceId(): string | undefined {
+    for (const call of this.#calls.values()) {
+      return call.speakingVoiceId ?? call.voiceId;
+    }
+    return undefined;
+  }
 
   /**
    * The provider never answers with silence: a sentence that produces no
@@ -547,13 +659,23 @@ export class VoiceAssistant extends VoiceAgentBase<
 
   // -- seams a test subclass overrides ---------------------------------------
 
-  protected createTts():
-    (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
+  /**
+   * One speech provider, in one voice.
+   *
+   * Takes the voice rather than reading it from the environment, because a
+   * call speaks as its Bot (ADR 0029) and one object may hold several. An
+   * absent voice is the deployment's own, which is what an account with no
+   * per-Bot voices chosen still sounds like.
+   */
+  protected createTts(
+    voiceId?: string,
+  ): (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
     const apiKey = this.env.ELEVENLABS_API_KEY?.trim();
     if (!apiKey) return undefined;
     return new ElevenLabsTTS({
       apiKey,
       voiceId:
+        voiceId?.trim() ||
         this.env.ELEVENLABS_VOICE_ID?.trim() ||
         VOICE_ASSISTANT_DEFAULT_VOICE_ID,
       modelId: VOICE_ASSISTANT_TTS_MODEL,
@@ -1091,6 +1213,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       await this.scheduleCallAbandon(current.callId);
     }
     this.#traced.delete(connection.id);
+    this.#targets.delete(connection.id);
     await super.onClose?.(connection, code, reason, wasClean);
   }
 
@@ -1107,6 +1230,26 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
     const custom = decodeVoiceAssistantClientMessageV1(parsed);
     if (!custom) return;
+    // The target is the one message that arrives before the call exists: the
+    // client says who it wants, then `start_call`. Once a call is live the
+    // same message is a hand-over the person asked for on the screen rather
+    // than in words, so it goes the same way `switch_bot` does.
+    if (custom.type === "voice/target") {
+      const live = this.#calls.get(connection.id);
+      if (!live) {
+        this.#targets.set(connection.id, custom.botId);
+        return;
+      }
+      const identity = this.identity(connection);
+      if (!identity) return;
+      await this.turnHost(
+        identity.userId,
+        live,
+        `target-${crypto.randomUUID()}`,
+        undefined,
+      ).switchBot(custom.botId);
+      return;
+    }
     const call = this.#calls.get(connection.id);
     if (!call) return;
     switch (custom.type) {
@@ -1149,6 +1292,124 @@ export class VoiceAssistant extends VoiceAgentBase<
       code,
       message,
     });
+  }
+
+  /**
+   * Which Bot a call opens on (ADR 0029).
+   *
+   * The client's choice wins when it names a Bot this account owns. Anything
+   * else — no choice, a deleted Bot, another account's — falls back to the
+   * account's General Bot: a Bot the person never asked for would answer in
+   * its own name, memory and thread with nothing saying it is not the one
+   * they wanted. An account with no General still has Bots — one that owned
+   * Bots before the bootstrap is never given General, and deleting General
+   * does not bring it back — so the directory is asked before a call is
+   * called Bot-less. Only an account with no Bots at all is answered by the
+   * account-wide assistant.
+   */
+  private async resolveCallTarget(
+    userId: string,
+    botId: string | undefined,
+  ): Promise<{ botId: string; name: string; voiceId?: string }> {
+    if (botId) {
+      try {
+        const owned = await this.ownedBot(userId, botId);
+        const voiceId = await this.voiceForBot(userId, owned.botId);
+        return {
+          botId: owned.botId,
+          name: owned.name,
+          ...(voiceId ? { voiceId } : {}),
+        };
+      } catch {
+        // Fall through to the account's default.
+      }
+    }
+    // Which Bot is General is recorded by the flock bootstrap, not spelled by
+    // a display name a person is free to change.
+    const generalBotId = await this.generalBotId(userId);
+    if (generalBotId) {
+      try {
+        const general = await this.ownedBot(userId, generalBotId);
+        const voiceId = await this.voiceForBot(userId, general.botId);
+        return {
+          botId: general.botId,
+          name: general.name,
+          ...(voiceId ? { voiceId } : {}),
+        };
+      } catch {
+        // General has been deleted. The directory below still answers.
+      }
+    }
+    // No General marker does not mean no Bots: an account that already owned
+    // Bots when the bootstrap ran is never given one, and deleting General
+    // does not bring it back. Only the directory can say the account is
+    // empty, and only then is the call Bot-less.
+    try {
+      const directory = await this.directory(userId);
+      for (const entry of directory.bots) {
+        try {
+          const owned = await this.ownedBot(userId, entry.botId);
+          const voiceId = await this.voiceForBot(userId, owned.botId);
+          return {
+            botId: owned.botId,
+            name: owned.name,
+            ...(voiceId ? { voiceId } : {}),
+          };
+        } catch {
+          // That Bot cannot be read; try the next one.
+        }
+      }
+    } catch {
+      // No directory to read: the call opens without a Bot.
+    }
+    return { botId: "", name: "" };
+  }
+
+  /**
+   * The voice a Bot speaks in (ADR 0029, decision 4).
+   *
+   * Its own choice if it has made one, else the voice its character carries,
+   * else the deployment's. The character is read from the account directory's
+   * avatar mirror, which is already the authority for what a Bot wears, so a
+   * Bot that has only ever picked a look already sounds unlike its siblings.
+   */
+  private async voiceForBot(
+    userId: string,
+    botId: string,
+  ): Promise<string | undefined> {
+    let characterId: string | undefined;
+    try {
+      const directory = await this.directory(userId);
+      characterId = directory.bots.find((bot) => bot.botId === botId)?.avatar
+        .characterId;
+    } catch {
+      // No directory, no character: the deployment's voice still answers.
+    }
+    return resolveVoiceIdV1({
+      ...(characterId ? { characterId } : {}),
+      ...(this.env.ELEVENLABS_VOICE_ID
+        ? { fallback: this.env.ELEVENLABS_VOICE_ID }
+        : {}),
+    });
+  }
+
+  /**
+   * Tells the client which Bot it is talking to (ADR 0029).
+   *
+   * Sent when a call is admitted and again whenever `switch_bot` moves it,
+   * so the screen follows the voice rather than the person having to guess
+   * who answered.
+   */
+  private sendTarget(connection: Connection, botId: string) {
+    this.send(connection, { schemaVersion: 1, type: "voice/target", botId });
+  }
+
+  /** The live socket with this id, if it is still one of ours. */
+  private connectionFor(connectionId: string): Connection | undefined {
+    for (const connection of this.getConnections()) {
+      if (connection.id === connectionId) return connection;
+    }
+    return undefined;
   }
 
   private sendState(connection: Connection, call: LiveCall) {
@@ -1199,12 +1460,25 @@ export class VoiceAssistant extends VoiceAgentBase<
     if (displaced && !(await ledger.rejoins(identity.deviceKey, now))) {
       await this.beginMemoryFinalization(displaced);
     }
+    // ADR 0029: a call addresses one Bot. The client says which before it
+    // says `start_call`, and that is what the call opens on whether it is a
+    // new call or a rejoin — the person pressed voice on a Bot just now, and
+    // a dropped call coming back on the Bot they left is not what they asked
+    // for. A rejoin that names none keeps the Bot its record has, and a
+    // client that names none — or names one this account does not own —
+    // gets General, so there is always somebody on the line.
+    const requested = this.#targets.get(connection.id);
     const admission = await ledger.beginCall({
       callId: crypto.randomUUID(),
       deviceKey: identity.deviceKey,
       connectionId: connection.id,
       at: now,
+      ...(requested ? { botId: requested } : {}),
     });
+    const target = await this.resolveCallTarget(
+      identity.userId,
+      admission.call.botId ?? requested,
+    );
     // Whatever this admission displaced — another device's call, or this
     // device's own earlier socket rejoining the same call — is ended now, so
     // one account never holds two live upstream sessions.
@@ -1225,9 +1499,13 @@ export class VoiceAssistant extends VoiceAgentBase<
     }
     const call: LiveCall = {
       callId: admission.call.callId,
+      connectionId: connection.id,
+      botId: target.botId,
+      botName: target.name,
+      ...(target.voiceId ? { voiceId: target.voiceId } : {}),
       startedAt: Date.now(),
       sequence: Date.parse(admission.call.startedAt),
-      promptContext: this.buildPromptContext(identity.userId),
+      promptContext: this.buildPromptContext(identity.userId, target.botId),
       lastAwakeSeconds: 0,
       reservedSeconds: 0,
       muted: false,
@@ -1249,7 +1527,12 @@ export class VoiceAssistant extends VoiceAgentBase<
       admission: admission.status,
       rejoined: admission.status === "admitted" && admission.rejoined,
       replaced: admission.replaced?.connectionId,
+      ...(call.botId ? { bot: call.botId } : {}),
     });
+    // The choice is spent: from here the Bot lives in the call record, and a
+    // later `voice/target` on this socket is a hand-over, not a preference.
+    this.#targets.delete(connection.id);
+    if (call.botId) this.sendTarget(connection, call.botId);
     return true;
   }
 
@@ -1638,6 +1921,7 @@ export class VoiceAssistant extends VoiceAgentBase<
             history,
             transcript,
             signal: context.signal,
+            botId: call.botId,
             bridge,
           },
           (result) => {
@@ -1981,6 +2265,58 @@ export class VoiceAssistant extends VoiceAgentBase<
         });
         void receipt;
         return `Asked ${bot.name} to stop.`;
+      },
+      // ADR 0029: the conversation is handed to another Bot. The record is
+      // written before the live call moves, so an eviction between the two
+      // leaves the call on the Bot the person was last told they had — and
+      // the client is told too, because the screen follows the voice.
+      switchBot: async (botId) => {
+        const target = botId.trim();
+        if (!target || target === call.botId) {
+          return {
+            status: "refused",
+            message: "You are already the one talking to them.",
+          };
+        }
+        let bot: { botId: string; name: string };
+        try {
+          bot = await this.ownedBot(userId, target);
+        } catch {
+          return {
+            status: "refused",
+            message: `There is no Bot called ${target} on this account.`,
+          };
+        }
+        const retargeted = await this.ledger().retargetCall(
+          call.connectionId,
+          bot.botId,
+          this.now(),
+        );
+        if (!retargeted) {
+          return {
+            status: "refused",
+            message: "This call is no longer the live one, so it cannot move.",
+          };
+        }
+        call.botId = bot.botId;
+        call.botName = bot.name;
+        // The voice moves with the Bot: from the next sentence the person
+        // hears somebody else, which is the whole point of the hand-over.
+        call.voiceId = await this.voiceForBot(userId, bot.botId);
+        // The Bot's own context is what the next turn wears, so it is read
+        // now rather than left to the next turn's critical path.
+        call.promptContext = this.buildPromptContext(userId, bot.botId);
+        const connection = this.connectionFor(call.connectionId);
+        if (connection) {
+          this.sendTarget(connection, bot.botId);
+          this.trace(connection, "call-switched", { bot: bot.botId });
+        }
+        return {
+          status: "switched",
+          botId: bot.botId,
+          name: bot.name,
+          message: `Handed over. You are ${bot.name} from here, speaking in your own voice; say so in your reply.`,
+        };
       },
       recallProject: async (projectId) => {
         if (!isMemoryProjectIdV1(projectId)) return "That is not a Project id.";
@@ -2330,12 +2666,24 @@ export class VoiceAssistant extends VoiceAgentBase<
     };
     try {
       const ledger = this.ledger();
+      // ADR 0029: work the current Bot started is its own, and is told in
+      // the first person. Only an answer from a Bot the call has since
+      // handed over from carries a name — and it is spoken in that Bot's
+      // voice, so the person hears who is answering before they are told.
+      const own = delegation.botId === call.botId;
       const transcript = renderVoiceBotAnswerEventV1({
         botName: delegation.botName,
         question: await this.delegationQuestion(ledger, delegation),
         ...(delegation.answer ? { answer: delegation.answer } : {}),
         ...(delegation.failure ? { failure: delegation.failure } : {}),
+        ...(own ? { own: true } : {}),
       });
+      if (!own) {
+        call.speakingVoiceId = await this.voiceForBot(
+          identity.userId,
+          delegation.botId,
+        );
+      }
       const admitted = await ledger.admitTurn({
         connectionId: connection.id,
         transcript,
@@ -2446,6 +2794,7 @@ export class VoiceAssistant extends VoiceAgentBase<
             history,
             transcript,
             signal: controller.signal,
+            botId: call.botId,
             acknowledge: false,
             tools: false,
           },
@@ -2505,6 +2854,10 @@ export class VoiceAssistant extends VoiceAgentBase<
       }
     } finally {
       release();
+      // The borrowed voice is given back with the floor, once the answer it
+      // was borrowed for has been spoken. Left set, the call would keep
+      // speaking as a Bot it is no longer talking to.
+      call.speakingVoiceId = undefined;
     }
   }
 
@@ -2583,6 +2936,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     // SAFETY: the binding names UserConfiguration; these are its reviewed RPCs.
     return stub as unknown as UserMemoryRpc & {
       listBots(input: unknown): Promise<unknown>;
+      readFlockBootstrap(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
       searchTranscripts(input: unknown): Promise<SearchIndexResultsV1>;
     };
@@ -2645,6 +2999,27 @@ export class VoiceAssistant extends VoiceAgentBase<
         await this.userRpc(userId).listBots({ schemaVersion: 1, userId }),
       ),
     );
+  }
+
+  /**
+   * Which Bot the account's authority provisioned as General. The bootstrap
+   * marker is the only thing that says so: names are the person's to change,
+   * and a Bot they call "General" is not the one the account bootstrapped.
+   */
+  private async generalBotId(userId: string): Promise<string | undefined> {
+    try {
+      const bootstrap = decodeFlockBootstrapViewV1(
+        rpcJsonSnapshotV1(
+          await this.userRpc(userId).readFlockBootstrap({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      );
+      return bootstrap.generalBotId ?? undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -2783,11 +3158,27 @@ export class VoiceAssistant extends VoiceAgentBase<
       .catch(() => "UTC");
   }
 
+  /**
+   * Everything the prompt needs that does not change within a turn.
+   *
+   * Built once when a call is admitted and again when `switch_bot` moves it,
+   * because the Bot half of it — who is speaking, their memory, their recent
+   * thread — is exactly what a switch replaces. All of it is read in
+   * parallel: this sits on the path between the person finishing a sentence
+   * and the first sound back.
+   */
   private async buildPromptContext(
     userId: string,
+    botId?: string,
   ): Promise<Omit<VoiceAssistantPromptInputV1, "now">> {
-    const [bots, memory, timezone, session] = await Promise.all([
-      this.listBots(userId).catch(() => [] as VoiceBotSummaryV1[]),
+    // One directory read serves both the prompt's `<bots>` list and the
+    // current Bot's activity; asked twice it would double the per-Bot RPC
+    // fan-out on exactly this path.
+    const directory = this.listBots(userId).catch(
+      () => [] as VoiceBotSummaryV1[],
+    );
+    const [bots, memory, timezone, session, bot] = await Promise.all([
+      directory,
       (async () => {
         const store = this.memoryStore(userId);
         if (!store) return undefined;
@@ -2807,15 +3198,79 @@ export class VoiceAssistant extends VoiceAgentBase<
       })(),
       this.userTimezone(userId),
       this.sessionMemoryContext(),
+      this.buildCurrentBotContext(userId, botId, directory),
     ]);
     return {
       bots,
       timezone,
       session,
+      ...(bot ? { bot } : {}),
       memory: {
         ...(memory ? { user: memory } : {}),
         logDays: VOICE_ASSISTANT_MEMORY_LOG_DAYS,
       },
+    };
+  }
+
+  /**
+   * The Bot the call is wearing (ADR 0029): who it is, what it remembers and
+   * what was last said to it.
+   *
+   * Every part is best-effort. A memory store that is down or a thread that
+   * cannot be read must not stop the person being answered — the prompt is
+   * simply thinner, and the model has tools to fetch what it is missing.
+   */
+  private async buildCurrentBotContext(
+    userId: string,
+    botId: string | undefined,
+    directory: Promise<VoiceBotSummaryV1[]>,
+  ): Promise<VoiceCurrentBotV1 | undefined> {
+    if (!botId) return undefined;
+    let bot: { botId: string; name: string; description?: string };
+    try {
+      bot = await this.ownedBot(userId, botId);
+    } catch {
+      // The Bot was deleted, or never belonged to this User. The call keeps
+      // going as the account-wide assistant rather than failing.
+      return undefined;
+    }
+    const [memory, thread, bots] = await Promise.all([
+      (async () => {
+        const store = this.memoryStore(userId);
+        if (!store) return undefined;
+        try {
+          return await store.read(botMemoryRootV1({ userId, botId }));
+        } catch {
+          return undefined;
+        }
+      })(),
+      (async () => {
+        try {
+          const page = await this.botDoor(userId, botId).listRuns();
+          const runs = page.runs.slice(-VOICE_HISTORY_DEFAULT_LIMIT_V1);
+          return {
+            botId,
+            botName: bot.name,
+            runs,
+            hasMore: page.page.truncated || page.runs.length > runs.length,
+          };
+        } catch {
+          return undefined;
+        }
+      })(),
+      // The directory is already being read for the prompt's `<bots>` list;
+      // this takes the live activity for the current Bot out of the same
+      // answer rather than asking its object again.
+      directory,
+    ]);
+    const activity = bots.find((row) => row.botId === botId)?.activity;
+    return {
+      botId: bot.botId,
+      name: bot.name,
+      ...(bot.description ? { description: bot.description } : {}),
+      ...(activity ? { activity } : {}),
+      ...(memory ? { memory } : {}),
+      ...(thread ? { thread } : {}),
     };
   }
 }

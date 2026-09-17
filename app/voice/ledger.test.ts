@@ -81,6 +81,40 @@ describe("voice ledger calls", () => {
     expect(same.replaced).toBeUndefined();
   });
 
+  // ADR 0029. A dropped call coming back is still a call the person just
+  // opened on a Bot: pressing voice on another Bot's composer inside the
+  // rejoin window has to be honoured, or they are handed back the Bot they
+  // had and the screen is driven back to it.
+  test("a rejoin that names a Bot moves the call, and one that names none keeps it", async () => {
+    const { ledger: l } = ledger();
+    await l.beginCall({
+      callId: "call-1",
+      deviceKey: "phone",
+      connectionId: "c1",
+      at: t0,
+      botId: "bot-a",
+    });
+    const moved = await l.beginCall({
+      callId: "call-x",
+      deviceKey: "phone",
+      connectionId: "c1b",
+      at: later(5_000),
+      botId: "bot-b",
+    });
+    if (moved.status !== "admitted") throw new Error("unreachable");
+    expect(moved.rejoined).toBe(true);
+    expect(moved.call.callId).toBe("call-1");
+    expect(moved.call.botId).toBe("bot-b");
+    const kept = await l.beginCall({
+      callId: "call-y",
+      deviceKey: "phone",
+      connectionId: "c1c",
+      at: later(10_000),
+    });
+    if (kept.status !== "admitted") throw new Error("unreachable");
+    expect(kept.call.botId).toBe("bot-b");
+  });
+
   test("the same device after the window starts a new call", async () => {
     const { ledger: l } = ledger();
     await liveCall(l);

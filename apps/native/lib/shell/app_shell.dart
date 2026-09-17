@@ -250,6 +250,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   DictationController? dictation;
   bool footerOpen = false;
   bool footerExiting = false;
+
+  /// The Bot the open call is with (ADR 0029), so the composer control on
+  /// that Bot's page reads as pressed and every other Bot's does not. Null
+  /// while the call is with the account's General.
+  String? voiceBotId;
   bool showHidden = false;
   TranscriptLine? openRun;
 
@@ -418,8 +423,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// The one control does both: it opens the call, and while the footer is
   /// up it ends it, so the way in is also the way out.
-  Future<void> _toggleVoice() =>
-      footerOpen ? _endVoice(reason: 'sidebar-button') : _startVoice();
+  ///
+  /// A call addresses one Bot (ADR 0029). Pressed on a Bot's composer it
+  /// opens on that Bot; pressed with no Bot named — the sidebar control — it
+  /// opens on the account's General. Pressed on a Bot while a call is already
+  /// open with somebody else, it moves the call rather than ending it: the
+  /// person asked to talk to this Bot, not to hang up.
+  Future<void> _toggleVoice({String? botId}) {
+    if (!footerOpen) return _startVoice(botId: botId);
+    if (botId != null && botId.isNotEmpty && botId != voiceBotId) {
+      return _switchVoice(botId);
+    }
+    return _endVoice(reason: 'sidebar-button');
+  }
+
+  /// Moves an open call to another Bot without dropping the audio.
+  ///
+  /// Who the call is with is the server's to say: it may refuse the move — a
+  /// Bot deleted from another device, a call that is no longer the live one —
+  /// and adopting the id here would leave the screen naming a Bot the audio
+  /// never reached. The `voice/target` frame is what moves it.
+  Future<void> _switchVoice(String botId) async {
+    final session = voiceSession;
+    if (session == null) return;
+    session.retarget(botId);
+  }
 
   /// Opens the footer and starts the call in the one gesture.
   ///
@@ -427,7 +455,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// probe was read at sign-in, so a deployment without voice is refused
   /// here without a round trip; a probe that never answered does not hold
   /// the press, and the socket speaks for itself.
-  Future<void> _startVoice() async {
+  Future<void> _startVoice({String? botId}) async {
     if (voiceProbe.known && !voiceProbe.assistantAvailable) {
       _say(voiceUnavailableMessage);
       return;
@@ -437,14 +465,37 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     voiceSession?.dispose();
     final session = AssistantSessionController(
       openSocket: assistantSocketOpenerV1(widget.api),
+      botId: botId,
       capture: voiceCapture ??= RecordVoiceCapture(
         minimumBuffer: audioRoute.minimumCaptureBuffer,
       ),
       player: PcmVoicePlayer(),
       route: audioRoute,
     );
+    // The Bot can hand the conversation over itself (ADR 0029, `switch_bot`),
+    // and the person can press voice on another Bot's page. Either way the
+    // server is the authority on who is on the line, so the shell follows
+    // what it says rather than only what this client asked for.
+    session.addListener(() {
+      if (!mounted || !identical(voiceSession, session)) return;
+      final now = session.currentBotId;
+      if (now == null || now == voiceBotId) return;
+      final wasOnScreen = selected?.botId.value == voiceBotId;
+      setState(() => voiceBotId = now);
+      // The conversation moved, so the page does too: the person is talking
+      // to this Bot now, and the thread they can read should be the one they
+      // are talking about. Only when the call is the thing on screen — a
+      // hand-over must not drag someone out of a page they went to
+      // themselves while the call carried on in the background.
+      if (wasOnScreen &&
+          selected?.botId.value != now &&
+          bots.any((bot) => bot.botId.value == now)) {
+        _select(now);
+      }
+    });
     setState(() {
       voiceSession = session;
+      voiceBotId = botId;
       footerOpen = true;
       footerExiting = false;
     });
@@ -2005,7 +2056,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 MediaQuery.textScalerOf(context).scale(14) / 14,
                             // A phone's bar is GrokBot's three things; the wider tiers
                             // name each entry of the right panel beside the title.
-                            onBack: single ? _openBack : null,
+                            //
+                            // In voice mode there is no Back (ADR 0029): the
+                            // way out of the Bot you are talking to is to end
+                            // the call, and a control that left the page with
+                            // the call still running would be a trap.
+                            onBack:
+                                single &&
+                                    !(footerOpen &&
+                                        voiceBotId == bot.botId.value)
+                                ? _openBack
+                                : null,
                             onOpenBot: single
                                 ? () => _pushPanel('bot-settings')
                                 : null,
@@ -2040,6 +2101,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           ),
                     conversationOpen: bot != null && conversationOpen,
                     onBack: _openBack,
+                    // Voice mode is this Bot being the one on the call: the
+                    // page belongs to the conversation until it ends.
+                    voiceMode:
+                        footerOpen &&
+                        bot != null &&
+                        voiceBotId == bot.botId.value,
+                    onEndVoice: () =>
+                        unawaited(_endVoice(reason: 'system-back')),
                     panelOpen: panelOpen,
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
@@ -2142,6 +2211,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             primary: _primary(bot.botId.value),
                             onDictate: () => unawaited(_dictate()),
                             onStopDictation: () => unawaited(_stopDictation()),
+                            // Voice, on the Bot whose page this is (ADR 0029).
+                            onVoice: () => unawaited(
+                              _toggleVoice(botId: bot.botId.value),
+                            ),
+                            voiceActive:
+                                footerOpen && voiceBotId == bot.botId.value,
                             dictationState:
                                 dictation?.context == bot.botId.value
                                 ? dictation!.state

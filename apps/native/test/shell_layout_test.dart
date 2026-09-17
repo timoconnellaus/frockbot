@@ -1352,4 +1352,75 @@ void main() {
       expect(find.text('This reply used no tools.'), findsOneWidget);
     });
   });
+
+  // ADR 0029: voice is a focused mode of the Bot page. The list of every
+  // other Bot is not what the person is doing, and Back must not be a way to
+  // walk out of a page while the call is still running behind it.
+  group('voice mode', () {
+    Widget layout({
+      required bool voiceMode,
+      VoidCallback? onEndVoice,
+      VoidCallback? onBack,
+    }) => host(
+      ShellLayout(
+        panelOpen: false,
+        onDismiss: () {},
+        conversationOpen: true,
+        onBack: onBack ?? () {},
+        voiceMode: voiceMode,
+        onEndVoice: onEndVoice,
+        sidebar: const Text('bots'),
+        conversation: const Text('thread'),
+        rightPanel: const Text('work'),
+      ),
+    );
+
+    testWidgets('collapses the desk sidebar so the Bot fills the window', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.physicalSize = const Size(1440, 900);
+
+      await tester.pumpWidget(layout(voiceMode: false));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(byIdentifier(ShellIds.sidebar)).width, 288);
+
+      await tester.pumpWidget(layout(voiceMode: true));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(byIdentifier(ShellIds.sidebar)).width, 0);
+    });
+
+    testWidgets('the system back gesture ends the call instead of leaving', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.physicalSize = const Size(390, 844);
+
+      var ended = 0;
+      var backed = 0;
+      await tester.pumpWidget(
+        layout(
+          voiceMode: true,
+          onEndVoice: () => ended += 1,
+          onBack: () => backed += 1,
+        ),
+      );
+      await tester.pumpAndSettle();
+      // The layout's own guard, found by shape rather than by its type
+      // argument, which the widget does not pin.
+      final scope = tester
+          .widgetList<Widget>(find.byWidgetPredicate((w) => w is PopScope))
+          .whereType<PopScope>()
+          .first;
+      expect(scope.canPop, isFalse);
+      scope.onPopInvokedWithResult?.call(false, null);
+      expect(ended, 1);
+      // The page is not left behind the call.
+      expect(backed, 0);
+    });
+  });
 }

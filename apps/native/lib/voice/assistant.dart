@@ -55,10 +55,14 @@ class AssistantSessionController extends ChangeNotifier {
   final Duration sleepAfter;
   final Duration connectRetryWindow;
 
+  /// The Bot this call opens on (ADR 0029). Null talks to General.
+  final String? botId;
+
   AssistantSessionController({
     required this.openSocket,
     required this.capture,
     required this.player,
+    this.botId,
     VoiceAudioRoute? route,
     this.gateConfig = const SpeechGateConfig(),
     this.startTimeout = voiceAssistantStartTimeoutV1,
@@ -86,6 +90,10 @@ class AssistantSessionController extends ChangeNotifier {
   /// microphone is open too.
   bool _welcomed = false;
   bool _barged = false;
+
+  /// The Bot the call is with, as the server last said. Read by the shell so
+  /// the screen and the composer control follow the voice.
+  String? _currentBotId;
   bool _disposed = false;
   double _micLevel = 0;
   String? _notice;
@@ -449,6 +457,13 @@ class AssistantSessionController extends ChangeNotifier {
         );
       case AssistantPlaybackInterruptV1():
         unawaited(player.interrupt());
+      case AssistantVoiceTargetV1(:final botId):
+        // The call is with this Bot now, whether this client asked for the
+        // move or the Bot handed the conversation over itself (ADR 0029).
+        if (_currentBotId != botId) {
+          _currentBotId = botId;
+          _notify();
+        }
       case AssistantVoiceStateV1(:final upstream):
         // The server reports its own view of the mute; the two inputs that
         // produced it are this client's and are not overwritten by it.
@@ -516,6 +531,12 @@ class AssistantSessionController extends ChangeNotifier {
     final socket = _socket;
     if (socket == null || !_welcomed || _started || _frames == null) return;
     socket.sendText(encodeAssistantHelloV1());
+    // Who the call is with, before it starts: the SDK's own frame has no
+    // room for it, and the server needs it to build the first prompt.
+    final target = botId;
+    if (target != null && target.isNotEmpty) {
+      socket.sendText(encodeVoiceTargetV1(target));
+    }
     socket.sendText(encodeAssistantStartCallV1());
     _started = true;
     while (_opening.isNotEmpty) {
@@ -523,6 +544,20 @@ class AssistantSessionController extends ChangeNotifier {
     }
     _openingBytes = 0;
   }
+
+  /// Points an open call at another Bot (ADR 0029).
+  ///
+  /// The audio stays up: this is the same call with somebody else on the
+  /// other end. The server moves its own record and tells every client, so a
+  /// screen that was already following stays right.
+  void retarget(String botId) {
+    if (botId.isEmpty || !_started) return;
+    _socket?.sendText(encodeVoiceTargetV1(botId));
+  }
+
+  /// The Bot the call is with right now (ADR 0029). Null before the server
+  /// has said, which is only the moment before the call is admitted.
+  String? get currentBotId => _currentBotId;
 
   void _onPlayback() {
     final playing = player.playing;

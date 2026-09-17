@@ -237,6 +237,7 @@
     "./voice/sleeping-transcriber": "./voice/sleeping-transcriber.ts",
     "./voice/speech-gate": "./voice/speech-gate.ts",
     "./voice/tts-guard": "./voice/tts-guard.ts",
+    "./voice/voices": "./voice/voices.ts",
     "./web": "./web/index.ts",
     "./web/agent": "./web/agent.ts",
     "./web/contract": "./web/contract.ts",
