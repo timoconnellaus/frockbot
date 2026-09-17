@@ -12,7 +12,10 @@ import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 import { dynamicToolInputV1 } from "./dynamic-tools.ts";
-import { decodePluginDescriptorV1 } from "@frockbot/core/contracts";
+import {
+  decodePluginDescriptorV1,
+  pluginCardToolNameV1,
+} from "@frockbot/core/contracts";
 import {
   routineDeliveryIdV1,
   routineHookDigestV1,
@@ -2846,5 +2849,364 @@ export async function execute(tool, input, ctx) {
     expect(counted.outputTokens).toBeGreaterThan(0);
     expect(counted.latencyMs).toBeGreaterThanOrEqual(0);
     expect(typeof counted.estimated).toBe("boolean");
+  });
+  /**
+   * A press is counted toward quarantine the way a Turn is, but it is not a
+   * Turn, and the notices a person reads must say which. Driven against the
+   * real Bot Durable Object: a run made only of failing presses is read back
+   * as presses, and a run holding a press and a Turn claims neither.
+   */
+  test("a run of failed card presses turns the Plugin off as presses, and a mixed run claims no Turns", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+
+    const PRESS_ID = "press-probe";
+    const MIXED_ID = "mixed-probe";
+    const cardSource = (hook: boolean) => `
+export const tools = [];
+export async function execute(tool) { throw new Error("unknown tool " + tool); }
+${
+  hook
+    ? `export const hooks = {
+  "agent/tool-exposure": async function (payload, ctx) {
+    const armed = await ctx.storage.get({ key: "armed" });
+    if (armed.value) throw new Error("the hook exploded");
+    return payload.tools;
+  },
+};`
+    : ""
+}
+export const cards = {
+  draft: {
+    render: async function (payload) {
+      return [
+        {
+          version: "v1.0",
+          createSurface: {
+            surfaceId: payload.surfaceId,
+            components: [
+              { id: "root", component: "Column", children: ["rows"] },
+              {
+                id: "rows",
+                component: "KeyValueRows",
+                rows: [{ label: "Subject", value: payload.data.subject }],
+              },
+            ],
+          },
+        },
+      ];
+    },
+    actions: {
+      boom: async function () { throw new Error("the press exploded"); },
+      arm: async function (press, ctx) {
+        await ctx.storage.put({ key: "armed", value: true });
+        return { drop: true, reason: "armed on purpose" };
+      },
+    },
+  },
+};
+`;
+    const cardDescriptor = (id: string, hooks: string[]) =>
+      decodePluginDescriptorV1({
+        id,
+        displayName: "Press probe",
+        version: "0.0.1",
+        contractVersion: 4,
+        tools: [],
+        hooks,
+        grants: ["storage"],
+        cards: [
+          {
+            id: "draft",
+            displayName: "Draft",
+            description: "Shows a draft the person can press.",
+            dataSchema: {
+              type: "object",
+              properties: { subject: { type: "string" } },
+              required: ["subject"],
+              additionalProperties: false,
+            },
+            actions: [
+              { name: "boom", description: "Throws on purpose." },
+              { name: "arm", description: "Arms the hook, and drops." },
+            ],
+          },
+        ],
+        contextKeys: ["user", "bot", "session"],
+      });
+    await pinGeneration(userId, [
+      {
+        id: PRESS_ID,
+        source: cardSource(false),
+        descriptor: cardDescriptor(PRESS_ID, []),
+      },
+      {
+        id: MIXED_ID,
+        source: cardSource(true),
+        descriptor: cardDescriptor(MIXED_ID, ["agent/tool-exposure"]),
+      },
+    ]);
+    await switchPlugin(identity, PRESS_ID, true);
+    await switchPlugin(identity, MIXED_ID, true);
+
+    // A failing press leaves the Card's revision where it was, so each press
+    // in a run needs its own surface: the count is per run, and a run is a
+    // Card at a revision. Every draw happens before any press, because a Turn
+    // the Plugin ran clean settles its record.
+    const draw = async (pluginId: string, runId: string, subject: string) => {
+      await callPluginToolRaw(
+        identity,
+        runId,
+        pluginId,
+        pluginCardToolNameV1(pluginId, "draft"),
+        { data: { subject } },
+      );
+    };
+    for (const [index, runId] of ["run-p1", "run-p2", "run-p3"].entries()) {
+      await draw(PRESS_ID, runId, `press ${index + 1}`);
+    }
+    for (const [index, runId] of ["run-m1", "run-m2"].entries()) {
+      await draw(MIXED_ID, runId, `mixed ${index + 1}`);
+    }
+
+    const surfaces = async (pluginId: string) =>
+      (
+        await bot(identity).listCards({ schemaVersion: 1, ...identity })
+      ).cards.filter((card) => card.surfaceId.startsWith(`${pluginId}_draft.`));
+    const press = async (
+      card: { surfaceId: string; revision: number },
+      pluginId: string,
+      action: string,
+    ) =>
+      bot(identity).cardAction({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          surfaceId: card.surfaceId,
+          revision: card.revision,
+          commandId: crypto.randomUUID(),
+          event: { name: `plugin/${pluginId}/${action}` },
+        },
+      });
+    const notices = async () =>
+      (await bot(identity).listNotifications({ schemaVersion: 1, ...identity }))
+        .map((notice) => `${notice.title}: ${notice.body}`);
+    const quarantineNotice = async (pluginId: string) =>
+      (await notices()).find(
+        (notice) =>
+          notice.startsWith("A plugin was turned off") &&
+          notice.includes(`"${pluginId}"`),
+      );
+
+    const pressCards = await surfaces(PRESS_ID);
+    expect(pressCards).toHaveLength(3);
+    for (const card of pressCards) {
+      const answer = await press(card, PRESS_ID, "boom");
+      expect(answer.failure).toContain("the press exploded");
+      // The Card is left exactly as it was: a press that failed is not a
+      // redraw.
+      expect(answer.card.revision).toBe(card.revision);
+    }
+    // Three failing presses is the same total three failing Turns is, and the
+    // Plugin is off — but the person is told about presses, not Turns.
+    expect(
+      (
+        await bot(identity).readPluginEnablement({
+          schemaVersion: 1,
+          ...identity,
+        })
+      ).enabled[PRESS_ID],
+    ).toBe(false);
+    const pressQuarantine = await quarantineNotice(PRESS_ID);
+    expect(pressQuarantine).toContain("failed on 3 card presses in a row");
+    expect(pressQuarantine).not.toContain("Turns");
+    const pressPage = (
+      await bot(identity).readBotPluginsFrame({ schemaVersion: 1, ...identity })
+    ).plugins.find((row) => row.pluginId === PRESS_ID) as
+      | { on: boolean; quarantined?: string }
+      | undefined;
+    expect(pressPage).toMatchObject({ on: false });
+    expect(pressPage?.quarantined).toContain(
+      "3 card presses in a row that failed",
+    );
+
+    // The mixed run: two failing presses and then a failing Turn. The total is
+    // what turns the Plugin off, and the words claim no kind the run did not
+    // hold.
+    const mixedCards = await surfaces(MIXED_ID);
+    expect(mixedCards).toHaveLength(2);
+    for (const card of mixedCards) {
+      expect((await press(card, MIXED_ID, "boom")).failure).toContain(
+        "the press exploded",
+      );
+    }
+    expect(await quarantineNotice(MIXED_ID)).toBeUndefined();
+    // A handler that refuses in as many words is not one that broke, so
+    // arming the hook costs the Plugin nothing.
+    expect((await press(mixedCards[0]!, MIXED_ID, "arm")).failure).toContain(
+      "armed on purpose",
+    );
+    await turn(identity, "run-m3");
+    expect(
+      (
+        await bot(identity).readPluginEnablement({
+          schemaVersion: 1,
+          ...identity,
+        })
+      ).enabled[MIXED_ID],
+    ).toBe(false);
+    const mixedQuarantine = await quarantineNotice(MIXED_ID);
+    expect(mixedQuarantine).toContain("failed 3 times in a row");
+    expect(mixedQuarantine).not.toContain("Turns in a row");
+    expect(mixedQuarantine).not.toContain("card presses in a row");
+
+    // A press on a Plugin a quarantine turned off says what happened, and
+    // never tells the person they switched it off themselves.
+    const afterQuarantine = await press(pressCards[0]!, PRESS_ID, "boom");
+    expect(afterQuarantine.failure).toContain("after it failed repeatedly");
+    expect(afterQuarantine.failure).not.toContain("is switched off");
+  });
+
+  /**
+   * Three different things are said apart when the kernel will not put a
+   * press to a Plugin, and none of them is the Plugin failing: it never ran,
+   * so none is counted toward its quarantine.
+   */
+  test("a press the kernel will not route says which of three things is wrong, and charges the Plugin nothing", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+
+    const REFUSE_ID = "refuse-probe";
+    const SOURCE = `
+export const tools = [];
+export async function execute(tool) { throw new Error("unknown tool " + tool); }
+export const cards = {
+  draft: {
+    render: async function (payload) {
+      return [
+        {
+          version: "v1.0",
+          createSurface: {
+            surfaceId: payload.surfaceId,
+            components: [
+              { id: "root", component: "Column", children: ["rows"] },
+              { id: "rows", component: "KeyValueRows", rows: [{ label: "Subject", value: payload.data.subject }] },
+            ],
+          },
+        },
+      ];
+    },
+    actions: {
+      redraw: async function (press) {
+        return [
+          {
+            version: "v1.0",
+            updateComponents: {
+              surfaceId: press.surfaceId,
+              components: [
+                { id: "rows", component: "KeyValueRows", rows: [{ label: "Subject", value: "pressed" }] },
+              ],
+            },
+          },
+        ];
+      },
+    },
+  },
+};
+`;
+    const descriptor = decodePluginDescriptorV1({
+      id: REFUSE_ID,
+      displayName: "Refusal probe",
+      version: "0.0.1",
+      contractVersion: 4,
+      tools: [],
+      hooks: [],
+      grants: [],
+      cards: [
+        {
+          id: "draft",
+          displayName: "Draft",
+          description: "Shows a draft the person can press.",
+          dataSchema: {
+            type: "object",
+            properties: { subject: { type: "string" } },
+            required: ["subject"],
+            additionalProperties: false,
+          },
+          actions: [{ name: "redraw", description: "Redraws the card." }],
+        },
+      ],
+      contextKeys: ["user", "bot", "session"],
+    });
+    await pinGeneration(userId, [
+      { id: REFUSE_ID, source: SOURCE, descriptor },
+    ]);
+    await switchPlugin(identity, REFUSE_ID, true);
+    await callPluginToolRaw(
+      identity,
+      "run-refuse-1",
+      REFUSE_ID,
+      pluginCardToolNameV1(REFUSE_ID, "draft"),
+      { data: { subject: "Hello" } },
+    );
+    const card = (
+      await bot(identity).listCards({ schemaVersion: 1, ...identity })
+    ).cards.find((candidate) =>
+      candidate.surfaceId.startsWith(`${REFUSE_ID}_draft.`),
+    )!;
+    const press = async (action: string) =>
+      bot(identity).cardAction({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          surfaceId: card.surfaceId,
+          revision: card.revision,
+          commandId: crypto.randomUUID(),
+          event: { name: `plugin/${REFUSE_ID}/${action}` },
+        },
+      });
+
+    // A member that is on, whose descriptor declares no such action.
+    const undeclared = await press("vanished");
+    expect(undeclared.failure).toContain('declares no action "vanished"');
+    expect(undeclared.failure).not.toContain("switched off");
+
+    // A member this Bot switched off. The card still carries its controls.
+    await switchPlugin(identity, REFUSE_ID, false);
+    const off = await press("redraw");
+    expect(off.failure).toContain("is switched off for this Bot");
+    expect(off.failure).toContain("turned back on under Plugins");
+    expect(off.failure).not.toContain("failed repeatedly");
+
+    // A Plugin the Composition no longer carries has no switch to throw, so
+    // it must not be named as one a person could turn back on.
+    await switchPlugin(identity, REFUSE_ID, true);
+    await pinGeneration(userId, []);
+    const gone = await press("redraw");
+    expect(gone.failure).toContain(
+      `this Bot no longer runs plugin "${REFUSE_ID}"`,
+    );
+    expect(gone.failure).not.toContain("switched off");
+    expect(gone.failure).not.toContain("turn it back on");
+
+    // None of the three is the Plugin failing: it never ran, so nothing was
+    // charged to it and the Card stands at the revision it was drawn at.
+    expect(
+      (
+        await bot(identity).listNotifications({ schemaVersion: 1, ...identity })
+      ).map((notice) => notice.title),
+    ).not.toContain("A plugin could not answer a card press");
+    expect(
+      (
+        await bot(identity).listCards({ schemaVersion: 1, ...identity })
+      ).cards.find((candidate) => candidate.surfaceId === card.surfaceId)
+        ?.revision,
+    ).toBe(card.revision);
   });
 });
