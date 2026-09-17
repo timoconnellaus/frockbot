@@ -211,8 +211,17 @@ takes nothing more, and a draft that has been sent no longer contains the span
 at all, so a late tidy-up finds nothing to replace. While `cleaning` runs the
 composer shows the same finishing state as the commit before it, with the
 microphone already off. Afterwards the composer offers "Use what I said",
-which puts the raw transcript back through the same path, and withdraws that
-offer the moment the person edits inside the tidied text.
+which puts the raw transcript back through the same path. That offer is a
+question asked of the draft as it stands, on every composer rebuild, rather
+than a flag set when the tidy-up landed: it is withdrawn the moment the span
+can no longer be replaced — an edit inside the tidied text, or a Send that
+empties the composer — while typing around the span keeps it, because the
+range re-anchors and the revert would still land. A button that reverts
+nothing is its own defect.
+
+Not yet run against a real model: the guards are tested against hand-written
+answers, so which of them fire in production, and how often, is unknown. That
+is what the named refusal log line is for.
 
 Bounds: after 5 minutes the server ends the capture the way a `stop` does —
 the commit, then the segment, so the draft keeps everything captured — and
@@ -1140,7 +1149,12 @@ an abandoned call. They also predate the per-Bot call of ADR 0029, which adds
 bun tests for the voice catalog, the narrowed tools and the first-person
 read-out, workerd scenarios for the targeted call, a durable hand-over and a
 borrowed voice, and Flutter tests for voice mode collapsing the desk sidebar
-and taking the system back gesture. The
+and taking the system back gesture. They also predate the tidy-up after a
+capture described under "Tidying the capture", which adds bun tests for the
+guards (run with no model at all), workerd scenarios for the frame order and
+for each way the tidy-up can fail leaving the raw transcript, Flutter tests
+for the span replacement, the revert and a late result after Send, and
+composer widget tests for the offer. The
 numbers below are therefore understated; the next run of the suites should replace them wholesale rather
 than add to them.
 
