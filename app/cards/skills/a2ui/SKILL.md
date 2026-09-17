@@ -224,6 +224,8 @@ Load one with `skill_load` — `{"path": "managed/a2ui", "reference": "forms.md"
 - `rich-text.md` — words: `Markdown`, `CodeBlock`, `Quote`.
 - `media.md` — pictures, files and links: `ImageGallery`, `FileAttachment`,
   `LinkPreview`.
+- `input.md` — answers: `ChoiceChips`, `MultiSelect`, `SegmentedControl`,
+  `Rating`.
 - `examples.md` — three complete cards, end to end.
 
 Start with `frock.md` and `structure.md`: most cards are a `CardHeader` and a

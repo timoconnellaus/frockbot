@@ -93,3 +93,47 @@ class FrockBoundText extends StatelessWidget {
     },
   );
 }
+
+/// Where a control writes what the person chose.
+///
+/// A control's `value` should be a binding — the schemas say so — because a
+/// press carries the renderer's data model back to the kernel, and a selection
+/// held anywhere else never leaves the card. When the model wrote a literal
+/// anyway the control still works: it writes under its own id, the way the
+/// standard catalog's `CheckBox` does, so nobody is handed a control that does
+/// nothing.
+String frockWritePathV1(Object? value, String id) =>
+    value is Map && value['path'] is String
+    ? value['path']! as String
+    : '$id.value';
+
+/// Raises a component's own `action`, in either spelling A2UI has had for it.
+///
+/// v0.9 nests the name under `event`, which is what the renderer this build
+/// has sends; 1.0 puts it at the top. A component takes both, because the
+/// record is 1.0 and the renderer is v0.9 and neither the card nor the
+/// component should have to know which one today is.
+Future<void> frockDispatchV1(
+  CatalogItemContext itemContext,
+  Object? action,
+) async {
+  if (action is! Map) return;
+  final event = action['event'];
+  final source = event is Map ? event : action;
+  final name = source['name'];
+  if (name is! String || name.isEmpty) return;
+  final context = source['context'];
+  final resolved = context is Map
+      ? await resolveContext(
+          itemContext.dataContext,
+          context.cast<String, Object?>(),
+        )
+      : <String, Object?>{};
+  itemContext.dispatchEvent(
+    UserActionEvent(
+      name: name,
+      sourceComponentId: itemContext.id,
+      context: resolved,
+    ),
+  );
+}

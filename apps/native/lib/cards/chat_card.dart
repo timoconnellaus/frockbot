@@ -25,14 +25,15 @@
 ///  * **What a stale answer costs.** A 409 means the surface moved under the
 ///    person. It is not a failure: the card re-reads and redraws, and says so.
 ///
-/// What this costs today: every adopted record rebuilds the surface, so a
-/// notice arriving while someone is part-way through a `TextField` loses what
-/// they had typed. Keeping the live renderer for a record that had not changed
-/// was tried and taken back out — it is a second way to settle the card's
-/// state, and it kept dropping one part of it. The next catalog family, which
-/// is where controls that hold real typing live, is where to do it properly:
-/// by giving the renderer its input state back, rather than by deciding not to
-/// redraw.
+/// Every adopted record rebuilds the surface — keeping the live renderer for a
+/// record that had not changed was tried and taken back out, because it is a
+/// second way to settle the card's state and it kept dropping one part of it.
+/// What the rebuild no longer costs is the person's half-finished answer: when
+/// the record's own data model has not moved, the model the old renderer held
+/// is theirs alone and is handed to the new one (`keptDataModel`). That is the
+/// input family's price of admission — a card with `ChoiceChips` and a
+/// `MultiSelect` on it is answered over several seconds, and a notice about
+/// something else entirely must not empty it.
 library;
 
 import 'dart:async';
@@ -46,6 +47,7 @@ import '../theme/frock_theme.dart';
 import '../view/embed.dart';
 import 'catalog.dart';
 import 'client.dart';
+import 'json.dart';
 import 'press.dart';
 import 'surface.dart';
 
@@ -177,8 +179,9 @@ class _CardChatCardState extends State<CardChatCard>
   /// Every adopted record rebuilds the surface. There is no same-record path
   /// that keeps the live renderer, because a card has one state to settle —
   /// what is drawn, which press may still be retried, and what the last press
-  /// said — and two ways to settle it is one way to get it wrong. The cost is named in this module's header: a notice arriving while
-  /// someone is typing costs them what they had typed.
+  /// said — and two ways to settle it is one way to get it wrong. What the
+  /// rebuild does carry over is the person's own half-finished answer; see
+  /// `keptDataModel`.
   ///
   /// Adopting a record ends every read older than it. A record arrives two
   /// ways — a read, and the receipt a press carries back — and the receipt is
@@ -194,12 +197,15 @@ class _CardChatCardState extends State<CardChatCard>
   void adopt(CardView answer) {
     epoch++;
     final live = controller;
+    // What the person had put into the old renderer, kept across the rebuild
+    // when the durable model has not moved. See `keptDataModel`.
+    final kept = keptDataModel(answer);
     SurfaceController? next;
     String? said;
     try {
       admitCardV1(answer);
       next = SurfaceController(catalogs: [cardCatalogV1]);
-      for (final message in cardMessagesV1(answer)) {
+      for (final message in cardMessagesV1(answer, dataModel: kept)) {
         next.handleMessage(core.A2uiMessage.fromJson(message));
       }
     } on CardRefusal catch (refused) {
@@ -257,6 +263,29 @@ class _CardChatCardState extends State<CardChatCard>
         setState(() => refusal = 'This card can’t be drawn by this app.');
       }
     }
+  }
+
+  /// What the person had put into the live renderer, when the rebuild has no
+  /// business taking it away.
+  ///
+  /// Every adopted record rebuilds the surface, which is still one settle path
+  /// and stays one. What changes with the input family is that a rebuild no
+  /// longer throws the person's half-finished answer away: if the record's own
+  /// data model is the same one the drawn record carried, the durable model
+  /// has not moved, so what the live renderer holds is exactly what this
+  /// person typed or ticked and nothing else. That is handed to the new
+  /// renderer.
+  ///
+  /// A record whose data model *has* moved wins, whole. That is the Bot or a
+  /// Plugin having said something about the card, and a half-typed value is
+  /// not a reason to draw a card that is out of date. It is also why this is
+  /// asked of the record and never of the revision: an input-routed press
+  /// never moves the revision.
+  Map<String, Object?>? keptDataModel(CardView answer) {
+    final drawn = card;
+    if (drawn == null || drawn.surfaceId != answer.surfaceId) return null;
+    if (!sameJsonV1(drawn.dataModel, answer.dataModel)) return null;
+    return liveDataModel();
   }
 
   /// The data model as the renderer holds it, which is the one the person has

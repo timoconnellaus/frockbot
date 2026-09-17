@@ -9,8 +9,10 @@ These five are the core of FrockBot's own catalog, drawn from the app's own
 theme, and they are what most cards are made of. Reach for them **before**
 composing the same thing out of `Row`s and `Text`s: they cost fewer
 components, they look like the rest of the app, and two of them do things the
-standard catalog cannot. `structure.md` is the rest of the same catalog's
-frame; load it when a card needs more than these five.
+standard catalog cannot. The rest of the Frock catalog is five more
+references — `structure.md` for the frame, `data.md` for numbers and rows,
+`rich-text.md` for words, `media.md` for pictures, files and links, and
+`input.md` for the answers a card takes. Load the one you need.
 
 - **`StatusPill`** — one per card, saying what state the card is in. Bind its
   `label` to the data model and the card settles with one small

@@ -156,7 +156,15 @@ Map<String, Object?> _recordJson(CardView card) => {
 
 /// The record as the messages that rebuild it, in the version the renderer
 /// speaks. Admit the card first: this assumes a drawable one.
-List<Map<String, Object?>> cardMessagesV1(CardView card) {
+///
+/// [dataModel] replaces the record's own, which is how a rebuild keeps what a
+/// person had half-typed or half-ticked: the caller hands back the model the
+/// old renderer held, having established that the durable one has not moved
+/// (`chat_card.dart`).
+List<Map<String, Object?>> cardMessagesV1(
+  CardView card, {
+  Map<String, Object?>? dataModel,
+}) {
   // A surface created under a catalog this build does not register would draw
   // nothing, so the record's own id is honoured only when it is one of ours;
   // anything else is the Frock catalog, which is every component either
@@ -189,7 +197,7 @@ List<Map<String, Object?>> cardMessagesV1(CardView card) {
       // has to keep saying so.
       'updateDataModel': {
         'surfaceId': card.surfaceId,
-        'value': copyJsonV1(card.dataModel),
+        'value': copyJsonV1(dataModel ?? card.dataModel),
       },
     },
   ];
