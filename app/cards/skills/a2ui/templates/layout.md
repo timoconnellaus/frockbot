@@ -21,7 +21,11 @@ Two rules that catch people out:
   `Button`) and a `content`.
 
 `weight` is how a child divides the space of the `Row` or `Column` it sits
-directly in — like CSS `flex-grow`. It means nothing anywhere else.
+directly in — like CSS `flex-grow`. It means nothing anywhere else. Only a
+component whose table lists a `weight` row may carry one: the five Frock
+components (`frock.md`) take no `weight` at all, and a card that writes one on
+them is refused. To give a Frock component the larger share of a `Row`, put the
+`weight` on its sibling instead. Write it as a whole number.
 
 Prefer a shallow card. Two levels of container is usually enough, and every
 level costs a component out of the 128 a surface may hold.
