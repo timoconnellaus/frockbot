@@ -1582,6 +1582,75 @@ describe("the voice session object", () => {
     opened.socket.close();
   });
 
+  test("a Bot answer whose model request never returns gives the floor back", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-stuck-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ delegateWord: "plan", botId: identity.botId });
+    await stub.probeDropDispatches(1_000);
+    // A deadline a test can wait out; the real one is twenty seconds.
+    await stub.probeSetBotAnswerDeadlineMs(500);
+    const opened = await open(identity.userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("plan the launch")).toBe(true);
+    await opened.waitFor(
+      (f) => f.type === "transcript_end" && String(f.text).includes("Done:"),
+      "acknowledged",
+    );
+    const key = Object.keys(await stub.probeStorage("voice:delegation:"))[0]!;
+    const record = (await stub.probeStorage("voice:delegation:"))[
+      key
+    ] as VoiceDelegationRecordV1;
+    // The answer's turn hangs at the model and is never released.
+    await stub.probeHoldAnnounce();
+    await stub.probePutStorage(key, { ...record, attempts: 39 });
+    const told = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:delegation:"))[
+          key
+        ] as VoiceDelegationRecordV1,
+      (one) => one.state === "spoken",
+      "the answer's turn admitted",
+      20_000,
+    );
+    // The deadline abandons it rather than holding the floor for the rest of
+    // the call, and the turn records why.
+    const turn = await eventually(
+      async () =>
+        (await stub.probeStorage("voice:turn:"))[
+          `voice:turn:${told.spokenTurnId}`
+        ] as VoiceTurnRecordV1,
+      (one) => one.state === "failed",
+      "the event turn settled",
+      20_000,
+    );
+    expect(turn.failure).toBe("timeout");
+    await eventually(
+      () => stub.probeTraces(),
+      (lines) =>
+        lines.some(
+          (line) => line.event === "bot-answer" && line.failure === "timeout",
+        ),
+      "the abandoned turn traced",
+      5_000,
+    );
+    // The floor came back: an ordinary utterance is answered as usual.
+    expect(await stub.probeUtterance("are you still there?")).toBe(true);
+    await opened.waitFor(
+      (f) =>
+        f.type === "transcript_end" &&
+        String(f.text).startsWith("You said: are you still there?"),
+      "the next turn answered",
+    );
+    await stub.probeReleaseAnnounce();
+    opened.socket.close();
+  });
+
   test("two Bot answers settling together are told one at a time, and both are heard", async () => {
     const suffix = crypto.randomUUID();
     const identity = {

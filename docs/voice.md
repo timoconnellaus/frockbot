@@ -463,7 +463,8 @@ kept for tests.
   admitted but never answered (eviction mid-model-call) is marked `abandoned`
   on the next start; a model call is never replayed without its key.
 - `delegation:<runId>` — a Bot delegation: target Bot, text, `runId` derived
-  as `sha256(userId, callId, turnId, botId)` (so a retried tool call admits
+  as `sha256(userId, callId, turnId, botId, text)` joined by NUL (so a
+  retried tool call admits
   the same Bot Turn once), state
   `admitted | settled | spoken | cancelled | expired` — `spoken` is told to
   the assistant, with the id of the event turn that told it; `cancelled` is a
@@ -514,7 +515,10 @@ words from being read as instructions. The system prompt says what such a messag
 choice it may make. No bridge fills the
 silence, because nobody asked a question just now. What it says is spoken
 once it is whole; a person who starts talking meanwhile aborts it and their
-turn takes the floor. The delegation is marked `spoken` the moment the turn is
+turn takes the floor. The event turn holds the announce floor while it runs
+and is bounded: a model request still going after twenty seconds is aborted
+and the turn settles `timeout`, so a stalled request cannot hold the floor —
+and every later answer with it — for the rest of the call. The delegation is marked `spoken` the moment the turn is
 admitted — told once, whatever is then said, and never re-announced, so an
 aborted answer is the one and only event turn for that answer and its message
 stays once in the history — and the turn record keeps what was said, or that

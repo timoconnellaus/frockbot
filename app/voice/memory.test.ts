@@ -1479,6 +1479,48 @@ describe("the end-of-call job", () => {
     );
   });
 
+  test("a chunk made entirely of an earlier call's turns names no range of this one", async () => {
+    const { memory, calls, read } = ledger();
+    // The earlier call gave up with more unread turns than one window holds,
+    // so this call's first chunk reaches none of its own turns at all.
+    calls["call-1"] = conversation(
+      "call-1",
+      CALL_ONE,
+      VOICE_MEMORY_CHUNK_TURNS_V1 + 5,
+    );
+    calls["call-2"] = conversation(
+      "call-2",
+      CALL_TWO,
+      2,
+      "2026-09-02T10:00:00.000Z",
+    );
+    await memory.createJob({
+      callId: "call-1",
+      sequence: CALL_ONE,
+      at: new Date("2026-09-01T12:00:00.000Z"),
+    });
+    await memory.claimChunk({ callId: "call-1", at: new Date(), read });
+    await memory.abandonChunk("call-1", "never answered", new Date());
+    await memory.createJob({
+      callId: "call-2",
+      sequence: CALL_TWO,
+      at: new Date("2026-09-02T10:01:00.000Z"),
+    });
+    const chunk = await memory.claimChunk({
+      callId: "call-2",
+      at: new Date(),
+      read,
+    });
+    expect(chunk!.turns.every((item) => item.callId === "call-1")).toBe(true);
+    expect(chunk!.to).toBe(chunk!.from);
+    const instruction = renderVoiceMemoryInstructionV1({
+      turns: chunk!.turns,
+      record: await memory.read(),
+      progress: { from: chunk!.from, to: chunk!.to, total: chunk!.total },
+    });
+    expect(instruction).not.toContain("part of a longer conversation");
+  });
+
   test("a long call is read in chunks, keeping what was said at the start", async () => {
     const { memory, calls, read } = ledger();
     const total = VOICE_MEMORY_CHUNK_TURNS_V1 + 5;

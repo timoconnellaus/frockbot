@@ -232,6 +232,14 @@ const DELEGATION_MAX_CHECK_SECONDS = 5 * 60;
  * this window is held rather than read out over the reply it would cut.
  */
 const REPLY_DRAIN_QUIET_MS = 6_000;
+/**
+ * How long a Bot answer's event turn may take before it is abandoned. It
+ * holds the announce floor while it runs, and a request that never comes back
+ * would hold it for the rest of the call: every later answer would be held,
+ * and nothing would ever be told. Generous enough for a slow model, finite
+ * because the floor must always come back.
+ */
+const BOT_ANSWER_TURN_DEADLINE_MS = 20_000;
 export interface VoiceAssistantEnv {
   AI?: Ai;
   OPENAI_API_KEY?: string;
@@ -624,6 +632,11 @@ export class VoiceAssistant extends VoiceAgentBase<
   /** How long a settled reply is left to finish playing; a test shortens it. */
   protected replyDrainQuietMs(): number {
     return REPLY_DRAIN_QUIET_MS;
+  }
+
+  /** How long a Bot answer's event turn may hold the floor; a test shortens it. */
+  protected botAnswerDeadlineMs(): number {
+    return BOT_ANSWER_TURN_DEADLINE_MS;
   }
 
   /**
@@ -2293,9 +2306,9 @@ export class VoiceAssistant extends VoiceAgentBase<
    * A Bot's answer, told to the assistant as one turn of the call.
    *
    * The same turn a person's utterance is — admitted and metered in the
-   * ledger, the call's own history and memory in front of the model, the
-   * same tools — with the Bot's answer in the person's seat, marked as what
-   * it is. The assistant decides what to say, and may say nothing. No bridge
+   * ledger, the call's own history and memory in front of the model — with
+   * the Bot's answer in the person's seat, marked as what it is. The
+   * assistant decides what to say, and may say nothing. No bridge
    * fills the silence, because nobody asked a question just now. What it
    * says is spoken once it is whole; a person who starts talking meanwhile
    * aborts it, and their turn takes the floor.
@@ -2421,6 +2434,11 @@ export class VoiceAssistant extends VoiceAgentBase<
         failure: "no settlement",
       };
       let text = "";
+      let expired = false;
+      const deadline = setTimeout(() => {
+        expired = true;
+        controller.abort();
+      }, this.botAnswerDeadlineMs());
       try {
         for await (const chunk of runVoiceTurnV1(
           host,
@@ -2448,6 +2466,8 @@ export class VoiceAssistant extends VoiceAgentBase<
           failure: error instanceof Error ? error.message : String(error),
         };
       } finally {
+        clearTimeout(deadline);
+        if (expired) settlement = { failure: "timeout" };
         if (call.turnId === turnId) call.turnSettledAt = Date.now();
         release();
         await ledger.settleTurn(turnId, settlement);

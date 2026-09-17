@@ -998,7 +998,13 @@ export function renderVoiceMemoryInstructionV1(input: {
       `- ${turn.id} [${moment(turn.at, { sequence: turn.sequence, turn: turn.ordinal })}]: ${clip(turn.said, 160)}`,
     );
   }
-  if (input.progress.from > 0 || input.progress.to < input.progress.total) {
+  // `to` is the highest ordinal this chunk reaches in its own call, so a
+  // window made entirely of turns carried from an earlier call leaves it at
+  // the cursor and there is no range of this call's turns to name.
+  if (
+    input.progress.to > input.progress.from &&
+    (input.progress.from > 0 || input.progress.to < input.progress.total)
+  ) {
     lines.push(
       `(This is part of a longer conversation: turns ${
         input.progress.from + 1

@@ -121,6 +121,7 @@ export interface VoiceTraceLine {
   turn?: string;
   ms?: number;
   sinceTurnMs?: number;
+  failure?: string;
 }
 
 export class WorkerdVoiceAssistant extends VoiceAssistant {
@@ -140,6 +141,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #ttsHeld: Promise<void> | undefined;
   #releaseTts: (() => void) | undefined;
   #playbackAckTimeoutMs: number | undefined;
+  #botAnswerDeadlineMs: number | undefined;
   #memoryRequests: VoiceMemoryRequest[] = [];
 
   protected override now(): Date {
@@ -163,6 +165,11 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
    */
   protected override playbackAckTimeoutMs(): number {
     return this.#playbackAckTimeoutMs ?? super.playbackAckTimeoutMs();
+  }
+
+  /** The real twenty-second bound, unless a test shortens it. */
+  protected override botAnswerDeadlineMs(): number {
+    return this.#botAnswerDeadlineMs ?? super.botAnswerDeadlineMs();
   }
 
   /** Drops the next N dispatches: the intent is durable, the send is lost. */
@@ -251,6 +258,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   protected override async chatCompletion(
     body: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<ReadableStream<Uint8Array>> {
     const messages = body.messages as { role: string; content: string }[];
     const last = messages.at(-1)!;
@@ -293,7 +301,12 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
       // the right answer reached it and whether the request came with it —
       // or says what the script tells it to, which may be nothing.
       this.#announced += 1;
-      if (this.#announceHeld) await this.#announceHeld;
+      // A real gateway request carries this signal: a held answer that is
+      // aborted rejects here rather than hanging on past the abort.
+      if (this.#announceHeld) {
+        await Promise.race([this.#announceHeld, aborts(signal)]);
+      }
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       const reply =
         this.#script.answerReply ??
         (() => {
@@ -452,6 +465,10 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   async probeSetPlaybackAckTimeoutMs(ms: number): Promise<void> {
     this.#playbackAckTimeoutMs = ms;
+  }
+
+  async probeSetBotAnswerDeadlineMs(ms: number): Promise<void> {
+    this.#botAnswerDeadlineMs = ms;
   }
 
   async probeSetNow(now: string): Promise<void> {
