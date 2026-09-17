@@ -96,12 +96,24 @@ const CATEGORY_INPUTS: Record<string, string[]> = {
 
 /**
  * Categories that build the deployable artifact, and so cannot run beside each
- * other: `test:integration` and `build` both reach `artifact:build`, and the
- * end-to-end web server builds the same tree. They write one
- * `apps/cloudflare/dist`, so two of them at once race on its contents. They
- * run in order, as a group, beside everything else.
+ * other: `test:integration` reaches `artifact:build` and the end-to-end web
+ * server builds the same tree. They write one `apps/cloudflare/dist`, so two
+ * of them at once race on its contents. They run in order, as a group, beside
+ * everything else.
  */
-const SHARED_ARTIFACT = new Set(["integration", "e2e", "build"]);
+const SHARED_ARTIFACT = new Set(["integration", "e2e"]);
+
+/**
+ * Categories that may not run beside anything at all. `build` writes that same
+ * `apps/cloudflare/dist`, but the sharper reason is that `bun run build`
+ * truncates and rewrites five tracked generated sources through
+ * `scripts/build-applets-assets.ts`. Every other category reads the work tree
+ * — through its own commands, and through `snapshot`, whose whole job is to
+ * prove the tree still matches the commit — so a concurrent category can
+ * observe a half-written file and fail spuriously. `build` is not in
+ * `prePushCategories`, so running it alone costs the push path nothing.
+ */
+const EXCLUSIVE = new Set(["build"]);
 
 /** How long an unwanted receipt survives before the sweep takes it. */
 const RECEIPT_LIFETIME_MS = 14 * 24 * 60 * 60 * 1000;
@@ -209,9 +221,9 @@ export async function validate(
   const registry = mkdtempSync(join(root, ".local-validation", "registry-"));
   // The registry directory and the lock exist for as long as a child can still
   // read them, so nothing may be removed while one is alive. The first failure
-  // stops the rest: live children are killed and categories that have not
-  // started do not, rather than being left to run against a deleted registry
-  // with the lock already released.
+  // stops the rest by killing every live child; a concurrent category is
+  // already spawned by then, so only the kill path stops one, while the guard
+  // in `runCategory` holds back work that has genuinely not begun.
   const live = new Set<ReturnType<typeof Bun.spawn>>();
   let failure: unknown;
   const stop = (error: unknown): void => {
@@ -219,6 +231,16 @@ export async function validate(
     // provokes in the others is a consequence of it, not a second cause.
     failure ??= error;
     for (const child of live) child.kill();
+  };
+  /**
+   * Wait for every job before propagating the first failure, so nothing
+   * removed below outlives a child still reading it. The first rejection is
+   * rethrown as it came, so a caller sees the same error it always did.
+   */
+  const settle = async (jobs: Promise<unknown>[]): Promise<void> => {
+    const results = await Promise.allSettled(jobs);
+    for (const result of results)
+      if (result.status === "rejected") throw result.reason;
   };
   /**
    * One category: decide whether its receipt still stands, run its commands if
@@ -267,7 +289,7 @@ export async function validate(
     }
     rmSync(receipt, { force: true });
     console.log(`validate: running ${name}`);
-    await Promise.all(
+    await settle(
       categories[name]!.map(async (command) => {
         const child = Bun.spawn(command, {
           cwd: root,
@@ -313,17 +335,20 @@ export async function validate(
     // Everything that does not build the artifact runs at once; the artifact
     // builders run in order beside them. A single machine has been running
     // these one after another on one core of many.
-    const parallel = names.filter((name) => !SHARED_ARTIFACT.has(name));
-    const serial = names.filter((name) => SHARED_ARTIFACT.has(name));
-    const tasks = [
-      ...parallel.map((name) => runCategory(name)),
+    const concurrent = names.filter((name) => !EXCLUSIVE.has(name));
+    const parallel = concurrent.filter((name) => !SHARED_ARTIFACT.has(name));
+    const serial = concurrent.filter((name) => SHARED_ARTIFACT.has(name));
+    // Every task is settled before the exclusive pass begins, and before the
+    // `finally` below removes the registry and the lock, so no child outlives
+    // what it reads.
+    await settle([
+      ...parallel.map((name) => runCategory(name).catch(stop)),
       (async () => {
-        for (const name of serial) await runCategory(name);
+        for (const name of serial) await runCategory(name).catch(stop);
       })(),
-    ];
-    // Every task is settled before the `finally` below removes the registry
-    // and the lock, so no child outlives what it reads.
-    await Promise.all(tasks.map((task) => task.catch(stop)));
+    ]);
+    for (const name of names.filter((name) => EXCLUSIVE.has(name)))
+      await runCategory(name).catch(stop);
     if (failure !== undefined) throw failure;
     if (snapshot(root) !== sha)
       throw new Error("Commit changed during validation");

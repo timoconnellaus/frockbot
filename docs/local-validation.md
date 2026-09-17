@@ -16,12 +16,15 @@ It uses no emulator or release build. The workflow owns the Java/Gradle setup
 and disposable signing configuration; these checks are not part of local Bun
 validation receipts.
 
-Selected categories run at once, except `integration`, `e2e` and `build`, which
-all reach the artifact build and would race on one `apps/cloudflare/dist`; those
-three run in order beside everything else. Each command's output is captured and
-printed as one block when it ends, so interleaved runs stay readable. The first
-failure kills the commands still running and stops the categories that have not
-started.
+Selected categories run at once, except `integration` and `e2e`, which both
+reach the artifact build and would race on one `apps/cloudflare/dist`; those two
+run in order beside everything else. `build` runs alone, after everything else
+has finished: besides writing that same `dist`, it rewrites tracked generated
+sources, and any category reading the work tree beside it could see a
+half-written file. Each command's output is captured and printed as one block
+when it ends, so interleaved runs stay readable. The first failure kills the
+commands still running, and every command is waited for before the run cleans
+up.
 
 Receipts live in gitignored `.local-validation/receipts/<category>-<key>.json`.
 The key is the content of everything the category reads — the committed blobs at
