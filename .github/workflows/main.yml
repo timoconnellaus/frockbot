@@ -142,7 +142,7 @@ jobs:
   flutter:
     name: Flutter
     needs: scope
-    if: needs.scope.outputs.slow-tier == 'true'
+    if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -224,7 +224,7 @@ jobs:
   runtime:
     name: Cloudflare runtime
     needs: scope
-    if: needs.scope.outputs.slow-tier == 'true'
+    if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -250,7 +250,7 @@ jobs:
   integration:
     name: Cloudflare integration
     needs: scope
-    if: needs.scope.outputs.slow-tier == 'true'
+    if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -315,7 +315,7 @@ jobs:
     # job decides whether it should run at all, and that answer takes seconds.
     # `deploy-staging` below is where the tier is required to agree.
     needs: scope
-    if: needs.scope.outputs.slow-tier == 'true'
+    if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     # Twenty was one crash short: a shard that lost `wrangler dev` twice and
     # then spent two four-minute test timeouts was cancelled at the limit,

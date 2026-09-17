@@ -177,8 +177,14 @@ test("the scope decision is what makes a slow-tier job run", () => {
       results: { scope: "success" },
       outputs: { scope: { "slow-tier": "false" } },
     };
+    // Only the word `false` excuses the tier. A `scope` job that succeeded
+    // without publishing the output at all — a stray line on standard output
+    // ahead of the key, a step that wrote nothing — must run the tier, the
+    // same direction `slowTierRequiredV1` defaults in.
+    const silent: RunState = { results: { scope: "success" } };
     expect({ job, runs: runs(job, obliged) }).toEqual({ job, runs: true });
     expect({ job, runs: runs(job, excused) }).toEqual({ job, runs: false });
+    expect({ job, runs: runs(job, silent) }).toEqual({ job, runs: true });
   }
 });
 
@@ -233,6 +239,25 @@ test("a job that ships refuses a slow-tier job that failed or was cancelled", ()
           runs: false,
         });
       }
+    }
+  }
+});
+
+test("a job that ships refuses a slow-tier job cancelled on its own", () => {
+  // A shard that runs out its `timeout-minutes` is cancelled while the run
+  // around it is not, so `!cancelled()` says nothing about it. Only the
+  // per-job enumeration of success-or-skipped refuses it; a bare
+  // `!= 'failure'` would ship on a suite that never finished.
+  for (const job of CONSUMERS) {
+    for (const slow of SLOW_TIER) {
+      const state = allGreen();
+      state.results[slow] = "cancelled";
+      state.cancelled = false;
+      expect({ job, slow, runs: runs(job, state) }).toEqual({
+        job,
+        slow,
+        runs: false,
+      });
     }
   }
 });
