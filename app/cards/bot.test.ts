@@ -49,6 +49,11 @@ function card(overrides: Partial<CardRecordV1> = {}): CardRecordV1 {
 function harness(
   values: Map<string, unknown> = new Map(),
   mountError = "this deployment cannot mount a Plugin worker",
+  /**
+   * The cards the Composition's `email` member declares, when the test needs
+   * a generation that reads rather than one that cannot be reached at all.
+   */
+  declaredCards?: { id: string; actions: { name: string }[] }[],
 ) {
   const notices: { title: string; body: string }[] = [];
   const storage = {
@@ -78,7 +83,27 @@ function harness(
       USER_CONFIGURATIONS: {
         idFromName: (name: string) => name,
         get: () => {
-          throw new Error(mountError);
+          if (declaredCards === undefined) throw new Error(mountError);
+          return {
+            readComposition: () =>
+              Promise.resolve({
+                current: {
+                  schemaVersion: 1,
+                  generationId: "gen-1",
+                  artifactSetHash: "hash-1",
+                  createdAt: NOW,
+                  origin: { kind: "bootstrap" },
+                  status: "active",
+                  members: [
+                    {
+                      packageId: "email",
+                      version: "1.0.0",
+                      descriptor: { cards: declaredCards },
+                    },
+                  ],
+                },
+              }),
+          };
         },
       },
     },
@@ -399,6 +424,74 @@ describe("the three routes", () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]?.body).toContain("could not answer a card press");
     expect(notices[0]?.body).not.toContain("was skipped for this Turn");
+  });
+
+  /**
+   * A card drawn before the Plugin stopped declaring an action still carries
+   * its button. Pressing it is the kernel refusing a name no card of that
+   * Plugin owns — the Plugin never ran, so nothing is charged to it.
+   */
+  test("a press naming an action the Plugin never declared is refused and charges nothing", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: true },
+          updatedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(values, undefined, [
+      { id: "draft", actions: [{ name: "regenerate" }] },
+    ]);
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/details" },
+    });
+    expect(receipt.routed).toBe("plugin");
+    expect(receipt.failure).toContain("details");
+    // The Card is exactly as it was, and no failure was charged.
+    expect(receipt.card.revision).toBe(2);
+    expect(values.get(cardKeyV1(SURFACE))).toMatchObject({ revision: 2 });
+    expect(notices).toHaveLength(0);
+    expect(
+      [...values.keys()].filter((key) => key.startsWith("plugin:health:")),
+    ).toHaveLength(0);
+  });
+
+  test("a declared action whose press fails is still charged, once", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: true },
+          updatedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(values, undefined, [
+      { id: "draft", actions: [{ name: "regenerate" }] },
+    ]);
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure).toBeTruthy();
+    expect(receipt.card.revision).toBe(2);
+    expect(notices).toHaveLength(1);
+    expect(
+      [...values.keys()].filter((key) => key.startsWith("plugin:health:")),
+    ).toHaveLength(1);
   });
 
   test("a plugin failure too long to carry still answers a readable receipt", async () => {

@@ -27,6 +27,7 @@ import { CARD_ACTION_CONTEXT_MAX_V1 } from "@frockbot/app/routines/inbox";
 import {
   readBotPluginRosterV1,
   withPluginWorkerV1,
+  type BotPluginRosterV1,
 } from "@frockbot/app/plugins/worker-bot";
 import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
 import {
@@ -348,12 +349,41 @@ export async function cardAction(
     // told why. A press on a card must not be able to fail a read of it.
     let outcome: Awaited<ReturnType<typeof runPluginCardAction>>;
     try {
-      outcome = await runPluginCardAction(state, identity, command, card, {
-        pluginId: route.pluginId,
-        cardId,
-        action: route.action,
-        runId,
-      });
+      const roster = await readBotPluginRosterV1(state, identity);
+      // An action no mounted card of this Plugin declares is refused here,
+      // off the descriptor, rather than by the worker's own refusal a round
+      // trip later — a card drawn before the Plugin stopped declaring an
+      // action still carries its button, and pressing it must not count
+      // against a Plugin that never ran. The worker still refuses it too.
+      if (
+        !mountedCardDeclaresActionV1(roster, {
+          pluginId: route.pluginId,
+          cardId,
+          action: route.action,
+        })
+      ) {
+        return {
+          schemaVersion: 1,
+          routed: "plugin",
+          card: projectCardV1(card),
+          failure: cardFailureV1(
+            `plugin "${route.pluginId}" card "${cardId}" declares no action "${route.action}"`,
+          ),
+        };
+      }
+      outcome = await runPluginCardAction(
+        state,
+        identity,
+        command,
+        card,
+        roster,
+        {
+          pluginId: route.pluginId,
+          cardId,
+          action: route.action,
+          runId,
+        },
+      );
     } catch (error) {
       const failure = cardFailureV1(
         error instanceof Error ? error.message : "the plugin was unavailable",
@@ -490,27 +520,48 @@ export function cardActionInvocationV1(
   };
 }
 
+/**
+ * Whether the descriptor the Composition mounted puts this action on this
+ * card of this Plugin. A press naming anything else is refused by the kernel
+ * before a worker is reached: the Plugin never ran, so it is not the Plugin
+ * failing and nothing is charged to it.
+ */
+function mountedCardDeclaresActionV1(
+  roster: BotPluginRosterV1,
+  handler: { pluginId: string; cardId: string; action: string },
+): boolean {
+  const member = roster.members.find(
+    (candidate) =>
+      candidate.packageId === handler.pluginId &&
+      roster.enabled.includes(candidate.packageId),
+  );
+  return (member?.descriptor.cards ?? []).some(
+    (card) =>
+      card.id === handler.cardId &&
+      card.actions.some((declared) => declared.name === handler.action),
+  );
+}
+
 /** The Plugin handler behind one `plugin/<pluginId>/<action>` name. */
 function runPluginCardAction(
   state: ShellBotStateV1,
   identity: BotIdentity,
   command: CardActionCommandV1,
   card: CardRecordV1,
+  roster: BotPluginRosterV1,
   handler: { pluginId: string; cardId: string; action: string; runId: string },
 ) {
-  return readBotPluginRosterV1(state, identity).then((roster) =>
-    withPluginWorkerV1(
-      state,
-      identity,
-      roster,
-      { runId: handler.runId, deadlineMs: CARD_ACTION_DEADLINE_MS },
-      (worker) =>
-        worker.active.cardAction(
-          cardActionInvocationV1(identity, command, card, {
-            ...handler,
-            generationId: roster.generationId,
-          }),
-        ),
-    ),
+  return withPluginWorkerV1(
+    state,
+    identity,
+    roster,
+    { runId: handler.runId, deadlineMs: CARD_ACTION_DEADLINE_MS },
+    (worker) =>
+      worker.active.cardAction(
+        cardActionInvocationV1(identity, command, card, {
+          ...handler,
+          generationId: roster.generationId,
+        }),
+      ),
   );
 }
