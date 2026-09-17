@@ -149,6 +149,7 @@ import {
   decodeBotLifecycleCommandV1,
   decodeBotRegistrationV1,
   decodeUpdateAvatarCommandV1,
+  decodeUpdateVoiceCommandV1,
   type BotLifecycleCommandV1,
   type BotRegistrationV1,
 } from "@frockbot/app/flock/shared";
@@ -1258,6 +1259,30 @@ export class BotState extends DurableObject<BotStateEnv> {
       registration,
       identity.userId,
       request.command as ReturnType<typeof decodeUpdateAvatarCommandV1>,
+    );
+  }
+
+  async readVoice(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { flock, registration } = await this.materialized(identity);
+    return flock.readVoice(registration, identity.userId);
+  }
+
+  async updateVoice(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeUpdateVoiceCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { flock, registration } = await this.materialized(identity);
+    return flock.updateVoice(
+      registration,
+      identity.userId,
+      request.command as ReturnType<typeof decodeUpdateVoiceCommandV1>,
     );
   }
 

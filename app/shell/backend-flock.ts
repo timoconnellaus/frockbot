@@ -28,6 +28,10 @@ import type {
   FlockSelfRuntimeHostV1,
   BotMessageOutcomeV1,
 } from "@frockbot/app/flock/agent";
+import type {
+  UpdateVoiceCommandV1,
+  VoiceIdentityViewV1,
+} from "@frockbot/app/flock/shared";
 import type { AgentTurnSlotReceiptV1 } from "@frockbot/app/flock/quota";
 
 /** The Bot and User whose identity a Turn may change. */
@@ -61,6 +65,12 @@ export interface BotSelfManagementAuthorities {
   createBot(
     userId: string,
     command: CreateBotCommandV1,
+  ): Promise<FlockReceiptV1>;
+  readBotVoice(userId: string, botId: string): Promise<VoiceIdentityViewV1>;
+  updateBotVoice(
+    userId: string,
+    botId: string,
+    command: UpdateVoiceCommandV1,
   ): Promise<FlockReceiptV1>;
   reserveAgentTurn(request: {
     schemaVersion: 1;
@@ -142,6 +152,33 @@ export function createBotSelfManagementHost(
     },
     listBots: () => authorities.listBots(identity.userId),
     createBot: (command) => authorities.createBot(identity.userId, command),
+    readOwnVoice: async () => {
+      const [record, directory] = await Promise.all([
+        authorities.readBotVoice(identity.userId, identity.botId),
+        authorities.listBots(identity.userId),
+      ]);
+      // The character is the Bot's own registration, read here so the tool can
+      // resolve the default rather than being handed a voice already decided.
+      const characterId = directory.bots.find(
+        (bot) => bot.botId === identity.botId,
+      )?.avatar.characterId;
+      return {
+        revision: record.revision,
+        ...(record.voice ? { voice: record.voice } : {}),
+        ...(characterId ? { characterId } : {}),
+      };
+    },
+    updateOwnVoice: (command) => {
+      // The target is this Bot, decided here, exactly as `commandSelf` does.
+      if (command.botId !== identity.botId) {
+        throw new Error("a Bot may only change its own voice");
+      }
+      return authorities.updateBotVoice(
+        identity.userId,
+        identity.botId,
+        command,
+      );
+    },
     ...(turn.inboundAgent ? { inboundAgent: turn.inboundAgent } : {}),
     messageBot: async (request): Promise<BotMessageOutcomeV1> => {
       if (request.targetBotId === identity.botId) {

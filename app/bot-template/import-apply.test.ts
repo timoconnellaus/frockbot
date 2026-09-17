@@ -101,6 +101,7 @@ const blobs: TemplateBlobStoreV1 = {
 const bots: TemplateBotReaderV1 = {
   readSettings: () => Promise.reject(new Error("not used")),
   readAvatar: () => Promise.resolve(avatar),
+  readVoice: () => Promise.resolve(undefined),
   readSkills: () => Promise.resolve([]),
   readRoutines: () => Promise.resolve([]),
 };

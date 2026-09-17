@@ -39,6 +39,11 @@ export const MAX_TEMPLATE_PACKAGES_V1 = 32;
 export const MAX_TEMPLATE_SKILL_BODY_BYTES_V1 = 16_384;
 export const MAX_TEMPLATE_ROUTINE_PROMPT_BYTES_V1 = 8_000;
 
+/** A voice slug is a short kebab identifier; the importing side knows which. */
+const TEMPLATE_VOICE_SLUG_MAX_V1 = 64;
+/** Matches `VOICE_CUSTOM_MAX_CHARS_V1`, which the importing side re-checks. */
+const TEMPLATE_VOICE_CUSTOM_MAX_V1 = 500;
+
 /**
  * The generated avatar avatar, structurally.
  *
@@ -55,12 +60,39 @@ export interface TemplateAvatarAppearanceV1 {
   primary: string;
 }
 
+/**
+ * How the Bot sounds, structurally (ADR 0031).
+ *
+ * Declared here for the same reason the avatar is: a template travels between
+ * deployments and must decode without a Package mounted. The slugs are opaque
+ * strings on this side of the seam — `app/voice/appearance.ts` owns the tables,
+ * and the importing deployment runs its own decoder against them before it
+ * materializes a Bot, so a template naming a voice this deployment does not
+ * offer is refused there rather than here.
+ */
+export interface TemplateVoiceAppearanceV1 {
+  schemaVersion: 1;
+  voiceName: string;
+  delivery: {
+    accent?: string;
+    attitude?: string;
+    pace?: string;
+    turnLength?: string;
+    humour?: string;
+    disfluency?: string;
+    formality?: string;
+    custom?: string;
+  };
+}
+
 /** The profile a template carries. Its avatar is the Bot's avatar recipe (D1). */
 export interface TemplateProfileV1 {
   name: string;
   title?: string;
   description?: string;
   avatar: { kind: "avatar"; recipe: TemplateAvatarAppearanceV1 };
+  /** Absent means the Bot never chose one and sounds like its character. */
+  voice?: TemplateVoiceAppearanceV1;
 }
 
 /** One own-root Skill, body verbatim. Managed and plugin Skills never appear. */
@@ -268,12 +300,70 @@ export function decodeTemplateAvatarAppearanceV1(
   };
 }
 
+export function decodeTemplateVoiceAppearanceV1(
+  value: unknown,
+): TemplateVoiceAppearanceV1 {
+  const voice = exactRecord(value, "template voice", [
+    "schemaVersion",
+    "voiceName",
+    "delivery",
+  ]);
+  if (voice.schemaVersion !== 1) {
+    throw new TemplateDecodeError("template voice schema version is invalid");
+  }
+  const delivery = exactRecord(
+    voice.delivery,
+    "template voice delivery",
+    [],
+    [
+      "accent",
+      "attitude",
+      "pace",
+      "turnLength",
+      "humour",
+      "disfluency",
+      "formality",
+      "custom",
+    ],
+  );
+  const slugs: Record<string, string | undefined> = {};
+  for (const key of [
+    "accent",
+    "attitude",
+    "pace",
+    "turnLength",
+    "humour",
+    "disfluency",
+    "formality",
+  ] as const) {
+    slugs[key] = optionalText(
+      delivery[key],
+      `template voice ${key}`,
+      TEMPLATE_VOICE_SLUG_MAX_V1,
+    );
+  }
+  slugs.custom = optionalText(
+    delivery.custom,
+    "template voice custom instruction",
+    TEMPLATE_VOICE_CUSTOM_MAX_V1,
+  );
+  return {
+    schemaVersion: 1,
+    voiceName: text(
+      voice.voiceName,
+      "template voice name",
+      TEMPLATE_VOICE_SLUG_MAX_V1,
+    ),
+    delivery: withOptional<TemplateVoiceAppearanceV1["delivery"]>({}, slugs),
+  };
+}
+
 function decodeTemplateProfileV1(value: unknown): TemplateProfileV1 {
   const profile = exactRecord(
     value,
     "template profile",
     ["name", "avatar"],
-    ["title", "description"],
+    ["title", "description", "voice"],
   );
   const avatar = exactRecord(profile.avatar, "template avatar", [
     "kind",
@@ -291,6 +381,9 @@ function decodeTemplateProfileV1(value: unknown): TemplateProfileV1 {
         kind: "avatar" as const,
         recipe: decodeTemplateAvatarAppearanceV1(avatar.recipe),
       },
+      ...(profile.voice === undefined
+        ? {}
+        : { voice: decodeTemplateVoiceAppearanceV1(profile.voice) }),
     },
     {
       title: optionalText(profile.title, "template profile title", 120),
@@ -467,6 +560,30 @@ export function canonicalBotTemplateDocumentV1(
           primary: decoded.profile.avatar.recipe.primary,
         },
       },
+      // Spelled out field by field, like everything else here: the canonical
+      // document is what a template's hash is taken over, so it may not carry
+      // whatever an object happened to hold.
+      ...(decoded.profile.voice === undefined
+        ? {}
+        : {
+            voice: {
+              schemaVersion: 1,
+              voiceName: decoded.profile.voice.voiceName,
+              delivery: withOptional(
+                {},
+                {
+                  accent: decoded.profile.voice.delivery.accent,
+                  attitude: decoded.profile.voice.delivery.attitude,
+                  pace: decoded.profile.voice.delivery.pace,
+                  turnLength: decoded.profile.voice.delivery.turnLength,
+                  humour: decoded.profile.voice.delivery.humour,
+                  disfluency: decoded.profile.voice.delivery.disfluency,
+                  formality: decoded.profile.voice.delivery.formality,
+                  custom: decoded.profile.voice.delivery.custom,
+                },
+              ),
+            },
+          }),
     },
     skills: decoded.skills.map((skill) => ({
       slug: skill.slug,

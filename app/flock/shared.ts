@@ -8,6 +8,11 @@ import {
 } from "@frockbot/core/configuration";
 export type { BotSelfWriterV1 } from "@frockbot/core/configuration";
 import { APPLET_IMPACT_FINGERPRINT_V1 } from "@frockbot/core/contracts";
+import {
+  decodeBotVoiceAppearanceV1,
+  type BotVoiceAppearanceV1,
+} from "@frockbot/app/voice/appearance";
+export type { BotVoiceAppearanceV1 } from "@frockbot/app/voice/appearance";
 
 /** The Flock's Bot-to-Bot message tool, by name. */
 export const BOT_MESSAGE_TOOL_V1 = "bot_message";
@@ -70,6 +75,13 @@ export interface BotRegistrationV1 {
    * the avatar mirror in this Package's README.
    */
   avatar: AvatarAppearanceV1;
+  /**
+   * How the Bot sounds now, mirrored from the Bot object exactly as `avatar`
+   * is (ADR 0031). Absent means nobody chose one: a reader resolves the Bot's
+   * character default with `resolveBotVoiceV1` rather than storing it, so
+   * improving a character's default improves every Bot that never chose.
+   */
+  voice?: BotVoiceAppearanceV1;
 }
 export interface BotMembershipViewV1 {
   schemaVersion: 1;
@@ -133,6 +145,8 @@ export interface CreateBotCommandV1 {
   /** The Bot and Turn issuing this command, when a Bot issues it. */
   createdBy?: BotSelfWriterV1;
   avatar?: AvatarAppearanceV1;
+  /** The voice the Bot is registered with; absent leaves it on its default. */
+  voice?: BotVoiceAppearanceV1;
 }
 export interface UpdateAvatarCommandV1 {
   schemaVersion: 1;
@@ -147,6 +161,29 @@ export interface AvatarIdentityViewV1 {
   botId: string;
   revision: number;
   avatar: AvatarAppearanceV1;
+}
+/**
+ * How a Bot sounds, changed the way its avatar is: one command, fenced on the
+ * voice record's own revision, answered by a durable receipt.
+ */
+export interface UpdateVoiceCommandV1 {
+  schemaVersion: 1;
+  type: "bot/update-voice";
+  commandId: string;
+  expectedRevision: number;
+  botId: string;
+  voice: BotVoiceAppearanceV1;
+}
+/**
+ * The Bot object's voice record. `voice` is absent until something sets one,
+ * and the command cannot clear it, so absent always means "never chosen" and
+ * the character default answers.
+ */
+export interface VoiceIdentityViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  revision: number;
+  voice?: BotVoiceAppearanceV1;
 }
 export interface FlockReceiptV1 {
   schemaVersion: 1;
@@ -323,12 +360,27 @@ export function decodeAvatarAppearanceV1(input: unknown): AvatarAppearanceV1 {
   return appearance;
 }
 
+/**
+ * The voice contract's own decoder, re-thrown as a Flock error so every seam
+ * in this Package fails the same way. The slug tables it validates against
+ * live in `app/voice/appearance.ts`; nothing about a voice is restated here.
+ */
+export function decodeBotVoiceForFlockV1(input: unknown): BotVoiceAppearanceV1 {
+  try {
+    return decodeBotVoiceAppearanceV1(input);
+  } catch (error) {
+    throw new FlockDecodeError(
+      error instanceof Error ? error.message : "voice is invalid",
+    );
+  }
+}
+
 export function decodeCreateBotCommandV1(input: unknown): CreateBotCommandV1 {
   const value = record(input, "create Bot command");
   exact(
     value,
     ["schemaVersion", "type", "commandId", "expectedRevision", "botId", "name"],
-    ["description", "createdBy", "avatar"],
+    ["description", "createdBy", "avatar", "voice"],
   );
   if (value.schemaVersion !== 1 || value.type !== "bot/create")
     throw new FlockDecodeError("unsupported create Bot command");
@@ -353,6 +405,9 @@ export function decodeCreateBotCommandV1(input: unknown): CreateBotCommandV1 {
       value.avatar === undefined
         ? undefined
         : decodeAvatarAppearanceV1(value.avatar),
+    ...(value.voice === undefined
+      ? {}
+      : { voice: decodeBotVoiceForFlockV1(value.voice) }),
   };
 }
 
@@ -380,12 +435,36 @@ export function decodeUpdateAvatarCommandV1(
   };
 }
 
+export function decodeUpdateVoiceCommandV1(
+  input: unknown,
+): UpdateVoiceCommandV1 {
+  const value = record(input, "update voice command");
+  exact(value, [
+    "schemaVersion",
+    "type",
+    "commandId",
+    "expectedRevision",
+    "botId",
+    "voice",
+  ]);
+  if (value.schemaVersion !== 1 || value.type !== "bot/update-voice")
+    throw new FlockDecodeError("unsupported update voice command");
+  return {
+    schemaVersion: 1,
+    type: "bot/update-voice",
+    commandId: identifier(value.commandId, "commandId"),
+    expectedRevision: revision(value.expectedRevision),
+    botId: botIdentifier(value.botId),
+    voice: decodeBotVoiceForFlockV1(value.voice),
+  };
+}
+
 export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   const bot = record(input, "Bot registration");
   exact(
     bot,
     ["schemaVersion", "botId", "registeredAt", "initialName", "avatar"],
-    ["initialDescription", "createdBy"],
+    ["initialDescription", "createdBy", "voice"],
   );
   if (bot.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported Bot registration");
@@ -409,6 +488,9 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
         }),
     ...(createdBy ? { createdBy } : {}),
     avatar: decodeAvatarAppearanceV1(bot.avatar),
+    ...(bot.voice === undefined
+      ? {}
+      : { voice: decodeBotVoiceForFlockV1(bot.voice) }),
   };
 }
 
@@ -660,6 +742,21 @@ export function decodeAvatarIdentityViewV1(
   };
 }
 
+export function decodeVoiceIdentityViewV1(input: unknown): VoiceIdentityViewV1 {
+  const value = record(input, "voice identity");
+  exact(value, ["schemaVersion", "botId", "revision"], ["voice"]);
+  if (value.schemaVersion !== 1)
+    throw new FlockDecodeError("unsupported voice identity");
+  return {
+    schemaVersion: 1,
+    botId: botIdentifier(value.botId),
+    revision: revision(value.revision),
+    ...(value.voice === undefined
+      ? {}
+      : { voice: decodeBotVoiceForFlockV1(value.voice) }),
+  };
+}
+
 function nameProvenance(value: unknown): BotNameProvenanceV1 {
   if (value !== "user" && value !== "bot")
     throw new FlockDecodeError("namedBy is invalid");
@@ -746,7 +843,11 @@ export function randomAvatarAppearanceV1(
 }
 
 export function flockCommandFingerprint(
-  value: CreateBotCommandV1 | UpdateAvatarCommandV1 | BotLifecycleCommandV1,
+  value:
+    | CreateBotCommandV1
+    | UpdateAvatarCommandV1
+    | UpdateVoiceCommandV1
+    | BotLifecycleCommandV1,
 ): string {
   return JSON.stringify(value);
 }

@@ -17,6 +17,7 @@
 import type {
   BotTemplateV1,
   TemplateAvatarAppearanceV1,
+  TemplateVoiceAppearanceV1,
   TemplateSkillV1,
   TemplateRoutineV1,
 } from "@frockbot/core/template";
@@ -56,6 +57,7 @@ export interface TemplateImportPlanV1 {
   botId: string;
   profile: { name: string; title?: string; description?: string };
   avatar: TemplateAvatarAppearanceV1;
+  voice?: TemplateVoiceAppearanceV1;
   skills: TemplateSkillV1[];
   routines: TemplateRoutineV1[];
   packages: TemplateImportPackageLineV1[];
@@ -169,6 +171,9 @@ export function planBotTemplateImportV1(
         : { description: input.template.profile.description }),
     },
     avatar: input.template.profile.avatar.recipe,
+    ...(input.template.profile.voice === undefined
+      ? {}
+      : { voice: input.template.profile.voice }),
     skills: input.template.skills,
     routines: input.template.routines,
     packages,

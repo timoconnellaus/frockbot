@@ -291,3 +291,67 @@ describe("share identity and visibility", () => {
     ).toThrow(TemplateDecodeError);
   });
 });
+
+describe("a template's voice", () => {
+  const voice = {
+    schemaVersion: 1 as const,
+    voiceName: "Sulafat",
+    delivery: {
+      accent: "australian",
+      turnLength: "terse",
+      custom: "Say g'day.",
+    },
+  };
+
+  it("round-trips a profile that carries one", () => {
+    const withVoice = template({
+      profile: { ...template().profile, voice },
+    });
+    expect(decodeBotTemplateV1(withVoice)).toEqual(withVoice);
+  });
+
+  it("survives the canonical document unchanged", async () => {
+    const withVoice = template({
+      profile: { ...template().profile, voice },
+    });
+    const document = canonicalBotTemplateDocumentV1(withVoice);
+    const hash = await templateContentHashV1(document);
+    expect(
+      (await decodeBotTemplateDocumentV1(document, hash)).profile.voice,
+    ).toEqual(voice);
+  });
+
+  it("leaves a profile without one alone", () => {
+    expect(decodeBotTemplateV1(template()).profile.voice).toBeUndefined();
+  });
+
+  it("refuses a shape it cannot carry, and accepts a slug it cannot judge", () => {
+    const profile = template().profile;
+    expect(() =>
+      decodeBotTemplateV1({
+        ...template(),
+        profile: { ...profile, voice: { ...voice, schemaVersion: 2 } },
+      }),
+    ).toThrow(/schema version/);
+    expect(() =>
+      decodeBotTemplateV1({
+        ...template(),
+        profile: {
+          ...profile,
+          voice: { ...voice, delivery: { volume: "loud" } },
+        },
+      }),
+    ).toThrow(/unknown field/);
+    // The slug tables belong to the importing deployment, which re-validates
+    // before it materializes a Bot; a template is not the place to judge them.
+    expect(
+      decodeBotTemplateV1({
+        ...template(),
+        profile: {
+          ...profile,
+          voice: { ...voice, voiceName: "Unreleased" },
+        },
+      }).profile.voice?.voiceName,
+    ).toBe("Unreleased");
+  });
+});

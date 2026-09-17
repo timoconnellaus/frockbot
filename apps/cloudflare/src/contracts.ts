@@ -60,6 +60,8 @@ import type {
   FlockReceiptV1,
   AvatarIdentityViewV1,
   UpdateAvatarCommandV1,
+  VoiceIdentityViewV1,
+  UpdateVoiceCommandV1,
 } from "@frockbot/app/flock/shared";
 import type {
   TemplateCommandV1,
@@ -506,6 +508,18 @@ export interface UserConfigurationBinding {
     botId: string;
     command: UpdateAvatarCommandV1;
   }): Promise<FlockReceiptV1>;
+  /** How a Bot sounds, read and changed the way its avatar is (ADR 0031). */
+  readBotVoice(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<VoiceIdentityViewV1>;
+  updateBotVoice(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: UpdateVoiceCommandV1;
+  }): Promise<FlockReceiptV1>;
   getBotRegistration(request: {
     schemaVersion: 1;
     userId: string;
@@ -620,6 +634,17 @@ export interface BotConfigurationBinding {
     userId: string;
     botId: string;
     command: UpdateAvatarCommandV1;
+  }): Promise<FlockReceiptV1>;
+  readVoice(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<VoiceIdentityViewV1>;
+  updateVoice(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: UpdateVoiceCommandV1;
   }): Promise<FlockReceiptV1>;
   readConfiguration(
     request: BotConfigurationReadRpcV1,

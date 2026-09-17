@@ -26,7 +26,11 @@ import {
   type FlockSelfRuntimeHostV1,
 } from "./agent.ts";
 import { createFlockUserBackendContribution } from "./user.ts";
-import { decodeCreateBotCommandV1 } from "./shared.ts";
+import {
+  decodeCreateBotCommandV1,
+  FlockConflictError,
+  type VoiceIdentityViewV1,
+} from "./shared.ts";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
 const WRITER = {
@@ -82,6 +86,7 @@ interface Harness {
   commands(): Array<Extract<ConfigurationCommandV1, { botId: string }>>;
   /** Forces the next `commandSelf` to lose an optimistic race exactly once. */
   raceOnce(): void;
+  voice(): VoiceIdentityViewV1;
 }
 
 function harness(initial?: Partial<BotSettingsViewV1>): Harness {
@@ -94,6 +99,13 @@ function harness(initial?: Partial<BotSettingsViewV1>): Harness {
   const commands: Array<Extract<ConfigurationCommandV1, { botId: string }>> =
     [];
   let race = false;
+  // The Bot's voice record, fenced on its own revision exactly as the Bot
+  // Durable Object fences it.
+  let voice: VoiceIdentityViewV1 = {
+    schemaVersion: 1,
+    botId: "bot-1",
+    revision: 0,
+  };
   const storage = memoryStorage();
   const flock = createFlockUserBackendContribution({
     storage,
@@ -110,6 +122,7 @@ function harness(initial?: Partial<BotSettingsViewV1>): Harness {
     settings: () => settings,
     announcements: () => announcements,
     commands: () => commands,
+    voice: () => structuredClone(voice),
     raceOnce: () => {
       race = true;
     },
@@ -183,6 +196,30 @@ function harness(initial?: Partial<BotSettingsViewV1>): Harness {
         // The command crosses the User Durable Object seam, so it decodes on
         // the way in exactly as the production RPC does.
         flock.createBot(OWNER.userId, decodeCreateBotCommandV1(command)),
+      readOwnVoice: async () => ({
+        revision: voice.revision,
+        ...(voice.voice ? { voice: structuredClone(voice.voice) } : {}),
+        // "cat" is the registered character, so an unset voice resolves to its
+        // default rather than the deployment-wide one.
+        characterId: "cat",
+      }),
+      updateOwnVoice: async (command) => {
+        if (command.expectedRevision !== voice.revision) {
+          throw new FlockConflictError(voice.revision);
+        }
+        voice = {
+          schemaVersion: 1,
+          botId: command.botId,
+          revision: voice.revision + 1,
+          voice: structuredClone(command.voice),
+        };
+        return {
+          schemaVersion: 1,
+          commandId: command.commandId,
+          status: "applied",
+          revision: voice.revision,
+        };
+      },
     },
   };
 }
@@ -356,6 +393,7 @@ describe("bot_update", () => {
       "title",
       "hidden_from_sidebar",
       "notify_on_updates",
+      "voice",
     ]);
   });
 });
@@ -539,5 +577,108 @@ describe("bot_message", () => {
     await expect(flock.read()).rejects.toThrow("User object is busy");
     await expect(flock.read()).resolves.toMatchObject({ schemaVersion: 1 });
     expect(calls).toBe(2);
+  });
+});
+
+describe("bot_update: how the Bot sounds", () => {
+  test("sets a voice from the character default, changing only what it names", async () => {
+    const test1 = harness();
+    const tool = createBotUpdateTool(test1.host);
+
+    const result = await tool.execute(
+      { voice: { accent: "australian", turn_length: "terse" } },
+      CONTEXT,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("voice");
+    expect(test1.voice()).toMatchObject({
+      revision: 1,
+      voice: {
+        schemaVersion: 1,
+        // Untouched, so it stays the "cat" character's default.
+        voiceName: "Despina",
+        delivery: { accent: "australian", turnLength: "terse" },
+      },
+    });
+  });
+
+  test("keeps the dials it was not given, and clears one with the empty string", async () => {
+    const test1 = harness();
+    const tool = createBotUpdateTool(test1.host);
+    await tool.execute({ voice: { accent: "irish", humour: "dry" } }, CONTEXT);
+
+    await tool.execute({ voice: { name: "Gacrux" } }, CONTEXT);
+    expect(test1.voice().voice).toEqual({
+      schemaVersion: 1,
+      voiceName: "Gacrux",
+      delivery: { accent: "irish", humour: "dry" },
+    });
+
+    await tool.execute({ voice: { humour: "" } }, CONTEXT);
+    expect(test1.voice().voice).toEqual({
+      schemaVersion: 1,
+      voiceName: "Gacrux",
+      delivery: { accent: "irish" },
+    });
+  });
+
+  test("commands nothing when the voice already holds", async () => {
+    const test1 = harness();
+    const tool = createBotUpdateTool(test1.host);
+    await tool.execute({ voice: { attitude: "dry-deadpan" } }, CONTEXT);
+    const applied = test1.voice().revision;
+
+    const result = await tool.execute(
+      { voice: { attitude: "dry-deadpan" } },
+      CONTEXT,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Nothing changed");
+    // A replay is a read: the revision is the proof nothing was written.
+    expect(test1.voice().revision).toBe(applied);
+  });
+
+  test("refuses a slug the voice tables do not hold, writing nothing", async () => {
+    const test1 = harness();
+    const tool = createBotUpdateTool(test1.host);
+
+    const result = await tool.execute(
+      { voice: { accent: "klingon" } },
+      CONTEXT,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("voice accent is invalid");
+    expect(test1.voice().revision).toBe(0);
+  });
+
+  test("refuses a voice argument that is empty or misshapen before the model spends a Turn on it", () => {
+    expect(() => decodeBotUpdateInputV1({ voice: {} })).toThrow(
+      "voice needs at least one field to change",
+    );
+    expect(() => decodeBotUpdateInputV1({ voice: { warmth: "high" } })).toThrow(
+      "input has unknown fields",
+    );
+    expect(() => decodeBotUpdateInputV1({ voice: { pace: 3 } })).toThrow(
+      "pace must be a string",
+    );
+  });
+
+  test("changes a profile and a voice in one call", async () => {
+    const test1 = harness();
+    const tool = createBotUpdateTool(test1.host);
+
+    const result = await tool.execute(
+      { title: "Chief of staff", voice: { formality: "formal" } },
+      CONTEXT,
+    );
+
+    expect(result.content).toBe(
+      "Updated title, voice. Everything else is unchanged.",
+    );
+    expect(test1.settings().profile.title).toBe("Chief of staff");
+    expect(test1.voice().voice?.delivery.formality).toBe("formal");
   });
 });

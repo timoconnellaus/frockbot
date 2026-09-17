@@ -222,6 +222,8 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readAvatar: () => Promise.reject(new Error("not used while composing")),
       updateAvatar: () => Promise.reject(new Error("not used while composing")),
+      readVoice: () => Promise.reject(new Error("not used while composing")),
+      updateVoice: () => Promise.reject(new Error("not used while composing")),
       listBotIdentities: () =>
         Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
       readComputer: () =>

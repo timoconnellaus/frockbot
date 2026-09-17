@@ -6,6 +6,7 @@ import {
   decodeBotLifecycleCommandV1,
   decodeCreateBotCommandV1,
   decodeUpdateAvatarCommandV1,
+  decodeUpdateVoiceCommandV1,
   type BotDirectoryViewV1,
   type BotIdentityDirectoryViewV1,
   type BotLifecycleCommandV1,
@@ -16,6 +17,8 @@ import {
   type FlockReceiptV1,
   type AvatarIdentityViewV1,
   type UpdateAvatarCommandV1,
+  type VoiceIdentityViewV1,
+  type UpdateVoiceCommandV1,
 } from "./shared.js";
 import {
   decodeBotUnreadCommandV1,
@@ -45,6 +48,12 @@ export interface FlockGatewayHost {
     userId: string,
     botId: string,
     command: UpdateAvatarCommandV1,
+  ): Promise<FlockReceiptV1>;
+  readVoice(userId: string, botId: string): Promise<VoiceIdentityViewV1>;
+  updateVoice(
+    userId: string,
+    botId: string,
+    command: UpdateVoiceCommandV1,
   ): Promise<FlockReceiptV1>;
   /** The live identity of every registered Bot, read through to its owner. */
   listBotIdentities(userId: string): Promise<BotIdentityDirectoryViewV1>;
@@ -172,6 +181,7 @@ export function createFlockBackendContribution(
     async route(request, url, context) {
       if (!context.userId) return undefined;
       const avatar = url.pathname.match(/^\/api\/bots\/([^/]+)\/avatar$/);
+      const voice = url.pathname.match(/^\/api\/bots\/([^/]+)\/voice$/);
       const unread = url.pathname.match(/^\/api\/bots\/([^/]+)\/unread$/);
       const lifecycle = url.pathname.match(/^\/api\/bots\/([^/]+)\/lifecycle$/);
       if (
@@ -182,6 +192,7 @@ export function createFlockBackendContribution(
         url.pathname !== "/api/bots/unread" &&
         url.pathname !== "/api/bots/notifications" &&
         !avatar &&
+        !voice &&
         !unread &&
         !lifecycle
       )
@@ -284,6 +295,26 @@ export function createFlockBackendContribution(
           return Response.json(receipt, {
             status: receipt.status === "pending" ? 202 : 200,
           });
+        }
+        if (voice) {
+          const voiceBotId = decodePathId(voice[1]!);
+          if (request.method === "GET")
+            return Response.json(
+              await host.readVoice(context.userId, voiceBotId),
+            );
+          if (request.method !== "POST")
+            return Response.json(
+              { error: "method not allowed" },
+              { status: 405 },
+            );
+          const command = decodeUpdateVoiceCommandV1(await request.json());
+          if (command.botId !== voiceBotId)
+            throw new FlockDecodeError(
+              "voice command does not match request path",
+            );
+          return Response.json(
+            await host.updateVoice(context.userId, voiceBotId, command),
+          );
         }
         const botId = decodePathId(avatar![1]!);
         if (request.method === "GET")

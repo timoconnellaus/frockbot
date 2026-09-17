@@ -66,12 +66,22 @@ import { decodeTurnTypeV1 } from "@frockbot/core/contracts";
 import {
   BOT_MESSAGE_TOOL_V1,
   FlockConflictError,
+  decodeBotVoiceForFlockV1,
   isFlockIdentifier,
   randomAvatarAppearanceV1,
   type BotDirectoryViewV1,
+  type BotVoiceAppearanceV1,
   type CreateBotCommandV1,
   type FlockReceiptV1,
+  type UpdateVoiceCommandV1,
 } from "./shared.js";
+import {
+  GEMINI_VOICES_V1,
+  resolveBotVoiceV1,
+  VOICE_ACCENTS_V1,
+  VOICE_ATTITUDES_V1,
+  type VoiceDeliveryV1,
+} from "@frockbot/app/voice/appearance";
 import { flockDefinitionV1 } from "./definition.js";
 export { BOT_MESSAGE_TOOL_V1 } from "./shared.js";
 export type {
@@ -111,6 +121,18 @@ export interface FlockSelfRuntimeHostV1 {
   listBots(): Promise<BotDirectoryViewV1>;
   /** The User's own `bot/create` path, and no wider. */
   createBot(command: CreateBotCommandV1): Promise<FlockReceiptV1>;
+  /**
+   * This Bot's voice record: the revision a command must expect, the voice it
+   * chose if it ever did, and the character whose default answers when it did
+   * not. The tool resolves the default itself rather than being handed one.
+   */
+  readOwnVoice(): Promise<{
+    revision: number;
+    voice?: BotVoiceAppearanceV1;
+    characterId?: string;
+  }>;
+  /** `bot/update-voice` against this Bot, through the User's own path. */
+  updateOwnVoice(command: UpdateVoiceCommandV1): Promise<FlockReceiptV1>;
   /** Ask another Bot registered to this same User. */
   messageBot(request: BotMessageRequestV1): Promise<BotMessageOutcomeV1>;
   /**
@@ -150,6 +172,46 @@ const PROFILE_FIELD_NAMES = [
   ["hiddenFromSidebar", "hidden_from_sidebar"],
 ] as const satisfies ReadonlyArray<readonly [keyof BotProfilePatchV1, string]>;
 
+/**
+ * The delivery dials, as the tool spells them. The slugs are the appearance
+ * module's own tables; the three-value dials are listed literally because they
+ * are the union types themselves, and the decoder is the authority on all of
+ * them either way.
+ */
+const VOICE_SCHEMA = {
+  type: "object",
+  description:
+    "How you sound in a voice call. Only the fields you pass change; the rest of your voice stays as it is.",
+  properties: {
+    name: {
+      type: "string",
+      enum: GEMINI_VOICES_V1.map((voice) => voice.voiceName),
+      description: `The prebuilt voice you speak in: ${GEMINI_VOICES_V1.map((voice) => `${voice.voiceName} (${voice.character.toLowerCase()})`).join(", ")}.`,
+    },
+    accent: {
+      type: "string",
+      enum: VOICE_ACCENTS_V1.map((accent) => accent.slug),
+      description: "The accent you speak English in.",
+    },
+    attitude: {
+      type: "string",
+      enum: VOICE_ATTITUDES_V1.map((attitude) => attitude.slug),
+      description: "Your manner on a call. Exactly one; it is a personality.",
+    },
+    pace: { type: "string", enum: ["slower", "natural", "faster"] },
+    turn_length: { type: "string", enum: ["terse", "natural", "chatty"] },
+    humour: { type: "string", enum: ["none", "dry", "playful"] },
+    disfluency: { type: "string", enum: ["clean", "natural"] },
+    formality: { type: "string", enum: ["casual", "neutral", "formal"] },
+    custom: {
+      type: "string",
+      description:
+        "Anything else about how you sound, in your own words. The empty string clears it.",
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 const BOT_UPDATE_SCHEMA = {
   type: "object",
   properties: {
@@ -178,6 +240,7 @@ const BOT_UPDATE_SCHEMA = {
       description:
         "Whether your User is notified when you have news. Cannot be turned on while you are hidden from the sidebar.",
     },
+    voice: VOICE_SCHEMA,
   },
   additionalProperties: false,
 } as const;
@@ -215,9 +278,20 @@ const BOT_MESSAGE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/**
+ * A partial voice. Each field is carried as the model wrote it and validated
+ * once, by the appearance decoder, after it is merged onto the voice the Bot
+ * already has — so an unknown slug is refused by the one table that knows.
+ */
+export interface BotVoicePatchV1 {
+  voiceName?: string;
+  delivery: VoiceDeliveryV1;
+}
+
 interface BotUpdateInputV1 {
   profile: BotProfilePatchV1;
   notifyOnUpdates?: boolean;
+  voice?: BotVoicePatchV1;
 }
 
 interface BotCreateInputV1 {
@@ -260,6 +334,70 @@ function boolean(value: unknown, label: string): boolean {
   return value;
 }
 
+/** The dials, by the name the tool uses and the field the delivery stores. */
+const VOICE_DIAL_FIELDS = [
+  ["accent", "accent"],
+  ["attitude", "attitude"],
+  ["pace", "pace"],
+  ["turn_length", "turnLength"],
+  ["humour", "humour"],
+  ["disfluency", "disfluency"],
+  ["formality", "formality"],
+  ["custom", "custom"],
+] as const satisfies ReadonlyArray<readonly [string, keyof VoiceDeliveryV1]>;
+
+function decodeVoicePatchV1(input: unknown): BotVoicePatchV1 {
+  const value = fields(input, [
+    "name",
+    ...VOICE_DIAL_FIELDS.map(([toolKey]) => toolKey),
+  ]);
+  if (Object.keys(value).length === 0) {
+    throw new Error("voice needs at least one field to change");
+  }
+  const delivery: Record<string, string> = {};
+  for (const [toolKey, deliveryKey] of VOICE_DIAL_FIELDS) {
+    const field = value[toolKey];
+    if (field === undefined) continue;
+    if (typeof field !== "string")
+      throw new Error(`${toolKey} must be a string`);
+    delivery[deliveryKey] = field;
+  }
+  return {
+    ...(value.name === undefined
+      ? {}
+      : (() => {
+          if (typeof value.name !== "string") {
+            throw new Error("name must be a string");
+          }
+          return { voiceName: value.name };
+        })()),
+    delivery: delivery as VoiceDeliveryV1,
+  };
+}
+
+/**
+ * The voice the Bot would have after this patch. The empty string clears a
+ * dial, which is the only way a partial update can say "stop doing that"; the
+ * decoder then refuses anything the tables do not hold.
+ */
+export function mergeVoicePatchV1(
+  current: BotVoiceAppearanceV1,
+  patch: BotVoicePatchV1,
+): BotVoiceAppearanceV1 {
+  const delivery: Record<string, unknown> = { ...current.delivery };
+  for (const [, deliveryKey] of VOICE_DIAL_FIELDS) {
+    const field = patch.delivery[deliveryKey];
+    if (field === undefined) continue;
+    if (field === "") delete delivery[deliveryKey];
+    else delivery[deliveryKey] = field;
+  }
+  return decodeBotVoiceForFlockV1({
+    schemaVersion: 1,
+    voiceName: patch.voiceName ?? current.voiceName,
+    delivery,
+  });
+}
+
 export function decodeBotUpdateInputV1(input: unknown): BotUpdateInputV1 {
   const value = fields(input, [
     "name",
@@ -267,6 +405,7 @@ export function decodeBotUpdateInputV1(input: unknown): BotUpdateInputV1 {
     "title",
     "hidden_from_sidebar",
     "notify_on_updates",
+    "voice",
   ]);
   if (Object.keys(value).length === 0) {
     throw new Error("bot_update needs at least one field to change");
@@ -300,6 +439,9 @@ export function decodeBotUpdateInputV1(input: unknown): BotUpdateInputV1 {
             "notify_on_updates",
           ),
         }),
+    ...(value.voice === undefined
+      ? {}
+      : { voice: decodeVoicePatchV1(value.voice) }),
   };
 }
 
@@ -413,7 +555,7 @@ export function createBotUpdateTool(
     name: "bot_update",
     namespace: "frockbot",
     description:
-      "Change your own name, description, title, sidebar visibility, or update notifications. Only the fields you pass change; everything else stays exactly as it is. Renaming yourself is announced in the conversation. This cannot archive or delete you — only your User can do that.",
+      "Change your own name, description, title, sidebar visibility, update notifications, or how you sound on a voice call. Only the fields you pass change; everything else stays exactly as it is. Renaming yourself is announced in the conversation. This cannot archive or delete you — only your User can do that.",
     inputSchema: BOT_UPDATE_SCHEMA as unknown as Record<string, unknown>,
     // Re-running converges on the same durable record and commands nothing
     // once it already holds, so recovery may replay it.
@@ -477,6 +619,9 @@ export function createBotUpdateTool(
           }));
           changed.push("notify_on_updates");
         }
+        if (decoded.voice && (await applySelfVoiceV1(host, decoded.voice))) {
+          changed.push("voice");
+        }
       } catch (error) {
         return refusal(
           `bot_update failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -526,6 +671,52 @@ async function applyWithRevisionV1(
           error.name === "ConfigurationConflictError");
       if (!conflict || attempt >= REVISION_RETRIES) throw error;
       current = await host.readSelf();
+    }
+  }
+}
+
+/**
+ * The voice half of `bot_update`. Answers whether anything changed, so a
+ * replay that asks for the voice the Bot already has reports nothing.
+ *
+ * The record is fenced on its own revision, so a losing race is re-read and
+ * re-issued rather than failing the whole call.
+ */
+async function applySelfVoiceV1(
+  host: FlockSelfRuntimeHostV1,
+  patch: BotVoicePatchV1,
+): Promise<boolean> {
+  for (let attempt = 0; ; attempt += 1) {
+    const record = await host.readOwnVoice();
+    const current = resolveBotVoiceV1({
+      ...(record.voice ? { chosen: record.voice } : {}),
+      ...(record.characterId ? { characterId: record.characterId } : {}),
+    });
+    const next = mergeVoicePatchV1(current, patch);
+    if (record.voice && JSON.stringify(record.voice) === JSON.stringify(next)) {
+      return false;
+    }
+    try {
+      const receipt = await host.updateOwnVoice({
+        schemaVersion: 1,
+        type: "bot/update-voice",
+        commandId: crypto.randomUUID(),
+        expectedRevision: record.revision,
+        botId: host.owner.botId,
+        voice: next,
+      });
+      if (receipt.status === "rejected") {
+        throw new Error(receipt.failure ?? "the command was rejected");
+      }
+      return true;
+    } catch (error) {
+      const conflict =
+        error instanceof FlockConflictError ||
+        (typeof error === "object" &&
+          error !== null &&
+          "name" in error &&
+          error.name === "FlockConflictError");
+      if (!conflict || attempt >= REVISION_RETRIES) throw error;
     }
   }
 }

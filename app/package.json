@@ -226,6 +226,7 @@
     "./testkit": "./testkit/index.ts",
     "./ui-theme/definition": "./ui-theme/definition.ts",
     "./user": "./user.ts",
+    "./voice/appearance": "./voice/appearance.ts",
     "./voice/assistant": "./voice/assistant.ts",
     "./voice/definition": "./voice/definition.ts",
     "./voice/dictation-cleanup": "./voice/dictation-cleanup.ts",

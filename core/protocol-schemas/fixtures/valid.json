@@ -299,6 +299,63 @@
     }
   },
   {
+    "name": "BotVoiceAppearance valid",
+    "schema": "BotVoiceAppearance",
+    "value": {
+      "schemaVersion": 1,
+      "voiceName": "Sulafat",
+      "delivery": {
+        "accent": "australian",
+        "turnLength": "terse"
+      }
+    }
+  },
+  {
+    "name": "VoiceIdentity valid",
+    "schema": "VoiceIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "revision": 2,
+      "voice": {
+        "schemaVersion": 1,
+        "voiceName": "Sulafat",
+        "delivery": {
+          "accent": "australian",
+          "turnLength": "terse"
+        }
+      }
+    }
+  },
+  {
+    "name": "VoiceIdentity before a voice is chosen",
+    "schema": "VoiceIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "revision": 0
+    }
+  },
+  {
+    "name": "BotVoiceCommand valid",
+    "schema": "BotVoiceCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/update-voice",
+      "commandId": "command-1",
+      "expectedRevision": 2,
+      "botId": "default",
+      "voice": {
+        "schemaVersion": 1,
+        "voiceName": "Sulafat",
+        "delivery": {
+          "accent": "australian",
+          "turnLength": "terse"
+        }
+      }
+    }
+  },
+  {
     "name": "SkillRef valid",
     "schema": "SkillRef",
     "value": {

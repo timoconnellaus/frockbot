@@ -383,6 +383,68 @@
       "required": ["schemaVersion", "commandId", "action", "sessionId"],
       "additionalProperties": false
     },
+    "BotVoiceAppearance": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "voiceName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "accent": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "attitude": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "pace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "turnLength": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "humour": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "disfluency": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "formality": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "custom": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 500
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": ["schemaVersion", "voiceName", "delivery"],
+      "additionalProperties": false
+    },
     "AvatarAppearance": {
       "type": "object",
       "properties": {
@@ -429,6 +491,9 @@
         },
         "createdBy": {
           "$ref": "#/$defs/BotWriter"
+        },
+        "voice": {
+          "$ref": "#/$defs/BotVoiceAppearance"
         }
       },
       "required": [
@@ -597,6 +662,9 @@
         },
         "avatar": {
           "$ref": "#/$defs/AvatarAppearance"
+        },
+        "voice": {
+          "$ref": "#/$defs/BotVoiceAppearance"
         }
       },
       "required": [
@@ -694,6 +762,61 @@
         "expectedRevision",
         "botId",
         "avatar"
+      ],
+      "additionalProperties": false
+    },
+    "VoiceIdentity": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "botId": {
+          "$ref": "#/$defs/BotId"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "voice": {
+          "$ref": "#/$defs/BotVoiceAppearance"
+        }
+      },
+      "required": ["schemaVersion", "botId", "revision"],
+      "additionalProperties": false
+    },
+    "BotVoiceCommand": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "type": {
+          "const": "bot/update-voice"
+        },
+        "commandId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "botId": {
+          "$ref": "#/$defs/BotId"
+        },
+        "voice": {
+          "$ref": "#/$defs/BotVoiceAppearance"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "type",
+        "commandId",
+        "expectedRevision",
+        "botId",
+        "voice"
       ],
       "additionalProperties": false
     },

@@ -289,6 +289,17 @@ export async function agentRuntime(
                 userConfigurationV1(state, identity).listBots(userId),
               createBot: (userId, command) =>
                 userConfigurationV1(state, identity).createBot(userId, command),
+              readBotVoice: (userId, botId) =>
+                userConfigurationV1(state, identity).readBotVoice(
+                  userId,
+                  botId,
+                ),
+              updateBotVoice: (userId, botId, command) =>
+                userConfigurationV1(state, identity).updateBotVoice(
+                  userId,
+                  botId,
+                  command,
+                ),
               reserveAgentTurn: (request) =>
                 agentTurnSlots(state, identity).reserve(request),
               releaseAgentTurn: (request) =>
