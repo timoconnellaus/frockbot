@@ -86,7 +86,7 @@ and rejects merge commits introduced on the branch; a branch behind main may
 push, because `main.yml` checks the merge commit itself once it lands. A fetch
 failure blocks the push.
 
-## Vitest file parallelism stays off (decided 2026-09-17)
+## Vitest file parallelism stays off
 
 Categories now run concurrently, but inside `apps/cloudflare` both vitest
 configs keep `fileParallelism: false`, deliberately and not as an oversight.
@@ -98,12 +98,6 @@ blocked-address tally are each read, driven through a Turn, and asserted to
 have risen by exactly one. Parallel files race on all of them, and a per-test
 reset is itself a thing that races, so switching the flag on today buys
 flakiness rather than speed.
-
-Making those fakes per pool worker is the change that would unlock it. That is
-its own piece of work, to be done and measured on its own rather than folded
-into a scheduling change. The measured shape of the workerd suite says it is
-worth doing: of 353 seconds, 155 are module import and 176 are test execution,
-and both are serial today.
 
 ## Conversation evaluation
 

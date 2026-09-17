@@ -378,13 +378,14 @@ export async function validate(
           await Promise.all(
             readers.map((reader) => reader.cancel().catch(() => {})),
           );
-          captured.forEach((chunks, index) => {
-            const output = chunks.join("").trimEnd();
-            if (output.trim())
-              sinks[index]!.write(
-                `\n--- ${name}: ${command.join(" ")} ---\n${output}\n`,
-              );
-          });
+          const halves = captured.map((chunks) => chunks.join("").trimEnd());
+          const heads = halves.findIndex((output) => output.trim());
+          if (heads !== -1) {
+            sinks[heads]!.write(`\n--- ${name}: ${command.join(" ")} ---\n`);
+            halves.forEach((output, index) => {
+              if (output.trim()) sinks[index]!.write(`${output}\n`);
+            });
+          }
           if (code !== 0) {
             // Kill here rather than when the category settles: the run is
             // already doomed, and a sibling suite left to finish is a wait
