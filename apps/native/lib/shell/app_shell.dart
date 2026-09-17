@@ -2212,9 +2212,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onDictate: () => unawaited(_dictate()),
                             onStopDictation: () => unawaited(_stopDictation()),
                             // Voice, on the Bot whose page this is (ADR 0029).
-                            onVoice: () => unawaited(
-                              _toggleVoice(botId: bot.botId.value),
-                            ),
+                            onVoice: () =>
+                                unawaited(_toggleVoice(botId: bot.botId.value)),
                             voiceActive:
                                 footerOpen && voiceBotId == bot.botId.value,
                             dictationState:
@@ -2223,12 +2222,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 : DictationState.idle,
                             // The offer belongs to the composer the capture
                             // was dictated into, exactly as the words do.
-                            dictationCleaned:
+                            canRevertDictation: () =>
                                 dictation?.context == bot.botId.value &&
                                 dictation!.cleaned,
                             onRevertDictation:
-                                dictation?.context == bot.botId.value &&
-                                    dictation!.cleaned
+                                dictation?.context == bot.botId.value
                                 ? dictation!.revertCleanup
                                 : null,
                             dictationLevel: dictation?.level,

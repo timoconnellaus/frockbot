@@ -7,11 +7,71 @@
 /// swapping it would take their edit with it.
 library;
 
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/composer.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/voice/dictation.dart';
+
+import 'voice_fakes.dart';
+
+/// A composer wired the way the chat pane wires one: what the person types
+/// goes to the draft store the capture reads, and that same change rebuilds
+/// the composer. The revert offer is asked of the controller on every build,
+/// which is the whole point — a value read once cannot be withdrawn.
+class _WiredComposer extends StatefulWidget {
+  final DictationController controller;
+  final ComposerDraftStore drafts;
+  const _WiredComposer({required this.controller, required this.drafts});
+
+  @override
+  State<_WiredComposer> createState() => _WiredComposerState();
+}
+
+class _WiredComposerState extends State<_WiredComposer> {
+  late final TextEditingController editor = TextEditingController(
+    text: widget.drafts.draftFor('bot-a'),
+  );
+  final FocusNode focus = FocusNode();
+
+  @override
+  void dispose() {
+    editor.dispose();
+    focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    theme: FrockTheme.theme(Brightness.dark),
+    home: Scaffold(
+      body: Align(
+        alignment: Alignment.bottomCenter,
+        child: Composer(
+          editor: editor,
+          focus: focus,
+          ready: true,
+          stoppable: false,
+          stopping: false,
+          onSend: () async {},
+          onStop: () async {},
+          onChanged: (value) => setState(() {
+            widget.drafts.setDraft('bot-a', value);
+          }),
+          skills: null,
+          onDictate: () {},
+          onStopDictation: () {},
+          dictationState: widget.controller.state,
+          canRevertDictation: () => widget.controller.cleaned,
+          onRevertDictation: widget.controller.revertCleanup,
+        ),
+      ),
+    ),
+  );
+}
 
 Future<List<String>> pumpComposer(
   WidgetTester tester, {
@@ -43,7 +103,7 @@ Future<List<String>> pumpComposer(
             onDictate: () {},
             onStopDictation: () {},
             dictationState: dictationState,
-            dictationCleaned: cleaned,
+            canRevertDictation: cleaned ? () => true : null,
             onRevertDictation: offerRevert
                 ? () => reverted.add('reverted')
                 : null,
@@ -111,6 +171,57 @@ void main() {
     expect(stop.onPressed, isNull);
     expect(DictationState.cleaning.active, isTrue);
     expect(DictationState.cleaning.finishing, isTrue);
+  });
+
+  // The offer is drawn from a live predicate, so it has to be asked again
+  // when the draft changes. Driven through a real edit rather than the prop:
+  // a snapshot taken in an ancestor's build survives the edit, which is
+  // exactly how "Use what I said" came to sit over a span it could no longer
+  // replace.
+  testWidgets('a draft edit inside the tidied span withdraws the offer', (
+    tester,
+  ) async {
+    final drafts = ComposerDraftStore();
+    final socket = FakeVoiceSocket();
+    final capture = FakeVoiceCapture();
+    final controller = DictationController(
+      openSocket: () async => socket,
+      capture: capture,
+      onDraft: drafts.setDraft,
+      readDraft: drafts.draftFor,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.runAsync(() async {
+      await controller.start('bot-a');
+      await settle();
+      void say(String type, [Map<String, Object?> extra = const {}]) => socket
+          .deliver(jsonEncode({'schemaVersion': 1, 'type': type, ...extra}));
+      say('ready');
+      say('segment', {'text': 'um so check the Friday flights'});
+      await settle();
+      unawaited(controller.stop());
+      await settle();
+      say('cleaning');
+      say('cleaned', {'text': 'Check the Friday flights.'});
+      say('final');
+      await settle();
+    });
+
+    expect(drafts.draftFor('bot-a'), 'Check the Friday flights.');
+    await tester.pumpWidget(
+      _WiredComposer(controller: controller, drafts: drafts),
+    );
+    await tester.pump();
+    expect(revert, findsOneWidget);
+
+    await tester.enterText(
+      find.byType(TextField),
+      'Check the SATURDAY flights.',
+    );
+    await tester.pump();
+    expect(revert, findsNothing);
+    expect(drafts.draftFor('bot-a'), 'Check the SATURDAY flights.');
   });
 
   testWidgets('a capture still recording is not drawn as finishing', (

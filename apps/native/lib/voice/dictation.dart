@@ -32,6 +32,7 @@ enum DictationState {
   starting,
   capturing,
   stopping,
+
   /// Said everything, and the server is tidying it. The words are already in
   /// the draft and the microphone is off; this is a state the composer shows,
   /// not one that is still recording.
@@ -417,7 +418,10 @@ class DictationController extends ChangeNotifier {
     final raw = _rawTranscript;
     final context = _context;
     if (raw == null || context == null || _disposed) return;
-    if (!_range.holds(readDraft(context))) return;
+    if (!_range.holds(readDraft(context))) {
+      _notify();
+      return;
+    }
     _rawTranscript = null;
     _segments
       ..clear()
