@@ -16,12 +16,19 @@ It uses no emulator or release build. The workflow owns the Java/Gradle setup
 and disposable signing configuration; these checks are not part of local Bun
 validation receipts.
 
-Selected categories run at once, except `integration` and `e2e`, which both
-reach the artifact build and would race on one `apps/cloudflare/dist`; those two
-run in order beside everything else. `build` runs alone, after everything else
-has finished: besides writing that same `dist`, it rewrites tracked generated
-sources, and any category reading the work tree beside it could see a
-half-written file. Every command is spawned the same way — in a process group
+Selected categories run at once, except those whose commands write tracked
+files: `integration`, `e2e` and `build`. Each of those runs alone, one after
+another, once the rest have finished. `build` rewrites tracked generated
+sources, and `integration` and `e2e` both reach the artifact build, which
+resolves the Dart dependencies unconditionally and so rewrites the tracked
+`apps/native/pubspec.lock`; every other category reads the work tree, through
+its own commands and through the snapshot that proves the tree still matches
+the commit, so a half-written tracked file aborts the run for no real reason.
+The `apps/cloudflare/dist` those three share follows from that rather than
+causing it. The question to ask before adding a category to that set is simply
+whether anything its command runs writes a tracked file; the pre-push tier
+(`format`, `typecheck`, `unit`) contains none of them and still runs together.
+Every command is spawned the same way — in a process group
 of its own, with both pipes read by the runner — so one signal reaches the
 workers below any package-manager wrapper. The only thing that varies is where
 those pipes go: a run left holding exactly one command once reused receipts

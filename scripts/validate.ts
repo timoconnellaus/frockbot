@@ -95,25 +95,25 @@ export function isCategoryInput(name: string, path: string): boolean {
 }
 
 /**
- * Categories that build the deployable artifact, and so cannot run beside each
- * other: `test:integration` reaches `artifact:build` and the end-to-end web
- * server builds the same tree. They write one `apps/cloudflare/dist`, so two
- * of them at once race on its contents. They run in order, as a group, beside
- * everything else.
+ * Categories that write tracked files, and so may not run beside anything at
+ * all. Every other category reads the work tree — through its own commands,
+ * and through `snapshot`, whose whole job is to prove the tree still matches
+ * the commit — so a category that rewrites a tracked path can be observed
+ * mid-write and abort the run with a spurious "Commit changed during
+ * validation". `build` truncates and rewrites five generated sources through
+ * `scripts/build-applets-assets.ts`; `integration` and `e2e` both reach
+ * `artifact:build`, whose `apps/cloudflare/build-flutter-web.ts` runs
+ * `flutter pub get` unconditionally — before any up-to-date short-circuit —
+ * and pub rewrites the tracked `apps/native/pubspec.lock` in place. The one
+ * `apps/cloudflare/dist` these three share is a consequence of that, not the
+ * reason.
+ *
+ * The test for adding a future category here is exactly that question: does
+ * anything its command runs write a tracked file. This costs the push path
+ * nothing — `prePushCategories` is `format`, `typecheck` and `unit`, none of
+ * them here, so they still run together, as do `runtime`'s three suites.
  */
-const SHARED_ARTIFACT = new Set(["integration", "e2e"]);
-
-/**
- * Categories that may not run beside anything at all. `build` writes that same
- * `apps/cloudflare/dist`, but the sharper reason is that `bun run build`
- * truncates and rewrites five tracked generated sources through
- * `scripts/build-applets-assets.ts`. Every other category reads the work tree
- * — through its own commands, and through `snapshot`, whose whole job is to
- * prove the tree still matches the commit — so a concurrent category can
- * observe a half-written file and fail spuriously. `build` is not in
- * `prePushCategories`, so running it alone costs the push path nothing.
- */
-const EXCLUSIVE = new Set(["build"]);
+const WRITES_TRACKED_FILES = new Set(["integration", "e2e", "build"]);
 
 /**
  * How long a command's pipes may still be read after the process
@@ -397,26 +397,20 @@ export async function validate(
       renameSync(temp, receipt);
     };
 
-    // Everything that does not build the artifact runs at once; the artifact
-    // builders run in order beside them. A single machine has been running
-    // these one after another on one core of many.
-    const concurrent = plan.filter((entry) => !EXCLUSIVE.has(entry.name));
-    const parallel = concurrent.filter(
-      (entry) => !SHARED_ARTIFACT.has(entry.name),
-    );
-    const serial = concurrent.filter((entry) =>
-      SHARED_ARTIFACT.has(entry.name),
-    );
+    // Everything that writes nothing tracked runs at once; the writers run
+    // alone, one after another, once those have finished. A single machine has
+    // been running all of these one after another on one core of many.
     // Every task is settled before the exclusive pass begins, and before the
     // `finally` below removes the registry and the lock, so no child outlives
     // what it reads.
-    await settle([
-      ...parallel.map((entry) => runCategory(entry).catch(stop)),
-      (async () => {
-        for (const entry of serial) await runCategory(entry).catch(stop);
-      })(),
-    ]);
-    for (const entry of plan.filter((entry) => EXCLUSIVE.has(entry.name)))
+    await settle(
+      plan
+        .filter((entry) => !WRITES_TRACKED_FILES.has(entry.name))
+        .map((entry) => runCategory(entry).catch(stop)),
+    );
+    for (const entry of plan.filter((entry) =>
+      WRITES_TRACKED_FILES.has(entry.name),
+    ))
       await runCategory(entry).catch(stop);
     if (failure !== undefined) throw failure;
     if (snapshot(root) !== sha)
