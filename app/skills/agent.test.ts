@@ -105,6 +105,7 @@ describe("the Skill catalog", () => {
       turn: 4,
       skills: [
         { path: "skills/kept/SKILL.md", name: "kept" },
+        { path: "managed/a2ui/SKILL.md" },
         { path: "managed/add-connector/SKILL.md" },
         { path: "managed/applets/SKILL.md" },
         { path: "managed/export-bot-template/SKILL.md" },
@@ -162,7 +163,9 @@ describe("the Skill catalog", () => {
     // A Skill with nothing beside it records nothing, as it records no `by`.
     expect(
       injected?.type === "skill/injected"
-        ? injected.skills[1]?.references
+        ? injected.skills.find(
+            (skill) => skill.path === "managed/add-connector/SKILL.md",
+          )?.references
         : "absent",
     ).toBeUndefined();
     await dispose();

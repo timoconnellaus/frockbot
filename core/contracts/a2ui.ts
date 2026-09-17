@@ -256,23 +256,41 @@ export function a2uiByteLengthV1(value: unknown): number {
  * component's `action` property carrying a name — the one thing on a surface
  * that reaches back into the kernel — so it is counted where it is written
  * rather than declared separately the way a `ViewDocument` declares one.
+ *
+ * Both spellings count. 1.0 writes the name directly on `action`; v0.9, which
+ * is what the shipping renderer and the committed catalogs speak, nests it
+ * under `action.event`. Counting only 1.0's would let a surface past this
+ * budget that `admitCardV1` in `apps/native/lib/cards/surface.dart` then
+ * refuses, and the seam and the client have to refuse the same surfaces: a
+ * budget enforced only in the client is enforced in the one place that cannot
+ * tell the Bot what it did wrong.
  */
 export function a2uiActionCountV1(
   components: readonly A2uiComponentV1[],
 ): number {
   let count = 0;
   for (const component of components) {
-    const action = component.action;
-    if (
-      typeof action === "object" &&
-      action !== null &&
-      !Array.isArray(action) &&
-      typeof (action as { name?: unknown }).name === "string"
-    ) {
-      count++;
-    }
+    if (a2uiRaisesActionV1(component.action)) count++;
   }
   return count;
+}
+
+function a2uiNamedV1(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as { name?: unknown }).name === "string"
+  );
+}
+
+/** Whether one `action` property raises a named action, in either spelling. */
+function a2uiRaisesActionV1(action: unknown): boolean {
+  if (typeof action !== "object" || action === null || Array.isArray(action)) {
+    return false;
+  }
+  if (a2uiNamedV1(action)) return true;
+  return a2uiNamedV1((action as { event?: unknown }).event);
 }
 
 function decodeComponent(value: unknown, label: string): A2uiComponentV1 {

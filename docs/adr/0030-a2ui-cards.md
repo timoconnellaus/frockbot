@@ -307,6 +307,55 @@ Each step leaves `main` shippable and is merged when green.
    a Bot-authored card on the phone and the browser build are the evidence.
 5. The `managed/a2ui` Skill with its references; a Bot draws a bespoke card
    from it in a real conversation.
+
+   > Built 2026-09-17, step 5. `managed/a2ui` is the seventh managed Skill,
+   > authored at `app/cards/skills/a2ui/` as a directory the step-2 generator
+   > compiles. Its six references — `layout.md`, `text-and-media.md`,
+   > `forms.md`, `actions.md`, `frock.md`, `examples.md` — have their
+   > per-component tables and minimal examples _generated_ from the two
+   > committed catalogs by `scripts/generate-a2ui-skill.ts`, which stitches
+   > hand-written prose from `templates/`; it fails on a catalog component no
+   > reference documents, on one documented twice, on an index in `SKILL.md`
+   > that has stopped matching, and on a reference past 64 KiB, and
+   > `bun run typecheck` runs it with `--check`.
+   > `SKILL_CATALOG_CAPS_V1.managed` rose from 8 to 12 — the seven, plus the
+   > Skill each of the five card Plugins may bring.
+   >
+   > One seam gap step 4 reported is closed: `a2uiActionCountV1` counted only
+   > 1.0's `action.name`, while the shipping renderer raises a press from
+   > v0.9's `action.event.name`, so the seam would have admitted surfaces
+   > `admitCardV1` refuses. It now counts both.
+   >
+   > **The live Turn.** Local `development` stack (`bun scripts/native-dev.ts
+serve`), the platform model over the remote Workers AI binding, asked
+   > "show me a draft reply to nick@example.com about the retainer as a card I
+   > can approve". The Bot loaded `managed/a2ui` and three of its references —
+   > `frock.md`, `forms.md`, `actions.md` — then sent one `card` and, in the
+   > same reply, the `approval` whose id its `ApprovalActions` names. Seven
+   > components: a `Column` at `root`, a `Row` of `Text` and `StatusPill`,
+   > `KeyValueRows` for To and Subject, a long-text `TextField` bound to
+   > `/body`, and `ApprovalActions` on `appr-nick-retainer`, with
+   > `sendDataModel: true`. The record folded at revision 1 with no refusal,
+   > and the card drew on the browser build at phone and desktop widths
+   > (`docs/screenshots/cards/`).
+   >
+   > Nothing was refused, so nothing in the Skill had to be repaired to make a
+   > card at all. One thing the screenshots showed was fixed anyway: the model
+   > wrote the title-and-pill `Row` with the default `justify`, and at phone
+   > width the pill ran past the card's edge
+   > (`card-draft-phone-before-layout-note.png`). `frock.md` now says to write
+   > that `Row` with `"justify": "spaceBetween"` and `"weight": 1` on the
+   > title, and `examples.md` shows it. A second Turn, on a second Bot loading
+   > the Skill fresh, wrote exactly that — and reached for `CollapsibleText`
+   > rather than a `TextField` for the body, which is what `frock.md` says the
+   > component is for. That card is `card-draft-phone.png` and
+   > `card-draft-desktop.png`; the pill sits inside the card.
+   >
+   > What the screenshots also show is the duplication step 7 exists to
+   > remove: the `approval` send draws its own bubble under the card, so the
+   > same decision is offered twice. That is the old member still being
+   > accepted, exactly as the decision says it is for one release.
+
 6. Descriptor `cards` and `skills`, `renderCard` and `cardAction` on the
    Plugin worker, `plugin/` actions. The email card as the first seeded
    Plugin, sending through a Connection.

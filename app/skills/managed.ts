@@ -40,9 +40,15 @@ import {
   PLUGINS_SKILL_REFERENCES_V1,
   PLUGINS_SKILL_SLUG_V1,
 } from "./managed-plugins.generated.js";
+import {
+  A2UI_SKILL_DOCUMENT_V1,
+  A2UI_SKILL_REFERENCES_V1,
+  A2UI_SKILL_SLUG_V1,
+} from "./managed-a2ui.generated.js";
 
 // Re-exported because the generated modules they come from are not package
 // exports, and a caller outside this package needs the slugs to withhold them.
+// `a2ui` is not among them: it is offered to every Bot, so nothing withholds it.
 export { APPLETS_SKILL_SLUG_V1, PLUGINS_SKILL_SLUG_V1 };
 
 /** The directory prefix a managed Skill's synthetic path carries. */
@@ -225,6 +231,16 @@ export const MANAGED_SKILL_DOCUMENTS_V1: readonly ManagedSkillDocumentV1[] = [
     slug: PLUGINS_SKILL_SLUG_V1,
     text: PLUGINS_SKILL_DOCUMENT_V1,
     references: PLUGINS_SKILL_REFERENCES_V1,
+  },
+  // The Cards catalog (ADR 0030), authored in `app/cards/skills/a2ui/`. Its
+  // references are the catalogs the client draws, turned into tables by
+  // `scripts/generate-a2ui-skill.ts`, so what a Bot is taught and what the
+  // renderer accepts cannot drift apart. Offered to every Bot: a card is a
+  // send, not an authoring surface, and needs no switch.
+  {
+    slug: A2UI_SKILL_SLUG_V1,
+    text: A2UI_SKILL_DOCUMENT_V1,
+    references: A2UI_SKILL_REFERENCES_V1,
   },
 ];
 

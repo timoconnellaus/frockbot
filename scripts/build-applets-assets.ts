@@ -19,6 +19,9 @@
 //   app/skills/managed-applets.generated.ts the Skill
 //   app/plugins/template.generated.ts       the Plugin SDK scaffold (ADR 0026)
 //   app/skills/managed-plugins.generated.ts the Plugins Skill
+//   app/skills/managed-a2ui.generated.ts    the Cards Skill (ADR 0030), whose
+//                                           references are themselves built by
+//                                           scripts/generate-a2ui-skill.ts
 //
 // Freshness is proved by `--check`, which `bun run typecheck` runs.
 import { existsSync, readdirSync } from "node:fs";
@@ -49,6 +52,9 @@ const PLUGIN_TEMPLATE_OUTPUT = "app/plugins/template.generated.ts";
 /** Where the Plugins Skill is authored. */
 export const PLUGIN_SKILL_SOURCE = at("app/plugins/skills/plugins/");
 const PLUGIN_SKILL_OUTPUT = "app/skills/managed-plugins.generated.ts";
+/** Where the Cards Skill is authored (ADR 0030). */
+export const A2UI_SKILL_SOURCE = at("app/cards/skills/a2ui/");
+const A2UI_SKILL_OUTPUT = "app/skills/managed-a2ui.generated.ts";
 
 /** Content addressing, the same digest the page route verifies against. */
 async function sha256Hex(text: string): Promise<string> {
@@ -318,12 +324,27 @@ const pluginSkillModule = (): Promise<string> =>
     authoredAt: "app/plugins/skills/plugins/",
   });
 
+/**
+ * The Cards Skill, authored at `app/cards/skills/a2ui/`. Its `references/` are
+ * generated from the two committed catalogs by
+ * `scripts/generate-a2ui-skill.ts`, so a stale reference fails that check
+ * before it reaches this one.
+ */
+const a2uiSkillModule = (): Promise<string> =>
+  managedSkillModule({
+    prefix: "A2UI",
+    slug: "a2ui",
+    directory: A2UI_SKILL_SOURCE,
+    authoredAt: "app/cards/skills/a2ui/",
+  });
+
 const outputs: Array<[string, () => Promise<string>]> = [
   [TEMPLATE_OUTPUT, templateModule],
   [PAGES_OUTPUT, pagesModule],
   [SKILL_OUTPUT, skillModule],
   [PLUGIN_TEMPLATE_OUTPUT, pluginTemplateModule],
   [PLUGIN_SKILL_OUTPUT, pluginSkillModule],
+  [A2UI_SKILL_OUTPUT, a2uiSkillModule],
 ];
 
 // Importing this module — the test drives `skillDirectory` directly — must not

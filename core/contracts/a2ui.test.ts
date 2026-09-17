@@ -226,6 +226,43 @@ describe("the budgets", () => {
     );
   });
 
+  // The shipping renderer raises a press from `action.event.name`, v0.9's
+  // spelling, and `admitCardV1` counts it. A seam that counted only 1.0's
+  // would admit a surface the client then refuses whole.
+  test("counts an action in the renderer's spelling too", () => {
+    const components = Array.from(
+      { length: A2UI_LIMITS_V1.actionsPerSurface + 1 },
+      (_, index) => ({
+        id: `b${index}`,
+        component: "Button",
+        action: { event: { name: "send", context: { draft: "d-1" } } },
+      }),
+    );
+    expect(a2uiActionCountV1(components)).toBe(
+      A2UI_LIMITS_V1.actionsPerSurface + 1,
+    );
+    expect(() => decodeA2uiAgentMessageV1(createSurface(components))).toThrow(
+      /actions/,
+    );
+  });
+
+  test("an action property that names nothing is not an action", () => {
+    expect(
+      a2uiActionCountV1([
+        { id: "a", component: "Text" },
+        { id: "b", component: "Button", action: {} },
+        { id: "c", component: "Button", action: { event: {} } },
+        { id: "d", component: "Button", action: { event: "send" } },
+        { id: "e", component: "Button", action: ["send"] },
+        {
+          id: "f",
+          component: "Button",
+          action: { functionCall: { call: "openUrl" } },
+        },
+      ]),
+    ).toBe(0);
+  });
+
   test("a data model larger than a settled card's state", () => {
     expect(() =>
       decodeA2uiAgentMessageV1({
