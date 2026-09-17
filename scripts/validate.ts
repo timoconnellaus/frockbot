@@ -116,7 +116,7 @@ const SHARED_ARTIFACT = new Set(["integration", "e2e"]);
 const EXCLUSIVE = new Set(["build"]);
 
 /**
- * How long a captured command's pipes may still be read after the process
+ * How long a command's pipes may still be read after the process
  * itself has exited. Exit is the authority on when a command is done: a pipe
  * closes only once every descendant that inherited the write end has let go,
  * and a killed package-manager wrapper can leave one behind forever. Whatever
@@ -194,14 +194,14 @@ export async function validate(
   for (const name of names)
     if (!Object.hasOwn(categories, name))
       throw new Error(`Unknown category: ${name}`);
-  // Live streams are the default: one command owns the terminal and its
-  // progress — Playwright's, vitest's — is worth watching as it happens.
-  // Capture is what concurrency costs. The whole run decides this once, from
-  // how many commands it will spawn in total, so a lone run of the one
-  // multi-command category still captures while a lone `e2e` or `build` does
-  // not.
-  const captureOutput =
-    names.reduce((total, name) => total + categories[name]!.length, 0) > 1;
+  // Every command is spawned the same way — its own process group, both pipes
+  // read here — so there is one kill semantics and one reader. The only thing
+  // this decides is what the reader does with a chunk: a run that will spawn
+  // exactly one command has nothing to interleave with, so its progress —
+  // Playwright's, vitest's — is echoed as it arrives; anything more is held
+  // and printed as one block per command.
+  const echoLive =
+    names.reduce((total, name) => total + categories[name]!.length, 0) === 1;
   const sha = snapshot(root);
   // Receipts are addressed by what they validated, not by the commit that
   // carried it, so this directory is shared across commits rather than being
@@ -265,20 +265,19 @@ export async function validate(
    * construction — `runtime`'s three are separate packages with separate
    * outputs, and every other category holds one — so they run together.
    *
-   * A captured command's output is printed as one block when it ends, so
-   * concurrent categories cannot interleave; otherwise it inherits the
-   * terminal and streams live. Capture is also why a command gets its own
-   * process group: what `stop` must reach is not the package-manager wrapper
-   * but the workers below it, which are what hold the pipe open.
+   * Each command leads its own process group: what `stop` must reach is not
+   * the package-manager wrapper but the workers below it, which are what hold
+   * the pipe open.
    */
   const runCategory = async (name: string): Promise<void> => {
     if (failure !== undefined) return;
     if (snapshot(root) !== sha)
       throw new Error("Commit changed during validation");
+    const inputs = inputFingerprint(root, name);
     const key = createHash("sha256")
       .update(
         JSON.stringify({
-          inputs: inputFingerprint(root, name),
+          inputs,
           commands: categories[name],
           bun: Bun.version,
           node: Bun.spawnSync(["node", "--version"]).stdout.toString().trim(),
@@ -296,14 +295,16 @@ export async function validate(
       /* Missing or damaged receipts require validation. */
     }
     if (passed && !force) {
-      console.log(`validate: ${name} cached (inputs ${key.slice(0, 8)})`);
+      console.log(
+        `validate: ${name} cached (inputs ${inputs.slice(0, 8)}, key ${key.slice(0, 8)})`,
+      );
       return;
     }
     rmSync(receipt, { force: true });
     console.log(`validate: running ${name}`);
     await settle(
       categories[name]!.map(async (command) => {
-        const options = {
+        const child = Bun.spawn(command, {
           cwd: root,
           env: {
             ...GIT_ENV,
@@ -311,60 +312,49 @@ export async function validate(
             WRANGLER_REGISTRY_PATH: registry,
           },
           stdin: "inherit",
-        } as const;
-        const child = captureOutput
-          ? Bun.spawn(command, {
-              ...options,
-              stdout: "pipe",
-              stderr: "pipe",
-              detached: true,
-            })
-          : Bun.spawn(command, {
-              ...options,
-              stdout: "inherit",
-              stderr: "inherit",
-            });
+          stdout: "pipe",
+          stderr: "pipe",
+          detached: true,
+        });
         const kill = (): void => {
           try {
-            process.kill(captureOutput ? -child.pid : child.pid, "SIGTERM");
+            process.kill(-child.pid, "SIGTERM");
           } catch {
             /* Already gone. */
           }
         };
         live.add(kill);
         const captured: string[] = [];
-        const readers = captureOutput
-          ? [child.stdout, child.stderr].map((stream) =>
-              (stream as ReadableStream<Uint8Array>).getReader(),
-            )
-          : [];
+        const readers = [child.stdout, child.stderr].map((stream) =>
+          (stream as ReadableStream<Uint8Array>).getReader(),
+        );
         const drained = Promise.all(
           readers.map(async (reader) => {
             const decoder = new TextDecoder();
             for (;;) {
               const { done, value } = await reader.read();
               if (done) return;
-              captured.push(decoder.decode(value, { stream: true }));
+              const text = decoder.decode(value, { stream: true });
+              if (echoLive) process.stdout.write(text);
+              else captured.push(text);
             }
           }),
         ).catch(() => {});
         const code = await child.exited.finally(() => live.delete(kill));
-        if (captureOutput) {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          await Promise.race([
-            drained,
-            new Promise((resolve) => {
-              timer = setTimeout(resolve, CAPTURE_DRAIN_MS);
-            }),
-          ]);
-          clearTimeout(timer);
-          await Promise.all(
-            readers.map((reader) => reader.cancel().catch(() => {})),
-          );
-          const output = captured.join("").trimEnd();
-          if (output.trim())
-            console.log(`\n--- ${name}: ${command.join(" ")} ---\n${output}`);
-        }
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          drained,
+          new Promise((resolve) => {
+            timer = setTimeout(resolve, CAPTURE_DRAIN_MS);
+          }),
+        ]);
+        clearTimeout(timer);
+        await Promise.all(
+          readers.map((reader) => reader.cancel().catch(() => {})),
+        );
+        const output = captured.join("").trimEnd();
+        if (output.trim())
+          console.log(`\n--- ${name}: ${command.join(" ")} ---\n${output}`);
         if (code !== 0) throw new Error(`${name} failed; no success recorded`);
       }),
     );

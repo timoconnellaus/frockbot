@@ -21,12 +21,14 @@ reach the artifact build and would race on one `apps/cloudflare/dist`; those two
 run in order beside everything else. `build` runs alone, after everything else
 has finished: besides writing that same `dist`, it rewrites tracked generated
 sources, and any category reading the work tree beside it could see a
-half-written file. When a run will spawn more than one command, each command's
-output is captured and printed as one block when it ends, so interleaved runs
-stay readable; when it will spawn exactly one, that command streams to the
-terminal live. The first failure kills the
-commands still running, and every command is waited for before the run cleans
-up.
+half-written file. Every command is spawned the same way — in a process group
+of its own, with both pipes read by the runner — so one signal reaches the
+workers below any package-manager wrapper. The only thing that varies is where
+those pipes go: a run that will spawn exactly one command echoes it to the
+terminal as it arrives, since there is nothing to interleave with; a run that
+will spawn more holds each command's output and prints it as one block when
+that command ends. The first failure kills the commands still running, and
+every command is waited for before the run cleans up.
 
 Receipts live in gitignored `.local-validation/receipts/<category>-<key>.json`.
 The key is the content of everything the category reads — the committed blobs at
@@ -73,6 +75,25 @@ Branch deletion needs no validation. Pre-push fetches main from the push remote
 and rejects merge commits introduced on the branch; a branch behind main may
 push, because `main.yml` checks the merge commit itself once it lands. A fetch
 failure blocks the push.
+
+## Vitest file parallelism stays off (decided 2026-09-17)
+
+Categories now run concurrently, but inside `apps/cloudflare` both vitest
+configs keep `fileParallelism: false`, deliberately and not as an oversight.
+The fakes those suites run against are shared mutable state that files assert
+exact increments on: the Computer host fake is a single Node-side closure whose
+exec table, file map and call log belong to the run rather than to a file, and
+the Workers AI call counter, the outbound stub's MCP handshake counter and its
+blocked-address tally are each read, driven through a Turn, and asserted to
+have risen by exactly one. Parallel files race on all of them, and a per-test
+reset is itself a thing that races, so switching the flag on today buys
+flakiness rather than speed.
+
+Making those fakes per pool worker is the change that would unlock it. That is
+its own piece of work, to be done and measured on its own rather than folded
+into a scheduling change. The measured shape of the workerd suite says it is
+worth doing: of 353 seconds, 155 are module import and 176 are test execution,
+and both are serial today.
 
 ## Conversation evaluation
 

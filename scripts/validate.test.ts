@@ -202,8 +202,7 @@ test("an interrupt reaches the children it took out of the foreground", async ()
   const marker = join(scratch, "child.pid");
   // A real interrupt, delivered to a real validator process, because that is
   // the whole claim: the children sit in process groups of their own and no
-  // longer receive the terminal's signal. Two commands, so the run captures
-  // and each child leads its own group. The first records its pid and then
+  // longer receive the terminal's signal. The first records its pid and then
   // sleeps far longer than the test allows.
   const driver = join(scratch, "driver.ts");
   writeFileSync(
