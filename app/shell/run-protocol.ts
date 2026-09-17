@@ -1624,7 +1624,9 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
     }
     return {
       type: "send/to-user",
-      payload: decodeSendToUserPayloadV1(event.payload, "run event.payload"),
+      payload: decodeSendToUserPayloadV1(event.payload, "run event.payload", {
+        kernelMinted: true,
+      }),
       ordinal: ordinal as number,
     };
   }

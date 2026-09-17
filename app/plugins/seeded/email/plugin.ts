@@ -1,6 +1,7 @@
 import type {
   CardMessage,
   PluginCard,
+  PluginCardDecision,
   PluginContext,
   PluginExecute,
   PluginTool,
@@ -124,11 +125,19 @@ function readDraft(data: { [key: string]: unknown }): Draft {
   };
 }
 
+/**
+ * The catalog every Frock card is drawn from:
+ * `core/protocol-schemas/schema/frock-catalog.json`. The client registers
+ * A2UI's standard components and the Frock family as one catalog under this
+ * id, so naming it is naming both.
+ */
+const FROCK_CATALOG_ID = "https://frockbot.com/a2ui/catalogs/frock/v1.json";
+
 function surface(surfaceId: string, components: unknown[]): CardMessage[] {
   return [
     {
       version: "v1.0",
-      createSurface: { surfaceId, components },
+      createSurface: { surfaceId, catalogId: FROCK_CATALOG_ID, components },
     },
   ];
 }
@@ -143,10 +152,21 @@ function surface(surfaceId: string, components: unknown[]): CardMessage[] {
 function drawDraft(
   surfaceId: string,
   draft: Draft,
-): { messages: CardMessage[]; covers: { [key: string]: unknown } } {
+): {
+  messages: CardMessage[];
+  covers: { [key: string]: unknown };
+  decision: PluginCardDecision;
+} {
   return {
     messages: surface(surfaceId, draftComponents(draft, false)),
     covers: { ...draft },
+    // What the person is actually asked. The catalog's ApprovalActions holds
+    // an id and two labels, so the words the Approval is recorded with are
+    // declared here, beside the values that decision covers.
+    decision: {
+      action: `Send an email to ${draft.to.join(", ")} — ${draft.subject}`,
+      risk: "medium",
+    },
   };
 }
 
@@ -166,17 +186,25 @@ function addressRows(draft: Draft, full: boolean): unknown {
 }
 
 /**
- * The two components a "More details" press changes, and only those: a press
+ * The components a "More details" press changes, and only those: a press
  * redraws what it was about, never the ApprovalActions, whose approvalId the
  * kernel bound when the card was sent and which the Plugin cannot mint again.
+ * The catalog's Button carries no label of its own — it names a child — so
+ * the word on it is a Text the press redraws beside the rows.
  */
 function detailComponents(draft: Draft, full: boolean): unknown[] {
   return [
     addressRows(draft, full),
     {
+      id: "more-label",
+      component: "Text",
+      text: full ? "Fewer details" : "More details",
+    },
+    {
       id: "more",
       component: "Button",
-      label: full ? "Fewer details" : "More details",
+      child: "more-label",
+      variant: "borderless",
       // A press the kernel routes to this Plugin's own handler, which answers
       // with the rows again. Costs no Turn, which is the point of the route.
       action: { name: `plugin/email/details`, context: { full: !full } },
@@ -185,7 +213,7 @@ function detailComponents(draft: Draft, full: boolean): unknown[] {
 }
 
 function draftComponents(draft: Draft, full: boolean): unknown[] {
-  const [rows, more] = detailComponents(draft, full);
+  const [rows, moreLabel, more] = detailComponents(draft, full);
   return [
     {
       id: "root",
@@ -196,7 +224,8 @@ function draftComponents(draft: Draft, full: boolean): unknown[] {
       id: "status",
       component: "StatusPill",
       label: "Ready to send",
-      tone: "pending",
+      // The catalog's tone for a card waiting on the person.
+      tone: "ready",
     },
     rows,
     {
@@ -205,6 +234,7 @@ function draftComponents(draft: Draft, full: boolean): unknown[] {
       text: draft.body,
       collapsedLines: 6,
     },
+    moreLabel,
     more,
     {
       id: "actions",
@@ -214,20 +244,19 @@ function draftComponents(draft: Draft, full: boolean): unknown[] {
       approvalId: "pending",
       approveLabel: "Send",
       declineLabel: "Discard",
-      action: `Send an email to ${draft.to.join(", ")} — ${draft.subject}`,
-      risk: "medium",
     },
   ];
 }
 
 function receiptComponents(
   title: string,
-  status: { label: string; tone: string },
+  status: string,
+  tone: "neutral" | "success",
   summary: string,
 ): unknown[] {
   return [
     { id: "root", component: "Column", children: ["receipt"] },
-    { id: "receipt", component: "Receipt", title, status, summary },
+    { id: "receipt", component: "Receipt", title, status, tone, summary },
   ];
 }
 
@@ -235,14 +264,16 @@ function settledComponents(state: DraftState): unknown[] | undefined {
   if (state.status === "sent") {
     return receiptComponents(
       state.draft.subject,
-      { label: "Sent", tone: "positive" },
+      "Sent",
+      "success",
       `Sent to ${state.draft.to.join(", ")} — ${state.draft.subject}`,
     );
   }
   if (state.status === "discarded") {
     return receiptComponents(
       state.draft.subject,
-      { label: "Discarded", tone: "muted" },
+      "Discarded",
+      "neutral",
       `Discarded — ${state.draft.subject}`,
     );
   }

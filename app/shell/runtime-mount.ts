@@ -312,6 +312,7 @@ export async function agentRuntime(
                   const payload = decodeSendToUserPayloadV1(
                     event.payload,
                     "agent send/to-user payload",
+                    { kernelMinted: true },
                   );
                   if (payload.type === "text") {
                     sentText = payload.text;

@@ -2368,8 +2368,6 @@ function components(subject, expanded) {
       approvalId: "not-the-kernels",
       approveLabel: "Send",
       declineLabel: "Discard",
-      action: "Send the draft",
-      risk: "medium",
     },
   ];
 }
@@ -2387,9 +2385,11 @@ export const cards = {
             },
           },
         ],
-        // What the decision this card asks for covers, in the Plugin's own
-        // words. A draw that asks for one and names none is refused.
+        // What the decision this card asks for covers, and what it asks, in
+        // the Plugin's own words. A draw that asks for one and names neither
+        // is refused.
         covers: { subject: payload.data.subject },
+        decision: { action: "Send the draft", risk: "medium" },
       };
     },
     actions: {
@@ -2421,8 +2421,6 @@ export const cards = {
                   approvalId: "minted-by-the-plugin",
                   approveLabel: "Send",
                   declineLabel: "Discard",
-                  action: "Send the draft",
-                  risk: "medium",
                 },
               ],
             },

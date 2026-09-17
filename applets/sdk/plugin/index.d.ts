@@ -510,15 +510,36 @@ export type PluginCardAnswer =
  * card would authorize. The Plugin states them because the Plugin, not the
  * model, decides what the card draws — a redraw that ignores the Bot's values
  * and shows the draft it is holding covers that draft. A draw that puts an
- * `ApprovalActions` on the card and declares no `covers` is refused, so a
- * decision bound to nothing cannot exist.
+ * `ApprovalActions` on the card and declares no `covers`, or no `decision`,
+ * is refused, so a decision bound to nothing — or asked in no words — cannot
+ * exist.
  */
 export type PluginCardDraw =
   | CardMessage[]
-  | { messages: CardMessage[]; covers?: { [key: string]: unknown } }
+  | {
+      messages: CardMessage[];
+      covers?: { [key: string]: unknown };
+      decision?: PluginCardDecision;
+    }
   | PluginCardDrop
   | undefined
   | void;
+
+/**
+ * The words the decision a card asks for is recorded with. They are stated
+ * here rather than on the `ApprovalActions` component because the Frock
+ * catalog allows that component an `approvalId` and its two labels and
+ * nothing else: the host draws the labels, the kernel records the Approval
+ * with these, and a draw that asks for a decision and states none is refused.
+ */
+export interface PluginCardDecision {
+  /** What the person is asked, in their words: "Send an email to …". */
+  action: string;
+  /** What getting it wrong costs. */
+  risk: "low" | "medium" | "high";
+  /** Why, when the action does not say. */
+  rationale?: string;
+}
 
 /**
  * One Card the Plugin draws (ADR 0030). `render` composes the surface from

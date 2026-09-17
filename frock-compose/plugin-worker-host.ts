@@ -62,6 +62,7 @@ import {
   cardSurfacePrefixV1,
   pluginCardToolNameV1,
   validateAgainstJsonSchemaV1,
+  type PluginCardDecisionV1,
   type PluginCardV1,
   type PluginDescriptorV1,
   type PluginGrantV1,
@@ -261,6 +262,12 @@ export interface PluginCardSendV1 {
    * declared none, which is only allowed of a card that asks for nothing.
    */
   covers?: Record<string, unknown>;
+  /**
+   * What the decision this draw asks for is recorded as, as the Plugin stated
+   * it. Absent when the draw asks for none; a draw that puts an
+   * `ApprovalActions` on the card and states none is refused at the seam.
+   */
+  decision?: PluginCardDecisionV1;
   /** The A2UI messages the Plugin drew, still undecoded. */
   messages: Record<string, unknown>[];
   context: ToolExecutionContext;
@@ -1408,6 +1415,9 @@ export class PluginWorkerHost {
           cardId: card.id,
           surfaceId,
           ...(rendered.covers === undefined ? {} : { covers: rendered.covers }),
+          ...(rendered.decision === undefined
+            ? {}
+            : { decision: rendered.decision }),
           messages: rendered.messages,
           context,
         });

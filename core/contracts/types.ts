@@ -1430,7 +1430,11 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       turn();
       step();
       eventString(event.occurrenceId, "session event.occurrenceId");
-      decodeSendToUserPayloadV1(event.payload, "session event.payload");
+      // A send already on the log: the reserved Card namespace is refused
+      // where a payload is authored, not where one is read back.
+      decodeSendToUserPayloadV1(event.payload, "session event.payload", {
+        kernelMinted: true,
+      });
       break;
     case "reply/to-caller":
       requireEventKeys(

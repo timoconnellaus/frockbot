@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import {
   cardSurfacePrefixV1,
   decodePluginDescriptorV1,
+  decodeSendToUserPayloadV1,
   ISOLATE_CONTRACT_VERSION,
   type BotCapabilitiesStub,
   type PluginWorkerEntrypoint,
@@ -419,6 +420,8 @@ describe("the Approvals a Plugin's Card asks for", () => {
     covers?: Record<string, unknown>;
     /** A draw that asks for a decision and declares nothing it covers. */
     declaresNothing?: true;
+    /** A draw that asks for a decision and says nothing about what it asks. */
+    saysNothing?: true;
   }): PluginWorkerEntrypoint {
     return {
       health: () =>
@@ -472,6 +475,14 @@ describe("the Approvals a Plugin's Card asks for", () => {
           ...(options?.declaresNothing
             ? {}
             : { covers: options?.covers ?? invocation.data }),
+          ...(options?.saysNothing
+            ? {}
+            : {
+                decision: {
+                  action: "Send the draft",
+                  risk: "medium" as const,
+                },
+              }),
           messages: [
             {
               version: "v1.0",
@@ -485,8 +496,6 @@ describe("the Approvals a Plugin's Card asks for", () => {
                     approvalId: "not-the-kernels",
                     approveLabel: "Send",
                     declineLabel: "Discard",
-                    action: "Send the draft",
-                    risk: "medium",
                   },
                 ],
               },
@@ -658,6 +667,13 @@ describe("the Approvals a Plugin's Card asks for", () => {
     return actions?.approvalId ?? "";
   }
 
+  /** Every surface this Bot has recorded a binding for. */
+  function bindingKeys(values: Map<string, unknown>): string[] {
+    return [...values.keys()].filter((key) =>
+      key.startsWith(CARD_APPROVAL_BINDING_PREFIX),
+    );
+  }
+
   /** The binding this surface's decision is recorded under, as stored. */
   function bindingFor(
     values: Map<string, unknown>,
@@ -716,11 +732,9 @@ describe("the Approvals a Plugin's Card asks for", () => {
       const asked = approvalIdsOnLog(mounted);
       expect(asked).toHaveLength(1);
       expect(cardSurfaceIdsOnLog(mounted)).toEqual([surfaceId]);
-      expect(
-        [...values.keys()].filter((key) =>
-          key.startsWith(CARD_APPROVAL_BINDING_PREFIX),
-        ),
-      ).toEqual([cardApprovalBindingKeyV1(CARD_PLUGIN, surfaceId)]);
+      expect(bindingKeys(values)).toEqual([
+        cardApprovalBindingKeyV1(CARD_PLUGIN, surfaceId),
+      ]);
       expect(bindingFor(values, surfaceId)?.approvalIds).toEqual(asked);
       expect(cardApprovalId(mounted)).toBe(asked[0]!);
     } finally {
@@ -756,7 +770,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
       expect(String(drawn.content)).toMatch(/without declaring the values/);
       // Nothing was recorded: no card, no decision, no binding.
       expect(approvalIdsOnLog(mounted)).toEqual([]);
-      expect([...values.keys()]).toEqual([]);
+      expect(bindingKeys(values)).toEqual([]);
       const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
       expect(
         (session?.events ?? []).filter(
@@ -765,6 +779,58 @@ describe("the Approvals a Plugin's Card asks for", () => {
       ).toEqual([]);
     } finally {
       await mounted.dispose();
+    }
+  });
+
+  test("a card asking for a decision it says nothing about is refused", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store, { saysNothing: true });
+    try {
+      const drawn = await draw({ data: { subject: "Hello" } });
+      expect(drawn.isError).toBe(true);
+      expect(String(drawn.content)).toMatch(
+        /without declaring what that decision asks/,
+      );
+      expect(approvalIdsOnLog(mounted)).toEqual([]);
+      expect(bindingKeys(values)).toEqual([]);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  // The model may choose any `approvalId` a `send_to_user` approval accepts,
+  // and those records share one storage namespace with a Card's. So a Card's
+  // id has to be one no accepted `send_to_user` could have spelled, and one
+  // nobody outside this Bot could have computed.
+  test("mints a decision id no send_to_user approval could have asked for", async () => {
+    const first = cardApprovalStorage();
+    const mountedFirst = await mountCards(first.store);
+    let minted: string;
+    try {
+      await mountedFirst.draw({ data: { subject: "Hello" } }, "effect-1");
+      minted = approvalIdsOnLog(mountedFirst.mounted)[0]!;
+    } finally {
+      await mountedFirst.mounted.dispose();
+    }
+    // Nothing a model sends may land on that id.
+    expect(() =>
+      decodeSendToUserPayloadV1({
+        type: "approval",
+        approvalId: minted,
+        action: "Check the weather for you?",
+        risk: "low",
+      }),
+    ).toThrow("that namespace is the kernel's");
+
+    // And it is not a function of the effect: another Bot's storage draws the
+    // same card under the same effect id and lands somewhere else entirely.
+    const second = cardApprovalStorage();
+    const mountedSecond = await mountCards(second.store);
+    try {
+      await mountedSecond.draw({ data: { subject: "Hello" } }, "effect-1");
+      expect(approvalIdsOnLog(mountedSecond.mounted)[0]).not.toBe(minted);
+    } finally {
+      await mountedSecond.mounted.dispose();
     }
   });
 

@@ -129,6 +129,30 @@ export const SEND_TO_USER_LIMITS_V1 = {
  */
 const APPROVAL_ID_PATTERN_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 
+/**
+ * The namespace the kernel mints a Card's own Approval ids in.
+ *
+ * Approval records live in one store, so an id the model may choose and an id
+ * the kernel mints for a Card share a namespace. A model that could spell a
+ * Card's id could ask for a decision under it on an earlier Turn, have a
+ * person answer *that* question, and leave an approved record sitting behind a
+ * card nobody decided about. So the namespace is the kernel's alone: the
+ * minted half carries a seed no caller can guess, and this half — every
+ * `send_to_user` approval, whoever sends it — refuses the prefix outright.
+ */
+export const CARD_APPROVAL_ID_PREFIX_V1 = "card-approval-";
+
+/** What may waive the reserved prefix. */
+export interface DecodeSendToUserOptionsV1 {
+  /**
+   * True only for a payload the kernel has already admitted: the Card ask it
+   * just minted, or a send being read back off a Session's log. Never set
+   * where a model or a Plugin is authoring the payload — that is the seam the
+   * reserved prefix exists to hold.
+   */
+  kernelMinted?: boolean;
+}
+
 function payloadRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
@@ -230,6 +254,7 @@ function decodeWidget(value: unknown, label: string): SendToUserWidgetV1 {
 export function decodeSendToUserPayloadV1(
   value: unknown,
   label = "send payload",
+  options: DecodeSendToUserOptionsV1 = {},
 ): SendToUserPayloadV1 {
   const payload = payloadRecord(value, label);
   const limits = SEND_TO_USER_LIMITS_V1;
@@ -336,6 +361,14 @@ export function decodeSendToUserPayloadV1(
       if (!APPROVAL_ID_PATTERN_V1.test(approvalId)) {
         throw new Error(
           `${label}.approvalId must be letters, digits, dot, underscore or dash`,
+        );
+      }
+      if (
+        options.kernelMinted !== true &&
+        approvalId.startsWith(CARD_APPROVAL_ID_PREFIX_V1)
+      ) {
+        throw new Error(
+          `${label}.approvalId must not start with "${CARD_APPROVAL_ID_PREFIX_V1}": that namespace is the kernel's, for the decisions a Card asks for`,
         );
       }
       return {

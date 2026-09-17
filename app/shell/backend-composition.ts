@@ -40,6 +40,7 @@ import { recordSendToUserV1 } from "./agent.js";
 import {
   bindCardApprovalsV1,
   cardApprovalIdV1,
+  cardApprovalSeedV1,
   cardValuesDigestV1,
   type CardApprovalStoreV1,
 } from "./cards.js";
@@ -309,23 +310,53 @@ export function createShellCompositionHost(
                   };
                 }
                 const reused = live?.approvalIds ?? [];
+                // The unguessable half of this card's Approval ids, from the
+                // Bot's own secret and the effect that records the send: the
+                // same effect recomputes it, and nothing outside the Durable
+                // Object can compute it at all.
+                const seed =
+                  approvals === undefined
+                    ? undefined
+                    : await cardApprovalSeedV1(
+                        await approvals.secret(),
+                        send.context.effectId,
+                      );
                 const bound = bindCardApprovalsV1(
                   payload.messages,
                   (index) =>
                     reused[index] ??
-                    cardApprovalIdV1(send.context.effectId, index),
-                  `${send.pluginId}: ${send.cardId}`,
+                    (seed === undefined ? "" : cardApprovalIdV1(seed, index)),
                 );
                 // An unbound decision cannot exist. A card asking one of a
-                // person while naming nothing it covers would record an
-                // Approval that authorizes whatever a later call claims it
-                // does, so the draw is refused rather than recorded.
-                if (bound.approvals.length > 0 && digest === undefined) {
-                  return {
-                    status: "refused" as const,
-                    reason: `plugin "${send.pluginId}" drew a decision on card "${send.cardId}" without declaring the values it covers`,
-                  };
+                // person while naming nothing it covers, saying nothing about
+                // what it is asking, or drawn where this host records no card
+                // approvals at all would record an Approval that authorizes
+                // whatever a later call claims it does, so the draw is refused
+                // rather than recorded.
+                const decision = send.decision;
+                if (bound.approvalIds.length > 0) {
+                  const unbound =
+                    digest === undefined
+                      ? "without declaring the values it covers"
+                      : decision === undefined
+                        ? "without declaring what that decision asks"
+                        : seed === undefined
+                          ? "where no card approvals are recorded"
+                          : undefined;
+                  if (unbound !== undefined) {
+                    return {
+                      status: "refused" as const,
+                      reason: `plugin "${send.pluginId}" drew a decision on card "${send.cardId}" ${unbound}`,
+                    };
+                  }
                 }
+                const cardApprovals =
+                  decision === undefined
+                    ? []
+                    : bound.approvalIds.map((approvalId) => ({
+                        approvalId,
+                        ...decision,
+                      }));
                 const tool = `${send.pluginId}_${send.cardId}`;
                 // Decoded like any other payload before anything reaches the
                 // log, and decoded *before* the Card is recorded: a decision
@@ -333,10 +364,13 @@ export function createShellCompositionHost(
                 // card in the conversation asking for one nobody can answer.
                 let asks;
                 try {
-                  asks = bound.approvals.map((approval) =>
+                  asks = cardApprovals.map((approval) =>
                     decodeSendToUserPayloadV1(
                       { type: "approval", ...approval },
                       `plugin "${send.pluginId}" card approval`,
+                      // The kernel minted these ids a few lines above; the
+                      // reserved namespace is refused for every other caller.
+                      { kernelMinted: true },
                     ),
                   );
                 } catch (error) {
@@ -365,7 +399,7 @@ export function createShellCompositionHost(
                   // A reused decision was already asked for on the Turn that
                   // drew this surface first; asking again would put a second
                   // request for one decision on the log.
-                  const approval = bound.approvals[index];
+                  const approval = cardApprovals[index];
                   if (approval && reused.includes(approval.approvalId)) continue;
                   const asked = await recordSendToUserV1(
                     runtime.services.sessions,
@@ -383,21 +417,19 @@ export function createShellCompositionHost(
                     return { status: "refused" as const, reason: asked.reason };
                   }
                 }
-                if (approvals && bound.approvals.length > 0 && digest) {
+                if (approvals && cardApprovals.length > 0 && digest) {
                   await approvals.record({
                     schemaVersion: 1,
                     pluginId: send.pluginId,
                     surfaceId: send.surfaceId,
                     digest,
-                    approvalIds: bound.approvals.map(
-                      (approval) => approval.approvalId,
-                    ),
+                    approvalIds: bound.approvalIds,
                     createdAt: new Date().toISOString(),
                   });
                 }
                 return {
                   status: "sent" as const,
-                  approvals: bound.approvals.length,
+                  approvals: bound.approvalIds.length,
                 };
               },
               recordHookFailure: async (failure) => {

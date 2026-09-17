@@ -66,6 +66,7 @@
  */
 import {
   A2UI_IDENTIFIER_V1,
+  CARD_APPROVAL_ID_PREFIX_V1,
   A2UI_LIMITS_V1,
   a2uiActionCountV1,
   a2uiByteLengthV1,
@@ -1165,37 +1166,62 @@ export function decodeCardActionReceiptV1(
 }
 
 /**
- * The Frock catalog component the host draws for a decision, and the props
- * the kernel reads off it. The renderer draws the two labels; `action`,
- * `risk` and `rationale` are the words the Approval is *recorded* with, and
- * a component that carries none of them is recorded with the card's own name.
+ * The Frock catalog component the host draws for a decision. The catalog
+ * allows it an `approvalId` and the two labels and nothing else, so the words
+ * the Approval is recorded with are not on the component: the draw states
+ * them beside the values it covers, and a draw that states neither is refused.
  */
 export const CARD_APPROVAL_COMPONENT_V1 = "ApprovalActions";
 
-/** One Approval a Card asked for, as the kernel recorded it. */
-export interface CardApprovalBindingV1 {
-  approvalId: string;
+/** The words one card's decision is recorded with, as the Plugin drew it. */
+export interface CardDecisionWordingV1 {
   action: string;
   risk: "low" | "medium" | "high";
   rationale?: string;
 }
 
+/** One Approval a Card asked for, as the kernel recorded it. */
+export interface CardApprovalBindingV1 extends CardDecisionWordingV1 {
+  approvalId: string;
+}
+
+/** Where the Bot's own card-approval seed secret is kept. */
+export const CARD_APPROVAL_SECRET_KEY_V1 = "shell:card-approval-secret";
+
 /**
- * The Approval id the Nth decision on one card send is recorded under.
+ * The unguessable half of a Card's Approval ids, one per card send.
  *
- * Derived from the effect that records the send rather than minted, because
- * the send itself is deduped by that effect id: a Turn interrupted before its
- * tool result landed re-runs the same call under the same effect, and a freshly
- * minted id would name a decision nobody was ever asked for while the card in
- * the conversation still carried the first one. Computing the id instead means
- * a replay recomputes it, the send dedupe makes the ask a no-op, and the
- * binding the replay writes is the one that was already there.
+ * Two things pull in opposite directions here. The id has to be *stable*: the
+ * send is deduped by its effect id, so a Turn interrupted before its tool
+ * result landed re-runs the same call, and a freshly minted id would name a
+ * decision nobody was ever asked for while the card in the conversation still
+ * carried the first one. And it has to be *unguessable*: `send_to_user` lets
+ * the model choose an `approvalId` in the same storage namespace, so an id
+ * that were a pure function of the effect could be asked for — and answered —
+ * a Turn before the card that will carry it exists.
  *
- * The effect id is a storage key and a URL path segment by the time it is an
- * Approval id, so anything outside the id's alphabet becomes a dash.
+ * A seed over the Bot's own secret and the effect id is both: the same effect
+ * recomputes the same seed, and nothing outside this Durable Object can
+ * compute it at all. The prefix is refused for a model-supplied `approvalId`
+ * at the `send_to_user` seam, so the two namespaces never meet.
  */
-export function cardApprovalIdV1(effectId: string, index: number): string {
-  return `card-approval-${effectId.replace(/[^a-zA-Z0-9._-]/g, "-")}-${index}`;
+export async function cardApprovalSeedV1(
+  secret: string,
+  effectId: string,
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${secret}\n${effectId}`),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
+}
+
+/** The Approval id the Nth decision on one card send is recorded under. */
+export function cardApprovalIdV1(seed: string, index: number): string {
+  return `${CARD_APPROVAL_ID_PREFIX_V1}${seed}-${index}`;
 }
 
 /** Where one surface's live Approvals are recorded, keyed by whose card it is. */
@@ -1280,6 +1306,12 @@ export interface CardApprovalStoreV1 {
     surfaceId: string,
   ): Promise<CardApprovalRecordV1 | undefined>;
   record(binding: CardApprovalRecordV1): Promise<void>;
+  /**
+   * This Bot's own secret, minted once and kept. It is what makes a Card's
+   * Approval ids unguessable while still being a function of the effect that
+   * drew the card; see `cardApprovalSeedV1`.
+   */
+  secret(): Promise<string>;
 }
 
 /** Reads the record only; the liveness of each id is the caller's question. */
@@ -1309,37 +1341,25 @@ export function decodeCardApprovalRecordV1(
  * kernel issues" (ADR 0030) is this function. Whatever `approvalId` the
  * author wrote is overwritten with a minted one before the send is recorded,
  * so a Card can never point its decision at an Approval it did not ask for,
- * and the returned bindings are the Approvals the caller records beside the
- * Card. `mint` is handed the index of the decision on this card, so a caller
+ * and the returned ids are the Approvals the caller records beside the Card.
+ * `mint` is handed the index of the decision on this card, so a caller
  * redrawing a surface whose decision is still pending can answer with the id
  * that decision already has rather than leaving two live Approvals over one
  * draft.
+ *
+ * The words each Approval is recorded with are the caller's, taken from what
+ * the draw declared: the catalog allows the component nothing but its id and
+ * its labels.
  */
 export function bindCardApprovalsV1(
   messages: readonly A2uiAgentMessageV1[],
   mint: (index: number) => string,
-  fallbackAction: string,
-): { messages: A2uiAgentMessageV1[]; approvals: CardApprovalBindingV1[] } {
-  const approvals: CardApprovalBindingV1[] = [];
+): { messages: A2uiAgentMessageV1[]; approvalIds: string[] } {
+  const approvalIds: string[] = [];
   const bindComponent = (component: A2uiComponentV1): A2uiComponentV1 => {
     if (component.component !== CARD_APPROVAL_COMPONENT_V1) return component;
-    const approvalId = mint(approvals.length);
-    const risk =
-      component.risk === "low" || component.risk === "high"
-        ? component.risk
-        : "medium";
-    approvals.push({
-      approvalId,
-      action:
-        typeof component.action === "string" && component.action.length > 0
-          ? component.action.slice(0, 512)
-          : fallbackAction,
-      risk,
-      ...(typeof component.rationale === "string" &&
-      component.rationale.length > 0
-        ? { rationale: component.rationale.slice(0, 2_000) }
-        : {}),
-    });
+    const approvalId = mint(approvalIds.length);
+    approvalIds.push(approvalId);
     return { ...component, approvalId };
   };
   const bound = messages.map((message) => {
@@ -1366,7 +1386,7 @@ export function bindCardApprovalsV1(
     }
     return message;
   });
-  return { messages: bound, approvals };
+  return { messages: bound, approvalIds };
 }
 
 /**
@@ -1380,7 +1400,22 @@ export function createCardApprovalStoreV1(storage: {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
 }): CardApprovalStoreV1 {
+  // One read per store, and one mint: two sends racing the first draw would
+  // otherwise seed their ids from two different secrets.
+  let secret: Promise<string> | undefined;
   return {
+    secret() {
+      secret ??= (async () => {
+        const stored = await storage.get<unknown>(CARD_APPROVAL_SECRET_KEY_V1);
+        if (typeof stored === "string" && stored.length > 0) return stored;
+        const minted = [...crypto.getRandomValues(new Uint8Array(32))]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+        await storage.put(CARD_APPROVAL_SECRET_KEY_V1, minted);
+        return minted;
+      })();
+      return secret;
+    },
     async live(pluginId, surfaceId) {
       const stored = decodeCardApprovalRecordV1(
         await storage.get<unknown>(cardApprovalBindingKeyV1(pluginId, surfaceId)),

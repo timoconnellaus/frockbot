@@ -775,6 +775,12 @@ async function runRenderCard(invocation, resolve, contextFor) {
     if (answer.status === "rendered" && isRecord(value) && isRecord(value.covers)) {
       answer.covers = value.covers;
     }
+    // And what that decision asks, in the Plugin's own words. The catalog
+    // allows the ApprovalActions component nothing but its id and its labels,
+    // so the wording rides here and the kernel records the Approval with it.
+    if (answer.status === "rendered" && isRecord(value) && isRecord(value.decision)) {
+      answer.decision = value.decision;
+    }
     return answer;
   } catch (error) {
     return { schemaVersion: 1, status: "drop", reason: errorText(error) };

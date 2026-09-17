@@ -319,7 +319,29 @@ export type PluginWorkerRenderCardResultV1 =
       status: "rendered";
       messages: Record<string, unknown>[];
       covers?: Record<string, unknown>;
+      decision?: PluginCardDecisionV1;
     };
+
+/**
+ * What the decision a draw asks for is recorded as: the words a person is
+ * asked, how much it costs to get wrong, and why when the words do not say.
+ *
+ * They are stated beside `covers` rather than on the `ApprovalActions`
+ * component because the Frock catalog allows that component an `approvalId`
+ * and its two labels and nothing else — the host draws the labels, and the
+ * Approval is recorded with these. A draw that puts an `ApprovalActions` on
+ * the card and states none of this is refused at the seam, exactly as one
+ * that declares no `covers` is.
+ */
+export interface PluginCardDecisionV1 {
+  action: string;
+  risk: "low" | "medium" | "high";
+  rationale?: string;
+}
+
+/** The bounds a decision's words are held to, matching a `send_to_user` approval. */
+export const MAX_PLUGIN_CARD_DECISION_ACTION_V1 = 2_000;
+export const MAX_PLUGIN_CARD_DECISION_RATIONALE_V1 = 8_000;
 
 /** The document is carried opaque and bounded; the host decodes it as a `ViewDocument`. */
 export type PluginWorkerViewResultV1 =
@@ -955,7 +977,10 @@ export function decodePluginWorkerRenderCardResultV1(
           }),
     };
   }
-  exactKeys(value, ["schemaVersion", "status", "messages"], label, ["covers"]);
+  exactKeys(value, ["schemaVersion", "status", "messages"], label, [
+    "covers",
+    "decision",
+  ]);
   if (value.status !== "rendered") {
     throw new Error(`${label}.status is invalid`);
   }
@@ -966,6 +991,42 @@ export function decodePluginWorkerRenderCardResultV1(
     ...(value.covers === undefined
       ? {}
       : { covers: decodeCardCoversV1(value.covers, label) }),
+    ...(value.decision === undefined
+      ? {}
+      : { decision: decodeCardDecisionV1(value.decision, label) }),
+  };
+}
+
+/** The words one draw asks its decision in, held to the Approval's own bounds. */
+function decodeCardDecisionV1(
+  input: unknown,
+  label: string,
+): PluginCardDecisionV1 {
+  const decision = record(input, `${label}.decision`);
+  exactKeys(decision, ["action", "risk"], `${label}.decision`, ["rationale"]);
+  if (
+    decision.risk !== "low" &&
+    decision.risk !== "medium" &&
+    decision.risk !== "high"
+  ) {
+    throw new Error(`${label}.decision.risk must be low, medium or high`);
+  }
+  return {
+    action: boundedString(
+      decision.action,
+      `${label}.decision.action`,
+      MAX_PLUGIN_CARD_DECISION_ACTION_V1,
+    ),
+    risk: decision.risk,
+    ...(decision.rationale === undefined
+      ? {}
+      : {
+          rationale: boundedString(
+            decision.rationale,
+            `${label}.decision.rationale`,
+            MAX_PLUGIN_CARD_DECISION_RATIONALE_V1,
+          ),
+        }),
   };
 }
 
