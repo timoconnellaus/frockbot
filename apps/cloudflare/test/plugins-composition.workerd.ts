@@ -2992,8 +2992,9 @@ export const cards = {
         },
       });
     const notices = async () =>
-      (await bot(identity).listNotifications({ schemaVersion: 1, ...identity }))
-        .map((notice) => `${notice.title}: ${notice.body}`);
+      (
+        await bot(identity).listNotifications({ schemaVersion: 1, ...identity })
+      ).map((notice) => `${notice.title}: ${notice.body}`);
     const quarantineNotice = async (pluginId: string) =>
       (await notices()).find(
         (notice) =>
@@ -3026,8 +3027,7 @@ export const cards = {
     const pressPage = (
       await bot(identity).readBotPluginsFrame({ schemaVersion: 1, ...identity })
     ).plugins.find((row) => row.pluginId === PRESS_ID) as
-      | { on: boolean; quarantined?: string }
-      | undefined;
+      { on: boolean; quarantined?: string } | undefined;
     expect(pressPage).toMatchObject({ on: false });
     expect(pressPage?.quarantined).toContain(
       "3 card presses in a row that failed",
