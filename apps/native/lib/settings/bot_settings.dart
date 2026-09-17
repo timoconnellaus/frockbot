@@ -166,6 +166,14 @@ class BotSettingsController extends ChangeNotifier {
     }
   }
 
+  /// Re-reads the Plugins line after the Plugins surface changed what this Bot
+  /// runs, so the row that summarises them cannot outlive the change.
+  Future<void> refreshPlugins() async {
+    if (!loaded) return;
+    await _loadPlugins();
+    _changed();
+  }
+
   Future<wire.SettingsOptionsPage> options(String query, int? cursor) async {
     final page = wire.SettingsOptionsPage.fromJson(
       await api.request(

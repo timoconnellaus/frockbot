@@ -150,7 +150,7 @@ class BotPageView extends StatelessWidget {
         final now = DateTime.now();
         return FrockRowGroup(
           rows: [
-            if (runs.isEmpty)
+            if (runs.isEmpty && (held == null || held.loaded))
               FrockRow(
                 icon: Icons.schedule_rounded,
                 title: 'No runs yet',

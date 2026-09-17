@@ -160,6 +160,45 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('flipping a Plugin re-reads the line that summarises them', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    var on = <String>['Web'];
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (path.startsWith('/api/settings')) return account();
+        if (path.endsWith('/plugins')) {
+          return {
+            'schemaVersion': 1,
+            'botId': 'alpha',
+            'revision': 0,
+            'plugins': [
+              for (final name in const ['Web', 'Routines'])
+                {
+                  'pluginId': name.toLowerCase(),
+                  'displayName': name,
+                  'on': on.contains(name),
+                },
+            ],
+          };
+        }
+        return botSettings();
+      }),
+      'alpha',
+    );
+    await open(tester, state, onOpenPlugins: () {});
+    expect(find.text('1 on · Web'), findsOneWidget);
+
+    // The Plugins surface turned one on and told the shell so.
+    on = ['Web', 'Routines'];
+    await state.refreshPlugins();
+    await tester.pumpAndSettle();
+    expect(find.text('2 on · Web, Routines'), findsOneWidget);
+    expect(find.text('1 on · Web'), findsNothing);
+    state.dispose();
+  });
+
   test('what the Plugins and Model rows say', () {
     expect(botPluginsSummaryV1(const []), 'None on');
     expect(botPluginsSummaryV1(const ['Web']), '1 on · Web');
