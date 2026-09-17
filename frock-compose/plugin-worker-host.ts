@@ -195,6 +195,16 @@ export class PluginFatalFailureError extends Error {
   readonly name = "PluginFatalFailureError";
 }
 
+/**
+ * The rejection `raceDeadline` gives when the caller's own signal ended the
+ * race, not the Plugin's deadline. A cancelled or expired Turn is not the
+ * Plugin failing, so a charge site can tell the two apart at the rejection
+ * rather than guessing from a signal that may have aborted afterwards.
+ */
+export class RaceAbortedError extends Error {
+  readonly name = "RaceAbortedError";
+}
+
 /** One Plugin the worker could not mount, with the phase it failed at. */
 export interface PluginMountFailureV1 {
   pluginId: string;
@@ -1453,7 +1463,9 @@ export class PluginWorkerHost {
           );
         } catch (error) {
           const message = errorMessage(error);
-          await chargeDraw(message);
+          // A Turn the person stopped, or one that ran out of time, is not
+          // the Plugin failing; only its own deadline overrun is.
+          if (!(error instanceof RaceAbortedError)) await chargeDraw(message);
           return {
             content: `${name} failed in its plugin: ${message}`,
             isError: true,
@@ -1610,7 +1622,14 @@ export function raceDeadline<T>(
       deadlineMs,
     );
     if (signal) {
-      onAbort = () => reject(signal.reason ?? new Error("aborted"));
+      onAbort = () =>
+        reject(
+          new RaceAbortedError(
+            signal.reason === undefined
+              ? "aborted"
+              : errorMessage(signal.reason),
+          ),
+        );
       if (signal.aborted) onAbort();
       else signal.addEventListener("abort", onAbort, { once: true });
     }

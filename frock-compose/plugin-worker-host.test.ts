@@ -1508,10 +1508,14 @@ describe("a Plugin's cards", () => {
     input: {
       renderCard?: PluginWorkerEntrypoint["renderCard"];
       sendCard?: PluginWorkerHostOptions["sendCard"];
+      deadlineMs?: number;
     } = {},
   ) {
     const sends: unknown[] = [];
     const subject = harness({
+      ...(input.deadlineMs === undefined
+        ? {}
+        : { deadlineMs: input.deadlineMs }),
       health: (plugins) =>
         ({
           schemaVersion: 1,
@@ -1754,6 +1758,44 @@ describe("a Plugin's cards", () => {
       (definition) => definition.name === "mail_draft",
     )!.execute!({ data: { subject: "Hello" } }, executionContext());
     expect(silent.cardFailures).toHaveLength(1);
+  });
+
+  // The Plugin's own deadline is the Plugin failing; the Turn's signal is the
+  // person pressing stop or the Turn running out of time, which is not.
+  test("a draw the Turn cancelled is not charged, while one that overran its deadline is", async () => {
+    const cancelled = cardHarness({
+      renderCard: () => new Promise(() => {}),
+    });
+    await (await cancelled.host.mount([cardMember()])).commit();
+    const controller = new AbortController();
+    const running = cancelled.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!(
+      { data: { subject: "Hello" } },
+      executionContext({ signal: controller.signal }),
+    );
+    controller.abort(new Error("agent cancelled by user"));
+    const stopped = await running;
+    expect(stopped).toMatchObject({ isError: true });
+    expect(stopped.content).toMatch(/agent cancelled by user/);
+    expect(cancelled.cardFailures).toEqual([]);
+
+    const overran = cardHarness({
+      deadlineMs: 5,
+      renderCard: () => new Promise(() => {}),
+    });
+    await (await overran.host.mount([cardMember()])).commit();
+    const late = await overran.definitions.find(
+      (definition) => definition.name === "mail_draft",
+    )!.execute!({ data: { subject: "Hello" } }, executionContext());
+    expect(late).toMatchObject({ isError: true });
+    expect(overran.cardFailures).toEqual([
+      {
+        pluginId: "mail",
+        cardId: "draft",
+        message: "isolate invocation exceeded its deadline of 5ms",
+      },
+    ]);
   });
 
   // A press names no card, so the card a module says owns an action is what
