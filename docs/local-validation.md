@@ -21,8 +21,10 @@ reach the artifact build and would race on one `apps/cloudflare/dist`; those two
 run in order beside everything else. `build` runs alone, after everything else
 has finished: besides writing that same `dist`, it rewrites tracked generated
 sources, and any category reading the work tree beside it could see a
-half-written file. Each command's output is captured and printed as one block
-when it ends, so interleaved runs stay readable. The first failure kills the
+half-written file. When a run will spawn more than one command, each command's
+output is captured and printed as one block when it ends, so interleaved runs
+stay readable; when it will spawn exactly one, that command streams to the
+terminal live. The first failure kills the
 commands still running, and every command is waited for before the run cleans
 up.
 
@@ -39,8 +41,9 @@ runtime prompts and is treated as code. `runtime` additionally excludes
 `apps/native/`, `apps/marketing/` and `apps/admin-portal/`, which nothing it
 runs imports; every other category depends on everything else by default. The
 checkout is checked before and after execution. Receipts accumulate rather than
-replace one another, and a reused receipt is touched, so the sweep drops what no
-run has wanted for a fortnight.
+replace one another, and nothing removes them; two commits with identical inputs
+share one file, so the directory grows more slowly than the per-commit scheme it
+replaced.
 
 Dependencies must be installed from the committed lockfile (`bun install
 --frozen-lockfile`). Receipts assume the installed dependencies and local test

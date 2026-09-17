@@ -2,12 +2,9 @@ import { createHash } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
-  utimesSync,
 } from "node:fs";
 import { resolve, join } from "node:path";
 
@@ -105,9 +102,6 @@ const SHARED_ARTIFACT = new Set(["integration", "e2e"]);
  */
 const EXCLUSIVE = new Set(["build"]);
 
-/** How long an unwanted receipt survives before the sweep takes it. */
-const RECEIPT_LIFETIME_MS = 14 * 24 * 60 * 60 * 1000;
-
 /**
  * The content of everything `name` reads, as one hash. `snapshot` has proven
  * the work tree matches `HEAD` everywhere `ignoredWorkingPath` does not
@@ -178,6 +172,14 @@ export async function validate(
   for (const name of names)
     if (!Object.hasOwn(categories, name))
       throw new Error(`Unknown category: ${name}`);
+  // Live streams are the default: one command owns the terminal and its
+  // progress — Playwright's, vitest's — is worth watching as it happens.
+  // Capture is what concurrency costs. The whole run decides this once, from
+  // how many commands it will spawn in total, so a lone run of the one
+  // multi-command category still captures while a lone `e2e` or `build` does
+  // not.
+  const captureOutput =
+    names.reduce((total, name) => total + categories[name]!.length, 0) > 1;
   const sha = snapshot(root);
   // Receipts are addressed by what they validated, not by the commit that
   // carried it, so this directory is shared across commits rather than being
@@ -185,20 +187,6 @@ export async function validate(
   // inputs land on the same file and the second reuses the first.
   const cache = join(root, ".local-validation", "receipts");
   mkdirSync(cache, { recursive: true });
-  // Addressing a receipt by content means a new one appears for every distinct
-  // input state rather than replacing the last, so they would otherwise
-  // accumulate for the life of the checkout. A reused receipt is touched below,
-  // which makes this a least-recently-used sweep rather than an age limit: what
-  // goes is what no run has wanted in a fortnight.
-  for (const entry of readdirSync(cache)) {
-    const path = join(cache, entry);
-    try {
-      if (Date.now() - statSync(path).mtimeMs > RECEIPT_LIFETIME_MS)
-        rmSync(path, { force: true });
-    } catch {
-      /* A receipt another run is replacing right now is not ours to sweep. */
-    }
-  }
   // A per-checkout lock prevents one run from reusing a receipt while another
   // is replacing it. An interrupted process leaves an explicit recovery step.
   const lock = join(root, ".local-validation", "running");
@@ -217,7 +205,7 @@ export async function validate(
   // stops the rest by killing every live child; a concurrent category is
   // already spawned by then, so only the kill path stops one, while the guard
   // in `runCategory` holds back work that has genuinely not begun.
-  const live = new Set<ReturnType<typeof Bun.spawn>>();
+  const live = new Set<{ kill: () => void }>();
   let failure: unknown;
   const stop = (error: unknown): void => {
     // The first failure is the one worth reporting; what the kill below
@@ -241,9 +229,9 @@ export async function validate(
    * construction — `runtime`'s three are separate packages with separate
    * outputs, and every other category holds one — so they run together.
    *
-   * Output is captured rather than inherited: several categories now run at
-   * once, and interleaving their streams onto one terminal makes a failure
-   * unreadable. Each command's output is printed as one block when it ends.
+   * A captured command's output is printed as one block when it ends, so
+   * concurrent categories cannot interleave; otherwise it inherits the
+   * terminal and streams live.
    */
   const runCategory = async (name: string): Promise<void> => {
     if (failure !== undefined) return;
@@ -270,13 +258,6 @@ export async function validate(
       /* Missing or damaged receipts require validation. */
     }
     if (passed && !force) {
-      // Mark it wanted, so the sweep measures disuse rather than age.
-      try {
-        const now = new Date();
-        utimesSync(receipt, now, now);
-      } catch {
-        /* Losing a touch costs an early sweep and one re-run, nothing more. */
-      }
       console.log(`validate: ${name} cached (inputs ${key.slice(0, 8)})`);
       return;
     }
@@ -284,7 +265,7 @@ export async function validate(
     console.log(`validate: running ${name}`);
     await settle(
       categories[name]!.map(async (command) => {
-        const child = Bun.spawn(command, {
+        const options = {
           cwd: root,
           env: {
             ...GIT_ENV,
@@ -292,20 +273,34 @@ export async function validate(
             WRANGLER_REGISTRY_PATH: registry,
           },
           stdin: "inherit",
-          stdout: "pipe",
-          stderr: "pipe",
-        });
+        } as const;
+        const child = captureOutput
+          ? Bun.spawn(command, { ...options, stdout: "pipe", stderr: "pipe" })
+          : Bun.spawn(command, {
+              ...options,
+              stdout: "inherit",
+              stderr: "inherit",
+            });
         live.add(child);
-        const [stdout, stderr, code] = await Promise.all([
-          new Response(child.stdout).text(),
-          new Response(child.stderr).text(),
-          child.exited,
-        ]).finally(() => live.delete(child));
-        const output = stdout + stderr;
-        if (output.trim())
-          console.log(
-            `\n--- ${name}: ${command.join(" ")} ---\n${output.trimEnd()}`,
-          );
+        const code = await (async () => {
+          if (
+            child.stdout instanceof ReadableStream &&
+            child.stderr instanceof ReadableStream
+          ) {
+            const [stdout, stderr, exited] = await Promise.all([
+              new Response(child.stdout).text(),
+              new Response(child.stderr).text(),
+              child.exited,
+            ]);
+            const output = stdout + stderr;
+            if (output.trim())
+              console.log(
+                `\n--- ${name}: ${command.join(" ")} ---\n${output.trimEnd()}`,
+              );
+            return exited;
+          }
+          return child.exited;
+        })().finally(() => live.delete(child));
         if (code !== 0) throw new Error(`${name} failed; no success recorded`);
       }),
     );
