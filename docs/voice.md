@@ -98,6 +98,19 @@ for Live, so which descriptors bite is something
 catalog check. There is nothing here to hold against a provider account: a
 voice name is either one of the thirty or it is refused by the decoder.
 
+**Choosing one.** Settings › Voice under a Bot
+(`apps/native/lib/settings/voice_settings.dart`) is the same two halves: a
+timbre picked from the thirty, and a delivery picked from presets, with the
+person's own words last. It saves as the About card does — the moment a
+choice is made, and a moment after the last keystroke — and there is no
+preview, because no endpoint speaks a sample: the way to hear a change is to
+call. It reads and writes `GET`/`POST /api/bots/:botId/voice`
+(`VoiceIdentityV1`, and a `bot/update-voice` command fenced on the Bot's own
+voice revision, which is separate from its avatar's). The Bot Durable Object
+is the authority and the User's directory mirrors what it reports wearing:
+[`app/flock/README.md`](../app/flock/README.md#the-voice-mirror) owns that
+half.
+
 ## Capabilities
 
 `GET /api/voice/capabilities` → `{schemaVersion: 1, dictation: boolean, assistant: boolean}`.
@@ -421,9 +434,12 @@ A turn that makes no sound at all reaches the client as
 `{type:"error",message}` and the call goes on — the client shows the sentence
 on the footer for four seconds and does **not** hang up. Two things produce
 it: a turn that has said nothing eight seconds after it began, and a turn that
-reaches its end having bridged no audio. The old speech-provider wrapper
-(`tts-guard.ts`) was the same guard in the only place that could see it then;
-this is the only place that can see it now.
+reaches its end having bridged no audio. The voice surface has no notice band
+of its own — nothing on it moves — so a call being looked at shows that
+sentence nowhere, and the call's trace is where it is read.
+
+The old speech-provider wrapper (`tts-guard.ts`) was the same guard in the
+only place that could see it then; this is the only place that can see it now.
 
 A session that closes on its own is the other failure. The object tells the
 client one sentence, keeps the call, and leaves the person able to speak
@@ -491,6 +507,12 @@ subagent admitted.
   handle immediately rather than letting the person hear the drop.
 - The object also sleeps on its own after 30 s without an audio frame, so a
   client that never says `voice/sleep` still stops the meter.
+- **Pause** is the person doing the same thing deliberately: the client sends
+  `voice/sleep`, stops the reply that is playing, and — unlike the gate's own
+  sleep — wakes for nothing but Resume, which sends `voice/wake`. Pause starts
+  nothing and cancels nothing: a `subagent` Turn already admitted is the Bot's
+  work, not this socket's, so it carries on, and what finishes meanwhile is
+  counted on the Resume control.
 - Server reports `{type:"voice/state",schemaVersion:1,upstream:"awake"|"asleep"|"starting",muted:boolean}`.
 
 Between `voice/sleep` and `voice/wake` the client sends no audio. While
@@ -1037,9 +1059,29 @@ collapses so the Bot fills the window, and Back disappears — including the
 Android system gesture, which ends the call instead of leaving a page with a
 call running behind it. A hand-over moves the page to the new Bot, but only
 when the call was the thing on screen, so somebody who walked to another Bot
-while the call carried on is not dragged out of it. The enlarged character and
-an on-page mute are not built, which is why the account-wide footer still
-carries mute, End and the meter.
+while the call carried on is not dragged out of it.
+
+**The voice surface.** Since ADR 0031 a call does not share the thread, so
+voice mode _replaces_ it: `apps/native/lib/voice/voice_mode.dart` is drawn
+where the transcript and the composer would be, and neither is drawn at all.
+There are no captions, for the same reason — the call is spoken, and the
+words of it are not a second record. A call with a Bot other than the one on
+screen keeps the small account-wide footer instead, which is why that footer
+still carries mute, End and the meter.
+
+Every band of the surface has a fixed height, so nothing moves as the state
+changes: the character in its ring, the Bot's name, and one word under it —
+`Listening`, `Speaking`, or `Paused`, which is all a paused call says. Under
+that is the activity slot, itself fixed, holding one chip per `subagent`
+hand-off the call has made: `Working` while the Turn runs, and `Work` once it
+settles, which opens the Turn the hand-off became — the `voice/delegation`
+frame names the `runId`, so that is the only Turn a chip can open. The bottom
+bar is Pause, the meter and End, and while paused it is a wide Resume — badged
+with how many hand-offs finished while nobody was listening — and End. An
+on-page mute is still not built: Pause is the control that stops the line.
+The bar above keeps the Bot's name, a `Voice` mark saying why the thread is
+gone, and the Computer; every other door leads out of a call that has no way
+out but ending it.
 
 **Starting.** The footer is on screen in the frame of the press, and the
 sidebar control takes its active colour on pointer-down, before the tap
