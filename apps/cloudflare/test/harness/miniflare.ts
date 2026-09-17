@@ -363,26 +363,25 @@ const blockedAddressCalls = new Map<string, number>();
  *
  * The assistant's ears open their own socket with a `fetch` upgrade, and this
  * suite lets nothing out, so the attempt itself is the only place a test can
- * read which provider the session chose and on what terms. The URL is the
- * provider's own connection contract — model, audio format and voice-detector
- * settings all travel on it — so it is recorded verbatim and read back through
- * the stub origin, the same way the blocked-address counter is.
+ * read what the session reached for and on what terms. The URL is the
+ * provider's own connection contract — for Gemini Live the key itself travels
+ * on it, because a browser-style WebSocket carries no headers of ours — so it
+ * is recorded verbatim and read back through the stub origin, the same way the
+ * blocked-address counter is.
  */
-const voiceSttUpgrades: {
+const voiceUpstreamUpgrades: {
   url: string;
-  xiApiKey: string | null;
   authorization: string | null;
 }[] = [];
 
-function recordVoiceSttUpgrade(request: Request, url: URL): void {
-  const realtimeStt =
-    (url.hostname === "api.elevenlabs.io" &&
-      url.pathname.startsWith("/v1/speech-to-text/realtime")) ||
+function recordVoiceUpstreamUpgrade(request: Request, url: URL): void {
+  const voiceUpstream =
+    (url.hostname === "generativelanguage.googleapis.com" &&
+      url.pathname.includes("BidiGenerateContent")) ||
     (url.hostname === "api.openai.com" && url.pathname.includes("realtime"));
-  if (!realtimeStt) return;
-  voiceSttUpgrades.push({
+  if (!voiceUpstream) return;
+  voiceUpstreamUpgrades.push({
     url: request.url,
-    xiApiKey: request.headers.get("xi-api-key"),
     authorization: request.headers.get("authorization"),
   });
 }
@@ -540,11 +539,11 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
 }
 
 function webStub(url: URL): Response {
-  if (url.pathname === "/voice-stt-upgrades") {
-    return Response.json({ upgrades: voiceSttUpgrades });
+  if (url.pathname === "/voice-upstream-upgrades") {
+    return Response.json({ upgrades: voiceUpstreamUpgrades });
   }
-  if (url.pathname === "/forget-voice-stt-upgrades") {
-    voiceSttUpgrades.length = 0;
+  if (url.pathname === "/forget-voice-upstream-upgrades") {
+    voiceUpstreamUpgrades.length = 0;
     return Response.json({ upgrades: [] });
   }
   if (url.pathname === "/counters") {
@@ -611,7 +610,7 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
       interval: 5,
     });
   }
-  recordVoiceSttUpgrade(request, url);
+  recordVoiceUpstreamUpgrade(request, url);
   if (!url.hostname.includes("ollama.com")) {
     // Anything a Bot should never reach is counted before it is refused, so a
     // test can prove the request was not made rather than only that it failed.

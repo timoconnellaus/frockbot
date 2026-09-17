@@ -13,6 +13,12 @@
 // probe subclass answers that open with one end of a `WebSocketPair`, the
 // same seam `voice-dictation.workerd.ts` uses for its own upstream.
 
+/**
+ * One byte of stand-in PCM. Built rather than written: a literal control
+ * character in source does not survive the formatter.
+ */
+const SAMPLE_BYTE = String.fromCharCode(1);
+
 /** One client frame the fake received, in the shape a test asserts on. */
 export interface GeminiFakeFrameV1 {
   kind:
@@ -176,7 +182,7 @@ export class GeminiFakeV1 {
             {
               inlineData: {
                 mimeType: "audio/pcm;rate=24000",
-                data: btoa("".repeat(audioBytes)),
+                data: btoa(SAMPLE_BYTE.repeat(audioBytes)),
               },
             },
           ],
@@ -205,7 +211,7 @@ export class GeminiFakeV1 {
             {
               inlineData: {
                 mimeType: "audio/pcm;rate=24000",
-                data: btoa("".repeat(audioBytes)),
+                data: btoa(SAMPLE_BYTE.repeat(audioBytes)),
               },
             },
           ],
