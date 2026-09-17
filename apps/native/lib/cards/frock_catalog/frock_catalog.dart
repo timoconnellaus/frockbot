@@ -43,12 +43,37 @@ export 'schemas.dart';
 export 'structure.dart';
 export 'tone.dart';
 
+/// One component, declared to take a share of the flex it is in.
+///
+/// `genui`'s `Row` and `Column` wrap a child in a `Flexible` only when the
+/// model wrote a `weight` on it or the component declares itself implicitly
+/// flexible; a child they do not wrap is laid out at unbounded width. A Frock
+/// component is not a `Text`: it has an `Expanded`, a stretched `Column` or a
+/// scroller inside it, and unbounded width is not a layout it survives. Put
+/// `ImageGallery` beside something in a `Row` — a composition the Skill
+/// invites — and the card would fail to draw at all.
+///
+/// So every one of them is flexible, here rather than 23 times. The fit
+/// `genui` gives an implicit weight is `FlexFit.loose`, which is what makes
+/// this safe in both axes: a `Row` hands the child a width it may use and a
+/// `Column` still lets it be exactly as tall as it wants to be.
+CatalogItem _flexible(CatalogItem item) => CatalogItem(
+  name: item.name,
+  dataSchema: item.dataSchema,
+  widgetBuilder: item.widgetBuilder,
+  exampleData: item.exampleData,
+  isImplicitlyFlexible: true,
+);
+
 /// Every Frock component this build draws, family by family.
 final List<CatalogItem> frockCatalogItemsV1 = List.unmodifiable([
-  ...frockCoreItemsV1,
-  ...frockDataItemsV1,
-  ...frockInputItemsV1,
-  ...frockMediaItemsV1,
-  ...frockRichTextItemsV1,
-  ...frockStructureItemsV1,
+  for (final item in [
+    ...frockCoreItemsV1,
+    ...frockDataItemsV1,
+    ...frockInputItemsV1,
+    ...frockMediaItemsV1,
+    ...frockRichTextItemsV1,
+    ...frockStructureItemsV1,
+  ])
+    _flexible(item),
 ]);

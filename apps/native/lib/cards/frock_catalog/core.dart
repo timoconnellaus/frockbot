@@ -37,15 +37,14 @@ final frockStatusPill = CatalogItem(
       ),
     );
   },
-  // A pill is flexible in a `Row` whether or not the model said so, which is
-  // what stops it running off the edge of the card on a phone: given a share
-  // of the row it can shrink, and the label ellipsizes inside it. Step 5's
-  // screenshots caught the other case — a pill laid out at its natural width
-  // beside a title that wanted the whole line — and prose in the Skill was as
-  // far as prose can get. Whatever the model writes, the host now lays it out
-  // so the pill stays inside the card.
-  isImplicitlyFlexible: true,
 );
+
+// Every Frock component is flexible in the flex it is in — the rule and its
+// reason live in `frock_catalog.dart` — and for the pill that is what stops it
+// running off the edge of the card on a phone: given a share of the row it can
+// shrink, and the label ellipsizes inside it. Step 5's screenshots caught the
+// other case, a pill laid out at its natural width beside a title that wanted
+// the whole line, and prose in the Skill was as far as prose can get.
 
 /// The pill itself, so the host can draw one outside a surface too.
 class FrockStatusPillView extends StatelessWidget {
@@ -244,8 +243,12 @@ final frockApprovalActions = CatalogItem(
         context: {'decision': decision},
       ),
     );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+    // A `Wrap`, not a `Row`: two buttons and their labels are wider than a
+    // narrow card can give, and a decision the person cannot reach is worse
+    // than one that took two lines.
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
       children: [
         FilledButton(
           onPressed: approvalId.isEmpty || frozen
@@ -257,7 +260,6 @@ final frockApprovalActions = CatalogItem(
                 : frockString(data['approveLabel']) ?? 'Approve',
           ),
         ),
-        const SizedBox(width: 8),
         TextButton(
           onPressed: approvalId.isEmpty || frozen
               ? null

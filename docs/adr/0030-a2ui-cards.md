@@ -385,6 +385,17 @@ serve`), the platform model over the remote Workers AI binding, asked
    > flexible, because `genui`'s `Row` lays an inflexible child out at its
    > natural width and pushes its sibling clean off the card.
    >
+   > The same argument reaches every component, not just the pill. `genui`
+   > wraps a flex child in a `Flexible` only when the model wrote a `weight`
+   > on it, and a child it does not wrap is laid out at unbounded width — which
+   > a component holding an `Expanded`, a stretched `Column` or a scroller does
+   > not survive. An `ImageGallery` beside something in a `Row`, a composition
+   > the Skill invites, would have failed to draw at all. So every Frock
+   > component is registered as implicitly flexible, in one place, and
+   > `ApprovalActions` and `Rating` wrap their controls rather than overflow
+   > them: `cards_row_test.dart` draws all twenty-three inside a `Row` at
+   > phone width and fails when a component is added that it does not cover.
+   >
    > Two smaller seams moved with the families. `admitCardV1` asks the
    > https-only question of every literal link a component carries at any
    > depth — `url`, `imageUrl`, the ones inside a gallery's rows — rather than

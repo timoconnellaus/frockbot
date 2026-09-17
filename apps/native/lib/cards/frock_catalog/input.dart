@@ -256,8 +256,10 @@ final frockRating = CatalogItem(
           value: readOnly ? data['value'] : {'path': path},
           builder: (context, value) {
             final stars = (value ?? 0).round().clamp(0, max);
-            return Row(
-              mainAxisSize: MainAxisSize.min,
+            // A `Wrap`, not a `Row`: ten stars beside a label are wider
+            // than a narrow card, and a rating that overflowed would be a
+            // rating the person could not finish giving.
+            return Wrap(
               children: [
                 for (var star = 1; star <= max; star++)
                   Semantics(

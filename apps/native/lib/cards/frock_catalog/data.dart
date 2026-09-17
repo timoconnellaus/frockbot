@@ -94,10 +94,11 @@ final frockMetricTile = CatalogItem(
       ),
     );
   },
-  // Two or three tiles in a `Row` is what this is for, so a tile takes its
-  // share of the row rather than its natural width.
-  isImplicitlyFlexible: true,
 );
+
+// Two or three tiles in a `Row` is what a `MetricTile` is for, and it takes
+// its share of that row rather than its natural width — the rule every Frock
+// component is registered under (`frock_catalog.dart`).
 
 /// A movement, drawn from the sign the model wrote.
 ///
