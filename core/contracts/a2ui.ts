@@ -31,12 +31,15 @@
 //    surface the drawing Turn is not itself writing is tombstoned with a
 //    refusal saying it made room for a newer one, whichever Turn drew it. A
 //    single Turn drawing past the cap spends the oldest surface it has itself
-//    already folded, and `app/shell/cards.ts` states what that costs.
-//    The tombstones eviction leaves behind answer to this same bound: once
-//    the records the index no longer lists outnumber it, the stalest are
-//    dropped on read, and a surface the index still lists never is — trimming
-//    loses a row and never a fact, because the send that drew the trimmed
-//    card is still on the durable log of the Turn that made it.
+//    already folded, and `app/shell/cards.ts` states what that costs. The
+//    index is hard-capped here and never runs past it: a send with no slot
+//    left to give writes a record saying so that simply is not indexed, read
+//    by its surface id and listed until retention reaches it.
+//    Those unlisted records answer to this same bound: once the records the
+//    index no longer lists outnumber it, the stalest are dropped on read, and
+//    a surface the index still lists never is — trimming loses a row and
+//    never a fact, because the send that drew the trimmed card is still on
+//    the durable log of the Turn that made it.
 //  * **32 actions per surface**, the number `ActionSchema` already allows a
 //    `ViewDocument`, because the two are the same question: how many things
 //    one surface may ask the kernel to do.

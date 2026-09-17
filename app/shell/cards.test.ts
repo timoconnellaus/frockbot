@@ -1017,18 +1017,17 @@ describe("what one settled Turn writes", () => {
       expect(card.deleted).toBeUndefined();
       expect(card.refusal).toBeUndefined();
     }
-    // The refusal takes the relaxed slot, so the one record saying why the
-    // card is not there is out of the listing retention's reach.
-    const index = records[CARD_INDEX_KEY] as { surfaces: string[] };
-    expect(index.surfaces).toContain("one-too-many");
-    expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession + 1);
+    // The index is hard-capped: the refusal takes no slot of its own, and no
+    // surface was spent to give it one.
+    expect(records[CARD_INDEX_KEY]).toBeUndefined();
   });
 
   /**
-   * A second surface named before the Turn has folded anything spends the
-   * relaxed slot the first one took rather than growing the index again.
+   * A second surface named before the Turn has folded anything is refused the
+   * same way. Neither refusal costs a card its slot, and the index does not
+   * move at all.
    */
-  test("a second refusal spends the relaxed slot rather than taking another", async () => {
+  test("every surface a full Turn cannot place is refused without moving the index", async () => {
     const surfaces = Array.from(
       { length: A2UI_LIMITS_V1.surfacesPerSession },
       (_, index) => `s${index}`,
@@ -1054,24 +1053,20 @@ describe("what one settled Turn writes", () => {
       now: NOW,
       read: reader({ [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces } }),
     });
-    const first = decodeCardRecordV1(records[cardKeyV1("extra-a")]);
-    expect(first.deleted).toBe(true);
-    expect(first.refusal).toContain("make room");
-    expect(decodeCardRecordV1(records[cardKeyV1("extra-b")]).refusal).toBe(
-      undefined,
-    );
-    const index = records[CARD_INDEX_KEY] as { surfaces: string[] };
-    expect(index.surfaces).not.toContain("extra-a");
-    expect(index.surfaces).toContain("extra-b");
-    expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession + 1);
+    for (const surfaceId of ["extra-a", "extra-b"]) {
+      const refused = decodeCardRecordV1(records[cardKeyV1(surfaceId)]);
+      expect(refused.refusal).toContain("full of cards this Turn is drawing");
+      expect(refused.deleted).toBeUndefined();
+    }
+    expect(records[CARD_INDEX_KEY]).toBeUndefined();
   });
 
   /**
-   * The relaxed slot is one slot, not one per Turn. Turn after Turn names a
-   * new surface ahead of every surface it is about to write, and the index
-   * holds at the cap plus the single relaxed slot rather than ratcheting up.
+   * The cap is hard. Turn after Turn names a new surface ahead of every
+   * surface it is about to write, and the index holds at the cap rather than
+   * ratcheting up, while every refused send still leaves a record to read.
    */
-  test("Turn after Turn exhausting the Session never grows the index again", async () => {
+  test("Turn after Turn exhausting the Session never grows the index", async () => {
     const store: Record<string, unknown> = {
       [CARD_INDEX_KEY]: {
         schemaVersion: 1,
@@ -1112,33 +1107,17 @@ describe("what one settled Turn writes", () => {
       ).toContain("full of cards this Turn is drawing");
       const live = (store[CARD_INDEX_KEY] as { surfaces: string[] }).surfaces;
       lengths.push(live.length);
-      // The newest refusal is the one holding the slot, and no refusal is ever
-      // left without one for the listing retention to reach.
-      expect(live).toContain(`extra-${turn}`);
-      expect(
-        decodeCardRecordV1(store[cardKeyV1(`extra-${turn}`)]).relaxedSlot,
-      ).toBe(true);
-      expect(
-        live.filter(
-          (surfaceId) =>
-            decodeCardRecordV1(store[cardKeyV1(surfaceId)]).relaxedSlot ===
-            true,
+      // No refusal is indexed, and none costs an indexed card its slot.
+      expect(live).not.toContain(`extra-${turn}`);
+      expect(live).toEqual(
+        Array.from(
+          { length: A2UI_LIMITS_V1.surfacesPerSession },
+          (_, index) => `s${index}`,
         ),
-      ).toEqual([`extra-${turn}`]);
-      for (const earlier of [1, 2, 3, 4]) {
-        const key = cardKeyV1(`extra-${earlier}`);
-        if (store[key] === undefined) continue;
-        if (
-          decodeCardRecordV1(store[key]).refusal?.includes(
-            "full of cards this Turn is drawing",
-          )
-        ) {
-          expect(live).toContain(`extra-${earlier}`);
-        }
-      }
+      );
     }
     const cap = A2UI_LIMITS_V1.surfacesPerSession;
-    expect(lengths).toEqual([cap + 1, cap + 1, cap + 1, cap + 1]);
+    expect(lengths).toEqual([cap, cap, cap, cap]);
   });
 
   test("a recovered Turn does not fold twice onto a surface evicted in between", async () => {
@@ -1386,10 +1365,9 @@ describe("what one settled Turn writes", () => {
     expect(card.components).toEqual([]);
     expect(card.dataModel).toEqual({});
     expect(card.refusal).toBeTruthy();
-    expect(records[CARD_INDEX_KEY]).toEqual({
-      schemaVersion: 1,
-      surfaces: [SURFACE],
-    });
+    // A refused send takes no slot: the record is read by its surface id and
+    // listed until retention reaches it.
+    expect(records[CARD_INDEX_KEY]).toBeUndefined();
   });
 
   test("a fold past a budget says so on the card it did not change", async () => {
