@@ -43,6 +43,14 @@ import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 export const CARD_ACTION_DEADLINE_MS = 10_000;
 
 /** Raised when the client answered a revision the surface has moved past. */
+/** A surface this Bot never drew, or one the Session no longer holds. */
+export class CardNotFoundError extends Error {
+  constructor(surfaceId: string) {
+    super(`card "${surfaceId}" was not found`);
+    this.name = "CardNotFoundError";
+  }
+}
+
 export class CardStaleError extends Error {
   constructor(surfaceId: string) {
     super(`card "${surfaceId}" has moved on`);
@@ -77,7 +85,7 @@ async function readCard(
 ): Promise<CardRecordV1> {
   const stored = await state.ctx.storage.get<unknown>(cardKeyV1(surfaceId));
   if (stored === undefined) {
-    throw new CardDecodeError(`card "${surfaceId}" was not found`);
+    throw new CardNotFoundError(surfaceId);
   }
   return decodeCardRecordV1(stored);
 }
@@ -112,7 +120,7 @@ async function foldHandlerMessages(
   return state.ctx.storage.transaction(async (transaction) => {
     const stored = await transaction.get<unknown>(key);
     if (stored === undefined) {
-      throw new CardDecodeError(`card "${surfaceId}" was not found`);
+      throw new CardNotFoundError(surfaceId);
     }
     const current = decodeCardRecordV1(stored);
     let folded: CardRecordV1;
@@ -147,7 +155,7 @@ export async function cardAction(
   await state.authority.validateIdentity(identity);
   const card = await readCard(state, command.surfaceId);
   if (card.deleted) {
-    throw new CardDecodeError(`card "${command.surfaceId}" was not found`);
+    throw new CardNotFoundError(command.surfaceId);
   }
   if (card.revision !== command.revision) {
     throw new CardStaleError(command.surfaceId);

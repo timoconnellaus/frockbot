@@ -237,7 +237,10 @@ export function decodeCardIndexV1(
   };
 }
 
-/** Raised when a fold would put a surface past one of its budgets. */
+/**
+ * Raised when a fold would put a surface past one of its budgets, or would
+ * write somewhere the data model has nowhere to land it.
+ */
 export class CardBudgetError extends Error {
   constructor(message: string) {
     super(message);
@@ -286,11 +289,16 @@ function writeAtPointer(
   let cursor = next;
   for (const token of tokens.slice(0, -1)) {
     const child = cursor[token];
-    if (typeof child !== "object" || child === null || Array.isArray(child)) {
+    if (child === undefined) {
       const created: Record<string, unknown> = {};
       cursor[token] = created;
       cursor = created;
       continue;
+    }
+    if (typeof child !== "object" || child === null || Array.isArray(child)) {
+      throw new CardBudgetError(
+        `a data-model update at "${path}" runs through a value that is not an object`,
+      );
     }
     const copied = { ...(child as Record<string, unknown>) };
     cursor[token] = copied;
@@ -374,9 +382,15 @@ export function foldCardMessagesV1(
       // A create is the surface starting again, not a patch on the one that
       // was there: the components and the model it carries are all of it.
       card = {
-        ...card,
+        schemaVersion: 1,
+        surfaceId: card.surfaceId,
+        runId: card.runId,
+        sessionId: card.sessionId,
         components: [...(created.components ?? [])],
         dataModel: { ...(created.dataModel ?? {}) },
+        revision: card.revision,
+        createdAt: card.createdAt,
+        updatedAt: card.updatedAt,
         ...(created.catalogId === undefined
           ? {}
           : { catalogId: created.catalogId }),
@@ -387,7 +401,6 @@ export function foldCardMessagesV1(
           ? {}
           : { surfaceProperties: created.surfaceProperties }),
       };
-      delete card.deleted;
       continue;
     }
     if ("updateComponents" in message) {

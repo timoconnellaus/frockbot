@@ -908,13 +908,14 @@ function createUserApplicationRoute() {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "card action failed";
+        const name = error instanceof Error ? error.name : "";
         // A surface that has moved is not a fault: the person answered the
-        // card they were shown, and the client redraws and asks again.
-        if (message.includes("has moved on")) return jsonError(409, message);
-        return jsonError(
-          message.includes("was not found") ? 404 : 500,
-          message,
-        );
+        // card they were shown, and the client redraws and asks again. A
+        // refused action is the client's, not the kernel's.
+        if (name === "CardStaleError") return jsonError(409, message);
+        if (name === "CardNotFoundError") return jsonError(404, message);
+        if (name === "CardDecodeError") return jsonError(400, message);
+        return jsonError(500, message);
       }
     }
 

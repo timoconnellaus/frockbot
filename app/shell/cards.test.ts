@@ -161,6 +161,64 @@ describe("folding a surface", () => {
     ).toThrow(CardBudgetError);
   });
 
+  test("a pointer through a list is refused rather than flattening it", () => {
+    const first = foldCardMessagesV1(
+      undefined,
+      [created([], { items: ["a", "b"] })],
+      CONTEXT,
+    );
+    expect(() =>
+      foldCardMessagesV1(
+        first,
+        [
+          message({
+            version: "v1.0",
+            updateDataModel: {
+              surfaceId: SURFACE,
+              path: "/items/0",
+              value: "c",
+            },
+          }),
+        ],
+        { ...CONTEXT, runId: "run-2" },
+      ),
+    ).toThrow(CardBudgetError);
+    expect(first.dataModel).toEqual({ items: ["a", "b"] });
+  });
+
+  test("a second create replaces the surface, carrying nothing of the first", () => {
+    const first = foldCardMessagesV1(
+      undefined,
+      [
+        message({
+          version: "v1.0",
+          createSurface: {
+            surfaceId: SURFACE,
+            catalogId: "cat-a",
+            sendDataModel: true,
+            surfaceProperties: { theme: "dark" },
+            components: [{ id: "root", component: "Text", text: "one" }],
+          },
+        }),
+      ],
+      CONTEXT,
+    );
+    const second = foldCardMessagesV1(
+      first,
+      [created([{ id: "root", component: "Text", text: "two" }])],
+      { ...CONTEXT, runId: "run-2" },
+    );
+    expect(second.catalogId).toBeUndefined();
+    expect(second.sendDataModel).toBeUndefined();
+    expect(second.surfaceProperties).toBeUndefined();
+    expect(second.dataModel).toEqual({});
+    expect(second.components).toEqual([
+      { id: "root", component: "Text", text: "two" },
+    ]);
+    expect(second.revision).toBe(2);
+    expect(second.createdAt).toBe(NOW);
+  });
+
   test("deleteSurface tombstones the record rather than emptying the thread", () => {
     const card = foldCardMessagesV1(
       undefined,

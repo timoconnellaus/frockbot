@@ -956,6 +956,12 @@ describe("user application Bot seam", () => {
 });
 
 describe("the cards route", () => {
+  function namedError(name: string, message: string): Error {
+    const error = new Error(message);
+    error.name = name;
+    return error;
+  }
+
   const card = {
     schemaVersion: 1 as const,
     surfaceId: "draft-email",
@@ -1038,7 +1044,9 @@ describe("the cards route", () => {
       }),
       envFor({
         cardAction: () =>
-          Promise.reject(new Error('card "draft-email" has moved on')),
+          Promise.reject(
+            namedError("CardStaleError", 'card "draft-email" has moved on'),
+          ),
       }),
     );
     expect(response.status).toBe(409);
@@ -1057,10 +1065,39 @@ describe("the cards route", () => {
       }),
       envFor({
         cardAction: () =>
-          Promise.reject(new Error('card "draft-email" was not found')),
+          Promise.reject(
+            namedError("CardNotFoundError", 'card "draft-email" was not found'),
+          ),
       }),
     );
     expect(response.status).toBe(404);
+  });
+
+  test("an action the kernel refuses is the client's fault, not a 500", async () => {
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards", {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          surfaceId: "draft-email",
+          revision: 2,
+          event: { name: "approval/ap-1" },
+        }),
+      }),
+      envFor({
+        cardAction: () =>
+          Promise.reject(
+            namedError(
+              "CardDecodeError",
+              "an approval action must carry a decision of approved or denied",
+            ),
+          ),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "an approval action must carry a decision of approved or denied",
+    });
   });
 
   test("no other method is served", async () => {

@@ -507,6 +507,11 @@ export function decodeA2uiActionV1(
     A2UI_LIMITS_V1.actionName,
     `${label}.name`,
   );
+  // The name is read back to a Bot as one line of its prompt preamble, so a
+  // name carrying a line break could forge a lane a press must never become.
+  if (/[\u0000-\u001f\u007f]/.test(name)) {
+    throw new Error(`${label}.name must not contain control characters`);
+  }
   if (action.context === undefined) return { name };
   const context = a2uiRecord(action.context, `${label}.context`);
   const json = a2uiJson(context, `${label}.context`) as A2uiJsonObjectV1;
