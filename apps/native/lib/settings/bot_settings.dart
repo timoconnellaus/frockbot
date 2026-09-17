@@ -430,7 +430,9 @@ class BotSettingsController extends ChangeNotifier {
     if (receipt['status'] != 'rejected') return;
     final failure = receipt['failure'];
     throw RequestFailure(
-      failure is String ? failure : 'Couldn’t save this Bot’s voice. Try again.',
+      failure is String
+          ? failure
+          : 'Couldn’t save this Bot’s voice. Try again.',
     );
   }
 
@@ -840,30 +842,30 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                   ),
                 ],
               ),
-              if (widget.onOpenPlugins != null || state.modelAvailable) ...[
-                const FrockSectionLabel('Capabilities'),
-                FrockRowGroup(
-                  rows: [
-                    if (widget.onOpenPlugins case final VoidCallback open)
-                      identified(
-                        SettingsIds.botPlugins,
-                        FrockRow(
-                          icon: Icons.extension_outlined,
-                          title: 'Plugins',
-                          subtitle: state.pluginsSummary,
-                          onTap: open,
-                        ),
+              const FrockSectionLabel('Capabilities'),
+              FrockRowGroup(
+                rows: [
+                  if (widget.onOpenPlugins case final VoidCallback open)
+                    identified(
+                      SettingsIds.botPlugins,
+                      FrockRow(
+                        icon: Icons.extension_outlined,
+                        title: 'Plugins',
+                        subtitle: state.pluginsSummary,
+                        onTap: open,
                       ),
-                    if (state.modelAvailable) _model(context),
-                  ],
-                ),
-              ],
-              // How this Bot sounds (ADR 0031): its own page, because the
-              // presets are a surface of their own and the row says enough.
-              BotVoiceRow(
-                controller: state,
-                characterId: widget.background,
-                primary: widget.primary,
+                    ),
+                  // How this Bot sounds (ADR 0031): its own page, because
+                  // the presets are a surface of their own and the row says
+                  // enough.
+                  botVoiceRow(
+                    context,
+                    controller: state,
+                    characterId: widget.background,
+                    primary: widget.primary,
+                  ),
+                  if (state.modelAvailable) _model(context),
+                ],
               ),
               ...widget.sections,
               if (widget.dangerZone case final Widget zone) ...[

@@ -23,56 +23,38 @@ import '../theme/rows.dart';
 import '../voice/appearance.dart';
 import 'bot_settings.dart';
 
-/// The row under the Bot's settings that opens this page.
-class BotVoiceRow extends StatelessWidget {
-  final BotSettingsController controller;
-  final String? characterId;
-  final String? primary;
-  const BotVoiceRow({
-    super.key,
-    required this.controller,
-    this.characterId,
-    this.primary,
-  });
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
-    builder: (context, _) => _row(context),
+/// The Capabilities row in the Bot's Settings that opens this page.
+///
+/// The line under the row is what the Bot sounds like now; the settings view
+/// rebuilds it on every controller change, so it follows every save rather
+/// than the values the page was built with.
+Widget botVoiceRow(
+  BuildContext context, {
+  required BotSettingsController controller,
+  String? characterId,
+  String? primary,
+}) {
+  final voice = resolveBotVoiceV1(
+    chosen: controller.voice,
+    characterId: characterId,
   );
-
-  /// The line under the row is what the Bot sounds like now, so it follows
-  /// every save rather than the values the page was built with.
-  Widget _row(BuildContext context) {
-    final voice = resolveBotVoiceV1(
-      chosen: controller.voice,
-      characterId: characterId,
-    );
-    return identified(
-      VoiceIds.settingsRow,
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: FrockRowGroup(
-          rows: [
-            FrockRow(
-              icon: Icons.graphic_eq_rounded,
-              title: 'Voice',
-              subtitle: voiceSummaryLineV1(voice),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => BotVoicePage(
-                    controller: controller,
-                    characterId: characterId,
-                    primary: primary,
-                  ),
-                ),
-              ),
-            ),
-          ],
+  return identified(
+    VoiceIds.settingsRow,
+    FrockRow(
+      icon: Icons.graphic_eq_rounded,
+      title: 'Voice',
+      subtitle: voiceSummaryLineV1(voice),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => BotVoicePage(
+            controller: controller,
+            characterId: characterId,
+            primary: primary,
+          ),
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class BotVoicePage extends StatefulWidget {
@@ -101,10 +83,8 @@ class _BotVoicePageState extends State<BotVoicePage> {
 
   BotSettingsController get state => widget.controller;
 
-  BotVoiceAppearanceV1 get _voice => resolveBotVoiceV1(
-    chosen: state.voice,
-    characterId: widget.characterId,
-  );
+  BotVoiceAppearanceV1 get _voice =>
+      resolveBotVoiceV1(chosen: state.voice, characterId: widget.characterId);
 
   /// Every write carries the words in the field, not the ones last saved, so
   /// a choice made mid-sentence keeps the sentence.
@@ -329,8 +309,7 @@ class _BotVoicePageState extends State<BotVoicePage> {
                     maxLength: voiceCustomMaxCharsV1,
                     decoration: const InputDecoration(
                       labelText: 'In your own words',
-                      helperText:
-                          'Read to the Bot before every call, after the presets. Yours wins a tie.',
+                      helperText: 'Read to the Bot before every call, after the presets. Yours wins a tie.',
                       helperMaxLines: 3,
                     ),
                     onChanged: _typed,
@@ -529,15 +508,17 @@ Future<String?> pickVoiceOptionV1(
       showDragHandle: true,
       isScrollControlled: true,
       builder: (sheet) => SafeArea(
-        child: SizedBox(height: MediaQuery.sizeOf(sheet).height * 0.7, child: list),
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheet).height * 0.7,
+          child: list,
+        ),
       ),
     );
   }
   return showDialog<String>(
     context: context,
-    builder: (dialog) => Dialog(
-      child: SizedBox(width: 400, height: 520, child: list),
-    ),
+    builder: (dialog) =>
+        Dialog(child: SizedBox(width: 400, height: 520, child: list)),
   );
 }
 
@@ -563,9 +544,8 @@ class _VoiceOptionList extends StatelessWidget {
             header: true,
             child: Text(
               title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+              style: Theme.of(context).textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
         ),

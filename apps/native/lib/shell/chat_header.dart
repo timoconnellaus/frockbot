@@ -91,10 +91,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             ),
           ),
         ),
-        if (voiceMode) ...[
-          const SizedBox(width: 8),
-          const VoiceHeaderPill(),
-        ],
+        if (voiceMode) ...[const SizedBox(width: 8), const VoiceHeaderPill()],
         if (onOpenBot != null && !voiceMode) ...[
           const SizedBox(width: 3),
           Icon(
