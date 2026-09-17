@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -473,6 +472,38 @@ void main() {
       );
       // The card is still there, drawn at the revision it now holds.
       expect(find.text('Ready to send'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a press retried after a lost answer is the same command', (
+      tester,
+    ) async {
+      final posts = <Map<String, Object?>>[];
+      var deliver = false;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body == null) return cardJson();
+        posts.add((body as Map).cast<String, Object?>());
+        if (!deliver) {
+          throw const RequestFailure('The connection dropped.', 0);
+        }
+        return {
+          'schemaVersion': 1,
+          'routed': 'approval',
+          'card': cardJson(revision: 2),
+        };
+      });
+      await tester.pumpWidget(host(api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(find.text('The connection dropped.'), findsOneWidget);
+      deliver = true;
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(posts, hasLength(2));
+      // The kernel sees one command, so a lost answer cannot record the
+      // decision twice.
+      expect(posts[1]['commandId'], posts[0]['commandId']);
       await tester.pumpWidget(const SizedBox());
     });
 

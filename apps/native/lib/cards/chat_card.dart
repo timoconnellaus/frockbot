@@ -92,8 +92,11 @@ class _CardChatCardState extends State<CardChatCard>
   /// The action name in flight. One at a time.
   String? pending;
 
-  /// The command id of the press in flight, kept so a retry is the same press.
-  String? pendingCommandId;
+  /// The command id of a press that never got its answer, kept with the action
+  /// it belongs to until a receipt lands or the card is read again, so pressing
+  /// the same control again is the same command and not a second one.
+  String? retryCommandId;
+  String? retryAction;
   int epoch = 0;
 
   @override
@@ -218,10 +221,11 @@ class _CardChatCardState extends State<CardChatCard>
     if (client == null || bot == null || drawn == null || pending != null) {
       return;
     }
-    final commandId = pendingCommandId ?? randomId();
+    final commandId = retryAction == name
+        ? retryCommandId ?? randomId()
+        : randomId();
     setState(() {
       pending = name;
-      pendingCommandId = commandId;
       failure = null;
     });
     try {
@@ -236,21 +240,21 @@ class _CardChatCardState extends State<CardChatCard>
       );
       if (!mounted) return;
       pending = null;
-      pendingCommandId = null;
+      retryCommandId = null;
+      retryAction = null;
       adopt(receipt.card);
       if (receipt.failure != null) {
         setState(() => failure = receipt.failure);
       }
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        pending = null;
-        pendingCommandId = null;
-      });
+      setState(() => pending = null);
       // A surface that moved under the person is not a fault: the card they
       // answered is gone, so it is read again and redrawn, and the words say
       // what happened rather than blaming the press.
       if (error is RequestFailure && error.status == 409) {
+        retryCommandId = null;
+        retryAction = null;
         // Read first, then say so: adopting a record clears whatever the last
         // press said about itself, and this is the one line that has to
         // survive the redraw it caused.
@@ -260,6 +264,11 @@ class _CardChatCardState extends State<CardChatCard>
         }
         return;
       }
+      // The POST may have been delivered and only its answer lost, so the id
+      // is kept against this control: pressing it again repeats the command
+      // the kernel may already hold rather than minting a second one.
+      retryCommandId = commandId;
+      retryAction = name;
       setState(() {
         failure = error is RequestFailure
             ? error.message

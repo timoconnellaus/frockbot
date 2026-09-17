@@ -174,6 +174,7 @@ class _FrockCollapsibleTextViewState extends State<FrockCollapsibleTextView> {
           text: TextSpan(text: widget.text, style: style),
           maxLines: widget.collapsedLines,
           textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
         )..layout(maxWidth: constraints.maxWidth);
         final overflows = painter.didExceedMaxLines;
         return Column(
