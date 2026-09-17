@@ -354,6 +354,86 @@ describe("the voice session object", () => {
     opened.socket.close();
   });
 
+  // A missing General marker is not an empty account: an account that owned
+  // Bots before the bootstrap ran is never given one, and deleting General
+  // does not bring it back. Answering either with the account-wide assistant
+  // told the person they had no Bots while their own Bot sat in the same
+  // prompt, unreachable for the whole call.
+  test("an account whose General is gone opens the call on a Bot it owns", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `voice-no-general-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    // SAFETY: the generated stub types for these RPCs are too deep for the
+    // compiler to instantiate here; this names only what the test calls.
+    const configuration = env.USER_CONFIGURATIONS.getByName(
+      identity.userId,
+    ) as unknown as {
+      readFlockBootstrap(input: unknown): Promise<{
+        generalBotId: string | null;
+      }>;
+      executeBotLifecycle(input: unknown): Promise<{ status: string }>;
+    };
+    const { generalBotId } = await configuration.readFlockBootstrap({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
+    expect(generalBotId).toBeTruthy();
+    expect(
+      await configuration.executeBotLifecycle({
+        schemaVersion: 1,
+        userId: identity.userId,
+        command: {
+          schemaVersion: 1,
+          type: "bot/delete",
+          commandId: `delete-general-${suffix}`,
+          botId: generalBotId,
+        },
+      }),
+    ).toMatchObject({ status: "applied" });
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ reply: "All good." });
+    const opened = await open(identity.userId);
+    // A client that names nobody, which is the sidebar control.
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    const target = await opened.waitFor(
+      (f) => f.type === "voice/target",
+      "the call's Bot",
+    );
+    expect(target.botId).toBe(identity.botId);
+    expect(await stub.probeUtterance("are you there")).toBe(true);
+    await opened.waitFor((f) => f.type === "transcript_end", "an answer");
+    const prompt = (await stub.probeSystemPrompts()).at(-1)!;
+    expect(prompt).toContain("<you>");
+    expect(prompt).toContain(`- id: ${identity.botId}`);
+    expect(prompt).not.toContain("no Bots on it yet");
+    opened.socket.close();
+  });
+
+  // The SDK reads `synthesizeStream` off the provider once and speaks every
+  // sentence through the branch it finds, so a wrapper that does not expose
+  // one costs every call its streaming audio: the first byte waits for the
+  // whole sentence. The fake provider streams, as the real one does, so the
+  // suite runs the branch a deployment with a key runs.
+  test("every sentence is synthesized through the streaming branch", async () => {
+    const userId = `voice-stream-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({ reply: "All good." });
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeUtterance("are you there")).toBe(true);
+    await opened.waitFor((f) => f.type === "transcript_end", "an answer");
+    const synthesized = await stub.probeSynthesized();
+    expect(synthesized.length).toBeGreaterThan(0);
+    expect(await stub.probeStreamed()).toEqual(synthesized);
+    opened.socket.close();
+  });
+
   test("switch_bot hands the call over, durably, and tells the client", async () => {
     const suffix = crypto.randomUUID();
     const identity = {

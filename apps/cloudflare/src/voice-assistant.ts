@@ -527,16 +527,34 @@ export class VoiceAssistant extends VoiceAgentBase<
   private speakingTts():
     (TTSProvider & Partial<StreamingTTSProvider>) | undefined {
     // A deployment with no speech provider at all has no voices either; the
-    // seam is asked once so a test subclass can refuse the same way.
-    if (!this.createTts()) return undefined;
+    // seam is asked once so a test subclass can refuse the same way. What it
+    // answers with also says whether this deployment's provider streams: the
+    // SDK reads `synthesizeStream` off this object before any call exists, so
+    // the capability cannot be discovered per sentence, and every voice is the
+    // same provider class over a different id.
+    const probe = this.createTts();
+    if (!probe) return undefined;
     const self = this;
-    return {
+    const speaking: TTSProvider & Partial<StreamingTTSProvider> = {
       async synthesize(text, signal) {
         const voice = self.ttsForVoice(self.speakingVoiceId());
         if (!voice) return null;
         return voice.synthesize(text, signal);
       },
     };
+    if (probe.synthesizeStream)
+      speaking.synthesizeStream = async function* (text, signal) {
+        const voice = self.ttsForVoice(self.speakingVoiceId());
+        if (!voice) return;
+        // A voice whose provider cannot stream still speaks, in one piece.
+        if (!voice.synthesizeStream) {
+          const audio = await voice.synthesize(text, signal);
+          if (audio) yield audio;
+          return;
+        }
+        yield* voice.synthesizeStream(text, signal);
+      };
+    return speaking;
   }
 
   /** The provider for one voice, made once and kept. */
@@ -1281,10 +1299,13 @@ export class VoiceAssistant extends VoiceAgentBase<
    *
    * The client's choice wins when it names a Bot this account owns. Anything
    * else — no choice, a deleted Bot, another account's — falls back to the
-   * account's General Bot, and to nothing else: a Bot the person never asked
-   * for would answer in its own name, memory and thread with nothing saying
-   * it is not the one they wanted. An account with no General — and so, in
-   * practice, no Bots at all — is answered by the account-wide assistant.
+   * account's General Bot: a Bot the person never asked for would answer in
+   * its own name, memory and thread with nothing saying it is not the one
+   * they wanted. An account with no General still has Bots — one that owned
+   * Bots before the bootstrap is never given General, and deleting General
+   * does not bring it back — so the directory is asked before a call is
+   * called Bot-less. Only an account with no Bots at all is answered by the
+   * account-wide assistant.
    */
   private async resolveCallTarget(
     userId: string,
@@ -1316,8 +1337,30 @@ export class VoiceAssistant extends VoiceAgentBase<
           ...(voiceId ? { voiceId } : {}),
         };
       } catch {
-        // General has been deleted. Nobody else stands in for it.
+        // General has been deleted. The directory below still answers.
       }
+    }
+    // No General marker does not mean no Bots: an account that already owned
+    // Bots when the bootstrap ran is never given one, and deleting General
+    // does not bring it back. Only the directory can say the account is
+    // empty, and only then is the call Bot-less.
+    try {
+      const directory = await this.directory(userId);
+      for (const entry of directory.bots) {
+        try {
+          const owned = await this.ownedBot(userId, entry.botId);
+          const voiceId = await this.voiceForBot(userId, owned.botId);
+          return {
+            botId: owned.botId,
+            name: owned.name,
+            ...(voiceId ? { voiceId } : {}),
+          };
+        } catch {
+          // That Bot cannot be read; try the next one.
+        }
+      }
+    } catch {
+      // No directory to read: the call opens without a Bot.
     }
     return { botId: "", name: "" };
   }
