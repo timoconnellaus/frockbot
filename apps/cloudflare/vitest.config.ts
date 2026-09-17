@@ -122,7 +122,14 @@ export default defineConfig({
   ],
   test: {
     include: ["test/**/*.workerd.ts"],
-    testTimeout: 15 * 60_000,
+    // Twice what the integration suite allows itself for the heavier trip
+    // through the real gateway, and far above the slowest test here. It was
+    // fifteen minutes, which is not a budget: a wedged test held the suite for
+    // a quarter of an hour before failing, which is most of what a worst-case
+    // local validation run cost. The hang that motivated that number was an
+    // uncancellable request deadline keeping a Durable Object from draining,
+    // fixed in `core/deadline.ts`.
+    testTimeout: 120_000,
     // One fake Computer host serves every file in this project, and it is one
     // Node-side object: a file that resets it, or asserts on the calls it
     // recorded, cannot be running beside another file driving the same host.

@@ -215,10 +215,11 @@ Five layers, each answering a different question. The first four run in CI; the 
 
 Root `bun test` covers unit tests; runtime, integration and browser tests use
 separate suffixes and commands. Pre-commit formats staged files. Pre-push runs
-the fast tier — `bun run validate format typecheck unit` — reusing successful
-categories for the exact commit and a clean code checkout; the slow tier runs
-on `main` after the merge. Run `bun run validate` for everything, or
-`bun run validate unit integration` to populate selected receipts while working.
+the fast tier — `bun run validate format typecheck unit` — reusing a
+category's last pass whenever nothing it reads has changed, with a clean code
+checkout; the slow tier runs on `main` after the merge. Run
+`bun run validate` for everything, or `bun run validate unit integration` to
+populate selected receipts while working.
 [Local validation](docs/local-validation.md) explains the cache rules, worktree
 isolation, and the GitHub configuration the pipeline depends on.
 
@@ -298,14 +299,14 @@ Everything from here to [Security model](#security-model) is the hosted profile 
 
 ### Releases
 
-Merging integrates; tagging ships. The pipeline has four stages, and a person decides at two of them:
+Merging integrates; tagging ships. The pipeline has four stages, and a person decides at one of them:
 
-1. **Pull request** — `check.yml` runs the fast tier (format, typecheck, unit tests, the two small package suites) in a couple of minutes. It needs no secret, so a fork's pull request runs it too. It is the one check the `main` ruleset requires.
+1. **Pull request** — `check.yml` runs the fast tier (format, typecheck, unit tests, the two small package suites) in a couple of minutes. It needs no secret, so a fork's pull request runs it too. Its two jobs, `Check` and `Flutter`, are the status checks the `main` ruleset requires.
 2. **Merge** — a maintainer clicks merge. There is no auto-merge: a green pull request waits for a person. A branch need not be rebased first; the ruleset does not require it to be up to date, because at this merge rate that was a rebase-and-rerun loop. (GitHub's merge queue would prove the combination before landing it, but it is only offered on organization-owned repositories.)
 3. **`main`** — `main.yml` runs everything once per landed change, on the merge commit itself: the fast tier again, then the Cloudflare workerd and integration suites, the real build, and the browser suite across four runners. Green deploys staging when the repository variable `DEPLOY_STAGING` is `true` (it is unset until the `staging` environment is configured), cuts the next patch tag on that revision, and starts `release.yml` for it. Red ships nothing, and the fix is the next pull request. A push that touches only `docs/**` and root Markdown starts no run.
-4. **Production** — `release.yml` verifies the tag, then its deploy jobs wait on the `production` environment, whose required reviewer is the maintainer. One approval on the run's page deploys bot.frockbot.com and frockbot.com, and only then publishes `applets/sdk` to npm and creates the GitHub release. A run nobody approves ships nothing; approve the newest and cancel the rest.
+4. **Production** — `release.yml` verifies the tag, then deploys bot.frockbot.com and frockbot.com, and only then publishes `applets/sdk` to npm and creates the GitHub release. The deploy jobs name the `production` environment, but it carries no protection rule, so nothing waits for a person: a green `main` reaches production on its own. The decision that ships a change is the merge in stage 2 — treat it as such, because it is the last one. To put a human back in the path, add a required reviewer to the `production` environment; every deploy job then parks until the run is approved, at the current rate a dozen or more times a day.
 
-Pushing a valid SemVer tag by hand — `v0.8.0` for a minor bump, `v0.8.0-rc.1` for a prerelease — runs the same release workflow with the same approval; the automatic cut continues from whatever tag is highest. Build metadata such as `+build.1` is rejected because npm does not accept it in package versions. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
+Pushing a valid SemVer tag by hand — `v0.8.0` for a minor bump, `v0.8.0-rc.1` for a prerelease — runs the same release workflow; the automatic cut continues from whatever tag is highest. Build metadata such as `+build.1` is rejected because npm does not accept it in package versions. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
 
 Two jobs exist for the other profile rather than for this one, and neither is on the production deploy's path. `publish-images` pushes the Computer host and Applet build container images to Docker Hub under `timoconnellaus`, which is what an installer with no Docker pulls; while the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets are unset it skips with a warning. `release-assets` builds the Flutter web client and the application artifact, and `github-release` attaches both to the Release, because a deployer has neither Flutter nor this repository's build. Details are in [`scripts/deployment-config/README.md`](scripts/deployment-config/README.md#what-a-release-publishes-and-what-an-installer-pulls).
 
@@ -317,11 +318,11 @@ bun scripts/ci-watch.ts release v0.2.0   # polls until production deployed
 bun scripts/ci-watch.ts pr 128 --once    # report now and exit, for a caller that paces itself
 ```
 
-It names the quiet failures rather than waiting them out: a release whose packages published while `Deploy FrockBot app` failed, or one that completed without ever running the deploy jobs. A release parked at the approval gate is reported as waiting, not failed.
+It names the quiet failures rather than waiting them out: a release whose packages published while `Deploy FrockBot app` failed, or one that completed without ever running the deploy jobs. A release parked for an approval — which only happens if the `production` environment is given a required reviewer — is reported as waiting, not failed.
 
 #### Android patches
 
-The phone app ships from the same run. `Cut Android patch` builds a signed Shorebird patch of `apps/native` against the newest active Android release and puts it on the staging track as soon as the tag verifies; `Promote Android patch` moves it to stable once `Deploy FrockBot app` has succeeded, so the one production approval promotes the client together with the server it was built against. A tag whose `apps/native` matches the previous release tag cuts nothing. When Shorebird finds native, asset or plugin changes the job stops with a notice rather than failing: only a full release carries those, and a full release is cut by hand with `bun run native:release` and installed once on the phone (see [`apps/native/README.md`](apps/native/README.md)). Neither Android job is on the web deploy's path, so neither can hold production back.
+The phone app ships from the same run. `Cut Android patch` builds a signed Shorebird patch of `apps/native` against the newest active Android release and puts it on the staging track as soon as the tag verifies; `Promote Android patch` moves it to stable once `Deploy FrockBot app` has succeeded, so the client goes stable together with the server it was built against, and never ahead of it. A tag whose `apps/native` matches the previous release tag cuts nothing. When Shorebird finds native, asset or plugin changes the job stops with a notice rather than failing: only a full release carries those, and a full release is cut by hand with `bun run native:release` and installed once on the phone (see [`apps/native/README.md`](apps/native/README.md)). Neither Android job is on the web deploy's path, so neither can hold production back.
 
 The jobs read three repository secrets, set once from the machine that holds the originals:
 
@@ -393,7 +394,7 @@ Register `https://staging-bot.frockbot.com/api/auth/callback/google` as an autho
 
 ### Production deployment
 
-After a version tag's packages are published, `release.yml` deploys five Cloudflare Workers — marketing, the admin portal, the Applet build service, the Computer host and the app — through the GitHub `production` environment. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
+Once a version tag verifies, `release.yml` deploys five Cloudflare Workers — marketing, the admin portal, the Applet build service, the Computer host and the app — through the GitHub `production` environment, and only then publishes `applets/sdk` to npm. Publishing waits on the backend deploy because a package published for a release whose deploy then failed would sit on the registry ahead of a production that never moved. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
 - `apps/admin-portal` serves the administrative surface at `https://admin.frockbot.com`; see [The admin portal](#the-admin-portal);
