@@ -148,6 +148,47 @@ describe("folding a surface", () => {
     expect(card.dataModel).toEqual({ keep: 1 });
   });
 
+  test("a delete of — or through — an absent list index changes nothing", () => {
+    const drawn = foldCardMessagesV1(
+      undefined,
+      [created([], { items: ["a", "b", "c"], rows: [] })],
+      CONTEXT,
+    );
+    const later = { ...CONTEXT, runId: "run-2" };
+    const once = foldCardMessagesV1(
+      drawn,
+      [
+        message({
+          version: "v1.0",
+          updateDataModel: { surfaceId: SURFACE, path: "/items/2", value: null },
+        }),
+      ],
+      later,
+    );
+    expect(once.dataModel).toEqual({ items: ["a", "b"], rows: [] });
+    expect(once.revision).toBe(2);
+    const twice = foldCardMessagesV1(
+      once,
+      [
+        message({
+          version: "v1.0",
+          updateDataModel: { surfaceId: SURFACE, path: "/items/2", value: null },
+        }),
+        message({
+          version: "v1.0",
+          updateDataModel: {
+            surfaceId: SURFACE,
+            path: "/rows/5/done",
+            value: null,
+          },
+        }),
+      ],
+      { ...CONTEXT, runId: "run-3" },
+    );
+    expect(twice.dataModel).toEqual({ items: ["a", "b"], rows: [] });
+    expect(twice.revision).toBe(2);
+  });
+
   test("a fold that changed nothing keeps the revision and the timestamp", () => {
     const drawn = foldCardMessagesV1(
       undefined,

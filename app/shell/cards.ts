@@ -412,6 +412,14 @@ function writeMember(
   });
 }
 
+/** Whether `token` names something that is actually there. */
+function hasMember(parent: PointerParent, token: string): boolean {
+  if (Array.isArray(parent)) {
+    return POINTER_INDEX.test(token) && Number(token) < parent.length;
+  }
+  return Object.hasOwn(parent, token);
+}
+
 /** Take `token` out: a list closes over the gap, an object loses the key. */
 function deleteMember(
   parent: PointerParent,
@@ -427,11 +435,12 @@ function deleteMember(
 
 /**
  * Write `value` at `path` in `model`. `null` deletes the member, as the
- * specification says, and a delete of — or through — a member that is not
- * there leaves the model exactly as it was, creating nothing and changing
- * nothing; a numeric token against a list indexes it, and `-` at
- * the leaf appends. A pointer through a scalar is a write with nowhere to
- * land, and is refused rather than made to fit.
+ * specification says, and a delete of — or through — something that is not
+ * there, an object member and a list index alike, leaves the model exactly as
+ * it was, creating nothing and changing nothing; a numeric token against a
+ * list indexes it, and `-` at the leaf appends. A write with nowhere to land —
+ * through a scalar, or at an index a list does not have — is refused rather
+ * than made to fit.
  */
 function writeAtPointer(
   model: A2uiJsonObjectV1,
@@ -454,9 +463,9 @@ function writeAtPointer(
   const next = { ...model } as Record<string, unknown>;
   let cursor: PointerParent = next;
   for (const token of tokens.slice(0, -1)) {
+    if (value === null && !hasMember(cursor, token)) return model;
     const child = readMember(cursor, token, path);
     if (child === undefined) {
-      if (value === null) return model;
       const created: Record<string, unknown> = {};
       writeMember(cursor, token, created, path);
       cursor = created;
@@ -475,7 +484,7 @@ function writeAtPointer(
   }
   const leaf = tokens.at(-1)!;
   if (value === null) {
-    if (!Array.isArray(cursor) && !Object.hasOwn(cursor, leaf)) return model;
+    if (!hasMember(cursor, leaf)) return model;
     deleteMember(cursor, leaf, path);
   } else writeMember(cursor, leaf, value, path);
   return next as A2uiJsonObjectV1;
