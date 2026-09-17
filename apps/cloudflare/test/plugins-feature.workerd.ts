@@ -122,6 +122,8 @@ describe("the Plugin authoring switch inside a real Bot", () => {
     expect(files.content).toContain("plugin.json");
 
     const again = await callTool(identity, `run-relist-${id}`, "plugin_list");
+    expect(again.isError).toBe(false);
+    expect(again.content).toContain("Email (email)");
     expect(again.content).not.toContain("notes");
 
     expect(await skillRefs(identity)).toContain("managed/plugins");
