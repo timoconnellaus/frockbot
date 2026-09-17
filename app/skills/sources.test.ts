@@ -70,6 +70,7 @@ describe("the managed Skill source", () => {
       "learn-from-demonstration",
       "applets",
       "plugins",
+      "a2ui",
     ]);
     for (const skill of loaded.skills) {
       expect(skill.ref?.source).toBe("managed");
@@ -375,6 +376,7 @@ describe("a Turn's whole catalog", () => {
 
     expect(catalog.current().skills.map((skill) => skill.ref?.source)).toEqual([
       "bot",
+      "managed",
       "managed",
       "managed",
       "managed",
