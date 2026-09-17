@@ -52,13 +52,20 @@ const frame: BotPluginsFrameV1 = {
   ],
 };
 
-function groups(document: ReturnType<typeof botPluginsDocumentV1>) {
+type Group = { title: string; children: Array<Record<string, unknown>> };
+
+/** The kind sections: one titled group per kind, in the order they appear. */
+function sections(document: ReturnType<typeof botPluginsDocumentV1>) {
   return (
     document.root as { children: Array<Record<string, unknown>> }
-  ).children.filter((node) => node.type === "group") as Array<{
-    title: string;
-    children: Array<Record<string, unknown>>;
-  }>;
+  ).children.filter((node) => node.type === "group") as Group[];
+}
+
+/** Every Plugin on the document, whichever section it is filed under. */
+function groups(document: ReturnType<typeof botPluginsDocumentV1>) {
+  return sections(document).flatMap(
+    (section) => section.children as unknown as Group[],
+  );
 }
 
 function toggle(group: { children: Array<Record<string, unknown>> }) {
@@ -72,12 +79,19 @@ describe("a Bot's Plugins document", () => {
     const document = botPluginsDocumentV1(frame);
     expect(document.surfaceId).toBe("bot-plugins");
     expect(document.revision).toBe(4);
+    // The kind is said once, over the rows it covers, and a Plugin's row is
+    // called what the Plugin is called.
+    expect(sections(document).map((section) => section.title)).toEqual([
+      "Built in",
+      "Always on",
+      "Made by your Bot",
+    ]);
     const cards = groups(document);
     expect(cards.map((card) => card.title)).toEqual([
-      "Web · Built in",
-      "Image · Built in",
-      "Audit log · Always on",
-      "Weather · Made by your Bot",
+      "Web",
+      "Image",
+      "Audit log",
+      "Weather",
     ]);
     expect(toggle(cards[0]!)).toMatchObject({
       actionId: "set-package-enabled",

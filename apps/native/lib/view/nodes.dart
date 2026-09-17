@@ -176,101 +176,97 @@ class ViewGridGroups extends StatelessWidget {
 /// and decides what each top-level group is from what it holds:
 ///
 /// * children that are all titled groups → a section: its title as the label,
-///   its children as the rows under it.
-/// * a switch or a way in of its own → a row, grouped under the kind its title
-///   ends with ("Web · Built in" becomes Web, under Built in).
+///   its children under it. Each of those is a row where it is one — words and
+///   the controls a row draws — and a card of its own where it is not, so a
+///   Plugin that draws a settings form still gets the room for it.
 /// * anything else → a card of its own, drawn by the shared renderer. That is
 ///   the editor at the top of Routines: a form is not a row and is not
-///   pretending to be. The completions at the foot of it are all titled groups,
-///   so they take the first branch and land as rows under a "Completions"
-///   label.
+///   pretending to be.
 class ViewSwitchRows extends StatelessWidget {
   final Map<String, Object?> node;
   const ViewSwitchRows({super.key, required this.node});
+
+  static List<Map<String, Object?>> _children(Map<String, Object?> node) =>
+      node['type'] == 'group'
+      ? (node['children'] as List)
+            .map((each) => (each as Map).cast<String, Object?>())
+            .toList()
+      : const <Map<String, Object?>>[];
+
+  static Widget _card(Map<String, Object?> child) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: child['type'] == 'group' && child['title'] != null
+        ? Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+              child: ViewNodeView(node: child),
+            ),
+          )
+        : ViewNodeView(node: child),
+  );
+
+  /// What a section holds: runs of rows on one card, and anything too big to
+  /// be a row on a card of its own, in the order the document wrote them.
+  static List<Widget> _section(List<Map<String, Object?>> children) {
+    final drawn = <Widget>[];
+    var rows = <Map<String, Object?>>[];
+    void flush() {
+      if (rows.isEmpty) return;
+      final batch = rows;
+      rows = [];
+      drawn.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: FrockRowGroup(
+            indent: 14,
+            rows: [for (final row in batch) _ViewSwitchRow(node: row)],
+          ),
+        ),
+      );
+    }
+
+    for (final child in children) {
+      if (viewIsRowV1(_children(child))) {
+        rows.add(child);
+        continue;
+      }
+      flush();
+      drawn.add(_card(child));
+    }
+    flush();
+    return drawn;
+  }
 
   @override
   Widget build(BuildContext context) {
     if (node['type'] != 'group') return ViewNodeView(node: node);
     final sections = <Widget>[];
-    final kinds = <String>[];
-    final pending = <String, List<Map<String, Object?>>>{};
-
-    void flush() {
-      for (final kind in kinds) {
-        if (kind.isNotEmpty) sections.add(FrockSectionLabel(kind));
-        sections.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: FrockRowGroup(
-              indent: 14,
-              rows: [
-                for (final row in pending[kind]!) _ViewSwitchRow(node: row),
-              ],
-            ),
-          ),
-        );
-      }
-      kinds.clear();
-      pending.clear();
-    }
-
     for (final raw in (node['children'] as List)) {
       final child = (raw as Map).cast<String, Object?>();
-      final children = child['type'] == 'group'
-          ? (child['children'] as List)
-                .map((each) => (each as Map).cast<String, Object?>())
-                .toList()
-          : const <Map<String, Object?>>[];
+      final children = _children(child);
       if (child['type'] == 'group' &&
           child['title'] != null &&
           children.isNotEmpty &&
           children.every(
             (each) => each['type'] == 'group' && each['title'] != null,
           )) {
-        flush();
-        sections.add(FrockSectionLabel(child['title']! as String));
+        final title = child['title']! as String;
+        sections.add(FrockSectionLabel(title));
         sections.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: identified(
-              viewGroupIdentifierV1(child['title']! as String),
-              FrockRowGroup(
-                indent: 14,
-                rows: [for (final row in children) _ViewSwitchRow(node: row)],
-              ),
+          identified(
+            viewGroupIdentifierV1(title),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: _section(children),
             ),
           ),
         );
         continue;
       }
-      if (child['type'] == 'group' &&
-          child['title'] != null &&
-          viewIsRowV1(children)) {
-        final kind = viewRowKindV1(child['title']! as String);
-        if (!pending.containsKey(kind)) {
-          kinds.add(kind);
-          pending[kind] = [];
-        }
-        pending[kind]!.add(child);
-        continue;
-      }
-      flush();
-      sections.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: child['type'] == 'group' && child['title'] != null
-              ? Card(
-                  margin: EdgeInsets.zero,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                    child: ViewNodeView(node: child),
-                  ),
-                )
-              : ViewNodeView(node: child),
-        ),
-      );
+      sections.add(_card(child));
     }
-    flush();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -318,28 +314,6 @@ bool _viewIsRowControlsV1(Map<String, Object?> child) {
             (_rowToggleIds.contains(raw['actionId']) ||
                 _rowOpenIds.contains(raw['actionId'])),
       );
-}
-
-/// The kinds the Plugins projection appends to a row's title (app/plugins/
-/// page.ts). Every other title is the reader's own words — a Routine may well
-/// be called "Standup · daily" — so only these are read as a kind.
-const _rowKinds = {'Built in', 'Always on', 'Included', 'Made by your Bot'};
-
-/// What a projection appended to a title to say what kind of thing it is —
-/// "Web · Built in" — which belongs over the group rather than in every row.
-String viewRowKindV1(String title) {
-  final cut = title.lastIndexOf(' · ');
-  if (cut < 0) return '';
-  final kind = title.substring(cut + 3);
-  return _rowKinds.contains(kind) ? kind : '';
-}
-
-/// The same title without it.
-String viewRowTitleV1(String title) {
-  final kind = viewRowKindV1(title);
-  return kind.isEmpty
-      ? title
-      : title.substring(0, title.length - kind.length - 3);
 }
 
 class _ViewSwitchRow extends StatelessWidget {
@@ -391,7 +365,7 @@ class _ViewSwitchRow extends StatelessWidget {
     final row = identified(
       viewGroupIdentifierV1(title),
       FrockRow(
-        title: viewRowTitleV1(title),
+        title: title,
         subtitle: said.isEmpty ? null : said.join(' · '),
         chevron: toggle == null,
         onTap: open != null && openSchema != null
@@ -404,7 +378,7 @@ class _ViewSwitchRow extends StatelessWidget {
             : identified(
                 viewActionIdentifierV1(toggle['actionId'] as String),
                 Semantics(
-                  label: viewRowTitleV1(title),
+                  label: title,
                   child: Switch(
                     value: drawn ?? on,
                     // A standing prediction means the node's own input is a

@@ -714,7 +714,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
             SettingsIds.botHideConfirm,
             AlertDialog(
               insetPadding: frockDialogInset,
-              title: const Text('Hide this Bot?'),
+              title: frockDialogTitle(const Text('Hide this Bot?')),
               content: frockDialogBody(
                 const Text(
                   'Hiding this Bot from the sidebar also turns off its notifications. Its new messages still show as unread.',

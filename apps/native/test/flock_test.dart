@@ -6,6 +6,7 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/flock/create.dart';
 import 'package:frockbot_native/flock/lifecycle.dart';
 import 'package:frockbot_native/flock/avatar.dart';
+import 'package:frockbot_native/theme/dialogs.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
@@ -600,5 +601,114 @@ void main() {
         api.close();
       },
     );
+  });
+
+  group('the one width a Bot asks its questions at', () {
+    // The Name field takes 100 characters, and a title is one unwrapped line:
+    // a dialog that sizes itself to its longest sentence came out ~700 wide on
+    // a desktop for a Bot named like this one.
+    const long =
+        'Quarterly revenue reconciliation and board-pack assistant for the '
+        'whole team';
+
+    testWidgets('a confirmation is 400 however long the Bot is called', (
+      tester,
+    ) async {
+      final store = MemoryStore();
+      final api = SettingsApi(store, (path, body) async {
+        if (path.endsWith('/applets/impact')) return impact();
+        final command = (body! as Map).cast<String, Object?>();
+        return lifecycleReceipt(command['commandId'], 'deleted');
+      });
+      final lifecycle = BotLifecycleCommands(api, store, 'tim');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: BotDangerZone(
+              lifecycle: lifecycle,
+              botId: 'alpha',
+              botName: long,
+              archived: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete Bot'));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete $long?'), findsOneWidget);
+      expect(
+        tester
+            .getSize(
+              find
+                  .descendant(
+                    of: find.byType(AlertDialog),
+                    matching: find.byType(Material),
+                  )
+                  .first,
+            )
+            .width,
+        frockDialogWidth,
+      );
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      lifecycle.dispose();
+      api.close();
+    });
+
+    // A short name leaves the widest row inside the picker — the eight colour
+    // circles, 335 — deciding the width, which is where a ceiling rather than
+    // a width made the picker 383.
+    testWidgets('the character picker is 420, not as wide as its widest row', (
+      tester,
+    ) async {
+      final store = MemoryStore();
+      final api = SettingsApi(
+        store,
+        (path, body) async => {
+          'schemaVersion': 1,
+          'botId': 'alpha',
+          'revision': 4,
+          'avatar': defaultAvatarAppearanceV1('pixel'),
+        },
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async => AvatarPickerSheet.show(
+                  context,
+                  api: api,
+                  botId: 'alpha',
+                  botName: 'Alpha',
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .getSize(
+              find
+                  .descendant(
+                    of: find.byType(Dialog),
+                    matching: find.byType(Material),
+                  )
+                  .first,
+            )
+            .width,
+        AvatarPickerSheet.dialogWidth,
+      );
+      await tester.pumpWidget(const SizedBox());
+      api.close();
+    });
   });
 }

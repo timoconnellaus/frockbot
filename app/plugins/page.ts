@@ -280,7 +280,7 @@ function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
   return {
     type: "group",
     orientation: "column",
-    title: `${row.displayName.slice(0, 150)} · ${kindLabel(row)}`,
+    title: row.displayName.slice(0, 150),
     children: [
       ...lines,
       { type: "group", orientation: "row", children: controls },
@@ -296,9 +296,16 @@ export function botPluginsDocumentV1(frame: BotPluginsFrameV1): ViewDocument {
   const children: ViewNode[] = [];
   let nodes = 2;
   let complete = true;
+  // A Plugin's kind is a heading over the rows it covers rather than a suffix
+  // on every one of their names: the client draws a titled group of titled
+  // groups as a labelled card of rows, so the section is what says "Built in"
+  // once, and a Plugin called "Web" is called Web.
+  const kinds = new Map<string, ViewNode[]>();
   for (const row of frame.plugins) {
+    const kind = kindLabel(row);
     const cost =
       6 +
+      (kinds.has(kind) ? 0 : 1) +
       (row.network ? 1 : 0) +
       (row.unavailable ? 1 : 0) +
       (row.quarantined ? 1 : 0) +
@@ -311,7 +318,17 @@ export function botPluginsDocumentV1(frame: BotPluginsFrameV1): ViewDocument {
       break;
     }
     nodes += cost;
-    children.push(pluginNode(row, frame.revision));
+    const section = kinds.get(kind) ?? [];
+    if (section.length === 0) kinds.set(kind, section);
+    section.push(pluginNode(row, frame.revision));
+  }
+  for (const [kind, rows] of kinds) {
+    children.push({
+      type: "group",
+      orientation: "column",
+      title: kind,
+      children: rows,
+    });
   }
   if (!complete) {
     children.push({

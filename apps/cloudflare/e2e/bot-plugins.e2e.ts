@@ -99,18 +99,14 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   // The Bot's Plugins are Bot settings: the door is in its header.
   await openBotPlugins(page);
 
-  // The five first-party features the panel offers.
-  for (const slug of [
-    "web-built-in",
-    "routines-built-in",
-    "image-built-in",
-    "subagents-built-in",
-    "messages-built-in",
-  ]) {
+  // The five first-party features the panel offers, under the one "Built in"
+  // label the projection files them under.
+  await expect(sem(page, "view-group-built-in").first()).toBeVisible();
+  for (const slug of ["web", "routines", "image", "subagents", "messages"]) {
     await expect(sem(page, `view-group-${slug}`).first()).toBeVisible();
   }
   // Choosing a model is a Settings decision, so it is never a card here.
-  await expect(sem(page, "view-group-custom-models-built-in")).toHaveCount(0);
+  await expect(sem(page, "view-group-custom-models")).toHaveCount(0);
   await testInfo.attach("bot-plugins-page.png", {
     body: await page.screenshot(),
     contentType: "image/png",
