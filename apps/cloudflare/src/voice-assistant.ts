@@ -112,7 +112,10 @@ import {
   userMemoryRootV1,
   isMemoryProjectIdV1,
 } from "@frockbot/app/memory/roots";
-import { decodeDirectoryViewV1 } from "@frockbot/app/flock/shared";
+import {
+  decodeDirectoryViewV1,
+  decodeFlockBootstrapViewV1,
+} from "@frockbot/app/flock/shared";
 import type {
   ClientRunLookupV1,
   ClientRunV1,
@@ -1221,12 +1224,16 @@ export class VoiceAssistant extends VoiceAgentBase<
       }
       const identity = this.identity(connection);
       if (!identity) return;
-      await this.turnHost(
+      const switched = await this.turnHost(
         identity.userId,
         live,
         `target-${crypto.randomUUID()}`,
         undefined,
       ).switchBot(custom.botId);
+      // A refusal is answered too: the client pressed a control and must not
+      // be left showing a Bot the audio never moved to.
+      if (switched.status === "refused")
+        this.sendTarget(connection, live.botId);
       return;
     }
     const call = this.#calls.get(connection.id);
@@ -1303,9 +1310,10 @@ export class VoiceAssistant extends VoiceAgentBase<
     const bots = await this.listBots(userId).catch(
       () => [] as VoiceBotSummaryV1[],
     );
-    const general =
-      bots.find((bot) => bot.name.trim().toLowerCase() === "general") ??
-      bots[0];
+    // Which Bot is General is recorded by the flock bootstrap, not spelled by
+    // a display name a person is free to change.
+    const generalBotId = await this.generalBotId(userId);
+    const general = bots.find((bot) => bot.botId === generalBotId) ?? bots[0];
     if (!general) return { botId: "", name: "" };
     const voiceId = await this.voiceForBot(userId, general.botId);
     return {
@@ -2610,9 +2618,6 @@ export class VoiceAssistant extends VoiceAgentBase<
     call.announcing = controller;
     const release = () => {
       if (call.announcing === controller) call.announcing = undefined;
-      // The borrowed voice is given back with the floor. Left set, the call
-      // would keep speaking as a Bot it is no longer talking to.
-      call.speakingVoiceId = undefined;
     };
     try {
       const ledger = this.ledger();
@@ -2804,6 +2809,10 @@ export class VoiceAssistant extends VoiceAgentBase<
       }
     } finally {
       release();
+      // The borrowed voice is given back with the floor, once the answer it
+      // was borrowed for has been spoken. Left set, the call would keep
+      // speaking as a Bot it is no longer talking to.
+      call.speakingVoiceId = undefined;
     }
   }
 
@@ -2882,6 +2891,7 @@ export class VoiceAssistant extends VoiceAgentBase<
     // SAFETY: the binding names UserConfiguration; these are its reviewed RPCs.
     return stub as unknown as UserMemoryRpc & {
       listBots(input: unknown): Promise<unknown>;
+      readFlockBootstrap(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
       searchTranscripts(input: unknown): Promise<SearchIndexResultsV1>;
     };
@@ -2944,6 +2954,27 @@ export class VoiceAssistant extends VoiceAgentBase<
         await this.userRpc(userId).listBots({ schemaVersion: 1, userId }),
       ),
     );
+  }
+
+  /**
+   * Which Bot the account's authority provisioned as General. The bootstrap
+   * marker is the only thing that says so: names are the person's to change,
+   * and a Bot they call "General" is not the one the account bootstrapped.
+   */
+  private async generalBotId(userId: string): Promise<string | undefined> {
+    try {
+      const bootstrap = decodeFlockBootstrapViewV1(
+        rpcJsonSnapshotV1(
+          await this.userRpc(userId).readFlockBootstrap({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      );
+      return bootstrap.generalBotId ?? undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -3095,8 +3126,14 @@ export class VoiceAssistant extends VoiceAgentBase<
     userId: string,
     botId?: string,
   ): Promise<Omit<VoiceAssistantPromptInputV1, "now">> {
+    // One directory read serves both the prompt's `<bots>` list and the
+    // current Bot's activity; asked twice it would double the per-Bot RPC
+    // fan-out on exactly this path.
+    const directory = this.listBots(userId).catch(
+      () => [] as VoiceBotSummaryV1[],
+    );
     const [bots, memory, timezone, session, bot] = await Promise.all([
-      this.listBots(userId).catch(() => [] as VoiceBotSummaryV1[]),
+      directory,
       (async () => {
         const store = this.memoryStore(userId);
         if (!store) return undefined;
@@ -3116,7 +3153,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       })(),
       this.userTimezone(userId),
       this.sessionMemoryContext(),
-      this.buildCurrentBotContext(userId, botId),
+      this.buildCurrentBotContext(userId, botId, directory),
     ]);
     return {
       bots,
@@ -3141,6 +3178,7 @@ export class VoiceAssistant extends VoiceAgentBase<
   private async buildCurrentBotContext(
     userId: string,
     botId: string | undefined,
+    directory: Promise<VoiceBotSummaryV1[]>,
   ): Promise<VoiceCurrentBotV1 | undefined> {
     if (!botId) return undefined;
     let bot: { botId: string; name: string; description?: string };
@@ -3151,7 +3189,7 @@ export class VoiceAssistant extends VoiceAgentBase<
       // going as the account-wide assistant rather than failing.
       return undefined;
     }
-    const [memory, thread, directory] = await Promise.all([
+    const [memory, thread, bots] = await Promise.all([
       (async () => {
         const store = this.memoryStore(userId);
         if (!store) return undefined;
@@ -3178,9 +3216,9 @@ export class VoiceAssistant extends VoiceAgentBase<
       // The directory is already being read for the prompt's `<bots>` list;
       // this takes the live activity for the current Bot out of the same
       // answer rather than asking its object again.
-      this.listBots(userId).catch(() => [] as VoiceBotSummaryV1[]),
+      directory,
     ]);
-    const activity = directory.find((row) => row.botId === botId)?.activity;
+    const activity = bots.find((row) => row.botId === botId)?.activity;
     return {
       botId: bot.botId,
       name: bot.name,

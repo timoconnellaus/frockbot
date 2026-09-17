@@ -438,10 +438,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   /// Moves an open call to another Bot without dropping the audio.
+  ///
+  /// Who the call is with is the server's to say: it may refuse the move — a
+  /// Bot deleted from another device, a call that is no longer the live one —
+  /// and adopting the id here would leave the screen naming a Bot the audio
+  /// never reached. The `voice/target` frame is what moves it.
   Future<void> _switchVoice(String botId) async {
     final session = voiceSession;
     if (session == null) return;
-    setState(() => voiceBotId = botId);
     session.retarget(botId);
   }
 
@@ -476,13 +480,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (!mounted || !identical(voiceSession, session)) return;
       final now = session.currentBotId;
       if (now == null || now == voiceBotId) return;
+      final wasOnScreen = selected?.botId.value == voiceBotId;
       setState(() => voiceBotId = now);
       // The conversation moved, so the page does too: the person is talking
       // to this Bot now, and the thread they can read should be the one they
       // are talking about. Only when the call is the thing on screen — a
       // hand-over must not drag someone out of a page they went to
       // themselves while the call carried on in the background.
-      if (selected?.botId.value != now &&
+      if (wasOnScreen &&
+          selected?.botId.value != now &&
           bots.any((bot) => bot.botId.value == now)) {
         _select(now);
       }
