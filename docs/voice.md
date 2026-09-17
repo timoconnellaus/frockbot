@@ -6,7 +6,7 @@ leave the Worker.
 | Feature                                 | Route                                | Server                                                                    | Providers                                                                                                            |
 | --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                                                           |
-| Continuous voice session (all Bots)     | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | ElevenLabs Scribe v2 Realtime (streaming partials, VAD commit) → Frock AI gateway (chat) → ElevenLabs Flash v2.5 TTS |
+| Continuous voice session (one Bot)      | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | ElevenLabs Scribe v2 Realtime (streaming partials, VAD commit) → Frock AI gateway (chat) → ElevenLabs Flash v2.5 TTS |
 | Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                                                                    |
 
 Both WebSocket routes are authenticated exactly like `/api/bots/:id/state-channel`:
@@ -20,6 +20,53 @@ The pure parts — protocol decoders, the durable ledger, the speech gate, the
 context assembly, the realtime upstream vocabulary and both transcription
 adapters — live in `app/voice/` and
 import no Cloudflare SDK. The two Worker modules above are the adapters.
+
+## A call talks to one Bot
+
+Since ADR 0029 a call addresses a Bot rather than the account. The client
+names it in a `voice/target` frame just before `start_call` — the SDK's own
+frame carries only a preferred format — and the id is written into the call
+record, so it survives eviction and a rejoin. A client that names none, or
+names a Bot this account does not own, gets the account's General Bot: a call
+with nobody on the other end is worse than one with the wrong somebody.
+
+The voice layer then wears that Bot. The prompt opens as it, in the first
+person, and carries `<you>` (its name, description and live activity),
+`<your-memory>` (its own memory, read and never written, beside the User's)
+and `<your-recent-conversation>` (the tail of its thread). The account
+directory is still in the prompt, but only so a hand-over can be asked for by
+name.
+
+The tools narrow with it. `ask`, `status`, `read_history`, `search_history`
+and `cancel` take no `bot_id` and mean this Bot; the loop supplies the target,
+not the model. `switch_bot` is the one that moves it: it writes the call
+record before the voice changes, tells the client so the screen follows, and
+rebuilds the prompt context. A delegation the previous Bot still owes is left
+open on purpose — it belongs to the call, not the target — and is read out in
+that Bot's own voice when it lands.
+
+The two layers are unchanged: the voice layer answers in a second or two from
+what it holds, and real work is still a Bot Turn on the `agent` lane, so the
+person is never waiting on one.
+
+## Each Bot has a voice
+
+`app/voice/voices.ts` is the deployment's curated list and the default voice
+for every character in the avatar cast, so a Bot whose owner has only ever
+picked a look already sounds unlike its siblings. The list is curated rather
+than free text: a setting that took any ElevenLabs id would be a way to bill
+the account for a voice nobody vetted, and a typo would be a call that cannot
+speak at all. `ELEVENLABS_VOICE_ID` remains the fallback.
+
+The SDK reads `tts` once and speaks every sentence through it, so the voice
+cannot be chosen by handing it a different provider. It is chosen per sentence
+from the call that is speaking — which is also the only place that knows a
+read-out belongs to another Bot — and one provider is made and kept per voice
+the object has spoken as.
+
+A Bot's own stored `voiceId` override is not built yet; `resolveVoiceIdV1`
+takes it and nothing writes it. The ids in that file are ElevenLabs' public
+premade voices and have not been played against this account.
 
 ## Capabilities
 
@@ -310,7 +357,14 @@ a socket nobody is listening on.
 A Bot answer that settles while an utterance, reply, or playback is in flight
 waits for a natural pause, then becomes a turn of the call: the assistant is
 told the answer, in the person's seat and marked as what it is, and decides
-what to say — one or two sentences, or nothing. There is no queue of answers
+what to say — one or two sentences, or nothing. Since ADR 0029 it is told in
+one of two shapes. Work the Bot on the call started is its own, and comes back
+with no name and an instruction to speak in the first person — "Done, the
+flights are booked", not "Sunny answered about the flights". An answer from a
+Bot the call has since handed over from keeps its name, because there the
+person really is being told about somebody else, and it is spoken in that
+Bot's voice so they hear who is answering before they are told; the borrowed
+voice is given back with the floor. There is no queue of answers
 across calls. A call that ends takes its open requests with it, so an answer
 that arrives after a hang-up is never read out, on that call or the next; the
 Bot's reply stays in the Bot's own conversation, where the person can read it.

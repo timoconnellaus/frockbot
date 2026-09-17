@@ -1,7 +1,34 @@
 # ADR 0029: Voice talks to one Bot
 
-Status: proposed, 2026-09-17. Decisions are Tim's from the 2026-09-17
-discussion. Nothing here is built.
+Status: accepted, 2026-09-17. Decisions are Tim's from the 2026-09-17
+discussion. Built in the same pull request, except where noted below.
+
+**What is built:** decisions 1 to 6, 8 and 9, and the first parts of 7 —
+the call addresses one Bot and wears it, the tools narrow to it,
+`switch_bot` hands the conversation over, each Bot speaks in its
+character's voice, the read-out is first person, and the composer carries
+the voice control while the Bot page becomes a focused voice mode.
+
+**What is not, yet:**
+
+- The `voiceId` **setting**. Every Bot already has a distinct voice from
+  its character and the resolution path takes a per-Bot override, but the
+  stored choice and its picker are not built. `resolveVoiceIdV1`'s
+  `chosen` argument is the seam.
+- The curated voice ids in `app/voice/voices.ts` are ElevenLabs' public
+  premade voices and have **not been played against this account**. They
+  need listening to before a release ships them.
+- Decision 7's **enlarged character and on-page mute**, and with them the
+  retirement of the account-wide footer. The footer still carries mute,
+  End and the meter.
+- Decision 7 says the sidebar `voice-start` is removed, but decision 1
+  says a call started "from the list root" opens with General. Those pull
+  against each other — the sidebar control _is_ the list-root entry — so
+  it has been left in place pending a decision.
+
+Decision 9 was overtaken before it was built: PR #534 made every call
+fresh, so answers that settle while nobody is listening are no longer
+carried into the next call at all. There is nothing left to scope.
 
 ## Context
 
