@@ -12,11 +12,14 @@ library;
 import 'package:genui/genui.dart';
 
 import 'frock_catalog/frock_catalog.dart';
-import 'frock_catalog/schemas.dart';
 
-/// The standard catalog plus the Frock family, as one registered catalog.
+/// The standard catalog plus the Frock families, as one registered catalog.
 final Catalog cardCatalogV1 = BasicCatalogItems.asCatalog().copyWith(
-  newItems: frockCatalogItemsV1,
+  newItems: [
+    for (final item in BasicCatalogItems.asCatalog().items)
+      if (item.name == 'Text') frockFlexibleV1(item),
+    ...frockCatalogItemsV1,
+  ],
   catalogId: frockCatalogIdV1,
   catalogIdAliases: [basicCatalogId],
 );

@@ -160,6 +160,738 @@
         }
       ],
       "unevaluatedProperties": false
+    },
+    "MetricTile": {
+      "type": "object",
+      "description": "One number that matters, with its name under it and an optional movement beside it. Put two or three in a Row for a summary; a Row of six is a table, so use DataTable instead.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "MetricTile" },
+            "label": {
+              "type": "string",
+              "maxLength": 60,
+              "description": "What the number is, e.g. 'Open invoices'."
+            },
+            "value": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The number itself, already formatted the way a person reads it: '$4,120', '18%', '3 of 7'."
+            },
+            "delta": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "How it moved, e.g. '+12%' or '-3 since Friday'. The host draws an arrow from the sign it starts with."
+            },
+            "caption": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "One quiet line under the tile: the period, the source."
+            },
+            "tone": {
+              "type": "string",
+              "enum": ["neutral", "ready", "success", "warning", "danger"],
+              "description": "What the number means — not which way it moved. Defaults to 'neutral'."
+            }
+          },
+          "required": ["component", "label", "value"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ProgressBar": {
+      "type": "object",
+      "description": "A proportion: how far through something is, how much of a budget is used. For work that is running, not for a rating.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "ProgressBar" },
+            "value": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicNumber",
+              "description": "Between 0 and 1. Anything outside that is clamped. Bind it and the bar moves with one updateDataModel."
+            },
+            "label": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "What is progressing, above the bar."
+            },
+            "caption": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The count in words, at the right of the label: '3 of 7', '62%'."
+            },
+            "tone": {
+              "type": "string",
+              "enum": ["neutral", "ready", "success", "warning", "danger"],
+              "description": "What the host colours the filled part. Defaults to 'ready' while something is running."
+            },
+            "indeterminate": {
+              "type": "boolean",
+              "description": "True when the proportion is not known yet: the bar animates instead of filling. Defaults to false."
+            }
+          },
+          "required": ["component", "value"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "DataTable": {
+      "type": "object",
+      "description": "Rows in aligned columns: line items, search results, a comparison. The host lays the columns out so they fit the card at phone width — never compose a table out of Rows.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "DataTable" },
+            "columns": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "description": "The columns, left to right. Five at most: a card is not a spreadsheet.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "description": "The heading."
+                  },
+                  "align": {
+                    "type": "string",
+                    "enum": ["start", "end"],
+                    "description": "Which edge the cells sit against. Use 'end' for numbers. Defaults to 'start'."
+                  },
+                  "weight": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 6,
+                    "description": "This column's share of the width, against the other columns'. Defaults to 1."
+                  }
+                },
+                "required": ["label"]
+              }
+            },
+            "rows": {
+              "type": "array",
+              "maxItems": 24,
+              "description": "The rows, in the order they are read. A row has one cell per column; a short row is padded, and extra cells are dropped.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cells": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "description": "This row's cells, in column order.",
+                    "items": {
+                      "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString"
+                    }
+                  }
+                },
+                "required": ["cells"]
+              }
+            },
+            "caption": {
+              "type": "string",
+              "maxLength": 120,
+              "description": "One line under the table, e.g. 'Showing the 12 most recent of 340'. Say so here when the rows are a sample."
+            }
+          },
+          "required": ["component", "columns", "rows"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Timeline": {
+      "type": "object",
+      "description": "What happened, in order, down a rail: the steps of a run, the history of a thread, what a Routine did overnight. For events with a time, not for a list of things.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "Timeline" },
+            "entries": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 20,
+              "description": "The events, oldest first unless the card says otherwise.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+                    "description": "What happened, in a few words."
+                  },
+                  "detail": {
+                    "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+                    "description": "One quieter line under it."
+                  },
+                  "time": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "description": "When, in the words a person reads: '9:14am', 'Tuesday', '3 days ago'."
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "neutral",
+                      "ready",
+                      "success",
+                      "warning",
+                      "danger"
+                    ],
+                    "description": "What this step means, which is what the host colours its dot. Defaults to 'neutral'."
+                  }
+                },
+                "required": ["title"]
+              }
+            }
+          },
+          "required": ["component", "entries"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ChoiceChips": {
+      "type": "object",
+      "description": "Pick one of a handful of options, laid out as chips that wrap. For a short, visible set — a tone, a recipient, a date the Bot suggested. Use ChoicePicker for a long list.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "ChoiceChips" },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 12,
+              "description": "What can be picked, in the order shown.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "maxLength": 60,
+                    "description": "The words on the chip."
+                  },
+                  "value": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "What is written to the data model when it is picked. This is what you will read back, so make it something you can act on."
+                  }
+                },
+                "required": ["label", "value"]
+              }
+            },
+            "value": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "Where the pick is kept: write a binding, `{\"path\": \"/tone\"}`. It must be a binding — a press carries the data model back, and a selection the component kept to itself would never reach you."
+            },
+            "action": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/Action",
+              "description": "Raised as soon as a chip is picked, when picking is the whole answer. Leave it out when a Button below submits the card."
+            }
+          },
+          "required": ["component", "options", "value"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "MultiSelect": {
+      "type": "object",
+      "description": "Tick any number of a handful of options. The ticked values are kept as a list in the data model, in the order the options are declared.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "MultiSelect" },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 12,
+              "description": "What can be ticked, in the order shown.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "maxLength": 60,
+                    "description": "The words beside the box."
+                  },
+                  "value": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "What appears in the list when it is ticked."
+                  },
+                  "detail": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "One quieter line under the label."
+                  }
+                },
+                "required": ["label", "value"]
+              }
+            },
+            "values": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicStringList",
+              "description": "Where the ticked values are kept: write a binding, `{\"path\": \"/include\"}`. Seed the data model with the ones that start ticked."
+            },
+            "maxSelected": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12,
+              "description": "How many may be ticked at once. Past it the unticked options stop responding and the host says why. Unbounded by default."
+            }
+          },
+          "required": ["component", "options", "values"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "SegmentedControl": {
+      "type": "object",
+      "description": "Choose between two, three or four things that are always visible — a view, a mode, a period. Not for an answer with many options: that is ChoiceChips.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "SegmentedControl" },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 4,
+              "description": "The segments, left to right.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "The words in the segment. Keep them to one or two."
+                  },
+                  "value": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "What is written to the data model when it is chosen."
+                  }
+                },
+                "required": ["label", "value"]
+              }
+            },
+            "value": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "Where the choice is kept: write a binding. The first segment is drawn as chosen when the data model holds nothing."
+            },
+            "action": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/Action",
+              "description": "Raised when a segment is chosen. Leave it out when the choice only changes what the card shows."
+            }
+          },
+          "required": ["component", "options", "value"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Rating": {
+      "type": "object",
+      "description": "How good was it, in stars. For asking, and — with readOnly — for showing a rating that is already recorded.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "Rating" },
+            "value": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicNumber",
+              "description": "How many stars, from 0. Write a binding when you are asking; a literal is fine when readOnly is true."
+            },
+            "max": {
+              "type": "integer",
+              "minimum": 3,
+              "maximum": 10,
+              "description": "How many stars there are. Defaults to 5."
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 80,
+              "description": "What is being rated, drawn above the stars."
+            },
+            "readOnly": {
+              "type": "boolean",
+              "description": "True shows a rating rather than asking for one. Defaults to false."
+            }
+          },
+          "required": ["component", "value"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ImageGallery": {
+      "type": "object",
+      "description": "Several pictures in one component: what was found, what was generated, the pages of a document. One image draws full width; more than one draws as a strip that scrolls. Tapping one opens it.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "ImageGallery" },
+            "images": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "description": "The pictures, in the order they are shown.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "description": "An https:// image. A card carrying any other scheme is refused whole and nothing is drawn."
+                  },
+                  "caption": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "One line under the picture."
+                  },
+                  "alt": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "What the picture shows, for a person who cannot see it. Write one."
+                  }
+                },
+                "required": ["url"]
+              }
+            }
+          },
+          "required": ["component", "images"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "FileAttachment": {
+      "type": "object",
+      "description": "A file the card is about: a document, an export, a generated artifact. One row with what it is and a control that opens it.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "FileAttachment" },
+            "name": {
+              "type": "string",
+              "maxLength": 160,
+              "description": "The file's name, as the person would recognise it."
+            },
+            "detail": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "What is worth knowing about it, already in words: 'PDF · 1.2 MB', 'Generated just now'. There is no formatting function; write the size the way a person reads it."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "document",
+                "spreadsheet",
+                "image",
+                "audio",
+                "video",
+                "archive",
+                "code",
+                "other"
+              ],
+              "description": "What sort of file it is, which is the icon the host draws. Defaults to 'other'."
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "An https:// link to the file. With one the row offers to open it, through the app's own link handling; without one it is a row that says the file exists."
+            }
+          },
+          "required": ["component", "name"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "LinkPreview": {
+      "type": "object",
+      "description": "One link, with enough of what is behind it that the person can decide before they follow it. Use it for a page a Bot found or made; a bare link inside prose belongs in Markdown.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "LinkPreview" },
+            "url": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Where it goes. https:// only, and the whole card is refused otherwise."
+            },
+            "title": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "What the page is called."
+            },
+            "description": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "A line or two about it. Two lines at most are drawn."
+            },
+            "site": {
+              "type": "string",
+              "maxLength": 80,
+              "description": "Whose page it is, e.g. 'example.com'. Defaults to the link's own host."
+            },
+            "imageUrl": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "An https:// thumbnail beside the title."
+            }
+          },
+          "required": ["component", "url", "title"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Markdown": {
+      "type": "object",
+      "description": "A body of Markdown, drawn the way the Bot's own messages are: headings, bullet and ordered lists, emphasis, inline code, block quotes, rules and links. Use it for anything with structure in it; use Text for one plain run.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "Markdown" },
+            "text": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The Markdown source. The subset the app draws is the one it draws chat messages with; anything else is shown as the characters you wrote. No HTML is rendered, ever."
+            }
+          },
+          "required": ["component", "text"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "CodeBlock": {
+      "type": "object",
+      "description": "Code, a command, or a payload, in a monospaced box with a control that copies it. Use it whenever the person might need the text exactly — never a Text, which will wrap and lose the indentation.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "CodeBlock" },
+            "code": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The text, exactly as it should be copied. Do not wrap it in backticks."
+            },
+            "language": {
+              "type": "string",
+              "maxLength": 24,
+              "description": "What it is, drawn as a label above the box: 'bash', 'json', 'dart'. There is no syntax colouring; this only says what the person is looking at."
+            },
+            "caption": {
+              "type": "string",
+              "maxLength": 120,
+              "description": "One line under the box: where it came from, what it does."
+            }
+          },
+          "required": ["component", "code"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Quote": {
+      "type": "object",
+      "description": "Something somebody else wrote, set apart from the card's own words: the message being replied to, the line of a document under discussion. Never for the Bot's own text.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "Quote" },
+            "text": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The quoted words. Keep it to the part that matters; a long quotation belongs in CollapsibleText."
+            },
+            "attribution": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "Who said it, and when: 'Nick, Tuesday 9:14am'."
+            }
+          },
+          "required": ["component", "text"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "CardHeader": {
+      "type": "object",
+      "description": "The top of a card: its title, an optional line under it, and the pill saying what state it is in. Prefer this to a Row of Text and StatusPill — the host lays it out so the pill can never be pushed off the edge on a phone.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "CardHeader" },
+            "title": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "What the card is about, in a few words. Two lines at most; the host truncates past that."
+            },
+            "subtitle": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "One quieter line under the title: who it is for, when it was made."
+            },
+            "status": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The words on the pill at the right, e.g. 'Ready to send'. Bind it to the data model and the card settles with one updateDataModel. Omit it for a card with no state."
+            },
+            "tone": {
+              "type": "string",
+              "enum": ["neutral", "ready", "success", "warning", "danger"],
+              "description": "What the state means, which is what the host colours the pill by. Defaults to 'neutral'."
+            }
+          },
+          "required": ["component", "title"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "SectionHeader": {
+      "type": "object",
+      "description": "A small heading that divides a long card into parts, with a hairline under it. Use it between blocks, never as the card's own title — that is CardHeader.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "SectionHeader" },
+            "title": {
+              "type": "string",
+              "maxLength": 80,
+              "description": "The section's name, e.g. 'Attachments'."
+            },
+            "caption": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "A short note at the right of the heading, e.g. a count."
+            }
+          },
+          "required": ["component", "title"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Callout": {
+      "type": "object",
+      "description": "A tinted note beside the thing the card is about: a warning, a consequence, a piece of context. One per card at most — a card that needs two is telling the person too much at once.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "Callout" },
+            "text": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "What the person needs to know, in a sentence or two."
+            },
+            "title": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "An optional bold first line."
+            },
+            "tone": {
+              "type": "string",
+              "enum": ["neutral", "ready", "success", "warning", "danger"],
+              "description": "What kind of note it is, which is what the host colours and which icon it draws. Defaults to 'neutral'."
+            }
+          },
+          "required": ["component", "text"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "IdentityRow": {
+      "type": "object",
+      "description": "A person or an account on one line: an avatar, a name, and a quieter second line. For the sender of an email, the owner of a file, the account a connection belongs to.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "IdentityRow" },
+            "name": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "Who it is."
+            },
+            "detail": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The second line: an address, a handle, a role."
+            },
+            "imageUrl": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "An https:// avatar. A card carrying any other scheme is refused whole."
+            },
+            "initials": {
+              "type": "string",
+              "maxLength": 3,
+              "description": "What the avatar says when there is no image. Defaults to the first letter of the name."
+            }
+          },
+          "required": ["component", "name"]
+        }
+      ],
+      "unevaluatedProperties": false
     }
   },
   "$defs": {
@@ -179,7 +911,25 @@
         { "$ref": "#/components/KeyValueRows" },
         { "$ref": "#/components/CollapsibleText" },
         { "$ref": "#/components/ApprovalActions" },
-        { "$ref": "#/components/Receipt" }
+        { "$ref": "#/components/Receipt" },
+        { "$ref": "#/components/MetricTile" },
+        { "$ref": "#/components/ProgressBar" },
+        { "$ref": "#/components/DataTable" },
+        { "$ref": "#/components/Timeline" },
+        { "$ref": "#/components/ChoiceChips" },
+        { "$ref": "#/components/MultiSelect" },
+        { "$ref": "#/components/SegmentedControl" },
+        { "$ref": "#/components/Rating" },
+        { "$ref": "#/components/ImageGallery" },
+        { "$ref": "#/components/FileAttachment" },
+        { "$ref": "#/components/LinkPreview" },
+        { "$ref": "#/components/Markdown" },
+        { "$ref": "#/components/CodeBlock" },
+        { "$ref": "#/components/Quote" },
+        { "$ref": "#/components/CardHeader" },
+        { "$ref": "#/components/SectionHeader" },
+        { "$ref": "#/components/Callout" },
+        { "$ref": "#/components/IdentityRow" }
       ],
       "discriminator": { "propertyName": "component" }
     }

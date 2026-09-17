@@ -1,13 +1,14 @@
 # Examples
 
-_A reference of `managed/a2ui`. Three complete cards, as they are actually
+_A reference of `managed/a2ui`. Four complete cards, as they are actually
 sent._
 
 ## 1. A draft the User approves
 
 Two sends in one reply: the card, then the approval whose id the card's
-`ApprovalActions` names. Seven components, one for the pill, one for the facts,
-one for the body.
+`ApprovalActions` names. Five components: the header, the facts, the body, the
+decision. The header carries the title and the state pill together, so nothing
+about the layout is left for the card to get wrong.
 
 ```json
 {
@@ -28,22 +29,10 @@ one for the body.
             },
             {
               "id": "header",
-              "component": "Row",
-              "justify": "spaceBetween",
-              "align": "center",
-              "children": ["title", "pill"]
-            },
-            {
-              "id": "title",
-              "component": "Text",
-              "text": "Draft reply",
-              "variant": "h4",
-              "weight": 1
-            },
-            {
-              "id": "pill",
-              "component": "StatusPill",
-              "label": { "path": "/status" },
+              "component": "CardHeader",
+              "title": "Draft reply",
+              "subtitle": "nick@example.com",
+              "status": { "path": "/status" },
               "tone": "ready"
             },
             {
@@ -212,3 +201,108 @@ carries the whole model with it, which is how the chosen value reaches you.
 The press arrives on your next Turn as the action `book-slot` on surface
 `pick-slot-thursday`, with its context and the data model. Book the slot, then
 send the same `surfaceId` once more with a `Receipt`.
+
+## 4. A report, with the answer it needs
+
+One card carrying the frame, the numbers, the rows and the one thing the
+person has to decide. Notice what is _not_ here: no `Row` of `Text`s for the
+header, no table built out of rows, no per-option `CheckBox`. Every part is
+one component, so the whole card is eleven.
+
+```json
+{
+  "disposition": "finish",
+  "payload": {
+    "type": "card",
+    "surfaceId": "invoices-september",
+    "messages": [
+      {
+        "version": "v1.0",
+        "createSurface": {
+          "surfaceId": "invoices-september",
+          "sendDataModel": true,
+          "components": [
+            {
+              "id": "root",
+              "component": "Column",
+              "children": ["header", "totals", "items", "note", "chase", "send"]
+            },
+            {
+              "id": "header",
+              "component": "CardHeader",
+              "title": "September invoices",
+              "subtitle": "Four clients, two overdue",
+              "status": { "path": "/status" },
+              "tone": "ready"
+            },
+            {
+              "id": "totals",
+              "component": "Row",
+              "children": ["outstanding", "overdue"]
+            },
+            {
+              "id": "outstanding",
+              "component": "MetricTile",
+              "label": "Outstanding",
+              "value": "$12,400",
+              "delta": "+2,100",
+              "caption": "since August"
+            },
+            {
+              "id": "overdue",
+              "component": "MetricTile",
+              "label": "Overdue",
+              "value": "2",
+              "tone": "warning"
+            },
+            {
+              "id": "items",
+              "component": "DataTable",
+              "columns": [
+                { "label": "Client", "weight": 3 },
+                { "label": "Due", "align": "end" },
+                { "label": "Amount", "align": "end" }
+              ],
+              "rows": [
+                { "cells": ["Harper & Co", "12 Sep", "$4,000"] },
+                { "cells": ["Nightjar", "19 Sep", "$3,200"] },
+                { "cells": ["Bellweather", "2 Oct", "$5,200"] }
+              ],
+              "caption": "Showing 3 of 4 — one is already paid"
+            },
+            {
+              "id": "note",
+              "component": "Callout",
+              "tone": "warning",
+              "text": "Harper & Co have been chased twice already."
+            },
+            {
+              "id": "chase",
+              "component": "MultiSelect",
+              "values": { "path": "/chase" },
+              "options": [
+                { "label": "Harper & Co", "value": "harper" },
+                { "label": "Nightjar", "value": "nightjar" }
+              ]
+            },
+            {
+              "id": "send",
+              "component": "Button",
+              "variant": "primary",
+              "child": "sendLabel",
+              "action": { "event": { "name": "chase-overdue" } }
+            },
+            { "id": "sendLabel", "component": "Text", "text": "Send reminders" }
+          ],
+          "dataModel": { "status": "Waiting on you", "chase": ["harper"] }
+        }
+      }
+    ]
+  }
+}
+```
+
+The press arrives as the action `chase-overdue` with the data model —
+`{"status": "Waiting on you", "chase": ["harper", "nightjar"]}` — so the
+ticked list is the answer. Then settle the card: one `updateDataModel` on
+`/status`, and a `Receipt` in place of the control.

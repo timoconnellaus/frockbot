@@ -197,7 +197,8 @@ A surface is refused **whole** — never drawn with a hole in it — and the Use
 sees an unavailable region where your card would be, saying why. The causes:
 
 - a component name no catalog declares, or a property it does not have;
-- a `url` that is not `https://`;
+- any link that is not `https://` — a `url` or an `imageUrl`, wherever it is
+  written, including inside a gallery's or a row's own list;
 - no `root`, a duplicate `id`, or an `id` that is not well formed;
 - anything past a budget above;
 - an envelope that is not `"v1.0"` with exactly one message key.
@@ -215,12 +216,22 @@ Load one with `skill_load` — `{"path": "managed/a2ui", "reference": "forms.md"
   `Slider`, and the validation and formatting functions.
 - `actions.md` — `Button`, the action shape, `sendDataModel`, and the kernel's
   action namespaces.
-- `frock.md` — FrockBot's own components: `StatusPill`, `KeyValueRows`,
+- `frock.md` — FrockBot's own core components: `StatusPill`, `KeyValueRows`,
   `CollapsibleText`, `ApprovalActions`, `Receipt`.
+- `structure.md` — the frame: `CardHeader`, `SectionHeader`, `Callout`,
+  `IdentityRow`.
+- `data.md` — numbers and rows: `MetricTile`, `ProgressBar`, `DataTable`,
+  `Timeline`.
+- `rich-text.md` — words: `Markdown`, `CodeBlock`, `Quote`.
+- `media.md` — pictures, files and links: `ImageGallery`, `FileAttachment`,
+  `LinkPreview`.
+- `input.md` — answers: `ChoiceChips`, `MultiSelect`, `SegmentedControl`,
+  `Rating`.
 - `examples.md` — three complete cards, end to end.
 
-Start with `frock.md`: most cards are a Frock component or two inside a
-`Column`, and the standard catalog only for the rest.
+Start with `frock.md` and `structure.md`: most cards are a `CardHeader` and a
+Frock component or two inside a `Column`, and the standard catalog only for
+the rest.
 
 Every reply is a `send_to_user` call: use disposition:"continue" while you
 still have more to say or do, and disposition:"finish" on the send that ends your

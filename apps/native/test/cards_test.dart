@@ -10,7 +10,6 @@ import 'package:frockbot_native/cards/catalog.dart';
 import 'package:frockbot_native/cards/chat_card.dart';
 import 'package:frockbot_native/cards/client.dart';
 import 'package:frockbot_native/cards/frock_catalog/frock_catalog.dart';
-import 'package:frockbot_native/cards/frock_catalog/schemas.dart';
 import 'package:frockbot_native/cards/surface.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/shell/transcript_model.dart';
@@ -396,6 +395,10 @@ void main() {
   });
 
   group('the card in the thread', () {
+    setUpAll(() async {
+      if (cardVisualOutput.isNotEmpty) await loadInter();
+    });
+
     testWidgets('draws the surface it read', (tester) async {
       final api = SettingsApi(MemoryStore(), (path, body) async {
         expect(path, '/api/bots/bot-1/cards/draft-1');
@@ -875,7 +878,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a notice rebuilds the surface from the record it re-read', (
+    testWidgets('a notice rebuilds the surface and keeps what was typed', (
       tester,
     ) async {
       final invalidations = ValueNotifier<int>(0);
@@ -901,16 +904,19 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'actually, no');
       await tester.pumpAndSettle();
+      await capture(tester, 'kept-answer-before-notice');
       // A notice says some durable state of the Bot's moved, never which
       // record, so the card re-reads and rebuilds from what came back. The
-      // known cost of having one path: what only the renderer held — the text
-      // in flight — goes with the renderer it was in.
+      // record's data model has not moved, so what the renderer held is this
+      // person's own half-finished answer and it is handed to the rebuilt
+      // surface rather than thrown away.
       invalidations.value++;
       await tester.pumpAndSettle();
       expect(reads, 2);
-      expect(find.text('actually, no'), findsNothing);
+      expect(find.text('actually, no'), findsOneWidget);
       expect(find.byType(TextField), findsOneWidget);
       expect(find.text('Approve'), findsOneWidget);
+      await capture(tester, 'kept-answer-after-notice');
       await tester.pumpWidget(const SizedBox());
     });
 

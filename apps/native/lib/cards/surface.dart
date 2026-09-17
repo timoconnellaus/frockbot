@@ -95,12 +95,15 @@ void admitCardV1(CardView card) {
       );
     }
     if (_raisesAction(component['action'])) actions++;
-    // "Images load over https only" is the ADR's, and the standard catalog's
-    // Image, Video and AudioPlayer each take a url. A literal one is checked
-    // here; a url bound to the data model resolves after this and is left to
-    // the deployment's own content policy, which is where a fetch is stopped.
-    final url = component['url'];
-    if (url is String && !url.startsWith('https://')) {
+    // "Images load over https only" is the ADR's, and it is asked of every
+    // link a component carries, at whatever depth: the standard catalog's
+    // Image, Video and AudioPlayer take a `url`, and the Frock families take
+    // a `url`, an `imageUrl`, and lists of rows that each carry one. The walk
+    // reads `url` and any property ending in `Url` or `Uri`, and nothing
+    // else. A literal link is checked here; a link bound to the data model
+    // resolves after this and is left to the deployment's own content policy,
+    // which is where a fetch is stopped.
+    if (_carriesInsecureUrl(component)) {
       throw const CardRefusal('This card loads media over an insecure link.');
     }
   }
@@ -112,6 +115,28 @@ void admitCardV1(CardView card) {
   if (!ids.contains('root')) {
     throw const CardRefusal('This card has no root part.');
   }
+}
+
+/// Whether any literal link anywhere in one component is not `https://`.
+///
+/// A property is a link by its name — `url`, or anything ending in `Url` or
+/// `Uri`, which is how both catalogs spell one — and the walk goes through
+/// lists and maps because a gallery's images and a table's rows carry theirs
+/// inside. A non-string value is a binding or a number and is not a link this
+/// side can read.
+bool _carriesInsecureUrl(Object? node) {
+  if (node is List) return node.any(_carriesInsecureUrl);
+  if (node is! Map) return false;
+  for (final entry in node.entries) {
+    final key = entry.key;
+    final value = entry.value;
+    final named =
+        key is String &&
+        (key == 'url' || key.endsWith('Url') || key.endsWith('Uri'));
+    if (named && value is String && !value.startsWith('https://')) return true;
+    if (_carriesInsecureUrl(value)) return true;
+  }
+  return false;
 }
 
 /// Whether one component's `action` property raises a named action, in either
@@ -132,7 +157,15 @@ Map<String, Object?> _recordJson(CardView card) => {
 
 /// The record as the messages that rebuild it, in the version the renderer
 /// speaks. Admit the card first: this assumes a drawable one.
-List<Map<String, Object?>> cardMessagesV1(CardView card) {
+///
+/// [dataModel] replaces the record's own, which is how a rebuild keeps what a
+/// person had half-typed or half-ticked: the caller hands back the model the
+/// old renderer held, having established that the durable one has not moved
+/// (`chat_card.dart`).
+List<Map<String, Object?>> cardMessagesV1(
+  CardView card, {
+  Map<String, Object?>? dataModel,
+}) {
   // A surface created under a catalog this build does not register would draw
   // nothing, so the record's own id is honoured only when it is one of ours;
   // anything else is the Frock catalog, which is every component either
@@ -165,7 +198,7 @@ List<Map<String, Object?>> cardMessagesV1(CardView card) {
       // has to keep saying so.
       'updateDataModel': {
         'surfaceId': card.surfaceId,
-        'value': copyJsonV1(card.dataModel),
+        'value': copyJsonV1(dataModel ?? card.dataModel),
       },
     },
   ];

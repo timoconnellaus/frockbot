@@ -362,3 +362,75 @@ serve`), the platform model over the remote Workers AI binding, asked
 7. The five first-party cards as locked Plugins; the old members mapped, then
    removed a release later.
 8. The rest of the Frock catalog, family by family, each with its reference.
+
+   > Built 2026-09-18, step 8. Eighteen components in five families, on top of
+   > step 4's five: **structure** — `CardHeader`, `SectionHeader`, `Callout`,
+   > `IdentityRow`; **data** — `MetricTile`, `ProgressBar`, `DataTable`,
+   > `Timeline`; **rich text** — `Markdown`, `CodeBlock`, `Quote`; **media** —
+   > `ImageGallery`, `FileAttachment`, `LinkPreview`; **input** —
+   > `ChoiceChips`, `MultiSelect`, `SegmentedControl`, `Rating`. Each family is
+   > one file of schemas under `frock_catalog/schemas/`, one file of widgets
+   > beside it, one reference generated from the first, and one commit; the
+   > generator reads the directory rather than a single constant and refuses a
+   > component two families declare.
+   >
+   > **The layout is the host's, not the prose's.** Step 5 closed its pill
+   > overflow by telling the model how to write the `Row`. That fixes the next
+   > Turn. `CardHeader` fixes every Turn: it lays out the title, the quiet line
+   > and the state pill itself, and there is nothing left for a card to get
+   > wrong. Underneath it, three things changed so that a card written before
+   > this step still cannot overflow — `StatusPill` is implicitly flexible and
+   > ellipsizes on one line, `Receipt`'s pill gives way before the card's edge
+   > does, and the standard catalog's `Text` is re-registered as implicitly
+   > flexible, because `genui`'s `Row` lays an inflexible child out at its
+   > natural width and pushes its sibling clean off the card.
+   >
+   > The same argument reaches every component, not just the pill. `genui`
+   > wraps a flex child in a `Flexible` only when the model wrote a `weight`
+   > on it, and a child it does not wrap is laid out at unbounded width — which
+   > a component holding an `Expanded`, a stretched `Column` or a scroller does
+   > not survive. An `ImageGallery` beside something in a `Row`, a composition
+   > the Skill invites, would have failed to draw at all. So every Frock
+   > component is registered as implicitly flexible, in one place, and
+   > `ApprovalActions` and `Rating` wrap their controls rather than overflow
+   > them: `cards_row_test.dart` draws all twenty-three inside a `Row` at
+   > phone width and fails when a component is added that it does not cover.
+   >
+   > Two smaller seams moved with the families. `admitCardV1` asks the
+   > https-only question of every literal link a component carries at any
+   > depth — `url`, `imageUrl`, the ones inside a gallery's rows — rather than
+   > of one top-level property; and opening a link is one host function
+   > (`frock_catalog/links.dart`), which checks the scheme again at the moment
+   > of opening, because a link can arrive through the data model and
+   > admission never sees that.
+   >
+   > **The open cost from step 4 is closed.** `chat_card.dart` said a notice
+   > arriving mid-typing cost the person what they had typed, and named the
+   > next catalog family as where to do it properly. Adopting a record still
+   > rebuilds the surface — one settle path, as before — but when the record's
+   > own data model has not moved, the model the old renderer held is this
+   > person's half-finished answer and is handed to the new one. A card with
+   > `ChoiceChips` and a `MultiSelect` on it is answered over several seconds,
+   > and a notice about something else must not empty it.
+   >
+   > **The live Turn.** Local `development` stack (`bun scripts/native-dev.ts
+serve`), the platform model over the remote Workers AI binding, asked for
+   > "a card summarising September invoices: a header with a status, two
+   > metric tiles, a table of the line items, a callout warning, and a
+   > multi-select of who to chase with a button to send the reminders". The
+   > Bot loaded `managed/a2ui`, then `frock.md`, `structure.md`, `data.md` and
+   > `input.md`, and sent one `card`: thirteen components — `CardHeader`, a
+   > `Row` of two `MetricTile`s, two `SectionHeader`s, a `DataTable`, a
+   > `Callout`, a `MultiSelect` and a `Button` — folded at revision 1 with no
+   > refusal, `sendDataModel: true`, and two clients pre-ticked in the data
+   > model. Nothing had to be repaired to make a card at all.
+   >
+   > What the phone screenshot showed was a real defect, and it is fixed
+   > rather than written around: the model wrote four columns at 412 logical
+   > pixels, and sharing the width between them squeezed "INV-0912" into a
+   > mid-word wrap. A column narrower than a short value is not a column, so a
+   > `DataTable` now claims a floor per column and becomes one horizontal
+   > scroller when the card cannot give it — the transcript scrolls the other
+   > way, so the two never fight over a drag — and `data.md` says three
+   > columns is what fits a phone. `docs/screenshots/cards/card-report-phone.png`
+   > and `card-report-desktop.png` are the card after that fix, at 412 and 1440.

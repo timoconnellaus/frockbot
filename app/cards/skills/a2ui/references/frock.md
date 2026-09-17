@@ -5,16 +5,19 @@ catalogs the app draws; do not edit them by hand._
 
 ## When to use
 
-These five are FrockBot's own, drawn from the app's own theme, and they are
-what most cards are made of. Reach for them **before** composing the same thing
-out of `Row`s and `Text`s: they cost fewer components, they look like the rest
-of the app, and two of them do things the standard catalog cannot.
+These five are the core of FrockBot's own catalog, drawn from the app's own
+theme, and they are what most cards are made of. Reach for them **before**
+composing the same thing out of `Row`s and `Text`s: they cost fewer
+components, they look like the rest of the app, and two of them do things the
+standard catalog cannot. The rest of the Frock catalog is five more
+references — `structure.md` for the frame, `data.md` for numbers and rows,
+`rich-text.md` for words, `media.md` for pictures, files and links, and
+`input.md` for the answers a card takes. Load the one you need.
 
-- **`StatusPill`** — one per card, beside its title, saying what state the card
-  is in. Bind its `label` to the data model and the card settles with one small
-  `updateDataModel`. Put the title and the pill in a `Row` with
-  `"justify": "spaceBetween"` and `"weight": 1` on the title, or on a phone the
-  pill runs off the edge of the card.
+- **`StatusPill`** — one per card, saying what state the card is in. Bind its
+  `label` to the data model and the card settles with one small
+  `updateDataModel`. For the usual title-and-pill line, do not build it: use
+  `CardHeader` (`structure.md`), which lays out both and cannot overflow.
 - **`KeyValueRows`** — the facts about the thing: From, To, Cc, Subject. One
   component for the whole block. Never use it as a form.
 - **`CollapsibleText`** — a body longer than the card: a draft, a quote, a
