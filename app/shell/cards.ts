@@ -31,11 +31,14 @@
  *    refused whole and says so on the record it did not change: a card that
  *    silently stopped updating is worse than one that says it stopped. A first
  *    send refused this way still writes an empty record carrying the refusal,
- *    so the transcript has something to draw where the send sits. When the
- *    index is already full, the oldest surface this Turn is not itself writing
- *    to is tombstoned with a refusal saying it made room, and the new card is
- *    written normally — trimming loses a row and never a fact, because the
- *    send that drew the trimmed card is still on its Turn's log.
+ *    so the transcript has something to draw where the send sits. The index is
+ *    the bound and a stored record is not: a surface the index does not list
+ *    is new to the Session however much of it is still in storage. When the
+ *    index is already full, its oldest surface is tombstoned with a refusal
+ *    saying it made room, and the new card is written and indexed normally —
+ *    trimming loses a row and never a fact, because the send that drew the
+ *    trimmed card is still on its Turn's log. So no card send ever leaves no
+ *    trace, not even a Turn drawing more surfaces than a Session may hold.
  */
 import {
   A2UI_IDENTIFIER_V1,
@@ -670,34 +673,45 @@ export async function cardTerminalRecordsV1(
     const current =
       existing === undefined ? undefined : decodeCardRecordV1(existing);
     if (current?.foldedRunId === input.run.runId) continue;
-    if (
-      current === undefined &&
-      surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession
-    ) {
-      const evictable = surfaces.findIndex(
-        (surfaceId) => !sends.some((other) => other.surfaceId === surfaceId),
-      );
-      if (evictable === -1) continue;
-      const [evicted] = surfaces.splice(evictable, 1);
-      const evictedKey = cardKeyV1(evicted!);
+    // The index is the bound, not whether a record happens to still be in
+    // storage: a surface evicted earlier is as new to the Session as one never
+    // drawn, tombstone and all, and is admitted the same way.
+    const indexed = surfaces.includes(send.surfaceId);
+    if (!indexed && surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession) {
+      const evicted = surfaces.shift()!;
+      const evictedKey = cardKeyV1(evicted);
+      const staged = records[evictedKey] as CardRecordV1 | undefined;
       const storedEvicted = await input.read<unknown>(evictedKey);
       const evictedCard =
-        storedEvicted === undefined
+        staged ??
+        (storedEvicted === undefined
           ? undefined
-          : decodeCardRecordV1(storedEvicted);
-      records[evictedKey] = {
-        schemaVersion: 1,
-        surfaceId: evicted!,
-        runId: input.run.runId,
-        sessionId: input.run.sessionId,
-        components: [],
-        dataModel: {},
-        revision: (evictedCard?.revision ?? 0) + 1,
-        createdAt: evictedCard?.createdAt ?? input.now,
-        updatedAt: input.now,
-        deleted: true,
-        refusal: "the card was dropped to make room for a newer card",
-      } satisfies CardRecordV1;
+          : decodeCardRecordV1(storedEvicted));
+      const tombstone: CardRecordV1 = evictedCard
+        ? {
+            ...evictedCard,
+            runId: input.run.runId,
+            components: [],
+            dataModel: {},
+            revision: evictedCard.revision + 1,
+            updatedAt: input.now,
+            deleted: true,
+            refusal: "the card was dropped to make room for a newer card",
+          }
+        : {
+            schemaVersion: 1,
+            surfaceId: evicted,
+            runId: input.run.runId,
+            sessionId: input.run.sessionId,
+            components: [],
+            dataModel: {},
+            revision: 1,
+            createdAt: input.now,
+            updatedAt: input.now,
+            deleted: true,
+            refusal: "the card was dropped to make room for a newer card",
+          };
+      records[evictedKey] = tombstone;
       movedIndex = true;
     }
     const context = {
@@ -734,14 +748,14 @@ export async function cardTerminalRecordsV1(
               refusal,
               foldedRunId: input.run.runId,
             } satisfies CardRecordV1);
-      if (current === undefined) {
+      if (!indexed) {
         surfaces.push(send.surfaceId);
         movedIndex = true;
       }
       continue;
     }
     records[key] = { ...folded, foldedRunId: input.run.runId };
-    if (current === undefined) {
+    if (!indexed) {
       surfaces.push(send.surfaceId);
       movedIndex = true;
     }

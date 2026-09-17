@@ -655,6 +655,160 @@ describe("what one settled Turn writes", () => {
     expect(index.surfaces.at(-1)).toBe("one-too-many");
   });
 
+  test("an evicted surface drawn again is indexed again, and still bounded", async () => {
+    const surfaces = Array.from(
+      { length: A2UI_LIMITS_V1.surfacesPerSession },
+      (_, index) => `s${index}`,
+    );
+    const tombstone: CardRecordV1 = {
+      schemaVersion: 1,
+      surfaceId: "s0",
+      runId: "run-2",
+      foldedRunId: "run-1",
+      sessionId: "user-1:bot-1",
+      components: [],
+      dataModel: {},
+      revision: 2,
+      createdAt: NOW,
+      updatedAt: NOW,
+      deleted: true,
+      refusal: "the card was dropped to make room for a newer card",
+    };
+    // `s0` was evicted: its record is still in storage, but the index — which
+    // is the bound — no longer lists it, so drawing it again is a new surface.
+    const evictedIndex = surfaces.filter((surfaceId) => surfaceId !== "s0");
+    evictedIndex.push("one-too-many");
+    const records = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-3",
+        sessionId: "user-1:bot-1",
+        events: [
+          sendEvent("s0", [
+            {
+              version: "v1.0",
+              createSurface: {
+                surfaceId: "s0",
+                components: [{ id: "root", component: "Text", text: "Again" }],
+              },
+            },
+          ]),
+        ],
+      },
+      now: NOW,
+      read: reader({
+        [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces: evictedIndex },
+        [cardKeyV1("s0")]: tombstone,
+      }),
+    });
+    const revived = decodeCardRecordV1(records[cardKeyV1("s0")]);
+    expect(revived.deleted).toBeUndefined();
+    expect(revived.components).toHaveLength(1);
+    const index = records[CARD_INDEX_KEY] as { surfaces: string[] };
+    expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession);
+    expect(index.surfaces.at(-1)).toBe("s0");
+    // Making room for it cost the oldest surface still in the index.
+    expect(index.surfaces).not.toContain("s1");
+    expect(decodeCardRecordV1(records[cardKeyV1("s1")]).deleted).toBe(true);
+  });
+
+  test("one Turn drawing past the cap keeps its newest cards and drops nothing silently", async () => {
+    const over = A2UI_LIMITS_V1.surfacesPerSession + 2;
+    const records = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        events: Array.from({ length: over }, (_, index) =>
+          sendEvent(`s${index}`, [
+            { version: "v1.0", createSurface: { surfaceId: `s${index}` } },
+          ]),
+        ),
+      },
+      now: NOW,
+      read: reader({}),
+    });
+    // Every send left a record: the ones past the cap evicted the Turn's own
+    // oldest surfaces, which say on their record why they are gone.
+    for (let index = 0; index < over; index += 1) {
+      const card = decodeCardRecordV1(records[cardKeyV1(`s${index}`)]);
+      if (index < 2) {
+        expect(card.deleted).toBe(true);
+        expect(card.refusal).toContain("make room");
+      } else {
+        expect(card.deleted).toBeUndefined();
+        expect(card.refusal).toBeUndefined();
+      }
+    }
+    const index = records[CARD_INDEX_KEY] as { surfaces: string[] };
+    expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession);
+    expect(index.surfaces[0]).toBe("s2");
+    expect(index.surfaces.at(-1)).toBe(`s${over - 1}`);
+  });
+
+  test("a recovered Turn does not fold twice onto a surface evicted in between", async () => {
+    const drawn = foldCardMessagesV1(
+      undefined,
+      [
+        message({
+          version: "v1.0",
+          createSurface: {
+            surfaceId: "s0",
+            components: [{ id: "root", component: "Text", text: "Old" }],
+          },
+        }),
+      ],
+      { surfaceId: "s0", runId: "run-1", sessionId: "user-1:bot-1", now: NOW },
+    );
+    const surfaces = Array.from(
+      { length: A2UI_LIMITS_V1.surfacesPerSession },
+      (_, index) => `s${index}`,
+    );
+    const evicting = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-2",
+        sessionId: "user-1:bot-1",
+        events: [
+          sendEvent("one-too-many", [
+            { version: "v1.0", createSurface: { surfaceId: "one-too-many" } },
+          ]),
+        ],
+      },
+      now: NOW,
+      read: reader({
+        [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces },
+        [cardKeyV1("s0")]: { ...drawn, foldedRunId: "run-1" },
+      }),
+    });
+    const tombstone = decodeCardRecordV1(evicting[cardKeyV1("s0")]);
+    expect(tombstone.deleted).toBe(true);
+    expect(tombstone.createdAt).toBe(drawn.createdAt);
+    // The tombstone keeps what only a settlement could have written, so run-1
+    // recovering finds its own fold already recorded and folds nothing twice.
+    expect(tombstone.foldedRunId).toBe("run-1");
+    const resettled = await cardTerminalRecordsV1({
+      run: {
+        runId: "run-1",
+        sessionId: "user-1:bot-1",
+        events: [
+          sendEvent("s0", [
+            {
+              version: "v1.0",
+              createSurface: {
+                surfaceId: "s0",
+                components: [{ id: "root", component: "Text", text: "Old" }],
+              },
+            },
+          ]),
+        ],
+      },
+      now: "2026-09-17T12:00:00.000Z",
+      read: reader({
+        [CARD_INDEX_KEY]: evicting[CARD_INDEX_KEY],
+        [cardKeyV1("s0")]: tombstone,
+      }),
+    });
+    expect(resettled).toEqual({});
+  });
+
   test("a tombstoned surface takes no update", () => {
     const drawn = foldCardMessagesV1(
       undefined,
