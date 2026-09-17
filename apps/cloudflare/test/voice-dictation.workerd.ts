@@ -241,6 +241,7 @@ function openRelay(
     cleanup?: VoiceDictationCleanupV1;
     cleanupTimeoutMs?: number;
     maxCaptureMs?: number;
+    now?: () => number;
   } = {},
 ): Opened {
   const response = openVoiceDictationRelayV1(
@@ -705,6 +706,42 @@ describe("tidying a finished capture", () => {
     expect(model.asked).toHaveLength(0);
     expect(opened.frames.some((f) => f.type === "cleaning")).toBe(false);
     expect(opened.segments()).toEqual(["book it"]);
+  });
+
+  // The dictation meter counts the seconds a microphone was open. A tidy-up
+  // happens after the last word, with nothing being sent, so the wait for it
+  // must not be booked against the account's daily dictation allowance.
+  test("does not meter the tidy-up wait as dictation seconds", async () => {
+    const upstream = fakeUpstream({ transcript: RAW });
+    let clock = 0;
+    let released: number | undefined;
+    const lease: VoiceDictationLeaseV1 = {
+      acquire: async () => ({ status: "acquired" }),
+      renew: async () => true,
+      release: async (activeSeconds) => {
+        released = activeSeconds;
+      },
+    };
+    const cleanup: VoiceDictationCleanupV1 = {
+      run: async () => {
+        clock += 8_000;
+        return TIDY;
+      },
+    };
+    const opened = openRelay(
+      upstream,
+      { OPENAI_API_KEY: "sk-test" },
+      { cleanup, lease, now: () => clock },
+    );
+    await ready(upstream, opened);
+    clock += 2_000;
+    opened.socket.send(pcm(1));
+    opened.socket.send(stop);
+    await opened.waitFor((f) => f.type === "final", "final");
+    await settle(10);
+
+    expect(opened.frames.some((f) => f.type === "cleaned")).toBe(true);
+    expect(released).toBe(2);
   });
 
   // A capture cut off at five minutes is not one whose false starts we can

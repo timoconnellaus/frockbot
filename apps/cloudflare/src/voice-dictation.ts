@@ -214,6 +214,8 @@ function runRelay(
   let upstream: WebSocket | undefined;
   let upstreamReady = false;
   let upstreamOpenedAt: number | undefined;
+  /** The provider seconds this capture spent, frozen when its socket closes. */
+  let upstreamSeconds: number | undefined;
   let closed = false;
   let stopping = false;
   /** The relay's own commit after `stop` has been sent, and then answered. */
@@ -256,7 +258,22 @@ function runRelay(
   };
 
   const activeSeconds = () =>
-    upstreamOpenedAt === undefined ? 0 : (now() - upstreamOpenedAt) / 1000;
+    upstreamSeconds ??
+    (upstreamOpenedAt === undefined ? 0 : (now() - upstreamOpenedAt) / 1000);
+
+  /**
+   * Stops the provider clock and lets go of its socket. Called the moment the
+   * capture stops producing words, so the seconds the account is charged are
+   * the seconds a microphone was open — not the few a tidy-up spends after it.
+   */
+  const closeUpstream = () => {
+    if (upstreamSeconds === undefined) upstreamSeconds = activeSeconds();
+    try {
+      upstream?.close(1000, "dictation ended");
+    } catch {
+      // Already closed.
+    }
+  };
 
   const finish = (frame?: VoiceDictationServerFrameV1) => {
     if (closed) return;
@@ -264,11 +281,7 @@ function runRelay(
     if (frame) send(client, frame);
     for (const timer of timers) clearTimeout(timer);
     timers.clear();
-    try {
-      upstream?.close(1000, "dictation ended");
-    } catch {
-      // Already closed.
-    }
+    closeUpstream();
     try {
       client.close(1000, "dictation ended");
     } catch {
@@ -347,6 +360,7 @@ function runRelay(
       timers.delete(finalTimer);
       finalTimer = undefined;
     }
+    closeUpstream();
     if (capped) {
       fail(
         "Dictation stopped after five minutes. Press the microphone to continue.",

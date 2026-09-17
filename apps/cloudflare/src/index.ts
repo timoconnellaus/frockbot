@@ -137,7 +137,11 @@ import {
 } from "./admin-identities.js";
 import type { DebugGatewaySurface } from "./debug.js";
 import type { BotDebugQueryV1 } from "@frockbot/app/shell/debug-protocol";
-import { BotState, type OwnedBotTurnCommand } from "./bot-state.js";
+import {
+  BotState,
+  frockAiWorkerVarV1,
+  type OwnedBotTurnCommand,
+} from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
   PackageArtifactStore,
@@ -1830,11 +1834,6 @@ function voiceDictationCleanup(
 ): VoiceDictationCleanupV1 | undefined {
   const ai = env.AI;
   if (!ai || typeof Reflect.get(ai, "gateway") !== "function") return undefined;
-  const workerVar = (name: `FROCK_AI_${string}`): string | undefined => {
-    const twin = `FLOCK_AI_${name.slice("FROCK_AI_".length)}` as keyof Env;
-    const value = env[name as keyof Env] ?? env[twin];
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
-  };
   return {
     run: async (body, signal) => {
       const stub = await getAgentByName(env.VOICE_ASSISTANTS, userId);
@@ -1848,10 +1847,10 @@ function voiceDictationCleanup(
       });
       if (booked.status !== "cleanup" || !booked.admitted) return undefined;
       const host = createFrockAiGatewayHostV1(ai as Pick<Ai, "gateway">, {
-        gatewayId: workerVar("FROCK_AI_GATEWAY_ID"),
-        autoRoute: workerVar("FROCK_AI_AUTO_ROUTE"),
-        accountId: workerVar("FROCK_AI_ACCOUNT_ID"),
-        token: workerVar("FROCK_AI_GATEWAY_TOKEN"),
+        gatewayId: frockAiWorkerVarV1(env, "FROCK_AI_GATEWAY_ID"),
+        autoRoute: frockAiWorkerVarV1(env, "FROCK_AI_AUTO_ROUTE"),
+        accountId: frockAiWorkerVarV1(env, "FROCK_AI_ACCOUNT_ID"),
+        token: frockAiWorkerVarV1(env, "FROCK_AI_GATEWAY_TOKEN"),
       });
       const model =
         env.VOICE_DICTATION_CLEANUP_MODEL?.trim() ||

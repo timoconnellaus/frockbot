@@ -338,12 +338,9 @@ function isFrockAiGatewayBindingV1(
   );
 }
 
-function optionalWorkerVarV1(
-  env: BotStateEnv,
-  name: string,
-): string | undefined {
+function optionalWorkerVarV1(env: object, name: string): string | undefined {
   const value = Reflect.get(env, name);
-  return typeof value === "string" && value ? value : undefined;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 /**
@@ -353,8 +350,8 @@ function optionalWorkerVarV1(
  * land before they are re-added under the new names. Remove it once every
  * environment names them `FROCK_AI_*`.
  */
-function frockAiWorkerVarV1(
-  env: BotStateEnv,
+export function frockAiWorkerVarV1(
+  env: object,
   name: `FROCK_AI_${string}`,
 ): string | undefined {
   return (
