@@ -70,6 +70,35 @@ describe("the card payload", () => {
     ).toThrow(/1 to /);
   });
 
+  // A card record carries no owner, so the minted `<pluginId>_<cardId>.`
+  // prefix is what says whose card a surface is. A model that could spell it
+  // could draw a card wearing a Plugin's prefix and have a
+  // `plugin/<id>/<action>` press on it reach that Plugin's handler.
+  test("refuses a surfaceId in the namespace the kernel mints card surfaces in", () => {
+    const minted = {
+      type: "card" as const,
+      surfaceId: "email_draft.0123456789abcdef01234567",
+      messages: [
+        {
+          version: "v1.0" as const,
+          createSurface: {
+            surfaceId: "email_draft.0123456789abcdef01234567",
+            components: [
+              { id: "root", component: "Text", text: "Ready to send" },
+            ],
+          },
+        },
+      ],
+    };
+    expect(() => decodeSendToUserPayloadV1(minted)).toThrow(
+      "that namespace is the kernel's",
+    );
+    // And the draw the kernel minted that surface for still goes through.
+    expect(
+      decodeSendToUserPayloadV1(minted, "plugin card", { kernelMinted: true }),
+    ).toEqual(minted as SendToUserPayloadV1);
+  });
+
   test("refuses a malformed message and an unexpected field", () => {
     expect(() =>
       decodeSendToUserPayloadV1({

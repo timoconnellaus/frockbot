@@ -271,6 +271,11 @@ export function createShellCompositionHost(
                       messages: send.messages,
                     },
                     `plugin "${send.pluginId}" card`,
+                    // The surface id is the one the host minted for this
+                    // Plugin's card, or one it already checked carries that
+                    // card's own prefix; the reserved shape is refused for
+                    // every payload a model authors.
+                    { kernelMinted: true },
                   );
                 } catch (error) {
                   return {

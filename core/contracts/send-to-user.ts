@@ -6,6 +6,7 @@ import {
   decodeA2uiAgentMessageV1,
   type A2uiAgentMessageV1,
 } from "./a2ui.js";
+import { cardSurfacePluginIdV1 } from "./plugin-worker.js";
 
 // The typed payload a user-facing send carries.
 //
@@ -145,10 +146,11 @@ export const CARD_APPROVAL_ID_PREFIX_V1 = "card-approval-";
 /** What may waive the reserved prefix. */
 export interface DecodeSendToUserOptionsV1 {
   /**
-   * True only for a payload the kernel has already admitted: the Card ask it
-   * just minted, or a send being read back off a Session's log. Never set
-   * where a model or a Plugin is authoring the payload — that is the seam the
-   * reserved prefix exists to hold.
+   * True only for a payload whose reserved ids the kernel itself minted or
+   * has already checked: the Card ask it just minted, the card draw whose
+   * surface id it minted for that Plugin, or a send being read back off a
+   * Session's log. Never set where a model chose the ids — that is the seam
+   * the reserved prefixes exist to hold.
    */
   kernelMinted?: boolean;
 }
@@ -403,6 +405,19 @@ export function decodeSendToUserPayloadV1(
       if (!A2UI_IDENTIFIER_V1.test(surfaceId)) {
         throw new Error(
           `${label}.surfaceId must be letters, digits, dot, underscore or dash`,
+        );
+      }
+      // The minted `<pluginId>_<cardId>.` shape is what says whose card a
+      // surface is, on the draw and on the press alike. A payload the kernel
+      // has not already admitted may not spell it: otherwise a Bot could draw
+      // a card wearing a Plugin's prefix and a `plugin/<id>/<action>` press on
+      // it would reach that Plugin's handler with a surface it never drew.
+      if (
+        options.kernelMinted !== true &&
+        cardSurfacePluginIdV1(surfaceId) !== undefined
+      ) {
+        throw new Error(
+          `${label}.surfaceId must not carry a "<pluginId>_<cardId>." prefix: that namespace is the kernel's, for the cards a Plugin draws`,
         );
       }
       if (!Array.isArray(payload.messages)) {

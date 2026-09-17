@@ -385,7 +385,7 @@ export async function cardAction(
         await enqueuePendingBotInputV1(transaction, {
           schemaVersion: 1,
           kind: "card-action",
-          pressId: `${command.commandId ?? runId}:${route.action}`,
+          pressId: command.commandId ?? crypto.randomUUID(),
           surfaceId: command.surfaceId,
           name: command.event.name,
           context: outcome.input!.slice(0, CARD_ACTION_CONTEXT_MAX_V1),

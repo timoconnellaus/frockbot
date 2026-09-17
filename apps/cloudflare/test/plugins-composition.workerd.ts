@@ -18,6 +18,7 @@ import {
   routineHookDigestV1,
   verifyRoutineHookTokenV1,
 } from "@frockbot/app/routines/hook";
+import { decodePendingBotInputV1 } from "@frockbot/app/routines/inbox";
 import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
@@ -2601,6 +2602,34 @@ export const cards = {
       pressed.card.revision,
     );
     expect(stillRunning.failure).toBeUndefined();
+
+    // A press id is the client's own command id, whatever length the seam
+    // admits. A record the inbox's own decoder refuses would wedge every
+    // later drain, so the id a press writes stays inside what it reads.
+    const longCommandId = "c".repeat(128);
+    const longPress = await bot(identity).cardAction({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        schemaVersion: 1,
+        surfaceId: card.surfaceId,
+        revision: stillRunning.card.revision,
+        commandId: longCommandId,
+        event: {
+          name: `plugin/${CARD_PLUGIN_ID}/details`,
+          context: { expanded: true },
+        },
+      },
+    });
+    expect(longPress.failure).toBeUndefined();
+    const queued = await runInDurableObject(
+      env.BOT_STATES.getByName(`${userId}:bot-1`),
+      (_instance, state) =>
+        state.storage.list<unknown>({ prefix: "routine-wake:" }),
+    );
+    for (const record of queued.values()) {
+      expect(() => decodePendingBotInputV1(record)).not.toThrow();
+    }
 
     // A card tool whose values do not fit the declared schema draws nothing.
     const refused = await callPluginToolRaw(
