@@ -34,6 +34,7 @@ import 'dart:convert';
 
 import 'schemas/core.dart';
 import 'schemas/data.dart';
+import 'schemas/media.dart';
 import 'schemas/rich_text.dart';
 import 'schemas/structure.dart';
 
@@ -51,6 +52,7 @@ const a2uiCommonTypesIdV1 =
 const List<String> frockCatalogSchemaFamiliesV1 = [
   frockCoreSchemasJsonV1,
   frockDataSchemasJsonV1,
+  frockMediaSchemasJsonV1,
   frockRichTextSchemasJsonV1,
   frockStructureSchemasJsonV1,
 ];

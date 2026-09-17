@@ -364,6 +364,138 @@
       ],
       "unevaluatedProperties": false
     },
+    "ImageGallery": {
+      "type": "object",
+      "description": "Several pictures in one component: what was found, what was generated, the pages of a document. One image draws full width; more than one draws as a strip that scrolls. Tapping one opens it.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "ImageGallery" },
+            "images": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "description": "The pictures, in the order they are shown.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "description": "An https:// image. A card carrying any other scheme is refused whole and nothing is drawn."
+                  },
+                  "caption": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "One line under the picture."
+                  },
+                  "alt": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "What the picture shows, for a person who cannot see it. Write one."
+                  }
+                },
+                "required": ["url"]
+              }
+            }
+          },
+          "required": ["component", "images"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "FileAttachment": {
+      "type": "object",
+      "description": "A file the card is about: a document, an export, a generated artifact. One row with what it is and a control that opens it.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "FileAttachment" },
+            "name": {
+              "type": "string",
+              "maxLength": 160,
+              "description": "The file's name, as the person would recognise it."
+            },
+            "detail": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "What is worth knowing about it, already in words: 'PDF · 1.2 MB', 'Generated just now'. There is no formatting function; write the size the way a person reads it."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "document",
+                "spreadsheet",
+                "image",
+                "audio",
+                "video",
+                "archive",
+                "code",
+                "other"
+              ],
+              "description": "What sort of file it is, which is the icon the host draws. Defaults to 'other'."
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "An https:// link to the file. With one the row offers to open it, through the app's own link handling; without one it is a row that says the file exists."
+            }
+          },
+          "required": ["component", "name"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "LinkPreview": {
+      "type": "object",
+      "description": "One link, with enough of what is behind it that the person can decide before they follow it. Use it for a page a Bot found or made; a bare link inside prose belongs in Markdown.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "LinkPreview" },
+            "url": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Where it goes. https:// only, and the whole card is refused otherwise."
+            },
+            "title": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "What the page is called."
+            },
+            "description": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "A line or two about it. Two lines at most are drawn."
+            },
+            "site": {
+              "type": "string",
+              "maxLength": 80,
+              "description": "Whose page it is, e.g. 'example.com'. Defaults to the link's own host."
+            },
+            "imageUrl": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "An https:// thumbnail beside the title."
+            }
+          },
+          "required": ["component", "url", "title"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "Markdown": {
       "type": "object",
       "description": "A body of Markdown, drawn the way the Bot's own messages are: headings, bullet and ordered lists, emphasis, inline code, block quotes, rules and links. Use it for anything with structure in it; use Text for one plain run.",
@@ -596,6 +728,9 @@
         { "$ref": "#/components/ProgressBar" },
         { "$ref": "#/components/DataTable" },
         { "$ref": "#/components/Timeline" },
+        { "$ref": "#/components/ImageGallery" },
+        { "$ref": "#/components/FileAttachment" },
+        { "$ref": "#/components/LinkPreview" },
         { "$ref": "#/components/Markdown" },
         { "$ref": "#/components/CodeBlock" },
         { "$ref": "#/components/Quote" },
