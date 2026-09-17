@@ -182,6 +182,8 @@ describe("a Skill's references, end to end", () => {
       `skills/${SLUG}/references/forms.md`,
     ]);
     expect(own?.references?.[0]?.generationId).toEqual(expect.any(String));
-    expect((own?.references?.[0]?.generationId ?? "").length).toBeGreaterThan(0);
+    expect((own?.references?.[0]?.generationId ?? "").length).toBeGreaterThan(
+      0,
+    );
   });
 });
