@@ -6,6 +6,12 @@
 // gate quietly runs on every push again, and — far worse — a gate that starts
 // reading a skipped slow tier as permission to ship would cut a release on the
 // fast tier alone. Neither shows up in a green run.
+//
+// A condition is asserted by running it, not by reading it: each `if` is
+// evaluated the way Actions would, over a table of states the run can actually
+// reach, and the assertion is whether the job runs. An inverted gate and a
+// loosened gate are both invisible to a test that only looks for a fragment of
+// the text, and both are exactly what this file exists to catch.
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -34,11 +40,145 @@ const SLOW_TIER = ["flutter", "runtime", "integration", "e2e"];
 /** The jobs that read the tier's verdict and act on it. */
 const CONSUMERS = ["deploy-staging", "release"];
 
-test("every slow-tier job is gated on the scope decision", () => {
+/** The state a run is in when a job's `if` is evaluated. */
+interface RunState {
+  /** Result of each job this one needs: success, skipped, failure, cancelled. */
+  results: Record<string, string>;
+  /** Outputs each needed job published, by job then output name. */
+  outputs?: Record<string, Record<string, string>>;
+  /** Whether the run itself was cancelled. */
+  cancelled?: boolean;
+  github?: Record<string, string>;
+  vars?: Record<string, string>;
+}
+
+/**
+ * Evaluate the subset of the Actions expression language `main.yml` uses:
+ * `&&`, `||`, `!`, parentheses, `==`/`!=` against single-quoted strings, the
+ * `needs`/`github`/`vars` contexts and the status functions.
+ */
+function evaluateCondition(expression: string, state: RunState): boolean {
+  const body = expression.trim().replace(/^\$\{\{(.*)\}\}$/s, "$1");
+  const tokens =
+    body.match(/\(|\)|&&|\|\||==|!=|!|'[^']*'|[A-Za-z0-9_.-]+/g) ?? [];
+  let at = 0;
+
+  const results = state.results;
+  const statuses: Record<string, () => boolean> = {
+    always: () => true,
+    cancelled: () => state.cancelled === true,
+    failure: () => Object.values(results).some((r) => r === "failure"),
+    success: () =>
+      Object.values(results).every((r) => r === "success" || r === "skipped"),
+  };
+
+  function lookup(path: string): string | undefined {
+    const parts = path.split(".");
+    if (parts[0] === "needs") {
+      const [, job, kind, name] = parts;
+      if (kind === "result") return results[job!];
+      if (kind === "outputs") return state.outputs?.[job!]?.[name!];
+      return undefined;
+    }
+    if (parts[0] === "github") return state.github?.[parts[1]!];
+    if (parts[0] === "vars") return state.vars?.[parts[1]!];
+    throw new Error(`unsupported context in condition: ${path}`);
+  }
+
+  /** A string comparison, a status call, or a parenthesised sub-expression. */
+  function parsePrimary(): boolean | string | undefined {
+    const token = tokens[at++];
+    if (token === undefined) throw new Error("condition ended early");
+    if (token === "(") {
+      const value = parseOr();
+      if (tokens[at++] !== ")") throw new Error("unbalanced parentheses");
+      return value;
+    }
+    if (token === "!") return !truthy(parsePrimary());
+    if (token.startsWith("'")) return token.slice(1, -1);
+    if (tokens[at] === "(") {
+      at += 2; // the call's `(` and `)`; none of these take arguments
+      const status = statuses[token];
+      if (!status) throw new Error(`unsupported function: ${token}()`);
+      return status();
+    }
+    return lookup(token);
+  }
+
+  function parseComparison(): boolean | string | undefined {
+    const left = parsePrimary();
+    const operator = tokens[at];
+    if (operator !== "==" && operator !== "!=") return left;
+    at++;
+    const right = parsePrimary();
+    return operator === "==" ? left === right : left !== right;
+  }
+
+  function parseAnd(): boolean | string | undefined {
+    let left = parseComparison();
+    while (tokens[at] === "&&") {
+      at++;
+      const right = parseComparison();
+      left = truthy(left) ? right : left;
+    }
+    return left;
+  }
+
+  function parseOr(): boolean | string | undefined {
+    let left = parseAnd();
+    while (tokens[at] === "||") {
+      at++;
+      const right = parseAnd();
+      left = truthy(left) ? left : right;
+    }
+    return left;
+  }
+
+  const value = parseOr();
+  if (at !== tokens.length) throw new Error(`unparsed tail in: ${body}`);
+  return truthy(value);
+}
+
+function truthy(value: boolean | string | undefined): boolean {
+  return value !== undefined && value !== false && value !== "";
+}
+
+/** Whether Actions would run `job` in this state, honouring an absent `if`. */
+function runs(job: string, state: RunState): boolean {
+  const condition = workflow.jobs[job]?.if;
+  if (condition === undefined) return true;
+  return evaluateCondition(condition, state);
+}
+
+/** Every job a consumer needs, green, with the slow tier having run. */
+function allGreen(): RunState {
+  return {
+    results: Object.fromEntries(
+      ["scope", "validate", ...SLOW_TIER, "deploy-staging", "e2e-report"].map(
+        (job) => [job, "success"],
+      ),
+    ),
+    outputs: { scope: { "slow-tier": "true" } },
+    github: { event_name: "push", ref: "refs/heads/main" },
+    vars: { DEPLOY_STAGING: "true" },
+  };
+}
+
+test("the scope decision is what makes a slow-tier job run", () => {
   for (const job of SLOW_TIER) {
     expect(workflow.jobs[job]).toBeDefined();
     expect(needs(job)).toContain("scope");
-    expect(workflow.jobs[job]!.if).toContain("needs.scope.outputs.slow-tier");
+
+    const obliged: RunState = {
+      results: { scope: "success" },
+      outputs: { scope: { "slow-tier": "true" } },
+    };
+    const excused: RunState = {
+      results: { scope: "success" },
+      outputs: { scope: { "slow-tier": "false" } },
+    };
+    expect({ job, runs: runs(job, obliged) }).toEqual({ job, runs: true });
+    expect({ job, runs: runs(job, excused) }).toEqual({ job, runs: false });
   }
 });
 
@@ -50,33 +190,87 @@ test("the fast tier is never skipped", () => {
   expect(workflow.jobs.validate?.if).toBeUndefined();
 });
 
-test("a job that ships requires the scope decision to have succeeded", () => {
-  // A failed `scope` skips its dependents, so tolerating a skipped slow tier
-  // without this would read that failure as four clean skips.
+test("a job that ships runs when every suite it needs is green", () => {
   for (const job of CONSUMERS) {
     expect(needs(job)).toContain("scope");
-    expect(workflow.jobs[job]!.if).toContain("needs.scope.result == 'success'");
+    for (const slow of SLOW_TIER) expect(needs(job)).toContain(slow);
+    expect({ job, runs: runs(job, allGreen()) }).toEqual({ job, runs: true });
   }
 });
 
-test("a job that ships tolerates a skipped slow tier but never a failed one", () => {
+test("a job that ships tolerates a slow tier the scope decision excused", () => {
   for (const job of CONSUMERS) {
-    const condition = workflow.jobs[job]!.if!;
-    for (const slow of SLOW_TIER) {
-      expect(needs(job)).toContain(slow);
-      // Success or skipped, and nothing else: no `always()`, no bare
-      // `!failure()` that would also admit a cancelled shard.
-      expect(condition).toContain(
-        `needs.${slow}.result == 'success' || needs.${slow}.result == 'skipped'`,
-      );
-    }
-    expect(condition).toContain("!cancelled()");
+    const state = allGreen();
+    state.outputs = { scope: { "slow-tier": "false" } };
+    for (const slow of SLOW_TIER) state.results[slow] = "skipped";
+    expect({ job, runs: runs(job, state) }).toEqual({ job, runs: true });
   }
+});
+
+test("a scope job that failed is not four clean skips", () => {
+  // A failed job's dependents do not run, so a `scope` failure presents as the
+  // whole slow tier skipped. Without requiring `scope` itself, a condition
+  // that tolerates skips would read that as permission to ship.
+  for (const job of CONSUMERS) {
+    const state = allGreen();
+    state.results.scope = "failure";
+    for (const slow of SLOW_TIER) state.results[slow] = "skipped";
+    expect({ job, runs: runs(job, state) }).toEqual({ job, runs: false });
+  }
+});
+
+test("a job that ships refuses a slow-tier job that failed or was cancelled", () => {
+  for (const job of CONSUMERS) {
+    for (const slow of SLOW_TIER) {
+      for (const result of ["failure", "cancelled"]) {
+        const state = allGreen();
+        state.results[slow] = result;
+        state.cancelled = result === "cancelled";
+        expect({ job, slow, result, runs: runs(job, state) }).toEqual({
+          job,
+          slow,
+          result,
+          runs: false,
+        });
+      }
+    }
+  }
+});
+
+test("a job that ships refuses a failed fast tier", () => {
+  for (const job of CONSUMERS) {
+    const state = allGreen();
+    state.results.validate = "failure";
+    expect({ job, runs: runs(job, state) }).toEqual({ job, runs: false });
+  }
+});
+
+test("staging stays opt-in and neither consumer ships off main", () => {
+  const unconfigured = allGreen();
+  unconfigured.vars = { DEPLOY_STAGING: "false" };
+  expect(runs("deploy-staging", unconfigured)).toBe(false);
+  expect(runs("release", unconfigured)).toBe(true);
+
+  for (const job of CONSUMERS) {
+    const branch = allGreen();
+    branch.github = { event_name: "push", ref: "refs/heads/topic" };
+    expect({ job, runs: runs(job, branch) }).toEqual({ job, runs: false });
+  }
+});
+
+test("release tolerates a skipped staging deploy but not a failed one", () => {
+  const skipped = allGreen();
+  skipped.results["deploy-staging"] = "skipped";
+  expect(runs("release", skipped)).toBe(true);
+
+  const failed = allGreen();
+  failed.results["deploy-staging"] = "failure";
+  expect(runs("release", failed)).toBe(false);
 });
 
 test("the end-to-end report cannot be resurrected by a skipped suite", () => {
   // It exists to explain a failure; a skipped suite has none to explain.
-  expect(workflow.jobs["e2e-report"]!.if).toContain(
-    "needs.e2e.result == 'failure'",
-  );
+  expect(runs("e2e-report", { results: { e2e: "failure" } })).toBe(true);
+  expect(runs("e2e-report", { results: { e2e: "skipped" } })).toBe(false);
+  expect(runs("e2e-report", { results: { e2e: "success" } })).toBe(false);
 });
