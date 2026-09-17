@@ -380,6 +380,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(activity.mark(botId, read: true));
   }
 
+  /// Where the call is drawn. On the page of the Bot being talked to it takes
+  /// the composer's place — there is nothing to send while the microphone is
+  /// the conversation — and anywhere else it stays the slab below the app, so
+  /// a call never claims a composer that can still send.
+  bool get _voiceIsInline =>
+      voiceSession != null &&
+      voiceBotId != null &&
+      selected?.botId.value == voiceBotId &&
+      _conversationVisible;
+
   /// Whether the conversation is on screen at all: always at the wider tiers,
   /// and on a phone only while its page is up over the list.
   bool get _conversationVisible =>
@@ -511,9 +521,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _endVoice({required String reason}) async {
     final session = voiceSession;
     if (session == null || !footerOpen) return;
+    // Only the slab animates out, and only the slab reserves the inset while
+    // it does. A call that was in the composer has no slab to exit: left
+    // marked as exiting, it would hold a gesture bar's worth of space under
+    // the composer until a reveal that never ran said it had finished.
+    final slab = !_voiceIsInline;
     setState(() {
       footerOpen = false;
-      footerExiting = true;
+      footerExiting = slab;
     });
     try {
       await session.end(reason: reason);
@@ -552,6 +567,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!mounted) return;
     final failure = controller.error;
     if (failure != null) _say(failure);
+  }
+
+  /// Throws a capture away: its words come back out of the draft, which is
+  /// the difference between this and the control that commits it.
+  Future<void> _discardDictation() async {
+    final controller = dictation;
+    if (controller == null || !controller.active) return;
+    await controller.discard();
+    if (mounted) setState(() {});
   }
 
   Future<void> _stopDictation() async {
@@ -2015,6 +2039,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final single = tier == ShellTier.single;
     final bot = selected;
     final session = voiceSession;
+    final voiceInline = footerOpen && _voiceIsInline;
     final rightPanel = _rightPanel();
     // Every input the badge reads — the fan-out, the directory, and focus —
     // repaints the shell, so the icon is reconciled on the same build that
@@ -2042,7 +2067,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             // would keep a gesture bar's worth of space above the footer.
             child: MediaQuery.removePadding(
               context: context,
-              removeBottom: footerOpen || footerExiting,
+              removeBottom: (footerOpen || footerExiting) && !voiceInline,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -2211,12 +2236,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             primary: _primary(bot.botId.value),
                             onDictate: () => unawaited(_dictate()),
                             onStopDictation: () => unawaited(_stopDictation()),
+                            onDiscardDictation: () =>
+                                unawaited(_discardDictation()),
                             // Voice, on the Bot whose page this is (ADR 0029).
                             onVoice: () => unawaited(
                               _toggleVoice(botId: bot.botId.value),
                             ),
                             voiceActive:
                                 footerOpen && voiceBotId == bot.botId.value,
+                            voiceSession: voiceInline ? session : null,
+                            onEndVoice: () =>
+                                unawaited(_endVoice(reason: 'composer-dock')),
                             dictationState:
                                 dictation?.context == bot.botId.value
                                 ? dictation!.state
@@ -2254,8 +2284,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ),
           ),
           VoiceReveal(
-            visible: footerOpen && session != null,
-            bottomInset: footerOpen || footerExiting
+            visible: footerOpen && session != null && !voiceInline,
+            bottomInset: (footerOpen || footerExiting) && !voiceInline
                 ? MediaQuery.paddingOf(context).bottom
                 : 0,
             onHidden: () {
@@ -2265,15 +2295,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 ? const SizedBox.shrink()
                 : VoiceFooter(
                     session: session,
-                    botAppearance: (botId) => bots
-                        .where((bot) => bot.botId.value == botId)
-                        .map(
-                          (bot) => (
-                            characterId: bot.avatar.characterId,
-                            primary: bot.avatar.primary,
-                          ),
-                        )
-                        .firstOrNull,
                     onEnd: () => unawaited(_endVoice(reason: 'end-button')),
                   ),
           ),

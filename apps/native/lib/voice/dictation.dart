@@ -358,6 +358,25 @@ class DictationController extends ChangeNotifier {
     await onFinished?.call();
   }
 
+  /// Abandons the capture *and* takes its words back out of the draft.
+  ///
+  /// The words are the capture's own span, so what the person typed around
+  /// them stays exactly where they typed it — and a span that has been edited
+  /// inside is fenced, in which case nothing is taken back. Deleting someone's
+  /// own edit because it happened to sit inside the transcript would be worse
+  /// than leaving a discarded sentence behind.
+  Future<void> discard() async {
+    final context = _context;
+    final range = _range;
+    await cancel();
+    if (context == null) return;
+    final restored = range.next(readDraft(context), '');
+    if (restored != null) onDraft(context, restored);
+    _segments.clear();
+    _delta = '';
+    _notify();
+  }
+
   Future<void> _fail(String message) async {
     _generation++;
     _error = message;

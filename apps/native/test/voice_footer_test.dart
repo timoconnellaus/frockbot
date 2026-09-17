@@ -41,7 +41,6 @@ Future<void> mount(
   required double width,
   VoidCallback? onEnd,
   bool footer = true,
-  ({String characterId, String primary})? Function(String botId)? botAppearance,
 }) async {
   tester.view.physicalSize = Size(width, 800);
   tester.view.devicePixelRatio = 1;
@@ -55,11 +54,7 @@ Future<void> mount(
           if (footer)
             RepaintBoundary(
               key: footerBoundary,
-              child: VoiceFooter(
-                session: controller,
-                onEnd: onEnd ?? () {},
-                botAppearance: botAppearance,
-              ),
+              child: VoiceFooter(session: controller, onEnd: onEnd ?? () {}),
             ),
         ],
       ),
@@ -276,19 +271,13 @@ void main() {
     expect(find.byKey(voiceFooterAnimationKey), findsOneWidget);
   });
 
-  testWidgets('the Bot being consulted rises into the voice stage', (
+  testWidgets('the Bot being consulted is not drawn into the call', (
     tester,
   ) async {
-    final semantics = tester.ensureSemantics();
     final socket = FakeVoiceSocket();
     final controller = session(socket);
     addTearDown(controller.dispose);
-    await mount(
-      tester,
-      controller,
-      width: 390,
-      botAppearance: (_) => (characterId: 'dog', primary: '#dca258'),
-    );
+    await mount(tester, controller, width: 390);
     await controller.start();
     await tester.pump();
     socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
@@ -305,15 +294,13 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
 
-    expect(find.byType(CharacterAvatar), findsOneWidget);
-    expect(
-      tester.getSemantics(find.byKey(const ValueKey('voice-bot-dog-bot'))),
-      matchesSemantics(label: 'Asked Scout', isLiveRegion: true),
-    );
-    // The pose carries the state; no words sit beside the character.
+    // The call is the conversation while it is running: no character rises
+    // out of the meter when the assistant asks a Bot something.
+    expect(controller.delegatedBotId, 'dog-bot');
+    expect(find.byType(CharacterAvatar), findsNothing);
     expect(find.text('Asked Scout'), findsNothing);
+    expect(find.byKey(voiceFooterAnimationKey), findsOneWidget);
     await captureFooter(tester, 'voice-footer-delegated');
-    semantics.dispose();
   });
 
   testWidgets('the slab is the brand pink, with no top border', (tester) async {

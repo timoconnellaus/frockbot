@@ -1,4 +1,5 @@
-/// Account-wide voice controls, below the app's navigation and conversations.
+/// The realtime call's own controls: in the composer's place on the Bot being
+/// talked to, and as a slab below the app everywhere else.
 library;
 
 import 'dart:math' as math;
@@ -6,14 +7,19 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../shell/semantics.dart';
-import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import 'assistant.dart';
 import 'motion.dart';
-import 'protocol.dart';
 import 'waveform.dart';
 
 const double voiceFooterHeight = 96;
+
+/// The call's controls in the composer's row, where the row is the size of a
+/// one-line field rather than of a slab.
+const double voiceDockControlExtent = 40;
+
+/// The composer pill's corner, so the call reads as the field it replaced.
+const double voiceDockRadius = 22;
 const double voiceFooterStageMaxWidth = 420;
 const double voiceFooterStageInset = 24;
 const double voiceFooterControlsWidth = 144;
@@ -22,29 +28,14 @@ const Key voiceFooterAnimationKey = ValueKey('voice-footer-animation');
 class VoiceFooter extends StatefulWidget {
   final AssistantSessionController session;
   final VoidCallback onEnd;
-  final ({String characterId, String primary})? Function(String botId)?
-  botAppearance;
-  const VoiceFooter({
-    super.key,
-    required this.session,
-    required this.onEnd,
-    this.botAppearance,
-  });
+  const VoiceFooter({super.key, required this.session, required this.onEnd});
 
   @override
   State<VoiceFooter> createState() => _VoiceFooterState();
 }
 
 class _VoiceFooterState extends State<VoiceFooter> {
-  late (
-    bool,
-    String?,
-    String?,
-    VoiceSessionPhase,
-    String?,
-    VoiceDelegationStateV1?,
-  )
-  _presentation;
+  late (bool, String?, String?, VoiceSessionPhase) _presentation;
 
   @override
   void initState() {
@@ -53,14 +44,11 @@ class _VoiceFooterState extends State<VoiceFooter> {
     widget.session.addListener(_changed);
   }
 
-  (bool, String?, String?, VoiceSessionPhase, String?, VoiceDelegationStateV1?)
-  _readPresentation() => (
+  (bool, String?, String?, VoiceSessionPhase) _readPresentation() => (
     widget.session.muted,
     widget.session.error,
     widget.session.notice,
     widget.session.phase,
-    widget.session.delegatedBotId,
-    widget.session.delegationState,
   );
 
   void _changed() {
@@ -174,26 +162,12 @@ class _VoiceFooterState extends State<VoiceFooter> {
     required VoidCallback onPressed,
     required IconData icon,
     bool selected = false,
-  }) => Semantics(
+  }) => voiceCircleControl(
+    context,
     label: label,
-    button: true,
-    child: Tooltip(
-      message: label,
-      excludeFromSemantics: true,
-      child: IconButton(
-        onPressed: onPressed,
-        icon: voiceIconTransition(context, Icon(icon, key: ValueKey(icon))),
-        iconSize: 22,
-        constraints: const BoxConstraints.tightFor(width: 48, height: 48),
-        style: IconButton.styleFrom(
-          foregroundColor: selected ? FrockTheme.accentDeep : Colors.white,
-          backgroundColor: Colors.white.withValues(
-            alpha: selected ? 0.95 : 0.18,
-          ),
-          shape: const CircleBorder(),
-        ),
-      ),
-    ),
+    onPressed: onPressed,
+    icon: icon,
+    selected: selected,
   );
 
   Widget _stage() => identified(
@@ -213,12 +187,10 @@ class _VoiceFooterState extends State<VoiceFooter> {
           voiceFooterStageInset,
           constraints.maxWidth - voiceFooterControlsWidth - width,
         );
-        final botId = widget.session.delegatedBotId;
-        final appearance = botId == null
-            ? null
-            : widget.botAppearance?.call(botId);
-        final botName = widget.session.delegatedBotName;
-        final delegation = widget.session.delegationState;
+        // The Bot being consulted is not drawn here. During a call the
+        // conversation is the voice, and a character rising out of the meter
+        // every time the assistant asked a Bot was a second thing moving
+        // under a row whose whole job is to say "you are still on a call".
         return Stack(
           children: [
             Positioned(
@@ -237,72 +209,189 @@ class _VoiceFooterState extends State<VoiceFooter> {
                 onAccent: true,
               ),
             ),
-            Positioned(
-              left: left,
-              top: 4,
-              width: width,
-              height: voiceFooterHeight - 8,
-              child: IgnorePointer(
-                child: AnimatedSwitcher(
-                  duration: FrockTheme.motion(
-                    context,
-                    const Duration(milliseconds: 350),
-                  ),
-                  switchInCurve: Curves.easeOutBack,
-                  switchOutCurve: Curves.easeInCubic,
-                  transitionBuilder: (child, animation) => FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, 0.45),
-                        end: Offset.zero,
-                      ).animate(animation),
-                      child: ScaleTransition(
-                        scale: Tween<double>(
-                          begin: 0.82,
-                          end: 1,
-                        ).animate(animation),
-                        child: child,
-                      ),
-                    ),
-                  ),
-                  child: appearance == null || botId == null
-                      ? const SizedBox.shrink(key: ValueKey('voice-no-bot'))
-                      : Semantics(
-                          key: ValueKey('voice-bot-$botId'),
-                          liveRegion: true,
-                          label: delegation == VoiceDelegationStateV1.answering
-                              ? '$botName is answering'
-                              : delegation == VoiceDelegationStateV1.finished
-                              ? '$botName finished'
-                              : 'Asked $botName',
-                          // The character alone: its pose says whether the
-                          // Bot is being asked, answering or done, which is
-                          // what the animations are for. The words stay on
-                          // the semantics label for a screen reader.
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: CharacterAvatar(
-                              size: 76,
-                              characterId: appearance.characterId,
-                              primary: appearance.primary,
-                              activity:
-                                  delegation == VoiceDelegationStateV1.finished
-                                  ? CharacterActivity.success
-                                  : CharacterActivity.thinking,
-                              emotion:
-                                  delegation == VoiceDelegationStateV1.answering
-                                  ? CharacterEmotion.content
-                                  : CharacterEmotion.curious,
-                            ),
-                          ),
-                        ),
-                ),
-              ),
-            ),
           ],
         );
       },
     ),
   );
+}
+
+/// A white-on-accent control, the one shape both surfaces use.
+Widget voiceCircleControl(
+  BuildContext context, {
+  required String label,
+  required VoidCallback onPressed,
+  required IconData icon,
+  bool selected = false,
+  double size = 48,
+}) => Semantics(
+  label: label,
+  button: true,
+  child: Tooltip(
+    message: label,
+    excludeFromSemantics: true,
+    child: IconButton(
+      onPressed: onPressed,
+      icon: voiceIconTransition(context, Icon(icon, key: ValueKey(icon))),
+      iconSize: size < 48 ? 20 : 22,
+      constraints: BoxConstraints.tightFor(width: size, height: size),
+      padding: EdgeInsets.zero,
+      style: IconButton.styleFrom(
+        foregroundColor: selected ? FrockTheme.accentDeep : Colors.white,
+        backgroundColor: Colors.white.withValues(alpha: selected ? 0.95 : 0.18),
+        shape: const CircleBorder(),
+      ),
+    ),
+  ),
+);
+
+/// The call where the composer was.
+///
+/// A call is not a mode of the draft — there is nothing to send while the
+/// microphone is the conversation — so the field is not left sitting disabled
+/// under a slab. It is replaced: the pill keeps the composer's frame and
+/// becomes the call, the meter across it and the two controls at its end, and
+/// the draft comes back untouched when the call ends.
+class VoiceComposerDock extends StatefulWidget {
+  final AssistantSessionController session;
+  final VoidCallback onEnd;
+  const VoiceComposerDock({
+    super.key,
+    required this.session,
+    required this.onEnd,
+  });
+
+  @override
+  State<VoiceComposerDock> createState() => _VoiceComposerDockState();
+}
+
+class _VoiceComposerDockState extends State<VoiceComposerDock> {
+  late (bool, String?, String?, VoiceSessionPhase) _presentation;
+
+  (bool, String?, String?, VoiceSessionPhase) _read() => (
+    widget.session.muted,
+    widget.session.error,
+    widget.session.notice,
+    widget.session.phase,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _presentation = _read();
+    widget.session.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(VoiceComposerDock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.session != widget.session) {
+      oldWidget.session.removeListener(_changed);
+      widget.session.addListener(_changed);
+      _presentation = _read();
+    }
+  }
+
+  void _changed() {
+    final next = _read();
+    if (_presentation == next) return;
+    setState(() => _presentation = next);
+  }
+
+  @override
+  void dispose() {
+    widget.session.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final session = widget.session;
+    final failure = session.error;
+    // A failure ends the call and takes the row for good; a notice borrows it
+    // for a few seconds while the call goes on, controls and all.
+    final text = failure ?? session.notice;
+    return identified(
+      VoiceIds.footer,
+      Material(
+        color: theme.colorScheme.primary,
+        borderRadius: BorderRadius.circular(voiceDockRadius),
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox.expand(
+          child: Row(
+            children: [
+              Expanded(
+                child: text == null
+                    ? identified(
+                        VoiceIds.footerAnimation,
+                        VoiceWaveform(
+                          key: voiceFooterAnimationKey,
+                          source: session,
+                          microphone: () =>
+                              session.muted ? 0 : session.micLevel,
+                          playback: () => session.playbackLevel,
+                          mode: () => session.meterMode,
+                          enabled: session.active,
+                          onAccent: true,
+                        ),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.only(left: 18),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              text,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+              ),
+              // Mute alone. The way out of the call is the control that
+              // started it, still in its own place beside the field — a
+              // second X inside the row would be two ways to hang up sitting
+              // a thumb's width apart.
+              if (failure == null)
+                identified(
+                  VoiceIds.mute,
+                  Semantics(
+                    toggled: session.muted,
+                    child: voiceCircleControl(
+                      context,
+                      label: session.muted
+                          ? 'Unmute microphone'
+                          : 'Mute microphone',
+                      selected: session.muted,
+                      onPressed: () => session.setMuted(!session.userMuted),
+                      icon: session.muted ? Icons.mic_off : Icons.mic,
+                      size: voiceDockControlExtent,
+                    ),
+                  ),
+                )
+              else
+                identified(
+                  VoiceIds.end,
+                  voiceCircleControl(
+                    context,
+                    label: 'End voice session',
+                    onPressed: widget.onEnd,
+                    icon: Icons.close,
+                    size: voiceDockControlExtent,
+                  ),
+                ),
+              const SizedBox(width: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

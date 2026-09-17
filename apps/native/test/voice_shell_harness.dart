@@ -94,9 +94,13 @@ class VoiceShellHarness {
     await tester.pump();
   }
 
-  void showCall() => shell.setState(() {
+  /// Puts the call on screen. Named with a Bot, it is that Bot's call, which
+  /// is what puts the controls in its composer's place instead of below the
+  /// app.
+  void showCall({String? botId}) => shell.setState(() {
     shell.footerOpen = true;
     shell.footerExiting = false;
+    shell.voiceBotId = botId;
   });
 
   Future<void> dispose(WidgetTester tester) async {

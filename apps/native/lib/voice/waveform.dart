@@ -20,6 +20,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 
 import '../theme/frock_theme.dart';
 
@@ -326,4 +327,210 @@ class _MeterPainter extends CustomPainter {
       oldDelegate.frame != frame ||
       oldDelegate.accent != accent ||
       oldDelegate.onAccent != onAccent;
+}
+
+/// The dictation meter: a fixed-width strip of bars that scrolls while the
+/// microphone is open.
+///
+/// It says a different thing from the five pills of a call. A call's meter
+/// answers "who is being heard right now"; this one answers "am I still
+/// recording" — so it keeps a history rather than a level, and the history
+/// moves whether or not anyone is speaking. Silence is a row of dots
+/// travelling left; a word is a hill travelling left with them. A strip that
+/// stopped moving when nobody spoke would read as a capture that had died.
+///
+/// Drawn the same way as [VoiceWaveform]: a [Ticker] pushes one bar into a
+/// ring buffer every [dictationBarPeriod] and the painter repaints off its
+/// own listenable, so nothing above it builds or lays out per audio frame.
+const double dictationBarWidth = 4;
+const double dictationBarGap = 2;
+const double dictationStripWidth = 108;
+const Duration dictationBarPeriod = Duration(milliseconds: 60);
+
+/// The resting dot: silence is still drawn, or a pause would look like a gap
+/// in the recording.
+const double dictationBarFloor = 0.06;
+
+class _DictationTrack extends ChangeNotifier {
+  /// Newest last. Sized in [resize] from the width the painter is given.
+  List<double> bars = const [];
+
+  /// The loudest sample since the last bar was pushed: a bar is a peak, not
+  /// whatever happened to be in flight at the moment the ticker fired.
+  double peak = 0;
+  double _carry = 0;
+  bool capturing = true;
+
+  /// Called by the painter with the width it was given, so it never notifies:
+  /// a repaint raised from inside a paint is a framework assertion, and the
+  /// frame doing the resizing is already drawing the result.
+  void resize(int count) {
+    if (bars.length == count) return;
+    final next = List<double>.filled(count, 0);
+    final overlap = math.min(count, bars.length);
+    // Keep the newest bars: the strip grows and shrinks from its left edge.
+    for (var i = 0; i < overlap; i++) {
+      next[count - 1 - i] = bars[bars.length - 1 - i];
+    }
+    bars = next;
+  }
+
+  void sample(double level) {
+    final target = VoiceEnvelope.target(level);
+    if (target > peak) peak = target;
+  }
+
+  /// Advances by whole bars, so the strip travels at the same speed whatever
+  /// the display's refresh rate is.
+  void advance(double seconds) {
+    if (bars.isEmpty) return;
+    _carry += seconds;
+    final period = dictationBarPeriod.inMicroseconds / 1e6;
+    var pushed = false;
+    while (_carry >= period) {
+      _carry -= period;
+      for (var i = 0; i < bars.length - 1; i++) {
+        bars[i] = bars[i + 1];
+      }
+      bars[bars.length - 1] = capturing
+          ? math.max(dictationBarFloor, peak)
+          : dictationBarFloor;
+      peak = 0;
+      pushed = true;
+    }
+    if (pushed) notifyListeners();
+  }
+}
+
+/// The scrolling strip beside the dictation controls.
+class DictationWaveform extends StatefulWidget {
+  final ValueListenable<double> level;
+
+  /// Whether the microphone is open. A strip that is starting or finishing
+  /// keeps travelling; it simply has nothing to draw but the floor.
+  final bool capturing;
+  const DictationWaveform({
+    super.key,
+    required this.level,
+    this.capturing = true,
+  });
+
+  @override
+  State<DictationWaveform> createState() => _DictationWaveformState();
+}
+
+class _DictationWaveformState extends State<DictationWaveform>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker = createTicker(_tick);
+  final _track = _DictationTrack();
+  Duration _last = Duration.zero;
+  bool _reducedMotion = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.level.addListener(_sample);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reducedMotion = MediaQuery.disableAnimationsOf(context);
+    _run();
+  }
+
+  @override
+  void didUpdateWidget(DictationWaveform oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.level != oldWidget.level) {
+      oldWidget.level.removeListener(_sample);
+      widget.level.addListener(_sample);
+    }
+    _run();
+  }
+
+  void _run() {
+    _track.capturing = widget.capturing;
+    // Reduced motion keeps the level and drops the travel: the bars follow
+    // what is being heard as it arrives, and no ticker runs for the scroll.
+    if (_reducedMotion) {
+      _ticker.stop();
+      return;
+    }
+    if (!_ticker.isActive) {
+      _last = Duration.zero;
+      _ticker.start();
+    }
+  }
+
+  void _sample() {
+    _track.sample(widget.level.value);
+    if (_reducedMotion) _track.advance(dictationBarPeriod.inMicroseconds / 1e6);
+  }
+
+  void _tick(Duration elapsed) {
+    final seconds = ((elapsed - _last).inMicroseconds / 1e6).clamp(0.0, 0.25);
+    _last = elapsed;
+    _track.sample(widget.level.value);
+    _track.advance(seconds);
+  }
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: ExcludeSemantics(
+      child: CustomPaint(
+        painter: _DictationPainter(
+          track: _track,
+          tint: Theme.of(context).colorScheme.primary,
+        ),
+        size: Size.infinite,
+      ),
+    ),
+  );
+
+  @override
+  void dispose() {
+    widget.level.removeListener(_sample);
+    _ticker.dispose();
+    _track.dispose();
+    super.dispose();
+  }
+}
+
+class _DictationPainter extends CustomPainter {
+  final _DictationTrack track;
+  final Color tint;
+  final Paint _paint = Paint();
+  _DictationPainter({required this.track, required this.tint})
+    : super(repaint: track);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    const pitch = dictationBarWidth + dictationBarGap;
+    final count = math.max(1, ((size.width + dictationBarGap) / pitch).floor());
+    track.resize(count);
+    final middle = size.height / 2;
+    final reach = size.height - dictationBarWidth;
+    // The row is drawn from the right edge, so the newest bar is always in
+    // the same place however the strip is sized.
+    final right = size.width;
+    _paint.color = tint;
+    for (var i = 0; i < count; i++) {
+      final value = track.bars[i];
+      final height = dictationBarWidth + reach * value;
+      final x = right - (count - i) * pitch + dictationBarGap;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, middle - height / 2, dictationBarWidth, height),
+          const Radius.circular(dictationBarWidth / 2),
+        ),
+        _paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DictationPainter oldDelegate) =>
+      oldDelegate.track != track || oldDelegate.tint != tint;
 }

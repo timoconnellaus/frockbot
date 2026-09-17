@@ -127,7 +127,11 @@ abstract final class VoiceIds {
   static const composerVoice = 'composer-voice';
   static const composerDictate = 'composer-dictate';
   static const composerDictationStop = 'composer-dictation-stop';
+  static const composerDictationDiscard = 'composer-dictation-discard';
   static const composerDictationLevel = 'composer-dictation-level';
+
+  /// The call in the composer's place, on the Bot being talked to.
+  static const composerVoiceDock = 'composer-voice-dock';
 }
 
 /// Settings: the account surfaces, and the Bot's own panel.

@@ -24,6 +24,7 @@ import '../client/chat_controller.dart';
 import '../client/transport.dart';
 import '../flock/avatar.dart';
 import '../theme/states.dart';
+import '../voice/assistant.dart';
 import '../voice/dictation.dart';
 import 'composer.dart';
 import 'lifecycle.dart';
@@ -68,11 +69,18 @@ class ChatPane extends StatefulWidget {
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
 
+  /// Throws a capture away, its words with it.
+  final VoidCallback? onDiscardDictation;
+
   /// Starts, moves or ends a voice call with this Bot (ADR 0029).
   final VoidCallback? onVoice;
 
   /// Whether the open call is with this Bot.
   final bool voiceActive;
+
+  /// That call, while it is this Bot's: the composer becomes it.
+  final AssistantSessionController? voiceSession;
+  final VoidCallback? onEndVoice;
   final DictationState dictationState;
   final ValueListenable<double>? dictationLevel;
 
@@ -102,8 +110,11 @@ class ChatPane extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
+    this.onDiscardDictation,
     this.onVoice,
     this.voiceActive = false,
+    this.voiceSession,
+    this.onEndVoice,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
@@ -398,7 +409,10 @@ class _ChatPaneState extends State<ChatPane> {
           clipBehavior: Clip.none,
           children: [
             Padding(
-              padding: EdgeInsets.only(left: avatarSize + 12),
+              // The character's own lane, and no more: the artboard carries
+              // its own margin, so a gap on each side of it as well left the
+              // companion adrift in a column of nothing.
+              padding: EdgeInsets.only(left: avatarSize),
               child: _composer(c),
             ),
             // The field sits above the system's bottom inset (the composer
@@ -407,7 +421,7 @@ class _ChatPaneState extends State<ChatPane> {
             // field's baseline.
             Positioned(
               key: _companionKey,
-              left: 10,
+              left: 6,
               bottom: 10 + MediaQuery.paddingOf(context).bottom,
               // The companion is the working indicator: while a Turn runs it
               // takes the working pose and wears the typing badge, paced by
@@ -475,8 +489,11 @@ class _ChatPaneState extends State<ChatPane> {
     skills: skills,
     onDictate: widget.onDictate,
     onStopDictation: widget.onStopDictation,
+    onDiscardDictation: widget.onDiscardDictation,
     onVoice: widget.onVoice,
     voiceActive: widget.voiceActive,
+    voiceSession: widget.voiceSession,
+    onEndVoice: widget.onEndVoice,
     dictationState: widget.dictationState,
     dictationLevel: widget.dictationLevel,
   );
@@ -517,11 +534,18 @@ class ConversationView extends StatefulWidget {
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
 
+  /// Throws a capture away, its words with it.
+  final VoidCallback? onDiscardDictation;
+
   /// Starts, moves or ends a voice call with this Bot (ADR 0029).
   final VoidCallback? onVoice;
 
   /// Whether the open call is with this Bot.
   final bool voiceActive;
+
+  /// That call, while it is this Bot's: the composer becomes it.
+  final AssistantSessionController? voiceSession;
+  final VoidCallback? onEndVoice;
   final DictationState dictationState;
   final ValueListenable<double>? dictationLevel;
   final String? background;
@@ -552,8 +576,11 @@ class ConversationView extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
+    this.onDiscardDictation,
     this.onVoice,
     this.voiceActive = false,
+    this.voiceSession,
+    this.onEndVoice,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
@@ -670,7 +697,10 @@ class _ConversationViewState extends State<ConversationView>
       onDictate: widget.onDictate,
       onVoice: widget.onVoice,
       voiceActive: widget.voiceActive,
+      voiceSession: widget.voiceSession,
+      onEndVoice: widget.onEndVoice,
       onStopDictation: widget.onStopDictation,
+      onDiscardDictation: widget.onDiscardDictation,
       dictationState: widget.dictationState,
       dictationLevel: widget.dictationLevel,
     ),

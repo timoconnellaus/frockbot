@@ -17,7 +17,9 @@ import '../acceptance_metrics.dart';
 import '../orientation.dart' show isNativeMobile;
 import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
+import '../voice/assistant.dart';
 import '../voice/dictation.dart';
+import '../voice/footer.dart';
 import '../voice/motion.dart';
 import '../voice/waveform.dart';
 import 'semantics.dart';
@@ -187,16 +189,27 @@ class Composer extends StatefulWidget {
   /// Commits the dictation into the editable draft. It never sends.
   final VoidCallback? onStopDictation;
 
+  /// Abandons the dictation and takes its words back out of the draft.
+  final VoidCallback? onDiscardDictation;
+
   /// Starts or ends a voice call with this Bot (ADR 0029).
   ///
-  /// Its own control, to the right of the one that morphs between dictate,
-  /// send and stop: voice is not a mode of the draft, and a target that moved
-  /// under the thumb would be pressed by accident. Absent on a client with no
-  /// microphone, like dictation.
+  /// Its own control, outside the field and to the right of it: voice is not a
+  /// mode of the draft, and a target that moved under the thumb would be
+  /// pressed by accident. Absent on a client with no microphone, like
+  /// dictation.
   final VoidCallback? onVoice;
 
   /// Whether this Bot is the one a voice call is open on right now.
   final bool voiceActive;
+
+  /// The open call, on the Bot this composer belongs to. Present only while
+  /// the call is this Bot's: then the field's place is the call, and there is
+  /// no separate slab below the app.
+  final AssistantSessionController? voiceSession;
+
+  /// Ends that call, from the control inside the dock.
+  final VoidCallback? onEndVoice;
 
   /// Whether this composer's Bot is the one being dictated into.
   final DictationState dictationState;
@@ -217,8 +230,11 @@ class Composer extends StatefulWidget {
     required this.skills,
     this.onDictate,
     this.onStopDictation,
+    this.onDiscardDictation,
     this.onVoice,
     this.voiceActive = false,
+    this.voiceSession,
+    this.onEndVoice,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
   });
@@ -331,21 +347,26 @@ class _ComposerState extends State<Composer> {
     );
   }
 
+  /// The one action in the field's corner. [dictating] is passed rather than
+  /// read, because the draft's own corner keeps the draft's action even while
+  /// a capture is standing in front of it: two live Stop controls in one row,
+  /// one of them invisible, is one too many for a pointer or a test to find.
   Widget _actionButton(
     BuildContext context, {
+    required bool dictating,
     required bool dictatable,
     required bool canSend,
   }) {
     final theme = Theme.of(context);
     return KeyedSubtree(
       key: ValueKey(
-        widget.dictating
+        dictating
             ? 'recording-action'
             : dictatable
             ? 'dictate-action'
             : 'send-action',
       ),
-      child: widget.dictating
+      child: dictating
           ? identified(
               VoiceIds.composerDictationStop,
               IconButton.filled(
@@ -450,15 +471,18 @@ class _ComposerState extends State<Composer> {
               (fieldStyle?.height ?? 1.0) +
           theme.visualDensity.baseSizeAdjustment.dy,
     );
-    Widget corner(Widget button) => Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      child: SizedBox(
-        height: oneLine,
-        child: Center(child: button),
-      ),
-    );
     final dictatable = widget.onDictate != null && text.trim().isEmpty;
     final skills = widget.skills;
+    // The call takes the field's place only while it is this Bot's call. A
+    // call with somebody else goes on below the app, where it does not claim
+    // a composer that can still send.
+    final call = widget.voiceActive && widget.voiceSession != null;
+    final field = _field(
+      context,
+      oneLine: oneLine,
+      dictatable: dictatable,
+      canSend: canSend,
+    );
     final draft = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -490,7 +514,161 @@ class _ComposerState extends State<Composer> {
           ComposerStopButton(stopping: widget.stopping, onStop: widget.onStop),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-          child: AnimatedContainer(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                // The draft keeps its place in the layout even while it is
+                // covered. A capture and a call are exactly the size of the
+                // field they stand in for, so neither the row nor the thread
+                // above it moves when one begins or ends.
+                child: Stack(
+                  children: [
+                    Visibility(
+                      visible: !call && !widget.dictating,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: field,
+                    ),
+                    if (widget.dictating)
+                      Positioned.fill(child: _capturePill(context, oneLine)),
+                    if (call)
+                      Positioned.fill(
+                        child: identified(
+                          VoiceIds.composerVoiceDock,
+                          VoiceComposerDock(
+                            key: const ValueKey('voice-dock'),
+                            session: widget.voiceSession!,
+                            onEnd:
+                                widget.onEndVoice ?? widget.onVoice ?? () {},
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // Voice, outside the field and never part of it (ADR 0029). It
+              // is the same target whatever the draft is doing — including
+              // during the call it started, where it reads as pressed and
+              // ends it — so the thumb can find it without looking and the
+              // field beside it never changes width under a capture.
+              if (widget.onVoice != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: SizedBox(
+                    height: oneLine,
+                    child: Center(child: _voiceButton(context)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (turnTextCounterVisible(text))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              '${turnTextRemaining(text)} characters left',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: turnTextTooLong(text) ? theme.colorScheme.error : null,
+              ),
+            ),
+          ),
+      ],
+    );
+    return SafeArea(top: false, child: draft);
+  }
+
+  /// The capture in the field's place: the meter, the way out, and the way to
+  /// throw it away.
+  ///
+  /// The draft is not editable while it runs — the words are still arriving —
+  /// so the field is stood in for rather than disabled in place.
+  Widget _capturePill(BuildContext context, double oneLine) {
+    final theme = Theme.of(context);
+    Widget corner(Widget button) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      child: SizedBox(
+        height: oneLine,
+        child: Center(child: button),
+      ),
+    );
+    return DecoratedBox(
+      key: const ValueKey('dictation-pill'),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(
+          theme.colorScheme.primary.withValues(alpha: 0.07),
+          theme.colorScheme.surfaceContainerHighest,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          // One group at the end of the row: throw it away, what is being
+          // heard, keep it. Spread across the width they read as three
+          // unrelated things, which at a desktop's width they looked like.
+          const Spacer(),
+          corner(_discardButton(context)),
+          Semantics(
+            container: true,
+            liveRegion: true,
+            label: switch (widget.dictationState) {
+              DictationState.starting => 'Starting dictation',
+              DictationState.stopping => 'Finishing dictation',
+              _ => 'Listening for dictation',
+            },
+            child: SizedBox(
+              key: const ValueKey('dictation-strip'),
+              width: dictationStripWidth,
+              height: 26,
+              child: widget.dictationLevel == null
+                  ? const SizedBox.shrink()
+                  : identified(
+                      VoiceIds.composerDictationLevel,
+                      DictationWaveform(
+                        level: widget.dictationLevel!,
+                        capturing:
+                            widget.dictationState == DictationState.capturing,
+                      ),
+                    ),
+            ),
+          ),
+          corner(
+            _actionButton(
+              context,
+              dictating: true,
+              dictatable: false,
+              canSend: false,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The draft itself: the field, and the action in its corner.
+  Widget _field(
+    BuildContext context, {
+    required double oneLine,
+    required bool dictatable,
+    required bool canSend,
+  }) {
+    final theme = Theme.of(context);
+    Widget corner(Widget button) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      child: SizedBox(
+        height: oneLine,
+        child: Center(child: button),
+      ),
+    );
+    final fieldStyle = theme.textTheme.bodyLarge?.copyWith(
+      fontWeight: FontWeight.w400,
+    );
+    final skills = widget.skills;
+    return AnimatedContainer(
             duration: FrockTheme.motion(context, voiceEnterDuration),
             curve: Curves.easeOutCubic,
             decoration: BoxDecoration(
@@ -511,8 +689,8 @@ class _ComposerState extends State<Composer> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Expanded(
-                      child: CallbackShortcuts(
+                      Expanded(
+                        child: CallbackShortcuts(
                         bindings: {
                           const SingleActivator(
                             LogicalKeyboardKey.enter,
@@ -599,100 +777,42 @@ class _ComposerState extends State<Composer> {
                             child: child,
                           ),
                         ),
-                        child: widget.dictating
-                            ? const SizedBox(width: 48, height: 48)
-                            : _actionButton(
-                                context,
-                                dictatable: dictatable,
-                                canSend: canSend,
-                              ),
+                        child: _actionButton(
+                          context,
+                          dictating: false,
+                          dictatable: dictatable,
+                          canSend: canSend,
+                        ),
                       ),
                     ),
-                    // Voice, to the right of the morph and never part of it
-                    // (ADR 0029). It is the same target whatever the draft is
-                    // doing, so the thumb can find it without looking.
-                    if (widget.onVoice != null) corner(_voiceButton(context)),
                   ],
                 ),
               ],
             ),
-          ),
-        ),
-        if (turnTextCounterVisible(text))
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(
-              '${turnTextRemaining(text)} characters left',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: turnTextTooLong(text) ? theme.colorScheme.error : null,
-              ),
-            ),
-          ),
-      ],
     );
-    return Stack(
-      alignment: Alignment.bottomCenter,
-      clipBehavior: Clip.none,
-      children: [
-        // Reserve the resting composer height while its editor is offstage.
-        // The dock can grow from it without collapsing the conversation first.
-        SizedBox(height: oneLine + 14 + MediaQuery.paddingOf(context).bottom),
-        Visibility(
-          visible: !widget.dictating,
-          maintainState: true,
-          child: SafeArea(top: false, child: draft),
+  }
+
+  /// Throws the capture away: the words it put in the draft go with it, which
+  /// is the whole difference between this and the control beside it.
+  Widget _discardButton(BuildContext context) {
+    final theme = Theme.of(context);
+    return identified(
+      VoiceIds.composerDictationDiscard,
+      IconButton(
+        key: const ValueKey('dictation-discard'),
+        tooltip: 'Discard dictation',
+        onPressed: widget.onDiscardDictation,
+        style: IconButton.styleFrom(
+          minimumSize: Size.square(chatControlExtent),
+          fixedSize: Size.square(chatControlExtent),
+          padding: EdgeInsets.zero,
+          iconSize: chatIconSize,
+          shape: const CircleBorder(),
+          backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.08),
+          foregroundColor: theme.colorScheme.onSurfaceVariant,
         ),
-        VoiceReveal(
-          visible: widget.dictating,
-          child: Material(
-            key: const ValueKey('dictation-dock'),
-            color: Color.alphaBlend(
-              theme.colorScheme.primary.withValues(alpha: 0.07),
-              theme.colorScheme.surfaceContainerHighest,
-            ),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Semantics(
-                  container: true,
-                  liveRegion: true,
-                  label: switch (widget.dictationState) {
-                    DictationState.starting => 'Starting dictation',
-                    DictationState.stopping => 'Finishing dictation',
-                    _ => 'Listening for dictation',
-                  },
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(
-                          height: 48,
-                          child: widget.dictationLevel == null
-                              ? const SizedBox.shrink()
-                              : identified(
-                                  VoiceIds.composerDictationLevel,
-                                  VoiceWaveform(
-                                    source: widget.dictationLevel!,
-                                    microphone: () =>
-                                        widget.dictationLevel!.value,
-                                    enabled:
-                                        widget.dictationState ==
-                                        DictationState.capturing,
-                                  ),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(width: 24),
-                      _actionButton(context, dictatable: false, canSend: false),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
+        icon: const Icon(Icons.delete_outline_rounded),
+      ),
     );
   }
 }
