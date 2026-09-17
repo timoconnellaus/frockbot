@@ -124,6 +124,32 @@ abstract final class VoiceIds {
   static const end = 'voice-end';
   /// The fixed voice control at the far right of the composer (ADR 0029).
   /// Unlike the morphing action beside it, it is always this one thing.
+  /// Voice mode, which replaces the thread while the call is with this Bot
+  /// (ADR 0031).
+  static const mode = 'voice-mode';
+  static const stage = 'voice-stage';
+  static const state = 'voice-state';
+  static const activity = 'voice-activity';
+  static const pause = 'voice-pause';
+  static const resume = 'voice-resume';
+  static const hangUp = 'voice-hang-up';
+  static const modeMeter = 'voice-mode-meter';
+  static const headerPill = 'voice-header-pill';
+  static String chip(String botId) => 'voice-chip-$botId';
+
+  /// The Bot's voice under its settings: the row, the page and its pickers.
+  static const settingsRow = 'voice-settings-row';
+  static const settings = 'voice-settings';
+  static const timbre = 'voice-timbre';
+  static const accent = 'voice-accent';
+  static const attitude = 'voice-attitude';
+  static const pace = 'voice-pace';
+  static const turnLength = 'voice-turn-length';
+  static const humour = 'voice-humour';
+  static const disfluency = 'voice-disfluency';
+  static const custom = 'voice-custom';
+  static const picker = 'voice-picker';
+
   static const composerVoice = 'composer-voice';
   static const composerDictate = 'composer-dictate';
   static const composerDictationStop = 'composer-dictation-stop';

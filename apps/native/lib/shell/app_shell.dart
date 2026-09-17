@@ -53,6 +53,7 @@ import '../voice/capabilities.dart';
 import '../voice/capture.dart';
 import '../voice/dictation.dart';
 import '../voice/footer.dart';
+import '../voice/voice_mode.dart';
 import '../voice/motion.dart';
 import '../voice/mic_ownership.dart';
 import '../voice/player.dart';
@@ -1200,6 +1201,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
+  /// The Work a subagent left behind, from voice mode's activity slot.
+  ///
+  /// A `voice/delegation` frame names the Bot, not the run, so what opens is
+  /// that Bot's latest Turn — the one the call just started. The call is not
+  /// ended and the page is not left: the run view opens over voice mode, the
+  /// way it opens over a thread.
+  void _openVoiceWork(String botId) {
+    final lines = projectRuns(
+      widget.sessions.open(widget.userId, botId).controller.runs,
+    );
+    if (lines.isEmpty) return;
+    _openRun(lines.last);
+  }
+
   void _openRun(TranscriptLine line) {
     if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
         ShellTier.single) {
@@ -2015,6 +2030,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final single = tier == ShellTier.single;
     final bot = selected;
     final session = voiceSession;
+    // Voice mode is this Bot being the one on the call: its thread and its
+    // composer give way to the call itself (ADR 0031). A call with another
+    // Bot keeps the small dock instead, so looking at one Bot while talking
+    // to another still works.
+    final voiceHere =
+        footerOpen &&
+        session != null &&
+        bot != null &&
+        voiceBotId == bot.botId.value;
     final rightPanel = _rightPanel();
     // Every input the badge reads — the fan-out, the directory, and focus —
     // repaints the shell, so the icon is reconciled on the same build that
@@ -2061,12 +2085,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             // way out of the Bot you are talking to is to end
                             // the call, and a control that left the page with
                             // the call still running would be a trap.
-                            onBack:
-                                single &&
-                                    !(footerOpen &&
-                                        voiceBotId == bot.botId.value)
-                                ? _openBack
-                                : null,
+                            voiceMode: voiceHere,
+                            onBack: single && !voiceHere ? _openBack : null,
                             onOpenBot: single
                                 ? () => _pushPanel('bot-settings')
                                 : null,
@@ -2103,10 +2123,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     onBack: _openBack,
                     // Voice mode is this Bot being the one on the call: the
                     // page belongs to the conversation until it ends.
-                    voiceMode:
-                        footerOpen &&
-                        bot != null &&
-                        voiceBotId == bot.botId.value,
+                    voiceMode: voiceHere,
                     onEndVoice: () =>
                         unawaited(_endVoice(reason: 'system-back')),
                     panelOpen: panelOpen,
@@ -2173,7 +2190,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onSwipeHide: (botId) =>
                                 unawaited(_runBotAction(botId, BotAction.hide)),
                           ),
-                    conversation: bot == null
+                    conversation: voiceHere
+                        ? VoiceMode(
+                            key: ValueKey('voice-${bot.botId.value}'),
+                            session: session,
+                            botName: _name(bot),
+                            characterId: bot.avatar.characterId,
+                            primary: bot.avatar.primary,
+                            onEnd: () =>
+                                unawaited(_endVoice(reason: 'end-button')),
+                            onOpenWork: _openVoiceWork,
+                          )
+                        : bot == null
                         ? NoConversation(
                             empty: bots.isEmpty,
                             failure: bots.isEmpty ? error : null,
@@ -2262,7 +2290,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ),
           ),
           VoiceReveal(
-            visible: footerOpen && session != null,
+            visible: footerOpen && session != null && !voiceHere,
             bottomInset: footerOpen || footerExiting
                 ? MediaQuery.paddingOf(context).bottom
                 : 0,

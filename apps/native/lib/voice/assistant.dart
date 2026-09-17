@@ -45,6 +45,28 @@ import 'waveform.dart' show VoiceMeterMode;
 
 enum VoiceSessionPhase { idle, connecting, live, ending, ended, error }
 
+/// One subagent the call has handed work to (ADR 0031), as the activity slot
+/// lists it.
+///
+/// The ledger is per Bot, because that is what the `voice/delegation` frame
+/// names: a later frame about the same Bot moves the entry rather than adding
+/// a second one. [finishedWhilePaused] is what the Resume badge counts — work
+/// that landed while nothing was listening is the thing the person missed.
+class VoiceDelegationEntryV1 {
+  final String botId;
+  final String botName;
+  final VoiceDelegationStateV1 state;
+  final bool finishedWhilePaused;
+  const VoiceDelegationEntryV1({
+    required this.botId,
+    required this.botName,
+    required this.state,
+    this.finishedWhilePaused = false,
+  });
+
+  bool get finished => state == VoiceDelegationStateV1.finished;
+}
+
 class AssistantSessionController extends ChangeNotifier {
   final VoiceSocketOpener openSocket;
   final VoiceCapture capture;
@@ -103,6 +125,16 @@ class AssistantSessionController extends ChangeNotifier {
   VoiceDelegationStateV1? _delegationState;
   Timer? _delegationTimer;
 
+  /// Every subagent this call has handed work to, in the order it was first
+  /// asked. Unlike the three fields above — which are the footer's one
+  /// transient rise — the ledger is the call's, and outlives each frame.
+  final List<VoiceDelegationEntryV1> _delegations = [];
+
+  /// Whether the person put the call to sleep. Distinct from [_asleep],
+  /// which the energy gate also sets: a paused call sends nothing and wakes
+  /// for nothing but Resume.
+  bool _paused = false;
+
   /// How long a notice about the last reply stays on the footer.
   static const noticeDuration = Duration(seconds: 4);
 
@@ -139,6 +171,19 @@ class AssistantSessionController extends ChangeNotifier {
   String? get delegatedBotId => _delegatedBotId;
   String? get delegatedBotName => _delegatedBotName;
   VoiceDelegationStateV1? get delegationState => _delegationState;
+
+  /// The activity slot's whole content: one entry per Bot this call asked.
+  List<VoiceDelegationEntryV1> get delegations =>
+      List.unmodifiable(_delegations);
+
+  /// Whether the person paused the call. The upstream is asleep and nothing
+  /// is being listened to or spoken.
+  bool get paused => _paused;
+
+  /// How many subagents finished while the call was paused: the count the
+  /// Resume pill wears.
+  int get finishedWhilePaused =>
+      _delegations.where((entry) => entry.finishedWhilePaused).length;
 
   /// Whether the reply is being heard: the server says it is speaking, or the
   /// speaker still has audio to play after the server moved on.
@@ -188,6 +233,7 @@ class AssistantSessionController extends ChangeNotifier {
     _userMuted = false;
     _microphoneHeld = false;
     _asleep = false;
+    _paused = false;
     _started = false;
     _welcomed = false;
     _barged = false;
@@ -360,6 +406,9 @@ class AssistantSessionController extends ChangeNotifier {
     }
     _notify();
     if (muted || !active) return;
+    // A paused call is not listening: the gate's onset must not wake an
+    // upstream the person deliberately put to sleep.
+    if (_paused) return;
     if (!_started) {
       _opening.addLast(frame.bytes);
       _openingBytes += frame.bytes.length;
@@ -470,6 +519,7 @@ class AssistantSessionController extends ChangeNotifier {
         _upstream = upstream;
         _notify();
       case AssistantDelegationV1(:final botId, :final botName, :final state):
+        _record(botId, botName, state);
         _delegationTimer?.cancel();
         _delegatedBotId = botId;
         _delegatedBotName = botName;
@@ -698,6 +748,7 @@ class AssistantSessionController extends ChangeNotifier {
     _openingBytes = 0;
     _started = false;
     _welcomed = false;
+    _paused = false;
   }
 
   /// A recorder, a speaker or a socket that fails to close — or to carry the
@@ -723,6 +774,68 @@ class AssistantSessionController extends ChangeNotifier {
     _delegatedBotId = null;
     _delegatedBotName = null;
     _delegationState = null;
+    _delegations.clear();
+  }
+
+  /// Moves the ledger's entry for one Bot, or opens it. A finish that lands
+  /// while the call is paused is marked, because the Resume pill counts them.
+  void _record(String botId, String botName, VoiceDelegationStateV1 state) {
+    final entry = VoiceDelegationEntryV1(
+      botId: botId,
+      botName: botName,
+      state: state,
+      finishedWhilePaused: _paused && state == VoiceDelegationStateV1.finished,
+    );
+    final at = _delegations.indexWhere((item) => item.botId == botId);
+    if (at < 0) {
+      _delegations.add(entry);
+      return;
+    }
+    // A Bot asked twice keeps its place in the slot; only a finish that
+    // already counted stays counted.
+    _delegations[at] = entry.finishedWhilePaused || !_delegations[at].finished
+        ? entry
+        : VoiceDelegationEntryV1(
+            botId: botId,
+            botName: botName,
+            state: state,
+            finishedWhilePaused: _delegations[at].finishedWhilePaused,
+          );
+  }
+
+  /// The person's own pause (ADR 0031): the upstream sleeps, the reply stops,
+  /// and nothing wakes it but [resume]. Subagents already admitted carry on —
+  /// their work is a Turn in the Bot, not this socket's — and what they
+  /// finish is counted for the Resume pill.
+  void pause() {
+    if (_paused || !active) return;
+    _paused = true;
+    _asleep = true;
+    _upstream = VoiceUpstreamStateV1.asleep;
+    _gate.reset();
+    unawaited(player.interrupt());
+    _socket?.sendText(encodeVoiceSleepV1());
+    _notify();
+  }
+
+  /// Back on the line. The badge's count is spent the moment the person has
+  /// been told, so it starts again at nothing.
+  void resume() {
+    if (!_paused) return;
+    _paused = false;
+    _asleep = false;
+    _upstream = VoiceUpstreamStateV1.starting;
+    _gate.reset();
+    for (var i = 0; i < _delegations.length; i++) {
+      if (!_delegations[i].finishedWhilePaused) continue;
+      _delegations[i] = VoiceDelegationEntryV1(
+        botId: _delegations[i].botId,
+        botName: _delegations[i].botName,
+        state: _delegations[i].state,
+      );
+    }
+    _socket?.sendText(encodeVoiceWakeV1());
+    _notify();
   }
 
   @override

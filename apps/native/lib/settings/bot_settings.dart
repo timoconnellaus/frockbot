@@ -12,7 +12,9 @@ import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../theme/states.dart';
+import '../voice/appearance.dart';
 import 'model_picker.dart';
+import 'voice_settings.dart';
 
 /// One Bot's own settings: its identity, how it reaches you, and the model it
 /// runs on.
@@ -54,6 +56,10 @@ class BotSettingsController extends ChangeNotifier {
   int? sidebarOrder;
   bool notifications = true;
 
+  /// How this Bot sounds (ADR 0031), or null when it has chosen nothing and
+  /// speaks in its character's default voice.
+  BotVoiceAppearanceV1? voice;
+
   /// The Bot's model override, as the `custom-models` Package stores it, and
   /// null when this Bot follows the account model.
   Object? model;
@@ -92,6 +98,11 @@ class BotSettingsController extends ChangeNotifier {
       sidebarOrder = (profile['sidebarOrder'] as num?)?.toInt();
       notifications =
           ((answer['notifications'] as Map?)?['enabled'] ?? true) == true;
+      // The voice travels with the Bot's own record; a deployment whose
+      // server does not send one yet simply leaves the character's default.
+      voice =
+          BotVoiceAppearanceV1.fromJson(answer['voice']) ??
+          BotVoiceAppearanceV1.fromJson(profile['voice']);
       model =
           ((answer['packageValues'] as Map?)?['custom-models']
               as Map?)?['model'];
@@ -289,6 +300,42 @@ class BotSettingsController extends ChangeNotifier {
     } catch (_) {
       message = 'Couldn’t save these settings. Try again.';
       await _reconcileUnacceptedHide();
+      return false;
+    } finally {
+      saving = false;
+      _changed();
+    }
+  }
+
+  /// How this Bot sounds, saved as the person changes it.
+  ///
+  /// One command, fenced like every other configuration write. It is its own
+  /// save rather than part of [save] because the voice page is a page of its
+  /// own: nothing else on it can be dirty at the same time.
+  Future<bool> saveVoice(BotVoiceAppearanceV1 next) async {
+    if (saving) return false;
+    saving = true;
+    message = null;
+    final previous = voice;
+    voice = next;
+    _changed();
+    try {
+      await _command({
+        'schemaVersion': 1,
+        'type': 'bot/update-voice',
+        'commandId': randomId(),
+        'botId': botId,
+        'voice': next.toJson(),
+      });
+      message = 'Saved.';
+      return true;
+    } on RequestFailure catch (failure) {
+      voice = previous;
+      message = failure.message;
+      return false;
+    } catch (_) {
+      voice = previous;
+      message = 'Couldn’t save this Bot’s voice. Try again.';
       return false;
     } finally {
       saving = false;
@@ -694,6 +741,13 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                 value: state.notifications,
                 enabled: !state.hidden,
                 onChanged: (next) => state.notifications = next,
+              ),
+              // How this Bot sounds (ADR 0031): its own page, because the
+              // presets are a surface of their own and the row says enough.
+              BotVoiceRow(
+                controller: state,
+                characterId: widget.background,
+                primary: widget.primary,
               ),
               if (state.modelAvailable) _model(context),
               ...widget.sections,

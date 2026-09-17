@@ -15,6 +15,10 @@ import 'widget_test.dart' show MemoryStore;
 /// Real shell layout and commands, with only network and audio devices faked.
 class VoiceShellHarness {
   final key = GlobalKey<State<AppShell>>();
+
+  /// The whole window, so a visual test can read the real shell back as an
+  /// image rather than photographing a fixture built to look like it.
+  final boundary = GlobalKey();
   final store = MemoryStore();
   final links = ValueNotifier<String?>(null);
   var dictationSocket = FakeVoiceSocket();
@@ -35,8 +39,9 @@ class VoiceShellHarness {
     WidgetTester tester, {
     required double width,
     required Brightness brightness,
+    double height = 800,
   }) async {
-    tester.view.physicalSize = Size(width, 800);
+    tester.view.physicalSize = Size(width, height);
     tester.view.devicePixelRatio = 1;
     tester.view.padding = FakeViewPadding(bottom: width == 390 ? 34 : 0);
     addTearDown(tester.view.reset);
@@ -52,7 +57,9 @@ class VoiceShellHarness {
           valueListenable: reducedMotion,
           builder: (context, reduced, _) => MediaQuery(
             data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
-            child: AppShell(
+            child: RepaintBoundary(
+              key: boundary,
+              child: AppShell(
               key: key,
               api: api,
               store: store,
@@ -60,6 +67,7 @@ class VoiceShellHarness {
               userId: 'voice-user',
               botLinks: links,
               onSignOut: () async {},
+            ),
             ),
           ),
         ),
@@ -94,9 +102,13 @@ class VoiceShellHarness {
     await tester.pump();
   }
 
-  void showCall() => shell.setState(() {
+  /// The call, as the shell holds it. Naming a Bot puts the call *on* that
+  /// Bot, which is what voice mode is; naming none leaves the call in the
+  /// background, where the dock is.
+  void showCall({String? botId}) => shell.setState(() {
     shell.footerOpen = true;
     shell.footerExiting = false;
+    if (botId != null) shell.voiceBotId = botId;
   });
 
   Future<void> dispose(WidgetTester tester) async {
