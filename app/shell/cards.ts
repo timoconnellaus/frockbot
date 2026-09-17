@@ -38,10 +38,12 @@
  *    so the transcript has something to draw where the send sits. The index is
  *    the bound and a stored record is not: a surface the index does not list
  *    is new to the Session however much of it is still in storage. When the
- *    index is already full, its oldest surface is tombstoned with a refusal
- *    saying it made room, and the new card is written and indexed normally —
- *    trimming loses a row and never a fact, because the send that drew the
- *    trimmed card is still on its Turn's log. So no card send ever leaves no
+ *    index is already full, the oldest surface this Turn is not itself
+ *    writing is tombstoned with a refusal saying it made room, and the new
+ *    card is written and indexed normally — so the order a Turn named its
+ *    surfaces in never changes which card it costs, and a Turn never destroys
+ *    a fold it just computed. Trimming loses a row and never a fact, because
+ *    the send that drew the trimmed card is still on its Turn's log. So no card send ever leaves no
  *    trace, not even a Turn drawing more surfaces than a Session may hold. A
  *    send that can only be refused takes no slot and evicts nothing: the fold
  *    is decided before the index is touched. The records eviction leaves
@@ -472,6 +474,7 @@ function writeAtPointer(
       continue;
     }
     if (typeof child !== "object" || child === null) {
+      if (value === null) return model;
       throw new CardBudgetError(
         `a data-model update at "${path}" runs through a value that is not an object`,
       );
@@ -689,6 +692,56 @@ export interface CardTerminalInputV1 {
 }
 
 /**
+ * Where in `surfaces` the card making room for a newer one is, or -1.
+ *
+ * The oldest surface this Turn is not itself writing goes first, so the order
+ * a Turn named its surfaces in never changes which card it destroys. Only when
+ * every indexed surface is one this Turn is writing — reachable only when the
+ * Turn's own sends outnumber the cap — does it spend one of its own, and then
+ * the oldest it has already folded and will not fold again.
+ */
+function evictionVictimV1(
+  surfaces: readonly string[],
+  writing: ReadonlySet<string>,
+  settled: (surfaceId: string) => boolean,
+): number {
+  const untouched = surfaces.findIndex((surfaceId) => !writing.has(surfaceId));
+  if (untouched !== -1) return untouched;
+  return surfaces.findIndex((surfaceId) => settled(surfaceId));
+}
+
+/** The record a send that could not be folded or indexed leaves behind. */
+function refusedCardRecordV1(
+  current: CardRecordV1 | undefined,
+  surfaceId: string,
+  input: CardTerminalInputV1,
+  refusal: string,
+): CardRecordV1 {
+  const said = refusal.slice(0, CARD_REFUSAL_MAX_V1);
+  return current === undefined
+    ? {
+        schemaVersion: 1,
+        surfaceId,
+        runId: input.run.runId,
+        sessionId: input.run.sessionId,
+        components: [],
+        dataModel: {},
+        revision: 1,
+        createdAt: input.now,
+        updatedAt: input.now,
+        refusal: said,
+        foldedRunId: input.run.runId,
+      }
+    : {
+        ...current,
+        runId: input.run.runId,
+        updatedAt: input.now,
+        refusal: said,
+        foldedRunId: input.run.runId,
+      };
+}
+
+/**
  * The card records one settled Turn contributes to the transaction that
  * settles it, and the surface index they advance.
  *
@@ -711,8 +764,9 @@ export async function cardTerminalRecordsV1(
       ? { schemaVersion: 1 as const, surfaces: [] }
       : decodeCardIndexV1(stored);
   const surfaces = [...index.surfaces];
+  const writing = new Set(sends.map((send) => send.surfaceId));
   let movedIndex = false;
-  for (const send of sends) {
+  for (const [at, send] of sends.entries()) {
     const key = cardKeyV1(send.surfaceId);
     const existing = await input.read<unknown>(key);
     const current =
@@ -731,29 +785,12 @@ export async function cardTerminalRecordsV1(
       folded = foldCardMessagesV1(current, send.messages, context);
     } catch (error) {
       if (!(error instanceof CardBudgetError)) throw error;
-      const refusal = error.message.slice(0, CARD_REFUSAL_MAX_V1);
-      records[key] =
-        current === undefined
-          ? ({
-              schemaVersion: 1,
-              surfaceId: send.surfaceId,
-              runId: input.run.runId,
-              sessionId: input.run.sessionId,
-              components: [],
-              dataModel: {},
-              revision: 1,
-              createdAt: input.now,
-              updatedAt: input.now,
-              refusal,
-              foldedRunId: input.run.runId,
-            } satisfies CardRecordV1)
-          : ({
-              ...current,
-              runId: input.run.runId,
-              updatedAt: input.now,
-              refusal,
-              foldedRunId: input.run.runId,
-            } satisfies CardRecordV1);
+      records[key] = refusedCardRecordV1(
+        current,
+        send.surfaceId,
+        input,
+        error.message,
+      );
       // A refused send takes a slot only if one is free: it never costs
       // another card its life, because the card it could not change is
       // already in storage saying why.
@@ -771,7 +808,21 @@ export async function cardTerminalRecordsV1(
     // drawn, tombstone and all, and is admitted the same way.
     if (!surfaces.includes(send.surfaceId)) {
       if (surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession) {
-        const evicted = surfaces.shift()!;
+        const victimAt = evictionVictimV1(surfaces, writing, (surfaceId) =>
+          records[cardKeyV1(surfaceId)] === undefined
+            ? false
+            : !sends.slice(at + 1).some((s) => s.surfaceId === surfaceId),
+        );
+        if (victimAt === -1) {
+          records[key] = refusedCardRecordV1(
+            current,
+            send.surfaceId,
+            input,
+            "the Session is full of cards this Turn is drawing",
+          );
+          continue;
+        }
+        const evicted = surfaces.splice(victimAt, 1)[0]!;
         const evictedKey = cardKeyV1(evicted);
         const staged = records[evictedKey] as CardRecordV1 | undefined;
         const storedEvicted = await input.read<unknown>(evictedKey);

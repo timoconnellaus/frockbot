@@ -148,6 +148,34 @@ describe("folding a surface", () => {
     expect(card.dataModel).toEqual({ keep: 1 });
   });
 
+  test("a delete through a scalar changes nothing, but a write is refused", () => {
+    const card = foldCardMessagesV1(
+      undefined,
+      [
+        created([], { a: 1 }),
+        message({
+          version: "v1.0",
+          updateDataModel: { surfaceId: SURFACE, path: "/a/b", value: null },
+        }),
+      ],
+      CONTEXT,
+    );
+    expect(card.dataModel).toEqual({ a: 1 });
+    expect(card.revision).toBe(1);
+    expect(() =>
+      foldCardMessagesV1(
+        card,
+        [
+          message({
+            version: "v1.0",
+            updateDataModel: { surfaceId: SURFACE, path: "/a/b", value: 2 },
+          }),
+        ],
+        { ...CONTEXT, runId: "run-2" },
+      ),
+    ).toThrow(/runs through a value that is not an object/);
+  });
+
   test("a delete of — or through — an absent list index changes nothing", () => {
     const drawn = foldCardMessagesV1(
       undefined,
@@ -746,6 +774,74 @@ describe("what one settled Turn writes", () => {
     expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession);
     expect(index.surfaces).not.toContain("s0");
     expect(index.surfaces.at(-1)).toBe("one-too-many");
+  });
+
+  test("a Turn never evicts a surface it is writing, whatever order it named them", async () => {
+    const surfaces = Array.from(
+      { length: A2UI_LIMITS_V1.surfacesPerSession },
+      (_, index) => `s${index}`,
+    );
+    const drawn = (surfaceId: string, label: string) =>
+      foldCardMessagesV1(
+        undefined,
+        [
+          message({
+            version: "v1.0",
+            createSurface: {
+              surfaceId,
+              components: [{ id: "root", component: "Text", text: label }],
+            },
+          }),
+        ],
+        { surfaceId, runId: "run-1", sessionId: "user-1:bot-1", now: NOW },
+      );
+    const stored = {
+      [CARD_INDEX_KEY]: { schemaVersion: 1, surfaces },
+      [cardKeyV1("s0")]: drawn("s0", "Oldest"),
+      [cardKeyV1("s1")]: drawn("s1", "Next"),
+    };
+    // The Turn both updates the oldest indexed surface and draws a new one.
+    const updateOldest = sendEvent("s0", [
+      {
+        version: "v1.0",
+        updateComponents: {
+          surfaceId: "s0",
+          components: [{ id: "root", component: "Text", text: "Fresh" }],
+        },
+      },
+    ]);
+    const drawNew = sendEvent("new", [
+      { version: "v1.0", createSurface: { surfaceId: "new" } },
+    ]);
+    const settle = (events: unknown[]) =>
+      cardTerminalRecordsV1({
+        run: {
+          runId: "run-2",
+          sessionId: "user-1:bot-1",
+          events: events as never,
+        },
+        now: NOW,
+        read: reader(stored),
+      });
+    const oldestFirst = await settle([updateOldest, drawNew]);
+    const newFirst = await settle([drawNew, updateOldest]);
+    // The order the Turn named its surfaces in changes nothing it leaves.
+    expect(oldestFirst).toEqual(newFirst);
+    // Its own update survives: the card that made room is the oldest surface
+    // this Turn is not writing.
+    const updated = decodeCardRecordV1(oldestFirst[cardKeyV1("s0")]);
+    expect(updated.deleted).toBeUndefined();
+    expect(updated.components).toEqual([
+      { id: "root", component: "Text", text: "Fresh" },
+    ]);
+    const evicted = decodeCardRecordV1(oldestFirst[cardKeyV1("s1")]);
+    expect(evicted.deleted).toBe(true);
+    expect(evicted.refusal).toContain("make room");
+    const index = oldestFirst[CARD_INDEX_KEY] as { surfaces: string[] };
+    expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession);
+    expect(index.surfaces).toContain("s0");
+    expect(index.surfaces).not.toContain("s1");
+    expect(index.surfaces.at(-1)).toBe("new");
   });
 
   test("an evicted surface drawn again is indexed again, and still bounded", async () => {

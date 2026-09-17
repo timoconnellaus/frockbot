@@ -28,8 +28,8 @@
 //  * **32 surfaces per Session.** Cards do not tear down, so every one a Bot
 //    draws stays readable; a Session is a conversation, not a canvas. A Bot
 //    that draws past it does not lose the new card: the oldest indexed
-//    surface is tombstoned with a refusal saying it made room for a newer one,
-//    whichever Turn drew it.
+//    surface the drawing Turn is not itself writing is tombstoned with a
+//    refusal saying it made room for a newer one, whichever Turn drew it.
 //  * **128 card records retained per Session.** The index bounds the live
 //    surfaces; this bounds the tombstones they leave behind, which a Session
 //    naming a fresh surface every Turn would otherwise pile up without end.
