@@ -98,10 +98,11 @@ void admitCardV1(CardView card) {
     // "Images load over https only" is the ADR's, and it is asked of every
     // link a component carries, at whatever depth: the standard catalog's
     // Image, Video and AudioPlayer take a `url`, and the Frock families take
-    // an `imageUrl`, a `href`, and lists of rows that each carry one. A
-    // literal link is checked here; a link bound to the data model resolves
-    // after this and is left to the deployment's own content policy, which is
-    // where a fetch is stopped.
+    // a `url`, an `imageUrl`, and lists of rows that each carry one. The walk
+    // reads `url` and any property ending in `Url` or `Uri`, and nothing
+    // else. A literal link is checked here; a link bound to the data model
+    // resolves after this and is left to the deployment's own content policy,
+    // which is where a fetch is stopped.
     if (_carriesInsecureUrl(component)) {
       throw const CardRefusal('This card loads media over an insecure link.');
     }
