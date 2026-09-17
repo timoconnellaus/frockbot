@@ -4,11 +4,16 @@
 // the client beforehand, and that its implementation is host code (ADR 0030).
 // That only holds if the schema the model is taught and the schema the
 // renderer draws against are the same schema. So there is exactly one place a
-// Frock component's data schema is written — `frockCatalogSchemasJsonV1` in
-// `apps/native/lib/cards/frock_catalog/schemas.dart`, beside the Dart that
+// Frock component's data schema is written — one raw JSON string per family
+// under `apps/native/lib/cards/frock_catalog/schemas/`, beside the Dart that
 // builds the `CatalogItem` from it — and this wraps those schemas in the
 // catalog definition A2UI describes and writes
 // `core/protocol-schemas/schema/frock-catalog.json`.
+//
+// The families are read in filename order and merged, which is the order
+// `schemas.dart` lists them in; a component name two families declare is
+// refused here rather than resolved by whichever file happened to be read
+// last.
 //
 // The source is a JSON string inside the Dart rather than Dart map literals
 // because this runs under bun in the `typecheck` gate, where Flutter is not
@@ -19,7 +24,7 @@
 // `--check` fails when the committed file is stale, which is what the gate
 // runs. The standard catalog beside it, `a2ui-basic-catalog.json`, is fetched
 // from a2ui.org once and committed; nothing fetches it at build time.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { format } from "prettier";
 
@@ -27,6 +32,10 @@ const root = resolve(import.meta.dirname, "..");
 const sourcePath = resolve(
   root,
   "apps/native/lib/cards/frock_catalog/schemas.dart",
+);
+const familiesDir = resolve(
+  root,
+  "apps/native/lib/cards/frock_catalog/schemas",
 );
 const outputPath = resolve(
   root,
@@ -46,13 +55,6 @@ function constant(name: string): string {
 const catalogId = constant("frockCatalogIdV1");
 const commonTypesId = constant("a2uiCommonTypesIdV1");
 
-const schemasMatch = source.match(
-  /const frockCatalogSchemasJsonV1 = r'''\n([\s\S]*?)\n''';/,
-);
-if (!schemasMatch?.[1]) {
-  throw new Error("frockCatalogSchemasJsonV1 is missing from schemas.dart");
-}
-
 interface ComponentSchema {
   type?: string;
   description?: string;
@@ -60,7 +62,27 @@ interface ComponentSchema {
   required?: string[];
 }
 
-const schemas = JSON.parse(schemasMatch[1]) as Record<string, ComponentSchema>;
+const families = readdirSync(familiesDir)
+  .filter((name) => name.endsWith(".dart"))
+  .sort();
+if (families.length === 0) throw new Error("the Frock catalog has no families");
+
+const schemas: Record<string, ComponentSchema> = {};
+for (const family of families) {
+  const text = readFileSync(resolve(familiesDir, family), "utf8");
+  const match = text.match(/= r'''\n([\s\S]*?)\n''';/);
+  if (!match?.[1]) {
+    throw new Error(`${family} declares no family of component schemas`);
+  }
+  for (const [name, schema] of Object.entries(
+    JSON.parse(match[1]) as Record<string, ComponentSchema>,
+  )) {
+    if (name in schemas) {
+      throw new Error(`two Frock families declare "${name}"`);
+    }
+    schemas[name] = schema;
+  }
+}
 const names = Object.keys(schemas);
 if (names.length === 0) throw new Error("the Frock catalog declares nothing");
 for (const [name, schema] of Object.entries(schemas)) {
