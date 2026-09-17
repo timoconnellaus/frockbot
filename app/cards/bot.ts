@@ -35,7 +35,6 @@ import {
   decodeCardRecordV1,
   foldCardMessagesV1,
   projectCardV1,
-  trimmableCardKeysV1,
   CARD_INDEX_KEY,
   CARD_PREFIX,
   CARD_REFUSAL_MAX_V1,
@@ -89,11 +88,11 @@ function cardFailureV1(reason: string): string {
  * by its id with `readCard`, so every surface a Session holds stays readable
  * whatever the budget cut.
  *
- * This is also where the Session's card records are bounded. The index caps
- * the live surfaces; the tombstones evicted surfaces leave behind are capped
- * here, on read, because the transaction that settles a Turn cannot list. Past
- * `cardsRetained` the stalest records the index no longer lists are deleted,
- * and a surface it still lists never is.
+ * This is also where the Session's card records are bounded, by the one bound
+ * the Session has. The index caps the live surfaces; once the records the
+ * index no longer lists outnumber `surfacesPerSession` too, the stalest of
+ * them are deleted here, on read, because the transaction that settles a Turn
+ * cannot list. A surface the index still lists is never dropped.
  */
 export async function listCards(
   state: ShellBotStateV1,
@@ -107,9 +106,20 @@ export async function listCards(
   // and trimming loses a row and never a fact: the send that drew the card is
   // still on the durable log of the Turn that made it.
   const indexed = await state.ctx.storage.get<unknown>(CARD_INDEX_KEY);
-  const surfaces =
-    indexed === undefined ? [] : decodeCardIndexV1(indexed).surfaces;
-  const trimmable = new Set(trimmableCardKeysV1(records, surfaces));
+  const live = new Set(
+    indexed === undefined ? [] : decodeCardIndexV1(indexed).surfaces,
+  );
+  const unlisted = records
+    .filter((card) => !live.has(card.surfaceId))
+    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+  const trimmable = new Set(
+    unlisted
+      .slice(
+        0,
+        Math.max(0, unlisted.length - A2UI_LIMITS_V1.surfacesPerSession),
+      )
+      .map((card) => cardKeyV1(card.surfaceId)),
+  );
   for (const key of trimmable) await state.ctx.storage.delete(key);
   records = records
     .filter((card) => !trimmable.has(cardKeyV1(card.surfaceId)))

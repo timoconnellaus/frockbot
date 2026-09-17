@@ -30,14 +30,11 @@
 //    that draws past it does not lose the new card: the oldest indexed
 //    surface the drawing Turn is not itself writing is tombstoned with a
 //    refusal saying it made room for a newer one, whichever Turn drew it.
-//  * **128 card records retained per Session.** The index bounds the live
-//    surfaces; this bounds the tombstones they leave behind, which a Session
-//    naming a fresh surface every Turn would otherwise pile up without end.
-//    Past it, the stalest records the index no longer lists are dropped on
-//    read, and a surface it still lists never is — trimming loses a row and
-//    never a fact,
-//    because the send that drew the trimmed card is still on the durable log
-//    of the Turn that made it.
+//    The tombstones eviction leaves behind answer to this same bound: once
+//    the records the index no longer lists outnumber it, the stalest are
+//    dropped on read, and a surface the index still lists never is — trimming
+//    loses a row and never a fact, because the send that drew the trimmed
+//    card is still on the durable log of the Turn that made it.
 //  * **32 actions per surface**, the number `ActionSchema` already allows a
 //    `ViewDocument`, because the two are the same question: how many things
 //    one surface may ask the kernel to do.
@@ -166,7 +163,6 @@ export const A2UI_LIMITS_V1 = {
   dataModelBytes: 16_000,
   cardRecordBytes: 131_072,
   cardListBytes: 262_144,
-  cardsRetained: 128,
   componentId: 128,
   componentName: 128,
   catalogId: 512,

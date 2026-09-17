@@ -140,7 +140,7 @@ describe("reading a Bot's Cards", () => {
       `2026-09-17T${(10 + Math.floor(minute / 60)).toString().padStart(2, "0")}:${(minute % 60).toString().padStart(2, "0")}:00.000Z`;
     // What a long Session naming a fresh surface every Turn leaves behind:
     // one tombstone per evicted surface, stalest first.
-    const evicted = A2UI_LIMITS_V1.cardsRetained + 40;
+    const evicted = A2UI_LIMITS_V1.surfacesPerSession + 40;
     for (let index = 0; index < evicted; index += 1) {
       const surfaceId = `gone-${index.toString().padStart(3, "0")}`;
       values.set(
@@ -168,7 +168,7 @@ describe("reading a Bot's Cards", () => {
     const kept = [...values.keys()].filter((key) =>
       key.startsWith(CARD_PREFIX),
     );
-    expect(kept).toHaveLength(A2UI_LIMITS_V1.cardsRetained);
+    expect(kept).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession * 2);
     // Every surface the index still lists survived; the stalest tombstones did
     // not, and the listing no longer carries them either.
     for (const surfaceId of live) {

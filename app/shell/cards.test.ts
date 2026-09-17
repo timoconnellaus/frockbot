@@ -214,59 +214,6 @@ describe("folding a surface", () => {
       { ...CONTEXT, runId: "run-3" },
     );
     expect(twice.dataModel).toEqual({ items: ["a", "b"], rows: [] });
-    expect(twice.revision).toBe(2);
-  });
-
-  test("a fold that changed nothing keeps the revision and the timestamp", () => {
-    const drawn = foldCardMessagesV1(
-      undefined,
-      [
-        created([{ id: "root", component: "Text", text: "Ready" }], {
-          keep: 1,
-        }),
-      ],
-      CONTEXT,
-    );
-    expect(drawn.revision).toBe(1);
-    const later = {
-      surfaceId: SURFACE,
-      runId: "run-2",
-      sessionId: "user-1:bot-1",
-      now: "2026-09-17T12:00:00.000Z",
-    };
-    // A delete at a member that is not there — the single-token pointer, so
-    // the walk before the leaf never runs — leaves the surface where it was.
-    const deleted = foldCardMessagesV1(
-      drawn,
-      [
-        message({
-          version: "v1.0",
-          updateDataModel: { surfaceId: SURFACE, path: "/gone", value: null },
-        }),
-      ],
-      later,
-    );
-    expect(deleted.dataModel).toEqual({ keep: 1 });
-    expect(deleted.revision).toBe(1);
-    expect(deleted.updatedAt).toBe(NOW);
-    // And so does folding the same components onto them a second time: a
-    // press drawn against revision 1 is still answerable.
-    const again = foldCardMessagesV1(
-      drawn,
-      [
-        message({
-          version: "v1.0",
-          updateComponents: {
-            surfaceId: SURFACE,
-            components: [{ id: "root", component: "Text", text: "Ready" }],
-          },
-        }),
-      ],
-      later,
-    );
-    expect(again.revision).toBe(1);
-    expect(again.updatedAt).toBe(NOW);
-    expect(again.components).toEqual(drawn.components);
   });
 
   test("a pointer with no path replaces the whole model", () => {
