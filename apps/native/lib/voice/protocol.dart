@@ -197,6 +197,17 @@ String encodeVoiceWakeV1() =>
 String encodeVoiceMuteV1(bool muted) =>
     jsonEncode({'schemaVersion': 1, 'type': 'voice/mute', 'muted': muted});
 
+/// Which Bot this call is with (ADR 0029).
+///
+/// The SDK's own `start_call` frame carries only a preferred format, so the
+/// target is said separately, just before it. A call that never names one
+/// talks to the account's General Bot.
+String encodeVoiceTargetV1(String botId) => jsonEncode({
+  'schemaVersion': 1,
+  'type': 'voice/target',
+  'botId': botId,
+});
+
 String encodeVoiceSpeechV1(bool playing) => jsonEncode({
   'schemaVersion': 1,
   'type': 'voice/speech',
@@ -263,6 +274,16 @@ final class AssistantVoiceStateV1 extends AssistantServerFrameV1 {
 
 enum VoiceDelegationStateV1 { asked, answering, finished }
 
+/// Which Bot the call is with now (ADR 0029).
+///
+/// Sent when the call is admitted and again whenever it is handed over, by
+/// the person pressing voice on another Bot or by the Bot itself calling
+/// `switch_bot`. The screen follows the voice rather than guessing.
+final class AssistantVoiceTargetV1 extends AssistantServerFrameV1 {
+  final String botId;
+  const AssistantVoiceTargetV1(this.botId);
+}
+
 final class AssistantDelegationV1 extends AssistantServerFrameV1 {
   final String botId;
   final String botName;
@@ -300,6 +321,10 @@ AssistantServerFrameV1? decodeAssistantServerFrameV1(String raw) {
         code,
         value['message'] is String ? value['message'] as String : '',
       );
+    case 'voice/target':
+      final botId = value['botId'];
+      if (botId is! String || botId.isEmpty) return null;
+      return AssistantVoiceTargetV1(botId);
     case 'voice/state':
       final upstream = switch (value['upstream']) {
         'asleep' => VoiceUpstreamStateV1.asleep,

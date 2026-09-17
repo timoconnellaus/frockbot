@@ -67,6 +67,12 @@ class ChatPane extends StatefulWidget {
   /// switching Bots must flush into the Bot the capture started on.
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
+
+  /// Starts, moves or ends a voice call with this Bot (ADR 0029).
+  final VoidCallback? onVoice;
+
+  /// Whether the open call is with this Bot.
+  final bool voiceActive;
   final DictationState dictationState;
   final ValueListenable<double>? dictationLevel;
 
@@ -96,6 +102,8 @@ class ChatPane extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
+    this.onVoice,
+    this.voiceActive = false,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
@@ -467,6 +475,8 @@ class _ChatPaneState extends State<ChatPane> {
     skills: skills,
     onDictate: widget.onDictate,
     onStopDictation: widget.onStopDictation,
+    onVoice: widget.onVoice,
+    voiceActive: widget.voiceActive,
     dictationState: widget.dictationState,
     dictationLevel: widget.dictationLevel,
   );
@@ -506,6 +516,12 @@ class ConversationView extends StatefulWidget {
   final VoidCallback? onOpenBilling;
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
+
+  /// Starts, moves or ends a voice call with this Bot (ADR 0029).
+  final VoidCallback? onVoice;
+
+  /// Whether the open call is with this Bot.
+  final bool voiceActive;
   final DictationState dictationState;
   final ValueListenable<double>? dictationLevel;
   final String? background;
@@ -536,6 +552,8 @@ class ConversationView extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
+    this.onVoice,
+    this.voiceActive = false,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.background,
@@ -650,6 +668,8 @@ class _ConversationViewState extends State<ConversationView>
       outOfCredit: widget.outOfCredit,
       onOpenBilling: widget.onOpenBilling,
       onDictate: widget.onDictate,
+      onVoice: widget.onVoice,
+      voiceActive: widget.voiceActive,
       onStopDictation: widget.onStopDictation,
       dictationState: widget.dictationState,
       dictationLevel: widget.dictationLevel,
