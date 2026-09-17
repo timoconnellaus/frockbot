@@ -214,6 +214,12 @@ class FirstRunApi extends NativeApi {
         'notifications': {'enabled': true},
       };
     }
+    // The settings read also asks how the Bot sounds; General has chosen
+    // nothing, so the record carries no voice at all (ADR 0031).
+    final voice = RegExp(r'^/api/bots/([^/]+)/voice$').firstMatch(path);
+    if (voice != null && body == null) {
+      return {'schemaVersion': 1, 'botId': voice.group(1), 'revision': 0};
+    }
     if (path.endsWith('/plugins') && plugins != null) {
       return {
         'schemaVersion': 1,
