@@ -76,6 +76,51 @@ Map<String, Object?> pluginsDocument({
   ],
 };
 
+/// The shape `botPluginsDocumentV1` produces: rows filed under a titled
+/// section per kind, which is what the search box has to look inside.
+Map<String, Object?> botPluginsDocument() => {
+  'schemaVersion': 1,
+  'surfaceId': 'bot-plugins',
+  'revision': 1,
+  'root': {
+    'type': 'group',
+    'orientation': 'column',
+    'children': [
+      {
+        'type': 'group',
+        'orientation': 'column',
+        'title': 'Built in',
+        'children': [
+          {
+            'type': 'group',
+            'orientation': 'column',
+            'title': 'Web',
+            'children': [
+              {'type': 'text', 'text': 'Search and read pages.'},
+              {
+                'type': 'text',
+                'text': 'Reaches example.com.',
+                'style': 'status',
+              },
+              {'type': 'group', 'orientation': 'row', 'children': []},
+            ],
+          },
+          {
+            'type': 'group',
+            'orientation': 'column',
+            'title': 'Files',
+            'children': [
+              {'type': 'text', 'text': 'Keeps notes for later.'},
+              {'type': 'group', 'orientation': 'row', 'children': []},
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  'actions': const [],
+};
+
 void main() {
   group('the projection read back', () {
     test('enablement becomes the User command the settings route takes', () {
@@ -149,6 +194,49 @@ void main() {
         (node) => (node as Map)['type'] == 'group',
       ),
       hasLength(1),
+    );
+    controller.dispose();
+  });
+
+  test('a Bot search matches the plugin inside a kind section, not the kind', () async {
+    final controller = PluginsController(
+      SettingsApi(MemoryStore(), (_, _) async => botPluginsDocument()),
+      'tim',
+      botId: 'bot-1',
+    );
+    await controller.load();
+    controller.search('web');
+    var root = (controller.document!.toJson() as Map)['root'] as Map;
+    var sections = (root['children'] as List)
+        .whereType<Map>()
+        .where((node) => node['type'] == 'group')
+        .toList();
+    expect(sections, hasLength(1));
+    expect(
+      (sections.single['children'] as List)
+          .whereType<Map>()
+          .map((row) => row['title']),
+      ['Web'],
+    );
+    controller.search('notes');
+    root = (controller.document!.toJson() as Map)['root'] as Map;
+    sections = (root['children'] as List)
+        .whereType<Map>()
+        .where((node) => node['type'] == 'group')
+        .toList();
+    expect(
+      (sections.single['children'] as List)
+          .whereType<Map>()
+          .map((row) => row['title']),
+      ['Files'],
+    );
+    controller.search('no such plugin');
+    root = (controller.document!.toJson() as Map)['root'] as Map;
+    expect(
+      (root['children'] as List).where(
+        (node) => (node as Map)['type'] == 'group',
+      ),
+      isEmpty,
     );
     controller.dispose();
   });

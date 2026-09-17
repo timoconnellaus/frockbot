@@ -28,22 +28,41 @@ class PluginsController extends ViewSurfaceController {
   wire.ViewDocument? _document;
   wire.ViewDocument? _all;
   String _query = '';
+
+  /// A row matches on its own name and the lines under it.
+  bool _matches(Map node) => [
+    node['title'],
+    ...(node['children'] as List? ?? const []).whereType<Map>().map(
+      (child) => child['text'] ?? '',
+    ),
+  ].join(' ').toLowerCase().contains(_query);
+
+  /// A Bot's Plugins document files its rows under a titled section per kind,
+  /// so a section is filtered by the rows inside it and dropped when none of
+  /// them match; a flat document is matched as the row it is.
+  Object? _filtered(Object? node) {
+    if (node is! Map || node['type'] != 'group') return node;
+    final rows = (node['children'] as List? ?? const [])
+        .whereType<Map>()
+        .where((child) => child['type'] == 'group' && child['title'] != null)
+        .toList();
+    if (rows.isEmpty) return _matches(node) ? node : null;
+    final kept = rows.where(_matches).toList();
+    if (kept.isEmpty) return null;
+    return {...node.cast<String, Object?>(), 'children': kept};
+  }
+
   void search(String query) {
     _query = query.trim().toLowerCase();
     final raw = _all?.toJson();
     if (raw is! Map) return;
     final root = raw['root'] as Map;
-    root['children'] = (root['children'] as List).where((node) {
-      if (node is! Map || node['type'] != 'group' || _query.isEmpty) {
-        return true;
-      }
-      return [
-        node['title'],
-        ...(node['children'] as List).whereType<Map>().map(
-          (child) => child['text'] ?? '',
-        ),
-      ].join(' ').toLowerCase().contains(_query);
-    }).toList();
+    root['children'] = _query.isEmpty
+        ? (root['children'] as List)
+        : (root['children'] as List)
+              .map(_filtered)
+              .where((node) => node != null)
+              .toList();
     if (_query.isNotEmpty &&
         !(root['children'] as List).any(
           (node) => (node as Map)['type'] == 'group',
