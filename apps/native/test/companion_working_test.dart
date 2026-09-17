@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
+import 'package:frockbot_native/shell/run_view.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/transcript.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -47,8 +48,78 @@ Future<void> capture(WidgetTester tester, String name) async {
   });
 }
 
+/// A Turn streaming beside a second Turn queued behind it.
+class SupersededTransport extends FakeTransport {
+  SupersededTransport(super.store);
+  @override
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
+    'runs': [
+      {
+        ...running(),
+        'events': [
+          {
+            'type': 'tool/call',
+            'call': {'id': 'call-1', 'name': 'search'},
+          },
+        ],
+      },
+      {
+        'runId': 'send-2',
+        'admittedAt': '2026-09-05T01:00:30Z',
+        'input': 'And one more thing',
+        'status': 'running',
+        'queued': true,
+        'events': <Object>[],
+      },
+    ],
+    'page': {'truncated': false},
+  };
+}
+
 void main() {
   setUpAll(loadFonts);
+
+  testWidgets('the badge is paced by the Turn running, not the one queued', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemoryStore();
+    final c = ChatController(
+      transport: SupersededTransport(store),
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-3',
+    );
+    await c.initialize();
+    c.connection = ConnectionState.connected;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: ChatPane(
+            controller: c,
+            onReconnect: () async {},
+            background: 'fox',
+            primary: '#ff6b57',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(c.activeRunId, 'send-1');
+    final pace = tester.widget<WorkingPace>(find.byType(WorkingPace));
+    // The queued Turn has nothing to read a tempo from; the one doing the
+    // work carries the tool the badge should quicken for.
+    expect(pace.line?.runId, 'send-1');
+    expect(pace.line?.tools, hasLength(1));
+
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
 
   for (final width in [390.0, 1280.0]) {
     testWidgets('a running Turn is worn by the companion, not the thread, at '

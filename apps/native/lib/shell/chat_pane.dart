@@ -274,14 +274,16 @@ class _ChatPaneState extends State<ChatPane> {
     final avatarSize = MediaQuery.sizeOf(context).width <= 640 ? 50.0 : 64.0;
     final runs = projectRuns(c.runs);
     final working = c.activeRunId != null;
-    // The Turn the companion's badge is paced by: the assistant line still
-    // streaming, or none while the submission is being delivered.
+    // The Turn the companion's badge is paced by: the assistant line of the
+    // Turn actually running, or none while the submission is being delivered.
+    // A Turn queued behind it has nothing to read a tempo from.
     final runningLine = working
         ? runs
               .where(
                 (line) =>
                     line.role == LineRole.assistant &&
-                    line.status == LineStatus.streaming,
+                    line.status == LineStatus.streaming &&
+                    line.runId == c.activeRunId,
               )
               .lastOrNull
         : null;

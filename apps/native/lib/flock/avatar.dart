@@ -5,7 +5,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:rive/rive.dart' as rive;
 
@@ -198,7 +197,6 @@ class CharacterAvatar extends StatefulWidget {
   final CharacterActivity activity;
   final CharacterEmotion emotion;
   final CharacterMotion motion;
-  final bool enableGaze;
 
   /// Where the eyes look, as a point in the artboard's own frame: `-1` to `1`
   /// on each axis, or nothing when there is nowhere to look. The surface
@@ -228,7 +226,6 @@ class CharacterAvatar extends StatefulWidget {
     this.activity = CharacterActivity.idle,
     this.emotion = CharacterEmotion.neutral,
     this.motion = CharacterMotion.active,
-    this.enableGaze = false,
     this.gaze,
     this.hold,
     this.workingRing = false,
@@ -432,23 +429,6 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     model.color('eyeColor')?.value = definition.eyes;
   }
 
-  void _look(PointerHoverEvent event) {
-    // A surface that feeds the gaze owns it; the square's own hover would
-    // only fight it for the last word.
-    if (widget.gaze != null) return;
-    if (!widget.enableGaze ||
-        defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS) {
-      return;
-    }
-    final model = _loaded?.viewModelInstance;
-    if (model == null) return;
-    model.number('lookX')?.value =
-        ((event.localPosition.dx / widget.size) * 2 - 1).clamp(-1.0, 1.0);
-    model.number('lookY')?.value =
-        ((event.localPosition.dy / widget.size) * 2 - 1).clamp(-1.0, 1.0);
-  }
-
   @override
   Widget build(BuildContext context) {
     final avatar = SizedBox.square(
@@ -508,13 +488,8 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
       },
       onExit: (_) {
         setState(() => _localHovered = false);
-        if (widget.gaze == null) {
-          _loaded?.viewModelInstance?.number('lookX')?.value = 0;
-          _loaded?.viewModelInstance?.number('lookY')?.value = 0;
-        }
         _sync();
       },
-      onHover: _look,
       // Its own layer: a frame the artboard redraws is then the artboard's
       // picture alone, not the composer, the thread and the sidebar with it.
       child: RepaintBoundary(child: avatar),
