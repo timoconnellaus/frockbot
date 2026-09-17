@@ -219,6 +219,8 @@ Load one with `skill_load` — `{"path": "managed/a2ui", "reference": "forms.md"
   `CollapsibleText`, `ApprovalActions`, `Receipt`.
 - `structure.md` — the frame: `CardHeader`, `SectionHeader`, `Callout`,
   `IdentityRow`.
+- `data.md` — numbers and rows: `MetricTile`, `ProgressBar`, `DataTable`,
+  `Timeline`.
 - `examples.md` — three complete cards, end to end.
 
 Start with `frock.md` and `structure.md`: most cards are a `CardHeader` and a

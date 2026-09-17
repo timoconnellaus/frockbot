@@ -10,7 +10,6 @@ import 'package:frockbot_native/cards/catalog.dart';
 import 'package:frockbot_native/cards/chat_card.dart';
 import 'package:frockbot_native/cards/client.dart';
 import 'package:frockbot_native/cards/frock_catalog/frock_catalog.dart';
-import 'package:frockbot_native/cards/frock_catalog/schemas.dart';
 import 'package:frockbot_native/cards/surface.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/shell/transcript_model.dart';

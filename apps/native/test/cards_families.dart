@@ -8,7 +8,6 @@
 library;
 
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -79,6 +78,9 @@ Future<List<Map<String, Object?>>> drawFamily(
   Map<String, Object?>? dataModel,
   double width = 412,
   bool sendDataModel = false,
+  // A surface that never stops moving — an indeterminate `ProgressBar` — has
+  // no settled frame to wait for, so those tests pump a fixed number instead.
+  bool settle = true,
 }) async {
   tester.view.physicalSize = Size(width * 2, 900 * 2);
   tester.view.devicePixelRatio = 2;
@@ -125,7 +127,13 @@ Future<List<Map<String, Object?>>> drawFamily(
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    for (var frame = 0; frame < 3; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+  }
   return posts;
 }
 

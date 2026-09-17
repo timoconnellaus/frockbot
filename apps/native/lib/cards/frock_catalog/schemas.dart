@@ -33,6 +33,7 @@ library;
 import 'dart:convert';
 
 import 'schemas/core.dart';
+import 'schemas/data.dart';
 import 'schemas/structure.dart';
 
 /// The catalog the Frock components are named under. Reverse-domain and
@@ -48,6 +49,7 @@ const a2uiCommonTypesIdV1 =
 /// Every family's schemas, in the filename order the generator reads them in.
 const List<String> frockCatalogSchemaFamiliesV1 = [
   frockCoreSchemasJsonV1,
+  frockDataSchemasJsonV1,
   frockStructureSchemasJsonV1,
 ];
 

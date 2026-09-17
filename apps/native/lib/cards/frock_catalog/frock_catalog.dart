@@ -26,10 +26,12 @@ library;
 import 'package:genui/genui.dart';
 
 import 'core.dart';
+import 'data.dart';
 import 'structure.dart';
 
 export 'common.dart';
 export 'core.dart';
+export 'data.dart';
 export 'schemas.dart';
 export 'structure.dart';
 export 'tone.dart';
@@ -37,5 +39,6 @@ export 'tone.dart';
 /// Every Frock component this build draws, family by family.
 final List<CatalogItem> frockCatalogItemsV1 = List.unmodifiable([
   ...frockCoreItemsV1,
+  ...frockDataItemsV1,
   ...frockStructureItemsV1,
 ]);
