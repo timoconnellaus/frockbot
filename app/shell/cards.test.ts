@@ -1066,6 +1066,58 @@ describe("what one settled Turn writes", () => {
     expect(index.surfaces).toHaveLength(A2UI_LIMITS_V1.surfacesPerSession + 1);
   });
 
+  /**
+   * The relaxed slot is one slot, not one per Turn. Turn after Turn names a
+   * new surface ahead of every surface it is about to write, and the index
+   * holds at the cap plus the single relaxed slot rather than ratcheting up.
+   */
+  test("Turn after Turn exhausting the Session never grows the index again", async () => {
+    const store: Record<string, unknown> = {
+      [CARD_INDEX_KEY]: {
+        schemaVersion: 1,
+        surfaces: Array.from(
+          { length: A2UI_LIMITS_V1.surfacesPerSession },
+          (_, index) => `s${index}`,
+        ),
+      },
+    };
+    const lengths: number[] = [];
+    for (const turn of [1, 2, 3, 4]) {
+      const indexed = (store[CARD_INDEX_KEY] as { surfaces: string[] })
+        .surfaces;
+      const records = await cardTerminalRecordsV1({
+        run: {
+          runId: `run-${turn}`,
+          sessionId: "user-1:bot-1",
+          events: [
+            sendEvent(`extra-${turn}`, [
+              {
+                version: "v1.0",
+                createSurface: { surfaceId: `extra-${turn}` },
+              },
+            ]),
+            ...indexed.map((surfaceId) =>
+              sendEvent(surfaceId, [
+                { version: "v1.0", createSurface: { surfaceId } },
+              ]),
+            ),
+          ],
+        },
+        now: NOW,
+        read: reader(store),
+      });
+      Object.assign(store, records);
+      expect(
+        decodeCardRecordV1(store[cardKeyV1(`extra-${turn}`)]).refusal,
+      ).toContain("full of cards this Turn is drawing");
+      lengths.push(
+        (store[CARD_INDEX_KEY] as { surfaces: string[] }).surfaces.length,
+      );
+    }
+    const cap = A2UI_LIMITS_V1.surfacesPerSession;
+    expect(lengths).toEqual([cap + 1, cap + 1, cap + 1, cap + 1]);
+  });
+
   test("a recovered Turn does not fold twice onto a surface evicted in between", async () => {
     const drawn = foldCardMessagesV1(
       undefined,

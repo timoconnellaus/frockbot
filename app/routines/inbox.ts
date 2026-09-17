@@ -289,8 +289,10 @@ export function pendingBotInputIdV1(input: PendingBotInputV1): string {
   if (input.kind === "superseded-turn") return `superseded-turn:${input.runId}`;
   // A surface can be pressed more than once, and two presses in the same
   // millisecond are still two presses — a Workers isolate advances its clock
-  // only on I/O, so the instant cannot tell them apart. The press's own minted
-  // id can: two presses are two inputs, and a replay of one is still one.
+  // only on I/O, so the instant cannot tell them apart. The press id can: it
+  // is the client's own `commandId` when it sent one, so a retried post is the
+  // same press and a new id is a new press, and a minted one otherwise, where
+  // every post is a press of its own.
   if (input.kind === "card-action") return `card-action:${input.pressId}`;
   return `machine-result:${input.commandId}`;
 }

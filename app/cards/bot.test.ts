@@ -445,6 +445,28 @@ describe("the three routes", () => {
     expect(queued[0]!.pressId).not.toBe(queued[1]!.pressId);
   });
 
+  test("two posts carrying one commandId are one press, two ids are two", async () => {
+    const values = new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]);
+    const { state } = harness(values);
+    const command = {
+      schemaVersion: 1 as const,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "pick-tuesday" },
+    };
+    await cardAction(state, IDENTITY, { ...command, commandId: "press-1" });
+    await cardAction(state, IDENTITY, { ...command, commandId: "press-1" });
+    const retried = [...values.keys()].filter((key) =>
+      key.startsWith("routine-wake:"),
+    );
+    expect(retried).toHaveLength(1);
+    await cardAction(state, IDENTITY, { ...command, commandId: "press-2" });
+    const both = [...values.keys()].filter((key) =>
+      key.startsWith("routine-wake:"),
+    );
+    expect(both).toHaveLength(2);
+  });
+
   test("a context past what the preamble carries is refused, never cut", async () => {
     // The Bot reads this verbatim, so half of a JSON object is worse than a
     // refusal the person is told about.

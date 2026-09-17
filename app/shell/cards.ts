@@ -56,9 +56,12 @@
  *    That refusal takes an index slot even though the condition that raised it
  *    is that none was free: the index runs one past the cap to hold it, and a
  *    Turn that keeps naming new surfaces spends that same relaxed slot rather
- *    than growing the index further. Every one of those paths writes a record
- *    and indexes it, so no card send ever leaves no trace, not even a Turn
- *    drawing more surfaces than a Session may hold.
+ *    than growing the index further. One past the cap is the whole of it — a
+ *    Turn that inherits an index already there writes its refusal record
+ *    without a slot rather than ratcheting the bound up a Turn at a time, and
+ *    that one record is the only one the listing retention may reach. Every
+ *    one of those paths writes a record, so no card send ever leaves no trace,
+ *    not even a Turn drawing more surfaces than a Session may hold.
  *
  *    Trimming loses a row and never a fact, because the send that drew the
  *    trimmed card is still on its Turn's log. The records eviction leaves
@@ -156,12 +159,13 @@ function text(value: unknown, maximum: number, label: string): string {
 }
 
 /**
- * A surface id, held to the same shape the send decoder holds it to. A surface
- * id is a durable key and a URL path segment, so one that could never have
- * been written is refused wherever it is read rather than only where it would
- * be stored.
+ * An id at this seam — a surface id, or a client's id for one press — held to
+ * the same shape the send decoder holds a surface id to. A surface id is a
+ * durable key and a URL path segment, so one that could never have been
+ * written is refused wherever it is read rather than only where it would be
+ * stored, and a press id is keyed on durably beside it.
  */
-function surfaceIdentifier(value: unknown, label: string): string {
+function identifierV1(value: unknown, label: string): string {
   const said = text(value, A2UI_LIMITS_V1.surfaceId, label);
   if (!A2UI_IDENTIFIER_V1.test(said)) {
     throw new CardDecodeError(
@@ -194,7 +198,7 @@ export function decodeCardSurfaceIdV1(
   value: unknown,
   label = "card surfaceId",
 ): string {
-  return surfaceIdentifier(value, label);
+  return identifierV1(value, label);
 }
 
 function timestamp(value: unknown, label: string): string {
@@ -266,7 +270,7 @@ export function decodeCardRecordV1(
   }
   return {
     schemaVersion: 1,
-    surfaceId: surfaceIdentifier(candidate.surfaceId, `${label} surfaceId`),
+    surfaceId: identifierV1(candidate.surfaceId, `${label} surfaceId`),
     runId: text(candidate.runId, MAX_ID_LENGTH, `${label} runId`),
     ...(candidate.foldedRunId === undefined
       ? {}
@@ -335,7 +339,7 @@ export function decodeCardIndexV1(
   return {
     schemaVersion: 1,
     surfaces: candidate.surfaces.map((surfaceId, index) =>
-      surfaceIdentifier(surfaceId, `${label} surfaces[${index}]`),
+      identifierV1(surfaceId, `${label} surfaces[${index}]`),
     ),
   };
 }
@@ -817,10 +821,17 @@ export async function cardTerminalRecordsV1(
           );
           // It takes the relaxed slot the header describes, so the one record
           // saying why the card is not there is out of the listing retention's
-          // reach; the next such refusal spends this slot rather than another.
-          surfaces.push(send.surfaceId);
-          relaxedSurfaces.add(send.surfaceId);
-          movedIndex = true;
+          // reach. The index runs at most one past the cap to hold it: a
+          // further refusal in this Turn spends that same slot through the
+          // eviction above, and one in a Turn that inherits a full-plus-one
+          // index is written without a slot rather than growing the index
+          // again. No older refusal can be spent for it — reaching here means
+          // every indexed surface is one this Turn is writing to.
+          if (surfaces.length < A2UI_LIMITS_V1.surfacesPerSession + 1) {
+            surfaces.push(send.surfaceId);
+            relaxedSurfaces.add(send.surfaceId);
+            movedIndex = true;
+          }
           continue;
         }
         const evicted = surfaces.splice(victimAt, 1)[0]!;
@@ -919,6 +930,12 @@ export interface CardActionCommandV1 {
   event: A2uiActionV1;
   /** The surface's data model, when it was created with `sendDataModel`. */
   dataModel?: A2uiJsonObjectV1;
+  /**
+   * The client's own id for this press. A retry that keeps it is the same
+   * press; a new id is a new press. Absent, the kernel mints one, and every
+   * post is its own press.
+   */
+  commandId?: string;
 }
 
 export function decodeCardActionCommandV1(
@@ -929,7 +946,7 @@ export function decodeCardActionCommandV1(
   exactKeys(
     candidate,
     ["schemaVersion", "surfaceId", "revision", "event"],
-    ["dataModel"],
+    ["dataModel", "commandId"],
     label,
   );
   if (candidate.schemaVersion !== 1) {
@@ -960,10 +977,15 @@ export function decodeCardActionCommandV1(
   }
   return {
     schemaVersion: 1,
-    surfaceId: surfaceIdentifier(candidate.surfaceId, `${label} surfaceId`),
+    surfaceId: identifierV1(candidate.surfaceId, `${label} surfaceId`),
     revision: candidate.revision as number,
     event,
     ...(dataModel === undefined ? {} : { dataModel }),
+    ...(candidate.commandId === undefined
+      ? {}
+      : {
+          commandId: identifierV1(candidate.commandId, `${label} commandId`),
+        }),
   };
 }
 
@@ -1051,7 +1073,7 @@ export function decodeCardViewV1(value: unknown, label = "card"): CardViewV1 {
   }
   return {
     schemaVersion: 1,
-    surfaceId: surfaceIdentifier(candidate.surfaceId, `${label} surfaceId`),
+    surfaceId: identifierV1(candidate.surfaceId, `${label} surfaceId`),
     revision: candidate.revision as number,
     components: candidate.components as A2uiComponentV1[],
     dataModel: record(candidate.dataModel, `${label} dataModel`),

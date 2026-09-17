@@ -332,7 +332,9 @@ export async function cardAction(
     await enqueuePendingBotInputV1(transaction, {
       schemaVersion: 1,
       kind: "card-action",
-      pressId: crypto.randomUUID(),
+      // The client's own id makes a retried post the same press; without one
+      // every post is a press of its own.
+      pressId: command.commandId ?? crypto.randomUUID(),
       surfaceId: command.surfaceId,
       name: command.event.name,
       ...(context === undefined ? {} : { context }),
