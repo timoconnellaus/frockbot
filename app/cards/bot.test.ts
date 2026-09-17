@@ -217,6 +217,21 @@ describe("the three routes", () => {
     expect(() => decodeCardActionReceiptV1(receipt)).not.toThrow();
   });
 
+  test("a plugin failure that said nothing still answers a readable receipt", async () => {
+    const { state } = harness(
+      new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]),
+      "   ",
+    );
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure).toMatch(/without saying why/);
+    expect(() => decodeCardActionReceiptV1(receipt)).not.toThrow();
+  });
+
   test("anything else becomes the Bot's next input, never the User's words", async () => {
     const values = new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]);
     const { state } = harness(values);

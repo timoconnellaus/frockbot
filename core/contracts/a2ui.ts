@@ -32,6 +32,12 @@
 //    one surface may ask the kernel to do.
 //  * **16,000 bytes of data model.** A settled card's state, not its content
 //    store; anything larger belongs behind a tool call.
+//  * **131,072 bytes for one folded record.** The bounds above are each on
+//    one part of a surface, and components carry across sends, so this is the
+//    one on the whole of it: room for 128 components beside a full data model,
+//    and far enough under the Durable Object per-value limit that a fold is
+//    refused in words on the card rather than by a `put` throwing inside the
+//    transaction settling the Turn.
 //
 // A message past any of them is refused whole, not truncated: a partial
 // surface misrepresents what its author said.
@@ -142,6 +148,7 @@ export const A2UI_LIMITS_V1 = {
   surfacesPerSession: 32,
   actionsPerSurface: 32,
   dataModelBytes: 16_000,
+  cardRecordBytes: 131_072,
   componentId: 128,
   componentName: 128,
   catalogId: 512,
@@ -317,6 +324,17 @@ function decodeDataModel(value: unknown, label: string): A2uiJsonObjectV1 {
 }
 
 /**
+ * The member names a data model may not be written through. They are not
+ * data: an untrusted author naming one is reaching for the prototype chain,
+ * not for a key, so the pointer is refused here like any other malformed one.
+ */
+const A2UI_POINTER_RESERVED_V1 = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+/**
  * A JSON Pointer (RFC 6901). Empty is the whole document; anything else is a
  * run of `/`-prefixed tokens. Refused here rather than at the fold, because a
  * pointer that cannot be resolved is a write with nowhere to land.
@@ -335,6 +353,10 @@ export function a2uiPointerV1(value: unknown, label: string): string {
     // pointer two implementations would resolve differently.
     if (/~(?![01])/.test(token)) {
       throw new Error(`${label} has an invalid JSON Pointer escape`);
+    }
+    const member = token.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (A2UI_POINTER_RESERVED_V1.has(member)) {
+      throw new Error(`${label} names the reserved member "${member}"`);
     }
   }
   return value;

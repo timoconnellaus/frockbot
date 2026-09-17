@@ -163,6 +163,27 @@ describe("what the decoder refuses", () => {
       }),
     ).toThrow(/JSON Pointer/);
   });
+
+  test("a pointer reaching for the prototype chain rather than a key", () => {
+    for (const member of ["__proto__", "constructor", "prototype"]) {
+      expect(() =>
+        decodeA2uiAgentMessageV1({
+          version: "v1.0",
+          updateDataModel: {
+            surfaceId: surface,
+            path: `/${member}/pwn`,
+            value: 1,
+          },
+        }),
+      ).toThrow(/reserved member/);
+      expect(() =>
+        decodeA2uiAgentMessageV1({
+          version: "v1.0",
+          updateDataModel: { surfaceId: surface, path: `/${member}`, value: 1 },
+        }),
+      ).toThrow(/reserved member/);
+    }
+  });
 });
 
 describe("the budgets", () => {

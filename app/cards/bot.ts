@@ -60,12 +60,14 @@ export class CardStaleError extends Error {
 }
 
 /**
- * Why a press could not be answered, bounded to what the receipt carries. A
- * plugin that failed to mount can say so at any length; a press that worked
- * must never come back as a refused receipt because the words were too long.
+ * Why a press could not be answered, bounded at both ends to what the receipt
+ * carries. A plugin that failed to mount can say so at any length, and one
+ * that threw nothing at all says nothing; neither may come back as a refused
+ * receipt, so the words are cut to fit and a sentence stands in for silence.
  */
 function cardFailureV1(reason: string): string {
-  return reason.slice(0, CARD_REFUSAL_MAX_V1);
+  const said = reason.trim().slice(0, CARD_REFUSAL_MAX_V1);
+  return said === "" ? "the plugin handler stopped without saying why" : said;
 }
 
 /**

@@ -17,7 +17,8 @@
  *  * **Fold semantics are the specification's.** `createSurface` replaces the
  *    surface, `updateComponents` upserts by `id` and keeps the order the
  *    components were first seen in, `updateDataModel` writes `value` at its
- *    JSON Pointer — `null` deletes the key — and `deleteSurface` tombstones
+ *    JSON Pointer — resolved as RFC 6901 does, through lists as well as
+ *    objects, and `null` deletes the member — and `deleteSurface` tombstones
  *    the record rather than removing it, because the send that drew the card
  *    is still on the Turn's log and the transcript still has to say something.
  *
@@ -266,10 +267,88 @@ function pointerTokens(path: string | undefined): string[] {
     .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
 }
 
+/** An array index as RFC 6901 spells one: digits, and no leading zero. */
+const POINTER_INDEX = /^(?:0|[1-9][0-9]*)$/;
+
+type PointerParent = Record<string, unknown> | unknown[];
+
 /**
- * Write `value` at `path` in `model`. `null` deletes the key, as the
- * specification says; a pointer through a value that is not an object is a
- * write with nowhere to land, and is refused rather than made to fit.
+ * The index `token` names in `array`, or a refusal. The one-past-the-end `-`
+ * belongs to the leaf of a write, so a walk through it has nothing to descend
+ * into and is refused with the rest.
+ */
+function pointerIndex(
+  array: readonly unknown[],
+  token: string,
+  path: string | undefined,
+): number {
+  if (!POINTER_INDEX.test(token)) {
+    throw new CardBudgetError(
+      `a data-model update at "${path}" names "${token}" in a list, which is not an index`,
+    );
+  }
+  const index = Number(token);
+  if (index >= array.length) {
+    throw new CardBudgetError(
+      `a data-model update at "${path}" names index ${index} of a list that has ${array.length}`,
+    );
+  }
+  return index;
+}
+
+/** The member `token` names, read as an own property and never inherited. */
+function readMember(
+  parent: PointerParent,
+  token: string,
+  path: string | undefined,
+): unknown {
+  if (Array.isArray(parent)) {
+    return parent[pointerIndex(parent, token, path)];
+  }
+  return Object.hasOwn(parent, token) ? parent[token] : undefined;
+}
+
+/** Put `value` at `token`, always as an own property of `parent`. */
+function writeMember(
+  parent: PointerParent,
+  token: string,
+  value: unknown,
+  path: string | undefined,
+): void {
+  if (Array.isArray(parent)) {
+    if (token === "-") {
+      parent.push(value);
+      return;
+    }
+    parent[pointerIndex(parent, token, path)] = value;
+    return;
+  }
+  Object.defineProperty(parent, token, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+/** Take `token` out: a list closes over the gap, an object loses the key. */
+function deleteMember(
+  parent: PointerParent,
+  token: string,
+  path: string | undefined,
+): void {
+  if (Array.isArray(parent)) {
+    parent.splice(pointerIndex(parent, token, path), 1);
+    return;
+  }
+  delete parent[token];
+}
+
+/**
+ * Write `value` at `path` in `model`. `null` deletes the member, as the
+ * specification says; a numeric token against a list indexes it, and `-` at
+ * the leaf appends. A pointer through a scalar is a write with nowhere to
+ * land, and is refused rather than made to fit.
  */
 function writeAtPointer(
   model: A2uiJsonObjectV1,
@@ -285,32 +364,34 @@ function writeAtPointer(
     }
     return { ...value };
   }
-  // The walk is plain objects: the stored types spell JSON out to a fixed
-  // depth so a Card can cross a Durable Object RPC boundary, and that depth
-  // is a statement about what crosses the seam, not about how a pointer is
-  // resolved. The byte budget is what actually bounds a data model.
+  // The walk is plain objects and arrays: the stored types spell JSON out to a
+  // fixed depth so a Card can cross a Durable Object RPC boundary, and that
+  // depth is a statement about what crosses the seam, not about how a pointer
+  // is resolved. The byte budget is what actually bounds a data model.
   const next = { ...model } as Record<string, unknown>;
-  let cursor = next;
+  let cursor: PointerParent = next;
   for (const token of tokens.slice(0, -1)) {
-    const child = cursor[token];
+    const child = readMember(cursor, token, path);
     if (child === undefined) {
       const created: Record<string, unknown> = {};
-      cursor[token] = created;
+      writeMember(cursor, token, created, path);
       cursor = created;
       continue;
     }
-    if (typeof child !== "object" || child === null || Array.isArray(child)) {
+    if (typeof child !== "object" || child === null) {
       throw new CardBudgetError(
         `a data-model update at "${path}" runs through a value that is not an object`,
       );
     }
-    const copied = { ...(child as Record<string, unknown>) };
-    cursor[token] = copied;
+    const copied = Array.isArray(child)
+      ? [...child]
+      : { ...(child as Record<string, unknown>) };
+    writeMember(cursor, token, copied, path);
     cursor = copied;
   }
   const leaf = tokens.at(-1)!;
-  if (value === null) delete cursor[leaf];
-  else cursor[leaf] = value;
+  if (value === null) deleteMember(cursor, leaf, path);
+  else writeMember(cursor, leaf, value, path);
   return next as A2uiJsonObjectV1;
 }
 
@@ -342,6 +423,11 @@ function assertSurfaceBudgets(card: CardRecordV1): void {
   if (a2uiByteLengthV1(card.dataModel) > A2UI_LIMITS_V1.dataModelBytes) {
     throw new CardBudgetError(
       `the data model exceeds ${A2UI_LIMITS_V1.dataModelBytes} bytes`,
+    );
+  }
+  if (a2uiByteLengthV1(card) > A2UI_LIMITS_V1.cardRecordBytes) {
+    throw new CardBudgetError(
+      `the card exceeds ${A2UI_LIMITS_V1.cardRecordBytes} bytes`,
     );
   }
 }

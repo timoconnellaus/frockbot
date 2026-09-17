@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   A2UI_LIMITS_V1,
+  a2uiByteLengthV1,
   decodeA2uiAgentMessageV1,
   type A2uiAgentMessageV1,
 } from "@frockbot/core/contracts";
@@ -176,29 +177,98 @@ describe("folding a surface", () => {
     ).toThrow(CardBudgetError);
   });
 
-  test("a pointer through a list is refused rather than flattening it", () => {
+  function writes(path: string, value: unknown) {
+    return message({
+      version: "v1.0",
+      updateDataModel: { surfaceId: SURFACE, path, value },
+    });
+  }
+
+  test("a pointer resolves through a list, as RFC 6901 says", () => {
     const first = foldCardMessagesV1(
+      undefined,
+      [created([], { items: ["a", "b"], rows: [{ done: false }] })],
+      CONTEXT,
+    );
+    const second = foldCardMessagesV1(
+      first,
+      [
+        writes("/items/0", "c"),
+        writes("/items/-", "d"),
+        writes("/rows/0/done", true),
+      ],
+      { ...CONTEXT, runId: "run-2" },
+    );
+    expect(second.dataModel).toEqual({
+      items: ["c", "b", "d"],
+      rows: [{ done: true }],
+    });
+    expect(first.dataModel).toEqual({
+      items: ["a", "b"],
+      rows: [{ done: false }],
+    });
+  });
+
+  test("null at a list index takes the element out, leaving no hole", () => {
+    const card = foldCardMessagesV1(
+      undefined,
+      [created([], { items: ["a", "b", "c"] }), writes("/items/1", null)],
+      CONTEXT,
+    );
+    expect(card.dataModel).toEqual({ items: ["a", "c"] });
+  });
+
+  test("a list token that is not an index, or is past the end, is refused", () => {
+    const card = foldCardMessagesV1(
       undefined,
       [created([], { items: ["a", "b"] })],
       CONTEXT,
     );
     expect(() =>
-      foldCardMessagesV1(
-        first,
-        [
-          message({
-            version: "v1.0",
-            updateDataModel: {
-              surfaceId: SURFACE,
-              path: "/items/0",
-              value: "c",
-            },
-          }),
-        ],
-        { ...CONTEXT, runId: "run-2" },
-      ),
+      foldCardMessagesV1(card, [writes("/items/second", "c")], CONTEXT),
+    ).toThrow(/not an index/);
+    expect(() =>
+      foldCardMessagesV1(card, [writes("/items/2", "c")], CONTEXT),
+    ).toThrow(/index 2 of a list that has 2/);
+    expect(card.dataModel).toEqual({ items: ["a", "b"] });
+  });
+
+  test("a pointer that descends through a scalar is still refused", () => {
+    const card = foldCardMessagesV1(
+      undefined,
+      [created([], { a: 1 })],
+      CONTEXT,
+    );
+    expect(() =>
+      foldCardMessagesV1(card, [writes("/a/b", 2)], CONTEXT),
     ).toThrow(CardBudgetError);
-    expect(first.dataModel).toEqual({ items: ["a", "b"] });
+  });
+
+  test("a write never re-parents the data model it walks", () => {
+    const card = foldCardMessagesV1(
+      undefined,
+      [created([], { a: 1 })],
+      CONTEXT,
+    );
+    // The decoder refuses this pointer; the walk must not depend on that.
+    const smuggled = {
+      version: "v1.0",
+      updateDataModel: {
+        surfaceId: SURFACE,
+        path: "/__proto__/pwn",
+        value: 42,
+      },
+    } as unknown as A2uiAgentMessageV1;
+    const folded = foldCardMessagesV1(card, [smuggled], {
+      ...CONTEXT,
+      runId: "run-2",
+    });
+    expect(Object.getPrototypeOf(folded.dataModel)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).pwn).toBeUndefined();
+    expect(Object.hasOwn(folded.dataModel, "__proto__")).toBe(true);
+    expect((folded.dataModel as Record<string, unknown>)["__proto__"]).toEqual({
+      pwn: 42,
+    });
   });
 
   test("a second create replaces the surface, carrying nothing of the first", () => {
@@ -326,6 +396,36 @@ describe("the surface budgets", () => {
         CONTEXT,
       ),
     ).toThrow(/data model/);
+  });
+
+  test("a fold that would put the whole record past its byte budget", () => {
+    const card = foldCardMessagesV1(undefined, [created([])], CONTEXT);
+    const fat = {
+      ...card,
+      components: Array.from({ length: 100 }, (_, index) => ({
+        id: `a${index}`,
+        component: "Text",
+        text: "x".repeat(1_200),
+      })),
+    };
+    expect(a2uiByteLengthV1(fat)).toBeLessThan(A2UI_LIMITS_V1.cardRecordBytes);
+    expect(() =>
+      foldCardMessagesV1(
+        fat,
+        [
+          message({
+            version: "v1.0",
+            updateComponents: {
+              surfaceId: SURFACE,
+              components: [
+                { id: "last", component: "Text", text: "x".repeat(12_000) },
+              ],
+            },
+          }),
+        ],
+        CONTEXT,
+      ),
+    ).toThrow(/the card exceeds/);
   });
 });
 
@@ -458,7 +558,7 @@ describe("what one settled Turn writes", () => {
               version: "v1.0",
               updateDataModel: {
                 surfaceId: SURFACE,
-                path: "/items/0",
+                path: "/items/first",
                 value: "b",
               },
             },
