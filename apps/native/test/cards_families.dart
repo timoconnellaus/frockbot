@@ -43,13 +43,20 @@ Map<String, Object?> familyCardJson({
 const familyVisualOutput = String.fromEnvironment('CARD_VISUAL_OUTPUT');
 
 /// The app's own typeface, so a captured card is read rather than measured.
+/// The built app carries Inter already and does not run from the repository,
+/// so on a real device there is nothing to load.
 Future<void> loadFamilyFont() async {
+  final faces = [
+    for (final weight in [400, 500, 600, 700])
+      File('assets/fonts/inter-latin-$weight.ttf'),
+  ];
+  if (faces.any((face) => !face.existsSync())) return;
   final loader = FontLoader('Inter');
-  for (final weight in [400, 500, 600, 700]) {
+  for (final face in faces) {
     loader.addFont(
-      File('assets/fonts/inter-latin-$weight.ttf')
-          .readAsBytes()
-          .then((bytes) => ByteData.view(Uint8List.fromList(bytes).buffer)),
+      face.readAsBytes().then(
+        (bytes) => ByteData.view(Uint8List.fromList(bytes).buffer),
+      ),
     );
   }
   await loader.load();
