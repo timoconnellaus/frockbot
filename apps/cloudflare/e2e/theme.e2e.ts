@@ -10,8 +10,12 @@
 import { expect, field, openApplication, sem, test } from "./fixtures.ts";
 import type { Page } from "@playwright/test";
 
-/** The one colour the product is named after. */
-const FROCKBOT_PINK: [number, number, number] = [236, 56, 107];
+/**
+ * The one colour the product is named after: `--pink` in the shell theme
+ * (`#db4b6d` since the rose accent landed in #533). The Flutter accent, the
+ * marketing site and the admin portal carry the same value.
+ */
+const FROCKBOT_PINK: [number, number, number] = [219, 75, 109];
 
 type Colour = [number, number, number];
 
