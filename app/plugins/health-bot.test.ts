@@ -80,6 +80,29 @@ describe("a Plugin failing more than once in one Turn", () => {
     expect(notices[0]?.body).toContain("could not answer a card press");
   });
 
+  // A press is counted the same way a Turn is, but it is not one: the body's
+  // last sentence must not read back a run of failing Turns that never ran.
+  test("a failed press's body counts failures, a hook's counts Turns", async () => {
+    const { state, notices } = harness();
+    await notePluginFailureV1(state, TURN, {
+      pluginId: "email",
+      phase: "hook",
+      message: "the handler threw",
+      card: "press",
+    });
+    expect(notices[0]?.body).toBe(
+      'The plugin "email" could not answer a card press: the handler threw. The card press did not go through, and this Bot carried on. 1 of 3 failures in a row before it is turned off.',
+    );
+    await notePluginFailureV1(
+      state,
+      { runId: "run-2", generationId: "gen-1" },
+      { pluginId: "email", phase: "hook", message: "beforeModel threw" },
+    );
+    expect(notices[1]?.body).toBe(
+      'The plugin "email" was skipped for this Turn: beforeModel threw. This Bot carried on without it. 2 of 3 failing Turns in a row before it is turned off.',
+    );
+  });
+
   test("the same thing failing twice in one Turn is one notice", async () => {
     const { state, notices } = harness();
     for (const message of ["render threw", "render threw again"]) {

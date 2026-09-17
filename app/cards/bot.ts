@@ -30,6 +30,7 @@ import {
   type BotPluginRosterV1,
 } from "@frockbot/app/plugins/worker-bot";
 import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
+import { readPluginHealthV1 } from "@frockbot/app/plugins/health";
 import {
   cardActionRouteV1,
   cardKeyV1,
@@ -350,25 +351,23 @@ export async function cardAction(
     let outcome: Awaited<ReturnType<typeof runPluginCardAction>>;
     try {
       const roster = await readBotPluginRosterV1(state, identity);
-      // An action no mounted card of this Plugin declares is refused here,
-      // off the descriptor, rather than by the worker's own refusal a round
-      // trip later — a card drawn before the Plugin stopped declaring an
-      // action still carries its button, and pressing it must not count
-      // against a Plugin that never ran. The worker still refuses it too.
-      if (
-        !mountedCardDeclaresActionV1(roster, {
-          pluginId: route.pluginId,
-          cardId,
-          action: route.action,
-        })
-      ) {
+      // A press the kernel will not put to the Plugin is refused here, off
+      // the roster and the descriptor, rather than by the worker's own
+      // refusal a round trip later — a card drawn before the Plugin stopped
+      // declaring an action, or before it was turned off, still carries its
+      // button, and pressing it must not count against a Plugin that never
+      // ran. The worker still refuses it too.
+      const refusal = await pluginCardActionRefusalV1(state, roster, {
+        pluginId: route.pluginId,
+        cardId,
+        action: route.action,
+      });
+      if (refusal !== undefined) {
         return {
           schemaVersion: 1,
           routed: "plugin",
           card: projectCardV1(card),
-          failure: cardFailureV1(
-            `plugin "${route.pluginId}" card "${cardId}" declares no action "${route.action}"`,
-          ),
+          failure: cardFailureV1(refusal),
         };
       }
       outcome = await runPluginCardAction(
@@ -521,25 +520,41 @@ export function cardActionInvocationV1(
 }
 
 /**
- * Whether the descriptor the Composition mounted puts this action on this
- * card of this Plugin. A press naming anything else is refused by the kernel
- * before a worker is reached: the Plugin never ran, so it is not the Plugin
- * failing and nothing is charged to it.
+ * Why the kernel will not put this press to the Plugin, or `undefined` when
+ * it will. Two different things are said apart, the way an admission refusal
+ * and a missing capability are: a Plugin this Bot is not running cannot
+ * answer any of its cards' controls, and a Plugin that is running answers
+ * only the actions the descriptor the Composition mounted declares. Neither
+ * is the Plugin failing — it never ran — so neither is charged to it.
  */
-function mountedCardDeclaresActionV1(
+async function pluginCardActionRefusalV1(
+  state: ShellBotStateV1,
   roster: BotPluginRosterV1,
   handler: { pluginId: string; cardId: string; action: string },
-): boolean {
+): Promise<string | undefined> {
+  if (!roster.enabled.includes(handler.pluginId)) {
+    // The switch reads the same whoever threw it, so the health record is
+    // what says whether the person turned this Plugin off or a quarantine
+    // did, and the person is never told they did something they did not.
+    const health = await readPluginHealthV1(
+      state.ctx.storage,
+      handler.pluginId,
+    );
+    return health?.quarantinedAt !== undefined
+      ? `plugin "${handler.pluginId}" was turned off for this Bot after it failed repeatedly, so this card's controls do nothing until it is turned on again under Plugins`
+      : `plugin "${handler.pluginId}" is switched off for this Bot, so this card's controls do nothing until it is turned back on under Plugins`;
+  }
   const member = roster.members.find(
-    (candidate) =>
-      candidate.packageId === handler.pluginId &&
-      roster.enabled.includes(candidate.packageId),
+    (candidate) => candidate.packageId === handler.pluginId,
   );
-  return (member?.descriptor.cards ?? []).some(
+  const declared = (member?.descriptor.cards ?? []).some(
     (card) =>
       card.id === handler.cardId &&
-      card.actions.some((declared) => declared.name === handler.action),
+      card.actions.some((action) => action.name === handler.action),
   );
+  return declared
+    ? undefined
+    : `plugin "${handler.pluginId}" card "${handler.cardId}" declares no action "${handler.action}"`;
 }
 
 /** The Plugin handler behind one `plugin/<pluginId>/<action>` name. */

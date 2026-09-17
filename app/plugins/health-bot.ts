@@ -59,6 +59,32 @@ function lockedCost(failure: PluginFailureNoticeV1): string {
   }
 }
 
+/** What the failure cost, in the words the notice uses. */
+function failureCost(failure: PluginFailureNoticeV1): string {
+  switch (failure.card) {
+    case "press":
+      return "The card press did not go through, and this Bot carried on.";
+    case "draw":
+      return "The card could not be drawn, and this Bot carried on.";
+    default:
+      return "This Bot carried on without it.";
+  }
+}
+
+/**
+ * Where the Plugin stands against the count that would turn it off. A press
+ * and a draw are counted the same way a Turn is, but neither is a Turn, so
+ * neither may be read back to the person as one.
+ */
+function failureCount(
+  failure: PluginFailureNoticeV1,
+  failures: number,
+): string {
+  return failure.card === undefined
+    ? `${failures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failing Turns in a row before it is turned off.`
+    : `${failures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failures in a row before it is turned off.`;
+}
+
 /** The notice's title, which must not say a Turn was lost when none was. */
 function failureTitle(failure: PluginFailureNoticeV1): string {
   switch (failure.card) {
@@ -151,10 +177,8 @@ export async function notePluginFailureV1(
     runId: turn.runId,
     createdAt: now().toISOString(),
     title: failureTitle(failure),
-    body: `The plugin "${failure.pluginId}" ${failureWords(failure)}: ${failure.message}. This Bot carried on without it.${
-      quarantined
-        ? ""
-        : ` ${health.consecutiveFailures} of ${PLUGIN_QUARANTINE_THRESHOLD_V1} failing Turns in a row before it is turned off.`
+    body: `The plugin "${failure.pluginId}" ${failureWords(failure)}: ${failure.message}. ${failureCost(failure)}${
+      quarantined ? "" : ` ${failureCount(failure, health.consecutiveFailures)}`
     }`.slice(0, 2_000),
   });
   if (quarantined) {

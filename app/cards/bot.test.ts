@@ -464,6 +464,84 @@ describe("the three routes", () => {
     ).toHaveLength(0);
   });
 
+  /**
+   * A Plugin this Bot is not running cannot answer any of its cards' controls,
+   * which is a different thing from a card that declares no such action: the
+   * person is sent to the switch, not back to the card.
+   */
+  test("a press on a switched-off Plugin says so, not that the card declares nothing", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: false },
+          updatedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(values, undefined, [
+      { id: "draft", actions: [{ name: "regenerate" }] },
+    ]);
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure).toContain("is switched off for this Bot");
+    expect(receipt.failure).not.toContain("declares no action");
+    expect(receipt.card.revision).toBe(2);
+    expect(notices).toHaveLength(0);
+  });
+
+  // The switch reads the same whoever threw it, so a Plugin a quarantine
+  // turned off must not be described as one the person turned off.
+  test("a press on a quarantined Plugin does not say the person turned it off", async () => {
+    const values = new Map<string, unknown>([
+      [cardKeyV1(SURFACE), card()],
+      [
+        "plugins:enablement",
+        {
+          schemaVersion: 1,
+          revision: 1,
+          enabled: { email: false },
+          updatedAt: NOW,
+        },
+      ],
+      [
+        "plugin:health:email",
+        {
+          schemaVersion: 1,
+          pluginId: "email",
+          consecutiveFailures: 3,
+          lastFailure: {
+            runId: "run-1",
+            phase: "hook",
+            message: "the handler threw",
+            at: NOW,
+          },
+          quarantinedAt: NOW,
+        },
+      ],
+    ]);
+    const { state, notices } = harness(values, undefined, [
+      { id: "draft", actions: [{ name: "regenerate" }] },
+    ]);
+    const receipt = await cardAction(state, IDENTITY, {
+      schemaVersion: 1,
+      surfaceId: SURFACE,
+      revision: 2,
+      event: { name: "plugin/email/regenerate" },
+    });
+    expect(receipt.failure).toContain("after it failed repeatedly");
+    expect(receipt.failure).not.toContain("is switched off for this Bot");
+    expect(receipt.card.revision).toBe(2);
+    expect(notices).toHaveLength(0);
+  });
+
   test("a declared action whose press fails is still charged, once", async () => {
     const values = new Map<string, unknown>([
       [cardKeyV1(SURFACE), card()],
