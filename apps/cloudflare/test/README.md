@@ -104,8 +104,8 @@ adding `--headed`. Locally it runs four workers at once; `--workers 1` puts it
 back to one file at a time when a failure needs reading.
 
 Four conventions carry across the layer, and a new spec inherits all four —
-three of them keep that parallelism honest, and the fourth keeps a spec reading
-the page rather than the viewport:
+three of them keep that parallelism honest, and the fourth keeps a spec off the
+list's scrollbar:
 
 - Every test takes a fresh `?as_user=` identity, so no two ever meet in one
   User Durable Object.
@@ -122,18 +122,15 @@ the page rather than the viewport:
 - A Flutter list publishes semantics only for the rows at or near the
   viewport: a row beyond that window is not hidden, it is absent from the tree,
   so there is no node to locate and none for `scrollIntoView` to take hold of.
-  A spec therefore walks a long list *in order*, scrolling each row into view,
-  which builds the next one — it cannot jump to the last. The scroll itself
-  lands because Flutter on the web publishes a scrollable as a real
-  overflow-scrolling element and forwards the browser's scroll back to the
-  framework, so `scrollIntoViewIfNeeded` on a node that already exists moves
-  the list. A sweep also leaves the list on its last row, so a spec scrolls
-  back to anything it passed before reading that again. `bot-plugins.e2e.ts` is
-  the worked example and does both. The other way out is to take the scroll out
-  of the path — `provisionThroughUi` sets a window tall enough that the row it
-  presses is on screen, and `enablePackage` filters the catalogue with its
-  search box — which is what to reach for when the target starts out beyond the
-  window, with no node to scroll to.
+  Scrolling is not the way back to it either — the engine drops a row out of
+  the tree as the list moves and does not reliably put it back, so a row can be
+  absent for a dozen consecutive scroll steps while its neighbours are present
+  throughout, and a spec that steers the list is flaky rather than thorough. A
+  spec therefore takes the scroll out of the path and brings what it asserts on
+  into the window instead: `provisionThroughUi` and `bot-plugins.e2e.ts` set a
+  window tall enough to hold every row they read, saying in a comment what the
+  height is counted from, and `enablePackage` filters the catalogue with its
+  search box so the row it presses is at the top of a short list.
 
 `e2e/harness.ts` is the Playwright `webServer`: it runs `artifact:build`,
 seeds `dist/artifacts/foundation-v1.mjs` into the local

@@ -52,6 +52,15 @@ function cardSwitch(page: Page, title: string): Locator {
 }
 
 async function openBotPlugins(page: Page): Promise<void> {
+  // Read in a window tall enough to hold every card at once, the way
+  // `provisionThroughUi` does: a Flutter list publishes semantics only for the
+  // rows at or near the viewport, and the engine drops a row back out as the
+  // list moves without reliably putting it back, so scrolling a long list is
+  // not something to rest assertions on. The height is what this page holds:
+  // six cards — the five first-party features and the deployment's seeded
+  // Plugin — under the page's header, all of them in the tree at 1600px. A
+  // seventh card is a taller window here, not a scroll.
+  await page.setViewportSize({ width: 1280, height: 1600 });
   // The Bot's own door: the Plugins row in its Settings, which is one level
   // under its page — the panel's root beside the conversation at this width.
   await openBotSettings(page);
@@ -100,8 +109,6 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   await openBotPlugins(page);
 
   // The five first-party features the panel offers.
-  // The panel scrolls: the deployment's own seeded plugins are cards here too,
-  // so the five first-party ones no longer all fit the viewport at once.
   for (const slug of [
     "web-built-in",
     "routines-built-in",
@@ -109,9 +116,7 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
     "subagents-built-in",
     "messages-built-in",
   ]) {
-    const card = sem(page, `view-group-${slug}`).first();
-    await card.scrollIntoViewIfNeeded();
-    await expect(card).toBeVisible();
+    await expect(sem(page, `view-group-${slug}`).first()).toBeVisible();
   }
   // Choosing a model is a Settings decision, so it is never a card here.
   await expect(sem(page, "view-group-custom-models-built-in")).toHaveCount(0);
@@ -122,9 +127,6 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
 
   // Web is on for a Bot nobody has switched.
   const web = cardSwitch(page, "Web");
-  // The sweep above left the list scrolled to its last card, and an off-screen
-  // switch is not in the semantics tree at all.
-  await sem(page, "view-group-web-built-in").first().scrollIntoViewIfNeeded();
   await expect(web).toHaveAttribute("aria-checked", "true");
   await web.click();
   await expect(web).toHaveAttribute("aria-checked", "false", {
