@@ -1108,9 +1108,13 @@ successful category records a receipt in `.local-validation/receipts/`, keyed on
 the content of that category's inputs and the toolchain rather than on the
 commit, so a commit that changes nothing a category reads reuses it; a clean
 code checkout is required before and after checks. Categories run concurrently,
-except `integration` and `e2e`, which share one artifact build and so run in
-order as a group, and `build`, which runs alone because it rewrites tracked
-generated sources every other category would observe mid-write.
+except those whose commands write tracked files — `integration`, `e2e` and
+`build` — each of which runs alone, one after another, once the rest have
+finished. Every other category reads the work tree, through its own commands
+and through the snapshot proving the tree still matches the commit, so a
+half-written tracked file would abort the run; the test before adding a
+category to that set is whether anything its command runs writes a tracked
+file.
 Each run has an isolated Wrangler service registry. Pre-push fetches remote
 main before and after validation and rejects stale branches or new merge commits.
 See [local validation](local-validation.md) for commands and cache recovery.

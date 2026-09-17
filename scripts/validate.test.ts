@@ -196,6 +196,51 @@ test("a reused receipt leaves the run holding one command, echoed live", async (
   expect(output).not.toContain("--- sleeper:");
 });
 
+test("a category that runs alone is echoed live beside a busy phase", async () => {
+  const root = fixture();
+  // `build` writes tracked files, so it runs by itself after everything else
+  // has finished: nothing can interleave with it however many commands the
+  // concurrent phase held, and its progress belongs on the terminal as it
+  // arrives rather than in a block once it is over.
+  const realBuild = categories.build!;
+  categories.build = [
+    [process.execPath, "-e", 'process.stdout.write("build-marker\\n")'],
+  ];
+  categories.probe = [[process.execPath, "-e", ""]];
+  categories.sleeper = [[process.execPath, "-e", ""]];
+  const written: string[] = [];
+  const write = process.stdout.write;
+  process.stdout.write = ((chunk: unknown) => {
+    written.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    await validate(root, ["probe", "sleeper", "build"]);
+  } finally {
+    process.stdout.write = write;
+    categories.build = realBuild;
+  }
+  const output = written.join("");
+  expect(output).toContain("build-marker");
+  expect(output).not.toContain("--- build:");
+});
+
+test("the first failure in a category kills its siblings at once", async () => {
+  const root = fixture();
+  // One category, two commands: the first fails immediately and the second
+  // would run for ten seconds. The run is doomed the moment the first exits,
+  // so the second must be killed then rather than waited out — while the
+  // failure still only surfaces once every command has settled.
+  categories.probe = [
+    [process.execPath, "-e", "process.exit(1)"],
+    [process.execPath, "-e", "await Bun.sleep(10_000)"],
+  ];
+  const started = Date.now();
+  await expect(validate(root, ["probe"])).rejects.toThrow("probe failed");
+  expect(Date.now() - started).toBeLessThan(6_000);
+  expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual([]);
+});
+
 test("a killed category's surviving descendants cannot wedge the run", async () => {
   const root = fixture();
   // `sleeper` leaks a grandchild into a process group of its own — what

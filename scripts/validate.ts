@@ -286,17 +286,18 @@ export async function validate(
     const plan = names.map(planCategory);
     // Every command is spawned the same way — its own process group, both
     // pipes read here — so there is one kill semantics and one reader. The
-    // only thing this decides is what the reader does with a chunk: a run
-    // holding exactly one command has nothing to interleave with, so its
-    // progress — Playwright's, vitest's — is echoed as it arrives; anything
-    // more is held and printed as one block per command. Reused receipts are
+    // only thing this decides is what the reader does with a chunk: output is
+    // echoed as it arrives when nothing can interleave with it, and held and
+    // printed as one block per command when something can. That is a property
+    // of a phase rather than of the run, so it is asked once per phase: the
+    // concurrent phase asks it of everything it is about to start together,
+    // and each exclusive category asks it of itself alone. Reused receipts are
     // already discounted, so naming a cached category beside a slow one does
     // not hide the slow one's output.
-    const echoLive =
-      plan
+    const liveCommands = (entries: typeof plan): number =>
+      entries
         .filter((entry) => !entry.cached)
-        .reduce((total, entry) => total + categories[entry.name]!.length, 0) ===
-      1;
+        .reduce((total, entry) => total + categories[entry.name]!.length, 0);
     /**
      * One category: run its commands unless its receipt still stands, and
      * record the result. Commands within a category are independent by
@@ -307,7 +308,10 @@ export async function validate(
      * the package-manager wrapper but the workers below it, which are what
      * hold the pipe open.
      */
-    const runCategory = async (entry: (typeof plan)[number]): Promise<void> => {
+    const runCategory = async (
+      entry: (typeof plan)[number],
+      echoLive: boolean,
+    ): Promise<void> => {
       const { name, inputs, key, receipt } = entry;
       if (failure !== undefined) return;
       if (snapshot(root) !== sha)
@@ -376,8 +380,15 @@ export async function validate(
           const output = captured.join("").trimEnd();
           if (output.trim())
             console.log(`\n--- ${name}: ${command.join(" ")} ---\n${output}`);
-          if (code !== 0)
-            throw new Error(`${name} failed; no success recorded`);
+          if (code !== 0) {
+            // Kill here rather than when the category settles: the run is
+            // already doomed, and a sibling suite left to finish is a wait
+            // nobody gets anything for. `stop` keeps the first failure, so
+            // what the kill provokes elsewhere cannot displace this one.
+            const error = new Error(`${name} failed; no success recorded`);
+            stop(error);
+            throw error;
+          }
         }),
       );
       if (snapshot(root) !== sha)
@@ -403,15 +414,18 @@ export async function validate(
     // Every task is settled before the exclusive pass begins, and before the
     // `finally` below removes the registry and the lock, so no child outlives
     // what it reads.
-    await settle(
-      plan
-        .filter((entry) => !WRITES_TRACKED_FILES.has(entry.name))
-        .map((entry) => runCategory(entry).catch(stop)),
+    const concurrent = plan.filter(
+      (entry) => !WRITES_TRACKED_FILES.has(entry.name),
     );
-    for (const entry of plan.filter((entry) =>
+    const exclusive = plan.filter((entry) =>
       WRITES_TRACKED_FILES.has(entry.name),
-    ))
-      await runCategory(entry).catch(stop);
+    );
+    const concurrentEcho = liveCommands(concurrent) === 1;
+    await settle(
+      concurrent.map((entry) => runCategory(entry, concurrentEcho).catch(stop)),
+    );
+    for (const entry of exclusive)
+      await runCategory(entry, liveCommands([entry]) === 1).catch(stop);
     if (failure !== undefined) throw failure;
     if (snapshot(root) !== sha)
       throw new Error("Commit changed during validation");

@@ -31,11 +31,14 @@ whether anything its command runs writes a tracked file; the pre-push tier
 Every command is spawned the same way — in a process group
 of its own, with both pipes read by the runner — so one signal reaches the
 workers below any package-manager wrapper. The only thing that varies is where
-those pipes go: a run left holding exactly one command once reused receipts
-are discounted echoes it to the terminal as it arrives, since there is nothing
-to interleave with; a run holding more holds each command's output and prints
-it as one block when that command ends. The first failure kills the commands still running, and
-every command is waited for before the run cleans up.
+those pipes go: output is echoed to the terminal as it arrives whenever nothing
+can interleave with it, and otherwise held and printed as one block when the
+command ends. That is decided per phase rather than per run, once reused
+receipts are discounted: the concurrent phase echoes only when it is left
+holding a single command, while each of `integration`, `e2e` and `build` echoes
+as it runs, because it runs alone by construction. The first failure kills the
+commands still running, and every command is waited for before the run cleans
+up.
 
 Receipts live in gitignored `.local-validation/receipts/<category>-<key>.json`.
 The key is the content of everything the category reads — the committed blobs at
