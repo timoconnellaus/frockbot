@@ -322,7 +322,7 @@ class _VoiceModeState extends State<VoiceMode> {
     final theme = Theme.of(context);
     final open = widget.onOpenWork;
     return identified(
-      VoiceIds.chip(chip.id),
+      VoiceIds.chip(chip.runId),
       Container(
         height: 56,
         padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),

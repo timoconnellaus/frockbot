@@ -106,12 +106,17 @@ Future<void> mountSurface(
   await tester.pump();
 }
 
-String delegation(String botId, String botName, String state) => jsonEncode({
+String delegation(
+  String botId,
+  String botName,
+  String state, {
+  String? runId,
+}) => jsonEncode({
   'schemaVersion': 1,
   'type': 'voice/delegation',
   'botId': botId,
   'botName': botName,
-  'runId': 'run-$botId',
+  'runId': runId ?? 'run-$botId',
   'state': state,
 });
 
@@ -235,7 +240,7 @@ void main() {
     socket.deliver(delegation('scout', 'Scout', 'asked'));
     await tester.pump();
     await tester.pump();
-    expect(byIdentifier(VoiceIds.chip('scout')), findsOneWidget);
+    expect(byIdentifier(VoiceIds.chip('run-scout')), findsOneWidget);
     expect(find.text('Scout'), findsOneWidget);
     expect(find.text('Working'), findsOneWidget);
     expect(find.text('Work'), findsNothing);
@@ -243,8 +248,8 @@ void main() {
     socket.deliver(delegation('scout', 'Scout', 'answering'));
     await tester.pump();
     await tester.pump();
-    // Still one chip: the ledger is per Bot, not per frame.
-    expect(byIdentifier(VoiceIds.chip('scout')), findsOneWidget);
+    // Still one chip: the ledger is per Turn, not per frame.
+    expect(byIdentifier(VoiceIds.chip('run-scout')), findsOneWidget);
     expect(find.text('Working'), findsOneWidget);
 
     socket.deliver(delegation('scout', 'Scout', 'finished'));
@@ -255,6 +260,48 @@ void main() {
     await tester.tap(find.text('Work'));
     await tester.pump();
     expect(opened, [('scout', 'run-scout')]);
+    await tester.pump(const Duration(milliseconds: 1300));
+  });
+
+  testWidgets('two hand-offs on one Bot are two chips, not one', (
+    tester,
+  ) async {
+    final socket = FakeVoiceSocket();
+    final controller = await live(tester, socket);
+    final opened = <(String, String)>[];
+    await mountSurface(
+      tester,
+      controller,
+      width: 390,
+      onOpenWork: (botId, runId) => opened.add((botId, runId)),
+    );
+
+    // One turn hands two tasks to the call's own Bot: two Turns, two chips.
+    socket.deliver(
+      delegation('scout', 'Scout', 'asked', runId: 'run-one'),
+    );
+    socket.deliver(
+      delegation('scout', 'Scout', 'asked', runId: 'run-two'),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(byIdentifier(VoiceIds.chip('run-one')), findsOneWidget);
+    expect(byIdentifier(VoiceIds.chip('run-two')), findsOneWidget);
+
+    // Each chip opens its own Turn.
+    socket.deliver(
+      delegation('scout', 'Scout', 'finished', runId: 'run-two'),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(
+      find.descendant(
+        of: byIdentifier(VoiceIds.chip('run-two')),
+        matching: find.text('Work'),
+      ),
+    );
+    await tester.pump();
+    expect(opened, [('scout', 'run-two')]);
     await tester.pump(const Duration(milliseconds: 1300));
   });
 
@@ -291,8 +338,8 @@ void main() {
       findsOneWidget,
     );
     // The same slot lists what finished while asleep.
-    expect(byIdentifier(VoiceIds.chip('scout')), findsOneWidget);
-    expect(byIdentifier(VoiceIds.chip('archie')), findsOneWidget);
+    expect(byIdentifier(VoiceIds.chip('run-scout')), findsOneWidget);
+    expect(byIdentifier(VoiceIds.chip('run-archie')), findsOneWidget);
 
     socket.sent.clear();
     await tester.tap(

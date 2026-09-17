@@ -135,7 +135,7 @@ abstract final class VoiceIds {
   static const hangUp = 'voice-hang-up';
   static const modeMeter = 'voice-mode-meter';
   static const headerPill = 'voice-header-pill';
-  static String chip(String botId) => 'voice-chip-$botId';
+  static String chip(String runId) => 'voice-chip-$runId';
 
   /// The Bot's voice under its settings: the row, the page and its pickers.
   static const settingsRow = 'voice-settings-row';

@@ -714,18 +714,17 @@ export class VoiceLedgerV1 {
 
   async meter(at: Date): Promise<VoiceMeterV1> {
     const day = voiceMeterDayV1(at);
-    return (
-      (await this.storage.get<VoiceMeterV1>(meterKey(day))) ?? {
-        schemaVersion: 1,
-        day,
-        audioInSeconds: 0,
-        audioOutSeconds: 0,
-        turns: 0,
-        delegations: 0,
-        dictationSeconds: 0,
-        dictationCleanups: 0,
-      }
-    );
+    const stored = await this.storage.get<VoiceMeterV1>(meterKey(day));
+    return {
+      schemaVersion: 1,
+      day,
+      audioInSeconds: stored?.audioInSeconds ?? 0,
+      audioOutSeconds: stored?.audioOutSeconds ?? 0,
+      turns: stored?.turns ?? 0,
+      delegations: stored?.delegations ?? 0,
+      dictationSeconds: stored?.dictationSeconds ?? 0,
+      dictationCleanups: stored?.dictationCleanups ?? 0,
+    };
   }
 
   async addMeter(
@@ -750,7 +749,7 @@ export class VoiceLedgerV1 {
       ),
       dictationSeconds: Math.max(
         0,
-        (meter.dictationSeconds ?? 0) + (delta.dictationSeconds ?? 0),
+        meter.dictationSeconds + (delta.dictationSeconds ?? 0),
       ),
     };
     await this.storage.put(meterKey(meter.day), next);
@@ -827,7 +826,7 @@ export class VoiceLedgerV1 {
     }
     if (meter.turns >= this.caps.turns) return "turns";
     if (meter.delegations >= this.caps.delegations) return "delegations";
-    if ((meter.dictationSeconds ?? 0) >= this.caps.dictationSeconds) {
+    if (meter.dictationSeconds >= this.caps.dictationSeconds) {
       return "dictationSeconds";
     }
     return undefined;
