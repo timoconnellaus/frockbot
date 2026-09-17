@@ -39,6 +39,7 @@ import {
   type ClientTurnRefusalV1,
 } from "@frockbot/app/shell/run-protocol";
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/app/shell/approvals";
+import { decodeCardActionCommandV1 } from "@frockbot/app/shell/cards";
 import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   botTurnRefusalCodeV1,
@@ -852,6 +853,64 @@ function createUserApplicationRoute() {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "approval decision failed";
+        return jsonError(
+          message.includes("was not found") ? 404 : 500,
+          message,
+        );
+      }
+    }
+
+    // Cards (ADR 0030). One path, beside the approvals it can carry: a GET is
+    // the Bot's surfaces as they stand, and a POST is one action on one of
+    // them, which the kernel — never the Card — decides the meaning of.
+    const cardsMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/cards$/);
+    if (cardsMatch) {
+      let cardBotId: string;
+      try {
+        cardBotId = decodeBotIdV1(decodeURIComponent(cardsMatch[1]!));
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      const missing = await requireRegisteredBot(env, cardBotId);
+      if (missing) return missing;
+      if (request.method === "GET") {
+        try {
+          return Response.json(
+            await env.BOT_STATE.listCards({
+              schemaVersion: 1,
+              botId: cardBotId,
+            }),
+          );
+        } catch (error) {
+          return botFailure(error, "cards failed");
+        }
+      }
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      let command;
+      try {
+        command = decodeCardActionCommandV1(await request.json());
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid card action",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.cardAction({
+            schemaVersion: 1,
+            botId: cardBotId,
+            command,
+          }),
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "card action failed";
+        // A surface that has moved is not a fault: the person answered the
+        // card they were shown, and the client redraws and asks again.
+        if (message.includes("has moved on")) return jsonError(409, message);
         return jsonError(
           message.includes("was not found") ? 404 : 500,
           message,

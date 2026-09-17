@@ -851,7 +851,7 @@
         "children": [
           {
             "type": "text",
-            "text": "2 Routines · 1 unread",
+            "text": "2 Routines \u00b7 1 unread",
             "style": "status"
           },
           {
@@ -893,9 +893,18 @@
                   "value": "schedule",
                   "editable": true,
                   "choices": [
-                    { "label": "A schedule", "value": "schedule" },
-                    { "label": "A webhook", "value": "webhook" },
-                    { "label": "A Plugin trigger", "value": "plugin" }
+                    {
+                      "label": "A schedule",
+                      "value": "schedule"
+                    },
+                    {
+                      "label": "A webhook",
+                      "value": "webhook"
+                    },
+                    {
+                      "label": "A Plugin trigger",
+                      "value": "plugin"
+                    }
                   ]
                 }
               },
@@ -944,13 +953,18 @@
                     "actionId": "save-routine",
                     "label": "Save changes",
                     "style": "primary",
-                    "input": { "kind": "save-routine", "routineId": "r1" }
+                    "input": {
+                      "kind": "save-routine",
+                      "routineId": "r1"
+                    }
                   },
                   {
                     "type": "action",
                     "actionId": "cancel-edit",
                     "label": "Cancel",
-                    "input": { "kind": "cancel-edit" }
+                    "input": {
+                      "kind": "cancel-edit"
+                    }
                   }
                 ]
               }
@@ -963,10 +977,13 @@
             "children": [
               {
                 "type": "text",
-                "text": "0 9 * * * · Australia/Sydney · Last 3 Sep 2026, 9:00am · Next 4 Sep 2026, 9:00am",
+                "text": "0 9 * * * \u00b7 Australia/Sydney \u00b7 Last 3 Sep 2026, 9:00am \u00b7 Next 4 Sep 2026, 9:00am",
                 "style": "status"
               },
-              { "type": "text", "text": "Summarise overnight email." },
+              {
+                "type": "text",
+                "text": "Summarise overnight email."
+              },
               {
                 "type": "group",
                 "orientation": "row",
@@ -975,7 +992,10 @@
                     "type": "action",
                     "actionId": "edit-routine",
                     "label": "Edit",
-                    "input": { "kind": "edit-routine", "routineId": "r1" }
+                    "input": {
+                      "kind": "edit-routine",
+                      "routineId": "r1"
+                    }
                   },
                   {
                     "type": "action",
@@ -991,20 +1011,29 @@
                     "type": "action",
                     "actionId": "run-routine",
                     "label": "Run now",
-                    "input": { "kind": "run-routine", "routineId": "r1" }
+                    "input": {
+                      "kind": "run-routine",
+                      "routineId": "r1"
+                    }
                   },
                   {
                     "type": "action",
                     "actionId": "open-runs",
                     "label": "Run log",
-                    "input": { "kind": "open-runs", "routineId": "r1" }
+                    "input": {
+                      "kind": "open-runs",
+                      "routineId": "r1"
+                    }
                   },
                   {
                     "type": "action",
                     "actionId": "delete-routine",
                     "label": "Delete",
                     "style": "danger",
-                    "input": { "kind": "delete-routine", "routineId": "r1" }
+                    "input": {
+                      "kind": "delete-routine",
+                      "routineId": "r1"
+                    }
                   }
                 ]
               }
@@ -1017,10 +1046,13 @@
             "children": [
               {
                 "type": "text",
-                "text": "Webhook trigger · Never run · No next firing scheduled",
+                "text": "Webhook trigger \u00b7 Never run \u00b7 No next firing scheduled",
                 "style": "status"
               },
-              { "type": "text", "text": "Triage the lead." },
+              {
+                "type": "text",
+                "text": "Triage the lead."
+              },
               {
                 "type": "group",
                 "orientation": "row",
@@ -1029,7 +1061,10 @@
                     "type": "action",
                     "actionId": "edit-routine",
                     "label": "Edit",
-                    "input": { "kind": "edit-routine", "routineId": "r2" }
+                    "input": {
+                      "kind": "edit-routine",
+                      "routineId": "r2"
+                    }
                   },
                   {
                     "type": "action",
@@ -1045,33 +1080,48 @@
                     "type": "action",
                     "actionId": "run-routine",
                     "label": "Run now",
-                    "input": { "kind": "run-routine", "routineId": "r2" }
+                    "input": {
+                      "kind": "run-routine",
+                      "routineId": "r2"
+                    }
                   },
                   {
                     "type": "action",
                     "actionId": "open-runs",
                     "label": "Run log",
-                    "input": { "kind": "open-runs", "routineId": "r2" }
+                    "input": {
+                      "kind": "open-runs",
+                      "routineId": "r2"
+                    }
                   },
                   {
                     "type": "action",
                     "actionId": "rotate-key",
                     "label": "Rotate key",
-                    "input": { "kind": "rotate-key", "routineId": "r2" }
+                    "input": {
+                      "kind": "rotate-key",
+                      "routineId": "r2"
+                    }
                   },
                   {
                     "type": "action",
                     "actionId": "revoke-key",
                     "label": "Revoke key",
                     "style": "danger",
-                    "input": { "kind": "revoke-key", "routineId": "r2" }
+                    "input": {
+                      "kind": "revoke-key",
+                      "routineId": "r2"
+                    }
                   },
                   {
                     "type": "action",
                     "actionId": "delete-routine",
                     "label": "Delete",
                     "style": "danger",
-                    "input": { "kind": "delete-routine", "routineId": "r2" }
+                    "input": {
+                      "kind": "delete-routine",
+                      "routineId": "r2"
+                    }
                   }
                 ]
               }
@@ -1088,15 +1138,21 @@
                 "children": [
                   {
                     "type": "text",
-                    "text": "Morning brief · Happened 3 times",
+                    "text": "Morning brief \u00b7 Happened 3 times",
                     "style": "status"
                   },
-                  { "type": "text", "text": "Nine unread, two need you." },
+                  {
+                    "type": "text",
+                    "text": "Nine unread, two need you."
+                  },
                   {
                     "type": "action",
                     "actionId": "acknowledge-inbox",
                     "label": "Mark read",
-                    "input": { "kind": "acknowledge-inbox", "entryId": "e1" }
+                    "input": {
+                      "kind": "acknowledge-inbox",
+                      "entryId": "e1"
+                    }
                   }
                 ]
               },
@@ -1109,14 +1165,19 @@
                     "text": "Inbound leads",
                     "style": "status"
                   },
-                  { "type": "text", "text": "Lead triaged." }
+                  {
+                    "type": "text",
+                    "text": "Lead triaged."
+                  }
                 ]
               },
               {
                 "type": "action",
                 "actionId": "acknowledge-inbox",
                 "label": "Mark all read",
-                "input": { "kind": "acknowledge-inbox" }
+                "input": {
+                  "kind": "acknowledge-inbox"
+                }
               }
             ]
           }
@@ -1143,8 +1204,13 @@
                   "revoke-key"
                 ]
               },
-              "routineId": { "type": "string", "maxLength": 128 },
-              "enabled": { "type": "boolean" }
+              "routineId": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "enabled": {
+                "type": "boolean"
+              }
             },
             "required": ["kind", "routineId", "enabled"],
             "additionalProperties": false
@@ -1170,7 +1236,10 @@
                   "revoke-key"
                 ]
               },
-              "routineId": { "type": "string", "maxLength": 128 }
+              "routineId": {
+                "type": "string",
+                "maxLength": 128
+              }
             },
             "required": ["kind", "routineId"],
             "additionalProperties": false
@@ -1196,7 +1265,10 @@
                   "revoke-key"
                 ]
               },
-              "routineId": { "type": "string", "maxLength": 128 }
+              "routineId": {
+                "type": "string",
+                "maxLength": 128
+              }
             },
             "required": ["kind", "routineId"],
             "additionalProperties": false
@@ -1222,7 +1294,10 @@
                   "revoke-key"
                 ]
               },
-              "routineId": { "type": "string", "maxLength": 128 }
+              "routineId": {
+                "type": "string",
+                "maxLength": 128
+              }
             },
             "required": ["kind", "routineId"],
             "additionalProperties": false
@@ -1248,7 +1323,10 @@
                   "revoke-key"
                 ]
               },
-              "entryId": { "type": "string", "maxLength": 128 }
+              "entryId": {
+                "type": "string",
+                "maxLength": 128
+              }
             },
             "required": ["kind"],
             "additionalProperties": false
@@ -1274,7 +1352,10 @@
                   "revoke-key"
                 ]
               },
-              "routineId": { "type": "string", "maxLength": 128 }
+              "routineId": {
+                "type": "string",
+                "maxLength": 128
+              }
             },
             "required": ["kind", "routineId"],
             "additionalProperties": false
@@ -1325,16 +1406,34 @@
                   "revoke-key"
                 ]
               },
-              "routineId": { "type": "string", "maxLength": 128 },
-              "routine.name": { "type": "string", "maxLength": 100 },
-              "routine.prompt": { "type": "string", "maxLength": 8000 },
+              "routineId": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "routine.name": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "routine.prompt": {
+                "type": "string",
+                "maxLength": 8000
+              },
               "routine.timing": {
                 "type": "string",
                 "enum": ["schedule", "webhook", "plugin"]
               },
-              "routine.schedule": { "type": "string", "maxLength": 256 },
-              "routine.pluginId": { "type": "string", "maxLength": 64 },
-              "routine.pluginTrigger": { "type": "string", "maxLength": 64 }
+              "routine.schedule": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "routine.pluginId": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "routine.pluginTrigger": {
+                "type": "string",
+                "maxLength": 64
+              }
             },
             "required": [
               "kind",
@@ -1365,7 +1464,10 @@
                   "revoke-key"
                 ]
               },
-              "routineId": { "type": "string", "maxLength": 128 }
+              "routineId": {
+                "type": "string",
+                "maxLength": 128
+              }
             },
             "required": ["kind", "routineId"],
             "additionalProperties": false
@@ -1391,7 +1493,10 @@
                   "revoke-key"
                 ]
               },
-              "routineId": { "type": "string", "maxLength": 128 }
+              "routineId": {
+                "type": "string",
+                "maxLength": 128
+              }
             },
             "required": ["kind", "routineId"],
             "additionalProperties": false
@@ -2152,6 +2257,80 @@
       "callId": "tool-2",
       "botId": "xero-books",
       "text": "What is overdue?"
+    }
+  },
+  {
+    "name": "A2uiAgentMessage createSurface valid",
+    "schema": "A2uiAgentMessage",
+    "value": {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "draft-email",
+        "sendDataModel": true,
+        "components": [
+          {
+            "id": "root",
+            "component": "Column",
+            "children": ["subject"]
+          },
+          {
+            "id": "subject",
+            "component": "Text",
+            "text": {
+              "path": "/subject"
+            }
+          }
+        ],
+        "dataModel": {
+          "subject": "Re: Following up"
+        }
+      }
+    }
+  },
+  {
+    "name": "A2uiAgentMessage updateDataModel valid",
+    "schema": "A2uiAgentMessage",
+    "value": {
+      "version": "v1.0",
+      "updateDataModel": {
+        "surfaceId": "draft-email",
+        "path": "/sent",
+        "value": true
+      }
+    }
+  },
+  {
+    "name": "SendPayload card valid",
+    "schema": "SendPayload",
+    "value": {
+      "type": "card",
+      "surfaceId": "draft-email",
+      "messages": [
+        {
+          "version": "v1.0",
+          "createSurface": {
+            "surfaceId": "draft-email",
+            "sendDataModel": true,
+            "components": [
+              {
+                "id": "root",
+                "component": "Column",
+                "children": ["subject"]
+              },
+              {
+                "id": "subject",
+                "component": "Text",
+                "text": {
+                  "path": "/subject"
+                }
+              }
+            ],
+            "dataModel": {
+              "subject": "Re: Following up"
+            }
+          }
+        }
+      ]
     }
   }
 ]

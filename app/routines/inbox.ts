@@ -249,18 +249,47 @@ export interface RoutinePendingSupersededTurnV1 {
   createdAt: string;
 }
 
+/**
+ * A Card action nobody else claimed, waiting to be told to the Bot (ADR 0030).
+ *
+ * The fifth variant, and the one a person produces directly. An action whose
+ * name is neither an approval nor a Plugin handler is conversation input: the
+ * event and its context reach the Bot's next user-lane Turn as durable input,
+ * never as something the User said, because a press on a card is not a
+ * sentence and rendering it as one would put words in their mouth.
+ */
+export interface RoutinePendingCardActionV1 {
+  schemaVersion: 1;
+  kind: "card-action";
+  surfaceId: string;
+  /** The action's name, as the surface declared it. */
+  name: string;
+  /** What the component sent with it, serialized. Absent when it sent none. */
+  context?: string;
+  createdAt: string;
+}
+
+/** The longest serialized context a card-action input carries. */
+export const CARD_ACTION_CONTEXT_MAX_V1 = 4_000;
+
 /** One durable input the Bot's next conversational Turn is owed. */
 export type PendingBotInputV1 =
   | RoutinePendingWakeV1
   | RoutinePendingApprovalV1
   | RoutinePendingMachineResultV1
-  | RoutinePendingSupersededTurnV1;
+  | RoutinePendingSupersededTurnV1
+  | RoutinePendingCardActionV1;
 
 /** The id one pending input is keyed and de-duplicated by. */
 export function pendingBotInputIdV1(input: PendingBotInputV1): string {
   if (input.kind === "wake") return input.wakeId;
   if (input.kind === "approval") return input.approvalId;
   if (input.kind === "superseded-turn") return `superseded-turn:${input.runId}`;
+  // A surface can be pressed more than once, so the id carries the instant as
+  // well: two presses are two inputs, and a replay of one is still one.
+  if (input.kind === "card-action") {
+    return `card-action:${input.surfaceId}:${input.name}:${input.createdAt}`;
+  }
   return `machine-result:${input.commandId}`;
 }
 
@@ -420,6 +449,30 @@ export function decodePendingBotInputV1(
       createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
     };
   }
+  if (candidate.kind === "card-action") {
+    routineExactKeys(
+      candidate,
+      ["schemaVersion", "kind", "surfaceId", "name", "createdAt"],
+      ["context"],
+      label,
+    );
+    return {
+      schemaVersion: 1,
+      kind: "card-action",
+      surfaceId: routineText(candidate.surfaceId, 128, `${label} surfaceId`),
+      name: routineText(candidate.name, 256, `${label} name`),
+      ...(candidate.context === undefined
+        ? {}
+        : {
+            context: routineText(
+              candidate.context,
+              CARD_ACTION_CONTEXT_MAX_V1,
+              `${label} context`,
+            ),
+          }),
+      createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
+    };
+  }
   if (candidate.kind === "superseded-turn") {
     routineExactKeys(
       candidate,
@@ -532,6 +585,14 @@ export function pendingBotInputPreambleV1(
     if (input.kind === "approval") {
       lines.push(
         `[Approval] The decision on "${input.approvalId}" is ${input.decision}.`,
+        "",
+      );
+      continue;
+    }
+    if (input.kind === "card-action") {
+      lines.push(
+        `[Card] The person used "${input.name}" on the card "${input.surfaceId}". This is a press on a control, not something they said.`,
+        ...(input.context === undefined ? [] : [input.context]),
         "",
       );
       continue;

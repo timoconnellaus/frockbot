@@ -10,6 +10,10 @@
 /// answered on another device, or expired by the alarm, shows what was
 /// actually recorded.
 ///
+/// A card is a placeholder: the surface is durable and readable over REST, but
+/// this build has no A2UI renderer yet, so it draws its id and nothing it
+/// cannot honestly draw (ADR 0030 step 4 brings the renderer).
+///
 /// Anything this client cannot draw — a payload shape newer than this build,
 /// or one the decoder refused — becomes a plain line saying so. A Turn's
 /// history has to render on a client older than the Bot that produced it.
@@ -183,6 +187,12 @@ class SendPayloadView extends StatelessWidget {
           return const _Unsupported();
         }
         return AppletChatCard(key: ValueKey(appletId), appletId: appletId);
+      case 'card':
+        final surfaceId = payload['surfaceId'];
+        if (surfaceId is! String || surfaceId.isEmpty) {
+          return const _Unsupported();
+        }
+        return _Card(key: ValueKey(surfaceId), title: 'Card', body: surfaceId);
       case 'agent-card':
         return _Card(
           title: '${payload['title'] ?? payload['agentId']}',
@@ -201,6 +211,7 @@ class _Card extends StatelessWidget {
   final List<Widget> actions;
   final String? footer;
   const _Card({
+    super.key,
     required this.title,
     this.body,
     this.head,

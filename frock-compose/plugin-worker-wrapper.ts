@@ -782,6 +782,15 @@ export default class extends WorkerEntrypoint {
     );
   }
 
+  /**
+   * Card actions (ADR 0030 step 6). The contract is here so the kernel can
+   * route \`plugin/<pluginId>/<action>\` today; no Plugin declares a card
+   * handler yet, so every call is a drop and the Card is left as it was.
+   */
+  async cardAction() {
+    return { schemaVersion: 1, status: "drop", reason: "this deployment does not run plugin card handlers yet" };
+  }
+
   async view(rawInvocation) {
     let invocation;
     try {
@@ -808,7 +817,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v4";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v5";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(

@@ -202,6 +202,45 @@ export type ConversationQuery = {
 };
 export type ExchangeCounterpart =
   { kind: "bot"; botId: BotId } | { kind: "voice" };
+export type A2uiAgentMessage =
+  | {
+      version: "v1.0" | "v0.9";
+      createSurface: {
+        surfaceId: Identifier;
+        catalogId?: string;
+        sendDataModel?: boolean;
+        surfaceProperties?: {
+          [key: string]: Json;
+        };
+        theme?: {
+          [key: string]: Json;
+        };
+        components?: Array<{
+          id: Identifier;
+          component: string;
+          [key: string]: Json;
+        }>;
+        dataModel?: {
+          [key: string]: Json;
+        };
+      };
+    }
+  | {
+      version: "v1.0" | "v0.9";
+      updateComponents: {
+        surfaceId: Identifier;
+        components: Array<{
+          id: Identifier;
+          component: string;
+          [key: string]: Json;
+        }>;
+      };
+    }
+  | {
+      version: "v1.0" | "v0.9";
+      updateDataModel: { surfaceId: Identifier; path?: string; value: Json };
+    }
+  | { version: "v1.0" | "v0.9"; deleteSurface: { surfaceId: Identifier } };
 export type SendPayload =
   | { type: "text"; text: string }
   | { type: "attachment"; url: string; name?: string; mediaType?: string }
@@ -225,7 +264,8 @@ export type SendPayload =
       risk: "low" | "medium" | "high";
       expiresInSeconds?: number;
     }
-  | { type: "applet"; appletId: string };
+  | { type: "applet"; appletId: string }
+  | { type: "card"; surfaceId: Identifier; messages: Array<A2uiAgentMessage> };
 export type RunEvent =
   | { type: "send/to-user"; payload: SendPayload; ordinal: number }
   | {
@@ -888,6 +928,7 @@ export interface ProtocolTypes {
   Page: Page;
   ConversationQuery: ConversationQuery;
   ExchangeCounterpart: ExchangeCounterpart;
+  A2uiAgentMessage: A2uiAgentMessage;
   SendPayload: SendPayload;
   RunEvent: RunEvent;
   RunOutcome: RunOutcome;

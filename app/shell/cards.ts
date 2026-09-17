@@ -1,0 +1,810 @@
+/**
+ * Cards, as durable state (ADR 0030).
+ *
+ * A `card` send carries the A2UI messages for one surface; this is where those
+ * messages become something a client can read. The record is the folded
+ * surface — its component set, its data model and its revision — so a client
+ * that reconnects reads the current Card over REST and never replays a stream.
+ *
+ * Four rules live here and nowhere else.
+ *
+ *  * **Folded where the Turn settles.** `cardTerminalRecordsV1` is handed the
+ *    settled run and a reader bound to the transaction settling it, and
+ *    returns the records that transaction writes — the same seam an approval's
+ *    pending decision comes through. The card in the transcript and the record
+ *    an action is posted against become durable at the same instant.
+ *
+ *  * **Fold semantics are the specification's.** `createSurface` replaces the
+ *    surface, `updateComponents` upserts by `id` and keeps the order the
+ *    components were first seen in, `updateDataModel` writes `value` at its
+ *    JSON Pointer — `null` deletes the key — and `deleteSurface` tombstones
+ *    the record rather than removing it, because the send that drew the card
+ *    is still on the Turn's log and the transcript still has to say something.
+ *
+ *  * **Every fold bumps the revision.** An action names the revision it was
+ *    drawn against; a stale one is refused, so nobody answers a card that has
+ *    moved under them.
+ *
+ *  * **The Session's surfaces are bounded.** Cards do not tear down, so the
+ *    index caps how many a Session may hold. A fold past a surface budget is
+ *    refused whole and says so on the record it did not change: a card that
+ *    silently stopped updating is worse than one that says it stopped.
+ */
+import {
+  A2UI_LIMITS_V1,
+  a2uiActionCountV1,
+  a2uiByteLengthV1,
+  a2uiMessageSurfaceIdV1,
+  decodeA2uiActionV1,
+  type A2uiActionV1,
+  type A2uiAgentMessageV1,
+  type A2uiComponentV1,
+  type A2uiJsonObjectV1,
+  type A2uiJsonValueV1,
+} from "@frockbot/core/contracts";
+
+/** One `CardRecordV1`, keyed by the surface the Bot named. */
+export const CARD_PREFIX = "shell:card:";
+/** The Session's surface roll, which is what bounds how many Cards it holds. */
+export const CARD_INDEX_KEY = "shell:card-index";
+
+const MAX_ID_LENGTH = 256;
+const MAX_TIMESTAMP_LENGTH = 64;
+/** Why a fold was refused, in words for the card. */
+const MAX_REFUSAL_LENGTH = 256;
+
+export class CardDecodeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CardDecodeError";
+  }
+}
+
+/** The folded surface, as it is stored and as a client reads it. */
+export interface CardRecordV1 {
+  schemaVersion: 1;
+  surfaceId: string;
+  /** The Turn whose fold last changed it. */
+  runId: string;
+  sessionId: string;
+  /** The adjacency list, in the order the components were first seen. */
+  components: A2uiComponentV1[];
+  dataModel: A2uiJsonObjectV1;
+  /** Bumped by every fold that changed the surface. */
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  /** The catalog the surface was created under, when it named one. */
+  catalogId?: string;
+  /** Whether a renderer `action` carries the data model with it. */
+  sendDataModel?: boolean;
+  /** The surface's own properties, under 1.0's name for them. */
+  surfaceProperties?: A2uiJsonObjectV1;
+  /** Set by `deleteSurface`. The record stays; the surface is gone. */
+  deleted?: true;
+  /** Why the last fold changed nothing. Cleared by the next one that does. */
+  refusal?: string;
+}
+
+/** The Session's surfaces, oldest first. */
+export interface CardIndexV1 {
+  schemaVersion: 1;
+  surfaces: string[];
+}
+
+export function cardKeyV1(surfaceId: string): string {
+  return `${CARD_PREFIX}${surfaceId}`;
+}
+
+function record(input: unknown, label: string): A2uiJsonObjectV1 {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new CardDecodeError(`${label} must be an object`);
+  }
+  return input as A2uiJsonObjectV1;
+}
+
+function text(value: unknown, maximum: number, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new CardDecodeError(`${label} must be a non-empty string`);
+  }
+  if (value.length > maximum) {
+    throw new CardDecodeError(`${label} exceeds ${maximum} characters`);
+  }
+  return value;
+}
+
+function timestamp(value: unknown, label: string): string {
+  const stamp = text(value, MAX_TIMESTAMP_LENGTH, label);
+  if (Number.isNaN(Date.parse(stamp))) {
+    throw new CardDecodeError(`${label} is not a timestamp`);
+  }
+  return stamp;
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+  label: string,
+): void {
+  const allowed = new Set([...required, ...optional]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new CardDecodeError(`${label} has an unexpected key "${key}"`);
+    }
+  }
+  for (const key of required) {
+    if (!Object.hasOwn(value, key)) {
+      throw new CardDecodeError(`${label} is missing "${key}"`);
+    }
+  }
+}
+
+export function decodeCardRecordV1(
+  value: unknown,
+  label = "card record",
+): CardRecordV1 {
+  const candidate = record(value, label);
+  exactKeys(
+    candidate,
+    [
+      "schemaVersion",
+      "surfaceId",
+      "runId",
+      "sessionId",
+      "components",
+      "dataModel",
+      "revision",
+      "createdAt",
+      "updatedAt",
+    ],
+    ["catalogId", "sendDataModel", "surfaceProperties", "deleted", "refusal"],
+    label,
+  );
+  if (candidate.schemaVersion !== 1) {
+    throw new CardDecodeError(`${label} schemaVersion is unsupported`);
+  }
+  if (!Array.isArray(candidate.components)) {
+    throw new CardDecodeError(`${label} components must be an array`);
+  }
+  if (
+    !Number.isSafeInteger(candidate.revision) ||
+    (candidate.revision as number) < 0
+  ) {
+    throw new CardDecodeError(`${label} revision is invalid`);
+  }
+  return {
+    schemaVersion: 1,
+    surfaceId: text(
+      candidate.surfaceId,
+      A2UI_LIMITS_V1.surfaceId,
+      `${label} surfaceId`,
+    ),
+    runId: text(candidate.runId, MAX_ID_LENGTH, `${label} runId`),
+    sessionId: text(candidate.sessionId, MAX_ID_LENGTH, `${label} sessionId`),
+    components: candidate.components as A2uiComponentV1[],
+    dataModel: record(candidate.dataModel, `${label} dataModel`),
+    revision: candidate.revision as number,
+    createdAt: timestamp(candidate.createdAt, `${label} createdAt`),
+    updatedAt: timestamp(candidate.updatedAt, `${label} updatedAt`),
+    ...(candidate.catalogId === undefined
+      ? {}
+      : {
+          catalogId: text(
+            candidate.catalogId,
+            A2UI_LIMITS_V1.catalogId,
+            `${label} catalogId`,
+          ),
+        }),
+    ...(candidate.sendDataModel === undefined
+      ? {}
+      : { sendDataModel: Boolean(candidate.sendDataModel) }),
+    ...(candidate.surfaceProperties === undefined
+      ? {}
+      : {
+          surfaceProperties: record(
+            candidate.surfaceProperties,
+            `${label} surfaceProperties`,
+          ),
+        }),
+    ...(candidate.deleted === undefined ? {} : { deleted: true as const }),
+    ...(candidate.refusal === undefined
+      ? {}
+      : {
+          refusal: text(
+            candidate.refusal,
+            MAX_REFUSAL_LENGTH,
+            `${label} refusal`,
+          ),
+        }),
+  };
+}
+
+export function decodeCardIndexV1(
+  value: unknown,
+  label = "card index",
+): CardIndexV1 {
+  const candidate = record(value, label);
+  exactKeys(candidate, ["schemaVersion", "surfaces"], [], label);
+  if (candidate.schemaVersion !== 1 || !Array.isArray(candidate.surfaces)) {
+    throw new CardDecodeError(`${label} is invalid`);
+  }
+  return {
+    schemaVersion: 1,
+    surfaces: candidate.surfaces.map((surfaceId, index) =>
+      text(surfaceId, A2UI_LIMITS_V1.surfaceId, `${label} surfaces[${index}]`),
+    ),
+  };
+}
+
+/** Raised when a fold would put a surface past one of its budgets. */
+export class CardBudgetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CardBudgetError";
+  }
+}
+
+/**
+ * The tokens of a JSON Pointer, unescaped. An absent or empty pointer names
+ * the whole data model; the specification's default of `/` is the same thing
+ * said differently, and both land at the root here rather than at a key whose
+ * name is the empty string, which no data model a Bot writes has.
+ */
+function pointerTokens(path: string | undefined): string[] {
+  if (path === undefined || path === "" || path === "/") return [];
+  return path
+    .slice(1)
+    .split("/")
+    .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
+}
+
+/**
+ * Write `value` at `path` in `model`. `null` deletes the key, as the
+ * specification says; a pointer through a value that is not an object is a
+ * write with nowhere to land, and is refused rather than made to fit.
+ */
+function writeAtPointer(
+  model: A2uiJsonObjectV1,
+  path: string | undefined,
+  value: A2uiJsonValueV1,
+): A2uiJsonObjectV1 {
+  const tokens = pointerTokens(path);
+  if (tokens.length === 0) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new CardBudgetError(
+        "a data-model update at the root must be an object",
+      );
+    }
+    return { ...value };
+  }
+  // The walk is plain objects: the stored types spell JSON out to a fixed
+  // depth so a Card can cross a Durable Object RPC boundary, and that depth
+  // is a statement about what crosses the seam, not about how a pointer is
+  // resolved. The byte budget is what actually bounds a data model.
+  const next = { ...model } as Record<string, unknown>;
+  let cursor = next;
+  for (const token of tokens.slice(0, -1)) {
+    const child = cursor[token];
+    if (typeof child !== "object" || child === null || Array.isArray(child)) {
+      const created: Record<string, unknown> = {};
+      cursor[token] = created;
+      cursor = created;
+      continue;
+    }
+    const copied = { ...(child as Record<string, unknown>) };
+    cursor[token] = copied;
+    cursor = copied;
+  }
+  const leaf = tokens.at(-1)!;
+  if (value === null) delete cursor[leaf];
+  else cursor[leaf] = value;
+  return next as A2uiJsonObjectV1;
+}
+
+/** Upsert by `id`, keeping the order the components were first seen in. */
+function upsertComponents(
+  current: readonly A2uiComponentV1[],
+  incoming: readonly A2uiComponentV1[],
+): A2uiComponentV1[] {
+  const folded = [...current];
+  for (const component of incoming) {
+    const at = folded.findIndex((existing) => existing.id === component.id);
+    if (at < 0) folded.push(component);
+    else folded[at] = component;
+  }
+  return folded;
+}
+
+function assertSurfaceBudgets(card: CardRecordV1): void {
+  if (card.components.length > A2UI_LIMITS_V1.componentsPerSurface) {
+    throw new CardBudgetError(
+      `the surface exceeds ${A2UI_LIMITS_V1.componentsPerSurface} components`,
+    );
+  }
+  if (a2uiActionCountV1(card.components) > A2UI_LIMITS_V1.actionsPerSurface) {
+    throw new CardBudgetError(
+      `the surface exceeds ${A2UI_LIMITS_V1.actionsPerSurface} actions`,
+    );
+  }
+  if (a2uiByteLengthV1(card.dataModel) > A2UI_LIMITS_V1.dataModelBytes) {
+    throw new CardBudgetError(
+      `the data model exceeds ${A2UI_LIMITS_V1.dataModelBytes} bytes`,
+    );
+  }
+}
+
+export interface CardFoldContextV1 {
+  surfaceId: string;
+  runId: string;
+  sessionId: string;
+  now: string;
+}
+
+/**
+ * The messages of one send, folded onto the record the Session holds. Throws
+ * `CardBudgetError` when the folded surface would be past a budget; the caller
+ * decides what to say about a card it did not change.
+ */
+export function foldCardMessagesV1(
+  current: CardRecordV1 | undefined,
+  messages: readonly A2uiAgentMessageV1[],
+  context: CardFoldContextV1,
+): CardRecordV1 {
+  let card: CardRecordV1 = current
+    ? { ...current, runId: context.runId, updatedAt: context.now }
+    : {
+        schemaVersion: 1,
+        surfaceId: context.surfaceId,
+        runId: context.runId,
+        sessionId: context.sessionId,
+        components: [],
+        dataModel: {},
+        revision: 0,
+        createdAt: context.now,
+        updatedAt: context.now,
+      };
+  delete card.refusal;
+  for (const message of messages) {
+    if (a2uiMessageSurfaceIdV1(message) !== context.surfaceId) {
+      throw new CardBudgetError("a message named a different surface");
+    }
+    if ("createSurface" in message) {
+      const created = message.createSurface;
+      // A create is the surface starting again, not a patch on the one that
+      // was there: the components and the model it carries are all of it.
+      card = {
+        ...card,
+        components: [...(created.components ?? [])],
+        dataModel: { ...(created.dataModel ?? {}) },
+        ...(created.catalogId === undefined
+          ? {}
+          : { catalogId: created.catalogId }),
+        ...(created.sendDataModel === undefined
+          ? {}
+          : { sendDataModel: created.sendDataModel }),
+        ...(created.surfaceProperties === undefined
+          ? {}
+          : { surfaceProperties: created.surfaceProperties }),
+      };
+      delete card.deleted;
+      continue;
+    }
+    if ("updateComponents" in message) {
+      card = {
+        ...card,
+        components: upsertComponents(
+          card.components,
+          message.updateComponents.components,
+        ),
+      };
+      continue;
+    }
+    if ("updateDataModel" in message) {
+      const update = message.updateDataModel;
+      card = {
+        ...card,
+        dataModel: writeAtPointer(card.dataModel, update.path, update.value),
+      };
+      continue;
+    }
+    card = { ...card, components: [], dataModel: {}, deleted: true as const };
+  }
+  assertSurfaceBudgets(card);
+  return { ...card, revision: card.revision + 1 };
+}
+
+/** One card send that a settled Turn made, in the order it made them. */
+export interface CardSendV1 {
+  surfaceId: string;
+  messages: A2uiAgentMessageV1[];
+}
+
+/**
+ * The card sends on a settled Turn's durable log, gathered per surface in the
+ * order the surfaces were first named. Read off `send/to-user` events rather
+ * than off anything the Agent returned, because the log is the reconstruction
+ * surface and a recovered Turn has only the log.
+ */
+export function cardSendsV1(events: readonly { type: string }[]): CardSendV1[] {
+  const sends = new Map<string, CardSendV1>();
+  for (const event of events) {
+    if (event.type !== "send/to-user") continue;
+    const payload = (event as { payload?: { type?: string } }).payload;
+    if (!payload || payload.type !== "card") continue;
+    const send = payload as unknown as CardSendV1;
+    const existing = sends.get(send.surfaceId);
+    // Several sends to one surface in one Turn fold in the order they were
+    // made, which is the order the person would have watched them arrive in.
+    if (existing) existing.messages.push(...send.messages);
+    else
+      sends.set(send.surfaceId, {
+        surfaceId: send.surfaceId,
+        messages: [...send.messages],
+      });
+  }
+  return [...sends.values()];
+}
+
+/** The settled Turn a terminal record set is computed from. */
+export interface CardTerminalInputV1 {
+  run: {
+    runId: string;
+    sessionId: string;
+    events: readonly { type: string }[];
+  };
+  now: string;
+  read<T>(key: string): Promise<T | undefined>;
+}
+
+/**
+ * The card records one settled Turn contributes to the transaction that
+ * settles it, and the surface index they advance.
+ *
+ * Re-settling the same Turn folds the same messages onto a record that already
+ * carries them: `runId` says which Turn last folded, and a record already at
+ * this one is left exactly as it is, so a recovered Turn never bumps a
+ * revision twice and never invalidates an action a person has in flight.
+ */
+export async function cardTerminalRecordsV1(
+  input: CardTerminalInputV1,
+): Promise<Record<string, unknown>> {
+  const sends = cardSendsV1(input.run.events);
+  if (sends.length === 0) return {};
+  const records: Record<string, unknown> = {};
+  const stored = await input.read<unknown>(CARD_INDEX_KEY);
+  const index =
+    stored === undefined
+      ? { schemaVersion: 1 as const, surfaces: [] }
+      : decodeCardIndexV1(stored);
+  const surfaces = [...index.surfaces];
+  let movedIndex = false;
+  for (const send of sends) {
+    const key = cardKeyV1(send.surfaceId);
+    const existing = await input.read<unknown>(key);
+    const current =
+      existing === undefined ? undefined : decodeCardRecordV1(existing);
+    if (current?.runId === input.run.runId) continue;
+    if (
+      current === undefined &&
+      surfaces.length >= A2UI_LIMITS_V1.surfacesPerSession
+    ) {
+      // Nothing is evicted to make room: an older Card is still in the
+      // transcript, still readable and still answerable, and dropping it to
+      // draw a new one would break a conversation the person can scroll to.
+      continue;
+    }
+    const context = {
+      surfaceId: send.surfaceId,
+      runId: input.run.runId,
+      sessionId: input.run.sessionId,
+      now: input.now,
+    };
+    try {
+      records[key] = foldCardMessagesV1(current, send.messages, context);
+    } catch (error) {
+      if (!(error instanceof CardBudgetError)) throw error;
+      if (current === undefined) continue;
+      records[key] = {
+        ...current,
+        runId: input.run.runId,
+        updatedAt: input.now,
+        refusal: error.message.slice(0, MAX_REFUSAL_LENGTH),
+      } satisfies CardRecordV1;
+      continue;
+    }
+    if (current === undefined) {
+      surfaces.push(send.surfaceId);
+      movedIndex = true;
+    }
+  }
+  if (movedIndex) {
+    records[CARD_INDEX_KEY] = {
+      schemaVersion: 1,
+      surfaces,
+    } satisfies CardIndexV1;
+  }
+  return records;
+}
+
+/** One Card, as the client is told it. */
+export interface CardViewV1 {
+  schemaVersion: 1;
+  surfaceId: string;
+  revision: number;
+  components: A2uiComponentV1[];
+  dataModel: A2uiJsonObjectV1;
+  createdAt: string;
+  updatedAt: string;
+  catalogId?: string;
+  sendDataModel?: boolean;
+  surfaceProperties?: A2uiJsonObjectV1;
+  deleted?: true;
+  refusal?: string;
+}
+
+export function projectCardV1(stored: CardRecordV1): CardViewV1 {
+  return {
+    schemaVersion: 1,
+    surfaceId: stored.surfaceId,
+    revision: stored.revision,
+    components: stored.components,
+    dataModel: stored.dataModel,
+    createdAt: stored.createdAt,
+    updatedAt: stored.updatedAt,
+    ...(stored.catalogId === undefined ? {} : { catalogId: stored.catalogId }),
+    ...(stored.sendDataModel === undefined
+      ? {}
+      : { sendDataModel: stored.sendDataModel }),
+    ...(stored.surfaceProperties === undefined
+      ? {}
+      : { surfaceProperties: stored.surfaceProperties }),
+    ...(stored.deleted === undefined ? {} : { deleted: true as const }),
+    ...(stored.refusal === undefined ? {} : { refusal: stored.refusal }),
+  };
+}
+
+/** The Bot's Cards, newest first. */
+export interface CardListViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  cards: CardViewV1[];
+}
+
+/** One renderer action, as the client posts it. */
+export interface CardActionCommandV1 {
+  schemaVersion: 1;
+  surfaceId: string;
+  /** The revision the surface was drawn at; a stale one is refused. */
+  revision: number;
+  event: A2uiActionV1;
+  /** The surface's data model, when it was created with `sendDataModel`. */
+  dataModel?: A2uiJsonObjectV1;
+}
+
+export function decodeCardActionCommandV1(
+  value: unknown,
+  label = "card action",
+): CardActionCommandV1 {
+  const candidate = record(value, label);
+  exactKeys(
+    candidate,
+    ["schemaVersion", "surfaceId", "revision", "event"],
+    ["dataModel"],
+    label,
+  );
+  if (candidate.schemaVersion !== 1) {
+    throw new CardDecodeError(`${label} schemaVersion is unsupported`);
+  }
+  if (
+    !Number.isSafeInteger(candidate.revision) ||
+    (candidate.revision as number) < 0
+  ) {
+    throw new CardDecodeError(`${label} revision is invalid`);
+  }
+  let event: A2uiActionV1;
+  try {
+    event = decodeA2uiActionV1(candidate.event, `${label} event`);
+  } catch (error) {
+    throw new CardDecodeError(
+      error instanceof Error ? error.message : `${label} event is invalid`,
+    );
+  }
+  let dataModel: A2uiJsonObjectV1 | undefined;
+  if (candidate.dataModel !== undefined) {
+    dataModel = record(candidate.dataModel, `${label} dataModel`);
+    if (a2uiByteLengthV1(dataModel) > A2UI_LIMITS_V1.dataModelBytes) {
+      throw new CardDecodeError(
+        `${label} dataModel exceeds ${A2UI_LIMITS_V1.dataModelBytes} bytes`,
+      );
+    }
+  }
+  return {
+    schemaVersion: 1,
+    surfaceId: text(
+      candidate.surfaceId,
+      A2UI_LIMITS_V1.surfaceId,
+      `${label} surfaceId`,
+    ),
+    revision: candidate.revision as number,
+    event,
+    ...(dataModel === undefined ? {} : { dataModel }),
+  };
+}
+
+/** What an action's name asks the kernel to do. */
+export type CardActionRouteV1 =
+  | { kind: "approval"; approvalId: string }
+  | { kind: "plugin"; pluginId: string; action: string }
+  | { kind: "input" };
+
+const APPROVAL_ID_PATTERN_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const PLUGIN_ID_PATTERN_V1 = /^[a-z][a-z0-9-]{0,63}$/;
+const PLUGIN_ACTION_PATTERN_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+
+/**
+ * What one action name means. The two reserved namespaces are the kernel's:
+ * `approval/<approvalId>` is a decision recorded exactly as an Approval is,
+ * and `plugin/<pluginId>/<action>` is a Plugin handler. A malformed name in
+ * either namespace is not conversation input — a Card must not be able to
+ * reach the kernel by writing a name the kernel almost understood.
+ */
+export function cardActionRouteV1(name: string): CardActionRouteV1 {
+  if (name.startsWith("approval/")) {
+    const approvalId = name.slice("approval/".length);
+    if (!APPROVAL_ID_PATTERN_V1.test(approvalId)) {
+      throw new CardDecodeError("the action names an invalid approval");
+    }
+    return { kind: "approval", approvalId };
+  }
+  if (name.startsWith("plugin/")) {
+    const [pluginId, ...rest] = name.slice("plugin/".length).split("/");
+    const action = rest.join("/");
+    if (
+      pluginId === undefined ||
+      !PLUGIN_ID_PATTERN_V1.test(pluginId) ||
+      !PLUGIN_ACTION_PATTERN_V1.test(action)
+    ) {
+      throw new CardDecodeError("the action names an invalid plugin handler");
+    }
+    return { kind: "plugin", pluginId, action };
+  }
+  return { kind: "input" };
+}
+
+/** What the action route answers. */
+export interface CardActionReceiptV1 {
+  schemaVersion: 1;
+  /**
+   * What the kernel did with it: recorded a decision, ran a Plugin handler,
+   * or queued the event as the Bot's next input.
+   */
+  routed: CardActionRouteV1["kind"];
+  /** The card as it stands after the action, so the client redraws once. */
+  card: CardViewV1;
+  /** Why a Plugin handler changed nothing, when it did not. */
+  failure?: string;
+}
+
+function decodeCardViewV1(value: unknown, label = "card"): CardViewV1 {
+  const candidate = record(value, label);
+  exactKeys(
+    candidate,
+    [
+      "schemaVersion",
+      "surfaceId",
+      "revision",
+      "components",
+      "dataModel",
+      "createdAt",
+      "updatedAt",
+    ],
+    ["catalogId", "sendDataModel", "surfaceProperties", "deleted", "refusal"],
+    label,
+  );
+  if (candidate.schemaVersion !== 1) {
+    throw new CardDecodeError(`${label} schemaVersion is unsupported`);
+  }
+  if (!Array.isArray(candidate.components)) {
+    throw new CardDecodeError(`${label} components must be an array`);
+  }
+  if (
+    !Number.isSafeInteger(candidate.revision) ||
+    (candidate.revision as number) < 0
+  ) {
+    throw new CardDecodeError(`${label} revision is invalid`);
+  }
+  return {
+    schemaVersion: 1,
+    surfaceId: text(
+      candidate.surfaceId,
+      A2UI_LIMITS_V1.surfaceId,
+      `${label} surfaceId`,
+    ),
+    revision: candidate.revision as number,
+    components: candidate.components as A2uiComponentV1[],
+    dataModel: record(candidate.dataModel, `${label} dataModel`),
+    createdAt: timestamp(candidate.createdAt, `${label} createdAt`),
+    updatedAt: timestamp(candidate.updatedAt, `${label} updatedAt`),
+    ...(candidate.catalogId === undefined
+      ? {}
+      : {
+          catalogId: text(
+            candidate.catalogId,
+            A2UI_LIMITS_V1.catalogId,
+            `${label} catalogId`,
+          ),
+        }),
+    ...(candidate.sendDataModel === undefined
+      ? {}
+      : { sendDataModel: Boolean(candidate.sendDataModel) }),
+    ...(candidate.surfaceProperties === undefined
+      ? {}
+      : {
+          surfaceProperties: record(
+            candidate.surfaceProperties,
+            `${label} surfaceProperties`,
+          ),
+        }),
+    ...(candidate.deleted === undefined ? {} : { deleted: true as const }),
+    ...(candidate.refusal === undefined
+      ? {}
+      : {
+          refusal: text(
+            candidate.refusal,
+            MAX_REFUSAL_LENGTH,
+            `${label} refusal`,
+          ),
+        }),
+  };
+}
+
+export function decodeCardListViewV1(
+  value: unknown,
+  label = "card list",
+): CardListViewV1 {
+  const candidate = record(value, label);
+  exactKeys(candidate, ["schemaVersion", "botId", "cards"], [], label);
+  if (candidate.schemaVersion !== 1 || !Array.isArray(candidate.cards)) {
+    throw new CardDecodeError(`${label} is invalid`);
+  }
+  return {
+    schemaVersion: 1,
+    botId: text(candidate.botId, MAX_ID_LENGTH, `${label} botId`),
+    cards: candidate.cards.map((card) =>
+      decodeCardViewV1(card, `${label} entry`),
+    ),
+  };
+}
+
+export function decodeCardActionReceiptV1(
+  value: unknown,
+  label = "card action receipt",
+): CardActionReceiptV1 {
+  const candidate = record(value, label);
+  exactKeys(candidate, ["schemaVersion", "routed", "card"], ["failure"], label);
+  if (candidate.schemaVersion !== 1) {
+    throw new CardDecodeError(`${label} schemaVersion is unsupported`);
+  }
+  if (
+    candidate.routed !== "approval" &&
+    candidate.routed !== "plugin" &&
+    candidate.routed !== "input"
+  ) {
+    throw new CardDecodeError(`${label} routed is invalid`);
+  }
+  return {
+    schemaVersion: 1,
+    routed: candidate.routed,
+    card: decodeCardViewV1(candidate.card, `${label} card`),
+    ...(candidate.failure === undefined
+      ? {}
+      : {
+          failure: text(
+            candidate.failure,
+            MAX_REFUSAL_LENGTH,
+            `${label} failure`,
+          ),
+        }),
+  };
+}

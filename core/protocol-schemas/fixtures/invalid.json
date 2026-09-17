@@ -1929,5 +1929,37 @@
       "botName": "Xero",
       "text": "What is overdue?"
     }
+  },
+  {
+    "name": "A2uiAgentMessage naming two messages invalid",
+    "schema": "A2uiAgentMessage",
+    "value": {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "draft-email"
+      },
+      "deleteSurface": {
+        "surfaceId": "draft-email"
+      }
+    }
+  },
+  {
+    "name": "A2uiAgentMessage with an unknown version invalid",
+    "schema": "A2uiAgentMessage",
+    "value": {
+      "version": "v2.0",
+      "deleteSurface": {
+        "surfaceId": "draft-email"
+      }
+    }
+  },
+  {
+    "name": "SendPayload card with no messages invalid",
+    "schema": "SendPayload",
+    "value": {
+      "type": "card",
+      "surfaceId": "draft-email",
+      "messages": []
+    }
   }
 ]

@@ -80,6 +80,8 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     listApprovals: ({ botId }) => state.listApprovals(botId),
     decideApproval: ({ botId, approvalId, command }) =>
       state.decideApproval(botId, approvalId, command),
+    listCards: ({ botId }) => state.listCards(botId),
+    cardAction: ({ botId, command }) => state.cardAction(botId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
     stopRun: ({ botId, command }) => state.stopRun(botId, command),
@@ -348,6 +350,9 @@ describe("user application Bot seam", () => {
           pending: 0,
         }),
       decideApproval: () => Promise.reject(new Error("unexpected")),
+      listCards: (botId) =>
+        Promise.resolve({ schemaVersion: 1 as const, botId, cards: [] }),
+      cardAction: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
       stopRun: () => Promise.reject(new Error("must not stop")),
     };
@@ -950,6 +955,125 @@ describe("user application Bot seam", () => {
   });
 });
 
+describe("the cards route", () => {
+  const card = {
+    schemaVersion: 1 as const,
+    surfaceId: "draft-email",
+    revision: 2,
+    components: [],
+    dataModel: {},
+    createdAt: "2026-09-17T10:00:00.000Z",
+    updatedAt: "2026-09-17T10:00:00.000Z",
+  };
+
+  function envFor(overrides: Partial<BotStateBinding>): UserApplicationEnv {
+    const botState = {
+      run: () => Promise.reject(new Error("unexpected")),
+      listRuns: () => Promise.reject(new Error("unexpected")),
+      lookupRun: () => Promise.reject(new Error("unexpected")),
+      fenceRunAdmission: () => Promise.reject(new Error("unexpected")),
+      listNotifications: () => Promise.resolve([]),
+      listApprovals: (botId: string) =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          botId,
+          approvals: [],
+          pending: 0,
+        }),
+      decideApproval: () => Promise.reject(new Error("unexpected")),
+      listCards: (botId: string) =>
+        Promise.resolve({ schemaVersion: 1 as const, botId, cards: [card] }),
+      cardAction: () => Promise.reject(new Error("unexpected")),
+      acknowledgeNotification: () => Promise.resolve(),
+      stopRun: () => Promise.reject(new Error("unexpected")),
+      ...overrides,
+    } as unknown as BotStateBinding;
+    return {
+      BOT_STATE: rpcBindingFor(botState),
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+  }
+
+  test("a GET answers the Bot's surfaces as they stand", async () => {
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards"),
+      envFor({}),
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()) as { cards: unknown[] }).toMatchObject({
+      botId: "primary",
+      cards: [{ surfaceId: "draft-email", revision: 2 }],
+    });
+  });
+
+  test("a malformed action never reaches the Durable Object", async () => {
+    let reached = 0;
+    const env = envFor({
+      cardAction: () => {
+        reached += 1;
+        return Promise.reject(new Error("unexpected"));
+      },
+    });
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards", {
+        method: "POST",
+        body: JSON.stringify({ schemaVersion: 1, surfaceId: "draft-email" }),
+      }),
+      env,
+    );
+    expect(response.status).toBe(400);
+    expect(reached).toBe(0);
+  });
+
+  test("a surface that has moved under the person is 409, not a fault", async () => {
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards", {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          surfaceId: "draft-email",
+          revision: 1,
+          event: { name: "send" },
+        }),
+      }),
+      envFor({
+        cardAction: () =>
+          Promise.reject(new Error('card "draft-email" has moved on')),
+      }),
+    );
+    expect(response.status).toBe(409);
+  });
+
+  test("a surface this Bot never drew is 404", async () => {
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards", {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          surfaceId: "draft-email",
+          revision: 2,
+          event: { name: "send" },
+        }),
+      }),
+      envFor({
+        cardAction: () =>
+          Promise.reject(new Error('card "draft-email" was not found')),
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  test("no other method is served", async () => {
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards", {
+        method: "DELETE",
+      }),
+      envFor({}),
+    );
+    expect(response.status).toBe(405);
+  });
+});
+
 describe("run list failures", () => {
   test("a stored run the codec refuses is a JSON failure with its reason, not a crash", async () => {
     const botState: BotStateBinding = {
@@ -969,6 +1093,9 @@ describe("run list failures", () => {
           pending: 0,
         }),
       decideApproval: () => Promise.reject(new Error("unexpected")),
+      listCards: (botId) =>
+        Promise.resolve({ schemaVersion: 1 as const, botId, cards: [] }),
+      cardAction: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
       stopRun: () => Promise.reject(new Error("unexpected")),
     };

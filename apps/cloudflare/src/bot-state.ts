@@ -135,6 +135,7 @@ import {
   resolveConfiguration,
 } from "@frockbot/app/settings/bot";
 import { decideApproval, listApprovals } from "@frockbot/app/approvals/bot";
+import { cardAction, listCards } from "@frockbot/app/cards/bot";
 import {
   getCompositionGeneration,
   listCompositionGenerations,
@@ -168,6 +169,10 @@ import {
   decodeApprovalDecisionCommandV1,
   type ApprovalDecisionCommandV1,
 } from "@frockbot/app/shell/approvals";
+import {
+  decodeCardActionCommandV1,
+  type CardActionCommandV1,
+} from "@frockbot/app/shell/cards";
 import {
   decodePackageIframeToolCommandV1,
   decodeIsolateMemoryReadRequestV1,
@@ -2116,6 +2121,41 @@ export class BotState extends DurableObject<BotStateEnv> {
       request.approvalId as string,
       request.command as ApprovalDecisionCommandV1,
     );
+  }
+
+  /** The Bot's Cards, newest first, tombstoned ones included (ADR 0030). */
+  async listCards(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell } = await this.materialized(identity);
+    return listCards(shell.state, identity);
+  }
+
+  /**
+   * One action on one Card. The kernel decides what the action's name means;
+   * a stale revision is refused rather than applied to a surface the person
+   * was not looking at.
+   */
+  async cardAction(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeCardActionCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    const receipt = await cardAction(
+      shell.state,
+      identity,
+      request.command as CardActionCommandV1,
+    );
+    // A Card is part of the transcript, so an attached client is told to read
+    // again the way it is told a Turn moved. The fold happened outside the
+    // authority's own storage, which is what observes run writes.
+    this.stateChannel.noticeRuns();
+    return receipt;
   }
 
   async listNotifications(input: unknown) {

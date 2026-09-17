@@ -149,6 +149,7 @@ function harness(
     hook?: PluginWorkerEntrypoint["hook"];
     receiveTrigger?: PluginWorkerEntrypoint["receiveTrigger"];
     view?: PluginWorkerEntrypoint["view"];
+    cardAction?: PluginWorkerEntrypoint["cardAction"];
     healthThrows?: string;
     deadlineMs?: number;
     artifacts?: Record<string, string>;
@@ -200,6 +201,13 @@ function harness(
         schemaVersion: 1 as const,
         status: "drop" as const,
         reason: "this fake renders nothing",
+      }),
+    cardAction: (invocation) =>
+      input.cardAction?.(invocation) ??
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        status: "drop" as const,
+        reason: "this fake runs no card handlers",
       }),
     receiveTrigger: (invocation) => {
       triggerInvocations.push(invocation);

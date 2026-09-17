@@ -436,6 +436,19 @@ describe("the conversation prompt section", () => {
         secretName: "api_key",
       },
       "agent-card": { type: "agent-card", agentId: "bot-2", title: "School" },
+      card: {
+        type: "card",
+        surfaceId: "draft-email",
+        messages: [
+          {
+            version: "v1.0",
+            createSurface: {
+              surfaceId: "draft-email",
+              components: [{ id: "root", component: "Text", text: "Ready" }],
+            },
+          },
+        ],
+      },
       approval: {
         type: "approval",
         approvalId: "ap-1",

@@ -213,11 +213,11 @@ class ChannelComputerStorage implements ComputerBotStorage {
 
 /**
  * The durable keys that hold what a browser draws as the conversation: the
- * run records themselves, their index, and the two pointers that say which
- * Turn is executing and which is waiting. A write to any of them means the
- * transcript moved.
+ * run records themselves, their index, the two pointers that say which Turn is
+ * executing and which is waiting, and the Cards a `card` send folded into
+ * (ADR 0030). A write to any of them means the transcript moved.
  */
-const RUN_STATE_KEY_PREFIXES = ["run:", "run-index:"] as const;
+const RUN_STATE_KEY_PREFIXES = ["run:", "run-index:", "shell:card:"] as const;
 const RUN_STATE_KEYS = ["active-run", "pending-run"] as const;
 
 function namesRunState(key: string): boolean {
@@ -354,8 +354,12 @@ export class BotStateChannel {
    * single Turn produces: a Turn writes its run record on admission, on every
    * session flush and on settlement, and an observer only ever needs to know
    * that it should read again.
+   *
+   * Public because a Card action folds outside the authority's own storage —
+   * the only writer `observeRuns` watches — and the card it changed is part
+   * of the transcript the notice is about.
    */
-  private noticeRuns(): void {
+  noticeRuns(): void {
     if (this.silenced) return;
     this.runsPending = true;
     if (this.runsNotice) return;

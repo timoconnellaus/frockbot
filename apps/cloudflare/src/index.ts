@@ -63,6 +63,14 @@ import {
   type ApprovalListViewV1,
 } from "@frockbot/app/shell/approvals";
 import {
+  decodeCardActionCommandV1,
+  decodeCardActionReceiptV1,
+  decodeCardListViewV1,
+  type CardActionCommandV1,
+  type CardActionReceiptV1,
+  type CardListViewV1,
+} from "@frockbot/app/shell/cards";
+import {
   decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationListViewV1,
   decodeCompositionGenerationViewV1,
@@ -454,6 +462,8 @@ interface BotStateRpc extends BotConfigurationBinding {
     approvalId: string,
     command: ApprovalDecisionCommandV1,
   ): Promise<ApprovalDecisionReceiptV1>;
+  listCards(): Promise<CardListViewV1>;
+  cardAction(command: CardActionCommandV1): Promise<CardActionReceiptV1>;
   readUnread(): Promise<BotUnreadViewV1>;
   executeUnreadCommand(
     command: BotUnreadCommandV1,
@@ -575,6 +585,9 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
         approvalId,
         command,
       }),
+    listCards: () => rpc.listCards({ schemaVersion: 1, userId, botId }),
+    cardAction: (command) =>
+      rpc.cardAction({ schemaVersion: 1, userId, botId, command }),
     readUnread: () => rpc.readUnread({ schemaVersion: 1, userId, botId }),
     executeUnreadCommand: (command) =>
       rpc.executeUnreadCommand({ schemaVersion: 1, userId, botId, command }),
@@ -1497,6 +1510,33 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
         request.approvalId as string,
         request.command as ApprovalDecisionCommandV1,
       ),
+    );
+  }
+
+  /** The Bot's Cards, decoded at the seam like every other crossing read. */
+  async listCards(input: unknown): Promise<CardListViewV1> {
+    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
+    return decodeCardListViewV1(
+      await botStateStub(
+        this.env,
+        this.ctx.props.userId,
+        request.botId as string,
+      ).listCards(),
+    );
+  }
+
+  /** One action on one Card, routed by the kernel before this answers. */
+  async cardAction(input: unknown): Promise<CardActionReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      command: rpcDecoded(decodeCardActionCommandV1),
+    });
+    return decodeCardActionReceiptV1(
+      await botStateStub(
+        this.env,
+        this.ctx.props.userId,
+        request.botId as string,
+      ).cardAction(request.command as CardActionCommandV1),
     );
   }
 
