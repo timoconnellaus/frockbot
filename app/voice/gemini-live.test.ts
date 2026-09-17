@@ -4,16 +4,12 @@ import {
   decodeGeminiBase64V1,
   decodeGeminiServerFrameV1,
   encodeGeminiAudioFrameV1,
-  encodeGeminiAudioStreamEndV1,
   encodeGeminiBase64V1,
   encodeGeminiTextTurnV1,
   encodeGeminiToolResponseV1,
-  encodeGeminiTurnBoundaryV1,
-  geminiAudioRateV1,
   geminiLiveUrlV1,
   GEMINI_LIVE_INPUT_MIME_V1,
   GEMINI_LIVE_MODEL_V1,
-  GEMINI_LIVE_OUTPUT_SAMPLE_RATE_V1,
 } from "./gemini-live.js";
 
 describe("the setup frame", () => {
@@ -129,15 +125,6 @@ describe("client frames", () => {
     });
   });
 
-  test("a bare boundary asks for an unprompted turn", () => {
-    expect(encodeGeminiTurnBoundaryV1()).toEqual({
-      clientContent: { turnComplete: true },
-    });
-    expect(encodeGeminiAudioStreamEndV1()).toEqual({
-      realtimeInput: { audioStreamEnd: true },
-    });
-  });
-
   test("a tool answer carries the server's own id and its scheduling", () => {
     expect(
       encodeGeminiToolResponseV1([
@@ -204,8 +191,6 @@ describe("decoding what the server sends", () => {
       { kind: "audio", pcm, mimeType: "audio/pcm;rate=24000" },
       { kind: "output-transcript", text: "Hello, I " },
     ]);
-    expect(geminiAudioRateV1("audio/pcm;rate=24000")).toBe(24_000);
-    expect(geminiAudioRateV1("")).toBe(GEMINI_LIVE_OUTPUT_SAMPLE_RATE_V1);
   });
 
   test("what the person said", () => {

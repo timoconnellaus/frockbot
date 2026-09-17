@@ -194,18 +194,6 @@ export function encodeGeminiTextTurnV1(text: string): Record<string, unknown> {
 }
 
 /**
- * "Say something now, unprompted." The observed frame for an opening line: no
- * turn content at all, just the boundary.
- */
-export function encodeGeminiTurnBoundaryV1(): Record<string, unknown> {
-  return { clientContent: { turnComplete: true } };
-}
-
-export function encodeGeminiAudioStreamEndV1(): Record<string, unknown> {
-  return { realtimeInput: { audioStreamEnd: true } };
-}
-
-/**
  * When a late answer is spoken.
  *
  * `WHEN_IDLE` waits for the floor, `INTERRUPT` takes it, `SILENT` goes into
@@ -376,17 +364,6 @@ export function decodeGeminiServerFrameV1(raw: string): GeminiServerEventV1[] {
     });
   }
   return events;
-}
-
-/**
- * The rate an audio part declares, or the output rate when it declares none.
- * Only ever 24 kHz in practice; read rather than assumed because the client is
- * told a rate once, in `audio_config`, and a session that started answering at
- * another one would play back wrong with nothing saying so.
- */
-export function geminiAudioRateV1(mimeType: string): number {
-  const matched = /rate=(\d+)/.exec(mimeType);
-  return matched ? Number(matched[1]) : GEMINI_LIVE_OUTPUT_SAMPLE_RATE_V1;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

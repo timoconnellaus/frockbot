@@ -171,9 +171,14 @@ export function createSubagentTool(
       spawned += 1;
       // The shape the model reads: the work is running and it is free to
       // answer now. There is no result to wait for — the hand-off speaks for
-      // itself in this conversation when it is done.
+      // itself in this conversation when it is done. A replay after eviction
+      // is told the Turn was already admitted rather than that a second one
+      // began.
       return {
-        content: JSON.stringify({ runId: outcome.runId, status: "started" }),
+        content: JSON.stringify({
+          runId: outcome.runId,
+          status: outcome.status,
+        }),
         isError: false,
       };
     },

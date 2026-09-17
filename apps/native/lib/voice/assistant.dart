@@ -48,10 +48,12 @@ enum VoiceSessionPhase { idle, connecting, live, ending, ended, error }
 /// One subagent the call has handed work to (ADR 0031), as the activity slot
 /// lists it.
 ///
-/// The ledger is per Bot, because that is what the `voice/delegation` frame
-/// names: a later frame about the same Bot moves the entry rather than adding
-/// a second one. [finishedWhilePaused] is what the Resume badge counts — work
-/// that landed while nothing was listening is the thing the person missed.
+/// The ledger is per Turn, because that is what the `voice/delegation` frame
+/// names: a later frame about the same [runId] moves the entry rather than
+/// adding a second one, and a second hand-off — which is a second Turn, even
+/// on the same Bot — opens its own. [finishedWhilePaused] is what the Resume
+/// badge counts — work that landed while nothing was listening is the thing
+/// the person missed.
 class VoiceDelegationEntryV1 {
   final String botId;
   final String botName;
@@ -129,9 +131,10 @@ class AssistantSessionController extends ChangeNotifier {
   VoiceDelegationStateV1? _delegationState;
   Timer? _delegationTimer;
 
-  /// Every subagent this call has handed work to, in the order it was first
-  /// asked. Unlike the three fields above — which are the footer's one
-  /// transient rise — the ledger is the call's, and outlives each frame.
+  /// Every subagent this call has handed work to, one entry per Turn, in the
+  /// order it was first asked. Unlike the three fields above — which are the
+  /// footer's one transient rise — the ledger is the call's, and outlives
+  /// each frame.
   final List<VoiceDelegationEntryV1> _delegations = [];
 
   /// Whether the person put the call to sleep. Distinct from [_asleep],
@@ -176,7 +179,7 @@ class AssistantSessionController extends ChangeNotifier {
   String? get delegatedBotName => _delegatedBotName;
   VoiceDelegationStateV1? get delegationState => _delegationState;
 
-  /// The activity slot's whole content: one entry per Bot this call asked.
+  /// The activity slot's whole content: one entry per hand-off this call made.
   List<VoiceDelegationEntryV1> get delegations =>
       List.unmodifiable(_delegations);
 
@@ -786,8 +789,9 @@ class AssistantSessionController extends ChangeNotifier {
     _delegations.clear();
   }
 
-  /// Moves the ledger's entry for one Bot, or opens it. A finish that lands
-  /// while the call is paused is marked, because the Resume pill counts them.
+  /// Moves the ledger's entry for one hand-off, or opens it. A finish that
+  /// lands while the call is paused is marked, because the Resume pill counts
+  /// them.
   void _record(
     String botId,
     String botName,
@@ -801,13 +805,13 @@ class AssistantSessionController extends ChangeNotifier {
       state: state,
       finishedWhilePaused: _paused && state == VoiceDelegationStateV1.finished,
     );
-    final at = _delegations.indexWhere((item) => item.botId == botId);
+    final at = _delegations.indexWhere((item) => item.runId == runId);
     if (at < 0) {
       _delegations.add(entry);
       return;
     }
-    // A Bot asked twice keeps its place in the slot; only a finish that
-    // already counted stays counted.
+    // A hand-off reported twice keeps its place in the slot; only a finish
+    // that already counted stays counted.
     _delegations[at] = entry.finishedWhilePaused || !_delegations[at].finished
         ? entry
         : VoiceDelegationEntryV1(
