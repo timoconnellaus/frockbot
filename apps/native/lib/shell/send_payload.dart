@@ -10,9 +10,11 @@
 /// answered on another device, or expired by the alarm, shows what was
 /// actually recorded.
 ///
-/// A card is a placeholder: the surface is durable and readable over REST, but
-/// this build has no A2UI renderer yet, so it draws its id and nothing it
-/// cannot honestly draw (ADR 0030 step 4 brings the renderer).
+/// A card is an A2UI surface, drawn by the renderer in `../cards/` from the
+/// two catalogs this build compiled in. The surface is durable and read over
+/// REST, so the card in the thread is the surface as it stands; a later send
+/// naming the same `surfaceId` updates it in place rather than adding a second
+/// one (ADR 0030).
 ///
 /// Anything this client cannot draw — a payload shape newer than this build,
 /// or one the decoder refused — becomes a plain line saying so. A Turn's
@@ -25,6 +27,7 @@ import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
 import '../applets/chat_card.dart';
+import '../cards/chat_card.dart';
 import 'markdown.dart';
 import 'semantics.dart';
 import 'transcript_model.dart';
@@ -192,7 +195,7 @@ class SendPayloadView extends StatelessWidget {
         if (surfaceId is! String || surfaceId.isEmpty) {
           return const _Unsupported();
         }
-        return _Card(key: ValueKey(surfaceId), title: 'Card', body: surfaceId);
+        return CardChatCard(key: ValueKey(surfaceId), surfaceId: surfaceId);
       case 'agent-card':
         return _Card(
           title: '${payload['title'] ?? payload['agentId']}',
@@ -211,7 +214,6 @@ class _Card extends StatelessWidget {
   final List<Widget> actions;
   final String? footer;
   const _Card({
-    super.key,
     required this.title,
     this.body,
     this.head,

@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frockbot.com/a2ui/catalogs/frock/v1.json",
+  "title": "Frock Catalog",
+  "description": "FrockBot's own A2UI components. Drawn by the host from the app's own theme; a Bot or a Plugin composes them, and neither supplies code.",
+  "catalogId": "https://frockbot.com/a2ui/catalogs/frock/v1.json",
+  "components": {
+    "StatusPill": {
+      "type": "object",
+      "description": "A small pill stating what state the card is in. One per card, beside its title.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "StatusPill" },
+            "label": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The words on the pill, e.g. 'Ready to send' or 'Sent'. Bind this to the data model when the card settles."
+            },
+            "tone": {
+              "type": "string",
+              "enum": ["neutral", "ready", "success", "warning", "danger"],
+              "description": "What the state means, which is what the host colours the pill by. 'ready' is waiting on the person, 'success' is done, 'warning' needs attention, 'danger' failed. Defaults to 'neutral'."
+            }
+          },
+          "required": ["component", "label"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "KeyValueRows": {
+      "type": "object",
+      "description": "Labelled values in a column, one per row: From, To, Cc, Subject. For facts about the thing the card shows, never as a form.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "KeyValueRows" },
+            "rows": {
+              "type": "array",
+              "description": "The rows, in the order they are read.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "description": "The short label on the left, e.g. 'To'."
+                  },
+                  "value": {
+                    "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+                    "description": "The value on the right. Bind it to the data model when it changes."
+                  }
+                },
+                "required": ["label", "value"]
+              }
+            }
+          },
+          "required": ["component", "rows"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "CollapsibleText": {
+      "type": "object",
+      "description": "A body of text that starts collapsed, with a control that shows the rest. For a draft, a quote, or anything longer than the card.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "CollapsibleText" },
+            "text": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The body. Plain text; a card is not a document."
+            },
+            "collapsedLines": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 40,
+              "description": "How many lines are shown before the control appears. Defaults to 6."
+            }
+          },
+          "required": ["component", "text"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ApprovalActions": {
+      "type": "object",
+      "description": "The approve and decline controls for one Approval the kernel issued. Compose it into a card; the host draws the buttons and names the actions, and the decision is recorded once and durably.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "ApprovalActions" },
+            "approvalId": {
+              "type": "string",
+              "description": "The id the kernel issued when the Bot proposed the action. A card cannot invent one: an id the kernel never recorded is refused when the button is pressed."
+            },
+            "approveLabel": {
+              "type": "string",
+              "description": "The word on the approving control. Defaults to 'Approve'."
+            },
+            "declineLabel": {
+              "type": "string",
+              "description": "The word on the declining control. Defaults to 'Decline'."
+            }
+          },
+          "required": ["component", "approvalId"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Receipt": {
+      "type": "object",
+      "description": "What a card settles into: its title, the pill saying what happened, and one line summarising it. Use it in place of the controls once the thing is done.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "Receipt" },
+            "title": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The same title the card carried before it settled."
+            },
+            "status": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The words on the pill, e.g. 'Sent'."
+            },
+            "tone": {
+              "type": "string",
+              "enum": ["neutral", "ready", "success", "warning", "danger"],
+              "description": "What the state means. Defaults to 'success', because a receipt usually says a thing worked."
+            },
+            "summary": {
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "One line saying what was done, e.g. 'Sent to nick@example.com — Re: Following up'."
+            }
+          },
+          "required": ["component", "title", "status"]
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  },
+  "$defs": {
+    "CatalogComponentCommon": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A unique identifier for this component instance within the surface. This ID is used to refer to the component in layout children arrays or event handlers."
+        }
+      },
+      "required": ["id"]
+    },
+    "anyComponent": {
+      "oneOf": [
+        { "$ref": "#/components/StatusPill" },
+        { "$ref": "#/components/KeyValueRows" },
+        { "$ref": "#/components/CollapsibleText" },
+        { "$ref": "#/components/ApprovalActions" },
+        { "$ref": "#/components/Receipt" }
+      ],
+      "discriminator": { "propertyName": "component" }
+    }
+  }
+}

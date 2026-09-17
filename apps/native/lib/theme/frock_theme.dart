@@ -21,6 +21,16 @@ abstract final class FrockTheme {
   /// same hue as [accent], darker, so the two voices are one family told
   /// apart by weight rather than by a second colour.
   static const accentDeep = Color(0xff9c1a44);
+  /// The two states the scheme has no slot for. A Card's pill says "Sent" in
+  /// green and "Needs your attention" in amber; `primary` is the brand and
+  /// `error` is a failure, and neither of those is what those two mean. Each
+  /// has a darker twin for the light theme, where the dark one would not
+  /// carry against paper.
+  static const success = Color(0xff44a877);
+  static const successInk = Color(0xff1c7a4e);
+  static const warning = Color(0xffd9a441);
+  static const warningInk = Color(0xff8a6000);
+
   static const window = Color(0xff1f1e24);
   static const surface = Color(0xff211f26);
   static const raised = Color(0xff2c2a33);

@@ -304,8 +304,16 @@ class ChatController extends ChangeNotifier {
     };
   }
 
+  /// Bumped once per state-channel notice, after the refresh it caused has
+  /// landed. Durable state a line draws from outside the transcript — a Card's
+  /// surface, read over REST against `shell:card:` — re-reads on this rather
+  /// than on every notification this controller makes, most of which are about
+  /// a Turn streaming and say nothing about a record it may have written.
+  final ValueNotifier<int> invalidations = ValueNotifier(0);
+
   Future<void> invalidate() async {
     await refresh();
+    if (!_disposed) invalidations.value++;
     // An unrelated state event cannot fence a POST still being delivered.
     if (pending.isNotEmpty && !sending) await checkDelivery();
   }
@@ -554,6 +562,7 @@ class ChatController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    invalidations.dispose();
     super.dispose();
   }
 }
