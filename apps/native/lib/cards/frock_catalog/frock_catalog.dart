@@ -216,7 +216,9 @@ class _FrockCollapsibleTextViewState extends State<FrockCollapsibleTextView> {
 ///
 /// The action names are `approval/<approvalId>`, built here from the id in the
 /// component's data: the card supplies the id, the host supplies the name, and
-/// the kernel refuses an id it never recorded.
+/// the kernel refuses an id it never recorded. The decision is the kernel's own
+/// word for it — `approved` or `denied`, the two answers `ApprovalUserDecisionV1`
+/// records — and not the button's label.
 final frockApprovalActions = CatalogItem(
   name: 'ApprovalActions',
   dataSchema: _schemaOf('ApprovalActions'),
@@ -225,8 +227,12 @@ final frockApprovalActions = CatalogItem(
     final approvalId = _string(data['approvalId']) ?? '';
     final name = 'approval/$approvalId';
     final pending = CardPressScope.pendingOf(itemContext.buildContext);
-    final busy = pending == name;
     final frozen = pending != null;
+    bool busyWith(String decision) =>
+        pending != null &&
+        pending.name == name &&
+        pending.componentId == itemContext.id &&
+        pending.context?['decision'] == decision;
     void decide(String decision) => itemContext.dispatchEvent(
       UserActionEvent(
         name: name,
@@ -240,17 +246,23 @@ final frockApprovalActions = CatalogItem(
         FilledButton(
           onPressed: approvalId.isEmpty || frozen
               ? null
-              : () => decide('approve'),
+              : () => decide('approved'),
           child: Text(
-            busy ? 'Working…' : _string(data['approveLabel']) ?? 'Approve',
+            busyWith('approved')
+                ? 'Working…'
+                : _string(data['approveLabel']) ?? 'Approve',
           ),
         ),
         const SizedBox(width: 8),
         TextButton(
           onPressed: approvalId.isEmpty || frozen
               ? null
-              : () => decide('decline'),
-          child: Text(_string(data['declineLabel']) ?? 'Decline'),
+              : () => decide('denied'),
+          child: Text(
+            busyWith('denied')
+                ? 'Working…'
+                : _string(data['declineLabel']) ?? 'Decline',
+          ),
         ),
       ],
     );

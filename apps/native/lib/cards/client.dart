@@ -5,10 +5,11 @@
 /// So a client that reconnects, or a transcript scrolled back to a month ago,
 /// draws the surface as it stands rather than replaying what built it.
 ///
-/// The three routes are the three things a client does with a Card: list the
-/// Bot's surfaces, read one by id whatever the listing's byte budget cut, and
-/// post one press. Nothing here decides what a press means — the kernel routes
-/// it — and nothing here folds; the receipt carries the card back.
+/// Two things a client does with a Card: read one by id, and post one press.
+/// The backend also lists a Bot's surfaces; nothing in the app needs that yet,
+/// so it is not decoded here. Nothing here decides what a press means — the
+/// kernel routes it — and nothing here folds; the receipt carries the card
+/// back.
 library;
 
 import '../client/transport.dart';
@@ -120,14 +121,6 @@ class CardActionReceipt {
 class CardsApi {
   final NativeApi api;
   const CardsApi(this.api);
-
-  Future<List<CardView>> list(String botId) async {
-    final answer = await api.request('/api/bots/${_bot(botId)}/cards');
-    final json = (answer! as Map).cast<String, Object?>();
-    return [
-      for (final card in (json['cards']! as List)) CardView.fromJson(card),
-    ];
-  }
 
   Future<CardView> read(String botId, String surfaceId) async {
     final answer = await api.request(

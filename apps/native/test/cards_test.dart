@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -437,9 +438,12 @@ void main() {
       expect(sent['surfaceId'], 'draft-1');
       expect(sent['revision'], 1);
       expect((sent['event']! as Map)['name'], 'approval/ap-1');
+      // The kernel's own vocabulary: `cardAction` in app/cards/bot.ts refuses
+      // any decision that is not literally `approved` or `denied`, the two
+      // answers `ApprovalUserDecisionV1` records.
       expect(
         ((sent['event']! as Map)['context']! as Map)['decision'],
-        'approve',
+        'approved',
       );
       expect(sent['commandId'], isA<String>());
       // Not sent: the surface was not created with `sendDataModel`.
@@ -553,6 +557,54 @@ void main() {
       expect(posts, hasLength(2));
       expect(posts[1]['revision'], 2);
       expect(posts[1]['commandId'], isNot(posts[0]['commandId']));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a re-read that has not moved keeps the lost command id', (
+      tester,
+    ) async {
+      final posts = <Map<String, Object?>>[];
+      var deliver = false;
+      final invalidations = ValueNotifier<int>(0);
+      addTearDown(invalidations.dispose);
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        // The surface never moves: an input-routed press is enqueued against
+        // its `pressId` and the card comes back unchanged.
+        if (body == null) return cardJson();
+        posts.add((body as Map).cast<String, Object?>());
+        if (!deliver) throw const RequestFailure('The connection dropped.', 0);
+        return {
+          'schemaVersion': 1,
+          'routed': 'approval',
+          'card': cardJson(revision: 2),
+        };
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: CardChatScope(
+              api: api,
+              botId: 'bot-1',
+              invalidations: invalidations,
+              child: const CardChatCard(surfaceId: 'draft-1'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(find.text('The connection dropped.'), findsOneWidget);
+      // A notice re-reads the card at the revision it was already at, which
+      // proves nothing about the lost press, so the id is still owed.
+      invalidations.value++;
+      await tester.pumpAndSettle();
+      deliver = true;
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      expect(posts, hasLength(2));
+      expect(posts[1]['commandId'], posts[0]['commandId']);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -809,10 +861,65 @@ void main() {
       await tester.tap(find.text('Discard'));
       await tester.pumpAndSettle();
       expect((posts.single['event']! as Map)['name'], 'approval/ap-9');
+      // Decline is `denied` on the wire: the kernel records the decision, so
+      // the kernel names it. See app/cards/bot.ts's approval branch.
       expect(
         ((posts.single['event']! as Map)['context']! as Map)['decision'],
-        'decline',
+        'denied',
       );
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('only the pressed approval control says it is working', (
+      tester,
+    ) async {
+      final held = Completer<Map<String, Object?>>();
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body == null) {
+          return cardJson(
+            components: [
+              {
+                'id': 'root',
+                'component': 'ApprovalActions',
+                'approvalId': 'ap-9',
+                'approveLabel': 'Send it',
+                'declineLabel': 'Discard',
+              },
+            ],
+          );
+        }
+        return held.future;
+      });
+      await tester.pumpWidget(host(api));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Discard'));
+      await tester.pumpAndSettle();
+      // The person refused: the control they pressed is the one that is
+      // working, and the one they did not press keeps its own words.
+      expect(
+        find.descendant(
+          of: find.byType(TextButton),
+          matching: find.text('Working…'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Send it'), findsOneWidget);
+      expect(find.text('Discard'), findsNothing);
+      // Both stop responding while the press is in flight.
+      expect(
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+        isNull,
+      );
+      held.complete({
+        'schemaVersion': 1,
+        'routed': 'approval',
+        'card': cardJson(revision: 2),
+      });
+      await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox());
     });
 

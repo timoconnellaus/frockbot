@@ -89,14 +89,19 @@ class _CardChatCardState extends State<CardChatCard>
   /// backend, or a press the kernel refused.
   String? failure;
 
-  /// The action name in flight. One at a time.
-  String? pending;
+  /// The press in flight. One at a time.
+  CardPress? pending;
 
   /// The command id of a press that never got its answer, kept with the action
-  /// it belongs to until a receipt lands or the card is read again, so pressing
-  /// the same control again is the same command and not a second one.
+  /// it belongs to until that press is proven to have landed — a receipt for
+  /// this very command id, or a read showing the surface has moved — so
+  /// pressing the same control again is the same command and not a second one.
+  /// A re-read that shows the same revision proves nothing and keeps it: an
+  /// input-routed press never moves the revision, so dropping the id there
+  /// would let one press reach the Bot twice.
   String? retryCommandId;
   String? retryAction;
+  int? retryRevision;
   int epoch = 0;
 
   @override
@@ -177,8 +182,11 @@ class _CardChatCardState extends State<CardChatCard>
     }
     unawaited(previousInteractions?.cancel());
     interactions = next?.onSubmit.listen(_interaction);
-    retryCommandId = null;
-    retryAction = null;
+    if (retryCommandId != null && answer.revision != retryRevision) {
+      retryCommandId = null;
+      retryAction = null;
+      retryRevision = null;
+    }
     setState(() {
       card = answer;
       refusal = said;
@@ -202,8 +210,11 @@ class _CardChatCardState extends State<CardChatCard>
       if (action is Map && action['name'] is String) {
         unawaited(
           press(
-            action['name']! as String,
-            (action['context'] as Map?)?.cast<String, Object?>(),
+            CardPress(
+              name: action['name']! as String,
+              componentId: action['sourceComponentId'] as String?,
+              context: (action['context'] as Map?)?.cast<String, Object?>(),
+            ),
           ),
         );
         continue;
@@ -216,18 +227,18 @@ class _CardChatCardState extends State<CardChatCard>
   }
 
   /// One press, to the kernel, against the revision it was drawn at.
-  Future<void> press(String name, Map<String, Object?>? context) async {
+  Future<void> press(CardPress action) async {
     final client = api;
     final bot = botId;
     final drawn = card;
     if (client == null || bot == null || drawn == null || pending != null) {
       return;
     }
-    final commandId = retryAction == name
+    final commandId = retryAction == action.name
         ? retryCommandId ?? randomId()
         : randomId();
     setState(() {
-      pending = name;
+      pending = action;
       failure = null;
     });
     try {
@@ -235,15 +246,18 @@ class _CardChatCardState extends State<CardChatCard>
         bot,
         surfaceId: drawn.surfaceId,
         revision: drawn.revision,
-        name: name,
-        context: context,
+        name: action.name,
+        context: action.context,
         dataModel: drawn.sendDataModel ? drawn.dataModel : null,
         commandId: commandId,
       );
       if (!mounted) return;
       pending = null;
-      retryCommandId = null;
-      retryAction = null;
+      if (retryCommandId == commandId) {
+        retryCommandId = null;
+        retryAction = null;
+        retryRevision = null;
+      }
       adopt(receipt.card);
       if (receipt.failure != null) {
         setState(() => failure = receipt.failure);
@@ -257,6 +271,7 @@ class _CardChatCardState extends State<CardChatCard>
       if (error is RequestFailure && error.status == 409) {
         retryCommandId = null;
         retryAction = null;
+        retryRevision = null;
         // Read first, then say so: adopting a record clears whatever the last
         // press said about itself, and this is the one line that has to
         // survive the redraw it caused.
@@ -270,7 +285,8 @@ class _CardChatCardState extends State<CardChatCard>
       // is kept against this control: pressing it again repeats the command
       // the kernel may already hold rather than minting a second one.
       retryCommandId = commandId;
-      retryAction = name;
+      retryAction = action.name;
+      retryRevision = drawn.revision;
       setState(() {
         failure = error is RequestFailure
             ? error.message
