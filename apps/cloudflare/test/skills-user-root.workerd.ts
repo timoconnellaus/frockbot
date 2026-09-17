@@ -57,7 +57,7 @@ describe("the User-global instruction root in Workerd", () => {
     const written = await bot(alice.botId).writeWorkspaceFile({
       userId,
       root,
-      path: "standup/SKILL.md",
+      path: "skills/standup/SKILL.md",
       text: skill(
         "Daily standup",
         "Use this when assembling the standup.",
@@ -73,7 +73,7 @@ describe("the User-global instruction root in Workerd", () => {
     const sibling = await bot(bob.botId).writeWorkspaceFile({
       userId,
       root,
-      path: "house-style/SKILL.md",
+      path: "skills/house-style/SKILL.md",
       text: skill(
         "House style",
         "Use this when writing for this User.",
@@ -115,7 +115,7 @@ describe("the User-global instruction root in Workerd", () => {
     await provisionBot(alice);
     await provisionSiblingBot(bob);
     const root = userSkillsRoot(userId);
-    const path = "standup/SKILL.md";
+    const path = "skills/standup/SKILL.md";
 
     const first = await bot(alice.botId).writeWorkspaceFile({
       userId,
@@ -182,7 +182,7 @@ describe("the User-global instruction root in Workerd", () => {
     const firstParty = await bot(alice.botId).writeWorkspaceFile({
       userId,
       root: userSkillsRoot(userId),
-      path: "shipped/SKILL.md",
+      path: "skills/shipped/SKILL.md",
       text: skill("Shipped", "Use this never.", "Body."),
       writer: { kind: "first-party", packageId: "skills" },
       expectedGenerationId: null,
@@ -194,7 +194,7 @@ describe("the User-global instruction root in Workerd", () => {
     const foreign = await bot(alice.botId).writeWorkspaceFile({
       userId,
       root: userSkillsRoot(`${userId}-other`),
-      path: "foreign/SKILL.md",
+      path: "skills/foreign/SKILL.md",
       text: skill("Foreign", "Use this never.", "Body."),
       writer: writerFor(userId, alice.botId),
       expectedGenerationId: null,
