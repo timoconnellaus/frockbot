@@ -71,9 +71,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The whole pushed range has to be readable, and a shallow checkout
-          # cannot see back to the commit the push started from.
+          # The range back to the last released commit has to be readable, and
+          # that means the tags as well as the history they point into.
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
 
       - name: Set up Bun
@@ -84,22 +85,31 @@ jobs:
       - name: Decide what this push obliges
         id: decide
         env:
-          BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          # An all-zero `before` is a branch that did not exist, and a `before`
-          # this checkout cannot resolve is a force push over history it no
-          # longer has. Either way the range is unreadable, so no paths are
-          # collected and the decision falls to its default: run everything.
+          # The range is measured from the newest release tag reachable from
+          # this head, not from the commit this push started at. A burst of
+          # merges collapses to the newest head — that is what the concurrency
+          # group is for — so the pushed range alone would let a cancelled
+          # run's commits go unverified by anybody. A tag is only ever cut
+          # after a run concluded, so everything since the newest one is
+          # exactly what no run has yet accepted.
+          #
+          # A repository with no such tag, or a tag this checkout cannot
+          # resolve, leaves no paths collected, and the decision falls to its
+          # default: run everything.
+          #
+          # `--no-renames` because rename detection prints only a rename's
+          # destination, so a file moved out of the application into an excused
+          # workspace would present as an excused change alone.
           paths=""
-          if [ -n "${BEFORE:-}" ] \
-            && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
-            && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            paths="$(git diff --name-only "$BEFORE" "$AFTER")"
+          if base="$(git describe --tags --abbrev=0 \
+            --match 'v[0-9]*.[0-9]*.[0-9]*' "$AFTER" 2>/dev/null)"; then
+            paths="$(git diff --no-renames --name-only "$base" "$AFTER")"
           else
-            echo "::notice::The pushed range could not be read; running the full tier."
+            echo "::notice::No release tag is reachable from this head, so the range since the last verified commit could not be read; running the full tier."
           fi
           printf '%s' "$paths" | bun scripts/ci-change-scope.ts >> "$GITHUB_OUTPUT"
 
@@ -130,6 +140,16 @@ jobs:
 
       - name: Test
         run: bun test
+
+      # `wrangler deploy --dry-run` for each: a real bundle plus the Worker
+      # configuration it would deploy with. Both are quick, and both belong to
+      # a job nothing can skip, so a push that touches only one of these two
+      # sites is still bundled before anything tags it.
+      - name: Build the marketing site
+        run: bun run build:marketing
+
+      - name: Build the admin portal
+        run: bun run build:admin-portal
 
   # The Flutter client's own analysis and tests. `apps/native` is the phone
   # app, the macOS app and the web client at once, and neither `bun test` nor
@@ -301,10 +321,14 @@ jobs:
         # authentication uses the development identity, so this needs no secret.
         run: bun run --filter @frockbot/cloudflare test:integration
 
-      - name: Build
+      - name: Build the Worker
         # Here rather than in `Validate` because it shares the Flutter client
-        # the integration suite just built.
-        run: bun run build
+        # the integration suite just built. The marketing site and the admin
+        # portal are bundled by `Validate`, which owes every push: they are
+        # separate Workers that share nothing with this one, and a build of
+        # theirs that only ran when the slow tier did would be missing for
+        # exactly the pushes that only touch them.
+        run: bun run build:cloudflare
 
   e2e:
     name: Browser end-to-end (${{ matrix.shard }}/${{ strategy.job-total }})

@@ -38,6 +38,16 @@ test("one unrecognised path among skippable ones is enough to oblige it", () => 
   ).toBe(true);
 });
 
+test("a file moved out of the application obliges it, both paths named", () => {
+  // A rename is two paths, and only the destination is under an excused
+  // prefix. The source is the whole point: the move deleted an application
+  // file. `main.yml` passes `--no-renames` so both sides are reported, and
+  // this is the behaviour that depends on it.
+  expect(
+    slowTierRequiredV1(["core/deadline.ts", "apps/marketing/src/deadline.ts"]),
+  ).toBe(true);
+});
+
 test("a prefix is a directory, not a string the path merely starts with", () => {
   // `apps/marketing-experiments/` is not `apps/marketing/`, and a deployable
   // nobody has classified must not inherit the skip by sharing a name.

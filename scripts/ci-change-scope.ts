@@ -39,10 +39,14 @@ export const SLOW_TIER_IRRELEVANT_V1 = [
 /**
  * Whether the slow tier must run for a push that touched `paths`.
  *
- * True whenever anything is unrecognised, and true for an empty list: a push
- * whose changed paths could not be determined — a force push, a first push, a
- * range GitHub did not report — must not be read as a push that changed
- * nothing.
+ * True whenever anything is unrecognised, and true for an empty list: a range
+ * whose changed paths could not be determined — no release tag to measure
+ * from, a tag the checkout cannot resolve — must not be read as a range that
+ * changed nothing.
+ *
+ * The caller is responsible for reporting a rename's source path as well as
+ * its destination; a set that named only the destination would describe a file
+ * moved out of the application as a change to the excused workspace alone.
  */
 export function slowTierRequiredV1(paths: readonly string[]): boolean {
   if (paths.length === 0) return true;
@@ -51,7 +55,10 @@ export function slowTierRequiredV1(paths: readonly string[]): boolean {
   );
 }
 
-/** The changed paths, one per line, as `git diff --name-only` writes them. */
+/**
+ * The changed paths, one per line, as `git diff --no-renames --name-only`
+ * writes them.
+ */
 export function parsePathsV1(input: string): string[] {
   return input
     .split("\n")

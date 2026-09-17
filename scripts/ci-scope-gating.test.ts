@@ -64,12 +64,12 @@ function evaluateCondition(expression: string, state: RunState): boolean {
   let at = 0;
 
   const results = state.results;
+  // Only the status functions the job conditions actually use. Anything else
+  // throws below rather than being guessed at, because a function modelled
+  // with the wrong semantics would assert a condition into passing.
   const statuses: Record<string, () => boolean> = {
-    always: () => true,
     cancelled: () => state.cancelled === true,
     failure: () => Object.values(results).some((r) => r === "failure"),
-    success: () =>
-      Object.values(results).every((r) => r === "success" || r === "skipped"),
   };
 
   function lookup(path: string): string | undefined {
