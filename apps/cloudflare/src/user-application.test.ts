@@ -1100,6 +1100,33 @@ describe("the cards route", () => {
     });
   });
 
+  test("an approval the kernel no longer holds is 404, as on the approvals route", async () => {
+    const response = await createUserApplication()(
+      new Request("https://frockbot.test/api/bots/primary/cards", {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          surfaceId: "draft-email",
+          revision: 2,
+          event: { name: "approval/ap-1", context: { decision: "approved" } },
+        }),
+      }),
+      envFor({
+        cardAction: () =>
+          Promise.reject(
+            namedError(
+              "ApprovalNotFoundError",
+              'approval "ap-1" was not found',
+            ),
+          ),
+      }),
+    );
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({
+      error: 'approval "ap-1" was not found',
+    });
+  });
+
   test("no other method is served", async () => {
     const response = await createUserApplication()(
       new Request("https://frockbot.test/api/bots/primary/cards", {

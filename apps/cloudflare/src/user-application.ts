@@ -853,10 +853,9 @@ function createUserApplicationRoute() {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "approval decision failed";
-        return jsonError(
-          message.includes("was not found") ? 404 : 500,
-          message,
-        );
+        const name = error instanceof Error ? error.name : "";
+        if (name === "ApprovalNotFoundError") return jsonError(404, message);
+        return jsonError(500, message);
       }
     }
 
@@ -915,6 +914,10 @@ function createUserApplicationRoute() {
         if (name === "CardStaleError") return jsonError(409, message);
         if (name === "CardNotFoundError") return jsonError(404, message);
         if (name === "CardDecodeError") return jsonError(400, message);
+        // An approval a Card named but the kernel does not hold is the same
+        // answer the approvals route gives for it, and for the same reason.
+        if (name === "ApprovalNotFoundError") return jsonError(404, message);
+        if (name === "ApprovalDecodeError") return jsonError(400, message);
         return jsonError(500, message);
       }
     }

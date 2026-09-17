@@ -42,7 +42,6 @@ import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 /** How long one Plugin card handler may run. A press, not a job. */
 export const CARD_ACTION_DEADLINE_MS = 10_000;
 
-/** Raised when the client answered a revision the surface has moved past. */
 /** A surface this Bot never drew, or one the Session no longer holds. */
 export class CardNotFoundError extends Error {
   constructor(surfaceId: string) {
@@ -51,6 +50,7 @@ export class CardNotFoundError extends Error {
   }
 }
 
+/** Raised when the client answered a revision the surface has moved past. */
 export class CardStaleError extends Error {
   constructor(surfaceId: string) {
     super(`card "${surfaceId}" has moved on`);

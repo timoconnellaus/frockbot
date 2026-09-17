@@ -162,7 +162,7 @@ describe("the three routes", () => {
         revision: 2,
         event: { name: "approval/invented", context: { decision: "approved" } },
       }),
-    ).rejects.toThrow(/was not found/);
+    ).rejects.toMatchObject({ name: "ApprovalNotFoundError" });
   });
 
   test("an approval action with no decision on it is refused", async () => {
