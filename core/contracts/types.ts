@@ -598,6 +598,19 @@ export interface SessionEventMap {
        * instruction the Turn ran under.
        */
       by?: string;
+      /**
+       * The references the Skill offered this Turn, with their generations
+       * (ADR 0030). A Skill is a directory, and which files were beside it is
+       * part of what was injected: a reference that was not there is then
+       * visible in durable state rather than only in the body that named it.
+       * Absent when the Skill offered none.
+       */
+      references?: Array<{
+        path: string;
+        /** Who wrote the reference, when it was not the reading Bot. */
+        by?: string;
+        generationId: string;
+      }>;
     }>;
     refusals: Array<{ path: string; reason: string }>;
   };
@@ -1928,12 +1941,18 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         const entry = eventRecord(skill, label);
         // Exact keys either way: a Skill the Bot wrote itself carries no `by`,
         // and one written by its User or another of its User's Bots carries
-        // the attribution the catalog block renders.
+        // the attribution the catalog block renders. A Skill with no files
+        // beside it carries no `references` for the same reason.
         requireEventKeys(
           entry,
-          entry.by === undefined
-            ? ["path", "name", "generationId", "contentHash"]
-            : ["path", "name", "generationId", "contentHash", "by"],
+          [
+            "path",
+            "name",
+            "generationId",
+            "contentHash",
+            ...(entry.by === undefined ? [] : ["by"]),
+            ...(entry.references === undefined ? [] : ["references"]),
+          ],
           label,
         );
         eventString(entry.path, `${label}.path`);
@@ -1941,6 +1960,29 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         eventString(entry.generationId, `${label}.generationId`);
         eventString(entry.contentHash, `${label}.contentHash`);
         if (entry.by !== undefined) eventString(entry.by, `${label}.by`);
+        if (entry.references !== undefined) {
+          if (!Array.isArray(entry.references)) {
+            throw new Error(`${label}.references must be an array`);
+          }
+          entry.references.forEach((reference, position) => {
+            const referenceLabel = `${label}.references[${position}]`;
+            const listed = eventRecord(reference, referenceLabel);
+            requireEventKeys(
+              listed,
+              [
+                "path",
+                ...(listed.by === undefined ? [] : ["by"]),
+                "generationId",
+              ],
+              referenceLabel,
+            );
+            eventString(listed.path, `${referenceLabel}.path`);
+            if (listed.by !== undefined) {
+              eventString(listed.by, `${referenceLabel}.by`);
+            }
+            eventString(listed.generationId, `${referenceLabel}.generationId`);
+          });
+        }
       });
       event.refusals.forEach((refusal, index) => {
         const label = `session event.refusals[${index}]`;

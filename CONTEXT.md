@@ -139,7 +139,7 @@ FrockBot's own A2UI catalog beside the standard one: the components the client d
 _Avoid_: Component library, design system, custom widgets
 
 **Skill ref**:
-The name that identifies one Skill across a seam — its source and slug — carried instead of its text, so what runs is the Skill generation the Turn resolves.
+The name that identifies one Skill across a seam — its source and slug, plus the Plugin for a `plugin` Skill — carried instead of its text, so what runs is the Skill generation the Turn resolves.
 _Avoid_: Skill id, skill path, handle
 
 **Invoke**:

@@ -16,6 +16,7 @@ import {
   ISOLATE_CONTRACT_VERSION,
   type IsolateContractVersion,
 } from "./isolate.js";
+import { isSkillReferenceNameV1, isSkillRefSlugV1 } from "./skills.js";
 
 /** Authority a plugin may hold. */
 export const PLUGIN_GRANTS_V1 = [
@@ -79,6 +80,21 @@ export interface PluginServiceV1 {
   version: number;
 }
 
+/**
+ * One Skill a plugin ships (ADR 0030): a `SKILL.md` and the Markdown files
+ * beside it, bundled in the artifact the way a managed Skill is bundled in the
+ * app's. The text is bounded and named here; whether it parses as a `SKILL.md`
+ * is the Skills Package's question, answered as a recorded refusal on the Turn
+ * that loaded it, because a plugin's bad document must not fail a descriptor
+ * decode the whole Composition depends on.
+ */
+export interface PluginSkillV1 {
+  slug: string;
+  text: string;
+  /** Loaded on their own by `skill_load`; `path` is one `.md` file name. */
+  references?: { path: string; text: string }[];
+}
+
 /** One kind of event a plugin can receive through the app-owned hooks route. */
 export interface PluginTriggerV1 {
   name: string;
@@ -102,6 +118,8 @@ export interface PluginDescriptorV1 {
   provides?: PluginServiceV1[];
   consumes?: PluginServiceV1[];
   triggers?: PluginTriggerV1[];
+  /** Offered to a Bot with this plugin enabled, as `plugin/<id>/<slug>`. */
+  skills?: PluginSkillV1[];
   slots?: PluginSlotV1[];
   views?: PluginViewV1[];
   /** Always all three: a plugin sees the whole context or none of it. */
@@ -122,6 +140,19 @@ const MAX_PLUGIN_VIEWS_V1 = 16;
 const MAX_PLUGIN_HOSTS_V1 = 32;
 const MAX_PLUGIN_SERVICES_V1 = 32;
 const MAX_PLUGIN_TRIGGERS_V1 = 16;
+const MAX_PLUGIN_SKILLS_V1 = 8;
+const MAX_PLUGIN_SKILL_REFERENCES_V1 = 32;
+const MAX_PLUGIN_SKILL_BYTES_V1 = 65_536;
+/**
+ * Everything one descriptor's Skills may weigh together.
+ *
+ * A descriptor is not a side artifact: it travels inside a Composition member,
+ * and a whole generation is written as one durable storage value. Per-item
+ * bounds alone would let one Plugin declare megabytes of prompt text and fail
+ * that write with nothing pointing at the Skill that caused it, so the total
+ * is bounded here, where every other declared ceiling is refused.
+ */
+const MAX_PLUGIN_SKILLS_TOTAL_BYTES_V1 = 262_144;
 const MAX_PLUGIN_SETTINGS_SCHEMA_BYTES_V1 = 65_536;
 
 /**
@@ -339,6 +370,73 @@ function decodePluginTriggersV1(
   return triggers;
 }
 
+function decodePluginSkillsV1(input: unknown, label: string): PluginSkillV1[] {
+  const skills = boundedArray(input, label, MAX_PLUGIN_SKILLS_V1).map(
+    (skill, index) => {
+      const itemLabel = `${label}[${index}]`;
+      const value = record(skill, itemLabel);
+      exactKeys(value, ["slug", "text"], ["references"], itemLabel);
+      const slug = boundedString(value.slug, `${itemLabel}.slug`, 64);
+      if (!isSkillRefSlugV1(slug)) {
+        throw new Error(`${itemLabel}.slug is invalid`);
+      }
+      const text = boundedString(
+        value.text,
+        `${itemLabel}.text`,
+        MAX_PLUGIN_SKILL_BYTES_V1,
+      );
+      if (value.references === undefined) return { slug, text };
+      const references = boundedArray(
+        value.references,
+        `${itemLabel}.references`,
+        MAX_PLUGIN_SKILL_REFERENCES_V1,
+      ).map((reference, position) => {
+        const referenceLabel = `${itemLabel}.references[${position}]`;
+        const entry = record(reference, referenceLabel);
+        exactKeys(entry, ["path", "text"], [], referenceLabel);
+        const path = boundedString(entry.path, `${referenceLabel}.path`, 64);
+        if (!isSkillReferenceNameV1(path)) {
+          throw new Error(`${referenceLabel}.path is invalid`);
+        }
+        return {
+          path,
+          text: boundedString(
+            entry.text,
+            `${referenceLabel}.text`,
+            MAX_PLUGIN_SKILL_BYTES_V1,
+          ),
+        };
+      });
+      if (
+        new Set(references.map((reference) => reference.path)).size !==
+        references.length
+      ) {
+        throw new Error(`${itemLabel}.references contains duplicate names`);
+      }
+      return { slug, text, references };
+    },
+  );
+  if (new Set(skills.map((skill) => skill.slug)).size !== skills.length) {
+    throw new Error(`${label} contains duplicate slugs`);
+  }
+  const total = skills.reduce(
+    (bytes, skill) =>
+      bytes +
+      skill.text.length +
+      (skill.references ?? []).reduce(
+        (referenced, reference) => referenced + reference.text.length,
+        0,
+      ),
+    0,
+  );
+  if (total > MAX_PLUGIN_SKILLS_TOTAL_BYTES_V1) {
+    throw new Error(
+      `${label} carries ${total} bytes of Skill text; the bound is ${MAX_PLUGIN_SKILLS_TOTAL_BYTES_V1}`,
+    );
+  }
+  return skills;
+}
+
 function decodePluginSettingsSchemaV1(
   input: unknown,
   label: string,
@@ -377,6 +475,7 @@ export function decodePluginDescriptorV1(
       "provides",
       "consumes",
       "triggers",
+      "skills",
       "slots",
       "views",
     ],
@@ -446,6 +545,10 @@ export function decodePluginDescriptorV1(
     value.triggers === undefined
       ? undefined
       : decodePluginTriggersV1(value.triggers, `${label}.triggers`);
+  const skills =
+    value.skills === undefined
+      ? undefined
+      : decodePluginSkillsV1(value.skills, `${label}.skills`);
   const slots =
     value.slots === undefined
       ? undefined
@@ -479,6 +582,7 @@ export function decodePluginDescriptorV1(
     ...(provides === undefined ? {} : { provides }),
     ...(consumes === undefined ? {} : { consumes }),
     ...(triggers === undefined ? {} : { triggers }),
+    ...(skills === undefined ? {} : { skills }),
     ...(slots === undefined ? {} : { slots }),
     ...(views === undefined ? {} : { views }),
     contextKeys: [...PLUGIN_CONTEXT_KEYS_V1],

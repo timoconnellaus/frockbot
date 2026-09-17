@@ -82,6 +82,37 @@ describe("the managed Skill source", () => {
     }
   });
 
+  test("carries the files bundled beside a Skill, and refuses one past a bound", async () => {
+    const document = MANAGED_SKILL_DOCUMENTS_V1[0]?.text ?? "";
+    const loaded = await loadManagedSkillsV1([
+      {
+        slug: "a2ui",
+        text: document,
+        references: [{ path: "forms.md", text: "# Forms" }],
+      },
+    ]);
+    expect(loaded.skills[0]?.references).toEqual([
+      {
+        path: "managed/a2ui/references/forms.md",
+        // A reference is an instruction, so it carries the attribution its
+        // Skill does: these bytes are the artifact's, not the Bot's.
+        by: "FrockBot",
+        generationId: expect.any(String),
+        text: "# Forms",
+      },
+    ]);
+
+    const refused = await loadManagedSkillsV1([
+      {
+        slug: "a2ui",
+        text: document,
+        references: [{ path: "forms", text: "# Forms" }],
+      },
+    ]);
+    expect(refused.skills).toEqual([]);
+    expect(refused.refusals[0]).toMatchObject({ kind: "malformed" });
+  });
+
   test("is stable across loads, so a pinned Composition reproduces it", async () => {
     const first = await loadManagedSkillsV1();
     const second = await loadManagedSkillsV1();
@@ -152,10 +183,12 @@ function fakeSkill(
 ): LoadedSkillV1 {
   return {
     path: `${source}/${slug}/SKILL.md`,
+    source,
     ref: { schemaVersion: 1, source, slug },
     name: slug,
     description: "Use this when testing.",
     body: "Body.",
+    references: [],
     generationId: "g",
     contentHash: "c",
   };
@@ -248,6 +281,29 @@ describe("the rendered catalog block", () => {
     expect(rendered).toContain('by="your User"');
     // Progressive disclosure survives the shared sources.
     expect(rendered).not.toContain("Body.");
+  });
+
+  test("names the root a Skill with no ref came from, not the Bot", async () => {
+    // A `SKILL.md` under the shared root whose directory is not a well-formed
+    // slug has no ref, and must still be presented as the User's.
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: USER_ROOT,
+        path: "skills/Standup Notes/SKILL.md",
+        text: skillMarkdown("Standup", "Use this when standing up.", "Body."),
+        writer: BOT_WRITER,
+      },
+    ]);
+
+    const catalog = await loadFullSkillCatalogV1(workspace, OWNER, {
+      managed: false,
+    });
+    const rendered = renderSkillCatalogPromptV1(catalog);
+
+    expect(catalog.skills).toHaveLength(1);
+    expect(catalog.skills[0]?.ref).toBeUndefined();
+    expect(rendered).toContain('source="user"');
+    expect(rendered).not.toContain('source="bot"');
   });
 
   test("disambiguates a duplicated name by its ref", () => {
@@ -346,6 +402,40 @@ describe("a Turn's whole catalog", () => {
     const unknown = await tool.execute({ path: "managed/nope" }, CONTEXT);
     expect(unknown.isError).toBe(true);
     await dispose();
+  });
+
+  test("offers an enabled Plugin's Skills, last, under its Plugin's ref", async () => {
+    const catalog = await loadFullSkillCatalogV1(new FakeWorkspace(), OWNER, {
+      managed: false,
+      pluginSkills: [
+        {
+          pluginId: "email-card",
+          displayName: "Email",
+          skills: [
+            {
+              slug: "drafting",
+              text: skillMarkdown(
+                "Draft an email",
+                "Use this when drafting.",
+                "Body.",
+              ),
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(catalog.skills.map((skill) => skill.ref)).toEqual([
+      {
+        schemaVersion: 1,
+        source: "plugin",
+        pluginId: "email-card",
+        slug: "drafting",
+      },
+    ]);
+    expect(renderSkillCatalogPromptV1(catalog)).toContain(
+      'ref="plugin/email-card/drafting"',
+    );
   });
 
   test("omits the managed set when the host disables it", async () => {

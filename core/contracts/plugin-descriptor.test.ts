@@ -260,6 +260,121 @@ describe("a plugin's services, triggers and settings", () => {
     ).toThrow(/name/);
   });
 
+  test("skills carry a slug, a document and the references beside it", () => {
+    const descriptor = decodePluginDescriptorV1({
+      ...base,
+      skills: [
+        {
+          slug: "drafting",
+          text: "---\nname: Draft\ndescription: Use this when drafting.\n---\nBody.\n",
+          references: [{ path: "forms.md", text: "# Forms" }],
+        },
+      ],
+    });
+    expect(descriptor.skills).toEqual([
+      {
+        slug: "drafting",
+        text: "---\nname: Draft\ndescription: Use this when drafting.\n---\nBody.\n",
+        references: [{ path: "forms.md", text: "# Forms" }],
+      },
+    ]);
+  });
+
+  test("skills are bounded, uniquely named, and reference one .md file each", () => {
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [{ slug: "Draft", text: "x" }],
+      }),
+    ).toThrow(/slug is invalid/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [
+          { slug: "drafting", text: "x" },
+          { slug: "drafting", text: "y" },
+        ],
+      }),
+    ).toThrow(/duplicate slugs/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: Array.from({ length: 9 }, (_, index) => ({
+          slug: `s${index}`,
+          text: "x",
+        })),
+      }),
+    ).toThrow(/bounded array/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [
+          {
+            slug: "drafting",
+            text: "x",
+            references: [{ path: "../etc/passwd", text: "x" }],
+          },
+        ],
+      }),
+    ).toThrow(/path is invalid/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [
+          {
+            slug: "drafting",
+            text: "x",
+            references: Array.from({ length: 33 }, (_, index) => ({
+              path: `r${index}.md`,
+              text: "x",
+            })),
+          },
+        ],
+      }),
+    ).toThrow(/bounded array/);
+  });
+
+  test("skills are bounded together, not only one at a time", () => {
+    // Eight Skills each inside the per-item bound, together past what one
+    // stored Composition generation should carry.
+    const oversized = Array.from({ length: 8 }, (_, index) => ({
+      slug: `s${index}`,
+      text: "x".repeat(40_000),
+    }));
+    expect(() =>
+      decodePluginDescriptorV1({ ...base, skills: oversized }),
+    ).toThrow(/bytes of Skill text/);
+
+    // A reference counts against the same total as the document it sits beside.
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [
+          {
+            slug: "drafting",
+            text: "x".repeat(60_000),
+            references: Array.from({ length: 4 }, (_, index) => ({
+              path: `r${index}.md`,
+              text: "x".repeat(60_000),
+            })),
+          },
+        ],
+      }),
+    ).toThrow(/bytes of Skill text/);
+
+    const admitted = decodePluginDescriptorV1({
+      ...base,
+      skills: [
+        {
+          slug: "drafting",
+          text: "x".repeat(60_000),
+          references: [{ path: "forms.md", text: "x".repeat(60_000) }],
+        },
+      ],
+    });
+    expect(admitted.skills?.[0]?.references).toHaveLength(1);
+  });
+
   test("a settings schema describes an object and is bounded", () => {
     expect(
       decodePluginDescriptorV1({

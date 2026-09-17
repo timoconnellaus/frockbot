@@ -6,10 +6,13 @@ import type {
 import {
   botInstructionRootV1,
   countSkillDocumentsV1,
+  countSkillReferencesV1,
   loadSkillCatalogV1,
   renderSkillCatalogPromptV1,
   SKILL_MAX_CATALOG_ENTRIES,
+  SKILL_MAX_LIST_PAGES,
 } from "./catalog.js";
+import { SKILL_MAX_FILE_BYTES, SKILL_MAX_REFERENCES } from "./skill-md.js";
 import { FakeWorkspace, skillMarkdown } from "./testing.js";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
@@ -266,17 +269,251 @@ describe("the Skills loader", () => {
       '<skill name="Daily standup" source="bot" ref="bot/standup" path="skills/standup/SKILL.md" by="your User">Use this when assembling the &lt;weekday&gt; standup.</skill>',
     );
     expect(rendered).toContain("Mentioning a Skill is not running it.");
+    // The closing sentence names every source the block can list, including
+    // the one whose name and description are a Plugin author's bytes.
+    expect(rendered).toContain(
+      "the plugin ones come from a Plugin your User's Bot runs",
+    );
     // Progressive disclosure: the body is never in the prompt.
     expect(rendered).not.toContain("Secret body text.");
     expect(
       renderSkillCatalogPromptV1({ owner: OWNER, skills: [], refusals: [] }),
     ).toBe("");
   });
+
+  test("lists the Markdown beside a Skill as its references, and nothing else", async () => {
+    const workspace = await FakeWorkspace.seeded([
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/SKILL.md",
+        text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+        writer: BOT_WRITER,
+      },
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/references/forms.md",
+        text: "# Forms",
+        writer: BOT_WRITER,
+      },
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/references/notes.txt",
+        text: "not markdown",
+        writer: BOT_WRITER,
+      },
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/scratch.md",
+        text: "beside the Skill, not under references/",
+        writer: BOT_WRITER,
+      },
+    ]);
+
+    const catalog = await loadSkillCatalogV1(workspace, OWNER);
+
+    expect(catalog.skills[0]?.references).toEqual([
+      {
+        path: "skills/standup/references/forms.md",
+        generationId: expect.any(String),
+      },
+    ]);
+    // The index is the listing: no reference body is read to assemble it.
+    expect(workspace.calls).toEqual([
+      "list:bot-instructions:user-1:bot-1",
+      "read:skills/standup/SKILL.md",
+    ]);
+  });
+
+  test("walks only the Skill directory, so unrelated files cost the Turn nothing", async () => {
+    const workspace = new FakeWorkspace();
+    // More unrelated files than the walk has pages, sorted before `skills/`:
+    // a walk over the whole root would be cut before it ever reached the Skill.
+    for (let index = 0; index < SKILL_MAX_LIST_PAGES + 3; index += 1) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `notes/n${index}.md`,
+        text: "a Bot's own note, not an instruction",
+        writer: BOT_WRITER,
+      });
+    }
+    await workspace.seed({
+      root: OWN_ROOT,
+      path: "skills/standup/SKILL.md",
+      text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+      writer: BOT_WRITER,
+    });
+    // One entry per page, whatever the loader asks for.
+    workspace.listMaxEntries = 1;
+
+    const catalog = await loadSkillCatalogV1(workspace, OWNER);
+    expect(catalog.skills.map((skill) => skill.name)).toEqual(["standup"]);
+    expect(catalog.refusals).toEqual([]);
+    // One page for the one Skill file, and no read of anything beside it.
+    expect(workspace.calls).toEqual([
+      "list:bot-instructions:user-1:bot-1",
+      "read:skills/standup/SKILL.md",
+    ]);
+  });
+
+  test("refuses a Skill whole when the listing was cut before its references", async () => {
+    const workspace = new FakeWorkspace();
+    for (let index = 1; index <= 7; index += 1) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `skills/skill-${index}/SKILL.md`,
+        text: skillMarkdown(`skill-${index}`, "Use this when cut.", "Body."),
+        writer: BOT_WRITER,
+      });
+      for (const name of ["a.md", "b.md"]) {
+        await workspace.seed({
+          root: OWN_ROOT,
+          path: `skills/skill-${index}/references/${name}`,
+          text: "# Reference",
+          writer: BOT_WRITER,
+        });
+      }
+    }
+    // A store that answers two entries a page whatever the walk asks for: the
+    // bounded walk ends inside the fifth Skill, after its `SKILL.md` and
+    // before the `references/` beside it.
+    workspace.listMaxEntries = 2;
+
+    const catalog = await loadSkillCatalogV1(workspace, OWNER);
+
+    expect(catalog.skills.map((skill) => skill.path)).toEqual([
+      "skills/skill-1/SKILL.md",
+      "skills/skill-2/SKILL.md",
+      "skills/skill-3/SKILL.md",
+      "skills/skill-4/SKILL.md",
+    ]);
+    expect(catalog.skills.map((skill) => skill.references.length)).toEqual([
+      2, 2, 2, 2,
+    ]);
+    // The cut itself is recorded, because the Skills entirely past it are
+    // never candidates and would otherwise vanish silently; the one the cut
+    // fell inside is refused whole rather than loaded off a partial index.
+    expect(catalog.refusals).toEqual([
+      {
+        path: "",
+        kind: "unreadable",
+        reason: expect.stringContaining("any Skill past the cut was not"),
+      },
+      {
+        path: "skills/skill-5/SKILL.md",
+        kind: "unreadable",
+        reason: expect.stringContaining("did not finish listing"),
+      },
+    ]);
+  });
+
+  test("lists a root that stays inside its own caps end to end", async () => {
+    const workspace = new FakeWorkspace();
+    // Every Skill inside the reference bound, the whole root inside the Skill
+    // cap: a walk sized to the caps finishes, so nothing is refused and
+    // nothing silently disappears.
+    const skills = 26;
+    for (let index = 1; index <= skills; index += 1) {
+      const slug = `skill-${String(index).padStart(2, "0")}`;
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `skills/${slug}/SKILL.md`,
+        text: skillMarkdown(slug, "Use this when capped.", "Body."),
+        writer: BOT_WRITER,
+      });
+      for (
+        let reference = 0;
+        reference < SKILL_MAX_REFERENCES - 1;
+        reference += 1
+      ) {
+        await workspace.seed({
+          root: OWN_ROOT,
+          path: `skills/${slug}/references/r-${String(reference).padStart(2, "0")}.md`,
+          text: "# Reference",
+          writer: BOT_WRITER,
+        });
+      }
+    }
+
+    const catalog = await loadSkillCatalogV1(workspace, OWNER);
+
+    expect(catalog.refusals).toEqual([]);
+    expect(catalog.skills).toHaveLength(skills);
+    expect(
+      catalog.skills.every(
+        (skill) => skill.references.length === SKILL_MAX_REFERENCES - 1,
+      ),
+    ).toBe(true);
+  });
+
+  test("refuses a Skill whole when a reference is past a bound or not the Bot's", async () => {
+    const seeds = (
+      extra: Parameters<typeof FakeWorkspace.seeded>[0],
+    ): Parameters<typeof FakeWorkspace.seeded>[0] => [
+      {
+        root: OWN_ROOT,
+        path: "skills/standup/SKILL.md",
+        text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+        writer: BOT_WRITER,
+      },
+      ...extra,
+    ];
+
+    const tooMany = await FakeWorkspace.seeded(
+      seeds(
+        Array.from({ length: SKILL_MAX_REFERENCES + 1 }, (_, index) => ({
+          root: OWN_ROOT,
+          path: `skills/standup/references/r${index}.md`,
+          text: "#",
+          writer: BOT_WRITER,
+        })),
+      ),
+    );
+    const overCount = await loadSkillCatalogV1(tooMany, OWNER);
+    expect(overCount.skills).toEqual([]);
+    expect(overCount.refusals[0]).toMatchObject({
+      path: "skills/standup/SKILL.md",
+      kind: "oversized",
+    });
+
+    const tooLarge = await FakeWorkspace.seeded(
+      seeds([
+        {
+          root: OWN_ROOT,
+          path: "skills/standup/references/big.md",
+          text: "x".repeat(SKILL_MAX_FILE_BYTES + 1),
+          writer: BOT_WRITER,
+        },
+      ]),
+    );
+    expect(
+      (await loadSkillCatalogV1(tooLarge, OWNER)).refusals[0],
+    ).toMatchObject({
+      kind: "oversized",
+      reason: expect.stringContaining("big.md"),
+    });
+
+    const foreign = await FakeWorkspace.seeded(
+      seeds([
+        {
+          root: OWN_ROOT,
+          path: "skills/standup/references/forms.md",
+          text: "# Forms",
+          writer: { kind: "first-party", packageId: "memory" },
+        },
+      ]),
+    );
+    const refusedWriter = await loadSkillCatalogV1(foreign, OWNER);
+    // Whole: a Skill whose index names a file the Bot may not read as an
+    // instruction is not half-loaded.
+    expect(refusedWriter.skills).toEqual([]);
+    expect(refusedWriter.refusals[0]).toMatchObject({ kind: "authority" });
+  });
 });
 
 describe("counting a root against the Skill quota", () => {
   test("counts Skills, not the files that sit beside them", async () => {
     const workspace = new FakeWorkspace();
+    // Notes outside the Skill directory are not a Skill and are never walked.
     for (let index = 0; index < 250; index += 1) {
       await workspace.seed({
         root: OWN_ROOT,
@@ -292,15 +529,66 @@ describe("counting a root against the Skill quota", () => {
         text: skillMarkdown(`s${index}`, "Use this when counting.", "Body."),
         writer: BOT_WRITER,
       });
+      // A Skill's own supporting files are walked, and are not Skills.
+      for (let beside = 0; beside < 30; beside += 1) {
+        await workspace.seed({
+          root: OWN_ROOT,
+          path: `skills/s${index}/references/r${String(beside).padStart(2, "0")}.md`,
+          text: "Beside the Skill.",
+          writer: BOT_WRITER,
+        });
+      }
     }
 
     const counted = await countSkillDocumentsV1(workspace, OWN_ROOT);
 
     expect(counted).toEqual({ status: "ok", count: 5 });
-    // Walked with the store's own cursor: one listing, three pages of 100.
+    // Walked with the store's own cursor: 155 files under the Skill directory,
+    // two pages of 100, and not one of the 250 notes outside it.
     expect(
       workspace.calls.filter((call) => call.startsWith("list:")),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
+  });
+
+  test("counts one Skill's references inside that Skill's own directory", async () => {
+    const workspace = new FakeWorkspace();
+    // A root far bigger than the count's page bound can walk end to end.
+    for (let index = 0; index < 300; index += 1) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `notes/note-${String(index).padStart(3, "0")}.md`,
+        text: "Not a Skill.",
+        writer: BOT_WRITER,
+      });
+    }
+    await workspace.seed({
+      root: OWN_ROOT,
+      path: "skills/standup/SKILL.md",
+      text: skillMarkdown("standup", "Use this when standing up.", "Body."),
+      writer: BOT_WRITER,
+    });
+    for (const name of ["a.md", "b.md"]) {
+      await workspace.seed({
+        root: OWN_ROOT,
+        path: `skills/standup/references/${name}`,
+        text: "# Reference",
+        writer: BOT_WRITER,
+      });
+    }
+    workspace.listPageSize = 1;
+
+    const counted = await countSkillReferencesV1(
+      workspace,
+      OWN_ROOT,
+      "skills/standup/SKILL.md",
+    );
+
+    // The question is about one directory, so the walk reads one directory:
+    // the rest of the root never enters it, and never exhausts its pages.
+    expect(counted).toEqual({ status: "ok", count: 2 });
+    expect(
+      workspace.calls.filter((call) => call.startsWith("list:")),
+    ).toHaveLength(2);
   });
 
   test("the walk is bounded by Skills, so a huge root is still countable", async () => {

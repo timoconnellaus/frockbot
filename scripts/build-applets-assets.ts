@@ -6,6 +6,10 @@
 // serves into a sandboxed iframe. A Worker has no filesystem, so each has to
 // reach the bundle as a string. That is all this script does.
 //
+// A Skill is a directory (ADR 0030), so each Skill source is read as one: its
+// `SKILL.md` and whatever Markdown sits under `references/`, which travel as
+// their own strings and are loaded on their own by `skill_load`.
+//
 // What it writes:
 //
 //   applets/template.generated.ts           the SDK scaffold
@@ -17,7 +21,13 @@
 //   app/skills/managed-plugins.generated.ts the Plugins Skill
 //
 // Freshness is proved by `--check`, which `bun run typecheck` runs.
+import { existsSync, readdirSync } from "node:fs";
 import { format } from "prettier";
+import {
+  SKILL_MAX_FILE_BYTES,
+  SKILL_MAX_REFERENCES,
+  isSkillReferenceNameV1,
+} from "../app/skills/skill-md.ts";
 
 const root = new URL("../", import.meta.url);
 const at = (path: string): URL => new URL(path, root);
@@ -30,12 +40,14 @@ const PAGE_IDS = ["list", "canvas"] as const;
 
 const TEMPLATE_OUTPUT = "applets/template.generated.ts";
 const PAGES_OUTPUT = "applets/pages.generated.ts";
-const SKILL_SOURCE = "applets/skills/applets.md";
+/** Where the Applets Skill is authored, as the directory the generator reads. */
+export const SKILL_SOURCE = at("applets/skills/applets/");
 const SKILL_OUTPUT = "app/skills/managed-applets.generated.ts";
 const PLUGIN_TEMPLATE_DIRECTORY = "applets/sdk/plugin/template/";
 const PLUGIN_TEMPLATE_FILES = ["plugin.json", "plugin.ts"];
 const PLUGIN_TEMPLATE_OUTPUT = "app/plugins/template.generated.ts";
-const PLUGIN_SKILL_SOURCE = "app/plugins/skills/plugins.md";
+/** Where the Plugins Skill is authored. */
+export const PLUGIN_SKILL_SOURCE = at("app/plugins/skills/plugins/");
 const PLUGIN_SKILL_OUTPUT = "app/skills/managed-plugins.generated.ts";
 
 /** Content addressing, the same digest the page route verifies against. */
@@ -197,43 +209,114 @@ async function pagesModule(): Promise<string> {
 }
 
 /**
- * The Applets Skill, as a managed Skill document.
+ * One authored Skill directory: its `SKILL.md` and the Markdown files under
+ * `references/` (ADR 0030).
  *
- * It is authored in `applets/skills/applets.md`, beside the feature it
- * documents, and copied here into `app/skills`'s managed set — string
- * constants compiled into that Package, read-only because there is no path
- * from `skill_write` to one.
+ * The bounds are the loader's, checked here so a managed Skill that would be
+ * refused at runtime fails the build instead.
  */
-async function skillModule(): Promise<string> {
-  const text = await Bun.file(at(SKILL_SOURCE)).text();
+export async function skillDirectory(
+  directory: URL,
+): Promise<{ text: string; references: { path: string; text: string }[] }> {
+  const text = await Bun.file(new URL("SKILL.md", directory)).text();
+  if (text.length > SKILL_MAX_FILE_BYTES) {
+    throw new Error(
+      `${directory.pathname}SKILL.md is larger than ${SKILL_MAX_FILE_BYTES} bytes`,
+    );
+  }
+  const referencesDirectory = new URL("references/", directory);
+  // A Skill with nothing beside it is an ordinary Skill, not a broken one.
+  const names = existsSync(referencesDirectory)
+    ? readdirSync(referencesDirectory)
+        .filter((name) => name.endsWith(".md"))
+        .sort()
+    : [];
+  for (const name of names) {
+    if (!isSkillReferenceNameV1(name)) {
+      throw new Error(
+        `${referencesDirectory.pathname}${name} is not a name the loader reads as a reference`,
+      );
+    }
+  }
+  if (names.length > SKILL_MAX_REFERENCES) {
+    throw new Error(
+      `${directory.pathname} offers ${names.length} references; the bound is ${SKILL_MAX_REFERENCES}`,
+    );
+  }
+  const references: { path: string; text: string }[] = [];
+  for (const path of names) {
+    const body = await Bun.file(new URL(path, referencesDirectory)).text();
+    if (new TextEncoder().encode(body).byteLength > SKILL_MAX_FILE_BYTES) {
+      throw new Error(
+        `${referencesDirectory.pathname}${path} is larger than ${SKILL_MAX_FILE_BYTES} bytes`,
+      );
+    }
+    references.push({ path, text: body });
+  }
+  return { text, references };
+}
+
+function referencesLiteral(
+  references: { path: string; text: string }[],
+): string {
+  return `[${references
+    .map(
+      (reference) =>
+        `{ path: ${JSON.stringify(reference.path)}, text: fromBase64V1(${JSON.stringify(base64(reference.text))}) }`,
+    )
+    .join(", ")}]`;
+}
+
+const REFERENCES_TYPE = "ReadonlyArray<{ path: string; text: string }>";
+
+/**
+ * One authored Skill directory, as a managed Skill module.
+ *
+ * The Applets Skill is authored in `applets/skills/applets/`, beside the
+ * feature it documents, and copied into `app/skills`'s managed set — string
+ * constants compiled into that Package, read-only because there is no path
+ * from `skill_write` to one. The Plugins Skill is the same, from its own
+ * directory, so both go through here.
+ */
+export async function managedSkillModule(source: {
+  /** The constant prefix the module exports under, like `APPLETS`. */
+  prefix: string;
+  slug: string;
+  directory: URL;
+  /** Where the Skill is authored, for the generated module's own comment. */
+  authoredAt: string;
+}): Promise<string> {
+  const skill = await skillDirectory(source.directory);
   return await prettyTypeScript(
     [
       "// Generated by scripts/build-applets-assets.ts. Do not edit.",
       "//",
-      "// Authored at applets/skills/applets.md.",
+      `// Authored at ${source.authoredAt}.`,
       DECODE_HELPER,
-      'export const APPLETS_SKILL_SLUG_V1 = "applets";',
-      `export const APPLETS_SKILL_DOCUMENT_V1 = fromBase64V1(${JSON.stringify(base64(text))});`,
+      `export const ${source.prefix}_SKILL_SLUG_V1 = ${JSON.stringify(source.slug)};`,
+      `export const ${source.prefix}_SKILL_DOCUMENT_V1 = fromBase64V1(${JSON.stringify(base64(skill.text))});`,
+      `export const ${source.prefix}_SKILL_REFERENCES_V1: ${REFERENCES_TYPE} = ${referencesLiteral(skill.references)};`,
       "",
     ].join("\n"),
   );
 }
 
-/** The Plugins Skill, authored at `app/plugins/skills/plugins.md`. */
-async function pluginSkillModule(): Promise<string> {
-  const text = await Bun.file(at(PLUGIN_SKILL_SOURCE)).text();
-  return await prettyTypeScript(
-    [
-      "// Generated by scripts/build-applets-assets.ts. Do not edit.",
-      "//",
-      "// Authored at app/plugins/skills/plugins.md.",
-      DECODE_HELPER,
-      'export const PLUGINS_SKILL_SLUG_V1 = "plugins";',
-      `export const PLUGINS_SKILL_DOCUMENT_V1 = fromBase64V1(${JSON.stringify(base64(text))});`,
-      "",
-    ].join("\n"),
-  );
-}
+const skillModule = (): Promise<string> =>
+  managedSkillModule({
+    prefix: "APPLETS",
+    slug: "applets",
+    directory: SKILL_SOURCE,
+    authoredAt: "applets/skills/applets/",
+  });
+
+/** The Plugins Skill, authored at `app/plugins/skills/plugins/`. */
+const pluginSkillModule = (): Promise<string> =>
+  managedSkillModule({
+    prefix: "PLUGINS",
+    slug: "plugins",
+    directory: PLUGIN_SKILL_SOURCE,
+    authoredAt: "app/plugins/skills/plugins/",
+  });
 
 const outputs: Array<[string, () => Promise<string>]> = [
   [TEMPLATE_OUTPUT, templateModule],
@@ -243,21 +326,27 @@ const outputs: Array<[string, () => Promise<string>]> = [
   [PLUGIN_SKILL_OUTPUT, pluginSkillModule],
 ];
 
-if (process.argv.includes("--check")) {
-  for (const [path, build] of outputs) {
-    const expected = await build();
-    const current = await Bun.file(at(path))
-      .text()
-      .catch(() => "");
-    if (current !== expected) {
-      console.error(
-        `${path} is stale; run \`bun scripts/build-applets-assets.ts\`.`,
-      );
-      process.exit(1);
+// Importing this module — the test drives `skillDirectory` directly — must not
+// read or rewrite the checkout.
+if (import.meta.main) {
+  if (process.argv.includes("--check")) {
+    for (const [path, build] of outputs) {
+      const expected = await build();
+      const current = await Bun.file(at(path))
+        .text()
+        .catch(() => "");
+      if (current !== expected) {
+        console.error(
+          `${path} is stale; run \`bun scripts/build-applets-assets.ts\`.`,
+        );
+        process.exit(1);
+      }
     }
+    console.log("Applets assets are fresh.");
+  } else {
+    for (const [path, build] of outputs) {
+      await Bun.write(at(path), await build());
+    }
+    console.log("Built the Applets assets.");
   }
-  console.log("Applets assets are fresh.");
-} else {
-  for (const [path, build] of outputs) await Bun.write(at(path), await build());
-  console.log("Built the Applets assets.");
 }

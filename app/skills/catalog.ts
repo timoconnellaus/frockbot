@@ -41,6 +41,7 @@ import {
   type SkillRefSourceV1,
   type SkillRefV1,
   type SkillSourceV1,
+  WORKSPACE_MAX_LIST_ENTRIES,
   type WorkspaceEntryV1,
   type WorkspaceInstructionRootV1,
   type WorkspaceReadOutcomeV1,
@@ -52,10 +53,19 @@ import {
 } from "@frockbot/core/concurrency";
 import { loadManagedSkillsV1, MANAGED_SKILL_DOCUMENTS_V1 } from "./managed.js";
 import {
+  loadPluginSkillsV1,
+  type PluginSkillContributionV1,
+} from "./plugin.js";
+import {
   SKILL_FILE_NAME,
   isSkillDocumentPathV1,
   parseSkillDocumentV1,
+  skillReferenceNameForV1,
+  skillReferencesPrefixV1,
+  SKILL_DIRECTORY,
   SKILL_MAX_FILE_BYTES,
+  SKILL_MAX_REFERENCES,
+  SKILL_REFERENCES_DIRECTORY,
 } from "./skill-md.js";
 
 /** The Bot whose instruction root is being loaded, and its User. */
@@ -64,8 +74,6 @@ export interface SkillOwnerV1 {
   botId: string;
 }
 
-/** Most `list` pages walked before enumeration stops. */
-export const SKILL_MAX_LIST_PAGES = 8;
 /**
  * Most `list` pages walked while counting a root for the quota.
  *
@@ -79,6 +87,72 @@ export const SKILL_MAX_COUNT_LIST_PAGES = 256;
 /** Most Skills carried in one catalog. Beyond this, the rest are refused. */
 export const SKILL_MAX_CATALOG_ENTRIES = 200;
 
+/**
+ * Entries asked for per `list` page while loading an instruction root.
+ *
+ * The store's own default page is a tenth of this, which was ample while a
+ * Skill was one file. A Skill is a directory now, so the walk asks for the
+ * largest page the kernel will answer rather than paying ten times the round
+ * trips for the same root.
+ */
+export const SKILL_LIST_PAGE_LIMIT = WORKSPACE_MAX_LIST_ENTRIES;
+
+/**
+ * Most `list` pages walked before enumeration stops.
+ *
+ * Derived, not chosen: a walk that stays inside the Skill directory's own
+ * declared bounds must list end to end, and those bounds are
+ * `SKILL_MAX_CATALOG_ENTRIES` Skills of one `SKILL.md` plus
+ * `SKILL_MAX_REFERENCES` files each. Because the walk is narrowed to
+ * {@link SKILL_WALK_PREFIX}, every page it pays for is a Skill's own file —
+ * the Bot's notes and an installer's leavings elsewhere in the root cost the
+ * turn-start path nothing. More Skill files than this is still cut, and the
+ * cut is a recorded refusal.
+ */
+export const SKILL_MAX_LIST_PAGES = Math.ceil(
+  (SKILL_MAX_CATALOG_ENTRIES * (1 + SKILL_MAX_REFERENCES)) /
+    SKILL_LIST_PAGE_LIMIT,
+);
+
+/**
+ * The part of an instruction root the turn-start walk lists.
+ *
+ * A Skill is written at `skills/<slug>/SKILL.md` and its references beside it,
+ * so that subtree is the whole of what the catalog can load. An instruction
+ * root is an ordinary durable root — a Bot's notes and an installer's leavings
+ * live there too — and listing all of it made every unrelated file cost a
+ * ledger lookup on the turn-start path. A `SKILL.md` outside this prefix is
+ * not a Skill this loader offers; a directory inside it that is not a
+ * well-formed slug still is, loadable by path with no ref.
+ */
+export const SKILL_WALK_PREFIX = SKILL_DIRECTORY;
+
+/**
+ * One Markdown file a Skill offers beside its `SKILL.md` (ADR 0030).
+ *
+ * The catalog carries the index, never the bodies: a reference is loaded on
+ * demand by `skill_load`, so a Skill with thirty-two of them costs a Turn that
+ * reads none of them nothing.
+ */
+export interface SkillReferenceV1 {
+  /** Listed the way the Skill's own path is: relative to the root, or synthetic. */
+  path: string;
+  generationId: string;
+  /**
+   * Who wrote this reference, when it was not this Bot. A reference is an
+   * instruction, so it carries the attribution its Skill does: the `SKILL.md`
+   * and the file beside it can have different writers, and the one the Turn
+   * actually reads is the one that must be named.
+   */
+  by?: string;
+  /**
+   * The bytes, for a source that carries them in the artifact rather than on
+   * the Workspace — managed and plugin Skills. A Workspace reference is read
+   * through the same `WorkspaceReadsV1` its listing came through.
+   */
+  text?: string;
+}
+
 /** One Skill this Turn may use, with the exact generation it came from. */
 export interface LoadedSkillV1 {
   /**
@@ -88,13 +162,20 @@ export interface LoadedSkillV1 {
    */
   path: string;
   /**
+   * Which root, or which artifact, the Skill came out of. The ref carries the
+   * same word but is optional — a `SKILL.md` in a directory that is not a
+   * well-formed slug has no ref — and reading a reference needs to know where
+   * to read it from, so the source is recorded whether or not it is nameable.
+   */
+  source: SkillRefSourceV1;
+  /**
    * The ref that names this Skill for invocation and for `skill_load`.
    *
    * Optional only for a `bot` Skill whose directory is not a well-formed slug:
-   * an instruction root is an ordinary durable root, so a `SKILL.md` can sit
-   * anywhere, and such a Skill is still listed and still loadable by path — it
-   * just has no name the composer can attach. Every managed Skill always has
-   * one.
+   * an instruction root is an ordinary durable root, so a directory under
+   * {@link SKILL_WALK_PREFIX} can be named anything, and such a Skill is still
+   * listed and still loadable by path — it just has no name the composer can
+   * attach. Every managed Skill always has one.
    */
   ref?: SkillRefV1;
   /**
@@ -105,6 +186,8 @@ export interface LoadedSkillV1 {
   name: string;
   description: string;
   body: string;
+  /** The references beside the `SKILL.md`, in path order; empty when none. */
+  references: SkillReferenceV1[];
   generationId: string;
   contentHash: string;
 }
@@ -238,15 +321,16 @@ export type SkillCountOutcomeV1 =
   { status: "ok"; count: number } | { status: "unavailable"; reason: string };
 
 /**
- * Counts the `SKILL.md` files under a root, walking the listing with the
+ * Counts the `SKILL.md` files a root holds, walking the listing with the
  * store's own cursor.
  *
- * Only an entry whose last segment is `SKILL.md`, inside a directory, counts —
- * `isSkillDocumentPathV1` decides it. An instruction root is an ordinary durable
- * root — a Bot's notes, an installer's leavings, and a Skill's own supporting
- * files all live there — so counting *files* would refuse a Skill on a quota
- * about Skills, and would make the page bound a bound on files rather than on
- * what the quota measures.
+ * Narrowed to {@link SKILL_WALK_PREFIX}, because the quota must measure what
+ * the catalog can load and the loader walks no further than that either. Inside
+ * it, only an entry whose last segment is `SKILL.md` counts —
+ * `isSkillDocumentPathV1` decides it — because a Skill's own supporting files
+ * live there too, and counting *files* would refuse a Skill on a quota about
+ * Skills, and would make the page bound a bound on files rather than on what
+ * the quota measures.
  *
  * `stopAfter` is what keeps the bound on Skills. The only question the quota
  * asks is whether the root already holds more than it allows, so once the
@@ -267,7 +351,9 @@ export async function countSkillDocumentsV1(
   let cursor: string | undefined;
   for (let page = 0; page < SKILL_MAX_COUNT_LIST_PAGES; page += 1) {
     const outcome = await reads.list(
-      cursor === undefined ? { root } : { root, cursor },
+      cursor === undefined
+        ? { root, prefix: SKILL_WALK_PREFIX }
+        : { root, prefix: SKILL_WALK_PREFIX, cursor },
     );
     if (outcome.status !== "ok") {
       return {
@@ -320,9 +406,17 @@ export async function loadSkillCatalogV1(
   const catalog = emptySkillCatalogV1(owner);
   const entries: WorkspaceEntryV1[] = [];
   let cursor: string | undefined;
+  let listedWhole = false;
   for (let page = 0; page < SKILL_MAX_LIST_PAGES; page += 1) {
     const outcome = await reads.list(
-      cursor === undefined ? { root } : { root, cursor },
+      cursor === undefined
+        ? { root, prefix: SKILL_WALK_PREFIX, limit: SKILL_LIST_PAGE_LIMIT }
+        : {
+            root,
+            prefix: SKILL_WALK_PREFIX,
+            cursor,
+            limit: SKILL_LIST_PAGE_LIMIT,
+          },
     );
     if (outcome.status !== "ok") {
       // "unavailable" is an ordinary answer, not an error condition: an
@@ -336,13 +430,119 @@ export async function loadSkillCatalogV1(
       return catalog;
     }
     entries.push(...outcome.entries);
-    if (!outcome.cursor) break;
+    if (!outcome.cursor) {
+      listedWhole = true;
+      break;
+    }
     cursor = outcome.cursor;
+  }
+
+  // The walk is bounded, so a root larger than it can list is cut somewhere.
+  // `frontier` is the furthest path the listing reached; a listing in path
+  // order that got past a Skill's whole `references/` prefix saw all of it,
+  // and every other Skill's index may be missing files that lie beyond the
+  // cut. `referencesOf` refuses those whole rather than load a partial index.
+  const frontier = listedWhole
+    ? undefined
+    : entries.reduce(
+        (furthest, entry) =>
+          entry.path.path > furthest ? entry.path.path : furthest,
+        "",
+      );
+  if (!listedWhole) {
+    // A Skill whose `SKILL.md` lies entirely past the cut never becomes a
+    // candidate, so without this the root would quietly hold fewer Skills
+    // than it has. The cut itself is the refusal; the straddling Skill below
+    // gets its own.
+    catalog.refusals.push({
+      path: "",
+      kind: "unreadable",
+      reason: `the ${refSource} instruction root did not finish listing within ${SKILL_MAX_LIST_PAGES} pages, so any Skill past the cut was not loaded`,
+    });
   }
 
   const candidates = entries
     .filter((entry) => isSkillDocumentPathV1(entry.path.path))
     .sort((left, right) => left.path.path.localeCompare(right.path.path));
+
+  // A Skill is a directory (ADR 0030): the Markdown files under its own
+  // `references/` are listed by the same walk the `SKILL.md` was, so they cost
+  // no further read here — the index is the listing, and a body is read only
+  // when `skill_load` asks for one.
+  const referencesByDocument = new Map<string, WorkspaceEntryV1[]>();
+  for (const entry of entries) {
+    const path = entry.path.path;
+    const cut = path.lastIndexOf(`/${SKILL_REFERENCES_DIRECTORY}/`);
+    if (cut < 0) continue;
+    const documentPath = `${path.slice(0, cut + 1)}${SKILL_FILE_NAME}`;
+    if (skillReferenceNameForV1(documentPath, path) === undefined) continue;
+    const listed = referencesByDocument.get(documentPath) ?? [];
+    listed.push(entry);
+    referencesByDocument.set(documentPath, listed);
+  }
+
+  /**
+   * The references of one Skill, or the reason the Skill is refused whole.
+   *
+   * Whole, because a partially loaded Skill is a Skill whose `SKILL.md` names
+   * a reference the Bot cannot read: the index in the body is the contract,
+   * and half of it is worse than none of it.
+   */
+  const referencesOf = (
+    documentPath: string,
+  ):
+    | { status: "ok"; references: SkillReferenceV1[] }
+    | { status: "refused"; kind: SkillRefusalKindV1; reason: string } => {
+    const prefix = skillReferencesPrefixV1(documentPath);
+    if (
+      frontier !== undefined &&
+      !(frontier > prefix && !frontier.startsWith(prefix))
+    ) {
+      return {
+        status: "refused",
+        kind: "unreadable",
+        reason: `the ${refSource} instruction root did not finish listing within ${SKILL_MAX_LIST_PAGES} pages, so the Skill's references could not be indexed`,
+      };
+    }
+    const listed = (referencesByDocument.get(documentPath) ?? []).sort(
+      (left, right) => left.path.path.localeCompare(right.path.path),
+    );
+    if (listed.length > SKILL_MAX_REFERENCES) {
+      return {
+        status: "refused",
+        kind: "oversized",
+        reason: `the Skill offers ${listed.length} references; the bound is ${SKILL_MAX_REFERENCES}`,
+      };
+    }
+    const references: SkillReferenceV1[] = [];
+    for (const entry of listed) {
+      const source = sourceOf(entry);
+      // The same rule, the same predicate: a reference is loaded as an
+      // instruction exactly when its Skill would be.
+      if (!isLoadableSkillSourceV1(source, owner)) {
+        return {
+          status: "refused",
+          kind: "authority",
+          reason: `its reference ${source.path.path} was written by ${describeWriter(source)}; only this Bot or its User may write an instruction`,
+        };
+      }
+      if (source.generation.size > SKILL_MAX_FILE_BYTES) {
+        return {
+          status: "refused",
+          kind: "oversized",
+          reason: `its reference ${source.path.path} is ${source.generation.size} bytes; the bound is ${SKILL_MAX_FILE_BYTES}`,
+        };
+      }
+      references.push({
+        path: source.path.path,
+        ...(attributionFor(source, owner)
+          ? { by: attributionFor(source, owner) as string }
+          : {}),
+        generationId: source.generation.generationId,
+      });
+    }
+    return { status: "ok", references };
+  };
 
   // The bodies are independent objects, and reading them one after another
   // made a root cost one round trip per SKILL.md on the turn-start critical
@@ -427,9 +627,19 @@ export async function loadSkillCatalogV1(
       catalog.refusals.push({ path, kind: "malformed", reason: parsed.reason });
       continue;
     }
+    const references = referencesOf(path);
+    if (references.status !== "ok") {
+      catalog.refusals.push({
+        path,
+        kind: references.kind,
+        reason: references.reason,
+      });
+      continue;
+    }
     const slug = skillSlugFromDocumentPathV1(path);
     catalog.skills.push({
       path,
+      source: refSource,
       ...(slug
         ? { ref: { schemaVersion: 1 as const, source: refSource, slug } }
         : {}),
@@ -439,11 +649,57 @@ export async function loadSkillCatalogV1(
       name: parsed.document.name,
       description: parsed.document.description,
       body: parsed.document.body,
+      references: references.references,
       generationId: source.generation.generationId,
       contentHash: source.generation.contentHash,
     });
   }
   return catalog;
+}
+
+/**
+ * How many references one Skill already holds under a root, or why that is not
+ * knowable.
+ *
+ * The write path needs it and the load path does not: loading walks the whole
+ * listing anyway, while a write knows only the Skill it is writing into. Same
+ * shape as `countSkillDocumentsV1`, and for the same reason — an incomplete
+ * count is not a smaller count.
+ */
+export async function countSkillReferencesV1(
+  reads: WorkspaceReadsV1,
+  root: WorkspaceInstructionRootV1,
+  documentPath: string,
+): Promise<SkillCountOutcomeV1> {
+  // The store validates a list prefix as a relative path, and a path may not
+  // end in a separator; it narrows at the segment boundary itself.
+  const prefix = skillReferencesPrefixV1(documentPath).slice(0, -1);
+  let count = 0;
+  let cursor: string | undefined;
+  for (let page = 0; page < SKILL_MAX_COUNT_LIST_PAGES; page += 1) {
+    const outcome = await reads.list(
+      cursor === undefined ? { root, prefix } : { root, prefix, cursor },
+    );
+    if (outcome.status !== "ok") {
+      return {
+        status: "unavailable",
+        reason: `the instruction root could not be listed: ${outcome.reason}`,
+      };
+    }
+    count += outcome.entries.filter(
+      (entry) =>
+        skillReferenceNameForV1(documentPath, entry.path.path) !== undefined,
+    ).length;
+    if (!outcome.cursor) return { status: "ok", count };
+    // Past the bound the answer cannot change, so the walk stops wherever it
+    // is rather than paging a root that a listing prefix already narrowed.
+    if (count > SKILL_MAX_REFERENCES) return { status: "ok", count };
+    cursor = outcome.cursor;
+  }
+  return {
+    status: "unavailable",
+    reason: `the instruction root did not finish listing within ${SKILL_MAX_COUNT_LIST_PAGES} pages`,
+  };
 }
 
 /**
@@ -463,6 +719,8 @@ export interface SkillCatalogCapsV1 {
   bot: number;
   user: number;
   managed: number;
+  /** Across every Plugin this Bot runs, not per Plugin. */
+  plugin: number;
   totalBytes: number;
 }
 
@@ -470,6 +728,7 @@ export const SKILL_CATALOG_CAPS_V1: SkillCatalogCapsV1 = {
   bot: 40,
   user: 40,
   managed: 8,
+  plugin: 16,
   totalBytes: 16_384,
 };
 
@@ -494,14 +753,17 @@ function catalogCostOf(skill: LoadedSkillV1): number {
 }
 
 function orderingKeyOf(skill: LoadedSkillV1): string {
-  return skill.ref ? skill.ref.slug : `\uffff${skill.path}`;
+  // The whole ref, so two Plugins shipping one slug order by their Plugin. The
+  // source prefix is constant inside a source, so nothing else moves.
+  return skill.ref ? formatSkillRefV1(skill.ref) : `\uffff${skill.path}`;
 }
 
 /**
  * Assembles one Turn's catalog from its sources.
  *
- * Ordering is `bot` → `user` → `managed`, then by ref within a source, and it is a *deterministic ordering only*: refs are globally unique,
- * so nothing here shadows anything. Two Skills may share a name; the rendered
+ * Ordering is `bot` → `user` → `managed` → `plugin`, then by ref within a
+ * source, and it is a *deterministic ordering only*: refs are globally
+ * unique, so nothing here shadows anything. Two Skills may share a name; the rendered
  * block disambiguates those by ref, which is what makes a User's edit visible
  * on every Bot instead of silently losing to a same-named local one.
  */
@@ -569,6 +831,13 @@ export async function loadFullSkillCatalogV1(
   options: {
     managed?: boolean;
     withheldManagedSlugs?: readonly string[];
+    /**
+     * The Skills the Plugins this Bot runs contribute. The host resolves which
+     * Plugins those are — a Plugin's Skill goes exactly where its tools go —
+     * so an absent list is a Turn with no Plugin Skills, not a filter applied
+     * here.
+     */
+    pluginSkills?: readonly PluginSkillContributionV1[];
     caps?: SkillCatalogCapsV1;
   } = {},
 ): Promise<SkillCatalogV1> {
@@ -594,6 +863,9 @@ export async function loadFullSkillCatalogV1(
       ),
     );
   }
+  if (options.pluginSkills && options.pluginSkills.length > 0) {
+    sources.plugin = await loadPluginSkillsV1(options.pluginSkills);
+  }
   return assembleSkillCatalogV1(owner, sources, options.caps);
 }
 
@@ -616,7 +888,7 @@ export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
   }
   const entries = catalog.skills.map((skill) => {
     const ref = skill.ref ? formatSkillRefV1(skill.ref) : undefined;
-    const source = skill.ref?.source ?? "bot";
+    const source = skill.source;
     const name =
       (counts.get(skill.name) ?? 0) > 1 && ref
         ? `${skill.name} (${ref})`
@@ -634,7 +906,7 @@ export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
     "<agent_skills>",
     ...entries,
     "</agent_skills>",
-    "These are your Skills: recipes you wrote, or your User wrote, for you; the managed ones ship with FrockBot.",
+    "These are your Skills: recipes you wrote, or your User wrote, for you; the managed ones ship with FrockBot, and the plugin ones come from a Plugin your User's Bot runs.",
     'Only names, refs, paths and descriptions are listed above. Call skill_load with the ref in its "path" field to read a Skill\'s full instructions before you follow it.',
     "Mentioning a Skill is not running it.",
   ].join("\n");

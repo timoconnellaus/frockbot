@@ -21,17 +21,23 @@
 // READ-ONLY follows from the same fact. There is no path from `skill_write` to
 // an artifact, so `scope: "managed"` is refused rather than routed anywhere.
 import {
-  parseSkillDocumentV1,
-  SKILL_FILE_NAME,
+  isSkillReferenceNameV1,
   isSkillSlugV1,
+  parseSkillDocumentV1,
+  skillReferencePathForV1,
+  SKILL_FILE_NAME,
+  SKILL_MAX_FILE_BYTES,
+  SKILL_MAX_REFERENCES,
 } from "./skill-md.js";
 import type { LoadedSkillV1, SkillRefusalV1 } from "./catalog.js";
 import {
   APPLETS_SKILL_DOCUMENT_V1,
+  APPLETS_SKILL_REFERENCES_V1,
   APPLETS_SKILL_SLUG_V1,
 } from "./managed-applets.generated.js";
 import {
   PLUGINS_SKILL_DOCUMENT_V1,
+  PLUGINS_SKILL_REFERENCES_V1,
   PLUGINS_SKILL_SLUG_V1,
 } from "./managed-plugins.generated.js";
 
@@ -49,6 +55,12 @@ export const MANAGED_SKILL_ATTRIBUTION = "FrockBot";
 export interface ManagedSkillDocumentV1 {
   slug: string;
   text: string;
+  /**
+   * The Markdown files bundled beside it, by file name (ADR 0030). A managed
+   * Skill is a directory like any other; the generator copies one where it
+   * copied a file, and a Skill with none declares none.
+   */
+  references?: readonly { path: string; text: string }[];
 }
 
 const ADD_CONNECTOR = `---
@@ -195,15 +207,25 @@ export const MANAGED_SKILL_DOCUMENTS_V1: readonly ManagedSkillDocumentV1[] = [
   { slug: "import-bot-template", text: IMPORT_BOT_TEMPLATE },
   { slug: "learn-from-demonstration", text: LEARN_FROM_DEMONSTRATION },
   // The Applets SDK reference. It is authored in
-  // `applets/skills/applets.md`, beside the Package it
+  // `applets/skills/applets/`, beside the Package it
   // documents, and copied here by `scripts/build-applets-assets.ts`: the
   // Applets Package has no in-process code to carry it, and the managed set is
-  // the mechanism a first-party Skill already ships through.
-  { slug: APPLETS_SKILL_SLUG_V1, text: APPLETS_SKILL_DOCUMENT_V1 },
+  // the mechanism a first-party Skill already ships through. The generator
+  // reads that whole directory, so a reference added beside the `SKILL.md`
+  // arrives here with it and neither one is edited by hand.
+  {
+    slug: APPLETS_SKILL_SLUG_V1,
+    text: APPLETS_SKILL_DOCUMENT_V1,
+    references: APPLETS_SKILL_REFERENCES_V1,
+  },
   // The Plugin SDK reference (ADR 0026), authored in
-  // `app/plugins/skills/plugins.md` and copied here the same way. Withheld
+  // `app/plugins/skills/plugins/` and copied here the same way. Withheld
   // with the `plugin_*` tools when the account's authoring switch is off.
-  { slug: PLUGINS_SKILL_SLUG_V1, text: PLUGINS_SKILL_DOCUMENT_V1 },
+  {
+    slug: PLUGINS_SKILL_SLUG_V1,
+    text: PLUGINS_SKILL_DOCUMENT_V1,
+    references: PLUGINS_SKILL_REFERENCES_V1,
+  },
 ];
 
 /** The synthetic path a managed Skill is listed and loadable under. */
@@ -255,14 +277,58 @@ export async function loadManagedSkillsV1(
       refusals.push({ path, kind: "malformed", reason: parsed.reason });
       continue;
     }
+    const declared = document.references ?? [];
+    if (declared.length > SKILL_MAX_REFERENCES) {
+      refusals.push({
+        path,
+        kind: "oversized",
+        reason: `the Skill offers ${declared.length} references; the bound is ${SKILL_MAX_REFERENCES}`,
+      });
+      continue;
+    }
+    const oversized = declared.find(
+      (reference) =>
+        new TextEncoder().encode(reference.text).byteLength >
+        SKILL_MAX_FILE_BYTES,
+    );
+    if (oversized) {
+      refusals.push({
+        path,
+        kind: "oversized",
+        reason: `its reference ${oversized.path} is larger than ${SKILL_MAX_FILE_BYTES} bytes`,
+      });
+      continue;
+    }
+    const malformedReference = declared.find(
+      (reference) => !isSkillReferenceNameV1(reference.path),
+    );
+    if (malformedReference) {
+      refusals.push({
+        path,
+        kind: "malformed",
+        reason: `its reference "${malformedReference.path}" is not a single .md file name`,
+      });
+      continue;
+    }
+    const references = [];
+    for (const reference of declared) {
+      references.push({
+        path: skillReferencePathForV1(path, reference.path),
+        by: MANAGED_SKILL_ATTRIBUTION,
+        generationId: await sha256Hex(reference.text),
+        text: reference.text,
+      });
+    }
     const contentHash = await sha256Hex(document.text);
     skills.push({
       path,
+      source: "managed",
       ref: { schemaVersion: 1, source: "managed", slug: document.slug },
       by: MANAGED_SKILL_ATTRIBUTION,
       name: parsed.document.name,
       description: parsed.document.description,
       body: parsed.document.body,
+      references,
       generationId: contentHash,
       contentHash,
     });

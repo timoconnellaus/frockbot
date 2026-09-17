@@ -836,10 +836,11 @@ the rows whose status the code moved:
   own wording, "managed skills are not editable this way". They are
   Package-contributed prompt content, not Workspace files, which is why the
   constitution's rule about instruction roots is untouched: the catalog is
-  ordered `bot` → `user` → `managed` under `SKILL_CATALOG_CAPS_V1`, every drop
-  recorded as an `over-source-cap` refusal in `skill/injected`.
-  **Plugin-borne** Skills regressed with the Package Catalog on 2026-09-07:
-  there is no Catalog to index, so the `plugin` rank is gone entirely. The
+  ordered `bot` → `user` → `managed` → `plugin` under `SKILL_CATALOG_CAPS_V1`,
+  every drop recorded as an `over-source-cap` refusal in `skill/injected`.
+  **Plugin-borne** Skills returned with ADR 0030 step 2: a Plugin's descriptor
+  carries `skills`, and `plugin/<pluginId>/<slug>` is the fourth rank, offered
+  only to a Bot with that Plugin enabled. The
   **user-global** root
   landed with ADR 0016 and the matching amendment to the constitution's
   instruction-root sentence: `{ kind: "user-instructions", userId }` is a
@@ -863,8 +864,10 @@ the rows whose status the code moved:
   rather than pasting text. An invoked ref resolves against the Turn's catalog
   at its exact generation, is recorded as `skill/invoked`, and its body is
   expanded into step 1's `model/request`; an unresolvable ref blocks the Turn
-  with a reason. `bot`, `user` and `managed` refs all resolve; there is no
-  `plugin` rank any more.
+  with a reason. All four ranks resolve — `bot`, `user`, `managed` and the
+  `plugin/<pluginId>/<slug>` form row 21 describes. A Skill's references are
+  disclosed the same way, one file per `skill_load` call
+  ([architecture.md, "Skills a Plugin ships"](architecture.md#built-in-versus-dynamic)).
 - **23** — one Computer per User with per-Bot durable roots is landed and
   checked (`computer/core/index.test.ts`,
   `computer/fly/computer.test.ts`); the shared scratch is not.

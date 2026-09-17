@@ -44,10 +44,13 @@ import {
   renderInvokedSkillsPromptV1,
   renderSkillCatalogPromptV1,
   resolveSkillRefV1,
+  type LoadedSkillV1,
   type SkillCatalogV1,
   type SkillOwnerV1,
+  userInstructionRootV1,
 } from "./catalog.js";
-import { writeSkillDocumentV1 } from "./write.js";
+import type { PluginSkillContributionV1 } from "./plugin.js";
+import { writeSkillDocumentV1, writeSkillReferenceV1 } from "./write.js";
 import {
   checkSkillQuotaV1,
   SKILL_QUOTA_DEFAULTS_V1,
@@ -55,7 +58,9 @@ import {
   type SkillQuotaScopeV1,
 } from "./quota.js";
 import {
+  isSkillReferenceNameV1,
   isSkillSlugV1,
+  skillReferenceNameForV1,
   skillSlugFromNameV1,
   SKILL_MAX_DESCRIPTION_LENGTH,
   SKILL_MAX_NAME_LENGTH,
@@ -80,6 +85,13 @@ export interface SkillsRuntimeHostV1 {
   files?: WorkspaceFilesV1;
   writer?: SkillWriterIdentityV1;
   quota?: SkillQuotaConfigV1;
+  /**
+   * The Skills the Plugins this Bot runs contribute (ADR 0030). A Plugin's
+   * Skill goes exactly where its tools go, so the host resolves the Bot's
+   * enable map and hands over only what it is running; an absent list is a
+   * Turn with no Plugin Skills.
+   */
+  pluginSkills?: readonly PluginSkillContributionV1[];
   /**
    * Managed Skills this Bot is not offered, by slug. A managed Skill is a
    * Package's own reference, and the host knows which Packages this Bot's
@@ -142,6 +154,7 @@ export class SkillCatalog {
   #owner: SkillOwnerV1;
   #reads: WorkspaceReadsV1;
   #withheldManagedSlugs: readonly string[];
+  #pluginSkills: readonly PluginSkillContributionV1[];
   #catalog: SkillCatalogV1;
   #turn: number | undefined;
   #invoked: InvokedSkillV1[] = [];
@@ -152,10 +165,12 @@ export class SkillCatalog {
     owner: SkillOwnerV1,
     reads: WorkspaceReadsV1,
     withheldManagedSlugs: readonly string[] = [],
+    pluginSkills: readonly PluginSkillContributionV1[] = [],
   ) {
     this.#owner = owner;
     this.#reads = reads;
     this.#withheldManagedSlugs = withheldManagedSlugs;
+    this.#pluginSkills = pluginSkills;
     this.#catalog = emptySkillCatalogV1(owner);
   }
 
@@ -171,6 +186,7 @@ export class SkillCatalog {
   async refresh(turn: number, session: Session): Promise<SkillCatalogV1> {
     this.#catalog = await loadFullSkillCatalogV1(this.#reads, this.#owner, {
       withheldManagedSlugs: this.#withheldManagedSlugs,
+      pluginSkills: this.#pluginSkills,
     });
     this.#turn = turn;
     session.append({
@@ -185,6 +201,20 @@ export class SkillCatalog {
         // whose durable record did not say who wrote the instruction would
         // make "the Bot ran under an instruction it did not author" invisible.
         ...(skill.by ? { by: skill.by } : {}),
+        // What the Skill offered to be loaded on demand, with the exact
+        // generation each file was at when the catalog was assembled.
+        ...(skill.references.length > 0
+          ? {
+              references: skill.references.map((reference) => ({
+                path: reference.path,
+                // Whose reference it is, when it is not this Bot's own: the
+                // file beside a `SKILL.md` can have a different writer, and a
+                // Turn that read it must say which.
+                ...(reference.by ? { by: reference.by } : {}),
+                generationId: reference.generationId,
+              })),
+            }
+          : {}),
       })),
       refusals: this.#catalog.refusals.map((refusal) => ({
         path: refusal.path,
@@ -258,6 +288,67 @@ export class SkillCatalog {
     return open ? this.invokedFor(open.turn, open.step) : [];
   }
 
+  /**
+   * One reference of a Skill this Turn loaded, read on demand (ADR 0030).
+   *
+   * The catalog carries the index; the bytes are fetched here, from wherever
+   * that source keeps them — a managed or Plugin reference travels in the
+   * artifact, and a Workspace one is read through the same `WorkspaceReadsV1`
+   * its listing came through, at the generation the catalog recorded. A
+   * reference that moved generation since is refused rather than served: the
+   * Turn would otherwise follow instructions it never listed.
+   */
+  async reference(
+    skill: LoadedSkillV1,
+    name: string,
+  ): Promise<
+    | { status: "ok"; path: string; by?: string; text: string }
+    | { status: "refused"; reason: string }
+  > {
+    const reference = skill.references.find(
+      (candidate) =>
+        skillReferenceNameForV1(skill.path, candidate.path) === name,
+    );
+    if (!reference) {
+      return {
+        status: "refused",
+        reason: `Skill "${skill.name}" offers no reference "${name}" on this Turn.`,
+      };
+    }
+    const by = reference.by;
+    if (reference.text !== undefined) {
+      return {
+        status: "ok",
+        path: reference.path,
+        ...(by ? { by } : {}),
+        text: reference.text,
+      };
+    }
+    const root =
+      skill.source === "user"
+        ? userInstructionRootV1(this.#owner)
+        : botInstructionRootV1(this.#owner);
+    const read = await this.#reads.read({ root, path: reference.path });
+    if (read.status !== "ok") {
+      return {
+        status: "refused",
+        reason: `the reference could not be read: ${read.reason}`,
+      };
+    }
+    if (read.file.generation.generationId !== reference.generationId) {
+      return {
+        status: "refused",
+        reason: "the reference changed generation since this Turn listed it",
+      };
+    }
+    return {
+      status: "ok",
+      path: reference.path,
+      ...(by ? { by } : {}),
+      text: new TextDecoder().decode(read.file.bytes),
+    };
+  }
+
   /** Drops the catalog, so the next Turn reloads it rather than reusing it. */
   invalidate(): void {
     this.#catalog = emptySkillCatalogV1(this.#owner);
@@ -274,7 +365,12 @@ const SKILL_LOAD_INPUT_SCHEMA = {
     path: {
       type: "string",
       description:
-        'The Skill\'s ref exactly as listed in <agent_skills> — bot/daily-standup, managed/add-connector, or plugin/<packageId>/<slug>. The path listed beside it is also accepted. This field is named "path" whichever of the two you send.',
+        'The Skill\'s ref exactly as listed in <agent_skills> — bot/daily-standup, managed/add-connector, or plugin/<pluginId>/<slug>. The path listed beside it is also accepted. This field is named "path" whichever of the two you send.',
+    },
+    reference: {
+      type: "string",
+      description:
+        "Optional file name of one of that Skill's references, like forms.md, as its instructions name it. With it you get that file instead of the Skill's own body.",
     },
   },
   required: ["path"],
@@ -284,20 +380,30 @@ const SKILL_LOAD_INPUT_SCHEMA = {
 const SKILL_WRITE_INPUT_SCHEMA = {
   type: "object",
   properties: {
-    name: { type: "string", description: "The Skill's display name." },
+    name: {
+      type: "string",
+      description:
+        "The Skill's display name. Required unless you are writing a reference.",
+    },
     description: {
       type: "string",
       description:
-        'When to use this Skill, phrased as "Use this when ...". This is the only part always in your prompt.',
+        'When to use this Skill, phrased as "Use this when ...". This is the only part always in your prompt. Required unless you are writing a reference.',
     },
     body: {
       type: "string",
-      description: "The Markdown recipe the Skill runs through.",
+      description:
+        "The Markdown the Skill runs through, or the reference's own Markdown.",
     },
     slug: {
       type: "string",
       description:
-        "Optional directory slug, lowercase letters, digits and hyphens. Derived from the name when omitted. Reuse a slug to supersede that Skill.",
+        "Optional directory slug, lowercase letters, digits and hyphens. Derived from the name when omitted, and required when writing a reference. Reuse a slug to supersede that Skill.",
+    },
+    reference: {
+      type: "string",
+      description:
+        "Optional file name, like forms.md, to write beside that Skill's instructions instead of the Skill itself. Your SKILL.md should say when to load it.",
     },
     scope: {
       type: "string",
@@ -306,7 +412,7 @@ const SKILL_WRITE_INPUT_SCHEMA = {
         "Where the Skill is written: your own instruction root (bot, the default), or your User's shared root (user), where every one of their Bots can read it. Managed and plugin Skills are not editable this way.",
     },
   },
-  required: ["name", "description", "body"],
+  required: ["body"],
   additionalProperties: false,
 } as const;
 
@@ -323,12 +429,13 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
  * at all — it is bytes of a first-party artifact — so it has no write path to
  * route to.
  */
-export type SkillWriteScopeV1 = "bot" | "user" | "managed";
+export type SkillWriteScopeV1 = "bot" | "user" | "managed" | "plugin";
 
 const SKILL_WRITE_SCOPES: readonly SkillWriteScopeV1[] = [
   "bot",
   "user",
   "managed",
+  "plugin",
 ];
 
 /** Why a scope is refused, or `undefined` when it is writable. GrokBot's own wording for managed. */
@@ -362,23 +469,49 @@ export function skillWriteTargetV1(
         status: "refused",
         reason: "managed skills are not editable this way",
       };
+    case "plugin":
+      // A Plugin's Skill is bytes of its artifact, like a managed one: there
+      // is no durable-root file to write, and a Bot changes what a Plugin
+      // teaches by writing the Plugin.
+      return {
+        status: "refused",
+        reason: "plugin skills are not editable this way",
+      };
   }
 }
 
-interface SkillWriteInputV1 {
-  name: string;
-  description: string;
-  body: string;
-  slug?: string;
-  scope?: SkillWriteScopeV1;
-}
+/**
+ * One `skill_write` call, decoded.
+ *
+ * Two writes share the tool because they share everything that matters —
+ * the root, the quota, the provenance — and differ only in what lands: a
+ * `SKILL.md` rendered from `name`, `description` and `body`, or one reference
+ * file whose bytes are the body. `reference` is what says which, and the two
+ * shapes are exclusive, so a Bot cannot half-write either one.
+ */
+type SkillWriteInputV1 =
+  | {
+      kind: "skill";
+      name: string;
+      description: string;
+      body: string;
+      slug?: string;
+      scope?: SkillWriteScopeV1;
+    }
+  | {
+      kind: "reference";
+      reference: string;
+      slug: string;
+      body: string;
+      scope?: SkillWriteScopeV1;
+    };
 
 function decodeSkillWriteInputV1(input: unknown): SkillWriteInputV1 {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("skill_write input must be an object");
   }
   const value = input as Record<string, unknown>;
-  const allowed = ["name", "description", "body", "slug", "scope"];
+  const allowed = ["name", "description", "body", "slug", "reference", "scope"];
   if (!Object.keys(value).every((key) => allowed.includes(key))) {
     throw new Error("skill_write input has unknown fields");
   }
@@ -401,25 +534,48 @@ function decodeSkillWriteInputV1(input: unknown): SkillWriteInputV1 {
     }
     return candidate.trim();
   };
-  const decoded: SkillWriteInputV1 = {
+  if (value.slug !== undefined && !isSkillSlugV1(value.slug)) {
+    throw new Error("skill_write slug is invalid");
+  }
+  const slug = value.slug as string | undefined;
+  let scope: SkillWriteScopeV1 | undefined;
+  if (value.scope !== undefined) {
+    scope = SKILL_WRITE_SCOPES.find((candidate) => candidate === value.scope);
+    if (!scope) throw new Error("skill_write scope is invalid");
+  }
+  const body = text("body", 65_536, false);
+  if (value.reference !== undefined) {
+    if (!isSkillReferenceNameV1(value.reference)) {
+      throw new Error(
+        "skill_write reference must be a single .md file name, like forms.md",
+      );
+    }
+    if (value.name !== undefined || value.description !== undefined) {
+      throw new Error(
+        "skill_write name and description belong to a Skill, not to one of its references",
+      );
+    }
+    if (slug === undefined) {
+      throw new Error(
+        "skill_write reference needs the slug of the Skill it belongs to",
+      );
+    }
+    return {
+      kind: "reference",
+      reference: value.reference,
+      slug,
+      body,
+      ...(scope ? { scope } : {}),
+    };
+  }
+  return {
+    kind: "skill",
     name: text("name", SKILL_MAX_NAME_LENGTH, true),
     description: text("description", SKILL_MAX_DESCRIPTION_LENGTH, true),
-    body: text("body", 65_536, false),
+    body,
+    ...(slug ? { slug } : {}),
+    ...(scope ? { scope } : {}),
   };
-  if (value.slug !== undefined) {
-    if (!isSkillSlugV1(value.slug)) {
-      throw new Error("skill_write slug is invalid");
-    }
-    decoded.slug = value.slug;
-  }
-  if (value.scope !== undefined) {
-    const scope = SKILL_WRITE_SCOPES.find(
-      (candidate) => candidate === value.scope,
-    );
-    if (!scope) throw new Error("skill_write scope is invalid");
-    decoded.scope = scope;
-  }
-  return decoded;
 }
 
 /**
@@ -440,9 +596,21 @@ export function skillLoadNameV1(input: unknown): string | undefined {
   return trimmed.length === 0 ? undefined : trimmed;
 }
 
+/**
+ * The reference a `skill_load` asked for: the file name as the Skill's
+ * instructions index it.
+ */
+export function skillLoadReferenceV1(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const named = (input as { reference?: unknown }).reference;
+  if (typeof named !== "string") return undefined;
+  const trimmed = named.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
 /** Why a `skill_load` input could not be used, and what to send instead. */
 export const SKILL_LOAD_INPUT_REFUSAL =
-  'skill_load input is invalid: "path" must be a non-empty string naming a Skill from <agent_skills> — its ref (bot/daily-standup, managed/add-connector, plugin/<packageId>/<slug>) or the path listed beside it. Expected {"path":"managed/add-connector"}.';
+  'skill_load input is invalid: "path" must be a non-empty string naming a Skill from <agent_skills> — its ref (bot/daily-standup, managed/add-connector, plugin/<pluginId>/<slug>) or the path listed beside it. Expected {"path":"managed/add-connector"}.';
 
 export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
   return {
@@ -453,7 +621,7 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.
     admission: { subagentRoles: ["executor"] },
     description:
-      'Read one of your Skills in full. Pass the ref or the path listed in <agent_skills> as "path". Only Skills listed there can be loaded.',
+      'Read one of your Skills in full. Pass the ref or the path listed in <agent_skills> as "path". Add "reference" to read one of the files that Skill\'s instructions name instead of its body. Only Skills listed there can be loaded.',
     inputSchema: SKILL_LOAD_INPUT_SCHEMA as unknown as Record<string, unknown>,
     idempotent: true,
     // Deliberately permissive: a wrong shape reaches `execute`, which says
@@ -461,13 +629,10 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
     // `Invalid input for tool: skill_load`, which cost a step every time the
     // model reached for the field name the prompt used.
     validate: (input: unknown) => !!input && typeof input === "object",
-    execute: (input: unknown) => {
+    execute: async (input: unknown) => {
       const named = skillLoadNameV1(input);
       if (named === undefined) {
-        return Promise.resolve({
-          content: SKILL_LOAD_INPUT_REFUSAL,
-          isError: true,
-        });
+        return { content: SKILL_LOAD_INPUT_REFUSAL, isError: true };
       }
       const loaded = catalog.current().skills;
       // A ref first, then the path. Both are printed in `<agent_skills>`, and
@@ -485,12 +650,30 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
       if (!skill) {
         // A candidate refused as an instruction is not readable here either:
         // `skill_load` discloses only what this Turn actually loaded.
-        return Promise.resolve({
+        return {
           content: `No Skill "${named}" is loaded for this Turn. Use only the refs listed in <agent_skills>.`,
           isError: true,
-        });
+        };
       }
-      return Promise.resolve({
+      const wanted = skillLoadReferenceV1(input);
+      if (wanted !== undefined) {
+        // Only a reference of a Skill this Turn loaded, at the generation the
+        // catalog listed: the same disclosure rule the body follows.
+        const reference = await catalog.reference(skill, wanted);
+        if (reference.status !== "ok") {
+          return { content: reference.reason, isError: true };
+        }
+        return {
+          content: [
+            `# ${skill.name} · ${wanted}`,
+            `${reference.by ? `By: ${reference.by}\n` : ""}Path: ${reference.path}`,
+            "",
+            reference.text,
+          ].join("\n"),
+          isError: false,
+        };
+      }
+      return {
         content: [
           `# ${skill.name}`,
           `${skill.ref ? `Ref: ${formatSkillRefV1(skill.ref)}\n` : ""}Path: ${skill.path} (generation ${skill.generationId})`,
@@ -498,7 +681,7 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
           skill.body,
         ].join("\n"),
         isError: false,
-      });
+      };
     },
   };
 }
@@ -562,7 +745,10 @@ export function createSkillWriteTool(
       const target = skillWriteTargetV1(decoded.scope ?? "bot");
       if (target.status === "refused") return writeRefusal(target.reason);
       const scope = target.scope;
-      const slug = decoded.slug ?? skillSlugFromNameV1(decoded.name);
+      const slug =
+        decoded.kind === "reference"
+          ? decoded.slug
+          : (decoded.slug ?? skillSlugFromNameV1(decoded.name));
       if (!slug) {
         return writeRefusal(
           "the Skill name yields no usable slug; pass an explicit slug",
@@ -582,41 +768,54 @@ export function createSkillWriteTool(
           error instanceof Error ? error.message : String(error),
         );
       }
+      const provenance = {
+        kind: "bot" as const,
+        botId: host.owner.botId,
+        sessionId: writer.sessionId,
+        turnId: writer.turnId,
+        runId: writer.runId,
+      };
+      // Intent before effect, and durable before the write is attempted.
+      const onIntent = async ({
+        path: relativePath,
+        contentHash,
+      }: {
+        path: string;
+        contentHash: string;
+      }): Promise<void> => {
+        session.append({
+          type: "skill/write-intent",
+          ...position,
+          effectId: effectIdOf(scope, relativePath, contentHash),
+          path: relativePath,
+          contentHash,
+        });
+        await session.flush();
+      };
       // One write path, shared with the template import (`./write.ts`); the
       // only thing that differs between them is the writer, and here it is
       // this Bot inside the Turn whose Session and Turn it names.
-      const outcome = await writeSkillDocumentV1(
-        host.files,
-        host.owner,
-        {
-          kind: "bot",
-          botId: host.owner.botId,
-          sessionId: writer.sessionId,
-          turnId: writer.turnId,
-          runId: writer.runId,
-        },
-        {
-          slug,
-          name: decoded.name,
-          description: decoded.description,
-          body: decoded.body,
-        },
-        {
-          scope,
-          quota,
-          // Intent before effect, and durable before the write is attempted.
-          onIntent: async ({ path: relativePath, contentHash }) => {
-            session.append({
-              type: "skill/write-intent",
-              ...position,
-              effectId: effectIdOf(scope, relativePath, contentHash),
-              path: relativePath,
-              contentHash,
-            });
-            await session.flush();
-          },
-        },
-      );
+      const outcome =
+        decoded.kind === "reference"
+          ? await writeSkillReferenceV1(
+              host.files,
+              host.owner,
+              provenance,
+              { slug, reference: decoded.reference, text: decoded.body },
+              { scope, quota, onIntent },
+            )
+          : await writeSkillDocumentV1(
+              host.files,
+              host.owner,
+              provenance,
+              {
+                slug,
+                name: decoded.name,
+                description: decoded.description,
+                body: decoded.body,
+              },
+              { scope, quota, onIntent },
+            );
       if (outcome.status === "refused") return writeRefusal(outcome.reason);
       session.append({
         type: "skill/written",
@@ -630,11 +829,15 @@ export function createSkillWriteTool(
       await session.flush();
       return {
         content: [
-          `Wrote Skill "${decoded.name}" to ${outcome.path} as generation ${outcome.generationId}.`,
+          decoded.kind === "reference"
+            ? `Wrote reference "${decoded.reference}" of Skill "${slug}" to ${outcome.path} as generation ${outcome.generationId}.`
+            : `Wrote Skill "${decoded.name}" to ${outcome.path} as generation ${outcome.generationId}.`,
           scope === "user"
             ? "It is under your User's shared instruction root, with your provenance recorded, so every one of their Bots can read it and will be told you wrote it."
             : "It is under your own instruction root with your provenance recorded.",
-          "Your Skill catalog is fixed for this Turn, so it appears in <agent_skills> on your next Turn.",
+          decoded.kind === "reference"
+            ? "Your Skill catalog is fixed for this Turn, so skill_load can read it on your next Turn."
+            : "Your Skill catalog is fixed for this Turn, so it appears in <agent_skills> on your next Turn.",
         ].join(" "),
         isError: false,
       };
@@ -655,6 +858,7 @@ export function createSkillsRuntimeFeature(
       host.owner,
       host.reads,
       host.withheldManagedSlugs ?? [],
+      host.pluginSkills ?? [],
     );
     const disposers: Array<() => void> = [];
     disposers.push(
