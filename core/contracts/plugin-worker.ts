@@ -195,6 +195,41 @@ export interface PluginWorkerViewInvocationV1 {
   deadlineMs: number;
 }
 
+/**
+ * One Card action routed to a Plugin (ADR 0030): the renderer's
+ * `plugin/<pluginId>/<action>` reaching the handler that wrote the Card. The
+ * surface's data model travels with it when the surface asked for it, so a
+ * handler answers about the card as the person actually saw it.
+ */
+export interface PluginWorkerCardActionInvocationV1 {
+  schemaVersion: 1;
+  pluginId: string;
+  surfaceId: string;
+  /** The `<action>` half of the name; the namespace is the kernel's. */
+  action: string;
+  context?: Record<string, unknown>;
+  dataModel?: Record<string, unknown>;
+  botId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  generationId: string;
+  deadlineMs: number;
+}
+
+/**
+ * The handler's answer: A2UI messages the kernel folds into the Card, carried
+ * opaque and bounded, or a drop with its reason. A handler that throws or
+ * overruns is a drop, and the Card is left exactly as it was.
+ */
+export type PluginWorkerCardActionResultV1 =
+  | { schemaVersion: 1; status: "drop"; reason?: string }
+  | {
+      schemaVersion: 1;
+      status: "rendered";
+      messages: Record<string, unknown>[];
+    };
+
 /** The document is carried opaque and bounded; the host decodes it as a `ViewDocument`. */
 export type PluginWorkerViewResultV1 =
   | { schemaVersion: 1; status: "drop"; reason?: string }
@@ -219,6 +254,9 @@ export interface PluginWorkerEntrypoint {
   view(
     invocation: PluginWorkerViewInvocationV1,
   ): Promise<PluginWorkerViewResultV1>;
+  cardAction(
+    invocation: PluginWorkerCardActionInvocationV1,
+  ): Promise<PluginWorkerCardActionResultV1>;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -676,6 +714,73 @@ export function decodePluginWorkerTriggerResultV1(
     schemaVersion: 1,
     status: "fire",
     text: boundedBytes(value.text, `${label}.text`, MAX_TRIGGER_BODY_BYTES_V1),
+  };
+}
+
+/** Messages one Card action may answer with, matching the send's own bound. */
+export const MAX_PLUGIN_CARD_ACTION_MESSAGES_V1 = 16;
+/** The handler's whole answer, serialized. A card, not a page. */
+export const MAX_PLUGIN_CARD_ACTION_BYTES_V1 = 256_000;
+
+export function decodePluginWorkerCardActionResultV1(
+  input: unknown,
+  label = "plugin worker card action result",
+): PluginWorkerCardActionResultV1 {
+  const value = record(input, label);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (value.status === "drop") {
+    exactKeys(value, ["schemaVersion", "status"], label, ["reason"]);
+    return {
+      schemaVersion: 1,
+      status: "drop",
+      ...(value.reason === undefined
+        ? {}
+        : {
+            reason: boundedString(
+              value.reason,
+              `${label}.reason`,
+              MAX_FAILURE_REASON_V1,
+            ),
+          }),
+    };
+  }
+  exactKeys(value, ["schemaVersion", "status", "messages"], label);
+  if (value.status !== "rendered") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  if (
+    !Array.isArray(value.messages) ||
+    value.messages.length === 0 ||
+    value.messages.length > MAX_PLUGIN_CARD_ACTION_MESSAGES_V1
+  ) {
+    throw new Error(
+      `${label}.messages must hold 1 to ${MAX_PLUGIN_CARD_ACTION_MESSAGES_V1} entries`,
+    );
+  }
+  const messages = value.messages.map((message, index) =>
+    record(message, `${label}.messages[${index}]`),
+  );
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(messages);
+  } catch {
+    throw new Error(`${label}.messages is not JSON`);
+  }
+  if (
+    new TextEncoder().encode(serialized).length >
+    MAX_PLUGIN_CARD_ACTION_BYTES_V1
+  ) {
+    throw new Error(
+      `${label}.messages exceeds ${MAX_PLUGIN_CARD_ACTION_BYTES_V1} bytes`,
+    );
+  }
+  // Decoded as A2UI at the fold, which is where the Card's own budgets are.
+  return {
+    schemaVersion: 1,
+    status: "rendered",
+    messages: JSON.parse(serialized) as Record<string, unknown>[],
   };
 }
 

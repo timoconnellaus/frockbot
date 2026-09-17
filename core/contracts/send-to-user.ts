@@ -1,4 +1,11 @@
 import { APPLET_ID_V1 } from "./applets.js";
+import {
+  A2UI_IDENTIFIER_V1,
+  A2UI_LIMITS_V1,
+  a2uiMessageSurfaceIdV1,
+  decodeA2uiAgentMessageV1,
+  type A2uiAgentMessageV1,
+} from "./a2ui.js";
 
 // The typed payload a user-facing send carries.
 //
@@ -35,6 +42,16 @@ export interface SendToUserWidgetV1 {
 
 export type SendToUserPayloadV1 =
   | { type: "text"; text: string }
+  | {
+      /**
+       * One A2UI surface in the conversation (ADR 0030). Unlike `widget` and
+       * `approval` it does not end the Turn: a card is something the Bot put
+       * in the thread and keeps updating, not a question it is waiting on.
+       */
+      type: "card";
+      surfaceId: string;
+      messages: A2uiAgentMessageV1[];
+    }
   | { type: "attachment"; url: string; name?: string; mediaType?: string }
   | { type: "applet"; appletId: string }
   | { type: "widget"; widget: SendToUserWidgetV1 }
@@ -68,6 +85,7 @@ export const SEND_TO_USER_PAYLOAD_TYPES_V1: readonly SendToUserPayloadV1["type"]
     "agent-card",
     "applet",
     "approval",
+    "card",
   ];
 
 /**
@@ -92,6 +110,16 @@ export const SEND_TO_USER_LIMITS_V1 = {
   approvalId: 128,
   action: 2_000,
   rationale: 8_000,
+  // The Card budgets (ADR 0030). The numbers and the reasoning behind each of
+  // them live in `a2ui.ts`, with the decoder that enforces them; naming them
+  // here is how a send's bounds stay readable in one list.
+  cardSurfaceId: A2UI_LIMITS_V1.surfaceId,
+  cardMessagesPerSend: A2UI_LIMITS_V1.messagesPerSend,
+  cardBytesPerMessage: A2UI_LIMITS_V1.bytesPerMessage,
+  cardComponentsPerSurface: A2UI_LIMITS_V1.componentsPerSurface,
+  cardSurfacesPerSession: A2UI_LIMITS_V1.surfacesPerSession,
+  cardActionsPerSurface: A2UI_LIMITS_V1.actionsPerSurface,
+  cardDataModelBytes: A2UI_LIMITS_V1.dataModelBytes,
 } as const;
 
 /**
@@ -331,6 +359,44 @@ export function decodeSendToUserPayloadV1(
       if (!APPLET_ID_V1.test(appletId))
         throw new Error(`${label}.appletId is invalid`);
       return { type: "applet", appletId };
+    }
+    case "card": {
+      exactPayloadKeys(payload, ["type", "surfaceId", "messages"], label);
+      const surfaceId = boundedString(
+        payload.surfaceId,
+        limits.cardSurfaceId,
+        `${label}.surfaceId`,
+      );
+      if (!A2UI_IDENTIFIER_V1.test(surfaceId)) {
+        throw new Error(
+          `${label}.surfaceId must be letters, digits, dot, underscore or dash`,
+        );
+      }
+      if (!Array.isArray(payload.messages)) {
+        throw new Error(`${label}.messages must be an array`);
+      }
+      if (
+        payload.messages.length === 0 ||
+        payload.messages.length > limits.cardMessagesPerSend
+      ) {
+        throw new Error(
+          `${label}.messages must hold 1 to ${limits.cardMessagesPerSend} entries`,
+        );
+      }
+      const messages = payload.messages.map((message, index) =>
+        decodeA2uiAgentMessageV1(message, `${label}.messages[${index}]`),
+      );
+      // One send is one surface. A payload whose messages wander between
+      // surfaces would fold into records the send does not name, which is
+      // how a Card would reach a Card the Bot was not talking about.
+      for (const [index, message] of messages.entries()) {
+        if (a2uiMessageSurfaceIdV1(message) !== surfaceId) {
+          throw new Error(
+            `${label}.messages[${index}] names a different surface`,
+          );
+        }
+      }
+      return { type: "card", surfaceId, messages };
     }
     case "agent-card": {
       exactPayloadKeys(payload, ["type", "agentId", "title", "body"], label);

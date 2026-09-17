@@ -40,6 +40,10 @@ import {
 } from "@frockbot/app/shell/run-protocol";
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/app/shell/approvals";
 import {
+  decodeCardActionCommandV1,
+  decodeCardSurfaceIdV1,
+} from "@frockbot/app/shell/cards";
+import {
   APPLETS_UNAVAILABLE_MESSAGE_V1,
   botTurnRefusalCodeV1,
 } from "@frockbot/core/durable";
@@ -852,10 +856,108 @@ function createUserApplicationRoute() {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "approval decision failed";
-        return jsonError(
-          message.includes("was not found") ? 404 : 500,
-          message,
+        const name = error instanceof Error ? error.name : "";
+        if (name === "ApprovalNotFoundError") return jsonError(404, message);
+        return jsonError(500, message);
+      }
+    }
+
+    // Cards (ADR 0030). Beside the approvals it can carry: a GET is the Bot's
+    // surfaces as they stand, a GET of one id is that surface whatever the
+    // listing's byte budget cut, and a POST is one action on one of them,
+    // which the kernel — never the Card — decides the meaning of.
+    const cardsMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/cards$/);
+    const cardMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/cards\/([^/]+)$/,
+    );
+    if (cardsMatch || cardMatch) {
+      let cardBotId: string;
+      try {
+        cardBotId = decodeBotIdV1(
+          decodeURIComponent((cardsMatch ?? cardMatch)![1]!),
         );
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      const missing = await requireRegisteredBot(env, cardBotId);
+      if (missing) return missing;
+      if (cardMatch) {
+        if (request.method !== "GET") {
+          return jsonError(405, "method not allowed");
+        }
+        let surfaceId: string;
+        try {
+          surfaceId = decodeCardSurfaceIdV1(decodeURIComponent(cardMatch[2]!));
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error ? error.message : "invalid surface id",
+          );
+        }
+        try {
+          return Response.json(
+            await env.BOT_STATE.readCard({
+              schemaVersion: 1,
+              botId: cardBotId,
+              surfaceId,
+            }),
+          );
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "card read failed";
+          const name = error instanceof Error ? error.name : "";
+          if (name === "CardNotFoundError") return jsonError(404, message);
+          if (name === "CardDecodeError") return jsonError(400, message);
+          return jsonError(500, message);
+        }
+      }
+      if (request.method === "GET") {
+        try {
+          return Response.json(
+            await env.BOT_STATE.listCards({
+              schemaVersion: 1,
+              botId: cardBotId,
+            }),
+          );
+        } catch (error) {
+          return botFailure(error, "cards failed");
+        }
+      }
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      let command;
+      try {
+        command = decodeCardActionCommandV1(await request.json());
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid card action",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.cardAction({
+            schemaVersion: 1,
+            botId: cardBotId,
+            command,
+          }),
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "card action failed";
+        const name = error instanceof Error ? error.name : "";
+        // A surface that has moved is not a fault: the person answered the
+        // card they were shown, and the client redraws and asks again. A
+        // refused action is the client's, not the kernel's.
+        if (name === "CardStaleError") return jsonError(409, message);
+        if (name === "CardNotFoundError") return jsonError(404, message);
+        if (name === "CardDecodeError") return jsonError(400, message);
+        // An approval a Card named but the kernel does not hold is the same
+        // answer the approvals route gives for it, and for the same reason.
+        if (name === "ApprovalNotFoundError") return jsonError(404, message);
+        if (name === "ApprovalDecodeError") return jsonError(400, message);
+        return jsonError(500, message);
       }
     }
 

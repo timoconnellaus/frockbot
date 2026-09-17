@@ -6,6 +6,12 @@ import type {
 import type { SetBotPluginEnabledReceiptV1 } from "@frockbot/app/plugins/bot";
 import type { BotPluginToolReceiptV1 } from "@frockbot/app/plugins/views-bot";
 import type {
+  CardActionCommandV1,
+  CardActionReceiptV1,
+  CardListViewV1,
+  CardViewV1,
+} from "@frockbot/app/shell/cards";
+import type {
   SettingsFrame,
   ConnectionsFrame,
   PluginsFrame,
@@ -176,6 +182,12 @@ export interface BotStateBinding {
     approvalId: string,
     command: ApprovalDecisionCommandV1,
   ): Promise<ApprovalDecisionReceiptV1>;
+  listCards(botId: string): Promise<CardListViewV1>;
+  readCard(botId: string, surfaceId: string): Promise<CardViewV1>;
+  cardAction(
+    botId: string,
+    command: CardActionCommandV1,
+  ): Promise<CardActionReceiptV1>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
   stopRun(
     botId: string,
@@ -353,6 +365,20 @@ export interface UserBotStateBinding {
     approvalId: string;
     command: ApprovalDecisionCommandV1;
   }): Promise<ApprovalDecisionReceiptV1>;
+  listCards(input: {
+    schemaVersion: 1;
+    botId: string;
+  }): Promise<CardListViewV1>;
+  readCard(input: {
+    schemaVersion: 1;
+    botId: string;
+    surfaceId: string;
+  }): Promise<CardViewV1>;
+  cardAction(input: {
+    schemaVersion: 1;
+    botId: string;
+    command: CardActionCommandV1;
+  }): Promise<CardActionReceiptV1>;
   acknowledgeNotification(input: {
     schemaVersion: 1;
     botId: string;

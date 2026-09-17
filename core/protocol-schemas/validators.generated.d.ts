@@ -71,6 +71,9 @@ declare const validators: {
   isExchangeCounterpart(
     value: unknown,
   ): value is ProtocolTypes["ExchangeCounterpart"];
+  isA2uiAgentMessage(
+    value: unknown,
+  ): value is ProtocolTypes["A2uiAgentMessage"];
   isSendPayload(value: unknown): value is ProtocolTypes["SendPayload"];
   isRunEvent(value: unknown): value is ProtocolTypes["RunEvent"];
   isRunOutcome(value: unknown): value is ProtocolTypes["RunOutcome"];

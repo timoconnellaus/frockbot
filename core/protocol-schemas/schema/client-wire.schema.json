@@ -1000,6 +1000,173 @@
         }
       ]
     },
+    "A2uiAgentMessage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "enum": ["v1.0", "v0.9"]
+            },
+            "createSurface": {
+              "type": "object",
+              "properties": {
+                "surfaceId": {
+                  "$ref": "#/$defs/Identifier"
+                },
+                "catalogId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "sendDataModel": {
+                  "type": "boolean"
+                },
+                "surfaceProperties": {
+                  "type": "object",
+                  "maxProperties": 256,
+                  "additionalProperties": {
+                    "$ref": "#/$defs/Json"
+                  }
+                },
+                "theme": {
+                  "type": "object",
+                  "maxProperties": 256,
+                  "additionalProperties": {
+                    "$ref": "#/$defs/Json"
+                  }
+                },
+                "components": {
+                  "type": "array",
+                  "minItems": 0,
+                  "maxItems": 128,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/$defs/Identifier"
+                      },
+                      "component": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_]{0,127}$"
+                      }
+                    },
+                    "required": ["id", "component"],
+                    "additionalProperties": {
+                      "$ref": "#/$defs/Json"
+                    }
+                  }
+                },
+                "dataModel": {
+                  "type": "object",
+                  "maxProperties": 256,
+                  "additionalProperties": {
+                    "$ref": "#/$defs/Json"
+                  }
+                }
+              },
+              "required": ["surfaceId"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["version", "createSurface"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "enum": ["v1.0", "v0.9"]
+            },
+            "updateComponents": {
+              "type": "object",
+              "properties": {
+                "surfaceId": {
+                  "$ref": "#/$defs/Identifier"
+                },
+                "components": {
+                  "type": "array",
+                  "minItems": 0,
+                  "maxItems": 128,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/$defs/Identifier"
+                      },
+                      "component": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_]{0,127}$"
+                      }
+                    },
+                    "required": ["id", "component"],
+                    "additionalProperties": {
+                      "$ref": "#/$defs/Json"
+                    }
+                  }
+                }
+              },
+              "required": ["surfaceId", "components"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["version", "updateComponents"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "enum": ["v1.0", "v0.9"]
+            },
+            "updateDataModel": {
+              "type": "object",
+              "properties": {
+                "surfaceId": {
+                  "$ref": "#/$defs/Identifier"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 1024
+                },
+                "value": {
+                  "$ref": "#/$defs/Json"
+                }
+              },
+              "required": ["surfaceId", "value"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["version", "updateDataModel"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "enum": ["v1.0", "v0.9"]
+            },
+            "deleteSurface": {
+              "type": "object",
+              "properties": {
+                "surfaceId": {
+                  "$ref": "#/$defs/Identifier"
+                }
+              },
+              "required": ["surfaceId"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["version", "deleteSurface"],
+          "additionalProperties": false
+        }
+      ]
+    },
     "SendPayload": {
       "oneOf": [
         {
@@ -1175,6 +1342,27 @@
             }
           },
           "required": ["type", "appletId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "card"
+            },
+            "surfaceId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "messages": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/A2uiAgentMessage"
+              }
+            }
+          },
+          "required": ["type", "surfaceId", "messages"],
           "additionalProperties": false
         }
       ]

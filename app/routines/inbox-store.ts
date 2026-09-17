@@ -17,7 +17,10 @@
 //
 // Both bounds — 100 entries, 16 pending inputs — are retention, not
 // correctness, so they are enforced when the records are next read rather than
-// inside the settling transaction, which cannot list.
+// inside the settling transaction, which cannot list. The one exception is the
+// `card-action` bound, enforced as the press is written: a person pressing a
+// control is the only producer nothing upstream bounds, so waiting until the
+// drain would let the queue itself grow without limit.
 import {
   decodePendingBotInputV1,
   decodeRoutineInboxEntryV1,
@@ -35,6 +38,7 @@ import {
   routineInboxKeyV1,
   routineSequenceCursorV1,
   routineWakeKeyV1,
+  ROUTINE_CARD_ACTION_LIMIT,
   ROUTINE_DRAIN_PREFIX,
   ROUTINE_DRAIN_RECEIPT_LIMIT,
   ROUTINE_INBOX_CURSOR_KEY,
@@ -176,6 +180,11 @@ export async function routineTerminalRecordsV1(
  *
  * Idempotent on the input's id — an id already waiting writes nothing, so a
  * retried decision cannot tell the Bot the same thing twice.
+ *
+ * A `card-action` is the one kind nothing upstream bounds — a person presses a
+ * control as often as they like — so it is bounded here, as it is written: the
+ * oldest waiting press is dropped to make room for the newest, which is what
+ * pressing again means.
  */
 export async function enqueuePendingBotInputV1(
   transaction: RoutineStorageWritesV1,
@@ -185,8 +194,18 @@ export async function enqueuePendingBotInputV1(
   const stored = await transaction.list<unknown>({
     prefix: ROUTINE_WAKE_PREFIX,
   });
-  for (const value of stored.values()) {
-    if (pendingBotInputIdV1(decodePendingBotInputV1(value)) === id) return;
+  const presses: string[] = [];
+  for (const [key, value] of stored.entries()) {
+    const queued = decodePendingBotInputV1(value);
+    if (pendingBotInputIdV1(queued) === id) return;
+    if (queued.kind === "card-action") presses.push(key);
+  }
+  if (input.kind === "card-action") {
+    presses.sort((left, right) => left.localeCompare(right));
+    const excess = presses.length + 1 - ROUTINE_CARD_ACTION_LIMIT;
+    for (const key of presses.slice(0, Math.max(0, excess))) {
+      await transaction.delete(key);
+    }
   }
   const cursor = routineSequenceCursorV1(
     await transaction.get<unknown>(ROUTINE_WAKE_CURSOR_KEY),
@@ -212,27 +231,28 @@ export interface StoredPendingInputV1 {
  * The inputs one drain carries, under the pending-input bound.
  *
  * The bound exists so a burst cannot hand a single Turn an unbounded prompt,
- * and it used to be a flat `slice(-16)` over everything queued. But the four
- * input kinds are not interchangeable. A dropped `wake` still has an inbox
- * entry, so the user can read it and nothing is lost; an `approval`, a
- * `machine-result` or a `superseded-turn` writes no entry anywhere, so
- * dropping one silently loses a decision the user made or a result a machine
- * produced. Those are kept whole and the cap falls on the wakes alone — the
- * only kind that can be dropped and still be read.
+ * and it used to be a flat `slice(-16)` over everything queued. But the input
+ * kinds are not interchangeable. An `approval`, a `machine-result` and a
+ * `superseded-turn` are each minted by the kernel and bounded by it, and each
+ * writes no entry anywhere, so dropping one silently loses a decision the user
+ * made or a result a machine produced. Those are kept whole. The cap falls on
+ * the other two: a `wake`, which still has an inbox entry the user can read,
+ * and a `card-action`, which the queue has already bounded where the press was
+ * written (`ROUTINE_CARD_ACTION_LIMIT`), keeping the newest. A press this drops
+ * is gone, and that is the point of dropping the oldest at both bounds: a
+ * person who presses again means the newest press, not the one before it.
  */
 export function retainedPendingInputsV1(
   inputs: readonly PendingBotInputV1[],
 ): PendingBotInputV1[] {
   if (inputs.length <= ROUTINE_PENDING_INPUT_LIMIT) return [...inputs];
-  const durable = inputs.filter((input) => input.kind !== "wake");
+  const trimmable = (input: PendingBotInputV1) =>
+    input.kind === "wake" || input.kind === "card-action";
+  const durable = inputs.filter((input) => !trimmable(input));
   const budget = ROUTINE_PENDING_INPUT_LIMIT - durable.length;
   if (budget <= 0) return durable;
-  const keptWakes = new Set(
-    inputs.filter((input) => input.kind === "wake").slice(-budget),
-  );
-  return inputs.filter(
-    (input) => input.kind !== "wake" || keptWakes.has(input),
-  );
+  const kept = new Set(inputs.filter(trimmable).slice(-budget));
+  return inputs.filter((input) => !trimmable(input) || kept.has(input));
 }
 
 /**

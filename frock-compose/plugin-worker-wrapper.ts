@@ -163,6 +163,53 @@ function decodeViewInvocation(value) {
   identityFields(value, "plugin worker view invocation");
   return value;
 }
+var CARD_ACTION_INVOCATION_KEYS = [
+  "schemaVersion",
+  "pluginId",
+  "surfaceId",
+  "action",
+  "botId",
+  "sessionId",
+  "runId",
+  "turnId",
+  "generationId",
+  "deadlineMs",
+];
+function decodeCardActionInvocation(value) {
+  if (!isRecord(value)) {
+    throw new Error("plugin worker card action invocation must be an object");
+  }
+  for (const key of Object.keys(value)) {
+    if (!CARD_ACTION_INVOCATION_KEYS.includes(key) && key !== "context" && key !== "dataModel") {
+      throw new Error("plugin worker card action invocation has invalid fields");
+    }
+  }
+  for (const key of CARD_ACTION_INVOCATION_KEYS) {
+    if (!Object.hasOwn(value, key)) {
+      throw new Error("plugin worker card action invocation has invalid fields");
+    }
+  }
+  if (value.schemaVersion !== 1) {
+    throw new Error("plugin worker card action invocation schemaVersion is unsupported");
+  }
+  if (typeof value.pluginId !== "string" || !PLUGIN_ID.test(value.pluginId)) {
+    throw new Error("plugin worker card action invocation pluginId is invalid");
+  }
+  if (typeof value.surfaceId !== "string" || !SURFACE_ID.test(value.surfaceId)) {
+    throw new Error("plugin worker card action invocation surfaceId is invalid");
+  }
+  if (typeof value.action !== "string" || !SURFACE_ID.test(value.action)) {
+    throw new Error("plugin worker card action invocation action is invalid");
+  }
+  if (value.context !== undefined && !isRecord(value.context)) {
+    throw new Error("plugin worker card action invocation context is invalid");
+  }
+  if (value.dataModel !== undefined && !isRecord(value.dataModel)) {
+    throw new Error("plugin worker card action invocation dataModel is invalid");
+  }
+  identityFields(value, "plugin worker card action invocation");
+  return value;
+}
 function decodeTriggerInvocation(value) {
   exactKeys(value, TRIGGER_INVOCATION_KEYS, "plugin worker trigger invocation");
   if (value.schemaVersion !== 1) {
@@ -782,6 +829,20 @@ export default class extends WorkerEntrypoint {
     );
   }
 
+  /**
+   * Card actions (ADR 0030 step 6). The contract is here so the kernel can
+   * route \`plugin/<pluginId>/<action>\` today; no Plugin declares a card
+   * handler yet, so every call is a drop and the Card is left as it was.
+   */
+  async cardAction(rawInvocation) {
+    try {
+      decodeCardActionInvocation(rawInvocation);
+    } catch (error) {
+      return { schemaVersion: 1, status: "drop", reason: errorText(error) };
+    }
+    return { schemaVersion: 1, status: "drop", reason: "this deployment does not run plugin card handlers yet" };
+  }
+
   async view(rawInvocation) {
     let invocation;
     try {
@@ -808,7 +869,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v4";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v6";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(

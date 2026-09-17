@@ -13,6 +13,81 @@ function event(overrides: Record<string, unknown>): Record<string, unknown> {
   return { seq: 3, timestamp: AT, ...overrides };
 }
 
+describe("the card payload", () => {
+  const message = {
+    version: "v1.0",
+    createSurface: {
+      surfaceId: "draft-email",
+      components: [{ id: "root", component: "Text", text: "Ready to send" }],
+    },
+  };
+
+  test("carries its surface and the messages that draw it", () => {
+    expect(
+      decodeSendToUserPayloadV1({
+        type: "card",
+        surfaceId: "draft-email",
+        messages: [message],
+      }),
+    ).toEqual({
+      type: "card",
+      surfaceId: "draft-email",
+      messages: [message],
+    } as SendToUserPayloadV1);
+  });
+
+  test("one send is one surface", () => {
+    expect(() =>
+      decodeSendToUserPayloadV1({
+        type: "card",
+        surfaceId: "draft-email",
+        messages: [
+          message,
+          { version: "v1.0", deleteSurface: { surfaceId: "something-else" } },
+        ],
+      }),
+    ).toThrow(/names a different surface/);
+  });
+
+  test("refuses an empty send and one past the message budget", () => {
+    expect(() =>
+      decodeSendToUserPayloadV1({
+        type: "card",
+        surfaceId: "draft-email",
+        messages: [],
+      }),
+    ).toThrow(/1 to /);
+    expect(() =>
+      decodeSendToUserPayloadV1({
+        type: "card",
+        surfaceId: "draft-email",
+        messages: Array.from(
+          { length: SEND_TO_USER_LIMITS_V1.cardMessagesPerSend + 1 },
+          () => message,
+        ),
+      }),
+    ).toThrow(/1 to /);
+  });
+
+  test("refuses a malformed message and an unexpected field", () => {
+    expect(() =>
+      decodeSendToUserPayloadV1({
+        type: "card",
+        surfaceId: "draft-email",
+        messages: [{ version: "v1.0" }],
+      }),
+    ).toThrow(/exactly one/);
+    expect(() =>
+      decodeSendToUserPayloadV1({
+        type: "card",
+        surfaceId: "draft-email",
+        messages: [message],
+        revision: 3,
+      }),
+    ).toThrow(/unexpected key/);
+  });
+});
+
 describe("the send payload codec", () => {
   test("applet cards accept only an applet id, never a URL or credentials", () => {
     for (const payload of [

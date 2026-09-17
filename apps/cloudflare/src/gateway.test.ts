@@ -6,6 +6,11 @@ import type {
   ApprovalDecisionReceiptV1,
   ApprovalListViewV1,
 } from "@frockbot/app/shell/approvals";
+import type {
+  CardActionReceiptV1,
+  CardListViewV1,
+  CardViewV1,
+} from "@frockbot/app/shell/cards";
 import { describe, expect, test } from "bun:test";
 import {
   type AuthPackageV1,
@@ -209,6 +214,18 @@ class MemoryBotState implements BotStateBinding {
     return Promise.reject(new Error("approvals are not wired in this test"));
   }
 
+  listCards(botId: string): Promise<CardListViewV1> {
+    return Promise.resolve({ schemaVersion: 1, botId, cards: [] });
+  }
+
+  readCard(): Promise<CardViewV1> {
+    return Promise.reject(new Error("cards are not wired in this test"));
+  }
+
+  cardAction(): Promise<CardActionReceiptV1> {
+    return Promise.reject(new Error("cards are not wired in this test"));
+  }
+
   listNotifications(botId: string): Promise<BotNotificationIntent[]> {
     return Promise.resolve(
       structuredClone(this.notifications.get(botId) ?? []),
@@ -309,6 +326,9 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     listApprovals: ({ botId }) => state.listApprovals(botId),
     decideApproval: ({ botId, approvalId, command }) =>
       state.decideApproval(botId, approvalId, command),
+    listCards: ({ botId }) => state.listCards(botId),
+    readCard: ({ botId, surfaceId }) => state.readCard(botId, surfaceId),
+    cardAction: ({ botId, command }) => state.cardAction(botId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
     stopRun: ({ botId, command }) => state.stopRun(botId, command),

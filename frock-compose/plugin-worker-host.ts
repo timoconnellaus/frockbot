@@ -18,6 +18,7 @@ import {
   decodePluginWorkerHealthV1,
   decodePluginWorkerHookResultV1,
   decodePluginWorkerTriggerResultV1,
+  decodePluginWorkerCardActionResultV1,
   decodePluginWorkerViewResultV1,
   isolateToolSchemaV1,
   ISOLATE_CONTRACT_VERSION,
@@ -45,6 +46,8 @@ import {
   type PluginWorkerToolInvocationV1,
   type PluginWorkerTriggerInvocationV1,
   type PluginWorkerTriggerResultV1,
+  type PluginWorkerCardActionInvocationV1,
+  type PluginWorkerCardActionResultV1,
   type PluginWorkerViewInvocationV1,
   type PluginWorkerViewResultV1,
   type ToolDefinition,
@@ -246,6 +249,15 @@ export interface ActivePluginWorker {
   renderView(
     invocation: PluginWorkerViewInvocationV1,
   ): Promise<PluginWorkerViewResultV1>;
+  /**
+   * Runs one Card action a renderer named `plugin/<pluginId>/<action>` (ADR
+   * 0030). Gated like a view, and answered with the A2UI messages the kernel
+   * folds into the Card; a handler that throws or overruns is a drop and the
+   * Card is left as it was.
+   */
+  cardAction(
+    invocation: PluginWorkerCardActionInvocationV1,
+  ): Promise<PluginWorkerCardActionResultV1>;
   /**
    * Runs one declared tool outside any Turn: a control on a Plugin's settings
    * section is the User's own click, so the call is made here rather than
@@ -504,6 +516,12 @@ export class PluginWorkerHost {
                 status: "drop",
                 reason: `plugin "${invocation.pluginId}" did not mount in this generation`,
               }),
+            cardAction: (invocation: PluginWorkerCardActionInvocationV1) =>
+              Promise.resolve<PluginWorkerCardActionResultV1>({
+                schemaVersion: 1,
+                status: "drop",
+                reason: `plugin "${invocation.pluginId}" did not mount in this generation`,
+              }),
             executeTool: (invocation: PluginWorkerToolInvocationV1) =>
               Promise.resolve<IsolateToolResultV1>({
                 schemaVersion: 1,
@@ -735,6 +753,41 @@ export class PluginWorkerHost {
               return decodePluginWorkerViewResultV1(
                 raw,
                 `plugin "${invocation.pluginId}" view result`,
+              );
+            } catch (error) {
+              return drop(errorMessage(error));
+            }
+          },
+          cardAction: async (
+            invocation: PluginWorkerCardActionInvocationV1,
+          ): Promise<PluginWorkerCardActionResultV1> => {
+            const drop = (reason: string): PluginWorkerCardActionResultV1 => ({
+              schemaVersion: 1,
+              status: "drop",
+              reason: reason.slice(0, MAX_FAILURE_REASON_V1),
+            });
+            if (disposed) {
+              return drop(
+                "the plugin worker for this generation is no longer mounted",
+              );
+            }
+            if (!live.has(invocation.pluginId)) {
+              return drop(
+                `plugin "${invocation.pluginId}" did not mount in this generation`,
+              );
+            }
+            const deadlineMs = Math.min(
+              invocation.deadlineMs,
+              ISOLATE_MAX_DEADLINE_MS - PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+            );
+            try {
+              const raw = await raceDeadline(
+                () => entrypoint.cardAction({ ...invocation, deadlineMs }),
+                deadlineMs + PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+              );
+              return decodePluginWorkerCardActionResultV1(
+                raw,
+                `plugin "${invocation.pluginId}" card action result`,
               );
             } catch (error) {
               return drop(errorMessage(error));

@@ -95,6 +95,10 @@ function sendAcknowledgement(payload: SendToUserPayloadV1): string {
       return "Interactive Applet sent to the user.";
     case "agent-card":
       return "Agent card sent to the user.";
+    case "card":
+      // Not a question, so not the end of the Turn: the card is in the thread
+      // and a later send naming the same surface updates it in place.
+      return "Card sent to the user. It stays in the conversation; send the same surfaceId again to update it.";
     case "approval":
       // Deliberately not "requested permission": nothing has been granted, and
       // the Turn is over whatever the answer turns out to be.
@@ -226,6 +230,7 @@ const SEND_TO_USER_DESCRIPTION = [
   '{"type":"secret-request","prompt":"…","secretName":"…"}',
   '{"type":"applet","appletId":"the id returned by applet_list or applet_create"} — embed the live Applet as an interactive chat card. Only an Applet you own or that is shared with you opens; the card opens it as you.',
   '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
+  '{"type":"card","surfaceId":"…","messages":[{"version":"v1.0","createSurface":{"surfaceId":"…","components":[{"id":"root","component":"Column","children":["title"]},{"id":"title","component":"Text","text":"…"}],"dataModel":{}}}]} — one A2UI surface in the conversation. A later send with the same surfaceId updates it in place and does not end your Turn.',
   '{"type":"approval","approvalId":"…","action":"…","rationale":"…","risk":"low|medium|high","expiresInSeconds":86400}',
   "A widget asks the user a question with 1 to 6 options and ends your Turn;",
   "their answer arrives as a new Turn. An approval asks the user to allow one",
@@ -333,6 +338,24 @@ const SEND_TO_USER_INPUT_SCHEMA = {
             body: { type: "string" },
           },
           required: ["type", "agentId", "title"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            type: { const: "card" },
+            surfaceId: { type: "string" },
+            // The A2UI envelope is decoded at the seam, not described here: a
+            // catalog's components are the Skill's business and would cost
+            // every Turn the whole vocabulary in its tool schema.
+            messages: {
+              type: "array",
+              minItems: 1,
+              maxItems: 16,
+              items: { type: "object" },
+            },
+          },
+          required: ["type", "surfaceId", "messages"],
           additionalProperties: false,
         },
         {

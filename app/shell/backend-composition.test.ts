@@ -277,6 +277,12 @@ describe("a Plugin that the worker refuses", () => {
         Promise.resolve({ schemaVersion: 1, content: "ok", isError: false }),
       receiveTrigger: () =>
         Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
+      cardAction: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "drop" as const,
+          reason: "no card handlers",
+        }),
       view: () =>
         Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
     };

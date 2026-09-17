@@ -62,6 +62,10 @@ function visibleDeliveryText(payload: SendToUserPayloadV1): string {
       return `Approval requested: ${payload.action}${payload.rationale ? ` — ${payload.rationale}` : ""}`;
     case "applet":
       return `Shared applet: ${payload.appletId}`;
+    case "card":
+      // A voice caller hears what happened, not the surface: the components
+      // are for a screen, and reading them aloud would be noise.
+      return `Showed a card: ${payload.surfaceId}`;
   }
 }
 

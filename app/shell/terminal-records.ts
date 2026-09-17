@@ -27,6 +27,7 @@
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
 import type { PendingBotInputV1 } from "@frockbot/app/routines/inbox";
 import { approvalTerminalRecordsV1 } from "./approvals.js";
+import { cardTerminalRecordsV1 } from "./cards.js";
 import { routineTerminalRecordsForRunV1 } from "@frockbot/app/routines/bot";
 import { voiceReplyOutboxRecordsV1 } from "./voice-reply.js";
 
@@ -100,6 +101,26 @@ async function approvalRecordsV1(
 }
 
 /**
+ * The Cards the Turn drew or updated, folded onto the records the Session
+ * holds. Beside the approvals for the same reason: a `card` send is a thing
+ * in the transcript a person can press, and the record their press is posted
+ * against becomes durable in the same transaction as the send.
+ */
+async function cardRecordsV1(
+  input: ShellTerminalInputV1,
+): Promise<Record<string, unknown>> {
+  return cardTerminalRecordsV1({
+    run: {
+      runId: input.run.runId,
+      sessionId: input.run.sessionId,
+      events: input.run.events,
+    },
+    now: input.now,
+    read: input.read,
+  });
+}
+
+/**
  * The note that a voice call is owed this Turn's answer.
  *
  * In the settling transaction rather than after it, for the reason every
@@ -118,6 +139,7 @@ function voiceRecordsV1(
 const SHELL_TERMINAL_PRODUCERS_V1 = [
   routineRecordsV1,
   approvalRecordsV1,
+  cardRecordsV1,
   voiceRecordsV1,
 ] as const;
 

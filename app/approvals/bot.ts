@@ -23,7 +23,7 @@ import {
   projectApprovalCardV1,
   trimmableApprovalKeysV1,
   APPROVAL_PREFIX,
-  ApprovalDecodeError,
+  ApprovalNotFoundError,
   type ApprovalDecisionCommandV1,
   type ApprovalDecisionReceiptV1,
   type ApprovalListViewV1,
@@ -83,7 +83,7 @@ async function settleApproval(
   return state.ctx.storage.transaction(async (transaction) => {
     const stored = await transaction.get<unknown>(key);
     if (stored === undefined) {
-      throw new ApprovalDecodeError(`approval "${approvalId}" was not found`);
+      throw new ApprovalNotFoundError(approvalId);
     }
     const approval = decodeApprovalRecordV1(stored);
     if (approval.decision !== "pending") {

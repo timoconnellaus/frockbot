@@ -59,6 +59,18 @@ export class ApprovalDecodeError extends Error {
   }
 }
 
+/**
+ * An approval id the kernel never recorded, or no longer holds. Its own name
+ * because a route answers it 404 rather than 500, and the name is what
+ * survives the Durable Object hops — the wording is never read.
+ */
+export class ApprovalNotFoundError extends ApprovalDecodeError {
+  constructor(approvalId: string) {
+    super(`approval "${approvalId}" was not found`);
+    this.name = "ApprovalNotFoundError";
+  }
+}
+
 /** What a pending decision resolved to, or that it has not. */
 export type ApprovalDecisionV1 = "pending" | "approved" | "denied" | "expired";
 
