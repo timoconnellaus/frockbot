@@ -373,7 +373,12 @@ serve`), the platform model over the remote Workers AI binding, asked
    > `createR2PackageArtifactStore`. Sending is a kernel loopback —
    > `ctx.email` to `isolateEmail` to `app/email/sender.ts` — attributed to
    > the Bot and holding no credential the Plugin can see, and inert until a
-   > deployment binds `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS`.
+   > deployment binds `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS`. An Approval a
+   > Card asks for is bound to what it authorizes: the kernel records the
+   > Plugin, the surface and a digest of the values the card was showing
+   > beside the ids it minted, `isolateEmail` refuses a decision that is not
+   > the one bound to this send, and a redraw of a pending draft reuses that
+   > decision rather than minting a second over one draft.
 7. The five first-party cards as locked Plugins; the old members mapped, then
    removed a release later.
 8. The rest of the Frock catalog, family by family, each with its reference.

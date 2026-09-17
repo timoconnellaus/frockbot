@@ -284,11 +284,21 @@ export class BotCapabilities extends WorkerEntrypoint<
     scope: unknown,
     request: unknown,
   ): Promise<IsolateEmailOutcomeV1> {
+    // Decoded outside the call, because a request the kernel refuses and a
+    // deployment that cannot send mail are different facts: a draft naming
+    // something that is not an address is the draft's problem, and answering
+    // it with "unavailable" would tell the person this deployment sends no
+    // mail when it sends mail fine.
+    let decoded;
     try {
-      const { rpc, envelope } = this.scoped(
-        scope,
-        decodeIsolateEmailRequestV1(request),
+      decoded = decodeIsolateEmailRequestV1(request);
+    } catch (error) {
+      return unavailable(
+        `this email was refused: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+    try {
+      const { rpc, envelope } = this.scoped(scope, decoded);
       return await rpc.isolateEmail(envelope);
     } catch {
       return unavailable("sending email is unavailable");

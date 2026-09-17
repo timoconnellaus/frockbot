@@ -305,6 +305,12 @@ export interface IsolateEmailRequestV1 {
    * person actually gave, and one decision sends at most one message.
    */
   approvalId: string;
+  /**
+   * The Card the decision was given on. The Approval is bound to a surface
+   * and to the values that surface was showing, so naming it is how the
+   * kernel checks that this message is the one that was approved.
+   */
+  surfaceId: string;
   to: string[];
   cc?: string[];
   subject: string;
@@ -1266,10 +1272,12 @@ export function decodeIsolateEmailRequestV1(
   label = "isolate email request",
 ): IsolateEmailRequestV1 {
   const value = record(input, label);
-  exactKeys(value, ["approvalId", "to", "subject", "body"], label, [
-    "cc",
-    "inReplyTo",
-  ]);
+  exactKeys(
+    value,
+    ["approvalId", "surfaceId", "to", "subject", "body"],
+    label,
+    ["cc", "inReplyTo"],
+  );
   const cc =
     value.cc === undefined
       ? undefined
@@ -1299,6 +1307,7 @@ export function decodeIsolateEmailRequestV1(
   }
   return {
     approvalId: boundedString(value.approvalId, `${label}.approvalId`, 256),
+    surfaceId: boundedString(value.surfaceId, `${label}.surfaceId`, 256),
     to: emailAddresses(value.to, `${label}.to`, true),
     ...(cc === undefined ? {} : { cc }),
     subject,

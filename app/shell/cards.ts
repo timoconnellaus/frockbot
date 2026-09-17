@@ -77,6 +77,7 @@ import {
   type A2uiJsonObjectV1,
   type A2uiJsonValueV1,
 } from "@frockbot/core/contracts";
+import { approvalKeyV1, decodeApprovalRecordV1 } from "./approvals.js";
 
 /** One `CardRecordV1`, keyed by the surface the Bot named. */
 export const CARD_PREFIX = "shell:card:";
@@ -1179,6 +1180,110 @@ export interface CardApprovalBindingV1 {
   rationale?: string;
 }
 
+/** Where one surface's live Approvals are recorded, keyed by whose card it is. */
+export const CARD_APPROVAL_BINDING_PREFIX = "shell:card-approval:";
+
+export function cardApprovalBindingKeyV1(
+  pluginId: string,
+  surfaceId: string,
+): string {
+  return `${CARD_APPROVAL_BINDING_PREFIX}${pluginId}:${surfaceId}`;
+}
+
+/**
+ * What the Approvals on one surface authorize.
+ *
+ * The Approval record says a person answered; this says *what they answered
+ * about*. Without it an approved decision is a bearer token for any outward
+ * effect the model can name, because `ApprovalRecordV1` carries only words.
+ * `digest` is the content address of the values the card was drawing when the
+ * decision was asked for, so a capability claiming one of these ids has to be
+ * about the same message the person read.
+ */
+export interface CardApprovalRecordV1 {
+  schemaVersion: 1;
+  pluginId: string;
+  surfaceId: string;
+  digest: string;
+  approvalIds: string[];
+  createdAt: string;
+}
+
+/**
+ * The canonical form the digest is taken over: object keys sorted, and
+ * anything a caller would have written as "nothing" — `undefined`, `null`,
+ * `""`, an empty list — dropped rather than recorded.
+ *
+ * Both sides of the gate canonicalise, so a card drawn with `cc: []` and a
+ * message sent with no `cc` at all are one value and not two.
+ */
+function canonicalCardValueV1(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const entries = value
+      .map(canonicalCardValueV1)
+      .filter((entry) => entry !== undefined);
+    return entries.length === 0 ? undefined : entries;
+  }
+  if (typeof value === "object" && value !== null) {
+    const source = value as Record<string, unknown>;
+    const canonical: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) {
+      const entry = canonicalCardValueV1(source[key]);
+      if (entry !== undefined) canonical[key] = entry;
+    }
+    return Object.keys(canonical).length === 0 ? undefined : canonical;
+  }
+  if (value === null || value === undefined || value === "") return undefined;
+  return value;
+}
+
+/** The content address of the values a Card is showing. */
+export async function cardValuesDigestV1(values: unknown): Promise<string> {
+  const canonical = JSON.stringify(canonicalCardValueV1(values) ?? null);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonical),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** The storage one Bot's card approval bindings are read and written through. */
+export interface CardApprovalStoreV1 {
+  /**
+   * The Approvals this surface already asked for that a person could still
+   * answer, or nothing. A binding whose Approval was never recorded is not
+   * live: the Turn that drew that card never settled, so nobody was ever
+   * asked, and reusing its id would leave a card that cannot be decided.
+   */
+  live(
+    pluginId: string,
+    surfaceId: string,
+  ): Promise<CardApprovalRecordV1 | undefined>;
+  record(binding: CardApprovalRecordV1): Promise<void>;
+}
+
+/** Reads the record only; the liveness of each id is the caller's question. */
+export function decodeCardApprovalRecordV1(
+  value: unknown,
+): CardApprovalRecordV1 | undefined {
+  const candidate = value as Partial<CardApprovalRecordV1> | undefined;
+  if (
+    !candidate ||
+    candidate.schemaVersion !== 1 ||
+    typeof candidate.pluginId !== "string" ||
+    typeof candidate.surfaceId !== "string" ||
+    typeof candidate.digest !== "string" ||
+    typeof candidate.createdAt !== "string" ||
+    !Array.isArray(candidate.approvalIds) ||
+    candidate.approvalIds.some((id) => typeof id !== "string")
+  ) {
+    return undefined;
+  }
+  return candidate as CardApprovalRecordV1;
+}
+
 /**
  * Binds every `ApprovalActions` on a Card to an Approval the kernel issues.
  *
@@ -1187,18 +1292,20 @@ export interface CardApprovalBindingV1 {
  * author wrote is overwritten with a minted one before the send is recorded,
  * so a Card can never point its decision at an Approval it did not ask for,
  * and the returned bindings are the Approvals the caller records beside the
- * Card. A redraw carrying the component again asks for a new decision: the
- * old one stays where it is, decided or expiring on its own terms.
+ * Card. `mint` is handed the index of the decision on this card, so a caller
+ * redrawing a surface whose decision is still pending can answer with the id
+ * that decision already has rather than leaving two live Approvals over one
+ * draft.
  */
 export function bindCardApprovalsV1(
   messages: readonly A2uiAgentMessageV1[],
-  mint: () => string,
+  mint: (index: number) => string,
   fallbackAction: string,
 ): { messages: A2uiAgentMessageV1[]; approvals: CardApprovalBindingV1[] } {
   const approvals: CardApprovalBindingV1[] = [];
   const bindComponent = (component: A2uiComponentV1): A2uiComponentV1 => {
     if (component.component !== CARD_APPROVAL_COMPONENT_V1) return component;
-    const approvalId = mint();
+    const approvalId = mint(approvals.length);
     const risk =
       component.risk === "low" || component.risk === "high"
         ? component.risk
@@ -1242,4 +1349,48 @@ export function bindCardApprovalsV1(
     return message;
   });
   return { messages: bound, approvals };
+}
+
+/**
+ * The Bot Durable Object's own card approval store.
+ *
+ * `live` asks the Approval records themselves whether anyone can still answer
+ * this surface's decision, so the binding never has to be kept in step with a
+ * decision it does not own.
+ */
+export function createCardApprovalStoreV1(storage: {
+  get<T>(key: string): Promise<T | undefined>;
+  put(key: string, value: unknown): Promise<void>;
+}): CardApprovalStoreV1 {
+  return {
+    async live(pluginId, surfaceId) {
+      const stored = decodeCardApprovalRecordV1(
+        await storage.get<unknown>(cardApprovalBindingKeyV1(pluginId, surfaceId)),
+      );
+      if (!stored) return undefined;
+      for (const approvalId of stored.approvalIds) {
+        const record = await storage.get<unknown>(approvalKeyV1(approvalId));
+        if (record === undefined) continue;
+        let approval;
+        try {
+          approval = decodeApprovalRecordV1(record);
+        } catch {
+          continue;
+        }
+        if (
+          approval.decision === "pending" &&
+          Date.parse(approval.expiresAt) > Date.now()
+        ) {
+          return stored;
+        }
+      }
+      return undefined;
+    },
+    async record(binding) {
+      await storage.put(
+        cardApprovalBindingKeyV1(binding.pluginId, binding.surfaceId),
+        binding,
+      );
+    },
+  };
 }

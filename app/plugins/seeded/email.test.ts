@@ -164,7 +164,7 @@ describe("the email Plugin's draft card", () => {
       (answer as Record<string, unknown>[]).map((message, index) =>
         decodeA2uiAgentMessageV1(message, `message[${index}]`),
       ),
-      () => "card-approval-1",
+      () => APPROVAL,
       "email: draft",
     );
     expect(bound.approvals).toEqual([
@@ -184,6 +184,26 @@ describe("the email Plugin's draft card", () => {
         ctx,
       ),
     ).toMatchObject({ drop: true });
+  });
+
+  // The kernel's own sender refuses an address that is not one. Refusing it
+  // here is the difference between the Bot fixing a typo and a person
+  // approving a draft that could never leave.
+  test("a draft naming something that is not an address draws nothing", async () => {
+    for (const data of [
+      { ...draft, to: ["nick@example"] },
+      { ...draft, cc: ["sam at example.com"] },
+    ]) {
+      const { ctx } = context();
+      const answer = await cards.draft.render(
+        { surfaceId: `${SURFACE}-${data.to[0]}`, data },
+        ctx,
+      );
+      expect(answer).toMatchObject({ drop: true });
+      expect(String((answer as { reason: string }).reason)).toMatch(
+        /is not an email address/,
+      );
+    }
   });
 
   test("the details action redraws the card with the rest of the headers", async () => {
@@ -213,6 +233,9 @@ describe("the email Plugin's draft card", () => {
     expect(sends).toEqual([
       {
         approvalId: APPROVAL,
+        // The card the decision was given on: the kernel checks the Approval
+        // against this surface and against these values.
+        surfaceId: SURFACE,
         to: ["nick@example.com"],
         cc: ["sam@example.com"],
         subject: "Re: Following up",

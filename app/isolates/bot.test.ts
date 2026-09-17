@@ -11,6 +11,10 @@ import type {
 } from "../shell/backend-state.js";
 import { approvalKeyV1 } from "../shell/approvals.js";
 import {
+  cardApprovalBindingKeyV1,
+  cardValuesDigestV1,
+} from "../shell/cards.js";
+import {
   isolateEmail,
   isolateWorkspaceRead,
   type IsolateCallScopeV1,
@@ -136,7 +140,31 @@ describe("one email, sent for the Bot that asked", () => {
     subject: "Re: Following up",
     body: "The whole message.",
   };
+  const SURFACE = "email_draft.aaaaaaaa";
   const HOUR = 60 * 60 * 1_000;
+
+  /** What the kernel wrote when it drew the card the decision was given on. */
+  async function binding(
+    overrides: {
+      approvalIds?: string[];
+      values?: Record<string, unknown>;
+      pluginId?: string;
+      surfaceId?: string;
+    } = {},
+  ) {
+    const pluginId = overrides.pluginId ?? "email";
+    const surfaceId = overrides.surfaceId ?? SURFACE;
+    return {
+      [cardApprovalBindingKeyV1(pluginId, surfaceId)]: {
+        schemaVersion: 1,
+        pluginId,
+        surfaceId,
+        digest: await cardValuesDigestV1(overrides.values ?? MESSAGE),
+        approvalIds: overrides.approvalIds ?? ["ap-1"],
+        createdAt: new Date(Date.now() - HOUR).toISOString(),
+      },
+    };
+  }
 
   function approval(overrides: Record<string, unknown> = {}) {
     return {
@@ -197,13 +225,94 @@ describe("one email, sent for the Bot that asked", () => {
     return scope({ packageId: "email", request });
   }
 
-  test("sends under an approved, unexpired, unspent decision", async () => {
-    const subject = sending({ [approvalKeyV1("ap-1")]: approval() });
+  /** The request the email Plugin makes for the card the decision was on. */
+  function requestValues(): Record<string, unknown> {
+    return { ...MESSAGE, approvalId: "ap-1", surfaceId: SURFACE };
+  }
+
+  test("sends under an approved, unexpired, unspent decision bound to this card", async () => {
+    const subject = sending({
+      [approvalKeyV1("ap-1")]: approval(),
+      ...(await binding()),
+    });
     expect(
-      await isolateEmail(subject.state, call({ ...MESSAGE, approvalId: "ap-1" })),
+      await isolateEmail(subject.state, call(requestValues())),
     ).toMatchObject({ status: "sent" });
-    // The approvalId is the kernel's gate, never part of the message.
+    // The approvalId and the surface are the kernel's gate, never part of
+    // the message.
     expect(subject.sent).toEqual([MESSAGE]);
+  });
+
+  // The gate exists because the model is not trusted to remember the
+  // decision, so it cannot be a gate the model passes by naming *any*
+  // decision: an Approval authorizes the message it was given for.
+  test("refuses an approved decision that was not given on this card", async () => {
+    const subject = sending({
+      // A decision the person really did give, on something else entirely.
+      [approvalKeyV1("ap-1")]: approval({
+        action: "Turn on the Weather plugin",
+      }),
+    });
+    const outcome = await isolateEmail(subject.state, call(requestValues()));
+    expect(outcome).toMatchObject({ status: "unavailable" });
+    expect((outcome as { reason: string }).reason).toMatch(
+      /was not the decision on card/,
+    );
+    expect(subject.sent).toHaveLength(0);
+  });
+
+  test("refuses a decision bound to another surface, or to another Plugin", async () => {
+    for (const bound of [
+      await binding({ surfaceId: "email_draft.bbbbbbbb" }),
+      await binding({ pluginId: "other" }),
+    ]) {
+      const subject = sending({
+        [approvalKeyV1("ap-1")]: approval(),
+        ...bound,
+      });
+      const outcome = await isolateEmail(subject.state, call(requestValues()));
+      expect(outcome).toMatchObject({ status: "unavailable" });
+      expect((outcome as { reason: string }).reason).toMatch(
+        /was not the decision on card/,
+      );
+      expect(subject.sent).toHaveLength(0);
+    }
+  });
+
+  test("refuses a message whose recipients or body are not the ones approved", async () => {
+    for (const changed of [
+      { ...MESSAGE, to: ["someone-else@example.com"] },
+      { ...MESSAGE, body: "Something the person never read." },
+      { ...MESSAGE, cc: ["quiet@example.com"] },
+    ]) {
+      const subject = sending({
+        [approvalKeyV1("ap-1")]: approval(),
+        ...(await binding()),
+      });
+      const outcome = await isolateEmail(
+        subject.state,
+        call({ ...changed, approvalId: "ap-1", surfaceId: SURFACE }),
+      );
+      expect(outcome).toMatchObject({ status: "unavailable" });
+      expect((outcome as { reason: string }).reason).toMatch(
+        /given for different values/,
+      );
+      expect(subject.sent).toHaveLength(0);
+    }
+  });
+
+  // The card is drawn with `cc: []` and the message is sent with no `cc` at
+  // all; they are one value, not two, or every send would be refused.
+  test("an absent field and an empty one are the same values", async () => {
+    const subject = sending({
+      [approvalKeyV1("ap-1")]: approval(),
+      ...(await binding({
+        values: { ...MESSAGE, cc: [], inReplyTo: "" },
+      })),
+    });
+    expect(await isolateEmail(subject.state, call(requestValues()))).toMatchObject({
+      status: "sent",
+    });
   });
 
   test("refuses a decision nobody gave, denied, or expired", async () => {
@@ -220,11 +329,11 @@ describe("one email, sent for the Bot that asked", () => {
         /expired/,
       ],
     ] as const) {
-      const subject = sending(records as Record<string, unknown>);
-      const outcome = await isolateEmail(
-        subject.state,
-        call({ ...MESSAGE, approvalId: "ap-1" }),
-      );
+      const subject = sending({
+        ...(records as Record<string, unknown>),
+        ...(await binding()),
+      });
+      const outcome = await isolateEmail(subject.state, call(requestValues()));
       expect(outcome).toMatchObject({ status: "unavailable" });
       expect((outcome as { reason: string }).reason).toMatch(pattern);
       expect(subject.sent).toHaveLength(0);
@@ -232,8 +341,11 @@ describe("one email, sent for the Bot that asked", () => {
   });
 
   test("one decision sends at most one message", async () => {
-    const subject = sending({ [approvalKeyV1("ap-1")]: approval() });
-    const request = call({ ...MESSAGE, approvalId: "ap-1" });
+    const subject = sending({
+      [approvalKeyV1("ap-1")]: approval(),
+      ...(await binding()),
+    });
+    const request = call(requestValues());
     expect(await isolateEmail(subject.state, request)).toMatchObject({
       status: "sent",
     });
@@ -244,14 +356,17 @@ describe("one email, sent for the Bot that asked", () => {
   });
 
   test("a send that never left leaves the decision good to try again", async () => {
-    const subject = sending({ [approvalKeyV1("ap-1")]: approval() });
+    const subject = sending({
+      [approvalKeyV1("ap-1")]: approval(),
+      ...(await binding()),
+    });
     (
       subject.state as unknown as {
         env: { EMAIL_SENDER: { send: () => Promise<unknown> } };
       }
     ).env.EMAIL_SENDER.send = () =>
       Promise.resolve({ status: "unavailable", reason: "no route" });
-    const request = call({ ...MESSAGE, approvalId: "ap-1" });
+    const request = call(requestValues());
     expect(await isolateEmail(subject.state, request)).toMatchObject({
       status: "unavailable",
       reason: "no route",
@@ -273,8 +388,11 @@ describe("one email, sent for the Bot that asked", () => {
   // The two causes are different facts about the deployment, and a person
   // told the wrong one is told this Bot cannot send mail when it can.
   test("admission and a missing sender are told apart", async () => {
-    const subject = sending({ [approvalKeyV1("ap-1")]: approval() });
-    const request = call({ ...MESSAGE, approvalId: "ap-1" });
+    const subject = sending({
+      [approvalKeyV1("ap-1")]: approval(),
+      ...(await binding()),
+    });
+    const request = call(requestValues());
     expect(
       await isolateEmail(subject.state, { ...request, packageId: "other" }),
     ).toMatchObject({

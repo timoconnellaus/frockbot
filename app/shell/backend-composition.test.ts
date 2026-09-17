@@ -20,7 +20,15 @@ import {
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
 import type { BotIsolateLoader } from "@frockbot/frock-compose";
-import { createShellCompositionHost } from "./backend-composition.js";
+import {
+  createShellCompositionHost,
+  type ShellMountedComposition,
+} from "./backend-composition.js";
+import { approvalKeyV1 } from "./approvals.js";
+import {
+  createCardApprovalStoreV1,
+  type CardApprovalStoreV1,
+} from "./cards.js";
 
 const USER = "user-1";
 const APPLET = "applet-1";
@@ -327,6 +335,351 @@ describe("a Plugin that the worker refuses", () => {
       const names = mounted.runtime.services.tools.registeredNames?.() ?? [];
       expect(names).toContain("good/good_tool");
       expect(names).not.toContain("bad/bad_tool");
+    } finally {
+      await mounted.dispose();
+    }
+  });
+});
+
+/**
+ * One draft, one live decision, and a decision that says what it covers.
+ *
+ * `bindCardApprovalsV1` mints an Approval for every `ApprovalActions` on
+ * every send, so without the binding a redraw of a surface whose decision is
+ * still pending left two live Approvals over one draft, and an Approval
+ * carried nothing that said which card it was given on.
+ */
+describe("the Approvals a Plugin's Card asks for", () => {
+  const CARD_PLUGIN = "drafts";
+
+  function cardMember(): CompositionMemberV1 {
+    return {
+      packageId: CARD_PLUGIN,
+      version: "0.0.1",
+      provenance: {
+        kind: "user",
+        packageId: CARD_PLUGIN,
+        version: "0.0.1",
+        userId: USER,
+        authoredAt: "2026-09-05T00:00:00.000Z",
+      },
+      artifact: {
+        contentHash: "d".repeat(64),
+        size: 32,
+        mediaType: "application/javascript",
+        bundlerVersion: "1",
+      },
+      descriptor: decodePluginDescriptorV1({
+        id: CARD_PLUGIN,
+        displayName: CARD_PLUGIN,
+        version: "0.0.1",
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        tools: [],
+        hooks: [],
+        grants: [],
+        cards: [
+          {
+            id: "draft",
+            displayName: "Draft",
+            description: "Asks the person to decide.",
+            dataSchema: {
+              type: "object",
+              properties: { subject: { type: "string" } },
+              required: ["subject"],
+              additionalProperties: false,
+            },
+            actions: [],
+          },
+        ],
+        contextKeys: ["user", "bot", "session"],
+      }),
+    };
+  }
+
+  async function cardGeneration(): Promise<CompositionGenerationV1> {
+    const members = [cardMember()];
+    const artifactSetHash = await compositionArtifactSetHashV1(members, []);
+    return decodeCompositionGenerationV1({
+      schemaVersion: 1,
+      generationId: `2026-09-05T00:00:00.000Z:${artifactSetHash.slice(0, 16)}`,
+      artifactSetHash,
+      createdAt: "2026-09-05T00:00:00.000Z",
+      origin: { kind: "bootstrap" },
+      members,
+      status: "active",
+    });
+  }
+
+  function cardEntrypoint(): PluginWorkerEntrypoint {
+    return {
+      health: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: [
+            {
+              pluginId: CARD_PLUGIN,
+              ok: true,
+              tools: [],
+              hooks: [],
+              provides: [],
+              consumes: [],
+              triggers: [],
+              views: [],
+              cards: ["draft"],
+            },
+          ],
+        }),
+      hook: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          status: "unchanged",
+          failures: [],
+        }),
+      execute: () =>
+        Promise.resolve({ schemaVersion: 1, content: "ok", isError: false }),
+      receiveTrigger: () =>
+        Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
+      cardAction: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "drop" as const,
+          reason: "no card handlers",
+        }),
+      view: () =>
+        Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
+      // Whatever the values are, the surface the Plugin draws asks for a
+      // decision — which is exactly the redraw the binding has to hold.
+      renderCard: (invocation: { surfaceId: string }) =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "rendered" as const,
+          messages: [
+            {
+              version: "v1.0",
+              createSurface: {
+                surfaceId: invocation.surfaceId,
+                components: [
+                  { id: "root", component: "Column", children: ["actions"] },
+                  {
+                    id: "actions",
+                    component: "ApprovalActions",
+                    approvalId: "not-the-kernels",
+                    approveLabel: "Send",
+                    declineLabel: "Discard",
+                    action: "Send the draft",
+                    risk: "medium",
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+    } as unknown as PluginWorkerEntrypoint;
+  }
+
+  /** The Bot's storage, as the Durable Object's own card approval store. */
+  function cardApprovalStorage() {
+    const values = new Map<string, unknown>();
+    return {
+      values,
+      store: createCardApprovalStoreV1({
+        get: <T,>(key: string) => Promise.resolve(values.get(key) as T),
+        put: (key: string, value: unknown) => {
+          values.set(key, value);
+          return Promise.resolve();
+        },
+      }),
+    };
+  }
+
+  /** What the Turn that drew the card writes when it settles. */
+  function recordPendingApproval(
+    values: Map<string, unknown>,
+    approvalId: string,
+  ): void {
+    values.set(approvalKeyV1(approvalId), {
+      schemaVersion: 1,
+      approvalId,
+      runId: "run-1",
+      sessionId: `${USER}:bot-1`,
+      action: "Send the draft",
+      risk: "medium",
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+      decision: "pending",
+      decidedBy: "pending",
+    });
+  }
+
+  async function mountCards(store: CardApprovalStoreV1) {
+    const generation = await cardGeneration();
+    const { signal } = new AbortController();
+    const entrypoint = cardEntrypoint();
+    const mounted = await createShellCompositionHost({
+      botId: "bot-1",
+      sessionId: `${USER}:bot-1`,
+      sessionEvents: [],
+      admitEffect: () => Promise.resolve(true),
+      cardApprovals: store,
+      isolate: {
+        userId: USER,
+        runId: "run-1",
+        turnId: "run-1",
+        loader: { get: () => ({ getEntrypoint: () => entrypoint }) },
+        artifacts: {
+          loadPackageArtifact: () =>
+            Promise.resolve("export const tools = [];"),
+        },
+        capabilities: {} as BotCapabilitiesStub,
+        bindingDigest: "e".repeat(64),
+        compatibilityDate: "2026-01-01",
+      },
+    }).mount(generation, signal);
+    await mounted.verify(signal);
+    // A send is recorded against the Turn's open step, which is what the
+    // loop opens before it dispatches a tool call.
+    mounted.runtime.services.sessions
+      .get(`${USER}:bot-1`)
+      ?.append({ type: "step/start", turn: 1, step: 1 });
+    let effect = 0;
+    const draw = async (input: Record<string, unknown>) => {
+      effect += 1;
+      // A Plugin's tools live in its own namespace, so the Bot reaches one
+      // through the registry's dynamic call, exactly as the model does.
+      const call = {
+        id: `call-${effect}`,
+        name: "call_dynamic_tool",
+        input: {
+          namespace: CARD_PLUGIN,
+          toolName: `${CARD_PLUGIN}_draft`,
+          arguments: input,
+        },
+      };
+      const context = {
+        botId: "bot-1",
+        agentId: "bot-1",
+        sessionId: `${USER}:bot-1`,
+        compositionGenerationId: generation.generationId,
+        effectId: `effect-${effect}`,
+        toolCall: call,
+        turnType: "chat" as const,
+        signal,
+      };
+      const prepared = await mounted.runtime.services.tools.prepare(
+        call,
+        context,
+      );
+      return mounted.runtime.services.tools.executePrepared(
+        prepared as Extract<typeof prepared, { kind: "ready" }>,
+        context,
+      );
+    };
+    return { mounted, draw, signal };
+  }
+
+  /** Every approval send the Turn's log carries, in order. */
+  function approvalIdsOnLog(mounted: ShellMountedComposition): string[] {
+    const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
+    return (session?.events ?? [])
+      .filter(
+        (event) =>
+          event.type === "send/to-user" &&
+          (event as { payload?: { type?: string } }).payload?.type ===
+            "approval",
+      )
+      .map(
+        (event) =>
+          (event as unknown as { payload: { approvalId: string } }).payload
+            .approvalId,
+      );
+  }
+
+  /** The approvalId the card in the conversation actually points at. */
+  function cardApprovalId(mounted: ShellMountedComposition): string {
+    const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
+    const cards = (session?.events ?? []).filter(
+      (event) =>
+        event.type === "send/to-user" &&
+        (event as { payload?: { type?: string } }).payload?.type === "card",
+    );
+    const last = cards.at(-1) as unknown as {
+      payload: {
+        messages: {
+          createSurface?: { components: { id: string; approvalId?: string }[] };
+        }[];
+      };
+    };
+    const actions = last.payload.messages[0]!.createSurface!.components.find(
+      (component) => component.id === "actions",
+    );
+    return actions?.approvalId ?? "";
+  }
+
+  test("a redraw of the same values keeps the one decision already pending", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store);
+    try {
+      const first = await draw({ data: { subject: "Hello" } });
+      expect(first).toMatchObject({ isError: false, endsTurn: true });
+      const surfaceId = /surface "([^"]+)"/.exec(String(first.content))![1]!;
+      const minted = approvalIdsOnLog(mounted);
+      expect(minted).toHaveLength(1);
+      expect(cardApprovalId(mounted)).toBe(minted[0]!);
+      // The Turn settles, so the pending decision is now durable.
+      recordPendingApproval(values, minted[0]!);
+
+      const again = await draw({ data: { subject: "Hello" }, surfaceId });
+      expect(again).toMatchObject({ isError: false });
+      // One draft, one live decision: nothing new was asked for, and the
+      // card the person is looking at still points at the decision they
+      // were given.
+      expect(approvalIdsOnLog(mounted)).toEqual(minted);
+      expect(cardApprovalId(mounted)).toBe(minted[0]!);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a redraw with different values is refused while that decision is pending", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store);
+    try {
+      const first = await draw({ data: { subject: "Hello" } });
+      const surfaceId = /surface "([^"]+)"/.exec(String(first.content))![1]!;
+      const minted = approvalIdsOnLog(mounted);
+      recordPendingApproval(values, minted[0]!);
+
+      const changed = await draw({ data: { subject: "Something else" }, surfaceId });
+      expect(changed.isError).toBe(true);
+      expect(String(changed.content)).toMatch(/decision still pending/);
+      // The card stands exactly as it was, and no second decision was asked.
+      expect(approvalIdsOnLog(mounted)).toEqual(minted);
+      expect(cardApprovalId(mounted)).toBe(minted[0]!);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a decided surface asks again, because nothing is pending on it", async () => {
+    const { values, store } = cardApprovalStorage();
+    const { mounted, draw } = await mountCards(store);
+    try {
+      const first = await draw({ data: { subject: "Hello" } });
+      const surfaceId = /surface "([^"]+)"/.exec(String(first.content))![1]!;
+      const minted = approvalIdsOnLog(mounted);
+      recordPendingApproval(values, minted[0]!);
+      const decided = values.get(approvalKeyV1(minted[0]!)) as {
+        decision: string;
+      };
+      decided.decision = "denied";
+
+      const again = await draw({ data: { subject: "Hello" }, surfaceId });
+      expect(again).toMatchObject({ isError: false });
+      const now = approvalIdsOnLog(mounted);
+      expect(now).toHaveLength(2);
+      expect(now[1]).not.toBe(minted[0]);
+      expect(cardApprovalId(mounted)).toBe(now[1]!);
     } finally {
       await mounted.dispose();
     }

@@ -73,6 +73,11 @@ import {
   decodeApprovalRecordV1,
 } from "@frockbot/app/shell/approvals";
 import {
+  cardApprovalBindingKeyV1,
+  cardValuesDigestV1,
+  decodeCardApprovalRecordV1,
+} from "@frockbot/app/shell/cards";
+import {
   executionPackagesV1,
   type ActiveTurnV1,
   type ShellBotStateV1,
@@ -870,13 +875,23 @@ export async function isolateEmail(
       reason: "this deployment has no sender bound, so it sends no email",
     };
   }
-  const { approvalId, ...message } = decodeIsolateEmailRequestV1(input.request);
+  const { approvalId, surfaceId, ...message } = decodeIsolateEmailRequestV1(
+    input.request,
+  );
   // The decision is the kernel's to require, not the model's to remember: a
   // Bot that misread a denial, or that called before anybody answered, gets
-  // no message out. Claimed before the send rather than after it, so a
-  // deadline cut between the binding accepting the mail and this write can
-  // never let a retry send it twice.
-  const claim = await claimEmailApprovalV1(state, approvalId);
+  // no message out. And the decision has to be the one that covers *this*
+  // message: the Approval is bound to the card surface it was asked on and to
+  // the content address of the values that card was showing, so an approved
+  // decision about something else authorizes nothing. Claimed before the send
+  // rather than after it, so a deadline cut between the binding accepting the
+  // mail and this write can never let a retry send it twice.
+  const claim = await claimEmailApprovalV1(state, {
+    approvalId,
+    pluginId: input.packageId,
+    surfaceId,
+    digest: await cardValuesDigestV1(message),
+  });
   if (claim.status !== "claimed") return claim.failure;
   const outcome = await sender.send(message);
   // Nothing left, so nothing was spent: the decision is still good and the
@@ -899,11 +914,17 @@ function emailApprovalUseKeyV1(approvalId: string): string {
  */
 async function claimEmailApprovalV1(
   state: ShellBotStateV1,
-  approvalId: string,
+  claim: {
+    approvalId: string;
+    pluginId: string;
+    surfaceId: string;
+    digest: string;
+  },
 ): Promise<
   | { status: "claimed" }
   | { status: "refused"; failure: IsolateCapabilityFailureV1 }
 > {
+  const { approvalId } = claim;
   const refused = (reason: string) =>
     ({ status: "refused" as const, failure: { status: "unavailable" as const, reason } });
   return state.ctx.storage.transaction(async (transaction) => {
@@ -921,6 +942,24 @@ async function claimEmailApprovalV1(
     }
     if (Date.parse(approval.expiresAt) <= Date.now()) {
       return refused(`Approval "${approvalId}" has expired, so nothing was sent`);
+    }
+    // What the person actually decided about. An Approval carrying no
+    // binding — one the Bot asked for with `send_to_user`, or one recorded
+    // for another Plugin's card — authorizes no send at all.
+    const binding = decodeCardApprovalRecordV1(
+      await transaction.get<unknown>(
+        cardApprovalBindingKeyV1(claim.pluginId, claim.surfaceId),
+      ),
+    );
+    if (!binding?.approvalIds.includes(approvalId)) {
+      return refused(
+        `Approval "${approvalId}" was not the decision on card "${claim.surfaceId}", so nothing authorizes this send`,
+      );
+    }
+    if (binding.digest !== claim.digest) {
+      return refused(
+        `Approval "${approvalId}" was given for different values than this message carries, so nothing was sent`,
+      );
     }
     const used = await transaction.get<unknown>(
       emailApprovalUseKeyV1(approvalId),

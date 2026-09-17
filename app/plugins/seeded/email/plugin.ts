@@ -95,6 +95,20 @@ async function writeState(
   await storage.put({ key: stateKey(surfaceId), value: state });
 }
 
+/**
+ * A mailbox, as loosely as one may be written and still be one. The same
+ * shape the kernel's own email request holds addresses to: an address the
+ * kernel would refuse is refused here, when the card is drawn, rather than
+ * after a person has read it and pressed Send.
+ */
+const ADDRESS = /^[^\s@,<>]+@[^\s@,<>.]+(?:\.[^\s@,<>.]+)+$/;
+
+function malformedAddress(draft: Draft): string | undefined {
+  return [...draft.to, ...(draft.cc ?? [])].find(
+    (address) => !ADDRESS.test(address),
+  );
+}
+
 function readDraft(data: { [key: string]: unknown }): Draft {
   const list = (value: unknown): string[] =>
     Array.isArray(value) ? value.map((entry) => String(entry)) : [];
@@ -241,6 +255,13 @@ const draftCard: PluginCard = {
     if (draft.to.length === 0) {
       return { drop: true, reason: "a draft needs at least one recipient" };
     }
+    const malformed = malformedAddress(draft);
+    if (malformed !== undefined) {
+      return {
+        drop: true,
+        reason: `"${malformed}" is not an email address, so nothing was drawn`,
+      };
+    }
     await writeState(ctx, surfaceId, { status: "drafted", draft });
     return surface(surfaceId, draftComponents(draft, false));
   },
@@ -307,7 +328,7 @@ export const execute: PluginExecute = async (tool, input, ctx) => {
   }
   const send = ctx.email;
   if (!send) throw new Error("the http grant is not open");
-  const outcome = await send({ ...state.draft, approvalId });
+  const outcome = await send({ ...state.draft, approvalId, surfaceId });
   if (outcome.status !== "sent") {
     throw new Error(outcome.reason);
   }

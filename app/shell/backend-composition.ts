@@ -37,7 +37,11 @@ import {
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
 import { recordSendToUserV1 } from "./agent.js";
-import { bindCardApprovalsV1 } from "./cards.js";
+import {
+  bindCardApprovalsV1,
+  cardValuesDigestV1,
+  type CardApprovalStoreV1,
+} from "./cards.js";
 
 /**
  * The generation a Bot starts on: empty.
@@ -159,6 +163,13 @@ export interface ShellCompositionMountOptions {
    * its catalog to it as well. Absent ⇒ no role narrowing.
    */
   subagentRole?: string;
+  /**
+   * Where the Approvals a Plugin's Card asks for are bound to what they
+   * authorize. Absent leaves every card send minting a fresh decision and
+   * binding none, which is fail-closed: a capability that requires a binding
+   * refuses rather than sending under a decision nobody tied to it.
+   */
+  cardApprovals?: CardApprovalStoreV1;
   /** Absent when the host cannot load isolates; isolate members then fail verify. */
   isolate?: ShellIsolateMountOptions;
   /** Absent when the host cannot reach Applet instances. */
@@ -268,9 +279,31 @@ export function createShellCompositionHost(
                 if (payload.type !== "card") {
                   return { status: "refused" as const, reason: "not a card" };
                 }
+                // What this card is showing, as one content address. It is
+                // what the Approval is bound to, so a capability claiming the
+                // decision later has to be about the same values the person
+                // read rather than about whatever the model names.
+                const digest = await cardValuesDigestV1(send.data);
+                const approvals = options.cardApprovals;
+                const live = await approvals?.live(
+                  send.pluginId,
+                  send.surfaceId,
+                );
+                // One draft, one live decision. A redraw of what is already
+                // pending keeps that decision; a redraw of *different* values
+                // would silently move what the pending decision covers, so it
+                // is refused and the card stays exactly as it was.
+                if (live && live.digest !== digest) {
+                  return {
+                    status: "refused" as const,
+                    reason: `surface "${send.surfaceId}" has a decision still pending on the values it was drawn with; draw a new card rather than changing what that decision covers`,
+                  };
+                }
+                const reused = live?.approvalIds ?? [];
                 const bound = bindCardApprovalsV1(
                   payload.messages,
-                  () => `card-approval-${crypto.randomUUID()}`,
+                  (index) =>
+                    reused[index] ?? `card-approval-${crypto.randomUUID()}`,
                   `${send.pluginId}: ${send.cardId}`,
                 );
                 const tool = `${send.pluginId}_${send.cardId}`;
@@ -290,6 +323,10 @@ export function createShellCompositionHost(
                   };
                 }
                 for (const [index, approval] of bound.approvals.entries()) {
+                  // A reused decision was already asked for on the Turn that
+                  // drew this surface first; asking again would put a second
+                  // request for one decision on the log.
+                  if (reused.includes(approval.approvalId)) continue;
                   const asked = await recordSendToUserV1(
                     runtime.services.sessions,
                     // Decoded like any other payload before it reaches the
@@ -310,6 +347,18 @@ export function createShellCompositionHost(
                   if (asked.status !== "sent") {
                     return { status: "refused" as const, reason: asked.reason };
                   }
+                }
+                if (approvals && bound.approvals.length > 0) {
+                  await approvals.record({
+                    schemaVersion: 1,
+                    pluginId: send.pluginId,
+                    surfaceId: send.surfaceId,
+                    digest,
+                    approvalIds: bound.approvals.map(
+                      (approval) => approval.approvalId,
+                    ),
+                    createdAt: new Date().toISOString(),
+                  });
                 }
                 return {
                   status: "sent" as const,

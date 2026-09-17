@@ -238,6 +238,12 @@ export interface PluginCardSendV1 {
   pluginId: string;
   cardId: string;
   surfaceId: string;
+  /**
+   * The values the Bot filled in, already checked against the card's declared
+   * schema. The seam binds the Card's Approvals to these, so a decision a
+   * person gives covers the values they were shown and nothing else.
+   */
+  data: Record<string, unknown>;
   /** The A2UI messages the Plugin drew, still undecoded. */
   messages: Record<string, unknown>[];
   context: ToolExecutionContext;
@@ -1384,6 +1390,7 @@ export class PluginWorkerHost {
           pluginId,
           cardId: card.id,
           surfaceId,
+          data: request.data as Record<string, unknown>,
           messages: rendered.messages,
           context,
         });

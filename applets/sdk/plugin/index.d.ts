@@ -273,6 +273,12 @@ export interface PluginContext {
      * spent, so one decision sends at most one message.
      */
     approvalId: string;
+    /**
+     * The Card that decision was given on. The Approval is bound to the
+     * surface and to the values it was showing, so a send whose message is
+     * not the one that was approved is refused.
+     */
+    surfaceId: string;
     to: string[];
     cc?: string[];
     subject: string;
