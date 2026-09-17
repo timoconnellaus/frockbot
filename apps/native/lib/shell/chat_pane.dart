@@ -116,7 +116,23 @@ class _ChatPaneState extends State<ChatPane> {
   /// or nothing while the pointer is elsewhere. The companion reads it
   /// straight into its eyes; the pane never rebuilds for a mouse move.
   final gaze = ValueNotifier<Offset?>(null);
+
+  /// Raised for a moment after any pointer down on the pane. The engine
+  /// attaches the composer's editing element in the frames after a tap, and
+  /// the companion drawing a turn of its eyes in those same frames cost the
+  /// first keystroke (skill-menu.e2e): the artboard holds still until the
+  /// field has the keys.
+  final hold = ValueNotifier<bool>(false);
+  Timer? _holdTimer;
   final _companionKey = GlobalKey();
+
+  void _pointerDown() {
+    hold.value = true;
+    _holdTimer?.cancel();
+    _holdTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) hold.value = false;
+    });
+  }
 
   void _pointerMoved(Offset global, Size pane) {
     final box = _companionKey.currentContext?.findRenderObject();
@@ -234,15 +250,20 @@ class _ChatPaneState extends State<ChatPane> {
     // the character's own square. Translucent: the region takes no pointer
     // from anything under it, the composer included.
     return LayoutBuilder(
-      builder: (context, constraints) => MouseRegion(
-        opaque: false,
-        hitTestBehavior: HitTestBehavior.translucent,
-        onHover: (event) => _pointerMoved(event.position, constraints.biggest),
-        onExit: (_) => gaze.value = null,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: readingWidth),
-            child: _column(context, c),
+      builder: (context, constraints) => Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => _pointerDown(),
+        child: MouseRegion(
+          opaque: false,
+          hitTestBehavior: HitTestBehavior.translucent,
+          onHover: (event) =>
+              _pointerMoved(event.position, constraints.biggest),
+          onExit: (_) => gaze.value = null,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: readingWidth),
+              child: _column(context, c),
+            ),
           ),
         ),
       ),
@@ -398,6 +419,7 @@ class _ChatPaneState extends State<ChatPane> {
                             primary: widget.primary,
                             enableGaze: true,
                             gaze: gaze,
+                            hold: hold,
                             motion: CharacterMotion.active,
                             activity: CharacterActivity.working,
                             working: true,
@@ -412,6 +434,7 @@ class _ChatPaneState extends State<ChatPane> {
                       primary: widget.primary,
                       enableGaze: true,
                       gaze: gaze,
+                      hold: hold,
                       // A live artboard at rest, so the eyes can follow the
                       // pointer and the character can twitch between Turns.
                       // Quiet, not active: the ticker runs only for a moment
@@ -456,6 +479,8 @@ class _ChatPaneState extends State<ChatPane> {
     editor.dispose();
     focus.dispose();
     gaze.dispose();
+    _holdTimer?.cancel();
+    hold.dispose();
     super.dispose();
   }
 }

@@ -207,6 +207,13 @@ class CharacterAvatar extends StatefulWidget {
   /// over that surface rather than only over the character's own square.
   /// Written straight into the artboard on each change; nothing rebuilds.
   final ValueListenable<Offset?>? gaze;
+
+  /// While true, the eyes may turn but the artboard is not woken to draw
+  /// them, and a moment's wake already running is cut short. The surface
+  /// raises it on a pointer down: the engine attaches a text field's editing
+  /// element in the frames after a tap, and an artboard drawing beside the
+  /// field in those frames cost the first keystroke typed into it.
+  final ValueListenable<bool>? hold;
   final bool workingRing;
   final bool working;
   final Duration tempo;
@@ -223,6 +230,7 @@ class CharacterAvatar extends StatefulWidget {
     this.motion = CharacterMotion.active,
     this.enableGaze = false,
     this.gaze,
+    this.hold,
     this.workingRing = false,
     this.working = false,
     this.tempo = thinkingBadgeDefaultTempo,
@@ -268,7 +276,22 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     super.initState();
     riveRuntimeReady.addListener(_runtimeChanged);
     widget.gaze?.addListener(_gazeChanged);
+    widget.hold?.addListener(_holdChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleQuietTwitch());
+  }
+
+  bool get _held => widget.hold?.value ?? false;
+
+  /// A hold that begins stops a moment's wake at once; one that ends draws
+  /// whatever the eyes were told meanwhile.
+  void _holdChanged() {
+    if (_held) {
+      if (_running) return;
+      _restTimer?.cancel();
+      _loaded?.controller.active = false;
+    } else if (widget.gaze?.value != null) {
+      _wake();
+    }
   }
 
   /// The surface's pointer moved: the eyes turn, and a resting artboard is
@@ -286,7 +309,7 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   /// change; the eyes are a change the state machine does not announce.
   void _wake() {
     final loaded = _loaded;
-    if (loaded == null || _running) return;
+    if (loaded == null || _running || _held) return;
     if (MediaQuery.disableAnimationsOf(context) ||
         !TickerMode.valuesOf(context).enabled) {
       return;
@@ -310,6 +333,10 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     if (!identical(oldWidget.gaze, widget.gaze)) {
       oldWidget.gaze?.removeListener(_gazeChanged);
       widget.gaze?.addListener(_gazeChanged);
+    }
+    if (!identical(oldWidget.hold, widget.hold)) {
+      oldWidget.hold?.removeListener(_holdChanged);
+      widget.hold?.addListener(_holdChanged);
     }
     if (oldWidget.characterId != widget.characterId) {
       _loaded = null;
@@ -554,6 +581,7 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   void dispose() {
     riveRuntimeReady.removeListener(_runtimeChanged);
     widget.gaze?.removeListener(_gazeChanged);
+    widget.hold?.removeListener(_holdChanged);
     _quietTimer?.cancel();
     _settleTimer?.cancel();
     _restTimer?.cancel();
