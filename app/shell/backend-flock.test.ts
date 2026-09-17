@@ -33,6 +33,8 @@ function seam(handoffDepth?: number): {
     reserveAgentTurn: () => unreachable("reserveAgentTurn"),
     releaseAgentTurn: () => unreachable("releaseAgentTurn"),
     runAgent: () => unreachable("runAgent"),
+    readBotVoice: () => unreachable("readBotVoice"),
+    updateBotVoice: () => unreachable("updateBotVoice"),
     spawnSubagent: async (request) => {
       admitted.push(request);
       return { status: "started" };
@@ -123,6 +125,8 @@ describe("a spawned hand-off", () => {
         reserveAgentTurn: () => unreachable("reserveAgentTurn"),
         releaseAgentTurn: () => unreachable("releaseAgentTurn"),
         runAgent: () => unreachable("runAgent"),
+        readBotVoice: () => unreachable("readBotVoice"),
+        updateBotVoice: () => unreachable("updateBotVoice"),
       },
     );
     expect(host.subagent).toBeUndefined();
