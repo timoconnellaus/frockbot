@@ -131,15 +131,23 @@ export function voiceCatalogAuditReportV1(audit: VoiceCatalogAuditV1): string {
   return lines.join("\n");
 }
 
-/** Reads every voice the account can reach, following its pagination. */
+/**
+ * Reads every voice the account can reach, following its pagination.
+ *
+ * The provider's list is cursor-based: each page carries the token for the
+ * next one, and a page without a token is the last.
+ */
 export async function fetchAccountVoicesV1(
   apiKey: string,
   doFetch: typeof fetch = fetch,
 ): Promise<AccountVoiceV1[]> {
   const voices: AccountVoiceV1[] = [];
-  for (let page = 0; page < 20; page += 1) {
+  let pageToken: string | undefined;
+  do {
+    const query = new URLSearchParams({ page_size: "100" });
+    if (pageToken) query.set("next_page_token", pageToken);
     const response = await doFetch(
-      `https://api.elevenlabs.io/v2/voices?page_size=100&page=${page}`,
+      `https://api.elevenlabs.io/v2/voices?${query.toString()}`,
       { headers: { "xi-api-key": apiKey } },
     );
     if (!response.ok) {
@@ -151,14 +159,15 @@ export async function fetchAccountVoicesV1(
     const body = (await response.json()) as {
       voices?: { voice_id?: string; name?: string }[];
       has_more?: boolean;
+      next_page_token?: string | null;
     };
     for (const voice of body.voices ?? []) {
       if (voice.voice_id) {
         voices.push({ voiceId: voice.voice_id, name: voice.name ?? "" });
       }
     }
-    if (!body.has_more) break;
-  }
+    pageToken = body.has_more ? (body.next_page_token ?? undefined) : undefined;
+  } while (pageToken);
   return voices;
 }
 

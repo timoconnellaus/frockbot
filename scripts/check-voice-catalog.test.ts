@@ -108,19 +108,29 @@ describe("auditing the catalog against the account", () => {
 });
 
 describe("reading the account's voices", () => {
-  test("follows pagination and keeps every page", async () => {
-    const pages = [
-      { voices: [{ voice_id: "aaa", name: "Bec" }], has_more: true },
-      { voices: [{ voice_id: "bbb", name: "Daniel" }], has_more: false },
-    ];
+  // The provider's list is cursor-based, so the second request has to carry
+  // the token the first one handed back. Driving a page number instead
+  // re-reads page one forever and silently loses every voice past the first
+  // hundred, which reads as a catalog full of unreachable ids.
+  test("follows the page token the account hands back", async () => {
+    const byToken: Record<string, unknown> = {
+      "": {
+        voices: [{ voice_id: "aaa", name: "Bec" }],
+        has_more: true,
+        next_page_token: "second",
+      },
+      second: {
+        voices: [{ voice_id: "bbb", name: "Daniel" }],
+        has_more: false,
+      },
+    };
     const asked: string[] = [];
     const voices = await fetchAccountVoicesV1("key", (async (url: string) => {
       asked.push(url);
-      return {
-        ok: true,
-        status: 200,
-        json: async () => pages[asked.length - 1],
-      };
+      const token = new URL(url).searchParams.get("next_page_token") ?? "";
+      const page = byToken[token];
+      if (!page) throw new Error(`no such page: ${token}`);
+      return { ok: true, status: 200, json: async () => page };
     }) as unknown as typeof fetch);
     expect(voices).toEqual([
       { voiceId: "aaa", name: "Bec" },
