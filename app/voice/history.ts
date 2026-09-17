@@ -191,7 +191,7 @@ export function renderVoiceBotSearchV1(
         source.results.hits.length > messages.length ||
         Boolean(source.results.nextCursor) ||
         messages.length > count,
-      source: "indexed conversation; use bot_status for current progress",
+      source: "indexed conversation; use status for current progress",
     },
     false,
   );
