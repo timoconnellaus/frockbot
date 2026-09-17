@@ -306,18 +306,34 @@ export async function validate(
         };
         live.add(kill);
         const captured: string[] = [];
-        const drained = captureOutput
-          ? Promise.all(
-              [child.stdout, child.stderr].map(async (stream) => {
-                const decoder = new TextDecoder();
-                for await (const chunk of stream as ReadableStream<Uint8Array>)
-                  captured.push(decoder.decode(chunk, { stream: true }));
-              }),
-            ).catch(() => {})
-          : undefined;
+        const readers = captureOutput
+          ? [child.stdout, child.stderr].map((stream) =>
+              (stream as ReadableStream<Uint8Array>).getReader(),
+            )
+          : [];
+        const drained = Promise.all(
+          readers.map(async (reader) => {
+            const decoder = new TextDecoder();
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) return;
+              captured.push(decoder.decode(value, { stream: true }));
+            }
+          }),
+        ).catch(() => {});
         const code = await child.exited.finally(() => live.delete(kill));
-        if (drained) {
-          await Promise.race([drained, Bun.sleep(CAPTURE_DRAIN_MS)]);
+        if (captureOutput) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            drained,
+            new Promise((resolve) => {
+              timer = setTimeout(resolve, CAPTURE_DRAIN_MS);
+            }),
+          ]);
+          clearTimeout(timer);
+          await Promise.all(
+            readers.map((reader) => reader.cancel().catch(() => {})),
+          );
           const output = captured.join("").trimEnd();
           if (output.trim())
             console.log(`\n--- ${name}: ${command.join(" ")} ---\n${output}`);
