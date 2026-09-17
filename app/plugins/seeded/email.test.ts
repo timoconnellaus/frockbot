@@ -160,8 +160,6 @@ describe("the email Plugin's draft card", () => {
       "StatusPill",
       "KeyValueRows",
       "CollapsibleText",
-      "Text",
-      "Button",
       "ApprovalActions",
     ]);
     expect(named(components, "status")).toMatchObject({
@@ -172,11 +170,9 @@ describe("the email Plugin's draft card", () => {
       { label: "To", value: "nick@example.com" },
       { label: "Cc", value: "sam@example.com" },
       { label: "Subject", value: "Re: Following up" },
+      { label: "In reply to", value: "<earlier@example.com>" },
     ]);
     expect(named(components, "body")).toMatchObject({ collapsedLines: 6 });
-    expect(named(components, "more").action).toEqual({
-      event: { name: "plugin/email/details", context: { full: true } },
-    });
 
     // The Plugin writes a placeholder; the kernel binds the real Approval.
     const bound = bindCardApprovalsV1(
@@ -231,27 +227,6 @@ describe("the email Plugin's draft card", () => {
         /is not an email address/,
       );
     }
-  });
-
-  test("the details action redraws the card with the rest of the headers", async () => {
-    const { ctx } = context();
-    await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx);
-    const pressed = await cards.draft.actions!.details!(
-      { surfaceId: SURFACE, action: "details", context: { full: true } },
-      ctx,
-    );
-    const pressedComponents = componentsOf(pressed);
-    expect(named(pressedComponents, "more-label").text).toBe("Fewer details");
-    expect(named(pressedComponents, "more").child).toBe("more-label");
-    const rows = named(pressedComponents, "rows").rows as {
-      label: string;
-    }[];
-    expect(rows.map((row) => row.label)).toEqual([
-      "To",
-      "Cc",
-      "Subject",
-      "In reply to",
-    ]);
   });
 
   test("sends once, settles into a receipt, and never sends a discarded draft", async () => {
@@ -519,6 +494,28 @@ describe("the seeded email Plugin", () => {
         schema,
       ),
     ).toThrow(/body must be at least 1 character/);
+    // The kernel's own bound on an address is 320 characters
+    // (`ISOLATE_EMAIL_LIMITS_V1.address`), so a longer one is refused when
+    // the card is drawn rather than after the person has pressed Send.
+    const overlong = `${"a".repeat(312)}@example.com`;
+    expect(overlong.length).toBeGreaterThan(320);
+    expect(() =>
+      validateAgainstJsonSchemaV1(
+        { to: [overlong], subject: draft.subject, body: draft.body },
+        schema,
+      ),
+    ).toThrow(/at most 320 characters/);
+    expect(() =>
+      validateAgainstJsonSchemaV1(
+        {
+          to: draft.to,
+          cc: [overlong],
+          subject: draft.subject,
+          body: draft.body,
+        },
+        schema,
+      ),
+    ).toThrow(/at most 320 characters/);
   });
 
   test("declares every tool the module exports, and nothing it does not", () => {
@@ -680,10 +677,6 @@ describe("every state the email card draws", () => {
       { surfaceId: SURFACE, data: draft },
       ctx,
     );
-    const expanded = await cards.draft.actions!.details!(
-      { surfaceId: SURFACE, action: "details", context: { full: true } },
-      ctx,
-    );
     await execute(
       "email_send",
       { surfaceId: SURFACE, approvalId: APPROVAL },
@@ -701,7 +694,7 @@ describe("every state the email card draws", () => {
       other.ctx,
     );
 
-    for (const state of [drafted, expanded, sent, discarded]) {
+    for (const state of [drafted, sent, discarded]) {
       for (const component of componentsOf(state)) expectConforms(component);
     }
 
@@ -729,10 +722,10 @@ describe("every state the email card draws", () => {
     ).toThrow();
     expect(() =>
       expectConforms({
-        id: "more",
-        component: "Button",
-        child: "more-label",
-        action: { name: "plugin/email/details" },
+        id: "body",
+        component: "CollapsibleText",
+        text: "line",
+        expandedLines: 6,
       } as unknown as A2uiComponentV1),
     ).toThrow();
     expect(() =>

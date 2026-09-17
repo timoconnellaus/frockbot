@@ -59,6 +59,18 @@ function lockedCost(failure: PluginFailureNoticeV1): string {
   }
 }
 
+/** The notice's title, which must not say a Turn was lost when none was. */
+function failureTitle(failure: PluginFailureNoticeV1): string {
+  switch (failure.card) {
+    case "press":
+      return "A plugin could not answer a card press";
+    case "draw":
+      return "A plugin could not draw a card";
+    default:
+      return "A plugin was skipped";
+  }
+}
+
 function phaseWords(phase: PluginFailurePhaseV1): string {
   switch (phase) {
     case "hook":
@@ -138,7 +150,7 @@ export async function notePluginFailureV1(
     ),
     runId: turn.runId,
     createdAt: now().toISOString(),
-    title: "A plugin was skipped",
+    title: failureTitle(failure),
     body: `The plugin "${failure.pluginId}" ${failureWords(failure)}: ${failure.message}. This Bot carried on without it.${
       quarantined
         ? ""

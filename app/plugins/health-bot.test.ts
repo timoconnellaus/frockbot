@@ -62,6 +62,22 @@ describe("a Plugin failing more than once in one Turn", () => {
     );
     expect(notices[0]?.body).toContain("was skipped for this Turn");
     expect(notices[1]?.body).toContain("could not draw a card");
+    // And the title says the same thing the body does: a card that could not
+    // be drawn is not a Turn the Bot went without the Plugin for.
+    expect(notices[0]?.title).toBe("A plugin was skipped");
+    expect(notices[1]?.title).toBe("A plugin could not draw a card");
+  });
+
+  test("a failed press is not titled as a lost Turn", async () => {
+    const { state, notices } = harness();
+    await notePluginFailureV1(state, TURN, {
+      pluginId: "email",
+      phase: "hook",
+      message: "the handler threw",
+      card: "press",
+    });
+    expect(notices[0]?.title).toBe("A plugin could not answer a card press");
+    expect(notices[0]?.body).toContain("could not answer a card press");
   });
 
   test("the same thing failing twice in one Turn is one notice", async () => {

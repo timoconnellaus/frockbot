@@ -158,7 +158,7 @@ function drawDraft(
   decision: PluginCardDecision;
 } {
   return {
-    messages: surface(surfaceId, draftComponents(draft, false)),
+    messages: surface(surfaceId, draftComponents(draft)),
     covers: { ...draft },
     // What the person is actually asked. The catalog's ApprovalActions holds
     // an id and two labels, so the words the Approval is recorded with are
@@ -171,7 +171,7 @@ function drawDraft(
 }
 
 /** The rows a person reads before deciding: who, and about what. */
-function addressRows(draft: Draft, full: boolean): unknown {
+function addressRows(draft: Draft): unknown {
   const rows: { label: string; value: string }[] = [
     { label: "To", value: draft.to.join(", ") },
   ];
@@ -179,48 +179,18 @@ function addressRows(draft: Draft, full: boolean): unknown {
     rows.push({ label: "Cc", value: draft.cc.join(", ") });
   }
   rows.push({ label: "Subject", value: draft.subject });
-  if (full && draft.inReplyTo) {
+  if (draft.inReplyTo) {
     rows.push({ label: "In reply to", value: draft.inReplyTo });
   }
   return { id: "rows", component: "KeyValueRows", rows };
 }
 
-/**
- * The components a "More details" press changes, and only those: a press
- * redraws what it was about, never the ApprovalActions, whose approvalId the
- * kernel bound when the card was sent and which the Plugin cannot mint again.
- * The catalog's Button carries no label of its own — it names a child — so
- * the word on it is a Text the press redraws beside the rows.
- */
-function detailComponents(draft: Draft, full: boolean): unknown[] {
-  return [
-    addressRows(draft, full),
-    {
-      id: "more-label",
-      component: "Text",
-      text: full ? "Fewer details" : "More details",
-    },
-    {
-      id: "more",
-      component: "Button",
-      child: "more-label",
-      variant: "borderless",
-      // A press the kernel routes to this Plugin's own handler, which answers
-      // with the rows again. Costs no Turn, which is the point of the route.
-      action: {
-        event: { name: `plugin/email/details`, context: { full: !full } },
-      },
-    },
-  ];
-}
-
-function draftComponents(draft: Draft, full: boolean): unknown[] {
-  const [rows, moreLabel, more] = detailComponents(draft, full);
+function draftComponents(draft: Draft): unknown[] {
   return [
     {
       id: "root",
       component: "Column",
-      children: ["status", "rows", "body", "more", "actions"],
+      children: ["status", "rows", "body", "actions"],
     },
     {
       id: "status",
@@ -229,15 +199,13 @@ function draftComponents(draft: Draft, full: boolean): unknown[] {
       // The catalog's tone for a card waiting on the person.
       tone: "ready",
     },
-    rows,
+    addressRows(draft),
     {
       id: "body",
       component: "CollapsibleText",
       text: draft.body,
       collapsedLines: 6,
     },
-    moreLabel,
-    more,
     {
       id: "actions",
       component: "ApprovalActions",
@@ -314,25 +282,6 @@ const draftCard: PluginCard = {
     }
     await writeState(ctx, surfaceId, { status: "drafted", draft });
     return drawDraft(surfaceId, draft);
-  },
-  actions: {
-    /** "More details": the same card, with the rest of the headers on it. */
-    async details({ surfaceId, context }, ctx) {
-      const state = await readState(ctx, surfaceId);
-      if (!state || state.status !== "drafted") {
-        return { drop: true, reason: "this draft has already settled" };
-      }
-      const full = context?.full === true;
-      return [
-        {
-          version: "v1.0",
-          updateComponents: {
-            surfaceId,
-            components: detailComponents(state.draft, full),
-          },
-        },
-      ];
-    },
   },
 };
 
