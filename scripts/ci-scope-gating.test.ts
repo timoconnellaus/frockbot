@@ -13,16 +13,19 @@
 // loosened gate are both invisible to a test that only looks for a fragment of
 // the text, and both are exactly what this file exists to catch.
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { SLOW_TIER_IRRELEVANT_V1 } from "./ci-change-scope";
 
 interface Job {
   needs?: string | string[];
   if?: string;
+  steps?: { run?: string }[];
 }
+const root = resolve(import.meta.dirname, "..");
 const workflow = Bun.YAML.parse(
   readFileSync(
-    resolve(import.meta.dirname, "..", ".github", "workflows", "main.yml"),
+    join(root, ".github", "workflows", "main.yml"),
     "utf8",
   ) as string,
 ) as { jobs: Record<string, Job> };
@@ -194,6 +197,87 @@ test("the fast tier is never skipped", () => {
   // decision can excuse from the slow tier. It owes every push.
   expect(needs("validate")).toEqual([]);
   expect(workflow.jobs.validate?.if).toBeUndefined();
+});
+
+/** Root `package.json` scripts, which is where a job's `run` line delegates. */
+const rootScripts: Record<string, string> =
+  JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts ?? {};
+
+/**
+ * A command with every root script it delegates to, at any depth, folded into
+ * it — so what a step ultimately builds is read from `package.json` rather
+ * than guessed from the workflow's own wording.
+ */
+function resolveCommand(command: string, seen = new Set<string>()): string {
+  let resolved = command;
+  for (const word of command.match(/[\w:@./-]+/g) ?? []) {
+    const body = rootScripts[word];
+    if (body === undefined || seen.has(word)) continue;
+    seen.add(word);
+    resolved += ` ${resolveCommand(body, seen)}`;
+  }
+  return resolved;
+}
+
+/** Whether any of `job`'s steps ends up building the workspace named `pkg`. */
+function builds(job: string, pkg: string): boolean {
+  return (workflow.jobs[job]?.steps ?? []).some((step) =>
+    step.run === undefined ? false : resolveCommand(step.run).includes(pkg),
+  );
+}
+
+/**
+ * Whether Actions would still reach `job` on a push the scope decision
+ * excused: its own condition holds, and nothing it waits on is a slow-tier job
+ * that the same decision skipped.
+ */
+function survivesAnExcusedScope(job: string): boolean {
+  const state: RunState = {
+    results: Object.fromEntries(
+      Object.keys(workflow.jobs).map((name) => [
+        name,
+        SLOW_TIER.includes(name) ? "skipped" : "success",
+      ]),
+    ),
+    outputs: { scope: { "slow-tier": "false" } },
+    github: { event_name: "push", ref: "refs/heads/main" },
+    vars: { DEPLOY_STAGING: "true" },
+  };
+  return (
+    runs(job, state) &&
+    needs(job).every(
+      (need) => !SLOW_TIER.includes(need) && survivesAnExcusedScope(need),
+    )
+  );
+}
+
+test("every workspace the tier excuses is still bundled by a job that runs", () => {
+  // The excused workspaces are the only Workers whose build no slow-tier job
+  // performs, so whichever job bundles them has to be one an excused push
+  // still reaches. Moving those bundles under the scope gate would leave them
+  // built by nobody for precisely the pushes that touch only them.
+  const excused = SLOW_TIER_IRRELEVANT_V1.map((prefix) =>
+    join(root, prefix, "package.json"),
+  )
+    .filter((manifest) => existsSync(manifest))
+    .map(
+      (manifest) => JSON.parse(readFileSync(manifest, "utf8")).name as string,
+    );
+  expect(excused.length).toBe(2);
+
+  for (const pkg of excused) {
+    const builders = Object.keys(workflow.jobs).filter((job) =>
+      builds(job, pkg),
+    );
+    expect({ pkg, bundled: builders.length > 0 }).toEqual({
+      pkg,
+      bundled: true,
+    });
+    expect({
+      pkg,
+      bundledWhenExcused: builders.some(survivesAnExcusedScope),
+    }).toEqual({ pkg, bundledWhenExcused: true });
+  }
 });
 
 test("a job that ships runs when every suite it needs is green", () => {

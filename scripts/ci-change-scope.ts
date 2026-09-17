@@ -12,7 +12,9 @@
 // The fast tier is not negotiable and is not decided here. `validate` runs
 // `format:check`, `typecheck` and the unit suite, and all three cover the
 // marketing and admin workspaces like any other — the formatter reads the
-// whole repository and the typechecker walks every workspace package.
+// whole repository and the typechecker walks every workspace package. It also
+// bundles those two sites, for the same reason: their only build must belong
+// to the job a skip cannot reach.
 //
 // The direction of the default is the point. A path nobody has classified
 // obliges the slow tier, so adding a directory, or a workspace, or a new kind
@@ -21,6 +23,11 @@
 
 import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
+
+// Every call here is about `root`, so inherited repository pointers must not
+// redirect it. That filter is one invariant with one definition, in the
+// validator, which learned it the hard way from its own hook and fixtures.
+import { GIT_ENV } from "./validate";
 
 /**
  * Directories whose contents cannot change what the slow tier asserts.
@@ -87,15 +94,6 @@ function parsePathsV1(input: string): string[] {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 }
-
-// Every call here is about `root`, so inherited repository pointers must not
-// redirect it: git exports GIT_DIR and friends to hooks, and a hook is one of
-// the places these tests run from.
-export const GIT_ENV: Record<string, string | undefined> = Object.fromEntries(
-  Object.entries(process.env).filter(
-    ([name]): boolean => !name.startsWith("GIT_") || name === "GIT_EXEC_PATH",
-  ) as [string, string | undefined][],
-);
 
 function git(root: string, args: string[]): string | null {
   const result = spawnSync("git", args, {

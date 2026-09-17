@@ -2,11 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import {
-  GIT_ENV,
-  scopeDecisionV1,
-  slowTierRequiredV1,
-} from "./ci-change-scope";
+import { scopeDecisionV1, slowTierRequiredV1 } from "./ci-change-scope";
+import { GIT_ENV } from "./validate";
 
 test("a push that only touches a separately deployed site skips the slow tier", () => {
   expect(
