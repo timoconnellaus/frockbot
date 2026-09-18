@@ -1441,9 +1441,21 @@
     color: var(--pink-dark);
   }
   /* A sub-group inside a kind: one quiet uppercase line. */
+  /* The kind row and the sub-group row stack under the platform header, each
+     a fixed height so the offsets below are exact. */
+  .reach-grid {
+    --reach-head: 58px;
+    --reach-group: 44px;
+  }
   .reach-grid .reach-sub th {
-    padding: 18px 0 6px;
+    position: sticky;
+    top: calc(var(--reach-head) + var(--reach-group));
+    z-index: 2;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 10px 0 4px;
     border-bottom: 1px solid var(--line);
+    background: #fff;
     text-align: left;
     font-size: 0.68rem;
     font-weight: 700;
@@ -1452,12 +1464,24 @@
     color: var(--muted);
   }
   .reach-grid .reach-group-row th {
-    padding: 26px 0 10px;
+    position: sticky;
+    top: var(--reach-head);
+    z-index: 2;
+    height: var(--reach-group);
+    box-sizing: border-box;
+    padding: 10px 0 8px;
     border-bottom: 1px solid var(--ink);
+    background: #fff;
     text-align: left;
     font-weight: 500;
     color: var(--muted);
     font-size: 0.82rem;
+    white-space: nowrap;
+  }
+  /* Air above each kind, outside the sticky cell so it doesn't ride along. */
+  .reach-grid .reach-group + .reach-group .reach-group-row th {
+    border-top: 18px solid #fff;
+    height: calc(var(--reach-group) + 18px);
   }
   .reach-grid .reach-group-row .reach-kind {
     margin-right: 12px;
@@ -1468,7 +1492,10 @@
     min-width: 72px;
   }
   .reach-grid thead th {
+    height: var(--reach-head);
+    box-sizing: border-box;
     line-height: 1.2;
+    vertical-align: bottom;
   }
   .reach-grid td svg {
     width: 18px;

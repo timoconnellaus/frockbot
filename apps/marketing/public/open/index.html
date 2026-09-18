@@ -175,7 +175,7 @@
           </div>
           <figure class="open-figure" aria-labelledby="arch-caption">
             <svg
-              viewBox="0 0 1100 600"
+              viewBox="0 0 1100 676"
               role="img"
               aria-labelledby="arch-caption"
               font-family="Manrope, system-ui, sans-serif"
@@ -342,7 +342,7 @@
                 x="380"
                 y="30"
                 width="380"
-                height="550"
+                height="544"
                 rx="20"
                 fill="#faf7f2"
                 stroke="#e6e1da"
@@ -542,6 +542,83 @@
                   nothing it wasn't granted
                 </text>
               </g>
+              <!-- your devices, as hooks -->
+              <line
+                x1="530"
+                y1="612"
+                x2="530"
+                y2="574"
+                stroke="#ec386b"
+                stroke-width="2"
+                marker-end="url(#arr-pink)"
+              />
+              <text
+                x="518"
+                y="597"
+                text-anchor="end"
+                font-size="11"
+                font-weight="700"
+                fill="#ec386b"
+              >
+                triggers · entries · handler questions
+              </text>
+              <line
+                x1="610"
+                y1="574"
+                x2="610"
+                y2="612"
+                stroke="#ec386b"
+                stroke-width="2"
+                marker-end="url(#arr-pink)"
+              />
+              <text
+                x="622"
+                y="597"
+                font-size="11"
+                font-weight="700"
+                fill="#ec386b"
+              >
+                slots to draw · actions to run
+              </text>
+              <rect
+                x="400"
+                y="612"
+                width="340"
+                height="52"
+                rx="12"
+                fill="#faf7f2"
+                stroke="#e6e1da"
+              />
+              <text
+                x="416"
+                y="632"
+                font-size="10.5"
+                font-weight="700"
+                fill="#6d6974"
+                letter-spacing="1.2"
+              >
+                YOUR DEVICES
+              </text>
+              <text
+                x="416"
+                y="652"
+                font-size="11.5"
+                font-weight="600"
+                fill="#1e1d27"
+              >
+                Phone · Watch · Mac · Windows · Linux · Browser extension
+              </text>
+              <text
+                x="724"
+                y="632"
+                text-anchor="end"
+                font-size="10.5"
+                font-weight="500"
+                fill="#6d6974"
+              >
+                no plugin code runs here
+              </text>
+
               <!-- right column -->
               <g font-size="14" font-weight="700" fill="#1e1d27">
                 <rect
@@ -697,7 +774,10 @@
               reaches storage, memory, the model and the network through
               loopback stubs the Bot mints for that Turn, and only the hosts it
               declared. A plugin that throws or overruns is skipped and the Turn
-              carries on.
+              carries on. Your devices attach to the same worker: a phone, a
+              watch, a Mac or a browser extension raises a trigger, an entry or
+              a handler's question up to it, and gets back a surface to draw or
+              an action to run. Plugin code never runs on the device.
             </figcaption>
           </figure>
         </div>
