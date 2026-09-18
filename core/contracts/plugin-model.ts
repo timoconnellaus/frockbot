@@ -50,10 +50,13 @@ export interface PluginModelProviderV1 {
 /**
  * What a person is told when a Bot's model is served by a provider Plugin this
  * account does not hold. It is user-facing copy, in the register the model
- * deadlines use: what happened, and what to do about it.
+ * deadlines use: what happened, and what to do about it. The words are the
+ * product's own — "model", "Plugin", "Models" — because the sentence reaches a
+ * chat bubble, where the machine's vocabulary (`runFailureCopyV1` forbids it)
+ * never does.
  */
 export const PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1 =
-  "This Bot's model runs through a provider Plugin that is not installed on this account, so the reply could not be started.";
+  "This Bot's model needs a Plugin this account has not installed, so the reply could not start. Add it in Models, or choose a different model.";
 
 /**
  * The longest silence a model invocation may name between two events. It is

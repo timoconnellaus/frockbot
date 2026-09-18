@@ -12,6 +12,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   encodePluginModelEventLineV1,
+  MODEL_OUTCOME_UNCERTAIN_REASON_V1,
   ModelOutcomeUncertainErrorV1,
   ModelProviderFailureError,
   type LlmStreamEvent,
@@ -389,6 +390,11 @@ describe("what the adapter believes of a failure", () => {
     );
     expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
     expect(outcome.error).not.toBeInstanceOf(ModelProviderFailureError);
+    // The sentence a person reads is the product's own, and the Plugin's
+    // words about why its answer died stay after it as the diagnostic.
+    const message = (outcome.error as Error).message;
+    expect(message.startsWith(MODEL_OUTCOME_UNCERTAIN_REASON_V1)).toBe(true);
+    expect(message).toContain("a refused key");
   });
 
   test("keeps a refusal the host made before the fetch, whatever the Plugin states", async () => {
@@ -438,6 +444,11 @@ describe("what the adapter believes of a failure", () => {
     );
     expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
     expect(outcome.error).not.toBeInstanceOf(ModelProviderFailureError);
+    // The person is told the call went out and the answer was lost; what the
+    // host recorded of it stays in the same text, after the sentence.
+    const message = (outcome.error as Error).message;
+    expect(message.startsWith(MODEL_OUTCOME_UNCERTAIN_REASON_V1)).toBe(true);
+    expect(message).toContain("not sent twice");
   });
 
   test("an accounted effect's replay stays the host's definitive refusal", async () => {

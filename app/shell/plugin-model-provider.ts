@@ -39,6 +39,7 @@ import {
 import {
   MODEL_FIRST_BYTE_DEADLINE_MS_V1,
   MODEL_IDLE_DEADLINE_MS_V1,
+  MODEL_OUTCOME_UNCERTAIN_REASON_V1,
   ModelRequestDeadlineError,
   MODEL_PROVIDER_FAILURE_REASON_MAX_LENGTH_V1,
 } from "@frockbot/core/contracts";
@@ -651,7 +652,7 @@ function classifyFailureV1(
     // Nothing was sent here, but the earlier call may have reached the
     // provider and billed: the attempt is the uncertain outcome the kernel
     // settles with the estimate, never a clean failure whose cost vanished.
-    return new ModelOutcomeUncertainErrorV1(reason);
+    return uncertainOutcomeV1(reason);
   }
   if (!dispatch.sent()) {
     // Nothing left the host: there is nothing that could have billed, and the
@@ -668,5 +669,27 @@ function classifyFailureV1(
   // classified provider failure — the kernel's own accounting treats one of
   // those as a call that never happened — and it is not retried: the kernel
   // settles it, records the estimate, and never dispatches this effect again.
-  return new ModelOutcomeUncertainErrorV1(reason);
+  return uncertainOutcomeV1(reason);
+}
+
+/**
+ * The uncertain outcome with the sentence a person reads first, and the host's
+ * own account of what it saw after it.
+ *
+ * A failure's stored text is a diagnostic, and the projection hands a person
+ * only a sentence it recognises (`runFailureCopyV1`). A Plugin's words about
+ * why its answer died are prose this deployment did not write, and the
+ * transport's account of a 5xx or of a refused replay is internals; neither
+ * belongs in a bubble. So the product's own sentence for an outcome the person
+ * can act on goes first — the call went out and its answer was lost — and the
+ * diagnostic follows it, where the debug surface still reads exactly what the
+ * host observed.
+ */
+function uncertainOutcomeV1(diagnostic: string): ModelOutcomeUncertainErrorV1 {
+  const detail = diagnostic.trim();
+  return new ModelOutcomeUncertainErrorV1(
+    detail.length === 0 || detail === MODEL_OUTCOME_UNCERTAIN_REASON_V1
+      ? MODEL_OUTCOME_UNCERTAIN_REASON_V1
+      : `${MODEL_OUTCOME_UNCERTAIN_REASON_V1} The host recorded: ${detail}`,
+  );
 }

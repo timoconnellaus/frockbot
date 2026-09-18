@@ -21,6 +21,7 @@ import {
 } from "./harness/miniflare.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
 import { flockRevision } from "./provision-bot.ts";
+import { MODEL_OUTCOME_UNCERTAIN_REASON_V1 } from "@frockbot/core/contracts";
 import { PLUGIN_SERVED_PROVIDERS_V1 } from "@frockbot/providers/catalog/definition";
 import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "@frockbot/app/plugins/catalog";
 
@@ -406,6 +407,10 @@ describe("a Bot whose model runs through a provider Plugin", () => {
     expect(usage?.estimated).toBe(true);
     // ...and the one request id is one upstream call.
     expect(await deepseekCalls()).toHaveLength(1);
+    // The person is told the call went out and the answer was lost — the
+    // product's sentence, with the host's own account of what it saw after it
+    // for the debug surface.
+    expect(result.failure).toContain(MODEL_OUTCOME_UNCERTAIN_REASON_V1);
   });
 
   test("a refused key is reported as a provider failure, once", async () => {
