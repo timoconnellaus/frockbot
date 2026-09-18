@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ISOLATE_CONTRACT_VERSION,
+  servedPluginContractVersionsV1,
+} from "@frockbot/core/contracts";
+import {
   bootstrapGeneration,
   DurableCompositionStore,
 } from "@frockbot/core/durable";
@@ -22,10 +26,14 @@ function store(storage = new MemoryStorage()) {
   });
 }
 
+/** The contract a deployment that has moved on no longer serves. */
+const RETIRED_CONTRACT_V1 = servedPluginContractVersionsV1()[0]! - 1;
+
 function seeded(
   pluginId: string,
   contentHash = "a".repeat(64),
   seed: "default-on" | "installable" = "default-on",
+  contractVersion = ISOLATE_CONTRACT_VERSION - 1,
 ): SeededPluginV1 {
   return decodeSeededPluginV1({
     pluginId,
@@ -42,7 +50,7 @@ function seeded(
       id: pluginId,
       displayName: pluginId,
       version: "1.0.0",
-      contractVersion: 4,
+      contractVersion,
       tools: [{ name: "ping", description: "Pings", inputSchema: {} }],
       hooks: [],
       grants: [],
@@ -107,6 +115,60 @@ describe("reconciling the deployment's catalog into a User's Composition", () =>
     expect(removed?.members).toEqual([]);
   });
 
+  test("a descriptor the catalog moved on reaches the next read, at the same bytes", async () => {
+    const subject = store();
+    // The deployment moved a Plugin's descriptor to a new contract without
+    // touching its module, so the account carries the artifact it will always
+    // carry and a descriptor the runtime refuses.
+    await reconcileSeededCompositionV1({
+      store: subject,
+      userId: "user-1",
+      seeded: [
+        seeded("weather", "a".repeat(64), "default-on", RETIRED_CONTRACT_V1),
+      ],
+      now: new Date("2026-09-12T00:00:00.000Z"),
+    });
+    const stale = (await subject.current()).members[0]!;
+    expect(stale.artifact.contentHash).toBe("a".repeat(64));
+    expect(servedPluginContractVersionsV1()).not.toContain(
+      stale.descriptor.contractVersion,
+    );
+    const repaired = await reconcileSeededCompositionV1({
+      store: subject,
+      userId: "user-1",
+      seeded: [
+        seeded(
+          "weather",
+          "a".repeat(64),
+          "default-on",
+          ISOLATE_CONTRACT_VERSION,
+        ),
+      ],
+      now: new Date("2026-09-12T00:01:00.000Z"),
+    });
+    const carried = repaired!.members[0]!;
+    expect(carried.artifact.contentHash).toBe("a".repeat(64));
+    expect(servedPluginContractVersionsV1()).toContain(
+      carried.descriptor.contractVersion,
+    );
+    // And it holds still on the catalog it just followed: the descriptor is
+    // compared, not re-proposed on every read.
+    expect(
+      await reconcileSeededCompositionV1({
+        store: subject,
+        userId: "user-1",
+        seeded: [
+          seeded(
+            "weather",
+            "a".repeat(64),
+            "default-on",
+            ISOLATE_CONTRACT_VERSION,
+          ),
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
   test("keeps what a Bot wrote beside the seeded set", async () => {
     const subject = store();
     const bootstrap = await subject.current();
@@ -160,7 +222,10 @@ describe("reconciling the deployment's catalog into a User's Composition", () =>
 
 describe("installing a provider Plugin from the account's own command", () => {
   /** The catalog entry an install of `provider-deepseek` would carry. */
-  function providerPlugin(contentHash = "b".repeat(64)): SeededPluginV1 {
+  function providerPlugin(
+    contentHash = "b".repeat(64),
+    contractVersion = ISOLATE_CONTRACT_VERSION - 1,
+  ): SeededPluginV1 {
     return decodeSeededPluginV1({
       pluginId: "deepseek",
       displayName: "DeepSeek",
@@ -176,7 +241,7 @@ describe("installing a provider Plugin from the account's own command", () => {
         id: "deepseek",
         displayName: "DeepSeek",
         version: "1.0.0",
-        contractVersion: 6,
+        contractVersion,
         tools: [],
         hooks: [],
         grants: [],
@@ -245,6 +310,31 @@ describe("installing a provider Plugin from the account's own command", () => {
       after.current.members.find((member) => member.packageId === "deepseek")!
         .artifact.contentHash,
     ).toBe("c".repeat(64));
+  });
+
+  test("an install follows a descriptor the deployment moved on, at the same bytes", async () => {
+    const storage = new MemoryStorage();
+    const before = await read(
+      storage,
+      [providerPlugin("b".repeat(64), RETIRED_CONTRACT_V1)],
+      ["provider-deepseek"],
+    );
+    const stale = before.current.members.find(
+      (member) => member.packageId === "deepseek",
+    )!;
+    expect(stale.artifact.contentHash).toBe("b".repeat(64));
+    expect(servedPluginContractVersionsV1()).not.toContain(
+      stale.descriptor.contractVersion,
+    );
+    const after = await read(
+      storage,
+      [providerPlugin("b".repeat(64), ISOLATE_CONTRACT_VERSION)],
+      ["provider-deepseek"],
+    );
+    expect(servedPluginContractVersionsV1()).toContain(
+      after.current.members.find((member) => member.packageId === "deepseek")!
+        .descriptor.contractVersion,
+    );
   });
 
   test("installation leaves the seeded set alone", async () => {

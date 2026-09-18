@@ -6,6 +6,7 @@
 // This module is the User half: the store over the User object's storage and
 // the RPC surface a Bot reaches it through. Nothing here knows a Bot's
 // identity beyond the User it belongs to.
+import { canonicalJson } from "@frockbot/core/contracts";
 import {
   bootstrapGeneration,
   compositionArtifactSetHashV1,
@@ -188,7 +189,28 @@ function nextCreatedAtV1(
   return new Date(at).toISOString();
 }
 
-/** What a seeded member is compared by: the artifact the catalog ships now. */
+/**
+ * Whether a member is the one a catalog entry ships: the same artifact and the
+ * same descriptor, the two things a member is beside its provenance.
+ *
+ * The descriptor is not decoration. The runtime reads the contract version,
+ * the grants and the slots off the member, and a Bot reads the Skills off it,
+ * so a catalog entry that moved any of them must reach an account still
+ * carrying the old descriptor — even when the module bytes are untouched, as
+ * they are when only the descriptor moved.
+ */
+function memberShipsFromCatalogV1(
+  member: CompositionMemberV1,
+  plugin: SeededPluginV1,
+): boolean {
+  return (
+    member.packageId === plugin.pluginId &&
+    canonicalJson(member.artifact) === canonicalJson(plugin.artifact) &&
+    canonicalJson(member.descriptor) === canonicalJson(plugin.descriptor)
+  );
+}
+
+/** Whether the seeded set an account carries is the one the catalog ships. */
 function seededDiffersV1(
   current: readonly CompositionMemberV1[],
   seeded: readonly SeededPluginV1[],
@@ -199,11 +221,7 @@ function seededDiffersV1(
     const member = carried.find(
       (candidate) => candidate.packageId === plugin.pluginId,
     );
-    return (
-      !member ||
-      member.artifact.contentHash !== plugin.artifact.contentHash ||
-      member.version !== plugin.descriptor.version
-    );
+    return !member || !memberShipsFromCatalogV1(member, plugin);
   });
 }
 
@@ -246,12 +264,7 @@ export async function reconcileInstalledProviderPluginsV1(input: {
     const settled =
       carried.length === wanted.length &&
       wanted.every((plugin) =>
-        carried.some(
-          (member) =>
-            member.packageId === plugin.pluginId &&
-            member.version === plugin.descriptor.version &&
-            member.artifact.contentHash === plugin.artifact.contentHash,
-        ),
+        carried.some((member) => memberShipsFromCatalogV1(member, plugin)),
       );
     if (settled) return undefined;
     const createdAt = nextCreatedAtV1(
