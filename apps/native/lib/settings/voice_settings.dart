@@ -34,6 +34,7 @@ Widget botVoiceRow(
   required BotSettingsController controller,
   String? characterId,
   String? primary,
+  VoidCallback? onOpen,
 }) {
   final voice = resolveBotVoiceV1(
     chosen: controller.voice,
@@ -45,15 +46,17 @@ Widget botVoiceRow(
       icon: Icons.graphic_eq_rounded,
       title: 'Voice',
       subtitle: voiceSummaryLineV1(voice),
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => BotVoicePage(
-            controller: controller,
-            characterId: characterId,
-            primary: primary,
+      onTap:
+          onOpen ??
+          () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => BotVoicePage(
+                controller: controller,
+                characterId: characterId,
+                primary: primary,
+              ),
+            ),
           ),
-        ),
-      ),
     ),
   );
 }
@@ -62,11 +65,15 @@ class BotVoicePage extends StatefulWidget {
   final BotSettingsController controller;
   final String? characterId;
   final String? primary;
+
+  /// Off inside the panel beside the conversation, which names it already.
+  final bool chrome;
   const BotVoicePage({
     super.key,
     required this.controller,
     this.characterId,
     this.primary,
+    this.chrome = true,
   });
 
   @override
@@ -121,9 +128,8 @@ class _BotVoicePageState extends State<BotVoicePage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: DesktopHeader(child: AppBar(title: const Text('Voice'))),
-    body: AnimatedBuilder(
+  Widget build(BuildContext context) {
+    final body = AnimatedBuilder(
       animation: state,
       builder: (context, _) {
         final voice = _voice;
@@ -322,8 +328,13 @@ class _BotVoicePageState extends State<BotVoicePage> {
           ),
         );
       },
-    ),
-  );
+    );
+    if (!widget.chrome) return body;
+    return Scaffold(
+      appBar: DesktopHeader(child: AppBar(title: const Text('Voice'))),
+      body: body,
+    );
+  }
 
   Widget _value(BuildContext context, String text) => ConstrainedBox(
     constraints: const BoxConstraints(maxWidth: 190),

@@ -267,6 +267,10 @@ void main() {
           tester.getTopLeft(byIdentifier(VoiceIds.headerPill)).dx,
           greaterThan(desktopTrafficLightLeading),
         );
+        expect(
+          tester.getTopLeft(find.text('Bob')).dy,
+          lessThan(desktopTitleBarBand),
+        );
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
@@ -304,6 +308,36 @@ void main() {
         );
         await tester.pump();
         expect(tester.getTopLeft(find.text('Bob')).dx, 14);
+        expect(
+          tester.getTopLeft(find.text('Bob')).dy,
+          lessThan(desktopTitleBarBand),
+        );
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  testWidgets(
+    'on a Mac a phone conversation header sits below the traffic lights',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: const Scaffold(appBar: ChatHeader(name: 'Bob', phone: true)),
+          ),
+        );
+        await tester.pump();
+        expect(
+          tester.getTopLeft(find.text('Bob')).dy,
+          greaterThanOrEqualTo(desktopTitleBarBand),
+        );
+        expect(
+          tester.getTopLeft(find.text('Bob')).dx,
+          lessThan(desktopTrafficLightLeading),
+        );
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }

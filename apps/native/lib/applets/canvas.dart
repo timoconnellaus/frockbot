@@ -588,6 +588,11 @@ class _AppletCanvasState extends State<AppletCanvas> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // A full-window Mac page sits below the traffic lights: extra
+              // top space, same surface, no divider. The call is the one
+              // header that insets instead.
+              if (desktopTitleBarless)
+                const SizedBox(height: desktopTitleBarBand),
               // The Turn's own signal, across the top of the panel: the canvas
               // says the Bot is working with the same signal the conversation
               // does, rather than inventing a second one.
@@ -664,12 +669,7 @@ class _AppletCanvasState extends State<AppletCanvas> {
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 52),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          desktopClearsTrafficLights(context) ? desktopTrafficLightLeading : 4,
-          0,
-          4,
-          0,
-        ),
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
         child: Row(
           children: [
             identified(

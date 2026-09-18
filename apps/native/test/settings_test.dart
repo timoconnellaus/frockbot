@@ -9,6 +9,7 @@ import 'package:frockbot_native/settings/controller.dart';
 import 'package:frockbot_native/settings/document.dart';
 import 'package:frockbot_native/settings/model_picker.dart';
 import 'package:frockbot_native/settings/page.dart';
+import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/theme/frock_theme.dart';
 
@@ -319,19 +320,33 @@ void main() {
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      final store = MemoryStore();
-      final api = SettingsApi(store, (path, body) async => document());
-      await tester.pumpWidget(app(store, api));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-      for (final control in [
-        find.byType(BackButton),
-        find.text('Personal details'),
-        find.byTooltip('Refresh settings'),
-      ]) {
-        expect(tester.getTopLeft(control).dy, lessThan(kToolbarHeight));
+      try {
+        final store = MemoryStore();
+        final api = SettingsApi(store, (path, body) async => document());
+        await tester.pumpWidget(app(store, api));
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        for (final control in [
+          find.byType(BackButton),
+          find.text('Personal details'),
+          find.byTooltip('Refresh settings'),
+        ]) {
+          expect(
+            tester.getTopLeft(control).dy,
+            greaterThanOrEqualTo(desktopTitleBarBand),
+          );
+          expect(
+            tester.getTopLeft(control).dy,
+            lessThan(kToolbarHeight + desktopTitleBarBand),
+          );
+          expect(
+            tester.getTopLeft(control).dx,
+            lessThan(desktopTrafficLightLeading),
+          );
+        }
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
       }
-      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets('adds nothing on a phone', (tester) async {

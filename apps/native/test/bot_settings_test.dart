@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/settings/bot_settings.dart';
+import 'package:frockbot_native/settings/voice_settings.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -77,6 +78,7 @@ Future<void> open(
   BotSettingsController state, {
   void Function(SidebarProfile profile)? onPredict,
   VoidCallback? onOpenPlugins,
+  VoidCallback? onOpenVoice,
 }) async {
   tester.view.physicalSize = const Size(390, 2200);
   tester.view.devicePixelRatio = 1;
@@ -90,6 +92,7 @@ Future<void> open(
             controller: state,
             onPredict: onPredict,
             onOpenPlugins: onOpenPlugins,
+            onOpenVoice: onOpenVoice,
           ),
         ),
       ),
@@ -157,6 +160,36 @@ void main() {
     await open(tester, state, onOpenPlugins: () {});
     expect(find.text('CAPABILITIES'), findsOneWidget);
     expect(find.text('2 on · Web, Routines'), findsOneWidget);
+    state.dispose();
+  });
+
+  testWidgets('the Voice row opens the host rather than pushing a page', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (path.startsWith('/api/settings')) return account();
+        if (path.endsWith('/plugins')) {
+          return {
+            'schemaVersion': 1,
+            'botId': 'alpha',
+            'revision': 0,
+            'plugins': <Object>[],
+          };
+        }
+        return botSettings();
+      }),
+      'alpha',
+    );
+    var opened = 0;
+    await open(tester, state, onOpenVoice: () => opened += 1);
+    await tester.ensureVisible(byIdentifier(VoiceIds.settingsRow));
+    await tester.tap(byIdentifier(VoiceIds.settingsRow));
+    await tester.pumpAndSettle();
+    expect(opened, 1);
+    expect(find.byType(BotVoicePage), findsNothing);
+    expect(byIdentifier(VoiceIds.settings), findsNothing);
     state.dispose();
   });
 

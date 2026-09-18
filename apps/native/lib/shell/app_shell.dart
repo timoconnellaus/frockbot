@@ -45,6 +45,7 @@ import '../settings/credit.dart';
 import '../settings/bot_quick_writes.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
+import '../settings/voice_settings.dart';
 import '../templates/page.dart';
 import '../theme/rows.dart';
 import '../update/app_version.dart';
@@ -970,6 +971,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
       label: 'Plugins',
     );
+    slots.register(
+      ShellSlot.rightPanel,
+      'voice',
+      (context) => ListenableBuilder(
+        listenable: avatarRevision,
+        builder: (context, _) => BotVoicePage(
+          controller: controller,
+          characterId: _background(botId),
+          primary: _primary(botId),
+          chrome: false,
+        ),
+      ),
+      label: 'Voice',
+    );
     appletCanvas?.dispose();
     computer?.dispose();
     appletCanvas = null;
@@ -1575,6 +1590,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   primary: _primary(botId),
                   onEditAvatar: () => unawaited(_editAvatar(botId, name)),
                   onOpenPlugins: () => _openPanel('plugins', push: true),
+                  onOpenVoice: () => _openPanel('voice', push: true),
                   dangerZone: _dangerZone(botId, name),
                   sections: _packageSettings(botId),
                 ),
@@ -1946,6 +1962,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     if (controller == null) return;
+    if (key == 'voice') {
+      _push(
+        BotVoicePage(
+          controller: controller,
+          characterId: _background(bot.botId.value),
+          primary: _primary(bot.botId.value),
+        ),
+      );
+      return;
+    }
     if (key == 'bot-settings') {
       _push(
         Scaffold(

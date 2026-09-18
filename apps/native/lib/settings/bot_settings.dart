@@ -527,6 +527,11 @@ class BotSettingsView extends StatefulWidget {
   /// what is on and the way in, and the switches live there.
   final VoidCallback? onOpenPlugins;
 
+  /// Opens this Bot's Voice settings. On a desk that is the panel beside the
+  /// conversation; on a phone it is a page. Absent, the row pushes the page
+  /// itself — tests, and any host that has not wired a slot.
+  final VoidCallback? onOpenVoice;
+
   /// Archiving, restoring and deleting belong to the Flock, whose directory
   /// they change, so the card is handed in rather than rebuilt here. It is
   /// built in `lib/flock/lifecycle.dart`, which owns that seam.
@@ -540,6 +545,7 @@ class BotSettingsView extends StatefulWidget {
     this.primary,
     this.onEditAvatar,
     this.onOpenPlugins,
+    this.onOpenVoice,
     this.dangerZone,
     this.sections = const [],
   });
@@ -863,6 +869,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     controller: state,
                     characterId: widget.background,
                     primary: widget.primary,
+                    onOpen: widget.onOpenVoice,
                   ),
                   if (state.modelAvailable) _model(context),
                 ],
