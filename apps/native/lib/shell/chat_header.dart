@@ -6,6 +6,7 @@ import '../client/chat_controller.dart';
 import '../voice/voice_mode.dart' show VoiceHeaderPill;
 import 'semantics.dart';
 import 'chat_icons.dart';
+import 'desktop_layout.dart';
 
 /// The blue a running Computer's icon wears: a cooler note beside the
 /// accent, so "working" and "yours" never read as the same colour.
@@ -102,64 +103,66 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
         ],
       ],
     );
-    return AppBar(
-      toolbarHeight: _toolbarHeight,
-      leadingWidth: 48,
-      leading: onBack == null
-          ? null
-          : identified(
-              ShellIds.sidebarToggle,
-              IconButton(
-                tooltip: 'Your Bots',
-                onPressed: onBack,
-                icon: Icon(Icons.arrow_back_rounded, size: chatIconSize),
+    return DesktopWindowDragRegion(
+      child: AppBar(
+        toolbarHeight: _toolbarHeight,
+        leadingWidth: 48,
+        leading: onBack == null
+            ? null
+            : identified(
+                ShellIds.sidebarToggle,
+                IconButton(
+                  tooltip: 'Your Bots',
+                  onPressed: onBack,
+                  icon: Icon(Icons.arrow_back_rounded, size: chatIconSize),
+                ),
               ),
-            ),
-      // With no back arrow the name is the first thing in the bar, and it
-      // sits as far from the left edge as the last icon's glyph does from the
-      // right: 4 of trailing space plus the icon's own margin inside its
-      // 40-wide button.
-      titleSpacing: onBack == null ? 14 : 4,
-      title: onOpenBot == null || voiceMode
-          ? title
-          : Align(
-              alignment: Alignment.centerLeft,
-              // A button rather than a bare InkWell, so its semantics are the
-              // same shape as every other control in this bar: one node that
-              // is the identifier, one tappable node inside it.
-              child: identified(
-                ShellIds.botPanelToggle,
-                Tooltip(
-                  message: 'Open $name',
-                  child: _BotNameButton(
-                    phone: phone,
-                    onPressed: onOpenBot!,
-                    child: title,
+        // With no back arrow the name is the first thing in the bar, and it
+        // sits as far from the left edge as the last icon's glyph does from the
+        // right: 4 of trailing space plus the icon's own margin inside its
+        // 40-wide button.
+        titleSpacing: onBack == null ? 14 : 4,
+        title: onOpenBot == null || voiceMode
+            ? title
+            : Align(
+                alignment: Alignment.centerLeft,
+                // A button rather than a bare InkWell, so its semantics are the
+                // same shape as every other control in this bar: one node that
+                // is the identifier, one tappable node inside it.
+                child: identified(
+                  ShellIds.botPanelToggle,
+                  Tooltip(
+                    message: 'Open $name',
+                    child: _BotNameButton(
+                      phone: phone,
+                      onPressed: onOpenBot!,
+                      child: title,
+                    ),
                   ),
                 ),
               ),
-            ),
-      actions: [
-        if (onComputer != null)
-          _destination(
-            'Computer',
-            ChatIconKind.computer,
-            onComputer,
-            color: computerRunning ? computerRunningColor : null,
-          ),
-        // The wide tiers' one switch for the panel beside the conversation:
-        // rightmost, against the column it shows and hides.
-        if (onTogglePanel != null && !voiceMode)
-          identified(
-            ShellIds.rightPanelToggle,
+        actions: [
+          if (onComputer != null)
             _destination(
-              panelShown ? 'Hide the panel' : 'Show the panel',
-              ChatIconKind.panel,
-              onTogglePanel,
+              'Computer',
+              ChatIconKind.computer,
+              onComputer,
+              color: computerRunning ? computerRunningColor : null,
             ),
-          ),
-        const SizedBox(width: 4),
-      ],
+          // The wide tiers' one switch for the panel beside the conversation:
+          // rightmost, against the column it shows and hides.
+          if (onTogglePanel != null && !voiceMode)
+            identified(
+              ShellIds.rightPanelToggle,
+              _destination(
+                panelShown ? 'Hide the panel' : 'Show the panel',
+                ChatIconKind.panel,
+                onTogglePanel,
+              ),
+            ),
+          const SizedBox(width: 4),
+        ],
+      ),
     );
   }
 
