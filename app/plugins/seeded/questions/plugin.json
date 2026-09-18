@@ -2,7 +2,7 @@
   "id": "questions",
   "displayName": "Question cards",
   "version": "1",
-  "contractVersion": 5,
+  "contractVersion": 7,
   "tools": [],
   "hooks": [],
   "grants": [],

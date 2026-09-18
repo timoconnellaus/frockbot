@@ -2,7 +2,7 @@
   "id": "agents",
   "displayName": "Agent cards",
   "version": "1",
-  "contractVersion": 5,
+  "contractVersion": 7,
   "tools": [],
   "hooks": [],
   "grants": [],
