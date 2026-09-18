@@ -219,6 +219,7 @@ abstract final class VoiceIds {
   static const disfluency = 'voice-disfluency';
   static const custom = 'voice-custom';
   static const picker = 'voice-picker';
+  static String hear(String voiceName) => 'voice-hear-$voiceName';
 
   /// The fixed voice control at the far right of the composer (ADR 0029).
   /// Unlike the morphing action beside it, it is always this one thing.

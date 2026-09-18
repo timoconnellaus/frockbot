@@ -7,12 +7,14 @@
 /// is why nothing here builds a sentence.
 ///
 /// It saves as the About card does: the moment a choice is made, and a moment
-/// after the last keystroke in the person's own words. There is no preview —
-/// no endpoint speaks a sample yet — so the way to hear a change is to call.
+/// after the last keystroke in the person's own words. Each timbre has a
+/// minted clip so the picker can play the mouth before it is chosen; accent
+/// and the rest are still only heard on a call.
 library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../flock/avatar.dart';
@@ -22,6 +24,7 @@ import '../theme/caret.dart';
 import '../theme/controls.dart';
 import '../theme/rows.dart';
 import '../voice/appearance.dart';
+import '../voice/preview.dart';
 import 'bot_settings.dart';
 
 /// The Capabilities row in the Bot's Settings that opens this page.
@@ -378,20 +381,26 @@ class _BotVoicePageState extends State<BotVoicePage> {
     BuildContext context,
     BotVoiceAppearanceV1 voice,
   ) async {
-    final chosen = await pickVoiceOptionV1(
-      context,
-      title: 'Timbre',
-      options: [
-        for (final option in geminiVoicesV1)
-          (
-            slug: option.voiceName,
-            label: option.voiceName,
-            detail: option.character,
-          ),
-      ],
-      selected: voice.voiceName,
-    );
-    if (chosen != null) _chose(voice.copyWith(voiceName: chosen));
+    final preview = kIsWeb ? null : VoicePreviewPlayer();
+    try {
+      final chosen = await pickVoiceOptionV1(
+        context,
+        title: 'Timbre',
+        options: [
+          for (final option in geminiVoicesV1)
+            (
+              slug: option.voiceName,
+              label: option.voiceName,
+              detail: option.character,
+            ),
+        ],
+        selected: voice.voiceName,
+        preview: preview,
+      );
+      if (chosen != null) _chose(voice.copyWith(voiceName: chosen));
+    } finally {
+      preview?.dispose();
+    }
   }
 
   Future<void> _pickPreset(
@@ -447,11 +456,13 @@ Future<String?> pickVoiceOptionV1(
   required String title,
   required List<VoicePickerOptionV1> options,
   required String? selected,
+  VoicePreviewPlayer? preview,
 }) {
   final list = _VoiceOptionList(
     title: title,
     options: options,
     selected: selected,
+    preview: preview,
   );
   if (MediaQuery.sizeOf(context).width < 640) {
     return showModalBottomSheet<String>(
@@ -477,50 +488,88 @@ class _VoiceOptionList extends StatelessWidget {
   final String title;
   final List<VoicePickerOptionV1> options;
   final String? selected;
+  final VoicePreviewPlayer? preview;
   const _VoiceOptionList({
     required this.title,
     required this.options,
     required this.selected,
+    this.preview,
   });
 
   @override
-  Widget build(BuildContext context) => identified(
-    VoiceIds.picker,
-    Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-          child: Semantics(
-            header: true,
-            child: Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
+  Widget build(BuildContext context) {
+    final preview = this.preview;
+    Widget list() => identified(
+      VoiceIds.picker,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Semantics(
+              header: true,
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
             ),
           ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.only(bottom: 12),
-            itemCount: options.length,
-            itemBuilder: (context, index) {
-              final option = options[index];
-              final chosen = option.slug == selected;
-              return FrockRow(
-                title: option.label,
-                subtitle: option.detail,
-                chevron: false,
-                color: chosen ? Theme.of(context).colorScheme.primary : null,
-                trailing: chosen
-                    ? const Icon(Icons.check_rounded, size: 18)
-                    : null,
-                onTap: () => Navigator.of(context).pop(option.slug),
-              );
-            },
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.only(bottom: 12),
+              itemCount: options.length,
+              itemBuilder: (context, index) {
+                final option = options[index];
+                final chosen = option.slug == selected;
+                final hearing = preview?.playing == option.slug;
+                return FrockRow(
+                  title: option.label,
+                  subtitle: option.detail,
+                  chevron: false,
+                  color: chosen ? Theme.of(context).colorScheme.primary : null,
+                  trailing: preview == null
+                      ? (chosen
+                            ? const Icon(Icons.check_rounded, size: 18)
+                            : null)
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            identified(
+                              VoiceIds.hear(option.slug),
+                              IconButton(
+                                tooltip: hearing
+                                    ? 'Stop ${option.label}'
+                                    : 'Hear ${option.label}',
+                                visualDensity: VisualDensity.compact,
+                                style: IconButton.styleFrom(
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  minimumSize: const Size(36, 36),
+                                ),
+                                icon: Icon(
+                                  hearing
+                                      ? Icons.stop_rounded
+                                      : Icons.volume_up_rounded,
+                                  size: 20,
+                                ),
+                                onPressed: () =>
+                                    unawaited(preview.hear(option.slug)),
+                              ),
+                            ),
+                            if (chosen)
+                              const Icon(Icons.check_rounded, size: 18),
+                          ],
+                        ),
+                  onTap: () => Navigator.of(context).pop(option.slug),
+                );
+              },
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+    if (preview == null) return list();
+    return AnimatedBuilder(animation: preview, builder: (_, _) => list());
+  }
 }
