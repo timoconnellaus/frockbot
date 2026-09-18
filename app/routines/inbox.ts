@@ -189,6 +189,16 @@ export interface RoutinePendingWakeV1 {
   quiet: { automation: true };
   /** Set once the alarm has re-emitted this wake's notification intent. */
   renotifiedAt?: string;
+  /**
+   * Set once a delivery Turn has been opened for this wake.
+   *
+   * One Turn per hand-off, marked before the Turn is admitted: a delivery that
+   * throws is not retried on the next alarm, because a Bot whose delivery Turn
+   * always fails would otherwise open one every time its clock came round. The
+   * hand-off is not lost — it stays queued, and the Bot's next conversational
+   * Turn still drains it, which is the delivery path that existed before.
+   */
+  deliveredAt?: string;
   /** What produced this wake. Absent means `routine`. */
   source?: CompletionSourceV1;
 }
@@ -515,7 +525,7 @@ export function decodePendingBotInputV1(
       "createdAt",
       "quiet",
     ],
-    ["renotifiedAt", "source"],
+    ["renotifiedAt", "deliveredAt", "source"],
     label,
   );
   if (!isRoutineIdV1(candidate.routineId)) {
@@ -548,11 +558,35 @@ export function decodePendingBotInputV1(
             `${label} renotifiedAt`,
           ),
         }),
+    ...(candidate.deliveredAt === undefined
+      ? {}
+      : {
+          deliveredAt: routineTimestamp(
+            candidate.deliveredAt,
+            `${label} deliveredAt`,
+          ),
+        }),
     ...(candidate.source === undefined
       ? {}
       : { source: completionSourceV1(candidate.source, `${label} source`) }),
   };
 }
+
+/**
+ * The cue a delivery Turn runs on.
+ *
+ * It sits where the person's own words would, behind the drained hand-off, and
+ * says plainly that they said nothing — otherwise a Bot handed a bare summary
+ * answers it as though it had been asked to. What it asks for is the whole
+ * point of delivering through a conversational Turn rather than posting the
+ * firing's words: the firing wrote its hand-off with no sight of the
+ * conversation, and this Turn has all of it.
+ */
+export const ROUTINE_DELIVERY_CUE_V1 = [
+  "[Delivery] Nobody has said anything to you. This Turn exists only so that what is above reaches the person.",
+  "Tell them what matters in it, in your own words, in the context of this conversation: leave out what they already know or have already dealt with here, and keep it to what is worth their attention now. Do not repeat the hand-off verbatim, and do not mention that this Turn happened or that anything was queued.",
+  "If none of it is worth their attention, say so in one line and stop.",
+].join("\n");
 
 /**
  * The hand-off text an automation Turn produced, if it produced one. The

@@ -12,6 +12,7 @@ import {
   type SessionEventInput,
   turnFailureMessage,
 } from "./types.js";
+import { messageTurnsV1 } from "./turn-history.js";
 
 const stores: SessionStore[] = [];
 const timestamp = "2026-08-29T00:00:00.000Z";
@@ -872,5 +873,122 @@ describe("resolved attachment bytes", () => {
     expect(session.deriveMessages().at(-1)).toMatchObject({
       attachments: [attachment],
     });
+  });
+});
+
+describe("a batch's sub-calls and the message count", () => {
+  /** One step whose single assistant tool call is a `batch` of two calls. */
+  function batchStep(): SessionEventInput[] {
+    const calls = [
+      { tool: "echo", arguments: { say: "one" } },
+      { tool: "echo", arguments: { say: "two" } },
+    ];
+    return [
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "user/message",
+        turn: 1,
+        step: 1,
+        messageId: "message-1",
+        text: "both, please",
+      },
+      {
+        type: "assistant/message",
+        turn: 1,
+        step: 1,
+        requestId: "request-1",
+        text: "",
+        toolCalls: [{ id: "call-1", name: "batch", input: { calls } }],
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "batch",
+        input: { calls },
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0.0",
+        name: "echo",
+        input: { say: "one" },
+      },
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0.1",
+        name: "echo",
+        input: { say: "two" },
+      },
+      {
+        type: "tool/result",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0.0",
+        name: "echo",
+        content: "one",
+        isError: false,
+        status: "completed",
+      },
+      {
+        type: "tool/result",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0.1",
+        name: "echo",
+        content: "two",
+        isError: false,
+        status: "completed",
+      },
+      {
+        type: "tool/result",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "batch",
+        content: '{"ran":2,"failed":0}',
+        isError: false,
+        status: "completed",
+      },
+      { type: "step/end", turn: 1, step: 1, outcome: "completed" },
+    ];
+  }
+
+  test("a sub-call's result is not replayed as a tool message of its own", () => {
+    const store = createStore();
+    const session = store.create("session-batch");
+    session.appendBatch(batchStep());
+
+    const messages = session.deriveMessages();
+
+    // The user's line, the assistant's one tool call, and the batch's own
+    // result: the two sub-results answer no call the assistant sent, and a
+    // tool message naming an id the assistant never sent is one a provider
+    // rejects.
+    expect(messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+    ]);
+    expect(messages.at(-1)).toMatchObject({ name: "batch" });
+  });
+
+  test("the derived messages and the log agree about their length", () => {
+    const store = createStore();
+    const session = store.create("session-batch-length");
+    session.appendBatch(batchStep());
+
+    // The invariant `turnScopedMessagesV1` enforces on every model request.
+    // When these two disagreed the throw was not one Turn's: the events are
+    // durable, so every later Turn in that session died the same way, before
+    // the model was ever called.
+    expect(messageTurnsV1(session.events)).toHaveLength(
+      session.deriveMessages().length,
+    );
   });
 });

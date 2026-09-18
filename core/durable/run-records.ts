@@ -122,9 +122,30 @@ export interface StoredRunVoiceOriginV1 {
   requestId: string;
 }
 
+/**
+ * A conversational Turn opened to deliver what an automation Turn handed off.
+ *
+ * A firing's hand-off is queued for the Bot's next conversational Turn, and
+ * nothing used to open one: the hand-off waited until the person happened to
+ * speak, which for a morning triage meant hours, or a day, or never. This is
+ * that Turn — an ordinary `chat` Turn, so the Bot answers with the
+ * conversation in front of it and says what matters in its own voice, rather
+ * than the firing's words being posted into a thread they were written
+ * without.
+ *
+ * `wakeRunId` is the automation run whose hand-off is owed, and it is what
+ * makes the delivery idempotent: one delivery Turn per hand-off, refused by
+ * the kernel's own run-id idempotency if the alarm asks twice.
+ */
+export interface StoredRunRoutineDeliveryOriginV1 {
+  kind: "routine-delivery";
+  wakeRunId: string;
+}
+
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
   | StoredRunRoutineOriginV1
+  | StoredRunRoutineDeliveryOriginV1
   | StoredRunSubagentOriginV1
   | StoredRunHandoffOriginV1
   | StoredRunBotOriginV1
@@ -282,6 +303,25 @@ export function storedRunLaneV1(run: {
   return (
     run.admission?.lane ?? defaultRunLaneV1(run.admission?.turnType ?? "chat")
   );
+}
+
+/**
+ * Whether this run is the delivery Turn the routine alarm opened.
+ *
+ * A chat Turn drains the pending queue before the model runs, so a Turn that
+ * does not complete has consumed hand-offs it never delivered. Only a delivery
+ * Turn gives them back: it is a Turn nobody asked for and nobody watched, so
+ * losing its hand-off loses a morning's triage with no one there to ask again.
+ * A Turn the person started keeps the behaviour it has always had — they were
+ * there, and re-queuing what it drained would make the Bot re-tell them
+ * something it has already said.
+ */
+export function storedRunIsRoutineDeliveryV1(run: {
+  // Structural rather than `StoredRunAdmissionV1`, so the one predicate also
+  // answers for the Shell's deliberately wide settled-run shape.
+  admission?: { origin?: { kind?: string } };
+}): boolean {
+  return run.admission?.origin?.kind === "routine-delivery";
 }
 
 /**
@@ -551,6 +591,16 @@ function decodeStoredRunOrigin(
       callId: candidate.callId,
       voiceTurnId: candidate.voiceTurnId,
       requestId: candidate.requestId,
+    };
+  }
+  if (candidate.kind === "routine-delivery") {
+    requireExactOriginFields(candidate, ["kind", "wakeRunId"], runId);
+    if (!boundedString(candidate.wakeRunId, 256)) {
+      throw new Error(`run "${runId}" has an invalid admission origin id`);
+    }
+    return {
+      kind: "routine-delivery",
+      wakeRunId: candidate.wakeRunId,
     };
   }
   if (candidate.kind !== "routine") {

@@ -205,6 +205,46 @@ describe("the pending-input queue", () => {
     ).toBeString();
   });
 
+  test("a wake is delivered a Turn at most once", async () => {
+    const store = storage();
+    await settle(store, { runId: "rf-1", handoff: "one" });
+    const inbox = new RoutineInboxStore(store);
+    const [pending] = await inbox.pending();
+
+    await inbox.markDelivered(pending!.key);
+    const first =
+      (await inbox.pending())[0]!.input.kind === "wake"
+        ? ((await inbox.pending())[0]!.input as { deliveredAt?: string })
+            .deliveredAt
+        : undefined;
+    await inbox.markDelivered(pending!.key);
+    const [after] = await inbox.pending();
+
+    expect(first).toBeString();
+    // The second mark is not a second delivery: a Turn that failed must not
+    // have the alarm open a fresh one for the same hand-off for ever.
+    expect(
+      after!.input.kind === "wake"
+        ? (after!.input as { deliveredAt?: string }).deliveredAt
+        : undefined,
+    ).toBe(first);
+  });
+
+  test("a delivered wake is still drained by the next chat Turn", async () => {
+    const store = storage();
+    await settle(store, { runId: "rf-1", handoff: "one" });
+    const inbox = new RoutineInboxStore(store);
+    const [pending] = await inbox.pending();
+
+    await inbox.markDelivered(pending!.key);
+
+    // The mark says a Turn was opened, never that the hand-off was spent. If
+    // that Turn failed, the ordinary path still carries it.
+    expect((await inbox.drainInto("chat-run-1")).map((it) => it.kind)).toEqual([
+      "wake",
+    ]);
+  });
+
   test("the preamble names the hand-off and never speaks as the user", () => {
     const preamble = pendingBotInputPreambleV1([
       {

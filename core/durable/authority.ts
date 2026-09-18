@@ -25,6 +25,7 @@ import {
   storedRunRecordV2,
   storedRunSubagentRoleV1,
   storedRunTurnTypeV1,
+  type StoredRunAdmissionV1,
   unreadableStoredRunV1,
   type BotNotificationIntent,
   type BotTurnCommand,
@@ -149,6 +150,12 @@ export interface BotDurableAuthorityHooks<Snapshot> {
       /** The stored diagnostic. Never shown to a person as it stands. */
       failure: string;
       events: readonly SessionEvent[];
+      /**
+       * The admission the failed Turn was accepted under. Carried because what
+       * a failure owes depends on who asked for the Turn: only a delivery Turn
+       * the alarm opened gives back what it drained and never delivered.
+       */
+      admission?: StoredRunAdmissionV1;
     },
     read: <T>(key: string) => Promise<T | undefined>,
   ): Promise<Record<string, unknown>>;
@@ -1751,6 +1758,7 @@ export class BotDurableAuthority<Snapshot> {
           runId: run.runId,
           failure: run.failure ?? "",
           events: run.events,
+          admission: run.admission,
         },
         read,
       );

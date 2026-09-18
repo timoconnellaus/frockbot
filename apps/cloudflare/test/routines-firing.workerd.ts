@@ -26,6 +26,7 @@ import {
 } from "./session-log-probe.ts";
 
 const HANDOFF = "Two overnight emails need you.";
+const SUBAGENT_HANDOFF = "The subagent found nothing that needs you.";
 
 function bot(userId: string, botId: string) {
   return env.BOT_STATES.getByName(`${userId}:${botId}`);
@@ -50,7 +51,10 @@ interface StoredRunProbe {
   sessionId: string;
   status: string;
   previousEventCount: number;
-  admission?: { turnType: string; origin?: { routineId: string } };
+  admission?: {
+    turnType: string;
+    origin?: { kind?: string; routineId: string };
+  };
   events: Array<{ type: string; turnType?: string; text?: string }>;
 }
 
@@ -158,7 +162,12 @@ describe("a firing's durable consequences in Workerd", () => {
     await createFiringRoutine(identity);
     await fireOnce(identity);
 
-    const [settled] = await storedRuns(identity);
+    // Named, not the newest: the same alarm that settles the firing opens the
+    // delivery Turn its hand-off is owed, so the object holds two runs and
+    // this test is about the firing.
+    const settled = (await storedRuns(identity)).find(
+      (run) => run.admission?.turnType === "automation",
+    );
     expect(settled).toMatchObject({
       status: "completed",
       admission: { turnType: "automation" },
@@ -196,7 +205,9 @@ describe("a firing's durable consequences in Workerd", () => {
       query: { schemaVersion: 1 },
     });
 
-    const [recovered] = await storedRuns(identity);
+    const recovered = (await storedRuns(identity)).find(
+      (run) => run.runId === settled!.runId,
+    );
     expect(recovered).toMatchObject({
       runId: settled!.runId,
       status: "completed",
@@ -235,8 +246,30 @@ describe("a firing's durable consequences in Workerd", () => {
     expect(inbox.unacknowledged).toBe(1);
     expect(inbox.entries[0]!.text).toBe(HANDOFF);
 
+    // The alarm that settled the firing also opened the Turn the hand-off is
+    // owed, on the Bot's own conversation. Nothing else used to open one, so a
+    // 9:45am triage waited for the person to speak first.
+    const delivery = (await storedRuns(identity)).find(
+      (run) => run.admission?.origin?.kind === "routine-delivery",
+    )!;
+    expect(delivery).toMatchObject({
+      sessionId: `${identity.userId}:${identity.botId}`,
+      admission: { turnType: "chat" },
+    });
+    const delivered = delivery.events
+      .filter((event) => event.type === "user/message")
+      .map((event) => event.text ?? "");
+    // The hand-off, and the cue saying nobody spoke — the Bot answers with the
+    // conversation in front of it rather than the firing's words being posted
+    // into a thread they were written without.
+    expect(delivered.some((text) => text.includes(HANDOFF))).toBe(true);
+    expect(
+      delivered.some((text) => text.includes("Nobody has said anything")),
+    ).toBe(true);
+
     await evictDurableObject(bot(identity.userId, identity.botId));
 
+    // Delivered once. The person's own next Turn is not told again.
     const turn = await rpc(identity).run({
       schemaVersion: 1,
       ...identity,
@@ -253,29 +286,90 @@ describe("a firing's durable consequences in Workerd", () => {
     const inputs = chat.events
       .filter((event) => event.type === "user/message")
       .map((event) => event.text ?? "");
-    expect(inputs.some((text) => text.includes(HANDOFF))).toBe(true);
+    expect(inputs.some((text) => text.includes(HANDOFF))).toBe(false);
     expect(
       inputs.some((text) => text.includes("what happened overnight?")),
     ).toBe(true);
 
-    // Delivered once. A second conversational Turn is not told again.
-    const second = await rpc(identity).run({
+    // And the alarm does not open a second delivery Turn for a hand-off it has
+    // already delivered.
+    await runDurableObjectAlarm(bot(identity.userId, identity.botId));
+    expect(
+      (await storedRuns(identity)).filter(
+        (run) => run.admission?.origin?.kind === "routine-delivery",
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("a subagent hand-off alone opens no delivery Turn", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `firing-subagent-${suffix}`,
+      botId: `firing-subagent-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    // One ordinary Turn first: the durable identity the alarm delivers under is
+    // written by an admitted Turn, and this Bot has no Routine to write it.
+    await rpc(identity).run({
       schemaVersion: 1,
       ...identity,
       command: {
-        runId: `chat-second-${suffix}`,
+        runId: `hello-${suffix}`,
         sessionId: `${identity.userId}:${identity.botId}`,
         acceptedAt: new Date().toISOString(),
-        text: "anything else?",
+        text: "hello",
       },
     });
-    const secondRun = (await storedRuns(identity)).find(
-      (run) => run.runId === second.runId,
+
+    // The pending queue is shared, and a background subagent settles on a path
+    // that arms no alarm — so a delivery Turn for one is a Turn nothing would
+    // ever open. This is the wake `recordTaskCompletion` enqueues.
+    await runInDurableObject(
+      bot(identity.userId, identity.botId),
+      (_instance, state) =>
+        state.storage.put("routine-wake:0000000001", {
+          schemaVersion: 1,
+          kind: "wake",
+          wakeId: `tw-${suffix}`,
+          runId: `task-${suffix}`,
+          routineId: `task-${suffix}`,
+          title: "Subagent: dig through the inbox",
+          text: SUBAGENT_HANDOFF,
+          createdAt: new Date().toISOString(),
+          quiet: { automation: true },
+          source: "subagent",
+        }),
+    );
+
+    // The alarm runs its whole settle pass, hand-off delivery included.
+    await runInDurableObject(bot(identity.userId, identity.botId), (instance) =>
+      (instance as unknown as { alarm(): Promise<void> }).alarm(),
+    );
+
+    expect(
+      (await storedRuns(identity)).filter(
+        (run) => run.admission?.origin?.kind === "routine-delivery",
+      ),
+    ).toEqual([]);
+
+    // It still reaches the Bot the way it always did: the person's next Turn.
+    const turn = await rpc(identity).run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: `chat-${suffix}`,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: new Date().toISOString(),
+        text: "anything new?",
+      },
+    });
+    const chat = (await storedRuns(identity)).find(
+      (run) => run.runId === turn.runId,
     )!;
     expect(
-      secondRun.events
+      chat.events
         .filter((event) => event.type === "user/message")
-        .some((event) => (event.text ?? "").includes(HANDOFF)),
-    ).toBe(false);
+        .some((event) => (event.text ?? "").includes(SUBAGENT_HANDOFF)),
+    ).toBe(true);
   });
 });

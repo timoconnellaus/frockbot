@@ -217,6 +217,70 @@ export async function enqueuePendingBotInputV1(
   });
 }
 
+/**
+ * The inputs a delivery Turn drained but never carried, queued again.
+ *
+ * `drainInto` takes the whole queue in one transaction, before the model runs,
+ * so a Turn that then fails, is stopped, or is superseded has consumed
+ * hand-offs it never delivered. That is survivable when the Turn is one the
+ * person themselves started — they were there, they may already have been told,
+ * and they can ask again — and it stopped being survivable when the alarm began
+ * opening a delivery Turn with nobody present. The drain receipt is the durable
+ * record of exactly what that Turn took, so a delivery Turn that settles
+ * anything other than `completed` gives it back. Every caller is guarded on
+ * `storedRunIsRoutineDeliveryV1`; a Turn the person started re-queues nothing.
+ *
+ * Composed into the transaction that settles the Turn, never after it: between
+ * "this Turn will not deliver" and "the queue owes it again" there must be no
+ * instant an eviction can lose. The receipt itself stays where it is — it is
+ * what a recovered Turn reads back — and the re-queued input keeps whatever
+ * the Turn marked on it, so a hand-off whose delivery Turn failed is owed to
+ * the Bot's next conversational Turn exactly as it was before any delivery
+ * Turn existed, and is not delivered a second time.
+ *
+ * Re-queuing is idempotent on the input's id, in the queue and again in the
+ * drain, so it cannot tell the Bot the same thing twice.
+ */
+export async function requeueDrainedInputsV1(
+  transaction: RoutineStorageWritesV1,
+  runId: string,
+): Promise<void> {
+  const receipt = await transaction.get<unknown>(routineDrainKeyV1(runId));
+  if (receipt === undefined) return;
+  for (const input of decodeDrainReceiptV1(receipt).inputs) {
+    await enqueuePendingBotInputV1(transaction, input);
+  }
+}
+
+/**
+ * The queue's writes, aimed at a settlement's record set instead of storage.
+ *
+ * A Package contributing terminal records is handed a reader and returns keys
+ * the kernel writes; it holds no transaction of its own. This is the adapter
+ * that lets the queue's own writers run there unchanged, reading back what the
+ * same settlement has already written so two enqueues in one settlement cannot
+ * be handed the same cursor.
+ */
+export function pendingInputSettlementWritesV1(
+  records: Record<string, unknown>,
+  read: <T>(key: string) => Promise<T | undefined>,
+): RoutineStorageWritesV1 {
+  return {
+    get: <T>(key: string) =>
+      Object.hasOwn(records, key)
+        ? Promise.resolve(records[key] as T)
+        : read<T>(key),
+    // A settling transaction cannot list. De-duplication by the input's id
+    // still happens where the queue is next carried, in `drainInto`.
+    list: <T>() => Promise.resolve(new Map<string, T>()),
+    put: (key: string, value: unknown) => {
+      records[key] = value;
+      return Promise.resolve();
+    },
+    delete: () => Promise.resolve(false),
+  };
+}
+
 export interface RoutineInboxStoreOptionsV1 {
   now?(): Date;
 }
@@ -409,6 +473,28 @@ export class RoutineInboxStore {
       await transaction.put(key, {
         ...input,
         renotifiedAt: at,
+      } satisfies PendingBotInputV1);
+    });
+  }
+
+  /**
+   * Record that a delivery Turn has been opened for this wake.
+   *
+   * Written before the Turn is admitted, so a delivery that throws costs the
+   * hand-off its proactive Turn rather than opening one on every alarm for
+   * ever. The wake itself stays queued either way: the Bot's next
+   * conversational Turn drains it as it always did.
+   */
+  async markDelivered(key: string): Promise<void> {
+    const at = this.#now().toISOString();
+    await this.#storage.transaction(async (transaction) => {
+      const stored = await transaction.get<unknown>(key);
+      if (stored === undefined) return;
+      const input = decodePendingBotInputV1(stored);
+      if (input.kind !== "wake" || input.deliveredAt !== undefined) return;
+      await transaction.put(key, {
+        ...input,
+        deliveredAt: at,
       } satisfies PendingBotInputV1);
     });
   }

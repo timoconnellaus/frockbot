@@ -24,8 +24,13 @@
  * One settlement also gets one `now`. Producers each reading their own clock
  * would stamp one transaction with several different instants.
  */
-import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
+import {
+  enqueuePendingBotInputV1,
+  pendingInputSettlementWritesV1,
+  requeueDrainedInputsV1,
+} from "@frockbot/app/routines/inbox-store";
 import type { PendingBotInputV1 } from "@frockbot/app/routines/inbox";
+import { storedRunIsRoutineDeliveryV1 } from "@frockbot/core/durable";
 import { approvalTerminalRecordsV1 } from "./approvals.js";
 import { cardTerminalRecordsV1 } from "./cards.js";
 import { routineTerminalRecordsForRunV1 } from "@frockbot/app/routines/bot";
@@ -153,6 +158,13 @@ const SHELL_TERMINAL_PRODUCERS_V1 = [
  * Background work survives a supersede, so the reminder is how the Bot learns
  * that an answer is still coming rather than losing track of it.
  *
+ * A delivery Turn also gives back whatever it drained and never carried. It is
+ * opened by the alarm with nobody present, and so is replaced by the person's
+ * very first word. The drained inputs go back on the queue in this same
+ * transaction, and the Turn that replaced this one drains them itself. A Turn
+ * the person themselves started gives back nothing: they were there, and the
+ * Turn that replaced theirs would re-tell them what this one already said.
+ *
  * An automation Turn contributes nothing: a firing is not the conversation,
  * and it reaches the User through its own inbox entry.
  */
@@ -172,20 +184,11 @@ export async function supersededTurnRecordsV1(input: {
     createdAt: input.now,
   } satisfies PendingBotInputV1;
   const records: Record<string, unknown> = {};
-  await enqueuePendingBotInputV1(
-    {
-      get: <T>(key: string) => input.read<T>(key),
-      // A settling transaction cannot list. De-duplication is by the input's
-      // id, which is this run's, and a run settles once.
-      list: <T>() => Promise.resolve(new Map<string, T>()),
-      put: (key: string, value: unknown) => {
-        records[key] = value;
-        return Promise.resolve();
-      },
-      delete: () => Promise.resolve(false),
-    },
-    pending,
-  );
+  const writes = pendingInputSettlementWritesV1(records, input.read);
+  if (storedRunIsRoutineDeliveryV1(input.run)) {
+    await requeueDrainedInputsV1(writes, input.run.runId);
+  }
+  await enqueuePendingBotInputV1(writes, pending);
   return records;
 }
 
