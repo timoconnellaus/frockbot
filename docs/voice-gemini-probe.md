@@ -12,6 +12,25 @@ The endpoint is
 The key goes in the query string; there is no header auth on a browser-style
 WebSocket, which is why the Durable Object holds the key.
 
+## Framing
+
+What comes back is **binary** WebSocket frames carrying JSON text, not text
+frames. A Worker's outbound socket hands binary frames over as `Blob`s unless
+it is told otherwise, and `TextDecoder` on a `Blob` throws — so the object sets
+`socket.binaryType = "arraybuffer"` before it listens (`GeminiSessionV1.start`
+in `apps/cloudflare/src/voice-assistant.ts`). A client that does not ask decodes
+nothing: no `setupComplete` ever arrives, and the session goes with code
+**1006** before it reaches `awake`.
+
+The other direction has no such trap: our frames go up as text
+(`socket.send(JSON.stringify(frame))`) and are accepted.
+
+Observed 2026-09-18 through this Worker's own upstream socket, not through the
+hand-run probe named above. The workerd regression is "bridges binary Live
+messages both ways and meters what crossed"
+(`apps/cloudflare/test/voice-assistant.workerd.ts`), whose fake upstream sends
+binary for the same reason.
+
 ## Which models are live
 
 `GET /v1beta/models` with `supportedGenerationMethods` containing
