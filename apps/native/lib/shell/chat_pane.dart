@@ -25,6 +25,7 @@ import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
 import '../flock/avatar.dart';
+import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
 import 'approvals.dart';
@@ -397,68 +398,101 @@ class _ChatPaneState extends State<ChatPane> {
         // of every Turn and the thread above jumped ten points. The composer
         // alone sets the height now; the transcript's reserved Stop space
         // keeps the thread still, as it did before the companion arrived.
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Padding(
-              padding: EdgeInsets.only(left: avatarSize + 12),
-              child: _composer(c),
-            ),
-            // The field sits above the system's bottom inset (the composer
-            // keeps it in a SafeArea); the companion sits above the same
-            // inset, or on a phone it hung a gesture bar's height below the
-            // field's baseline.
-            Positioned(
-              key: _companionKey,
-              left: 10,
-              bottom: 10 + MediaQuery.paddingOf(context).bottom,
-              // The companion is the working indicator: while a Turn runs it
-              // takes the working pose and wears the typing badge, paced by
-              // the Turn's own stream. Nothing in the thread says "thinking"
-              // any more; the character does.
-              child: working
-                  ? identified(
-                      ShellIds.workingIndicator,
-                      Semantics(
-                        container: true,
-                        liveRegion: true,
-                        label: 'Working',
-                        child: WorkingPace(
-                          line: runningLine,
-                          builder: (context, tempo) => CharacterAvatar(
-                            size: avatarSize,
-                            characterId: widget.background,
-                            primary: widget.primary,
-                            gaze: gaze,
-                            hold: hold,
-                            motion: CharacterMotion.active,
-                            activity: CharacterActivity.working,
-                            working: true,
-                            tempo: tempo,
-                          ),
-                        ),
+        //
+        // A phone cannot keep that column and a usable field at once. The
+        // first character slides the composer into his seat and he leaves;
+        // an empty draft — send, or clearing — gives him back. A desk has
+        // the room, so he stays.
+        ListenableBuilder(
+          listenable: editor,
+          builder: (context, _) {
+            final tuck =
+                MediaQuery.sizeOf(context).width <= 640 &&
+                editor.text.isNotEmpty;
+            final motion = FrockTheme.motion(context, FrockTheme.enter);
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                AnimatedPadding(
+                  duration: motion,
+                  curve: Curves.easeOutCubic,
+                  padding: EdgeInsets.only(left: tuck ? 0 : avatarSize + 12),
+                  child: _composer(c),
+                ),
+                // The field sits above the system's bottom inset (the
+                // composer keeps it in a SafeArea); the companion sits
+                // above the same inset, or on a phone it hung a gesture
+                // bar's height below the field's baseline.
+                AnimatedPositioned(
+                  duration: motion,
+                  curve: Curves.easeOutCubic,
+                  key: _companionKey,
+                  left: tuck ? -avatarSize : 10,
+                  bottom: 10 + MediaQuery.paddingOf(context).bottom,
+                  child: IgnorePointer(
+                    ignoring: tuck,
+                    child: AnimatedOpacity(
+                      duration: motion,
+                      curve: Curves.easeOutCubic,
+                      opacity: tuck ? 0 : 1,
+                      child: ExcludeSemantics(
+                        excluding: tuck,
+                        // The companion is the working indicator: while a
+                        // Turn runs it takes the working pose and wears
+                        // the typing badge, paced by the Turn's own
+                        // stream. Nothing in the thread says "thinking"
+                        // any more; the character does.
+                        child: working
+                            ? identified(
+                                ShellIds.workingIndicator,
+                                Semantics(
+                                  container: true,
+                                  liveRegion: true,
+                                  label: 'Working',
+                                  child: WorkingPace(
+                                    line: runningLine,
+                                    builder: (context, tempo) =>
+                                        CharacterAvatar(
+                                          size: avatarSize,
+                                          characterId: widget.background,
+                                          primary: widget.primary,
+                                          gaze: gaze,
+                                          hold: hold,
+                                          motion: CharacterMotion.active,
+                                          activity: CharacterActivity.working,
+                                          working: true,
+                                          tempo: tempo,
+                                        ),
+                                  ),
+                                ),
+                              )
+                            : CharacterAvatar(
+                                size: avatarSize,
+                                characterId: widget.background,
+                                primary: widget.primary,
+                                gaze: gaze,
+                                hold: hold,
+                                // A live artboard at rest, so the eyes can
+                                // follow the pointer and the character can
+                                // twitch between Turns. Quiet, not active:
+                                // the ticker runs only for a moment after
+                                // a change and stops again, which is what
+                                // keeps an open chat from redrawing the
+                                // window sixty times a second. The
+                                // artboard takes no pointer and no focus,
+                                // so the field beside it keeps its
+                                // keystrokes (errors.e2e, skill-menu.e2e).
+                                motion: CharacterMotion.quiet,
+                                activity: CharacterActivity.idle,
+                                semanticsLabel: 'Bot is ready',
+                              ),
                       ),
-                    )
-                  : CharacterAvatar(
-                      size: avatarSize,
-                      characterId: widget.background,
-                      primary: widget.primary,
-                      gaze: gaze,
-                      hold: hold,
-                      // A live artboard at rest, so the eyes can follow the
-                      // pointer and the character can twitch between Turns.
-                      // Quiet, not active: the ticker runs only for a moment
-                      // after a change and stops again, which is what keeps
-                      // an open chat from redrawing the window sixty times
-                      // a second. The artboard takes no pointer and no
-                      // focus, so the field beside it keeps its keystrokes
-                      // (errors.e2e, skill-menu.e2e).
-                      motion: CharacterMotion.quiet,
-                      activity: CharacterActivity.idle,
-                      semanticsLabel: 'Bot is ready',
                     ),
-            ),
-          ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );

@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
+import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'voice_shell_harness.dart';
 
@@ -59,6 +60,39 @@ void main() {
         findsNothing,
       );
       await capture(tester, 'composer-companion-${width.toInt()}');
+      await harness.dispose(tester);
+    });
+  }
+
+  for (final width in [390.0, 1280.0]) {
+    testWidgets('typing tucks the companion only on a phone at $width', (
+      tester,
+    ) async {
+      final harness = VoiceShellHarness();
+      await harness.mount(tester, width: width, brightness: Brightness.dark);
+      final companion = find.bySemanticsLabel('Bot is ready');
+      final field = find.byKey(const ValueKey('composer'));
+      expect(companion, findsOneWidget);
+      final restLeft = tester.getTopLeft(field).dx;
+
+      await tester.enterText(field, 'hello');
+      await tester.pump();
+      await tester.pump(FrockTheme.enter);
+
+      if (width == 390) {
+        expect(companion, findsNothing);
+        expect(tester.getTopLeft(field).dx, lessThan(restLeft - 24));
+      } else {
+        expect(companion, findsOneWidget);
+        expect(tester.getTopLeft(field).dx, restLeft);
+      }
+
+      await tester.enterText(field, '');
+      await tester.pump();
+      await tester.pump(FrockTheme.enter);
+      expect(companion, findsOneWidget);
+      expect(tester.getTopLeft(field).dx, restLeft);
+      expect(tester.takeException(), isNull);
       await harness.dispose(tester);
     });
   }
