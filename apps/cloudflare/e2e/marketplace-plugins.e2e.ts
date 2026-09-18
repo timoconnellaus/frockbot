@@ -43,10 +43,13 @@ async function revealAction(
 }
 
 async function openBotList(page: Page): Promise<void> {
-  await revealSidebar(page);
-  await expect(sem(page, "sidebar-marketplace")).toBeVisible({
-    timeout: 120_000,
-  });
+  // General can replace the initial phone list while the account loads.
+  await expect(async () => {
+    await revealSidebar(page);
+    await expect(sem(page, "sidebar-marketplace")).toBeVisible({
+      timeout: 1_000,
+    });
+  }).toPass({ timeout: 120_000 });
   await settle(page);
 }
 
