@@ -507,6 +507,10 @@ void main() {
     await harness.controller.end(reason: 'lifecycle:paused');
     expect(harness.texts.last, encodeAssistantEndCallV1());
     expect(harness.controller.phase, VoiceSessionPhase.ended);
+    // The person's own end has nothing to explain: their surface is going
+    // away, and the line about the call ending is only for one nobody asked
+    // for.
+    expect(harness.controller.endedLine, isNull);
     expect(harness.controller.status, VoiceStatusV1.idle);
     expect(harness.capture.stops, 1);
     expect(harness.player.closed, isTrue);
@@ -516,17 +520,24 @@ void main() {
     harness.controller.dispose();
   });
 
-  test('a server that closes first names the path', () async {
-    final harness = Harness();
-    await harness.live();
-    await harness.socket.finish();
-    await settle();
-    expect(harness.controller.phase, VoiceSessionPhase.ended);
-    expect(harness.socket.closed, isTrue);
-    expect(harness.socket.closeCode, voiceCloseNormalV1);
-    expect(harness.socket.closeReason, 'server-closed');
-    harness.controller.dispose();
-  });
+  test(
+    'a server that closes first names the path and says the call ended',
+    () async {
+      final harness = Harness();
+      await harness.live();
+      await harness.socket.finish();
+      await settle();
+      expect(harness.controller.phase, VoiceSessionPhase.ended);
+      // The socket completing with no error frame is the call being over, not
+      // the call having failed: the surface says the first, never the second.
+      expect(harness.controller.error, isNull);
+      expect(harness.controller.endedLine, 'The call ended.');
+      expect(harness.socket.closed, isTrue);
+      expect(harness.socket.closeCode, voiceCloseNormalV1);
+      expect(harness.socket.closeReason, 'server-closed');
+      harness.controller.dispose();
+    },
+  );
 
   test('a socket that arrives after the call ended is abandoned', () async {
     final deferred = Completer<VoiceSocket>();

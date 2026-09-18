@@ -187,7 +187,8 @@ class Composer extends StatefulWidget {
   /// Commits the dictation into the editable draft. It never sends.
   final VoidCallback? onStopDictation;
 
-  /// Starts or ends a voice call with this Bot (ADR 0029).
+  /// Starts a voice call with this Bot, or moves the open one to it
+  /// (ADR 0029).
   ///
   /// Its own control, to the right of the one that morphs between dictate,
   /// send and stop: voice is not a mode of the draft, and a target that moved
@@ -195,8 +196,10 @@ class Composer extends StatefulWidget {
   /// microphone, like dictation.
   final VoidCallback? onVoice;
 
-  /// Whether this Bot is the one a voice call is open on right now.
-  final bool voiceActive;
+  /// Whether a call is still closing: the control is held until it finishes,
+  /// because a press now would be refused. Drawn held rather than inviting a
+  /// press that goes nowhere.
+  final bool voiceClosing;
 
   /// Whether this composer's Bot is the one being dictated into.
   final DictationState dictationState;
@@ -227,7 +230,7 @@ class Composer extends StatefulWidget {
     this.onDictate,
     this.onStopDictation,
     this.onVoice,
-    this.voiceActive = false,
+    this.voiceClosing = false,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.canRevertDictation,
@@ -311,30 +314,27 @@ class _ComposerState extends State<Composer> {
   /// The voice control: always this one thing, whatever the draft is doing.
   ///
   /// It does not morph with the action beside it (ADR 0029), so the target
-  /// under the thumb never moves. While a call is open on this Bot it reads
-  /// as pressed and ends the call, which is the same control doing the
-  /// opposite rather than a second one appearing somewhere else.
+  /// under the thumb never moves. It only ever starts a call with this Bot:
+  /// while the call is with this Bot the whole composer is gone — voice mode
+  /// is drawn in its place — so the way out of a call is not here. While a
+  /// previous call is still closing it is held.
   Widget _voiceButton(BuildContext context) {
     final theme = Theme.of(context);
-    final active = widget.voiceActive;
+    final closing = widget.voiceClosing;
     return identified(
       VoiceIds.composerVoice,
       IconButton(
         key: const ValueKey('composer-voice'),
-        tooltip: active ? 'End voice' : 'Talk to this Bot',
-        isSelected: active,
-        onPressed: widget.onVoice,
+        tooltip: 'Talk to this Bot',
+        onPressed: closing ? null : widget.onVoice,
         style: IconButton.styleFrom(
           minimumSize: Size.square(chatControlExtent),
           fixedSize: Size.square(chatControlExtent),
           padding: EdgeInsets.zero,
           iconSize: chatIconSize,
           shape: const CircleBorder(),
-          backgroundColor: active
-              ? theme.colorScheme.primary
-              : Colors.transparent,
-          foregroundColor: active
-              ? theme.colorScheme.onPrimary
+          foregroundColor: closing
+              ? theme.disabledColor
               : theme.colorScheme.onSurfaceVariant,
         ),
         icon: const Icon(Icons.graphic_eq_rounded),

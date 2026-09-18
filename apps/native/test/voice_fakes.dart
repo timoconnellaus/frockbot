@@ -106,10 +106,15 @@ class FakeVoiceCapture implements VoiceCapture {
   /// audio session has already gone away.
   Object? stopFailure;
 
+  /// Stands in for a device that is slow to let go: a stop that does not
+  /// finish until the test says so, which is the window a teardown is in.
+  Completer<void>? stopGate;
+
   @override
   Future<void> stop() async {
     final failed = stopFailure;
     if (failed != null) throw failed;
+    await stopGate?.future;
     if (_active) stops++;
     _active = false;
   }

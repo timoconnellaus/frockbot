@@ -262,8 +262,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool footerOpen = false;
   bool footerExiting = false;
 
-  /// The Bot the open call is with (ADR 0029), so the composer control on
-  /// that Bot's page reads as pressed and every other Bot's does not.
+  /// The Bot the open call is with (ADR 0029): that Bot's page is the one
+  /// voice mode is drawn on, and every other Bot's keeps its thread.
   String? voiceBotId;
   bool showHidden = false;
   TranscriptLine? openRun;
@@ -431,19 +431,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!directoryLoaded) unawaited(load());
   }
 
-  /// The one control does both: it opens the call, and while the footer is
-  /// up it ends it, so the way in is also the way out.
+  /// The composer's voice control: it starts a call with this Bot, or moves
+  /// a live one to it. Since the sidebar's list-root control went it is the
+  /// only way in, so a call always names a Bot (ADR 0029).
   ///
-  /// A call addresses one Bot (ADR 0029), so the Bot is always named: the
-  /// control lives on that Bot's composer and there is no botless entry.
-  /// Pressed on a Bot while a call is already open with somebody else, it
-  /// moves the call rather than ending it: the person asked to talk to this
-  /// Bot, not to hang up.
-  Future<void> _toggleVoice({required String botId}) {
-    if (!footerOpen) return _startVoice(botId: botId);
-    if (botId != voiceBotId) return _switchVoice(botId);
-    return _endVoice(reason: 'composer-button');
+  /// It never ends a call, and cannot: while the call is with this Bot, voice
+  /// mode is drawn where the composer was, so the control is not there to
+  /// press. A call is ended from the surface that is drawing it — and a call
+  /// that is already over is not moved, it is replaced: the person pressed
+  /// the control to talk to this Bot.
+  Future<void> _startOrSwitchVoice({required String botId}) {
+    final session = voiceSession;
+    if (!footerOpen || session == null || !session.active) {
+      return _startVoice(botId: botId);
+    }
+    return _switchVoice(botId);
   }
+
+  /// Whether a call is still closing. Its composer control is held for as
+  /// long as that lasts: a press there is refused by [_startVoice], and a
+  /// control that invites a press it will not take should say so instead.
+  bool get voiceClosing => !footerOpen && voiceSession?.active == true;
 
   /// Moves an open call to another Bot without dropping the audio.
   ///
@@ -457,12 +465,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     session.retarget(botId);
   }
 
-  /// Opens the footer and starts the call in the one gesture.
+  /// Opens the call's surface and starts the call in the one gesture.
   ///
-  /// The footer is on screen in the same frame as the press. The capability
-  /// probe was read at sign-in, so a deployment without voice is refused
-  /// here without a round trip; a probe that never answered does not hold
-  /// the press, and the socket speaks for itself.
+  /// The call's surface is on screen in the same frame as the press — voice
+  /// mode on this Bot's page, the footer below the shell for a call that is
+  /// with another. The capability probe was read at sign-in, so a deployment
+  /// without voice is refused here without a round trip; a probe that never
+  /// answered does not hold the press, and the socket speaks for itself.
   Future<void> _startVoice({required String botId}) async {
     if (voiceProbe.known && !voiceProbe.assistantAvailable) {
       _say(voiceUnavailableMessage);
@@ -2363,10 +2372,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onDictate: () => unawaited(_dictate()),
                             onStopDictation: () => unawaited(_stopDictation()),
                             // Voice, on the Bot whose page this is (ADR 0029).
-                            onVoice: () =>
-                                unawaited(_toggleVoice(botId: bot.botId.value)),
-                            voiceActive:
-                                footerOpen && voiceBotId == bot.botId.value,
+                            onVoice: () => unawaited(
+                              _startOrSwitchVoice(botId: bot.botId.value),
+                            ),
+                            voiceClosing: voiceClosing,
                             dictationState:
                                 dictation?.context == bot.botId.value
                                 ? dictation!.state

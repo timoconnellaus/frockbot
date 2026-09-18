@@ -55,10 +55,10 @@ the list stands as it was.
 ## The voice session
 
 1. Open a Bot and press the voice control at the far right of its composer.
-   Expect: the footer slides up from the bottom edge immediately, the meter's
-   lobes bloom white and pale pink from the microphone before the server says
-   `listening`, the call starts within ~2 s, and the call is with that Bot —
-   the control reads as pressed and Back is gone. The composer is the only way
+   Expect: the page goes into voice mode immediately — the character where the
+   thread was — the meter's lobes bloom white and pale pink from the
+   microphone before the server says `listening`, the call starts within ~2 s,
+   and the call is with that Bot; Back is gone. The composer is the only way
    in: the sidebar's list-root row carries no voice control, so there is no
    entry that starts a call without naming a Bot.
 2. Ask "what bots do I have". Expect: the reply is spoken in **this Bot's**
@@ -92,11 +92,11 @@ the list stands as it was.
    in the exchange view to read.
 7. Ask to be put through to another Bot ("let me talk to Remy") while it is
    mid-sentence. Expect: it finishes its sign-off, the next voice is Remy's,
-   and the page moves to Remy with the composer control there reading as
-   pressed. Pressing voice on a third Bot's composer moves the call again
-   rather than hanging up. Then ask the first Bot to _get something done_ by
-   another Bot: that must stay on the line as `subagent`, not hand the
-   conversation over.
+   and the page moves to Remy — voice mode on its page now, with its name
+   under the character. Pressing voice on a third Bot's composer moves the
+   call again rather than hanging up. Then ask the first Bot to _get something
+   done_ by another Bot: that must stay on the line as `subagent`, not hand
+   the conversation over.
 8. Ask something that needs today's facts ("what's the weather in Sydney
    right now"). Expect: it answers from Google Search grounding without
    saying how, and without handing off.

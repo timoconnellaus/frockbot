@@ -18,8 +18,10 @@
 /// A per-turn error from the server — a reply that produced no text, a
 /// sentence that never became sound — is a notice on the footer for a few
 /// seconds, not the end of the call. An error that carries a `code` is the
-/// call itself failing — the server has already ended it — and so is the
-/// server closing the socket, a refusal, or this client's own failure.
+/// call itself failing — the server has already ended it — and so is a
+/// refusal or this client's own failure. The server's end of the socket
+/// finishing first also ends the call, without anything having failed: the
+/// surface says it has ended rather than going on claiming a live call.
 ///
 /// Nothing here caps how long a call may last. A sleeping upstream costs
 /// nothing, so the footer may stay open silently for hours; what the server
@@ -103,6 +105,12 @@ class AssistantSessionController extends ChangeNotifier {
   VoiceUpstreamStateV1 _upstream = VoiceUpstreamStateV1.starting;
   String? _error;
 
+  /// The line a call that ended on its own leaves on the surface, or null:
+  /// the server's end of the socket finished first. Nothing failed and there
+  /// is nothing to retry, so it is not an error — but the call is over, and
+  /// no surface may go on saying it is live.
+  String? _endedLine;
+
   /// Two independent inputs decide whether this client is sending. [_userMuted]
   /// is the person's own toggle and survives everything; [_microphoneHeld] is
   /// the device being lent to dictation for a moment. Effective mute is either
@@ -126,6 +134,18 @@ class AssistantSessionController extends ChangeNotifier {
   double _micLevel = 0;
   String? _notice;
   Timer? _noticeTimer;
+
+  /// Whether the microphone has carried any signal above the gate's floor on
+  /// this call, and whether the one notice about never hearing it has been
+  /// given. Between them they settle the question a live call asks: is this
+  /// microphone being heard at all?
+  bool _microphoneHeard = false;
+  bool _deafNoticed = false;
+
+  /// When the search for a signal started, on the capture's own clock: the
+  /// first frame after the call went live, and again after a frame the call
+  /// was not listening to at all. Null until such a frame has started it.
+  int? _deafSinceMs;
   String? _delegatedBotId;
   String? _delegatedBotName;
   VoiceDelegationStateV1? _delegationState;
@@ -172,6 +192,11 @@ class AssistantSessionController extends ChangeNotifier {
   VoiceStatusV1 get status => _status;
   VoiceUpstreamStateV1 get upstream => _upstream;
   String? get error => _error;
+
+  /// The line a call that ended without the person asking says about itself,
+  /// or null. A failure has [error]; a call the person ended has a surface
+  /// that is already going away.
+  String? get endedLine => _endedLine;
 
   /// A sentence about the last reply, shown for [noticeDuration].
   String? get notice => _notice;
@@ -237,6 +262,7 @@ class AssistantSessionController extends ChangeNotifier {
     if (active) return;
     final generation = ++_generation;
     _error = null;
+    _endedLine = null;
     _userMuted = false;
     _microphoneHeld = false;
     _asleep = false;
@@ -250,6 +276,9 @@ class AssistantSessionController extends ChangeNotifier {
     _opening.clear();
     _openingBytes = 0;
     _held.clear();
+    _microphoneHeard = false;
+    _deafNoticed = false;
+    _deafSinceMs = null;
     _clearNotice();
     _clearDelegation();
     _set(VoiceSessionPhase.connecting);
@@ -327,6 +356,38 @@ class AssistantSessionController extends ChangeNotifier {
     });
   }
 
+  /// A live call that has carried no signal at all for
+  /// [voiceAssistantDeafNoticeAfterV1] says so, once, because a call can be up
+  /// and deaf: the microphone open and handing over silence, which is what the
+  /// documented macOS voice-processing unit produces (`capture.dart`). It is a
+  /// notice and not an error — the call is fine and the microphone is the
+  /// problem — and it never ends the call.
+  ///
+  /// The capture's own clock is the clock here, as it is for the gate's quiet
+  /// window: the frames carry it, so a test runs the window out in a
+  /// millisecond. A frame the call is not listening to at all — before it is
+  /// live, or while the person has it paused, both of which are silence by
+  /// somebody's choice rather than a microphone nobody can hear — starts the
+  /// window again rather than counting: a call that never carried signal is
+  /// not the same as one whose person stopped talking, and only the first is
+  /// ever said.
+  void _watchForDeafness(int atMs) {
+    if (_microphoneHeard ||
+        _deafNoticed ||
+        _phase != VoiceSessionPhase.live ||
+        muted ||
+        _paused) {
+      _deafSinceMs = null;
+      return;
+    }
+    final since = _deafSinceMs ??= atMs;
+    if (atMs - since < voiceAssistantDeafNoticeAfterV1.inMilliseconds) return;
+    _deafNoticed = true;
+    _showNotice(
+      'FrockBot isn’t hearing anything. Check the microphone in your device settings.',
+    );
+  }
+
   /// One retry, inside the retry window. Then it is an error, not a loop.
   Future<VoiceSocket?> _connectOnce(int generation) async {
     final began = DateTime.now();
@@ -394,6 +455,12 @@ class AssistantSessionController extends ChangeNotifier {
   void _onFrame(AudioFrame frame) {
     if (_disposed) return;
     _micLevel = frame.level;
+    // The one thing a deaf call never has: a frame louder than the floor
+    // below which the gate refuses to call anything speech.
+    if (!_microphoneHeard && frame.level > gateConfig.floor) {
+      _microphoneHeard = true;
+    }
+    _watchForDeafness(frame.atMs);
     final decision = _gate.offer(frame.bytes, frame.level, frame.atMs);
     // Barge-in is judged before mute and before sleep: it is the one thing
     // that must reach the server while it is talking.
@@ -711,9 +778,24 @@ class AssistantSessionController extends ChangeNotifier {
     _set(VoiceSessionPhase.ended);
   }
 
+  /// The server's end of the socket finished first: the call is over and
+  /// nobody asked for it to be. Nothing failed and there is nothing to act
+  /// on, so it is not an error — but it is an end, and the surface says so
+  /// rather than going on claiming a live call.
+  ///
+  /// A failure already under way and the person's own end both outrank it:
+  /// the failure has the line that explains it, and a call the person ended
+  /// has a surface that is already going away.
   Future<void> _ended() async {
-    if (!active) return;
+    if (_disposed ||
+        _error != null ||
+        !active ||
+        _phase == VoiceSessionPhase.ending) {
+      return;
+    }
     _generation++;
+    _endedLine = 'The call ended.';
+    _notify();
     await _teardown(reason: 'server-closed');
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.ended);

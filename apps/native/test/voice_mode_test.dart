@@ -24,6 +24,7 @@ import 'package:frockbot_native/voice/appearance.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/capture.dart';
 import 'package:frockbot_native/voice/footer.dart';
+import 'package:frockbot_native/voice/protocol.dart';
 import 'package:frockbot_native/voice/voice_mode.dart';
 
 import 'bot_settings_test.dart' show account, api, botSettings;
@@ -159,6 +160,43 @@ void main() {
     await harness.dispose(tester);
   });
 
+  testWidgets('the composer is not talkable while a call is still closing', (
+    tester,
+  ) async {
+    final harness = VoiceShellHarness();
+    await harness.mount(tester, width: 1280, brightness: Brightness.dark);
+    // A device slow to let go, so the teardown is still in flight while the
+    // test looks at the screen.
+    final stop = Completer<void>();
+    harness.callCapture.stopGate = stop;
+    await harness.call.start();
+    harness.showCall(botId: 'voice-bot');
+    await tester.pump();
+    expect(find.byType(VoiceMode), findsOneWidget);
+
+    // End the call from voice mode: the thread is back at once, and the
+    // composer's voice control is held until the call has finished closing
+    // rather than inviting a press the shell would refuse.
+    await tester.tap(byIdentifier(VoiceIds.hangUp));
+    await tester.pump();
+    await tester.pump();
+    final voice = find.byKey(const ValueKey('composer-voice'));
+    expect(find.byType(Composer), findsOneWidget);
+    expect(tester.widget<IconButton>(voice).onPressed, isNull);
+
+    stop.complete();
+    await tester.runAsync(() => settle());
+    await tester.pump();
+    expect(tester.widget<IconButton>(voice).onPressed, isNotNull);
+    // The footer's exit finishes on its own; the composer is talkable under
+    // it, not over it.
+    for (var frame = 0; frame < 20; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(tester.widget<IconButton>(voice).onPressed, isNotNull);
+    await harness.dispose(tester);
+  });
+
   for (final width in [390.0, 1280.0]) {
     testWidgets('the stage holds still across all three states: $width', (
       tester,
@@ -274,6 +312,139 @@ void main() {
     expect(find.text('Listening'), findsOneWidget);
   });
 
+  testWidgets('a call the server closed first says it ended, not Listening', (
+    tester,
+  ) async {
+    final socket = FakeVoiceSocket();
+    final controller = await live(tester, socket);
+    await mountSurface(tester, controller, width: 390);
+    expect(find.text('Listening'), findsOneWidget);
+
+    // The socket's end going away with no error frame: the client already
+    // knows the call is over, so the surface must stop claiming it is live —
+    // without framing a call that failed at nothing as a failure.
+    unawaited(socket.finish());
+    await tester.runAsync(() => settle());
+    await tester.pump();
+    await tester.pump();
+
+    expect(controller.active, isFalse);
+    expect(controller.error, isNull);
+    expect(find.text('Listening'), findsNothing);
+    expect(find.text('Call failed'), findsNothing);
+    expect(find.text('Call ended'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: byIdentifier(VoiceIds.modeNotice),
+        matching: find.text('The call ended.'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a live call that has never heard the microphone says so once', (
+    tester,
+  ) async {
+    final socket = FakeVoiceSocket();
+    final capture = FakeVoiceCapture();
+    final controller = AssistantSessionController(
+      openSocket: () async => socket,
+      capture: capture,
+      player: FakeVoicePlayer(),
+    );
+    addTearDown(controller.dispose);
+    await controller.start();
+    await tester.pump();
+    socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+    await tester.pump();
+    await tester.pump();
+    await mountSurface(tester, controller, width: 390);
+
+    // The microphone is open and every frame is the room at rest: the call is
+    // live and has carried no signal at all. The frames are the clock, so the
+    // window is run out in frames rather than in waited-for seconds.
+    var at = 0;
+    void silence(int ms) {
+      for (var elapsed = 0; elapsed < ms; elapsed += 40) {
+        capture.emit(AudioFrame(pcmFrame(0), 0, at));
+        at += 40;
+      }
+    }
+
+    silence(voiceAssistantDeafNoticeAfterV1.inMilliseconds ~/ 2);
+    await tester.runAsync(() => settle());
+    await tester.pump();
+    expect(controller.notice, isNull);
+    silence(voiceAssistantDeafNoticeAfterV1.inMilliseconds ~/ 2 + 40);
+    await tester.runAsync(() => settle());
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.descendant(
+        of: byIdentifier(VoiceIds.modeNotice),
+        matching: find.text(
+          'FrockBot isn’t hearing anything. Check the microphone in your device settings.',
+        ),
+      ),
+      findsOneWidget,
+    );
+    // A notice, not an error: the call is fine, the microphone is the
+    // problem, and the call goes on saying it is listening.
+    expect(controller.error, isNull);
+    expect(controller.active, isTrue);
+    expect(find.text('Listening'), findsOneWidget);
+
+    // Once: when the notice's four seconds are up, another window of the same
+    // silence says nothing more.
+    await tester.pump(AssistantSessionController.noticeDuration);
+    await tester.pump();
+    expect(byIdentifier(VoiceIds.modeNotice), findsNothing);
+    silence(voiceAssistantDeafNoticeAfterV1.inMilliseconds + 40);
+    await tester.runAsync(() => settle());
+    await tester.pump();
+    await tester.pump();
+    expect(controller.notice, isNull);
+    expect(byIdentifier(VoiceIds.modeNotice), findsNothing);
+  });
+
+  testWidgets('a call that has heard the microphone is never called deaf', (
+    tester,
+  ) async {
+    final socket = FakeVoiceSocket();
+    final capture = FakeVoiceCapture();
+    final controller = AssistantSessionController(
+      openSocket: () async => socket,
+      capture: capture,
+      player: FakeVoicePlayer(),
+    );
+    addTearDown(controller.dispose);
+    await controller.start();
+    await tester.pump();
+    socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+    await tester.pump();
+    await tester.pump();
+
+    // Heard once, then silence: somebody who stopped talking on a working
+    // microphone is not a microphone nobody can hear.
+    var at = 0;
+    capture.emit(AudioFrame(pcmFrame(0.05), 0.05, at));
+    at += 40;
+    for (
+      var elapsed = 0;
+      elapsed < voiceAssistantDeafNoticeAfterV1.inMilliseconds + 40;
+      elapsed += 40
+    ) {
+      capture.emit(AudioFrame(pcmFrame(0), 0, at));
+      at += 40;
+    }
+    await tester.runAsync(() => settle());
+    await tester.pump();
+    expect(controller.notice, isNull);
+  });
+
   testWidgets('a delegation becomes a chip, and finishing offers the Work', (
     tester,
   ) async {
@@ -336,21 +507,15 @@ void main() {
     );
 
     // One turn hands two tasks to the call's own Bot: two Turns, two chips.
-    socket.deliver(
-      delegation('scout', 'Scout', 'asked', runId: 'run-one'),
-    );
-    socket.deliver(
-      delegation('scout', 'Scout', 'asked', runId: 'run-two'),
-    );
+    socket.deliver(delegation('scout', 'Scout', 'asked', runId: 'run-one'));
+    socket.deliver(delegation('scout', 'Scout', 'asked', runId: 'run-two'));
     await tester.pump();
     await tester.pump();
     expect(byIdentifier(VoiceIds.chip('run-one')), findsOneWidget);
     expect(byIdentifier(VoiceIds.chip('run-two')), findsOneWidget);
 
     // Each chip opens its own Turn.
-    socket.deliver(
-      delegation('scout', 'Scout', 'finished', runId: 'run-two'),
-    );
+    socket.deliver(delegation('scout', 'Scout', 'finished', runId: 'run-two'));
     await tester.pump();
     await tester.pump();
     await tester.tap(
@@ -705,61 +870,64 @@ void main() {
     expect(delivery['custom'], 'Talk like a ship captain.');
   });
 
-  test('a voice choice made while a save is in flight is not dropped', () async {
-    final commands = <Map<String, Object?>>[];
-    final gates = <Completer<void>>[];
-    final state = BotSettingsController(
-      SettingsApi(MemoryStore(), (path, body) async {
-        if (body == null) {
-          if (path.startsWith('/api/settings')) return account();
+  test(
+    'a voice choice made while a save is in flight is not dropped',
+    () async {
+      final commands = <Map<String, Object?>>[];
+      final gates = <Completer<void>>[];
+      final state = BotSettingsController(
+        SettingsApi(MemoryStore(), (path, body) async {
+          if (body == null) {
+            if (path.startsWith('/api/settings')) return account();
+            return {
+              ...botSettings(),
+              'voice': {
+                'schemaVersion': 1,
+                'voiceName': 'Sulafat',
+                'delivery': <String, Object?>{},
+              },
+            };
+          }
+          commands.add(Map<String, Object?>.from(body as Map));
+          final gate = Completer<void>();
+          gates.add(gate);
+          await gate.future;
           return {
-            ...botSettings(),
-            'voice': {
-              'schemaVersion': 1,
-              'voiceName': 'Sulafat',
-              'delivery': <String, Object?>{},
-            },
+            'schemaVersion': 1,
+            'commandId': body['commandId'],
+            'status': 'applied',
           };
-        }
-        commands.add(Map<String, Object?>.from(body as Map));
-        final gate = Completer<void>();
-        gates.add(gate);
-        await gate.future;
-        return {
-          'schemaVersion': 1,
-          'commandId': body['commandId'],
-          'status': 'applied',
-        };
-      }),
-      'alpha',
-    );
-    addTearDown(state.dispose);
-    await state.load();
+        }),
+        'alpha',
+      );
+      addTearDown(state.dispose);
+      await state.load();
 
-    final base = state.voice!;
-    final faster = base.copyWith(
-      delivery: base.delivery.copyWith(pace: 'faster'),
-    );
-    final dry = faster.copyWith(
-      delivery: faster.delivery.copyWith(humour: 'dry'),
-    );
-    final first = state.saveVoice(faster);
-    final second = state.saveVoice(dry);
-    await pumpEventQueue();
-    expect(gates.length, 1);
-    gates.first.complete();
-    await pumpEventQueue();
-    expect(gates.length, 2);
-    gates.last.complete();
+      final base = state.voice!;
+      final faster = base.copyWith(
+        delivery: base.delivery.copyWith(pace: 'faster'),
+      );
+      final dry = faster.copyWith(
+        delivery: faster.delivery.copyWith(humour: 'dry'),
+      );
+      final first = state.saveVoice(faster);
+      final second = state.saveVoice(dry);
+      await pumpEventQueue();
+      expect(gates.length, 1);
+      gates.first.complete();
+      await pumpEventQueue();
+      expect(gates.length, 2);
+      gates.last.complete();
 
-    expect(await first, isTrue);
-    expect(await second, isTrue);
-    expect(
-      (commands[1]['voice']! as Map)['delivery'],
-      containsPair('humour', 'dry'),
-    );
-    expect(state.voice!.delivery.humour, 'dry');
-  });
+      expect(await first, isTrue);
+      expect(await second, isTrue);
+      expect(
+        (commands[1]['voice']! as Map)['delivery'],
+        containsPair('humour', 'dry'),
+      );
+      expect(state.voice!.delivery.humour, 'dry');
+    },
+  );
 
   test('the Dart voice tables mirror the TypeScript ones', () {
     expect(geminiVoicesV1.length, 30);
