@@ -22,7 +22,10 @@ import {
   type PluginWorkerModelResultV1,
   type SessionEvent,
 } from "@frockbot/core/contracts";
-import { createAgentLoop } from "@frockbot/core/agent-loop";
+import {
+  createAgentLoop,
+  modelFailureMayRetryV1,
+} from "@frockbot/core/agent-loop";
 import type { AgentHandle } from "@frockbot/core/agent-loop/agent";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { priorOutcomeUnknownV1 } from "@frockbot/app/isolates/model-transport";
@@ -386,6 +389,32 @@ describe("what the adapter believes of a failure", () => {
     expect((outcome.error as ModelProviderFailureError).classification).toBe(
       "permanent",
     );
+  });
+
+  test("keeps the host's own classification when the worker refused before the Plugin ran", async () => {
+    // The worker never produced a Plugin generator, so nothing left the host
+    // and the failure is the host's own reading: definitive, not the
+    // Plugin's to word and not "unknown" for the kernel to spend a second
+    // attempt on.
+    const fake = provider({
+      streamModel: async () => ({
+        schemaVersion: 1,
+        status: "refused",
+        reason: "the plugin worker for this generation is no longer mounted",
+      }),
+    });
+    const outcome = await drain(
+      fake.stream(request(), new AbortController().signal),
+    );
+    const error = outcome.error as ModelProviderFailureError;
+    expect(error).toBeInstanceOf(ModelProviderFailureError);
+    expect(error.classification).toBe("permanent");
+    expect(
+      modelFailureMayRetryV1({
+        classification: error.classification,
+        attempt: 1,
+      }),
+    ).toBe(false);
   });
 
   test("takes the host's word when the host saw the provider refuse", async () => {

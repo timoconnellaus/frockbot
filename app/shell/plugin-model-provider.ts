@@ -650,7 +650,8 @@ export function pluginModelProviderV1(
  * otherwise the failure the deadline's own sentence describes, because a
  * worker that never reached the transport dispatched nothing to bill. A
  * failure with nothing sent at all is otherwise the Plugin's to explain, and
- * the host believes it about why because it has no answer of its own.
+ * the host believes it about why because it has no answer of its own — but a
+ * failure the host itself raised carries the reading it already made.
  * Anything else means the call went out and nothing definitive came back,
  * which is an uncertain outcome the kernel settles rather than retries; a
  * `ModelProviderFailureError` would tell the kernel and Billing that nothing
@@ -702,14 +703,28 @@ function classifyFailureV1(
         });
   }
   if (!dispatch.sent()) {
-    // Nothing left the host: there is nothing that could have billed, and the
-    // Plugin's own words stand because the host has no reading of its own.
+    // Nothing left the host: there is nothing that could have billed. A
+    // failure the host itself raised — a worker that refused before the
+    // Plugin's generator existed, a protocol violation the adapter caught —
+    // carries the classification the host already reached, which the kernel
+    // retries on its own terms; only a failure the host read out of the
+    // Plugin's own words falls back to what the Plugin stated.
+    const stated =
+      error instanceof ModelProviderFailureError
+        ? {
+            classification: error.classification,
+            retryAfterMs: error.retryAfterMs,
+          }
+        : {
+            classification: claimed?.claimed ?? "unknown",
+            retryAfterMs: claimed?.retryAfterMs,
+          };
     return new ModelProviderFailureError({
-      classification: claimed?.claimed ?? "unknown",
+      classification: stated.classification,
       reason,
-      ...(claimed?.retryAfterMs === undefined
+      ...(stated.retryAfterMs === undefined
         ? {}
-        : { retryAfterMs: claimed.retryAfterMs }),
+        : { retryAfterMs: stated.retryAfterMs }),
     });
   }
   // The call went out and nothing definitive came back. That is not a
