@@ -44,9 +44,12 @@ const double voiceModeBarHeight = 84;
 const double voiceModeWideWidth = 700;
 
 /// Which word the surface says, and which dot it wears.
-enum VoiceModeState { listening, speaking, paused }
+enum VoiceModeState { listening, speaking, paused, failed }
 
 VoiceModeState voiceModeStateOf(AssistantSessionController session) {
+  // A failure outranks the rest: the call is over, so saying "Listening"
+  // under a dead meter is the one thing the surface must not do.
+  if (session.error != null) return VoiceModeState.failed;
   if (session.paused) return VoiceModeState.paused;
   return session.meterMode == VoiceMeterMode.speaking
       ? VoiceModeState.speaking
@@ -57,6 +60,7 @@ String voiceModeWordOf(VoiceModeState state) => switch (state) {
   VoiceModeState.listening => 'Listening',
   VoiceModeState.speaking => 'Speaking',
   VoiceModeState.paused => 'Paused',
+  VoiceModeState.failed => 'Call failed',
 };
 
 class VoiceMode extends StatefulWidget {
@@ -91,6 +95,10 @@ class _VoiceModeState extends State<VoiceMode> {
     state: voiceModeStateOf(widget.session),
     paused: widget.session.paused,
     badge: widget.session.finishedWhilePaused,
+    // A call that failed, or is saying something short-lived, is the whole
+    // reason this surface exists at that moment: the footer that used to
+    // carry both is not drawn while voice mode is (ADR 0029).
+    text: widget.session.error ?? widget.session.notice,
     chips: [
       for (final entry in widget.session.delegations)
         (
@@ -109,7 +117,10 @@ class _VoiceModeState extends State<VoiceMode> {
   }
 
   static bool _same(_Presentation a, _Presentation b) {
-    if (a.state != b.state || a.paused != b.paused || a.badge != b.badge) {
+    if (a.state != b.state ||
+        a.paused != b.paused ||
+        a.badge != b.badge ||
+        a.text != b.text) {
       return false;
     }
     if (a.chips.length != b.chips.length) return false;
@@ -261,6 +272,7 @@ class _VoiceModeState extends State<VoiceMode> {
                             theme.colorScheme.onSurfaceVariant.withValues(
                               alpha: 0.4,
                             ),
+                          VoiceModeState.failed => theme.colorScheme.error,
                         },
                       ),
                     ),
@@ -284,7 +296,41 @@ class _VoiceModeState extends State<VoiceMode> {
 
   /// What the call has handed off. An empty slot stays empty: a placeholder
   /// sentence about work nobody asked for is noise.
+  ///
+  /// The slot is also where the call speaks: a failure, or a notice that
+  /// borrows the stage for a few seconds, is the same shape of thing — one
+  /// line about the call, where the call's other output goes. Which of the
+  /// two is showing is decided by precedence, exactly as the footer decides
+  /// it, so the two surfaces never disagree about what is being said.
   Widget _activity(BuildContext context, {required bool wide}) {
+    final text = _shown.text;
+    if (text != null) {
+      final theme = Theme.of(context);
+      final failed = _shown.state == VoiceModeState.failed;
+      return identified(
+        VoiceIds.modeNotice,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Center(
+            child: SingleChildScrollView(
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  text,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontSize: 13.5,
+                    color: failed
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     final chips = _shown.chips;
     return identified(
       VoiceIds.activity,
@@ -566,5 +612,6 @@ typedef _Presentation = ({
   VoiceModeState state,
   bool paused,
   int badge,
+  String? text,
   List<_Chip> chips,
 });

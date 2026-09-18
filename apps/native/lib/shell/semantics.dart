@@ -115,13 +115,12 @@ abstract final class SignInIds {
   static const note = 'sign-in-note';
 }
 
-/// Voice: the two controls that start it, and the footer that is it.
+/// Voice: the control that starts it, and the surfaces that are it.
 ///
-/// The controls are always present — a deployment without the keys answers a
+/// The control is always present — a deployment without the keys answers a
 /// press with one line rather than hiding the button — so a spec can select
-/// on them whatever the deployment is configured with.
+/// on it whatever the deployment is configured with.
 abstract final class VoiceIds {
-  static const sidebarStart = 'voice-start';
   static const footer = 'voice-footer';
   static const footerAnimation = 'voice-footer-animation';
   static const mute = 'voice-mute';
@@ -135,6 +134,10 @@ abstract final class VoiceIds {
   static const stage = 'voice-stage';
   static const state = 'voice-state';
   static const activity = 'voice-activity';
+
+  /// The one line the call is saying on its own surface: a failure that
+  /// ended it, or a notice that is borrowing the stage.
+  static const modeNotice = 'voice-mode-notice';
   static const pause = 'voice-pause';
   static const resume = 'voice-resume';
   static const hangUp = 'voice-hang-up';

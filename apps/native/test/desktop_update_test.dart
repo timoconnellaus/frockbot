@@ -97,8 +97,6 @@ Widget sidebar(
     onSearch: () {},
     onProfile: onProfile ?? () {},
     onMarketplace: () {},
-    onVoice: () {},
-    voiceControl: VoiceControlState.idle,
     onToggleHidden: () {},
     onRetry: () async {},
   );

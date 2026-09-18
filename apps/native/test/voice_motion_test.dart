@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/composer.dart';
 import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/dictation.dart';
@@ -571,30 +570,21 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.start();
-    expect(
-      voiceControlStateV1(footerOpen: true, sessionActive: controller.active),
-      VoiceControlState.active,
-    );
+    expect(controller.active, isTrue);
 
     // End takes the footer away at once; the socket is still closing.
     final ending = controller.end(reason: 'test');
     await settle();
     expect(controller.phase, VoiceSessionPhase.ending);
-    expect(
-      voiceControlStateV1(footerOpen: false, sessionActive: controller.active),
-      VoiceControlState.ending,
-    );
 
     socket.gate.complete();
     await ending;
-    expect(
-      voiceControlStateV1(footerOpen: false, sessionActive: controller.active),
-      VoiceControlState.idle,
-    );
+    expect(controller.active, isFalse);
   });
 
   test(
-    'a failing recorder or socket still ends the call and frees the control',
+    'a failing recorder or socket still ends the call and frees the '
+    'microphone',
     () async {
       final capture = FakeVoiceCapture()..stopFailure = StateError('recorder');
       final socket = FailingCloseSocket();
@@ -608,13 +598,7 @@ void main() {
 
       await controller.end(reason: 'end-button');
       expect(controller.phase, VoiceSessionPhase.ended);
-      expect(
-        voiceControlStateV1(
-          footerOpen: false,
-          sessionActive: controller.active,
-        ),
-        VoiceControlState.idle,
-      );
+      expect(controller.active, isFalse);
       expect(socket.closeReason, 'end-button');
       controller.dispose();
       await settle();
@@ -638,10 +622,6 @@ void main() {
     await controller.end(reason: 'lifecycle:paused');
     expect(controller.phase, VoiceSessionPhase.ended);
     expect(controller.active, isFalse);
-    expect(
-      voiceControlStateV1(footerOpen: false, sessionActive: controller.active),
-      VoiceControlState.idle,
-    );
     expect(capture.stops, 1);
     expect(socket.closed, isTrue);
     expect(socket.closeReason, 'lifecycle:paused');
@@ -649,8 +629,8 @@ void main() {
     await settle();
   }, timeout: const Timeout(Duration(seconds: 10)));
 
-  test('an end whose every device step fails still frees the control and the '
-      'microphone', () async {
+  test('an end whose every device step fails still frees the microphone',
+      () async {
     final capture = HostileCapture()..stopFailure = StateError('recorder');
     final socket = HostileSocket();
     final player = FailingClosePlayer();
@@ -667,10 +647,6 @@ void main() {
 
     expect(controller.phase, VoiceSessionPhase.ended);
     expect(controller.active, isFalse);
-    expect(
-      voiceControlStateV1(footerOpen: false, sessionActive: controller.active),
-      VoiceControlState.idle,
-    );
     expect(capture.stopAttempts, greaterThan(0));
     expect(player.closed, isTrue);
     expect(socket.closed, isTrue);
@@ -734,60 +710,6 @@ void main() {
       await tester.tap(find.byTooltip('Send'));
       expect(sends, 1);
       expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets(
-    'the voice control cannot invite a start while a call is ending',
-    (tester) async {
-      var starts = 0;
-      Future<void> show(VoiceControlState state) => tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: Scaffold(
-            body: ShellSidebar(
-              bots: const [],
-              profiles: const {},
-              unread: const {},
-              archived: const {},
-              activeBotId: null,
-              focusedBotId: null,
-              workingBotId: null,
-              loaded: true,
-              showHidden: false,
-              onSelect: (_) {},
-              onCreateBot: () {},
-              onSearch: () {},
-              onProfile: () {},
-              onMarketplace: () {},
-              onVoice: () => starts++,
-              voiceControl: state,
-              onToggleHidden: () {},
-              onRetry: () async {},
-            ),
-          ),
-        ),
-      );
-
-      await show(VoiceControlState.ending);
-      final button = find.byTooltip('Ending voice session…');
-      expect(button, findsOneWidget);
-      expect(
-        tester
-            .widget<IconButton>(
-              find.ancestor(of: button, matching: find.byType(IconButton)),
-            )
-            .onPressed,
-        isNull,
-      );
-      await tester.tap(button, warnIfMissed: false);
-      await tester.pump();
-      expect(starts, 0);
-
-      await show(VoiceControlState.idle);
-      await tester.tap(find.byTooltip('Start voice session'));
-      await tester.pump();
-      expect(starts, 1);
     },
   );
 }

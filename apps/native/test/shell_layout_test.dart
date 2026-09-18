@@ -489,8 +489,6 @@ void main() {
             onSearch: () {},
             onProfile: () {},
             onMarketplace: () {},
-            onVoice: () {},
-            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {},
           ),
@@ -548,8 +546,6 @@ void main() {
       onSearch: () {},
       onProfile: () {},
       onMarketplace: () {},
-      onVoice: () {},
-      voiceControl: VoiceControlState.idle,
       onToggleHidden: () {},
       onRetry: () async {},
       onActions: onActions,
@@ -772,8 +768,6 @@ void main() {
             onSearch: () {},
             onProfile: () {},
             onMarketplace: () {},
-            onVoice: () {},
-            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {},
             onMove: drops.add,
@@ -826,8 +820,6 @@ void main() {
             onSearch: () {},
             onProfile: () {},
             onMarketplace: () {},
-            onVoice: () {},
-            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {},
           ),
@@ -841,11 +833,11 @@ void main() {
       expect(byIdentifier(ShellIds.sidebarCreateBot), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarSearch), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarProfile), findsOneWidget);
-      // Four controls and no more: you, a call, search, a new Bot. The
-      // account is behind the first and each Bot's own affairs are on its
-      // page. The Marketplace is the column's foot, a named row below the
-      // list rather than a fifth icon in its bar.
-      expect(find.byType(IconButton), findsNWidgets(3));
+      // The row carries only what the account needs: you, search and a new
+      // Bot. A call is not among them — it addresses one Bot, so it starts on
+      // that Bot's composer (ADR 0029) — and the Marketplace is the column's
+      // foot, a named row below the list rather than an icon in its bar.
+      expect(find.byType(IconButton), findsNWidgets(2));
       final foot = byIdentifier(ShellIds.sidebarMarketplace);
       expect(foot, findsOneWidget);
       expect(
@@ -883,8 +875,6 @@ void main() {
             onSearch: () {},
             onProfile: () {},
             onMarketplace: () {},
-            onVoice: () {},
-            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {},
           ),
@@ -920,8 +910,6 @@ void main() {
             onSearch: () {},
             onProfile: () {},
             onMarketplace: () => opened++,
-            onVoice: () {},
-            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {},
           ),
@@ -935,7 +923,7 @@ void main() {
       expect(marketplace, findsOneWidget);
       expect(find.text('Marketplace'), findsNothing);
       expect(find.byTooltip('Marketplace'), findsOneWidget);
-      expect(find.byType(IconButton), findsNWidgets(5));
+      expect(find.byType(IconButton), findsNWidgets(4));
       final profile = tester.getRect(byIdentifier(ShellIds.sidebarProfile));
       final door = tester.getRect(marketplace);
       expect(door.left, greaterThanOrEqualTo(profile.right - 1));
@@ -968,8 +956,6 @@ void main() {
             onSearch: () {},
             onProfile: () {},
             onMarketplace: () {},
-            onVoice: () {},
-            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {
               retries++;

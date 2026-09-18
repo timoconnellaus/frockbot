@@ -217,6 +217,63 @@ void main() {
     );
   });
 
+  testWidgets('a failed call says so where it said Listening', (tester) async {
+    final socket = FakeVoiceSocket();
+    final controller = await live(tester, socket);
+    await mountSurface(tester, controller, width: 390);
+    expect(find.text('Listening'), findsOneWidget);
+
+    socket.deliver(
+      jsonEncode({'type': 'error', 'message': 'upstream', 'code': 'upstream'}),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    // The word stops claiming a call that is over, and the reason it is over
+    // is on the surface that shows the call: the footer is the only other
+    // place a failure is ever written, and voice mode does not draw it.
+    expect(find.text('Listening'), findsNothing);
+    expect(find.text('Call failed'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: byIdentifier(VoiceIds.modeNotice),
+        matching: find.text('Voice stopped. Try again.'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a notice borrows the stage without ending the call', (
+    tester,
+  ) async {
+    final socket = FakeVoiceSocket();
+    final controller = await live(tester, socket);
+    await mountSurface(tester, controller, width: 390);
+    expect(controller.active, isTrue);
+
+    // No code: one reply failed, the call carries on.
+    socket.deliver(jsonEncode({'type': 'error', 'message': 'no text'}));
+    await tester.pump();
+    await tester.pump();
+
+    expect(controller.active, isTrue);
+    expect(find.text('Listening'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: byIdentifier(VoiceIds.modeNotice),
+        matching: find.text('That reply didn’t come through. Say it again.'),
+      ),
+      findsOneWidget,
+    );
+
+    // A borrow, not a takeover: the line goes when its time is up, and the
+    // call is left saying what it was saying.
+    await tester.pump(AssistantSessionController.noticeDuration);
+    await tester.pump();
+    expect(byIdentifier(VoiceIds.modeNotice), findsNothing);
+    expect(find.text('Listening'), findsOneWidget);
+  });
+
   testWidgets('a delegation becomes a chip, and finishing offers the Work', (
     tester,
   ) async {
