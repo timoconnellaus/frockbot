@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/flock/avatar.dart';
@@ -34,6 +35,19 @@ Future<void> capture(WidgetTester tester, String name) async {
 }
 
 void main() {
+  const visual = String.fromEnvironment('COMPANION_VISUAL_OUTPUT');
+  if (visual.isNotEmpty) {
+    setUpAll(() async {
+      final inter = FontLoader('Inter');
+      for (final weight in [400, 500, 600, 700]) {
+        inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+      }
+      await inter.load();
+      await (FontLoader(
+        'MaterialIcons',
+      )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+    });
+  }
   for (final width in [390.0, 1280.0]) {
     testWidgets('the companion sits on the composer field at $width', (
       tester,
@@ -88,11 +102,16 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: FrockTheme.theme(Brightness.dark),
-          home: Scaffold(
-            body: ChatPane(
-              controller: c,
-              onReconnect: () async {},
-              background: 'fox',
+          home: RepaintBoundary(
+            child: Scaffold(
+              body: ChatPane(
+                controller: c,
+                onReconnect: () async {},
+                background: 'fox',
+                onDictate: () {},
+                onStopDictation: () {},
+                onVoice: () {},
+              ),
             ),
           ),
         ),
@@ -103,6 +122,7 @@ void main() {
       final field = find.byKey(const ValueKey('composer'));
       expect(companion, findsOneWidget);
       final restLeft = tester.getTopLeft(field).dx;
+      await capture(tester, 'companion-tuck-rest-${width.toInt()}');
 
       await tester.enterText(field, 'hello');
       await tester.pump();
@@ -128,6 +148,7 @@ void main() {
         expect(companion, findsOneWidget);
         expect(tester.getTopLeft(field).dx, restLeft);
       }
+      await capture(tester, 'companion-tuck-typing-${width.toInt()}');
 
       await tester.enterText(field, '');
       await tester.pump();
