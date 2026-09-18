@@ -11,7 +11,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 
 import 'shell_layout_test.dart' show byIdentifier;
-import 'voice_fakes.dart';
 import 'voice_shell_harness.dart';
 
 void main() {
