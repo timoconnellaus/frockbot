@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../flock/avatar.dart';
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
 import '../theme/document.dart';
@@ -177,7 +178,7 @@ class _BotLookPageState extends State<BotLookPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Look')),
+    appBar: DesktopHeader(child: AppBar(title: const Text('Look'))),
     body: AnimatedBuilder(
       animation: state,
       builder: (context, _) {

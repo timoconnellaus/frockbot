@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/desktop_layout.dart';
 import 'action.dart';
 import 'document.dart';
 import 'embed.dart';
@@ -147,7 +148,7 @@ class _ViewSamplePageState extends State<ViewSamplePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('View sample')),
+    appBar: DesktopHeader(child: AppBar(title: const Text('View sample'))),
     body: SafeArea(
       top: false,
       child: ListView(

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
 import '../shell/chat_pane.dart' show RunPage;
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../shell/transcript.dart';
 import 'controller.dart';
@@ -89,7 +90,7 @@ class _ArchivedConversationPageState extends State<ArchivedConversationPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.bot.name)),
+    appBar: DesktopHeader(child: AppBar(title: Text(widget.bot.name))),
     body: identified(
       SearchIds.archivedConversation,
       SafeArea(

@@ -7,6 +7,7 @@ import '../client/transport.dart';
 import '../connections/page.dart';
 import '../plugins/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/desktop_layout.dart';
 import '../shell/lifecycle.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
@@ -211,21 +212,23 @@ class _SettingsPageState extends State<SettingsPage>
     final document = state.document;
     final controller = view;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.title ??
-              (widget.home == 'models' ? 'Models' : 'Personal details'),
-        ),
-        actions: [
-          identified(
-            SettingsIds.refresh,
-            IconButton(
-              tooltip: 'Refresh settings',
-              onPressed: state.busy ? null : state.load,
-              icon: const Icon(Icons.refresh_rounded),
-            ),
+      appBar: DesktopHeader(
+        child: AppBar(
+          title: Text(
+            widget.title ??
+                (widget.home == 'models' ? 'Models' : 'Personal details'),
           ),
-        ],
+          actions: [
+            identified(
+              SettingsIds.refresh,
+              IconButton(
+                tooltip: 'Refresh settings',
+                onPressed: state.busy ? null : state.load,
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+            ),
+          ],
+        ),
       ),
       body: SafeArea(
         top: false,
