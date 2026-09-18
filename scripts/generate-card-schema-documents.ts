@@ -13,7 +13,7 @@
 // implementation, a root dependency, whose delivered `refs/json-schema-2020-12`
 // is the published set — keyed by each document's canonical `$id`, and written
 // as Dart source `apps/native/lib/cards/schema_documents.g.dart`. The client
-// answers those URIs from this build and delegates everything else, so a card
+// answers those URIs from this build and refuses every other URI, so a card
 // never leaves the app to be validated, and the two implementations of the
 // draft here (ajv in a Worker, this client) read the same words.
 //
