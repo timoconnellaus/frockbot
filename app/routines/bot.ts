@@ -38,7 +38,10 @@ import { routineHookPathV1 } from "@frockbot/app/routines/shared";
 import { firstPartyFeatureOnForBotV1 } from "@frockbot/app/plugins/catalog";
 import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
 import type { RoutinesRuntimeHostV1 } from "@frockbot/app/routines/agent";
-import { routineHandoffTextV1 } from "@frockbot/app/routines/inbox";
+import {
+  routineHandoffTextV1,
+  ROUTINE_DELIVERY_CUE_V1,
+} from "@frockbot/app/routines/inbox";
 import {
   routineTerminalRecordsV1,
   type RoutineTerminalRecordsV1,
@@ -596,6 +599,7 @@ export async function settleScheduledWork(
   // cost that producer its pass, never the clock.
   try {
     await settleRoutineFirings(state);
+    await deliverPendingHandoffs(state);
     await runOwedSubagentTurns(state);
     await reconcileOverdueTasks(state);
     await expireDueApprovals(state);
@@ -618,6 +622,72 @@ export async function settleScheduledWork(
  * retry after eviction is refused by the kernel's own idempotency rather than
  * running the Routine a second time.
  */
+/**
+ * Open the conversational Turn a waiting hand-off is owed.
+ *
+ * A firing hands off with `wake_parent`, and that hand-off is drained into the
+ * Bot's *next* conversational Turn. Nothing opened one: a 9:45am inbox triage
+ * sat in the queue until the person happened to speak — hours later, against
+ * whatever they actually asked about — while the only thing that reached them
+ * unasked was a notification carrying the first 240 characters.
+ *
+ * So the alarm opens it. An ordinary `chat` Turn on the Bot's own conversation,
+ * whose input is the drained hand-off and a cue saying nobody spoke: the Bot
+ * answers with the whole conversation in front of it and says what matters in
+ * its own voice. That second inference is the point rather than the price — the
+ * firing wrote its hand-off in a Session that is deliberately blind to the
+ * conversation, so it cannot know what the person already dealt with here.
+ *
+ * One Turn covers every waiting hand-off, because the drain takes the whole
+ * queue.
+ */
+async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
+  const identity = await state.authority.readDurableIdentity();
+  if (!identity) return;
+  const pending = await state.routineInbox.pending();
+  const owed = pending.filter(
+    ({ input }) => input.kind === "wake" && input.deliveredAt === undefined,
+  );
+  if (owed.length === 0) return;
+  // A run already occupies the object — the person is talking to the Bot, or a
+  // firing is still going. Delivering into that would either be refused or
+  // supersede what is running, and the hand-off is owed, not urgent: the next
+  // alarm opens the Turn, and a conversation the person started in the
+  // meantime drains the queue itself, which is the better delivery anyway.
+  if (await state.authority.readActiveRunId()) return;
+  const newest = owed.at(-1)!;
+  const wake = newest.input as Extract<
+    (typeof newest)["input"],
+    { kind: "wake" }
+  >;
+  // Marked before the Turn is admitted, and for every hand-off this Turn will
+  // drain rather than only the newest: a delivery that throws must not leave
+  // the alarm opening a fresh Turn for the same hand-offs for ever.
+  for (const { key } of owed) await state.routineInbox.markDelivered(key);
+  try {
+    await admitTurnV1(state, {
+      userId: identity.userId,
+      botId: identity.botId,
+      // The run id is the hand-off's, so an alarm that asks twice is refused
+      // by the kernel's own idempotency rather than delivering twice.
+      runId: `rd-${wake.runId}`,
+      sessionId: `${identity.userId}:${identity.botId}`,
+      acceptedAt: new Date().toISOString(),
+      text: ROUTINE_DELIVERY_CUE_V1,
+      turnType: "chat" as const,
+      origin: {
+        kind: "routine-delivery" as const,
+        routineId: wake.routineId,
+        wakeRunId: wake.runId,
+      },
+    });
+  } catch {
+    // The hand-off is still queued and still drains into the Bot's next
+    // conversational Turn. A failed delivery costs this hand-off its proactive
+    // Turn, never the hand-off itself, and never the rest of the alarm.
+  }
+}
+
 async function settleRoutineFirings(state: ShellBotStateV1): Promise<void> {
   const identity = await state.authority.readDurableIdentity();
   if (!identity) return;

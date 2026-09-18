@@ -260,6 +260,39 @@ export const CONVERSATION_PROMPT_TEXT_V1 = [
   "Don't say the same thing twice or close with a summary of the answer.",
 ].join("\n");
 
+/**
+ * The same contract, for a Turn that is not in the conversation.
+ *
+ * An automation or subagent Turn has no `send_to_user` — the manifest admits
+ * `user-voice` on `chat` and `agent` only — because its Session is not the
+ * conversation and what it writes has no position there. It was still handed
+ * the conversational contract, so it was told at length to call a tool that
+ * did not exist: Bob's morning triage (2026-09-16) read the inbox, built the
+ * summary, then spent its last steps failing to send it. A Turn is told about
+ * the voice it has.
+ */
+export const HANDOFF_PROMPT_TEXT_V1 = [
+  "## Talking to the user",
+  "",
+  "You are not in the conversation on this Turn, and nothing you write here reaches the user. `send_to_user` does not exist; do not look for it or for another way to reach the person directly.",
+  `The way out is one \`${WAKE_PARENT_TOOL_V1}\` call, and it ends this Turn. The message you pass is the only thing your conversation ever sees — your own text, your tool results and everything else here are not carried.`,
+  "So write that message complete: what you were asked for, what you found, and anything the person needs to know or decide. Someone reading only those words, with none of this Turn in front of them, must have the whole answer.",
+  "Do not narrate what you are doing or which tool you are using. Work, then hand off once.",
+].join("\n");
+
+/**
+ * Which contract a Turn is given: the voice it has, never the one it hasn't.
+ *
+ * Read off the manifest's own admission ceiling rather than restated, so the
+ * section and the tool registry cannot disagree about what this Turn may call.
+ */
+export function conversationPromptTextV1(turnType: TurnTypeV1): string {
+  const ceiling = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1);
+  return ceiling === undefined || ceiling.includes(turnType)
+    ? CONVERSATION_PROMPT_TEXT_V1
+    : HANDOFF_PROMPT_TEXT_V1;
+}
+
 const SEND_TO_USER_DESCRIPTION = [
   "Speak to the user. This is the only way to say anything the user sees.",
   "Call it once, immediately, with one short line when the request will take",
@@ -573,12 +606,15 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
   const userVoice = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1);
   const parentHandoff = shellAdmissionCeilingV1(PARENT_HANDOFF_CAPABILITY_V1);
   const disposers = [
-    // The voice and the rules for using it are contributed together, so a
-    // Composition that admits the send tool always carries the contract.
+    // The voice and the rules for using it are contributed together, and the
+    // rules are chosen by the same ceiling that admits the tool: a Turn that
+    // has the send tool carries the conversational contract, and one that has
+    // only the hand-off is told about the hand-off. A section that named a
+    // tool the Turn could not call sent the model hunting for it instead.
     runtime.systemPrompt.register({
       id: CONVERSATION_PROMPT_SECTION_V1,
       order: CONVERSATION_PROMPT_ORDER_V1,
-      render: () => CONVERSATION_PROMPT_TEXT_V1,
+      render: (context) => conversationPromptTextV1(context.turnType),
     }),
     // Empty for most of a Turn; a countdown and one instruction at the end of
     // its step budget. See `stepBudgetPromptTextV1`.

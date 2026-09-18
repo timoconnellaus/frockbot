@@ -1,4 +1,5 @@
 import { expandToolCallOccurrencesV1 } from "./batch.js";
+import { messageEventsV1 } from "./turn-history.js";
 import type {
   LlmMessage,
   SessionEvent,
@@ -305,7 +306,12 @@ export class Session {
   deriveMessages(): LlmMessage[] {
     const messages: LlmMessage[] = [];
     const journal = validateToolOccurrenceJournal(this.#events);
-    for (const event of this.#events) {
+    // `messageEventsV1` is the one statement of which events become messages —
+    // including that a call inside a `batch` has no tool call of the
+    // provider's own to answer, so its result is not replayed. Reading it here
+    // rather than restating the rule is what keeps derivation and every
+    // narrowing policy agreeing about how many messages a log holds.
+    for (const event of messageEventsV1(this.#events)) {
       if (event.type === "user/message") {
         messages.push({ role: "user", content: event.text });
       } else if (event.type === "assistant/message") {
@@ -318,13 +324,7 @@ export class Session {
             : {}),
         });
       } else if (event.type === "tool/result") {
-        const occurrence = journal.get(event.occurrenceId)!.occurrence;
-        // A call inside a batch has no tool call of the provider's own to
-        // answer; the batch's own result is the one the model reads, and a
-        // tool message naming an id the assistant never sent is one a
-        // provider rejects.
-        if (occurrence.parentOccurrenceId !== undefined) continue;
-        const call = occurrence.call;
+        const call = journal.get(event.occurrenceId)!.occurrence.call;
         messages.push({
           role: "tool",
           callId: call.id,

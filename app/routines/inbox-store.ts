@@ -414,6 +414,28 @@ export class RoutineInboxStore {
   }
 
   /**
+   * Record that a delivery Turn has been opened for this wake.
+   *
+   * Written before the Turn is admitted, so a delivery that throws costs the
+   * hand-off its proactive Turn rather than opening one on every alarm for
+   * ever. The wake itself stays queued either way: the Bot's next
+   * conversational Turn drains it as it always did.
+   */
+  async markDelivered(key: string): Promise<void> {
+    const at = this.#now().toISOString();
+    await this.#storage.transaction(async (transaction) => {
+      const stored = await transaction.get<unknown>(key);
+      if (stored === undefined) return;
+      const input = decodePendingBotInputV1(stored);
+      if (input.kind !== "wake" || input.deliveredAt !== undefined) return;
+      await transaction.put(key, {
+        ...input,
+        deliveredAt: at,
+      } satisfies PendingBotInputV1);
+    });
+  }
+
+  /**
    * The durable inputs one chat Turn carries. The first call for a run moves
    * the queue into the run's receipt; every later call — a resumed Turn, a
    * recovered one — reads that receipt back and drains nothing, which is what

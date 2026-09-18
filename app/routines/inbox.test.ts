@@ -9,6 +9,7 @@ import {
   pendingBotInputPreambleV1,
   routineAttributionV1,
   routineHandoffTextV1,
+  ROUTINE_DELIVERY_CUE_V1,
   subagentAttributionV1,
 } from "./inbox.js";
 import {
@@ -203,6 +204,54 @@ describe("the pending-input queue", () => {
     expect(
       after!.input.kind === "wake" ? after!.input.renotifiedAt : undefined,
     ).toBeString();
+  });
+
+  test("a wake is delivered a Turn at most once", async () => {
+    const store = storage();
+    await settle(store, { runId: "rf-1", handoff: "one" });
+    const inbox = new RoutineInboxStore(store);
+    const [pending] = await inbox.pending();
+
+    await inbox.markDelivered(pending!.key);
+    const first =
+      (await inbox.pending())[0]!.input.kind === "wake"
+        ? ((await inbox.pending())[0]!.input as { deliveredAt?: string })
+            .deliveredAt
+        : undefined;
+    await inbox.markDelivered(pending!.key);
+    const [after] = await inbox.pending();
+
+    expect(first).toBeString();
+    // The second mark is not a second delivery: a Turn that failed must not
+    // have the alarm open a fresh one for the same hand-off for ever.
+    expect(
+      after!.input.kind === "wake"
+        ? (after!.input as { deliveredAt?: string }).deliveredAt
+        : undefined,
+    ).toBe(first);
+  });
+
+  test("a delivered wake is still drained by the next chat Turn", async () => {
+    const store = storage();
+    await settle(store, { runId: "rf-1", handoff: "one" });
+    const inbox = new RoutineInboxStore(store);
+    const [pending] = await inbox.pending();
+
+    await inbox.markDelivered(pending!.key);
+
+    // The mark says a Turn was opened, never that the hand-off was spent. If
+    // that Turn failed, the ordinary path still carries it.
+    expect((await inbox.drainInto("chat-run-1")).map((it) => it.kind)).toEqual([
+      "wake",
+    ]);
+  });
+
+  test("the delivery cue says nobody spoke and asks for the Bot's own words", () => {
+    // The Turn is opened with no person behind it, and a Bot handed a bare
+    // summary otherwise answers it as though it had been asked to.
+    expect(ROUTINE_DELIVERY_CUE_V1).toContain("Nobody has said anything");
+    expect(ROUTINE_DELIVERY_CUE_V1).toContain("in the context of this");
+    expect(ROUTINE_DELIVERY_CUE_V1).toContain("verbatim");
   });
 
   test("the preamble names the hand-off and never speaks as the user", () => {

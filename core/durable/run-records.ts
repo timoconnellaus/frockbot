@@ -122,9 +122,31 @@ export interface StoredRunVoiceOriginV1 {
   requestId: string;
 }
 
+/**
+ * A conversational Turn opened to deliver what an automation Turn handed off.
+ *
+ * A firing's hand-off is queued for the Bot's next conversational Turn, and
+ * nothing used to open one: the hand-off waited until the person happened to
+ * speak, which for a morning triage meant hours, or a day, or never. This is
+ * that Turn — an ordinary `chat` Turn, so the Bot answers with the
+ * conversation in front of it and says what matters in its own voice, rather
+ * than the firing's words being posted into a thread they were written
+ * without.
+ *
+ * `wakeRunId` is the automation run whose hand-off is owed, and it is what
+ * makes the delivery idempotent: one delivery Turn per hand-off, refused by
+ * the kernel's own run-id idempotency if the alarm asks twice.
+ */
+export interface StoredRunRoutineDeliveryOriginV1 {
+  kind: "routine-delivery";
+  routineId: string;
+  wakeRunId: string;
+}
+
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
   | StoredRunRoutineOriginV1
+  | StoredRunRoutineDeliveryOriginV1
   | StoredRunSubagentOriginV1
   | StoredRunHandoffOriginV1
   | StoredRunBotOriginV1
@@ -551,6 +573,24 @@ function decodeStoredRunOrigin(
       callId: candidate.callId,
       voiceTurnId: candidate.voiceTurnId,
       requestId: candidate.requestId,
+    };
+  }
+  if (candidate.kind === "routine-delivery") {
+    requireExactOriginFields(
+      candidate,
+      ["kind", "routineId", "wakeRunId"],
+      runId,
+    );
+    if (
+      !boundedString(candidate.routineId, 128) ||
+      !boundedString(candidate.wakeRunId, 256)
+    ) {
+      throw new Error(`run "${runId}" has an invalid admission origin id`);
+    }
+    return {
+      kind: "routine-delivery",
+      routineId: candidate.routineId,
+      wakeRunId: candidate.wakeRunId,
     };
   }
   if (candidate.kind !== "routine") {

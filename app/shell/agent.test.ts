@@ -19,6 +19,8 @@ import {
 import {
   CONVERSATION_PROMPT_SECTION_V1,
   CONVERSATION_PROMPT_TEXT_V1,
+  conversationPromptTextV1,
+  HANDOFF_PROMPT_TEXT_V1,
   shellAdmissionCeilingV1,
   shellAgentFeature,
   PARENT_HANDOFF_CAPABILITY_V1,
@@ -415,6 +417,50 @@ describe("the conversation prompt section", () => {
       expect(assembled.text).toContain(CONVERSATION_PROMPT_TEXT_V1);
     } finally {
       await mounted.dispose();
+    }
+  });
+
+  // A Turn is told about the voice it has. An automation Turn that was handed
+  // the conversational contract spent its last steps hunting for a
+  // `send_to_user` the manifest never admitted there.
+  test("a Turn outside the conversation is given the hand-off contract", async () => {
+    const mounted = await mount();
+    try {
+      const assembled = await mounted.root.systemPrompt.assemble({
+        sessionId: SESSION_ID,
+        provider: "test",
+        model: "test-model",
+        turnType: "automation",
+      });
+
+      const section = assembled.sections.find(
+        (candidate) => candidate.id === CONVERSATION_PROMPT_SECTION_V1,
+      );
+      expect(section?.text).toBe(HANDOFF_PROMPT_TEXT_V1);
+      expect(section?.text).toContain(WAKE_PARENT_TOOL_V1);
+      // Named only as the thing that is not there, never as an instruction.
+      expect(section?.text).not.toContain(
+        `\`${SEND_TO_USER_TOOL_V1}\` call with`,
+      );
+      expect(assembled.text).not.toContain(CONVERSATION_PROMPT_TEXT_V1);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("every turn type is given the contract for the voice it admits", () => {
+    const ceiling = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1) ?? [];
+    for (const turnType of [
+      "chat",
+      "agent",
+      "automation",
+      "subagent",
+    ] as const satisfies readonly TurnTypeV1[]) {
+      expect(conversationPromptTextV1(turnType)).toBe(
+        ceiling.includes(turnType)
+          ? CONVERSATION_PROMPT_TEXT_V1
+          : HANDOFF_PROMPT_TEXT_V1,
+      );
     }
   });
 
