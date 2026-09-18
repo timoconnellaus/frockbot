@@ -48,8 +48,18 @@ const FAILING_CONCLUSIONS = new Set([
   "STALE",
 ]);
 
-/** The jobs that actually move production. A release without them shipped nothing. */
-const PRODUCTION_JOBS = ["Deploy marketing site", "Deploy FrockBot app"];
+/**
+ * The jobs that actually move production. A release without them shipped nothing.
+ *
+ * `.github/workflows/release.yml` owns these display names — the `name:` of its
+ * `deploy-marketing` and `deploy-backend` jobs — and the release-leg test builds
+ * its fixture from the workflow, so a rename that misses this list fails there
+ * rather than quietly reporting a release that never deployed.
+ */
+const PRODUCTION_JOBS = [
+  "Deploy marketing site and admin portal",
+  "Deploy FrockBot app",
+];
 
 function record(value: unknown, what: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

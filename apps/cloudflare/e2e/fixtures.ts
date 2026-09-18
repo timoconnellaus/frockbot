@@ -617,6 +617,10 @@ export async function createBot(
   }
   await sem(page, "flock-create-submit").click();
   await expect(sheet).toBeHidden({ timeout: 60_000 });
+  // Closing the sheet precedes bootstrap selecting the new Bot.
+  await expect(
+    sem(page, "bot-panel-toggle").getByRole("button", { name, exact: true }),
+  ).toBeVisible({ timeout: 60_000 });
 }
 
 /** The sheet the list's own avatar opens: every account surface is in it. */

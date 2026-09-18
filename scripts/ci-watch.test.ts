@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   formatReport,
   parseArguments,
@@ -148,15 +149,25 @@ describe("release leg", () => {
     expect(report.summary).toContain("no release run");
   });
 
-  test("a release that deployed both Workers has shipped", async () => {
+  test("a release that deployed the workflow's production jobs has shipped", async () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    );
+    const productionJobs = ["deploy-marketing", "deploy-backend"].map((id) => {
+      const name = workflow.match(
+        new RegExp(`^  ${id}:\\n    name: (.+)$`, "m"),
+      )?.[1];
+      expect(name).toBeDefined();
+      return { name, conclusion: "success" };
+    });
     const report = await releaseReport(
       fakeGitHub({
         runs,
         run: {
           jobs: [
             { name: "Publish packages and release", conclusion: "success" },
-            { name: "Deploy marketing site", conclusion: "success" },
-            { name: "Deploy FrockBot app", conclusion: "success" },
+            ...productionJobs,
           ],
         },
       }),
@@ -173,7 +184,10 @@ describe("release leg", () => {
         run: {
           jobs: [
             { name: "Publish packages and release", conclusion: "success" },
-            { name: "Deploy marketing site", conclusion: "success" },
+            {
+              name: "Deploy marketing site and admin portal",
+              conclusion: "success",
+            },
             {
               name: "Deploy FrockBot app",
               conclusion: "failure",
