@@ -6,8 +6,16 @@ Gemini Live API itself, probed frame by frame through
 `apps/cloudflare/test/voice-gemini-probe.ts`, with the shapes it returned
 written down in [`voice-gemini-probe.md`](voice-gemini-probe.md). That probe
 proves the wire; it proves nothing about a microphone, a speaker or a person.
-Everything below is still untested end to end. The deterministic checks that
-_have_ run are in [`voice.md`](voice.md) under "Verification".
+On 2026-09-18 the way into a call, a call that fails, and a microphone the
+call can hear and one it cannot were driven too — in the repo's own browser
+harness (`bun e2e/serve.ts` in `apps/cloudflare`), the real client and Worker,
+with the Live upstream and the capture device substituted (a fake upstream,
+and a WAV of zeros where a microphone would be). The steps below marked driven
+are that drive's record. No call has yet been made against the real provider
+or through a real microphone, so the real devices behind all of it, and
+anything the drive did not reach, remain untested end to end. The
+deterministic checks that _have_ run are in [`voice.md`](voice.md) under
+"Verification".
 
 ## Prerequisites
 
@@ -60,7 +68,9 @@ the list stands as it was.
    microphone before the server says `listening`, the call starts within ~2 s,
    and the call is with that Bot; Back is gone. The composer is the only way
    in: the sidebar's list-root row carries no voice control, so there is no
-   entry that starts a call without naming a Bot.
+   entry that starts a call without naming a Bot. Driven 2026-09-18 in the
+   browser, for the way in alone: no `voice-start` control was anywhere on the
+   page, and a press on the composer's control opened voice mode on that Bot.
 2. Ask "what bots do I have". Expect: the reply is spoken in **this Bot's**
    voice, the same meter blooms deep rose from the playback, the reply names
    the other Bots. Listen for the gap before the first word: one session
@@ -124,6 +134,34 @@ the list stands as it was.
     `audioOutSeconds` should track the billed minutes to within a block or
     two. A large gap either way means the bridge is counting something it did
     not send, or sending something it did not count.
+15. Make a call fail before it starts — deny the microphone, cut the network
+    between the press and the socket, or point the deployment at a
+    `GEMINI_API_KEY` that is not a key. Expect: the word under the Bot's name
+    is `Call failed`, never left saying `Listening` over a dead meter, with
+    the sentence that explains it in the activity slot ("Voice didn’t
+    start. Try again." for a start that never started). Driven 2026-09-18 in
+    the browser against a bad voice key: the surface settled on `Call failed`
+    with that sentence rather than staying on `Listening`.
+16. Have the server's end of the socket finish first, with nothing having gone
+    wrong — a Worker restarted behind a live call, or the connection dropped
+    without a frame saying why. Expect: the word becomes `Call ended` and the
+    activity slot says `The call ended.` — an end, not a failure, so never
+    `Call failed`, and never `Listening` over a socket that is gone. With the
+    call on another Bot's page the footer says the same line. Covered by the
+    Flutter suite; not yet driven live.
+17. Put a live call behind a microphone that never carries anything: the macOS
+    voice-processing failure described under "A call that is up and deaf" in
+    [`voice.md`](voice.md), or any capture device handing over nothing but
+    zeros. Expect: ten seconds in, the surface says "FrockBot isn’t hearing
+    anything. Check the microphone in your device settings." once, in the
+    activity slot, while the word beside it still says `Listening` — a notice,
+    not an error — and the call goes on; a pause or a mute starts the ten
+    seconds again, the silence being the person's own. A microphone that
+    carries anything at all, the room's own tone included, must never trip it,
+    so a quiet person in a quiet room is not this. Driven 2026-09-18 in the
+    browser with the capture device substituted: a WAV of zeros said it once
+    and the call stayed live, and a fake device playing a tone never said it
+    in thirty seconds.
 
 ## Flutter
 
