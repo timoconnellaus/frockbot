@@ -898,8 +898,9 @@
                 without shipping a line of client code.
               </p>
               <p>
-                Some of this runs today and some of it is the plan. The dots say
-                which, and the design is public before the code:
+                Some of this runs today and some of it is the plan. A green tick
+                is the first, a grey one the second, and the design is public
+                before the code:
                 <b>ADR 0032</b> is the proposal, and the twelve scenarios it is
                 measured against are in the repo beside it.
               </p>
@@ -1391,540 +1392,1006 @@
           </figure>
 
           <p class="reach-legend">
-            <span><i class="reach-dot"></i>Live today</span>
-            <span class="is-planned"><i class="reach-dot"></i>In the plan</span>
+            <span class="is-live"
+              ><svg aria-hidden="true"><use href="#reach-tick" /></svg>Live
+              today</span
+            >
+            <span class="is-planned"
+              ><svg aria-hidden="true"><use href="#reach-tick" /></svg>In the
+              plan</span
+            >
+            <span class="is-gated"
+              ><sup>&dagger;</sup>Needs a store declaration</span
+            >
           </p>
-
-          <h3 class="reach-subhead">Five kinds of extension point</h3>
-          <div class="reach-kinds">
-            <div>
-              <b class="k-slot">Slot</b>
-              <p>The host asks the plugin what to draw, and draws it.</p>
-            </div>
-            <div>
-              <b class="k-entry">Entry</b>
-              <p>A person starts a Turn from outside the app.</p>
-            </div>
-            <div>
-              <b class="k-trigger">Trigger</b>
-              <p>An event starts a run with nobody watching.</p>
-            </div>
-            <div>
-              <b class="k-handler">Handler</b>
-              <p>The system asks a question and waits for the verdict.</p>
-            </div>
-            <div>
-              <b class="k-action">Action</b>
-              <p>A tool the Bot calls to reach the device or the network.</p>
-            </div>
-          </div>
-
-          <h3 class="reach-subhead">In the app</h3>
-          <div class="reach-rails">
-            <div class="reach-rail">
-              <h3>Slots</h3>
-              <p>
-                Where a plugin may render. It sends a description of the
-                surface, never code that runs on your machine.
-              </p>
-              <ul class="reach-chips">
-                <li><i class="reach-dot"></i><code>cards</code></li>
-                <li><i class="reach-dot"></i><code>settings.sections</code></li>
-                <li class="is-planned">
-                  <i class="reach-dot"></i><code>sidebar.entries</code>
-                </li>
-                <li class="is-planned">
-                  <i class="reach-dot"></i><code>composer.toolbar</code>
-                </li>
-                <li class="is-planned">
-                  <i class="reach-dot"></i><code>message.actions</code>
-                </li>
-                <li class="is-planned">
-                  <i class="reach-dot"></i><code>bot.profile</code>
-                </li>
-              </ul>
-            </div>
-            <div class="reach-rail">
-              <h3>Grants</h3>
-              <p>
-                What it may hold and reach, declared in the descriptor and
-                approved by you before it mounts.
-              </p>
-              <ul class="reach-chips">
-                <li><i class="reach-dot"></i><code>storage</code></li>
-                <li><i class="reach-dot"></i><code>http</code></li>
-                <li><i class="reach-dot"></i><code>ai</code></li>
-                <li><i class="reach-dot"></i><code>schedule</code></li>
-                <li><i class="reach-dot"></i><code>memory</code></li>
-                <li><i class="reach-dot"></i><code>workspace</code></li>
-                <li><i class="reach-dot"></i><code>triggers</code></li>
-                <li><i class="reach-dot"></i><code>skills</code></li>
-                <li class="is-planned">
-                  <i class="reach-dot"></i><code>stores</code>
-                </li>
-                <li class="is-planned">
-                  <i class="reach-dot"></i><code>files</code>
-                </li>
-                <li class="is-planned">
-                  <i class="reach-dot"></i><code>computer</code>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <h3 class="reach-subhead">On the phone</h3>
-          <p class="reach-foot reach-foot-lead">
-            Not listed: the app's own runtime. Background work, scheduled runs,
-            its files and its database are things FrockBot already does, and a
-            plugin gets them wherever it runs. These are the systems the app
-            does not own, and the hook each one offers.
-          </p>
-          <div class="reach-rails">
-            <div class="reach-rail">
-              <h3>Android</h3>
-              <span class="reach-status is-planned"
-                ><i class="reach-dot"></i>In the plan</span
-              >
-              <ul class="reach-api">
-                <li>
-                  <b
-                    ><code>NotificationListenerService</code><sup>&dagger;</sup
-                    ><em class="reach-kind k-trigger">trigger</em></b
-                  ><span
-                    >any app's notifications, and an inline reply back</span
-                  >
-                </li>
-                <li>
-                  <b
-                    ><code>CallScreeningService</code
-                    ><em class="reach-kind k-handler">handler</em></b
-                  ><span>answer or reject before the phone rings</span>
-                </li>
-                <li>
-                  <b
-                    ><code>AppWidgetProvider</code> · <code>Glance</code
-                    ><em class="reach-kind k-slot">slot</em></b
-                  ><span>home and lock screen widgets</span>
-                </li>
-                <li>
-                  <b
-                    ><code>TileService</code
-                    ><em class="reach-kind k-entry">entry</em></b
-                  ><span>a Quick Settings tile that fires a Routine</span>
-                </li>
-                <li>
-                  <b
-                    ><code>ACTION_SEND</code> · <code>ShortcutManager</code
-                    ><em class="reach-kind k-entry">entry</em></b
-                  ><span>the share sheet, with a Bot as a direct target</span>
-                </li>
-                <li>
-                  <b
-                    ><code>shortcuts.xml</code> App Actions<em
-                      class="reach-kind k-entry"
-                      >entry</em
-                    ></b
-                  ><span>"Hey Google, ask Sunny…"</span>
-                </li>
-                <li>
-                  <b
-                    ><code>InputMethodService</code
-                    ><em class="reach-kind k-handler">handler</em></b
-                  ><span>a keyboard that asks a Bot, inside any app</span>
-                </li>
-                <li>
-                  <b
-                    ><code>GeofencingClient</code> ·
-                    <code>ActivityRecognitionClient</code><sup>&dagger;</sup
-                    ><em class="reach-kind k-trigger">trigger</em></b
-                  ><span>arrive, leave, driving, walking</span>
-                </li>
-                <li>
-                  <b
-                    ><code>CompanionDeviceManager</code> · BLE<em
-                      class="reach-kind k-trigger"
-                      >trigger</em
-                    ></b
-                  ><span>watches, scales and sensors</span>
-                </li>
-                <li>
-                  <b
-                    ><code>HealthConnectClient</code><sup>&dagger;</sup
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>sleep, steps and workouts, read and write</span>
-                </li>
-                <li>
-                  <b
-                    ><code>ContactsContract</code> ·
-                    <code>CalendarContract</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>two-way sync with the phone's own data</span>
-                </li>
-                <li>
-                  <b
-                    ><code>SmsManager</code><sup>&dagger;</sup
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>send and read, as the default SMS app</span>
-                </li>
-                <li>
-                  <b
-                    ><code>CameraX</code> · ML Kit<em
-                      class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span>scan and OCR on the device, upload nothing</span>
-                </li>
-                <li>
-                  <b
-                    ><code>MediaProjection</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>record the screen for one consented session</span>
-                </li>
-                <li>
-                  <b
-                    >AICore · <code>Gemini Nano</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>an on-device model for private Bots</span>
-                </li>
-              </ul>
-            </div>
-            <div class="reach-rail">
-              <h3>iPhone</h3>
-              <span class="reach-status is-planned"
-                ><i class="reach-dot"></i>In the plan</span
-              >
-              <ul class="reach-api">
-                <li>
-                  <b
-                    ><code>WidgetKit</code
-                    ><em class="reach-kind k-slot">slot</em></b
-                  ><span>home screen, lock screen and StandBy</span>
-                </li>
-                <li>
-                  <b
-                    ><code>ActivityKit</code
-                    ><em class="reach-kind k-slot">slot</em></b
-                  ><span>Live Activities and the Dynamic Island</span>
-                </li>
-                <li>
-                  <b
-                    ><code>AppIntents</code
-                    ><em class="reach-kind k-entry">entry</em></b
-                  ><span
-                    >Siri, Shortcuts, Spotlight and Apple Intelligence</span
-                  >
-                </li>
-                <li>
-                  <b
-                    ><code>ControlWidget</code
-                    ><em class="reach-kind k-entry">entry</em></b
-                  ><span>Control Centre and the Action button</span>
-                </li>
-                <li>
-                  <b
-                    >Share and Action extensions<em class="reach-kind k-entry"
-                      >entry</em
-                    ></b
-                  ><span>any app's share sheet, straight to one Bot</span>
-                </li>
-                <li>
-                  <b
-                    ><code>PushToTalk</code> · <code>CallKit</code
+          <div class="reach-grid-wrap">
+            <table class="reach-grid">
+              <caption class="sr-only">
+                What a plugin can reach, by platform
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col"><span class="sr-only">Capability</span></th>
+                  <th scope="col">Web</th>
+                  <th scope="col">Android</th>
+                  <th scope="col">iPhone</th>
+                  <th scope="col">macOS</th>
+                  <th scope="col">Windows</th>
+                  <th scope="col">Linux</th>
+                </tr>
+              </thead>
+              <tbody class="reach-group">
+                <tr class="reach-group-row">
+                  <th scope="rowgroup" colspan="7">
+                    <b class="reach-kind k-slot">Slot</b
+                    ><span
+                      >A place in the app&#x27;s UI the plugin draws into. It
+                      sends a description, never code.</span
+                    >
+                  </th>
+                </tr>
+                <tr>
+                  <th scope="row">A card in the conversation</th>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">A section in Settings</th>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">A tab in the sidebar</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">A strip above or below the composer</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">An action on a message</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">The Bot&#x27;s profile page</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">A home-screen widget</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">A live activity on the lock screen</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">A quick-settings tile or control</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">A menu bar or system tray item</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">A keyboard</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+              </tbody>
+              <tbody class="reach-group">
+                <tr class="reach-group-row">
+                  <th scope="rowgroup" colspan="7">
+                    <b class="reach-kind k-entry">Entry</b
+                    ><span>A person starts a Turn from outside the app.</span>
+                  </th>
+                </tr>
+                <tr>
+                  <th scope="row">
+                    Share something to a Bot<small
+                      >from the system share sheet</small
+                    >
+                  </th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">
+                    A shortcut or voice command<small
+                      >Siri, Assistant and App Intents</small
+                    >
+                  </th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">A global hotkey</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Tap a notification</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Open a link</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+              </tbody>
+              <tbody class="reach-group">
+                <tr class="reach-group-row">
+                  <th scope="rowgroup" colspan="7">
+                    <b class="reach-kind k-trigger">Trigger</b
+                    ><span>An event starts a run with nobody watching.</span>
+                  </th>
+                </tr>
+                <tr>
+                  <th scope="row">A webhook from a connected service</th>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">A notification arrives on the phone</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p g">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
                     ><sup>&dagger;</sup
-                    ><em class="reach-kind k-entry">entry</em></b
-                  ><span>hands-free voice from the lock screen</span>
-                </li>
-                <li>
-                  <b
-                    ><code>CallDirectory</code> extension<em
-                      class="reach-kind k-handler"
-                      >handler</em
-                    ></b
-                  ><span
-                    >caller ID and blocking from the Bot's own records</span
-                  >
-                </li>
-                <li>
-                  <b
-                    ><code>IdentityLookup</code> extension<em
-                      class="reach-kind k-handler"
-                      >handler</em
-                    ></b
-                  ><span>sort unknown senders out of Messages</span>
-                </li>
-                <li>
-                  <b
-                    ><code>CoreLocation</code
-                    ><em class="reach-kind k-trigger">trigger</em></b
-                  ><span>geofences and significant-change, app closed</span>
-                </li>
-                <li>
-                  <b
-                    ><code>HealthKit</code><sup>&dagger;</sup
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>read and write, behind its own consent screen</span>
-                </li>
-                <li>
-                  <b
-                    ><code>Contacts</code> · <code>EventKit</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>two-way sync with the phone's own data</span>
-                </li>
-                <li>
-                  <b
-                    ><code>VisionKit</code> · <code>DataScanner</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>document scan and OCR on the device</span>
-                </li>
-                <li>
-                  <b
-                    ><code>CoreNFC</code> · <code>PassKit</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>tags, and passes a Bot issues to Wallet</span>
-                </li>
-                <li>
-                  <b
-                    ><code>FoundationModels</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>Apple's on-device model for private Bots</span>
-                </li>
-              </ul>
-            </div>
+                    ><span class="sr-only">In the plan, store-gated</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Arriving at or leaving a place</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p g">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><sup>&dagger;</sup
+                    ><span class="sr-only">In the plan, store-gated</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Starting to walk, run or drive</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">A calendar event starts or changes</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">
+                    A nearby device connects<small>Bluetooth</small>
+                  </th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">The clipboard changes</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+              </tbody>
+              <tbody class="reach-group">
+                <tr class="reach-group-row">
+                  <th scope="rowgroup" colspan="7">
+                    <b class="reach-kind k-handler">Handler</b
+                    ><span>The system asks, and waits for a verdict.</span>
+                  </th>
+                </tr>
+                <tr>
+                  <th scope="row">Decide on a call as it rings</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Filter a text from an unknown number</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">
+                    Sort or act on incoming mail<small
+                      >in the system mail app</small
+                    >
+                  </th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+              </tbody>
+              <tbody class="reach-group">
+                <tr class="reach-group-row">
+                  <th scope="rowgroup" colspan="7">
+                    <b class="reach-kind k-action">Action</b
+                    ><span
+                      >A tool the Bot calls to reach the device or the
+                      network.</span
+                    >
+                  </th>
+                </tr>
+                <tr>
+                  <th scope="row">Call the network with your credentials</th>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                  <td class="y">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">Live today</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Post a notification</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">
+                    Share something out<small>to the system share sheet</small>
+                  </th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Read and write contacts</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Read and write the calendar</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Get the current location</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Take a photo or scan a document</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Read the clipboard</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Capture the screen or system audio</th>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">
+                    Drive another app<small>accessibility automation</small>
+                  </th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Read an NFC tag</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Add a pass to the wallet</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Index into system search</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Run a model on the device</th>
+                  <td class="n"><span class="sr-only">No equivalent</span></td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                  <td class="p">
+                    <svg aria-hidden="true"><use href="#reach-tick" /></svg
+                    ><span class="sr-only">In the plan</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-
+          <svg class="sr-only" aria-hidden="true" focusable="false">
+            <symbol id="reach-tick" viewBox="0 0 16 16">
+              <path
+                d="M3 8.5l3.2 3.2L13 5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </symbol>
+          </svg>
           <p class="reach-foot">
-            <b>&dagger;</b> Gated by the stores, not by us. Notifications,
-            background location and health each need a Play declaration; Push to
-            Talk and CallKit need an entitlement Apple grants case by case;
-            health data carries its own consent rules on both platforms. SMS is
-            the hard one, because Android gives it only to your default SMS app.
-            Two things people ask for are deliberately absent: driving other
-            apps through the Android accessibility service, and filtering
-            traffic through a VPN service. Both read as data harvesting to a
-            reviewer, and neither is worth the app.
+            Green is what works in the app today; grey is the plan, and iPhone,
+            Windows and Linux stay grey until the app ships there. Not listed:
+            the app's own runtime. Background work, scheduled runs, its files
+            and its database are things FrockBot already does, and a plugin gets
+            them wherever it runs. Where two systems are the same thing under
+            different names, they share a row.
+          </p>
+          <p class="reach-foot">
+            <b>&dagger;</b> A Play declaration, granted after review. Left out
+            on purpose: anything a store refuses or hands only to a default app.
+            That means no texting on Android, no health data, no accessibility
+            automation on Android and no VPN service.
           </p>
 
-          <h3 class="reach-subhead">On the desktop</h3>
+          <h3 class="reach-subhead">Every plugin, wherever it runs</h3>
           <p class="reach-foot reach-foot-lead">
-            Same rule, and no store: the desktop app is a long-running local
-            process, so watching a folder or holding a database is ordinary work
-            rather than a capability to announce. What is worth announcing is
-            everything it can reach outside itself, and the only gate is the
-            permission prompt you accept.
+            Grants a plugin declares in its descriptor and you approve before it
+            mounts. They live in the worker, so they are the same on every
+            platform.
           </p>
-          <div class="reach-rails reach-rails-3">
-            <div class="reach-rail">
-              <h3>macOS</h3>
-              <span class="reach-status is-planned"
-                ><i class="reach-dot"></i>In the plan</span
-              >
-              <ul class="reach-api">
-                <li>
-                  <b
-                    ><code>NSStatusItem</code
-                    ><em class="reach-kind k-slot">slot</em></b
-                  ><span>a menu bar item, one per Bot</span>
-                </li>
-                <li>
-                  <b
-                    ><code>RegisterEventHotKey</code
-                    ><em class="reach-kind k-entry">entry</em></b
-                  ><span>select anywhere, ask a Bot</span>
-                </li>
-                <li>
-                  <b
-                    ><code>NSPasteboard</code> · Services<em
-                      class="reach-kind k-entry"
-                      >entry</em
-                    ></b
-                  ><span>act on a selection from any app</span>
-                </li>
-                <li>
-                  <b
-                    ><code>MailKit</code> extension<em
-                      class="reach-kind k-handler"
-                      >handler</em
-                    ></b
-                  ><span>label, file and draft inside Mail</span>
-                </li>
-                <li>
-                  <b
-                    ><code>ScreenCaptureKit</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>system audio and screen, for meetings</span>
-                </li>
-                <li>
-                  <b
-                    ><code>AXUIElement</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>read and drive any app on screen</span>
-                </li>
-                <li>
-                  <b
-                    >Apple Events · JXA<em class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span
-                    >script Mail, Calendar, Numbers, anything scriptable</span
-                  >
-                </li>
-                <li>
-                  <b
-                    ><code>CoreSpotlight</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>index and query what you already have</span>
-                </li>
-                <li>
-                  <b
-                    ><code>CoreML</code> · MLX<em class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span>a local model for private Bots</span>
-                </li>
-                <li>
-                  <b>Bonjour<em class="reach-kind k-action">action</em></b
-                  ><span>find the printer, the NAS, the Pi</span>
-                </li>
-              </ul>
-            </div>
-            <div class="reach-rail">
-              <h3>Windows</h3>
-              <span class="reach-status is-planned"
-                ><i class="reach-dot"></i>In the plan</span
-              >
-              <ul class="reach-api">
-                <li>
-                  <b
-                    ><code>Shell_NotifyIcon</code
-                    ><em class="reach-kind k-slot">slot</em></b
-                  ><span>a tray icon, one per Bot</span>
-                </li>
-                <li>
-                  <b
-                    >Widgets Board · Jump Lists<em class="reach-kind k-slot"
-                      >slot</em
-                    ></b
-                  ><span>a Bot on the board and the taskbar</span>
-                </li>
-                <li>
-                  <b
-                    >Toast notifications<em class="reach-kind k-slot"
-                      >slot</em
-                    ></b
-                  ><span>actionable notifications with inline reply</span>
-                </li>
-                <li>
-                  <b
-                    ><code>RegisterHotKey</code
-                    ><em class="reach-kind k-entry">entry</em></b
-                  ><span>select anywhere, ask a Bot</span>
-                </li>
-                <li>
-                  <b
-                    ><code>DataTransferManager</code
-                    ><em class="reach-kind k-entry">entry</em></b
-                  ><span>the Windows share contract</span>
-                </li>
-                <li>
-                  <b
-                    ><code>Windows.Graphics.Capture</code> · WASAPI<em
-                      class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span>screen and system audio, for meetings</span>
-                </li>
-                <li>
-                  <b
-                    ><code>IUIAutomation</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>read and drive any app on screen</span>
-                </li>
-                <li>
-                  <b
-                    >PowerShell · COM<em class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span>script Outlook, Excel, anything automatable</span>
-                </li>
-                <li>
-                  <b
-                    >Windows Search · <code>IFilter</code
-                    ><em class="reach-kind k-action">action</em></b
-                  ><span>index and query what you already have</span>
-                </li>
-                <li>
-                  <b
-                    >Windows ML · DirectML<em class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span>a local model for private Bots</span>
-                </li>
-              </ul>
-            </div>
-            <div class="reach-rail">
-              <h3>Linux</h3>
-              <span class="reach-status is-planned"
-                ><i class="reach-dot"></i>In the plan</span
-              >
-              <ul class="reach-api">
-                <li>
-                  <b
-                    ><code>StatusNotifierItem</code
-                    ><em class="reach-kind k-slot">slot</em></b
-                  ><span>a tray icon, one per Bot</span>
-                </li>
-                <li>
-                  <b
-                    ><code>org.freedesktop.Notifications</code
-                    ><em class="reach-kind k-slot">slot</em></b
-                  ><span>actionable notifications with inline reply</span>
-                </li>
-                <li>
-                  <b
-                    ><code>portal.GlobalShortcuts</code
-                    ><em class="reach-kind k-entry">entry</em></b
-                  ><span>select anywhere, ask a Bot</span>
-                </li>
-                <li>
-                  <b
-                    ><code>portal.ScreenCast</code> · PipeWire<em
-                      class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span>screen and system audio, for meetings</span>
-                </li>
-                <li>
-                  <b>AT-SPI2<em class="reach-kind k-action">action</em></b
-                  ><span>read and drive any app on screen</span>
-                </li>
-                <li>
-                  <b
-                    >D-Bus session bus<em class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span>talk to any app that exposes an interface</span>
-                </li>
-                <li>
-                  <b
-                    >Tracker · Baloo<em class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span>index and query what you already have</span>
-                </li>
-                <li>
-                  <b
-                    >Secret Service<em class="reach-kind k-action"
-                      >action</em
-                    ></b
-                  ><span>keyring-backed credentials</span>
-                </li>
-                <li>
-                  <b>Avahi<em class="reach-kind k-action">action</em></b
-                  ><span>find the printer, the NAS, the Pi</span>
-                </li>
-              </ul>
-            </div>
-          </div>
+          <ul class="reach-chips">
+            <li><i class="reach-dot"></i><code>storage</code></li>
+            <li><i class="reach-dot"></i><code>http</code></li>
+            <li><i class="reach-dot"></i><code>ai</code></li>
+            <li><i class="reach-dot"></i><code>schedule</code></li>
+            <li><i class="reach-dot"></i><code>memory</code></li>
+            <li><i class="reach-dot"></i><code>workspace</code></li>
+            <li><i class="reach-dot"></i><code>triggers</code></li>
+            <li><i class="reach-dot"></i><code>skills</code></li>
+            <li class="is-planned">
+              <i class="reach-dot"></i><code>stores</code>
+            </li>
+            <li class="is-planned">
+              <i class="reach-dot"></i><code>files</code>
+            </li>
+            <li class="is-planned">
+              <i class="reach-dot"></i><code>computer</code>
+            </li>
+          </ul>
 
           <p class="reach-note">
             <b>The catch, stated plainly.</b> A plugin never ships code that
