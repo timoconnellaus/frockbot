@@ -150,6 +150,11 @@ export const hooks: PluginHooks = {
 - `version` is a string you bump when you publish a change. A publish with
   the version already live is still a new generation — the User approves the
   code, not the number — but bumping it is how you both tell versions apart.
+- `contractVersion` is the kernel contract the module is built against. The
+  scaffold `plugin_create` wrote already names the one this deployment serves
+  — leave that number alone rather than typing your own: a Plugin declaring a
+  contract the deployment has retired does not mount, and one naming a
+  contract that does not exist yet is refused at publish.
 - `tools`, `hooks`, `triggers`, `views` and `cards` must match the module's
   exports, name for name. A mismatch is refused at publish with both lists.
 - `grants` is what the module may use, from `storage`, `http`, `schedule`,
