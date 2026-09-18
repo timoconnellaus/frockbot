@@ -49,7 +49,10 @@ const FAILING_CONCLUSIONS = new Set([
 ]);
 
 /** The jobs that actually move production. A release without them shipped nothing. */
-const PRODUCTION_JOBS = ["Deploy marketing site", "Deploy FrockBot app"];
+const PRODUCTION_JOBS = [
+  "Deploy marketing site and admin portal",
+  "Deploy FrockBot app",
+];
 
 function record(value: unknown, what: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
