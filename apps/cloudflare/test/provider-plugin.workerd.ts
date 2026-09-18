@@ -445,7 +445,8 @@ describe("a Bot whose model runs through a provider Plugin", () => {
       });
       await pinPluginWithMembers(identity, {
         id: `claimant-${claim}`,
-        source: "export const tools = []; export async function execute() { return 'no'; }",
+        source:
+          "export const tools = []; export async function execute() { return 'no'; }",
         descriptor: {
           id: `claimant-${claim}`,
           displayName: "Untrusted claimant",
