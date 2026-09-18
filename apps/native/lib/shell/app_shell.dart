@@ -229,8 +229,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// What the panel is showing over the Bot page.
   ///
   /// The Bot page is the panel's floor and is never in here: an empty stack is
-  /// that page. A sub-page — Settings, All Routines, the Computer, Plugins, a
-  /// Package's own page — is pushed onto it, and the panel header grows a back
+  /// that page. A sub-page — Settings, All Routines, Plugins, a Package's own
+  /// page — is pushed onto it, and the panel header grows a back
   /// chevron for as long as there is something to go back to. A Bot switch
   /// empties it, because a sub-page of one Bot is not a sub-page of another.
   final List<String> panelStack = [];

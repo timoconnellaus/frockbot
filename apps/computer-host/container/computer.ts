@@ -2535,10 +2535,11 @@ export class ComputerHost {
       );
     }
 
-    // The ensure exec that precedes a new viewer has already minted these
-    // files and touched last-seen. Renewals still need the touch, so reading
-    // both values and recording activity are one Sprite exec rather than two
-    // filesystem requests followed by another exec (P3).
+    // A running desktop has already been ensured: that exec minted these files
+    // and touched last-seen, and attaching to it re-runs none of that. Reading
+    // both values, confirming the tenant's slot and its VNC and gateway ports,
+    // and recording activity are one Sprite exec rather than several round
+    // trips to the Sprite (P3).
     const material = await this.run(
       sprite,
       [
