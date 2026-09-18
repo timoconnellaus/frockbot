@@ -139,8 +139,8 @@ void main() {
     final commands = <Map<String, Object?>>[];
     final state = BotSettingsController(api(store, commands), 'alpha');
     await open(tester, state);
-    expect(find.text('LOOK'), findsOneWidget);
-    expect(find.text('Inherit'), findsOneWidget);
+    expect(byIdentifier(SettingsIds.botLook), findsOneWidget);
+    expect(find.text('Inherit'), findsWidgets);
     await tester.tap(find.text('Studio'));
     await tester.pumpAndSettle();
     expect(commands, isNotEmpty);

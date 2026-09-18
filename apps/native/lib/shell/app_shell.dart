@@ -909,7 +909,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   void _featuresChanged([String? botId]) {
     unawaited(_loadAppearance());
-    unawaited(load());
     if (mounted && (botId == null || selected?.botId.value == botId)) {
       setState(() => featuresRevision += 1);
       unawaited(botSettings?.refreshPlugins() ?? Future<void>.value());

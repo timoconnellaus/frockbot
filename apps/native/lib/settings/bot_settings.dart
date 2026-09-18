@@ -894,41 +894,6 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                   ),
                 ),
               ),
-              const FrockSectionLabel('Look'),
-              identified(
-                SettingsIds.botLook,
-                Card(
-                  margin: EdgeInsets.zero,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          'Inherit the app look, or give this thread Studio — paper sitting in the app’s ink.',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        const SizedBox(height: 12),
-                        SegmentedButton<BotLook>(
-                          segments: const [
-                            ButtonSegment(
-                              value: BotLook.inherit,
-                              label: Text('Inherit'),
-                            ),
-                            ButtonSegment(
-                              value: BotLook.studio,
-                              label: Text('Studio'),
-                            ),
-                          ],
-                          selected: {state.look},
-                          onSelectionChanged: (next) =>
-                              unawaited(_saveLook(next.single)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
               const FrockSectionLabel('Behaviour'),
               FrockRowGroup(
                 rows: [
@@ -982,6 +947,36 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     controller: state,
                     characterId: widget.background,
                     primary: widget.primary,
+                  ),
+                  identified(
+                    SettingsIds.botLook,
+                    FrockRow(
+                      icon: Icons.palette_outlined,
+                      title: 'Look',
+                      chevron: false,
+                      trailing: FittedBox(
+                        child: SegmentedButton<BotLook>(
+                          showSelectedIcon: false,
+                          style: const ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          segments: const [
+                            ButtonSegment(
+                              value: BotLook.inherit,
+                              label: Text('Inherit'),
+                            ),
+                            ButtonSegment(
+                              value: BotLook.studio,
+                              label: Text('Studio'),
+                            ),
+                          ],
+                          selected: {state.look},
+                          onSelectionChanged: (next) =>
+                              unawaited(_saveLook(next.single)),
+                        ),
+                      ),
+                    ),
                   ),
                   if (state.modelAvailable) _model(context),
                 ],
