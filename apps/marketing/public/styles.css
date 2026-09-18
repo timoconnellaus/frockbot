@@ -1608,6 +1608,37 @@
     margin: 0 1px;
     vertical-align: 1px;
   }
+  /* The parts list: which rows of the grid build the scenario. */
+  .reach-parts {
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .reach-parts li {
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    gap: 2px 10px;
+    align-items: baseline;
+    padding: 9px 0;
+    border-top: 1px solid var(--line);
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
+  .reach-parts .reach-kind {
+    justify-self: start;
+  }
+  .reach-parts b {
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .reach-parts span {
+    grid-column: 2;
+    color: var(--muted);
+  }
+  .k-grant {
+    background: #ece9e4;
+    color: #5a5560;
+  }
   .reach-note {
     margin-top: 28px;
     padding: 20px 24px;
