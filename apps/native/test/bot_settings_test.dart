@@ -6,6 +6,7 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/settings/bot_settings.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
+import 'package:frockbot_native/theme/document.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
@@ -128,6 +129,24 @@ void main() {
     expect(find.text('Named by you'), findsNothing);
     expect(find.text('Named by this Bot'), findsNothing);
     expect(tester.takeException(), isNull);
+    state.dispose();
+  });
+
+  testWidgets('Look is Inherit or Studio and writes bot/update-look', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    final state = BotSettingsController(api(store, commands), 'alpha');
+    await open(tester, state);
+    expect(find.text('LOOK'), findsOneWidget);
+    expect(find.text('Inherit'), findsOneWidget);
+    await tester.tap(find.text('Studio'));
+    await tester.pumpAndSettle();
+    expect(commands, isNotEmpty);
+    expect(commands.last['type'], 'bot/update-look');
+    expect(commands.last['look'], 'studio');
+    expect(state.look, BotLook.studio);
     state.dispose();
   });
 

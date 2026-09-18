@@ -203,6 +203,7 @@ abstract final class SettingsIds {
   static const botHidden = 'bot-hidden-from-sidebar';
   static const botHideConfirm = 'bot-hide-confirm';
   static const botSaveStatus = 'bot-settings-status';
+  static const botLook = 'bot-settings-look';
 
   /// The Bot page: what the Bot is doing, and the doors to the rest of it.
   static const botPage = 'bot-page';

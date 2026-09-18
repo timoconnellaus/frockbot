@@ -18,6 +18,8 @@ describe("Flock gateway Contribution", () => {
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       readVoice: () => Promise.reject(new Error("voice is not wired here")),
       updateVoice: () => Promise.reject(new Error("voice is not wired here")),
+      readLook: () => Promise.reject(new Error("look is not wired here")),
+      updateLook: () => Promise.reject(new Error("look is not wired here")),
       createBot: () =>
         Promise.reject({ name: "FlockDecodeError", message: "collision" }),
       listBotLifecycles: () =>
@@ -62,6 +64,8 @@ describe("Flock gateway Contribution", () => {
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       readVoice: () => Promise.reject(new Error("voice is not wired here")),
       updateVoice: () => Promise.reject(new Error("voice is not wired here")),
+      readLook: () => Promise.reject(new Error("look is not wired here")),
+      updateLook: () => Promise.reject(new Error("look is not wired here")),
       createBot: (_user, command) =>
         Promise.resolve({
           schemaVersion: 1,
@@ -229,6 +233,8 @@ describe("Flock gateway Contribution", () => {
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       readVoice: () => Promise.reject(new Error("voice is not wired here")),
       updateVoice: () => Promise.reject(new Error("voice is not wired here")),
+      readLook: () => Promise.reject(new Error("look is not wired here")),
+      updateLook: () => Promise.reject(new Error("look is not wired here")),
       createBot: () => Promise.reject(new Error("not used")),
       listBotLifecycles: () =>
         Promise.resolve({ schemaVersion: 1, lifecycles: [] }),

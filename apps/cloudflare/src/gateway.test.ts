@@ -728,6 +728,50 @@ class MemoryConfiguration
       revision: request.command.expectedRevision + 1,
     });
   }
+  readLook(request: Parameters<BotConfigurationBinding["readLook"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      revision: 0,
+      look: "inherit" as const,
+    });
+  }
+  updateLook(request: Parameters<BotConfigurationBinding["updateLook"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      status: "applied" as const,
+      revision: request.command.expectedRevision + 1,
+    });
+  }
+  persistAssembledDocument(
+    request: Parameters<BotConfigurationBinding["persistAssembledDocument"]>[0],
+  ) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      revision: 1,
+      look: "inherit" as const,
+      ...(request.document === undefined ? {} : { document: request.document }),
+    });
+  }
+  readBotLook(
+    request: Parameters<UserConfigurationBinding["readBotLook"]>[0],
+  ) {
+    return this.readLook(request);
+  }
+  updateBotLook(
+    request: Parameters<UserConfigurationBinding["updateBotLook"]>[0],
+  ) {
+    return this.updateLook(request);
+  }
+  mirrorBotLook() {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      revision: 1,
+      bots: [] as const,
+    });
+  }
   readBotVoice(
     request: Parameters<UserConfigurationBinding["readBotVoice"]>[0],
   ) {
@@ -1125,6 +1169,19 @@ function createTestGateway(
           }),
         updateVoice: (userId, botId, command) =>
           configurationFor(userId).updateVoice({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        readLook: (userId, botId) =>
+          configurationFor(userId).readLook({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        updateLook: (userId, botId, command) =>
+          configurationFor(userId).updateLook({
             schemaVersion: 1,
             userId,
             botId,

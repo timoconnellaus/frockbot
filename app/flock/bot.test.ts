@@ -88,6 +88,45 @@ describe("Flock Bot contribution", () => {
     expect(settingsMaterializations).toBeGreaterThan(0);
   });
 
+  test("materializes look and fences bot/update-look on its own revision", async () => {
+    const storage = new MemoryStorage();
+    const create = () =>
+      createFlockBotBackendContribution({
+        storage,
+        materializeSettings: () => Promise.resolve(),
+        archiveEligible: () => Promise.resolve(true),
+        tearDown: () => Promise.resolve("complete"),
+      });
+    expect(await create().readLook(registration, "user-1")).toMatchObject({
+      botId: "alpha",
+      revision: 0,
+      look: "inherit",
+    });
+    const command = {
+      schemaVersion: 1 as const,
+      type: "bot/update-look" as const,
+      commandId: "look-1",
+      expectedRevision: 0,
+      botId: "alpha",
+      look: "studio" as const,
+    };
+    const first = await create().updateLook(registration, "user-1", command);
+    expect(await create().updateLook(registration, "user-1", command)).toEqual(
+      first,
+    );
+    expect(await create().readLook(registration, "user-1")).toMatchObject({
+      revision: 1,
+      look: "studio",
+    });
+    await expect(
+      create().updateLook(registration, "user-1", {
+        ...command,
+        commandId: "stale",
+        expectedRevision: 0,
+      }),
+    ).rejects.toBeInstanceOf(FlockConflictError);
+  });
+
   test("archives idempotently, fences mutations, rejects active work, and restores data", async () => {
     const storage = new MemoryStorage();
     let eligible = true;

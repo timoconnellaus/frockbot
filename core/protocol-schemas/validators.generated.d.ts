@@ -36,6 +36,9 @@ declare const validators: {
   isAvatarAppearance(
     value: unknown,
   ): value is ProtocolTypes["AvatarAppearance"];
+  isThemeHex(value: unknown): value is ProtocolTypes["ThemeHex"];
+  isThemeTokens(value: unknown): value is ProtocolTypes["ThemeTokens"];
+  isThemeDocument(value: unknown): value is ProtocolTypes["ThemeDocument"];
   isBotRegistration(value: unknown): value is ProtocolTypes["BotRegistration"];
   isBotDirectory(value: unknown): value is ProtocolTypes["BotDirectory"];
   isBotLifecycle(value: unknown): value is ProtocolTypes["BotLifecycle"];
@@ -58,6 +61,8 @@ declare const validators: {
   ): value is ProtocolTypes["BotAvatarCommand"];
   isVoiceIdentity(value: unknown): value is ProtocolTypes["VoiceIdentity"];
   isBotVoiceCommand(value: unknown): value is ProtocolTypes["BotVoiceCommand"];
+  isLookIdentity(value: unknown): value is ProtocolTypes["LookIdentity"];
+  isBotLookCommand(value: unknown): value is ProtocolTypes["BotLookCommand"];
   isFlockReceipt(value: unknown): value is ProtocolTypes["FlockReceipt"];
   isSkillRef(value: unknown): value is ProtocolTypes["SkillRef"];
   isTurnCommand(value: unknown): value is ProtocolTypes["TurnCommand"];

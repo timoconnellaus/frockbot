@@ -191,6 +191,84 @@
     }
   },
   {
+    "name": "BotRegistration with Studio look",
+    "schema": "BotRegistration",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "registeredAt": "2026-09-05T00:00:00.000Z",
+      "initialName": "Studio",
+      "avatar": {
+        "schemaVersion": 1,
+        "characterId": "pixel",
+        "primary": "#fc85ae"
+      },
+      "look": "studio",
+      "document": {
+        "schemaVersion": 1,
+        "look": "studio",
+        "tokens": {
+          "surfaces": {
+            "window": "#faf7f2",
+            "surface": "#ffffff",
+            "raised": "#f2ece4",
+            "text": "#1e1d27",
+            "muted": "#6d6974",
+            "line": "#e7e0d9",
+            "accent": "#c23359",
+            "onAccent": "#ffffff"
+          },
+          "type": "manrope",
+          "bubbles": { "bot": "plain", "me": "accent" }
+        }
+      }
+    }
+  },
+  {
+    "name": "ThemeDocument valid",
+    "schema": "ThemeDocument",
+    "value": {
+      "schemaVersion": 1,
+      "look": "ink",
+      "tokens": {
+        "surfaces": {
+          "window": "#1f1e24",
+          "surface": "#1a191e",
+          "raised": "#2c2a33",
+          "text": "#f6f2ee",
+          "muted": "#a8a3a6",
+          "line": "#3a3742",
+          "accent": "#d03f64",
+          "onAccent": "#ffffff"
+        },
+        "type": "manrope",
+        "bubbles": { "bot": "raised", "me": "tint" }
+      }
+    }
+  },
+  {
+    "name": "LookIdentity valid",
+    "schema": "LookIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "revision": 2,
+      "look": "inherit"
+    }
+  },
+  {
+    "name": "BotLookCommand valid",
+    "schema": "BotLookCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/update-look",
+      "commandId": "command-1",
+      "expectedRevision": 2,
+      "botId": "default",
+      "look": "studio"
+    }
+  },
+  {
     "name": "BotDirectory valid",
     "schema": "BotDirectory",
     "value": {

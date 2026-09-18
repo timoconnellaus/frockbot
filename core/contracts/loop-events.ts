@@ -35,6 +35,11 @@ import type {
 import { decodeNormalizedModelRequestV1 } from "./types.js";
 import type { Session } from "./session.js";
 import { decodeSkillRefsV1, type SkillRefV1 } from "./skills.js";
+import {
+  decodeThemeDocumentV1,
+  type BotLookV1,
+  type ThemeDocumentV1,
+} from "../theme/document.js";
 
 export type LoopEventDispatchModeV1 = "waterfall" | "serial" | "emit";
 
@@ -183,6 +188,12 @@ export interface LoopEventPayloadMapV1 {
     error: { name: string; message: string };
   };
   "session/event": SessionEventEnvelope;
+  "theme/assemble": {
+    document: ThemeDocumentV1;
+    look: BotLookV1;
+    now: string;
+    timezone: string;
+  };
 }
 
 /** The value a waterfall listener may replace; observations return nothing. */
@@ -209,6 +220,7 @@ export interface LoopEventReturnMapV1 {
   "agent/cancel-requested": void;
   "agent/error": void;
   "session/event": void;
+  "theme/assemble": ThemeDocumentV1;
 }
 
 export type LoopEventNameV1 = keyof LoopEventPayloadMapV1;
@@ -227,6 +239,7 @@ export const BOT_ISOLATE_HOOK_EVENTS_V1 = [
   "tools/pre-execute",
   "tools/post-execute",
   "agent/turn-stopping",
+  "theme/assemble",
 ] as const satisfies readonly LoopEventNameV1[];
 
 export type BotIsolateHookEventNameV1 =
@@ -495,6 +508,9 @@ export function decodeBotIsolateHookReplacementV1<
     case "tools/post-execute":
       decoded = decodeHookResult(input, label);
       break;
+    case "theme/assemble":
+      decoded = decodeThemeDocumentV1(input);
+      break;
   }
   return decoded as LoopEventReturnMapV1[Event];
 }
@@ -642,5 +658,11 @@ export const LOOP_EVENTS_V1 = {
     payload: "SessionEventEnvelope",
     returns: "void",
     isolateHook: false,
+  },
+  "theme/assemble": {
+    mode: "waterfall",
+    payload: "{ document, look, now, timezone }",
+    returns: "ThemeDocumentV1",
+    isolateHook: true,
   },
 } as const satisfies Record<LoopEventNameV1, LoopEventDefinitionV1>;

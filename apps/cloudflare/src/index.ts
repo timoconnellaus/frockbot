@@ -28,6 +28,7 @@ import {
   decodeFlockReceiptV1,
   decodeAvatarIdentityViewV1,
   decodeVoiceIdentityViewV1,
+  decodeLookIdentityViewV1,
   BotNotFoundError,
   decodeBotIdentityDirectoryViewV1,
   FLOCK_DIRECTORY_LIMIT,
@@ -537,6 +538,9 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     updateAvatar: (request) => rpc.updateAvatar(request),
     readVoice: (request) => rpc.readVoice(request),
     updateVoice: (request) => rpc.updateVoice(request),
+    readLook: (request) => rpc.readLook(request),
+    updateLook: (request) => rpc.updateLook(request),
+    persistAssembledDocument: (request) => rpc.persistAssembledDocument(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     readBotPluginsFrame: (request) => rpc.readBotPluginsFrame(request),
@@ -669,6 +673,9 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     updateBotAvatar: (request) => rpc.updateBotAvatar(request),
     readBotVoice: (request) => rpc.readBotVoice(request),
     updateBotVoice: (request) => rpc.updateBotVoice(request),
+    readBotLook: (request) => rpc.readBotLook(request),
+    updateBotLook: (request) => rpc.updateBotLook(request),
+    mirrorBotLook: (request) => rpc.mirrorBotLook(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
     readConnectionsFrame: (request) => rpc.readConnectionsFrame(request),
@@ -2274,6 +2281,16 @@ const createGatewayBackendContributions = (env: Env) =>
           }),
         ),
       ),
+    readLook: async (userId, botId) =>
+      decodeLookIdentityViewV1(
+        rpcJsonSnapshot(
+          await botStateStub(env, userId, botId).readLook({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        ),
+      ),
     executeConnection: (userId, command) =>
       userConfigurationStub(env, userId).executeConnection({
         schemaVersion: 1,
@@ -2538,6 +2555,17 @@ const createGatewayBackendContributions = (env: Env) =>
       decodeFlockReceiptV1(
         rpcJsonSnapshot(
           await userConfigurationStub(env, userId).updateBotVoice({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        ),
+      ),
+    updateLook: async (userId, botId, command) =>
+      decodeFlockReceiptV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).updateBotLook({
             schemaVersion: 1,
             userId,
             botId,

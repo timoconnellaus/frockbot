@@ -22,6 +22,7 @@
     "./workspace-store/testing": "./workspace-store/testing.ts",
     "./secret-shapes": "./secret-shapes/index.ts",
     "./template": "./template/index.ts",
+    "./theme": "./theme/index.ts",
     "./protocol": "./protocol/index.ts",
     "./protocol-schemas": "./protocol-schemas/index.ts",
     "./machine-protocol": "./machine-protocol/index.ts",

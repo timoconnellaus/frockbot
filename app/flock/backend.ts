@@ -7,6 +7,7 @@ import {
   decodeCreateBotCommandV1,
   decodeUpdateAvatarCommandV1,
   decodeUpdateVoiceCommandV1,
+  decodeUpdateLookCommandV1,
   type BotDirectoryViewV1,
   type BotIdentityDirectoryViewV1,
   type BotLifecycleCommandV1,
@@ -19,6 +20,8 @@ import {
   type UpdateAvatarCommandV1,
   type VoiceIdentityViewV1,
   type UpdateVoiceCommandV1,
+  type LookIdentityViewV1,
+  type UpdateLookCommandV1,
 } from "./shared.js";
 import {
   decodeBotUnreadCommandV1,
@@ -54,6 +57,12 @@ export interface FlockGatewayHost {
     userId: string,
     botId: string,
     command: UpdateVoiceCommandV1,
+  ): Promise<FlockReceiptV1>;
+  readLook(userId: string, botId: string): Promise<LookIdentityViewV1>;
+  updateLook(
+    userId: string,
+    botId: string,
+    command: UpdateLookCommandV1,
   ): Promise<FlockReceiptV1>;
   /** The live identity of every registered Bot, read through to its owner. */
   listBotIdentities(userId: string): Promise<BotIdentityDirectoryViewV1>;
@@ -182,6 +191,7 @@ export function createFlockBackendContribution(
       if (!context.userId) return undefined;
       const avatar = url.pathname.match(/^\/api\/bots\/([^/]+)\/avatar$/);
       const voice = url.pathname.match(/^\/api\/bots\/([^/]+)\/voice$/);
+      const look = url.pathname.match(/^\/api\/bots\/([^/]+)\/look$/);
       const unread = url.pathname.match(/^\/api\/bots\/([^/]+)\/unread$/);
       const lifecycle = url.pathname.match(/^\/api\/bots\/([^/]+)\/lifecycle$/);
       if (
@@ -193,6 +203,7 @@ export function createFlockBackendContribution(
         url.pathname !== "/api/bots/notifications" &&
         !avatar &&
         !voice &&
+        !look &&
         !unread &&
         !lifecycle
       )
@@ -314,6 +325,26 @@ export function createFlockBackendContribution(
             );
           return Response.json(
             await host.updateVoice(context.userId, voiceBotId, command),
+          );
+        }
+        if (look) {
+          const lookBotId = decodePathId(look[1]!);
+          if (request.method === "GET")
+            return Response.json(
+              await host.readLook(context.userId, lookBotId),
+            );
+          if (request.method !== "POST")
+            return Response.json(
+              { error: "method not allowed" },
+              { status: 405 },
+            );
+          const command = decodeUpdateLookCommandV1(await request.json());
+          if (command.botId !== lookBotId)
+            throw new FlockDecodeError(
+              "look command does not match request path",
+            );
+          return Response.json(
+            await host.updateLook(context.userId, lookBotId, command),
           );
         }
         const botId = decodePathId(avatar![1]!);

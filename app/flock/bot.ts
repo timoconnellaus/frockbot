@@ -7,6 +7,7 @@ import {
   decodeBotRegistrationV1,
   decodeAvatarIdentityViewV1,
   decodeVoiceIdentityViewV1,
+  decodeLookIdentityViewV1,
   decodeStoredBotLifecycleReceiptV1,
   decodeStoredFlockReceiptV1,
   flockCommandFingerprint,
@@ -19,7 +20,10 @@ import {
   type UpdateAvatarCommandV1,
   type VoiceIdentityViewV1,
   type UpdateVoiceCommandV1,
+  type LookIdentityViewV1,
+  type UpdateLookCommandV1,
 } from "./shared.js";
+import { defaultBotLookV1, type ThemeDocumentV1 } from "@frockbot/core/theme";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 
 const IDENTITY_KEY = "flock:avatar:v1";
@@ -28,6 +32,8 @@ const RECEIPT_PREFIX = "flock:avatar-receipt:";
 // sounds never races a change to how it looks (ADR 0031).
 const VOICE_KEY = "flock:voice:v1";
 const VOICE_RECEIPT_PREFIX = "flock:voice-receipt:";
+const LOOK_KEY = "flock:look:v1";
+const LOOK_RECEIPT_PREFIX = "flock:look-receipt:";
 const LIFECYCLE_KEY = "flock:lifecycle:v1";
 const LIFECYCLE_RECEIPT_PREFIX = "flock:lifecycle-receipt:";
 export interface FlockBotTransaction {
@@ -282,6 +288,120 @@ export class FlockBotBackendContribution {
         [receiptKey]: { fingerprint, receipt },
       });
       return receipt;
+    });
+  }
+
+  private async materializeLook(
+    registration: BotRegistrationV1,
+    userId: string,
+  ): Promise<LookIdentityViewV1> {
+    await this.materialize(registration, userId);
+    return this.host.storage.transaction(async (storage) => {
+      const existingValue = await storage.get<unknown>(LOOK_KEY);
+      if (existingValue !== undefined) {
+        const existing = decodeLookIdentityViewV1(existingValue);
+        if (existing.botId !== registration.botId)
+          throw new Error("look identity does not match Bot registration");
+        return existing;
+      }
+      const initial = {
+        schemaVersion: 1,
+        botId: registration.botId,
+        revision: 0,
+        look: registration.look ?? defaultBotLookV1(),
+        ...(registration.document === undefined
+          ? {}
+          : { document: structuredClone(registration.document) }),
+      } satisfies LookIdentityViewV1;
+      await storage.put(LOOK_KEY, initial);
+      return initial;
+    });
+  }
+
+  async readLook(
+    registration: BotRegistrationV1,
+    userId: string,
+  ): Promise<LookIdentityViewV1> {
+    return structuredClone(await this.materializeLook(registration, userId));
+  }
+
+  async updateLook(
+    registration: BotRegistrationV1,
+    userId: string,
+    command: UpdateLookCommandV1,
+  ): Promise<FlockReceiptV1> {
+    if (registration.botId !== command.botId)
+      throw new Error("look command does not match Bot registration");
+    await this.materializeLook(registration, userId);
+    const fingerprint = flockCommandFingerprint(command);
+    return this.host.storage.transaction(async (storage) => {
+      await this.assertActive(storage, registration.botId);
+      const receiptKey = `${LOOK_RECEIPT_PREFIX}${command.commandId}`;
+      const storedValue = await storage.get<unknown>(receiptKey);
+      const stored =
+        storedValue === undefined
+          ? undefined
+          : decodeStoredFlockReceiptV1(storedValue);
+      if (stored) {
+        if (stored.fingerprint !== fingerprint)
+          throw new FlockDecodeError(
+            `command ID collision: ${command.commandId}`,
+          );
+        return structuredClone(stored.receipt);
+      }
+      const currentValue = await storage.get<unknown>(LOOK_KEY);
+      if (currentValue === undefined)
+        throw new Error("look identity was not materialized");
+      const current = decodeLookIdentityViewV1(currentValue);
+      if (current.revision !== command.expectedRevision)
+        throw new FlockConflictError(current.revision);
+      const next = {
+        schemaVersion: 1 as const,
+        botId: current.botId,
+        revision: current.revision + 1,
+        look: command.look,
+      } satisfies LookIdentityViewV1;
+      const receipt = {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        status: "applied",
+        revision: next.revision,
+      } satisfies FlockReceiptV1;
+      await storage.put({
+        [LOOK_KEY]: next,
+        [receiptKey]: { fingerprint, receipt },
+      });
+      return receipt;
+    });
+  }
+
+  /**
+   * Persist an assembled document onto the look record, or drop it. Bumps the
+   * revision. `undefined` is Inherit compiling locally again.
+   */
+  async persistAssembledDocument(
+    registration: BotRegistrationV1,
+    userId: string,
+    document: ThemeDocumentV1 | undefined,
+  ): Promise<LookIdentityViewV1> {
+    await this.materializeLook(registration, userId);
+    return this.host.storage.transaction(async (storage) => {
+      await this.assertActive(storage, registration.botId);
+      const currentValue = await storage.get<unknown>(LOOK_KEY);
+      if (currentValue === undefined)
+        throw new Error("look identity was not materialized");
+      const current = decodeLookIdentityViewV1(currentValue);
+      const next = {
+        schemaVersion: 1 as const,
+        botId: current.botId,
+        revision: current.revision + 1,
+        look: current.look,
+        ...(document === undefined
+          ? {}
+          : { document: structuredClone(document) }),
+      } satisfies LookIdentityViewV1;
+      await storage.put(LOOK_KEY, next);
+      return structuredClone(next);
     });
   }
 

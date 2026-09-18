@@ -46,6 +46,8 @@ import '../settings/bot_quick_writes.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../templates/page.dart';
+import '../theme/document.dart';
+import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../update/app_version.dart';
 import '../view/sample_page.dart';
@@ -152,6 +154,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Map<String, SidebarProfile> profiles = {};
   Set<String> archived = {};
   wire.BotRegistration? selected;
+
+  /// Account look: Ink, Paper, or System. Paints the shell in the same
+  /// frame as a Bot switch; the thread may overlay Studio.
+  AccountLook accountLook = AccountLook.ink;
+  String accountTimezone = 'UTC';
 
   /// The Bot the account was given as General, from the authority.
   String? generalBotId;
@@ -318,6 +325,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // is what locks the zone until it is accounted for.
     unawaited(lifecycle.restore());
     unawaited(load());
+    unawaited(_loadAppearance());
     _startPolling();
     unawaited(push.start());
   }
@@ -818,6 +826,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _readBackBotSettings() async {
     await _loadIdentities();
     await activity.load();
+    await load();
   }
 
   /// Draws a Bot profile change before the round trip that confirms it: the
@@ -899,6 +908,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _featuresChanged([String? botId]) {
+    unawaited(_loadAppearance());
+    unawaited(load());
     if (mounted && (botId == null || selected?.botId.value == botId)) {
       setState(() => featuresRevision += 1);
       unawaited(botSettings?.refreshPlugins() ?? Future<void>.value());
@@ -1178,9 +1189,82 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  ThemeData _accountThemeOf(BuildContext context) => FrockTheme.fromDocument(
+    namedLookDocument(
+      resolveAccountNamedLook(
+        accountLook,
+        MediaQuery.platformBrightnessOf(context),
+      ),
+    ),
+    timezone: accountTimezone,
+  );
+
+  ThemeData _botThemeOf(BuildContext context, wire.BotRegistration bot) =>
+      FrockTheme.fromDocument(
+        paintDocumentFor(
+          look: parseBotLook(bot.look),
+          document: bot.document?.toJson(),
+          account: accountLook,
+          platform: MediaQuery.platformBrightnessOf(context),
+        ),
+        timezone: accountTimezone,
+      );
+
+  Widget _withAccountTheme(BuildContext context, Widget child) =>
+      Theme(data: _accountThemeOf(context), child: child);
+
+  Future<void> _loadAppearance() async {
+    final cacheKey = 'appearance/${widget.userId}';
+    final cached = await widget.store.read(cacheKey);
+    if (cached != null && mounted) {
+      try {
+        final value = jsonDecode(cached);
+        if (value is Map) {
+          setState(() {
+            accountLook = parseAccountLook(value['look'] as String?);
+            final timezone = value['timezone'];
+            if (timezone is String && timezone.isNotEmpty) {
+              accountTimezone = timezone;
+            }
+          });
+        }
+      } catch (_) {
+        await widget.store.delete(cacheKey);
+      }
+    }
+    try {
+      final settings = (await widget.api.request('/api/settings?view=2'))!
+          as Map;
+      final look = parseAccountLook(
+        (settings['appearance'] as Map?)?['look'] as String?,
+      );
+      final timezone =
+          (settings['profile'] as Map?)?['timezone'] as String? ?? 'UTC';
+      try {
+        await widget.store.write(
+          cacheKey,
+          jsonEncode({'look': look.name, 'timezone': timezone}),
+        );
+      } catch (_) {
+        // Appearance cache only speeds the next cold start.
+      }
+      if (!mounted) return;
+      setState(() {
+        accountLook = look;
+        accountTimezone = timezone;
+      });
+    } catch (_) {
+      // Ink is the product default; a cached look still paints.
+    }
+  }
+
   void _push(Widget page) {
     push.reading(null);
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => _withAccountTheme(routeContext, page),
+      ),
+    );
   }
 
   /// Back from a conversation on a phone: the list again, with nothing of the
@@ -2187,6 +2271,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final tier = shellTierForWidth(MediaQuery.sizeOf(context).width);
     final single = tier == ShellTier.single;
     final bot = selected;
+    final accountTheme = _accountThemeOf(context);
+    final threadTheme = bot == null
+        ? accountTheme
+        : _botThemeOf(context, bot);
     final session = voiceSession;
     // Voice mode is this Bot being the one on the call: its thread and its
     // composer give way to the call itself (ADR 0031). A call with another
@@ -2231,7 +2319,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ShellLayout(
                     header: bot == null
                         ? null
-                        : ChatHeader(
+                        : _ThemedPreferred(
+                            theme: threadTheme,
+                            child: ChatHeader(
                             name: _name(bot),
                             connection: selectedConnection,
                             textScale:
@@ -2260,6 +2350,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             panelShown: tier == ShellTier.triple
                                 ? !panelCollapsed
                                 : panelOpen,
+                          ),
                           ),
                     conversationOpen: bot != null && conversationOpen,
                     onBack: _openBack,
@@ -2327,7 +2418,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onSwipeHide: (botId) =>
                                 unawaited(_runBotAction(botId, BotAction.hide)),
                           ),
-                    conversation: voiceHere
+                    conversation: Theme(
+                      key: ValueKey(
+                        'thread-theme-${bot?.botId.value ?? 'none'}',
+                      ),
+                      data: threadTheme,
+                      child: voiceHere
                         ? VoiceMode(
                             key: ValueKey('voice-${bot.botId.value}'),
                             session: session,
@@ -2419,6 +2515,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                               setState(() => selectedConnection = state);
                             },
                           ),
+                    ),
                   ),
                   ?_appletFrameHolder(context),
                 ],
@@ -2454,9 +2551,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
     return SearchShortcutListener(
       onOpen: () => unawaited(_openSearch()),
-      child: ColoredBox(
-        color: Theme.of(context).colorScheme.surface,
-        child: shell,
+      child: Theme(
+        key: const ValueKey('shell-theme'),
+        data: accountTheme,
+        child: Builder(
+          builder: (context) => ColoredBox(
+            color: Theme.of(context).colorScheme.surface,
+            child: shell,
+          ),
+        ),
       ),
     );
   }
@@ -2634,11 +2737,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(
       showDialog<void>(
         context: context,
-        builder: (_) => MarketplaceDialog(
-          onFeaturesChanged: _featuresChanged,
-          api: widget.api,
-          store: widget.store,
-          userId: widget.userId,
+        builder: (dialogContext) => _withAccountTheme(
+          dialogContext,
+          MarketplaceDialog(
+            onFeaturesChanged: _featuresChanged,
+            api: widget.api,
+            store: widget.store,
+            userId: widget.userId,
+          ),
         ),
       ),
     );
@@ -3072,4 +3178,16 @@ class _ExchangeScreenState extends State<_ExchangeScreen> {
       ),
     ),
   );
+}
+
+class _ThemedPreferred extends StatelessWidget implements PreferredSizeWidget {
+  final ThemeData theme;
+  final PreferredSizeWidget child;
+  const _ThemedPreferred({required this.theme, required this.child});
+
+  @override
+  Size get preferredSize => child.preferredSize;
+
+  @override
+  Widget build(BuildContext context) => Theme(data: theme, child: child);
 }

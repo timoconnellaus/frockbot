@@ -10,6 +10,7 @@ import '../shell/semantics.dart';
 import '../shell/sidebar.dart' show SidebarProfile;
 import '../theme/caret.dart';
 import '../theme/dialogs.dart';
+import '../theme/document.dart';
 import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../theme/states.dart';
@@ -29,6 +30,7 @@ class BotSettingsController extends ChangeNotifier {
   bool busy = false;
   bool saving = false;
   Future<bool> _voiceWrites = Future.value(false);
+  Future<bool> _lookWrites = Future.value(false);
 
   /// Whether a read has landed. A Bot that has never been edited is at
   /// revision 0, so the revision cannot double as this.
@@ -42,6 +44,9 @@ class BotSettingsController extends ChangeNotifier {
   /// profile (`/api/bots/:id/voice`), so a profile save never moves it and a
   /// voice save never moves [revision].
   int voiceRevision = 0;
+
+  /// The look record's own revision, fenced like voice.
+  int lookRevision = 0;
 
   /// How many reads have replaced what the fields show. A field is keyed on
   /// this rather than on the revision: a save moves the revision on every
@@ -66,6 +71,9 @@ class BotSettingsController extends ChangeNotifier {
   /// How this Bot sounds (ADR 0031), or null when it has chosen nothing and
   /// speaks in its character's default voice.
   BotVoiceAppearanceV1? voice;
+
+  /// Inherit the account look, or Studio for this thread.
+  BotLook look = BotLook.inherit;
 
   /// The Bot's model override, as the `custom-models` Package stores it, and
   /// null when this Bot follows the account model.
@@ -115,6 +123,9 @@ class BotSettingsController extends ChangeNotifier {
       final voiceAnswer = (await api.request('/api/bots/$botId/voice'))! as Map;
       voiceRevision = (voiceAnswer['revision'] as num?)?.toInt() ?? 0;
       voice = BotVoiceAppearanceV1.fromJson(voiceAnswer['voice']);
+      final lookAnswer = (await api.request('/api/bots/$botId/look'))! as Map;
+      lookRevision = (lookAnswer['revision'] as num?)?.toInt() ?? 0;
+      look = parseBotLook(lookAnswer['look'] as String?);
       model =
           ((answer['packageValues'] as Map?)?['custom-models']
               as Map?)?['model'];
@@ -387,6 +398,44 @@ class BotSettingsController extends ChangeNotifier {
     }
   }
 
+  /// This Bot's look, saved as the person changes it. Fenced on its own
+  /// revision like the voice, so a profile save never races it.
+  Future<bool> saveLook(BotLook next) {
+    final write = _lookWrites.then((_) => _writeLook(next));
+    _lookWrites = write;
+    return write;
+  }
+
+  Future<bool> _writeLook(BotLook next) async {
+    saving = true;
+    message = null;
+    final previous = look;
+    look = next;
+    _changed();
+    try {
+      await _lookCommand({
+        'schemaVersion': 1,
+        'type': 'bot/update-look',
+        'commandId': randomId(),
+        'botId': botId,
+        'look': next == BotLook.studio ? 'studio' : 'inherit',
+      });
+      message = 'Saved.';
+      return true;
+    } on RequestFailure catch (failure) {
+      look = previous;
+      message = failure.message;
+      return false;
+    } catch (_) {
+      look = previous;
+      message = 'Couldn’t save this Bot’s look. Try again.';
+      return false;
+    } finally {
+      saving = false;
+      _changed();
+    }
+  }
+
   /// One fenced command, and the revision it left behind.
   ///
   /// A conflict is re-fenced once against the revision the authority now
@@ -433,6 +482,36 @@ class BotSettingsController extends ChangeNotifier {
       failure is String
           ? failure
           : 'Couldn’t save this Bot’s voice. Try again.',
+    );
+  }
+
+  /// The look's own fenced write, to `/api/bots/:id/look`.
+  Future<void> _lookCommand(Map<String, Object?> command) async {
+    Future<Map<String, Object?>> send() async {
+      final answer = await api.request(
+        '/api/bots/$botId/look',
+        body: {...command, 'expectedRevision': lookRevision},
+      );
+      return (answer! as Map).cast<String, Object?>();
+    }
+
+    Map<String, Object?> receipt;
+    try {
+      receipt = await send();
+    } on RequestFailure catch (failure) {
+      if (failure.status != 409) rethrow;
+      final current = (await api.request('/api/bots/$botId/look'))! as Map;
+      lookRevision = (current['revision'] as num?)?.toInt() ?? lookRevision;
+      receipt = await send();
+    }
+    final settled = receipt['revision'];
+    if (settled is int) lookRevision = settled;
+    if (receipt['status'] != 'rejected') return;
+    final failure = receipt['failure'];
+    throw RequestFailure(
+      failure is String
+          ? failure
+          : 'Couldn’t save this Bot’s look. Try again.',
     );
   }
 
@@ -736,6 +815,11 @@ class _BotSettingsViewState extends State<BotSettingsView> {
         false;
   }
 
+  Future<void> _saveLook(BotLook next) async {
+    final saved = await state.saveLook(next);
+    if (saved) await widget.onSaved?.call();
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: state,
@@ -807,6 +891,41 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                         onChanged: (next) => state.description = next,
                       ),
                     ],
+                  ),
+                ),
+              ),
+              const FrockSectionLabel('Look'),
+              identified(
+                SettingsIds.botLook,
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Inherit the app look, or give this thread Studio — paper sitting in the app’s ink.',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 12),
+                        SegmentedButton<BotLook>(
+                          segments: const [
+                            ButtonSegment(
+                              value: BotLook.inherit,
+                              label: Text('Inherit'),
+                            ),
+                            ButtonSegment(
+                              value: BotLook.studio,
+                              label: Text('Studio'),
+                            ),
+                          ],
+                          selected: {state.look},
+                          onSelectionChanged: (next) =>
+                              unawaited(_saveLook(next.single)),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

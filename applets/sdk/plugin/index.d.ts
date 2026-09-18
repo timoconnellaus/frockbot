@@ -24,7 +24,8 @@ export type PluginHookEvent =
   | "agent/request"
   | "tools/pre-execute"
   | "tools/post-execute"
-  | "agent/turn-stopping";
+  | "agent/turn-stopping"
+  | "theme/assemble";
 
 /**
  * The grants a Plugin may declare in `plugin.json`, in the kernel's order.
@@ -479,6 +480,12 @@ export interface PluginHookPayloads {
     result: { [key: string]: unknown };
   };
   "agent/turn-stopping": { agent: { [key: string]: unknown }; turn: number };
+  "theme/assemble": {
+    document: { [key: string]: unknown };
+    look: "inherit" | "studio";
+    now: string;
+    timezone: string;
+  };
 }
 
 export interface PluginHookReplacements {
@@ -488,6 +495,7 @@ export interface PluginHookReplacements {
   "tools/pre-execute": PluginHookPayloads["tools/pre-execute"]["preparation"];
   "tools/post-execute": PluginHookPayloads["tools/post-execute"]["result"];
   "agent/turn-stopping": never;
+  "theme/assemble": PluginHookPayloads["theme/assemble"]["document"];
 }
 
 export type PluginHook<Event extends PluginHookEvent> = (

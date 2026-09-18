@@ -32,7 +32,7 @@ extension on String {
 const clientHello = <String, Object>{
   'schemaVersion': 1,
   'protocolVersion': 1,
-  'nativeVersion': '1.4.0',
+  'nativeVersion': '1.5.0',
   'catalogs': <Object>[],
 };
 String randomId() {

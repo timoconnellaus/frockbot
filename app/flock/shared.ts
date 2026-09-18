@@ -13,6 +13,13 @@ import {
   type BotVoiceAppearanceV1,
 } from "@frockbot/app/voice/appearance";
 export type { BotVoiceAppearanceV1 } from "@frockbot/app/voice/appearance";
+import {
+  decodeBotLookV1,
+  decodeThemeDocumentV1,
+  type BotLookV1,
+  type ThemeDocumentV1,
+} from "@frockbot/core/theme";
+export type { BotLookV1, ThemeDocumentV1 } from "@frockbot/core/theme";
 
 /** The Flock's Bot-to-Bot message tool, by name. */
 export const BOT_MESSAGE_TOOL_V1 = "bot_message";
@@ -82,6 +89,16 @@ export interface BotRegistrationV1 {
    * improving a character's default improves every Bot that never chose.
    */
   voice?: BotVoiceAppearanceV1;
+  /**
+   * The named look this Bot paints: Inherit (the account look) or Studio.
+   * Absent means Inherit, which is what every Bot was before this field.
+   */
+  look?: BotLookV1;
+  /**
+   * Last assembled ThemeDocument. The client paints this when present and
+   * otherwise compiles `look` locally — never waits on a hook to switch Bots.
+   */
+  document?: ThemeDocumentV1;
 }
 export interface BotMembershipViewV1 {
   schemaVersion: 1;
@@ -184,6 +201,21 @@ export interface VoiceIdentityViewV1 {
   botId: string;
   revision: number;
   voice?: BotVoiceAppearanceV1;
+}
+export interface UpdateLookCommandV1 {
+  schemaVersion: 1;
+  type: "bot/update-look";
+  commandId: string;
+  expectedRevision: number;
+  botId: string;
+  look: BotLookV1;
+}
+export interface LookIdentityViewV1 {
+  schemaVersion: 1;
+  botId: string;
+  revision: number;
+  look: BotLookV1;
+  document?: ThemeDocumentV1;
 }
 export interface FlockReceiptV1 {
   schemaVersion: 1;
@@ -459,12 +491,56 @@ export function decodeUpdateVoiceCommandV1(
   };
 }
 
+export function decodeUpdateLookCommandV1(
+  input: unknown,
+): UpdateLookCommandV1 {
+  const value = record(input, "update look command");
+  exact(value, [
+    "schemaVersion",
+    "type",
+    "commandId",
+    "expectedRevision",
+    "botId",
+    "look",
+  ]);
+  if (value.schemaVersion !== 1 || value.type !== "bot/update-look")
+    throw new FlockDecodeError("unsupported update look command");
+  return {
+    schemaVersion: 1,
+    type: "bot/update-look",
+    commandId: identifier(value.commandId, "commandId"),
+    expectedRevision: revision(value.expectedRevision),
+    botId: botIdentifier(value.botId),
+    look: decodeBotLookV1(value.look),
+  };
+}
+
+export function decodeLookIdentityViewV1(input: unknown): LookIdentityViewV1 {
+  const value = record(input, "look identity");
+  exact(
+    value,
+    ["schemaVersion", "botId", "revision", "look"],
+    ["document"],
+  );
+  if (value.schemaVersion !== 1)
+    throw new FlockDecodeError("unsupported look identity");
+  return {
+    schemaVersion: 1,
+    botId: botIdentifier(value.botId),
+    revision: revision(value.revision),
+    look: decodeBotLookV1(value.look),
+    ...(value.document === undefined
+      ? {}
+      : { document: decodeThemeDocumentV1(value.document) }),
+  };
+}
+
 export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   const bot = record(input, "Bot registration");
   exact(
     bot,
     ["schemaVersion", "botId", "registeredAt", "initialName", "avatar"],
-    ["initialDescription", "createdBy", "voice"],
+    ["initialDescription", "createdBy", "voice", "look", "document"],
   );
   if (bot.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported Bot registration");
@@ -491,6 +567,10 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
     ...(bot.voice === undefined
       ? {}
       : { voice: decodeBotVoiceForFlockV1(bot.voice) }),
+    ...(bot.look === undefined ? {} : { look: decodeBotLookV1(bot.look) }),
+    ...(bot.document === undefined
+      ? {}
+      : { document: decodeThemeDocumentV1(bot.document) }),
   };
 }
 
@@ -847,6 +927,7 @@ export function flockCommandFingerprint(
     | CreateBotCommandV1
     | UpdateAvatarCommandV1
     | UpdateVoiceCommandV1
+    | UpdateLookCommandV1
     | BotLifecycleCommandV1,
 ): string {
   return JSON.stringify(value);
