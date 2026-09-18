@@ -1256,6 +1256,61 @@ describe("open", () => {
     expect((await updating).status).toBe(200);
   });
 
+  test("a revoke during that update still takes the viewer down", async () => {
+    const client = new FakeSpritesClient();
+    const host = new ComputerHost({
+      client,
+      baseSpriteName: "frockbot",
+      digest,
+      now: () => Date.parse("2026-08-31T00:00:00.000Z"),
+      provisionPollMs: 30,
+    });
+    const sprite = new FakeSprite(host.spriteNameFor("user-1"));
+    client.sprites.set(sprite.name, sprite);
+    writeFile(
+      sprite,
+      COMPUTER_HOST_STATE_PATH,
+      JSON.stringify({ version: 1, generation: 4 }),
+    );
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    writeFile(sprite, `/home/box/.frockbot/bots/${botKey}/slot`, "3\n");
+    const service = viewServiceNameV1(botKey);
+    sprite.services.set(service, "running");
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+
+    const updating = host.handle(
+      request({ kind: "open" }, { effectId: "open-1" }),
+    );
+    while (
+      !sprite.commands.some((command) =>
+        command.stdin.includes(`${PROVISION_SCRIPT} update`),
+      )
+    ) {
+      await Bun.sleep(1);
+    }
+    const revoked = await host.handle(
+      request({
+        kind: "viewer",
+        action: "revoke",
+        sessionId: "opaque-token",
+      }),
+    );
+
+    expect(revoked.status).toBe(200);
+    expect(
+      sprite.commands.some((command) =>
+        command.stdin.includes("'opaque-token'"),
+      ),
+    ).toBe(true);
+    expect(sprite.serviceStops).toContain(service);
+    expect((await updating).status).toBe(200);
+  });
+
   test("refuses when every desktop slot belongs to a live tenant", async () => {
     const { host, sprite } = provisioned();
     sprite.scripts = [{ stdout: [`${NO_SLOTS_MARKER}\n`], exitCode: 75 }];

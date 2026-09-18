@@ -2476,18 +2476,6 @@ export class ComputerHost {
     if (operation.kind !== "viewer") {
       throw new ComputerHostError("invalid-request", "not a viewer call", 400);
     }
-    const updating = this.updates.get(request.identity.userId);
-    if (updating) {
-      // The current phase, not a sentence about updating: this message is
-      // read as the label of the step the User is waiting on, exactly as the
-      // bounded wait above answers it.
-      throw new ComputerHostError(
-        "computer-updating",
-        updating.progress.label,
-        409,
-        true,
-      );
-    }
     let sprite: SpriteHandle;
     try {
       sprite = await this.spriteFor(
@@ -2532,6 +2520,19 @@ export class ComputerHost {
         // Already stopped or absent is the desired end state.
       }
       return Response.json({ version: 1, effectId: request.effectId });
+    }
+
+    const updating = this.updates.get(request.identity.userId);
+    if (updating) {
+      // The current phase, not a sentence about updating: this message is
+      // read as the label of the step the User is waiting on, exactly as the
+      // bounded wait above answers it.
+      throw new ComputerHostError(
+        "computer-updating",
+        updating.progress.label,
+        409,
+        true,
+      );
     }
 
     // The ensure exec that precedes a new viewer has already minted these
