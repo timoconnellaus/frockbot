@@ -26,6 +26,7 @@ class VoiceShellHarness {
   final callSocket = FakeVoiceSocket();
   final player = FakeVoicePlayer();
   final callCapture = FakeVoiceCapture();
+  final route = FakeVoiceAudioRoute();
   late final api = OfflineApi(store);
   late final sessions = BotSessions(api: api, store: store);
   late DictationController dictation;
@@ -95,10 +96,15 @@ class VoiceShellHarness {
       openSocket: () async => callSocket,
       capture: callCapture,
       player: player,
+      route: route,
     );
     shell.setState(() {
       shell.dictation = dictation;
       shell.voiceSession = call;
+      // A call the shell itself builds — a press on a voice control — takes
+      // the same devices, so nothing here reaches a real microphone.
+      shell.voiceCapture = callCapture;
+      shell.audioRoute = route;
     });
     await tester.pump();
   }

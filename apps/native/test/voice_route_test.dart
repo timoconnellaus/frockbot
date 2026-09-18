@@ -107,6 +107,41 @@ void main() {
     expect(h.route.ends, 0);
   });
 
+  test(
+    'a session disposed before it started never begins the session',
+    () async {
+      final h = _Harness();
+      // The shell disposed it while it waited on the call before it, and the
+      // start that was already on its way must leave the audio alone: a begun
+      // session nobody owns is a phone left in communication mode.
+      h.controller.dispose();
+      await settle();
+      await h.controller.start();
+      await settle(6);
+      expect(h.route.begins, 0);
+      expect(h.route.ends, 0);
+      expect(h.capture.starts, 0);
+      expect(h.controller.phase, VoiceSessionPhase.idle);
+    },
+  );
+
+  test('a session disposed after it began ends the session it began', () async {
+    final h = _Harness();
+    h.capture.permission = Completer<void>();
+    unawaited(h.controller.start());
+    await settle();
+    // The call holds the audio session while the person is still answering
+    // the permission prompt; disposing it is what gives the session back.
+    expect(h.route.begins, 1);
+    expect(h.route.ends, 0);
+    h.controller.dispose();
+    h.capture.permission!.complete();
+    await settle(6);
+    expect(h.route.begins, 1);
+    expect(h.route.ends, 1);
+    expect(h.capture.active, isFalse);
+  });
+
   test('a call answers when its devices are closed, not when it ends', () async {
     final h = _Harness();
     await h.open();

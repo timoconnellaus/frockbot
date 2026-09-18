@@ -282,7 +282,7 @@ class AssistantSessionController extends ChangeNotifier {
   /// `start_call` wakes a metered upstream, and it is not sent while the
   /// person is still answering the permission prompt.
   Future<void> start() async {
-    if (active) return;
+    if (active || _disposed) return;
     final generation = ++_generation;
     _error = null;
     _endedLine = null;

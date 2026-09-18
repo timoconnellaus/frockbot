@@ -252,12 +252,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// One capture for both features. The microphone has one owner at a time,
   /// which [microphone] enforces, so there is one device object.
-  RecordVoiceCapture? voiceCapture;
+  VoiceCapture? voiceCapture;
   AssistantSessionController? voiceSession;
 
   /// The call's audio session on this platform, held from before the
   /// microphone opens until after the speaker closes.
-  late final VoiceAudioRoute audioRoute = VoiceAudioRoute.forPlatform();
+  VoiceAudioRoute audioRoute = VoiceAudioRoute.forPlatform();
   DictationController? dictation;
   bool footerOpen = false;
   bool footerExiting = false;
