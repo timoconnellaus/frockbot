@@ -68,11 +68,13 @@ class ChatPane extends StatefulWidget {
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
 
-  /// Starts, moves or ends a voice call with this Bot (ADR 0029).
+  /// Starts a voice call with this Bot, or moves the open one to it
+  /// (ADR 0029). It never ends one: while the call is with this Bot, voice
+  /// mode is drawn where the composer was and there is no composer at all.
   final VoidCallback? onVoice;
 
-  /// Whether the open call is with this Bot.
-  final bool voiceActive;
+  /// Whether a call is still closing, which holds [onVoice]'s control.
+  final bool voiceClosing;
   final DictationState dictationState;
 
   /// Whether a tidied transcript is in the draft and can be put back. Asked
@@ -109,7 +111,7 @@ class ChatPane extends StatefulWidget {
     this.onDictate,
     this.onStopDictation,
     this.onVoice,
-    this.voiceActive = false,
+    this.voiceClosing = false,
     this.dictationState = DictationState.idle,
     this.canRevertDictation,
     this.onRevertDictation,
@@ -477,7 +479,7 @@ class _ChatPaneState extends State<ChatPane> {
     onDictate: widget.onDictate,
     onStopDictation: widget.onStopDictation,
     onVoice: widget.onVoice,
-    voiceActive: widget.voiceActive,
+    voiceClosing: widget.voiceClosing,
     dictationState: widget.dictationState,
     canRevertDictation: widget.canRevertDictation,
     onRevertDictation: widget.onRevertDictation,
@@ -518,11 +520,13 @@ class ConversationView extends StatefulWidget {
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
 
-  /// Starts, moves or ends a voice call with this Bot (ADR 0029).
+  /// Starts a voice call with this Bot, or moves the open one to it
+  /// (ADR 0029). It never ends one: while the call is with this Bot, voice
+  /// mode is drawn where the composer was and there is no composer at all.
   final VoidCallback? onVoice;
 
-  /// Whether the open call is with this Bot.
-  final bool voiceActive;
+  /// Whether a call is still closing, which holds [onVoice]'s control.
+  final bool voiceClosing;
   final DictationState dictationState;
 
   /// Whether a tidied transcript is in the draft and can be put back. Asked
@@ -561,7 +565,7 @@ class ConversationView extends StatefulWidget {
     this.onDictate,
     this.onStopDictation,
     this.onVoice,
-    this.voiceActive = false,
+    this.voiceClosing = false,
     this.dictationState = DictationState.idle,
     this.canRevertDictation,
     this.onRevertDictation,
@@ -667,31 +671,31 @@ class _ConversationViewState extends State<ConversationView>
       child: CardApprovalsScope(
         approvals: approvals,
         child: ChatPane(
-      background: widget.background,
-      primary: widget.primary,
-      starters: starters,
-      controller: session.controller,
-      onReconnect: session.channel.connect,
-      skills: skills,
-      onOpenRun: widget.onOpenRun,
-      onOpenExchange: widget.onOpenExchange,
-      backgroundOf: widget.backgroundOf,
-      primaryOf: widget.primaryOf,
-      nameOf: widget.nameOf,
-      onMessageActions: widget.onMessageActions,
-      unreadFromMessageId: widget.unreadFromMessageId,
-      onReadLatest: widget.onReadLatest,
-      onWorkingChanged: widget.onWorkingChanged,
-      outOfCredit: widget.outOfCredit,
-      onOpenBilling: widget.onOpenBilling,
-      onDictate: widget.onDictate,
-      onVoice: widget.onVoice,
-      voiceActive: widget.voiceActive,
-      onStopDictation: widget.onStopDictation,
-      dictationState: widget.dictationState,
-      canRevertDictation: widget.canRevertDictation,
-      onRevertDictation: widget.onRevertDictation,
-      dictationLevel: widget.dictationLevel,
+          background: widget.background,
+          primary: widget.primary,
+          starters: starters,
+          controller: session.controller,
+          onReconnect: session.channel.connect,
+          skills: skills,
+          onOpenRun: widget.onOpenRun,
+          onOpenExchange: widget.onOpenExchange,
+          backgroundOf: widget.backgroundOf,
+          primaryOf: widget.primaryOf,
+          nameOf: widget.nameOf,
+          onMessageActions: widget.onMessageActions,
+          unreadFromMessageId: widget.unreadFromMessageId,
+          onReadLatest: widget.onReadLatest,
+          onWorkingChanged: widget.onWorkingChanged,
+          outOfCredit: widget.outOfCredit,
+          onOpenBilling: widget.onOpenBilling,
+          onDictate: widget.onDictate,
+          onVoice: widget.onVoice,
+          voiceClosing: widget.voiceClosing,
+          onStopDictation: widget.onStopDictation,
+          dictationState: widget.dictationState,
+          canRevertDictation: widget.canRevertDictation,
+          onRevertDictation: widget.onRevertDictation,
+          dictationLevel: widget.dictationLevel,
         ),
       ),
     ),

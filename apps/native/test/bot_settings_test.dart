@@ -851,8 +851,6 @@ class _ShellState extends State<_Shell> {
               onSearch: () {},
               onProfile: () {},
               onMarketplace: () {},
-              onVoice: () {},
-              voiceControl: VoiceControlState.idle,
               onToggleHidden: () {},
               onRetry: () async {},
             ),

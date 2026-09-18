@@ -418,11 +418,15 @@ the plan for every platform is [`docs/app-updates.md`](app-updates.md)).
 Everything a person looks at is `lib/shell/`.
 
 Voice is shell-owned chrome shared by web, Android and macOS: the composer
-microphone starts dictation into the selected Bot's draft, while the sidebar
-waveform opens an account-wide session rendered in a footer below the complete
-shell layout. Capture and playback live under `apps/native/lib/voice/`; the
-authenticated gateway sockets and durable voice ledger are described in
-[`docs/voice.md`](voice.md).
+microphone starts dictation into the selected Bot's draft, and the control at
+its far right starts a call with that Bot — the only way in, the sidebar's
+list-root control having gone (ADR 0029), so a call always names a Bot. A call
+with the Bot on screen is **voice mode**: `lib/voice/voice_mode.dart` takes
+the place of the thread and the composer, and neither is drawn. A call with
+another Bot is drawn instead in a footer below the complete shell layout, so
+looking at one Bot while talking to another still works. Capture and playback
+live under `apps/native/lib/voice/`; the authenticated gateway sockets and
+durable voice ledger are described in [`docs/voice.md`](voice.md).
 
 **The shell layout.** `lib/shell/desktop_layout.dart` has three tiers at two
 widths. Above 980 points the shell is three columns — the Bot list, the

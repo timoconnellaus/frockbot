@@ -252,16 +252,22 @@ class RecordVoiceCapture implements VoiceCapture {
 
   @override
   Future<void> stop() async {
+    final started = _active;
     _active = false;
     _clock.stop();
     final subscription = _subscription;
     _subscription = null;
     await subscription?.cancel();
-    try {
-      await _recorder.stop();
-    } on Object {
-      // Stopping a recorder that never started is not a failure worth
-      // showing: the capture is over either way.
+    // A recorder that was never started has no device to give back, so the
+    // platform is not asked: stopping it is nothing at all rather than a
+    // round trip that can land on whatever holds the audio now.
+    if (started) {
+      try {
+        await _recorder.stop();
+      } on Object {
+        // A device that will not let go is not a failure worth showing: the
+        // capture is over either way.
+      }
     }
     final frames = _frames;
     _frames = null;

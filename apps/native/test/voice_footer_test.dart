@@ -276,6 +276,47 @@ void main() {
     expect(find.byKey(voiceFooterAnimationKey), findsOneWidget);
   });
 
+  testWidgets(
+    'a call the server closed first says so before the device lets go',
+    (tester) async {
+      final socket = FakeVoiceSocket();
+      final capture = FakeVoiceCapture();
+      final controller = AssistantSessionController(
+        openSocket: () async => socket,
+        capture: capture,
+        player: FakeVoicePlayer(),
+      );
+      addTearDown(controller.dispose);
+      await mount(tester, controller, width: 390);
+      unawaited(controller.start());
+      await tester.pump();
+      socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+      socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+      await tester.pump();
+
+      // The device is slow to let go: the teardown is inside its own stop when
+      // the call has already ended, so the phase is still the live one.
+      final gate = Completer<void>();
+      capture.stopGate = gate;
+      unawaited(socket.finish());
+      await tester.runAsync(() => settle());
+      await tester.pump();
+
+      // The line is the only thing that has changed: the footer has to paint
+      // it from the ending alone, without waiting for the phase to flip.
+      expect(controller.phase, VoiceSessionPhase.live);
+      expect(find.text('The call ended.'), findsOneWidget);
+      expect(find.byKey(voiceFooterAnimationKey), findsNothing);
+      expect(find.bySemanticsLabel('Mute microphone'), findsNothing);
+
+      gate.complete();
+      await tester.runAsync(() => settle());
+      await tester.pump();
+      expect(controller.phase, VoiceSessionPhase.ended);
+      expect(find.text('The call ended.'), findsOneWidget);
+    },
+  );
+
   testWidgets('the Bot being consulted rises into the voice stage', (
     tester,
   ) async {
@@ -449,17 +490,22 @@ void main() {
     expect(find.byType(Text), findsNothing);
   });
 
-  testWidgets('the control that opened the call also ends it', (tester) async {
+  testWidgets('the footer\'s End ends the call', (tester) async {
     final harness = VoiceShellHarness();
     await harness.mount(tester, width: 1280, brightness: Brightness.dark);
     await harness.call.start();
     harness.showCall();
-    await tester.pump();
+    // The footer slides in over its own entrance; until that finishes it is
+    // ignoring pointers, so the press is made once it is really there. The
+    // frames stay well inside the call's start timeout, which no socket in
+    // this harness ever answers.
+    for (var frame = 0; frame < 30; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
     expect(find.byType(VoiceFooter), findsOneWidget);
-    // The same control, now saying the other thing.
     final control = find.descendant(
-      of: byIdentifier(VoiceIds.sidebarStart),
-      matching: find.byTooltip('End voice session'),
+      of: byIdentifier(VoiceIds.end),
+      matching: find.byType(IconButton),
     );
     expect(control, findsOneWidget);
     await tester.tap(control);
@@ -470,7 +516,7 @@ void main() {
     }
     expect(find.byType(VoiceFooter), findsNothing);
     expect(harness.shell.voiceSession, isNull);
-    expect(harness.callSocket.closeReason, 'sidebar-button');
+    expect(harness.callSocket.closeReason, 'end-button');
     await harness.dispose(tester);
   });
 }

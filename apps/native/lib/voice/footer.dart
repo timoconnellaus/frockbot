@@ -40,6 +40,7 @@ class _VoiceFooterState extends State<VoiceFooter> {
     bool,
     String?,
     String?,
+    String?,
     VoiceSessionPhase,
     String?,
     VoiceDelegationStateV1?,
@@ -53,10 +54,19 @@ class _VoiceFooterState extends State<VoiceFooter> {
     widget.session.addListener(_changed);
   }
 
-  (bool, String?, String?, VoiceSessionPhase, String?, VoiceDelegationStateV1?)
+  (
+    bool,
+    String?,
+    String?,
+    String?,
+    VoiceSessionPhase,
+    String?,
+    VoiceDelegationStateV1?,
+  )
   _readPresentation() => (
     widget.session.muted,
     widget.session.error,
+    widget.session.endedLine,
     widget.session.notice,
     widget.session.phase,
     widget.session.delegatedBotId,
@@ -90,9 +100,11 @@ class _VoiceFooterState extends State<VoiceFooter> {
     final theme = Theme.of(context);
     final session = widget.session;
     final failure = session.error;
-    // A failure ends the call and takes the stage for good; a notice borrows
-    // it for a few seconds while the call goes on, controls and all.
-    final text = failure ?? session.notice;
+    // A failure ends the call and takes the stage for good, and so does a
+    // call the server closed first; a notice borrows it for a few seconds
+    // while the call goes on, controls and all.
+    final text = failure ?? session.endedLine ?? session.notice;
+    final over = failure != null || session.endedLine != null;
     return identified(
       VoiceIds.footer,
       Material(
@@ -131,7 +143,7 @@ class _VoiceFooterState extends State<VoiceFooter> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (failure == null) ...[
+                      if (!over) ...[
                         identified(
                           VoiceIds.mute,
                           Semantics(

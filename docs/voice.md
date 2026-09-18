@@ -432,11 +432,13 @@ dates and zone.
 
 A turn that makes no sound at all reaches the client as
 `{type:"error",message}` and the call goes on — the client shows the sentence
-on the footer for four seconds and does **not** hang up. Two things produce
-it: a turn that has said nothing eight seconds after it began, and a turn that
-reaches its end having bridged no audio. The voice surface has no notice band
-of its own — nothing on it moves — so a call being looked at shows that
-sentence nowhere, and the call's trace is where it is read.
+for four seconds and does **not** hang up. Two things produce it: a turn that
+has said nothing eight seconds after it began, and a turn that reaches its end
+having bridged no audio. Whichever surface the call is on says it: voice mode
+carries it in the activity slot where the call's other output goes, and a call
+with another Bot carries it on the account-wide footer, both with the same
+precedence — a failure first, then a call that has ended, then a notice — so
+the two cannot disagree about what is being said.
 
 The old speech-provider wrapper (`tts-guard.ts`) was the same guard in the
 only place that could see it then; this is the only place that can see it now.
@@ -448,7 +450,7 @@ answer to a resumption handle it has forgotten (see Sleep and wake).
 
 An error frame that carries a `code` still means the call itself has failed
 and has been torn down behind it; the client ends the call and shows the
-failure rather than leaving a live-looking footer over a socket nobody is
+failure rather than leaving a live-looking surface over a socket nobody is
 listening on.
 
 A `subagent` result that settles while the call is live goes back to the
@@ -986,6 +988,22 @@ entitlement. `AppShell`'s lifecycle observer ends capture and playback when
 the app leaves the foreground; navigation inside the app leaves the footer
 alone.
 
+**A call that is up and deaf.** A working microphone picks up a room; one
+that is open and delivering nothing but zeros — what the macOS voice
+processing unit does when asked for echo cancellation with nothing rendering
+through the same engine (`voiceCaptureProcessingV1` in
+`apps/native/lib/voice/capture.dart`) — leaves the call live with a flat
+meter. Ten seconds of a live call that has never carried a single frame at or
+above the room's own level — `voiceRoomToneLevelV1` in
+`apps/native/lib/voice/speech_gate.dart`, far below the gate's floor, which is
+where words start — says so once, as a notice on whichever surface is drawing
+the call: `FrockBot isn’t hearing anything. Check the microphone in your
+device settings.` It is a notice and not an error — the call is fine and the
+microphone is the problem — it fires only when the call has never carried
+signal at all rather than after speech stops, a quiet room being signal and so
+never an occasion for it, it is not said while the call is paused or muted,
+where the silence is the person's own choice, and it never ends the call.
+
 **The call's audio session (Android).** A realtime call is a call to the
 operating system — communication mode is where Android attaches its echo
 canceller and how a Bluetooth microphone gets used — but not to the person,
@@ -1046,20 +1064,25 @@ the thread and counts as unread, but carries `notify: false`
 (`app/notifications/messages.ts`): the person asked out loud and is on the
 call, and a buzz for what they are being told aloud is noise.
 
-**Where a call starts, and voice mode.** Since ADR 0029 the ordinary way in
-is the voice control at the far right of the Bot's composer, its own fixed
-control beside the one that morphs between dictate, send and stop — voice is
-not a mode of the draft, and a target that moved under the thumb would be
-pressed by accident. It starts the call on that Bot, reads as pressed while
-the call is on it, and ends it. Pressed on a different Bot while a call is up
-it moves the call rather than ending it. The sidebar control is still there
-and still starts a call with no Bot named, which is General's. While a call is
-on the Bot on screen the page is in **voice mode**: the desktop sidebar
-collapses so the Bot fills the window, and Back disappears — including the
-Android system gesture, which ends the call instead of leaving a page with a
-call running behind it. A hand-over moves the page to the new Bot, but only
-when the call was the thing on screen, so somebody who walked to another Bot
-while the call carried on is not dragged out of it.
+**Where a call starts, and voice mode.** Since ADR 0029 the way in is the
+voice control at the far right of the Bot's composer, its own fixed control
+beside the one that morphs between dictate, send and stop — voice is not a
+mode of the draft, and a target that moved under the thumb would be pressed by
+accident. It starts the call on that Bot, and pressed on a different Bot while
+a call is up it moves the call rather than ending it. It is the only way in:
+the sidebar's list-root control — the last botless entry, which opened a call
+on the account's General — is gone, and the shell's start takes the Bot as a
+required argument, so a call always names one. It never ends one either: while
+the call is with the Bot whose page is open, voice mode is drawn where the
+composer was and the control is not there to press, so a call ends from the
+surface drawing it — voice mode's own End, or the footer's End for a call with
+another Bot. While a call is on the Bot on screen the page is
+in **voice mode**: the desktop sidebar collapses so the Bot fills the window,
+and Back disappears — including the Android system gesture, which ends the
+call instead of leaving a page with a call running behind it. A hand-over
+moves the page to the new Bot, but only when the call was the thing on screen,
+so somebody who walked to another Bot while the call carried on is not dragged
+out of it.
 
 **The voice surface.** Since ADR 0031 a call does not share the thread, so
 voice mode _replaces_ it: `apps/native/lib/voice/voice_mode.dart` is drawn
@@ -1071,21 +1094,28 @@ still carries mute, End and the meter.
 
 Every band of the surface has a fixed height, so nothing moves as the state
 changes: the character in its ring, the Bot's name, and one word under it —
-`Listening`, `Speaking`, or `Paused`, which is all a paused call says. Under
-that is the activity slot, itself fixed, holding one chip per `subagent`
-hand-off the call has made: `Working` while the Turn runs, and `Work` once it
-settles, which opens the Turn the hand-off became — the `voice/delegation`
-frame names the `runId`, so that is the only Turn a chip can open. The bottom
-bar is Pause, the meter and End, and while paused it is a wide Resume — badged
+`Listening`, `Speaking`, `Paused`, which is all a paused call says, or
+`Call failed` and `Call ended`, which are what the word says instead of
+claiming a call that is over: the first for a call that failed, the second for
+one the server closed first, which is over without anything having gone wrong.
+Under that is the activity slot, itself fixed. It holds the line the
+call is saying about itself — a failure that ended it, the end itself, or a
+notice borrowing the slot for its four seconds — and otherwise one chip per
+`subagent` hand-off
+the call has made: `Working` while the Turn runs, and `Work` once it settles,
+which opens the Turn the hand-off became — the `voice/delegation` frame names
+the `runId`, so that is the only Turn a chip can open. The bottom bar is
+Pause, the meter and End, and while paused it is a wide Resume — badged
 with how many hand-offs finished while nobody was listening — and End. An
 on-page mute is still not built: Pause is the control that stops the line.
 The bar above keeps the Bot's name, a `Voice` mark saying why the thread is
 gone, and the Computer; every other door leads out of a call that has no way
 out but ending it.
 
-**Starting.** The footer is on screen in the frame of the press, and the
-sidebar control takes its active colour on pointer-down, before the tap
-resolves; the same control ends the call while the footer is up. Every
+**Starting.** The call's surface is on screen in the frame of the press —
+voice mode on the Bot whose page it is, the footer below the shell for a call
+with another Bot — because the shell opens the call in the same synchronous
+step, before it awaits anything. Every
 AudioManager call runs on the route's own thread — choosing the
 communication device is a synchronous call into the audio server of several
 hundred milliseconds, and on the platform main thread it held every frame of
@@ -1112,8 +1142,18 @@ The complete controls paint throughout the transition without a shrinking clip.
 Closing begins microphone and playback teardown immediately and keeps the
 outgoing visual mounted only through its exit. Bottom system insets
 transfer back to the conversation without a final layout jump. While that
-teardown finishes, the sidebar's start control says the session is ending and
-cannot be pressed, because a start in that window would be dropped.
+teardown finishes the Bot's composer is back with its voice control held —
+drawn as held, and refusing the press, until the session has finished ending.
+One call has one teardown, whichever path reaches it — End, a failure, the
+server closing first, the shell disposing the session that is over — so a
+superseded session can never close the capture or the audio session a second
+time, and a session disposed before it started has nothing to give back: it
+never begins the audio session, and the platform is never asked to stop a
+recorder that never opened.
+The capture and the Android audio session are the shell's, lent to one call at
+a time: the next call's press waits on `AssistantSessionController.released`
+before it opens them. Nothing is queued: the control says so, and the person
+presses again.
 
 Both meters are the same five pills (`apps/native/lib/voice/waveform.dart`):
 one object whose motion source changes with the call, the way the shipped

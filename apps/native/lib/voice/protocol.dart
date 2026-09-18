@@ -63,6 +63,13 @@ const voiceAssistantPreRollV1 = Duration(milliseconds: 500);
 /// How long the handshake has to reach `listening` before it is a failure.
 const voiceAssistantStartTimeoutV1 = Duration(seconds: 15);
 
+/// How long a live call may carry no signal at all before the surface says
+/// the microphone is not being heard. A working microphone picks up a room;
+/// one that is open and handing over nothing but zeros — what the documented
+/// macOS voice-processing failure produces — never does. Counted on the
+/// capture's own clock, the way the gate's quiet window is.
+const voiceAssistantDeafNoticeAfterV1 = Duration(seconds: 10);
+
 /// The one retry of the initial connect happens inside this window.
 const voiceAssistantConnectRetryWindowV1 = Duration(seconds: 5);
 

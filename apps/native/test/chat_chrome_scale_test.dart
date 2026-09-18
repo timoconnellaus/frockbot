@@ -40,8 +40,6 @@ Widget _sidebar({required bool phone}) => MaterialApp(
       onSearch: () {},
       onProfile: () {},
       onMarketplace: () {},
-      onVoice: () {},
-      voiceControl: VoiceControlState.idle,
       onToggleHidden: () {},
       onRetry: () async {},
     ),
@@ -123,12 +121,11 @@ void main() {
     await tester.pumpWidget(_sidebar(phone: true));
     await tester.pumpAndSettle();
 
-    // The row Tim's screenshot circled: you, the Marketplace, voice, search
-    // and a new Bot. Every one of them a target a thumb can hit.
+    // The row Tim's screenshot circled: you, the Marketplace, search and a
+    // new Bot. Every one of them a target a thumb can hit.
     for (final id in [
       ShellIds.sidebarProfile,
       ShellIds.sidebarMarketplace,
-      VoiceIds.sidebarStart,
       ShellIds.sidebarSearch,
       ShellIds.sidebarCreateBot,
     ]) {
@@ -234,29 +231,22 @@ void main() {
     await tester.pumpWidget(_sidebar(phone: false));
     await tester.pumpAndSettle();
 
-    for (final id in [VoiceIds.sidebarStart, ShellIds.sidebarCreateBot]) {
-      final button = tester.widget<IconButton>(
+    final createBot = tester.widget<IconButton>(
+      find.descendant(
+        of: byIdentifier(ShellIds.sidebarCreateBot),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(
+      tester.getSize(
         find.descendant(
-          of: byIdentifier(id),
+          of: byIdentifier(ShellIds.sidebarCreateBot),
           matching: find.byType(IconButton),
         ),
-      );
-      expect(
-        tester.getSize(
-          find.descendant(
-            of: byIdentifier(id),
-            matching: find.byType(IconButton),
-          ),
-        ),
-        const Size.square(36),
-        reason: id,
-      );
-      expect(
-        button.style?.iconSize?.resolve({}),
-        chatIconSizeDesktop,
-        reason: id,
-      );
-    }
+      ),
+      const Size.square(36),
+    );
+    expect(createBot.style?.iconSize?.resolve({}), chatIconSizeDesktop);
     final marketplaceGlyph = tester.widget<Icon>(
       find.descendant(
         of: byIdentifier(ShellIds.sidebarMarketplace),

@@ -29,23 +29,6 @@ import 'focus.dart';
 import 'semantics.dart';
 import 'sidebar_order.dart';
 
-/// What the sidebar's voice control offers right now. [ending] is the window
-/// between the footer leaving and the previous call's teardown finishing: a
-/// start in it would be dropped, so the control says so instead of inviting
-/// one.
-enum VoiceControlState { idle, active, ending }
-
-/// Mirrors the shell's own start guard — a start is refused while the session
-/// is still active — so the control cannot promise what the guard would drop.
-VoiceControlState voiceControlStateV1({
-  required bool footerOpen,
-  required bool sessionActive,
-}) => footerOpen
-    ? VoiceControlState.active
-    : sessionActive
-    ? VoiceControlState.ending
-    : VoiceControlState.idle;
-
 /// The mutable half of a Bot's identity, as the sidebar reads it.
 class SidebarProfile {
   final String? name;
@@ -284,11 +267,6 @@ class ShellSidebar extends StatelessWidget {
   /// the column has a foot, and the Marketplace is a named row on it.
   final bool phone;
 
-  /// Opens the voice footer and starts the call, in the one gesture.
-  final VoidCallback onVoice;
-
-  /// What the control says and whether it can be pressed.
-  final VoiceControlState voiceControl;
   final VoidCallback onToggleHidden;
   final Future<void> Function() onRetry;
 
@@ -324,8 +302,6 @@ class ShellSidebar extends StatelessWidget {
     required this.onSearch,
     required this.onProfile,
     required this.onMarketplace,
-    required this.onVoice,
-    required this.voiceControl,
     required this.onToggleHidden,
     required this.onRetry,
     this.onActions,
@@ -385,8 +361,6 @@ class ShellSidebar extends StatelessWidget {
           onSearch: phone ? onSearch : null,
           onProfile: onProfile,
           onMarketplace: phone ? onMarketplace : null,
-          onVoice: onVoice,
-          voiceControl: voiceControl,
         ),
         if (!phone)
           Padding(
@@ -1594,8 +1568,11 @@ class _BotRowState extends State<_BotRow> {
   }
 }
 
-/// The list's own controls, GrokBot's plus voice: you, a call, search, and
-/// a new Bot — and on a phone, the Marketplace beside you.
+/// The list's own controls, GrokBot's: you, search, and a new Bot — and on a
+/// phone, the Marketplace beside you.
+///
+/// Voice is not here: a call addresses one Bot, so it is started from that
+/// Bot's composer and nowhere else (ADR 0029).
 ///
 /// Everything about the account is behind the first one; everything about one
 /// Bot is on that Bot's page. The list itself carries no title — the rows say
@@ -1609,16 +1586,9 @@ class _Header extends StatelessWidget {
   /// column's foot names it instead.
   final VoidCallback? onMarketplace;
 
-  /// Starts the continuous voice session. One gesture: the footer opens and
-  /// the call starts, because a footer that opens and then waits to be
-  /// started again is two gestures for one intention.
-  final VoidCallback onVoice;
-  final VoiceControlState voiceControl;
   const _Header({
     required this.onCreateBot,
     required this.onSearch,
-    required this.onVoice,
-    required this.voiceControl,
     required this.onProfile,
     this.onMarketplace,
   });
@@ -1643,21 +1613,6 @@ class _Header extends StatelessWidget {
       foregroundColor: WidgetStatePropertyAll(scheme.primary),
       backgroundColor: WidgetStatePropertyAll(
         scheme.primary.withValues(alpha: 0.14),
-      ),
-    );
-    // The voice control answers the finger, not the tap: it takes the active
-    // colour the moment it is touched, so the press reads as instant however
-    // long the call takes to open behind it.
-    final armed = quiet.copyWith(
-      foregroundColor: WidgetStateProperty.resolveWith(
-        (states) => states.contains(WidgetState.pressed)
-            ? scheme.primary
-            : scheme.onSurfaceVariant,
-      ),
-      backgroundColor: WidgetStateProperty.resolveWith(
-        (states) => states.contains(WidgetState.pressed)
-            ? scheme.primary.withValues(alpha: 0.14)
-            : null,
       ),
     );
     return Padding(
@@ -1712,22 +1667,6 @@ class _Header extends StatelessWidget {
                       padding: const EdgeInsets.only(left: 6, right: 4),
                       child: DesktopUpdateButton(controller: desktopUpdates),
                     ),
-            ),
-          ),
-          identified(
-            VoiceIds.sidebarStart,
-            IconButton(
-              tooltip: switch (voiceControl) {
-                VoiceControlState.active => 'End voice session',
-                VoiceControlState.ending => 'Ending voice session…',
-                VoiceControlState.idle => 'Start voice session',
-              },
-              isSelected: voiceControl == VoiceControlState.active,
-              style: voiceControl == VoiceControlState.active ? active : armed,
-              onPressed: voiceControl == VoiceControlState.ending
-                  ? null
-                  : onVoice,
-              icon: const Icon(Icons.graphic_eq_rounded),
             ),
           ),
           const SizedBox(width: 2),

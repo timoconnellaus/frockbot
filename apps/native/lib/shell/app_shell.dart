@@ -252,19 +252,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// One capture for both features. The microphone has one owner at a time,
   /// which [microphone] enforces, so there is one device object.
-  RecordVoiceCapture? voiceCapture;
+  VoiceCapture? voiceCapture;
   AssistantSessionController? voiceSession;
 
   /// The call's audio session on this platform, held from before the
   /// microphone opens until after the speaker closes.
-  late final VoiceAudioRoute audioRoute = VoiceAudioRoute.forPlatform();
+  VoiceAudioRoute audioRoute = VoiceAudioRoute.forPlatform();
   DictationController? dictation;
   bool footerOpen = false;
   bool footerExiting = false;
 
-  /// The Bot the open call is with (ADR 0029), so the composer control on
-  /// that Bot's page reads as pressed and every other Bot's does not. Null
-  /// while the call is with the account's General.
+  /// The Bot the open call is with (ADR 0029): that Bot's page is the one
+  /// voice mode is drawn on, and every other Bot's keeps its thread.
   String? voiceBotId;
   bool showHidden = false;
   TranscriptLine? openRun;
@@ -432,21 +431,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!directoryLoaded) unawaited(load());
   }
 
-  /// The one control does both: it opens the call, and while the footer is
-  /// up it ends it, so the way in is also the way out.
+  /// The composer's voice control: it starts a call with this Bot, or moves
+  /// a live one to it. Since the sidebar's list-root control went it is the
+  /// only way in, so a call always names a Bot (ADR 0029).
   ///
-  /// A call addresses one Bot (ADR 0029). Pressed on a Bot's composer it
-  /// opens on that Bot; pressed with no Bot named — the sidebar control — it
-  /// opens on the account's General. Pressed on a Bot while a call is already
-  /// open with somebody else, it moves the call rather than ending it: the
-  /// person asked to talk to this Bot, not to hang up.
-  Future<void> _toggleVoice({String? botId}) {
-    if (!footerOpen) return _startVoice(botId: botId);
-    if (botId != null && botId.isNotEmpty && botId != voiceBotId) {
-      return _switchVoice(botId);
+  /// It never ends a call, and cannot: while the call is with this Bot, voice
+  /// mode is drawn where the composer was, so the control is not there to
+  /// press. A call is ended from the surface that is drawing it — and a call
+  /// that is already over is not moved, it is replaced: the person pressed
+  /// the control to talk to this Bot.
+  Future<void> _startOrSwitchVoice({required String botId}) {
+    final session = voiceSession;
+    if (!footerOpen || session == null || !session.active) {
+      return _startVoice(botId: botId);
     }
-    return _endVoice(reason: 'sidebar-button');
+    return _switchVoice(botId);
   }
+
+  /// Whether a call is still closing. Its composer control is held for as
+  /// long as that lasts: a press there is refused by [_startVoice], and a
+  /// control that invites a press it will not take should say so instead.
+  bool get voiceClosing => !footerOpen && voiceSession?.active == true;
 
   /// Moves an open call to another Bot without dropping the audio.
   ///
@@ -460,20 +465,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     session.retarget(botId);
   }
 
-  /// Opens the footer and starts the call in the one gesture.
+  /// Opens the call's surface and starts the call in the one gesture.
   ///
-  /// The footer is on screen in the same frame as the press. The capability
-  /// probe was read at sign-in, so a deployment without voice is refused
-  /// here without a round trip; a probe that never answered does not hold
-  /// the press, and the socket speaks for itself.
-  Future<void> _startVoice({String? botId}) async {
+  /// The call's surface is on screen in the same frame as the press — voice
+  /// mode on this Bot's page, the footer below the shell for a call that is
+  /// with another. The capability probe was read at sign-in, so a deployment
+  /// without voice is refused here without a round trip; a probe that never
+  /// answered does not hold the press, and the socket speaks for itself.
+  Future<void> _startVoice({required String botId}) async {
     if (voiceProbe.known && !voiceProbe.assistantAvailable) {
       _say(voiceUnavailableMessage);
       return;
     }
     if (voiceSession?.active == true) return;
     final borrowed = microphone.acquireForAssistant();
-    voiceSession?.dispose();
+    final previous = voiceSession;
+    previous?.dispose();
     final session = AssistantSessionController(
       openSocket: assistantSocketOpenerV1(widget.api),
       botId: botId,
@@ -511,9 +518,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       footerExiting = false;
     });
     // A dictation in progress is stopped and its draft flushed before the
-    // call takes the device; that is the one thing the press waits for.
+    // call takes the device, and the call before this one is closed before
+    // this one opens it: the capture and the audio session are the shell's,
+    // lent to one call at a time.
     await borrowed;
     if (!mounted || !identical(voiceSession, session)) return;
+    await previous?.released;
     await session.start();
   }
 
@@ -2299,11 +2309,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onProfile: _openProfile,
                             onMarketplace: _openMarketplace,
                             phone: single,
-                            onVoice: () => unawaited(_toggleVoice()),
-                            voiceControl: voiceControlStateV1(
-                              footerOpen: footerOpen,
-                              sessionActive: voiceSession?.active == true,
-                            ),
                             onToggleHidden: () =>
                                 setState(() => showHidden = !showHidden),
                             onRetry: load,
@@ -2371,10 +2376,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onDictate: () => unawaited(_dictate()),
                             onStopDictation: () => unawaited(_stopDictation()),
                             // Voice, on the Bot whose page this is (ADR 0029).
-                            onVoice: () =>
-                                unawaited(_toggleVoice(botId: bot.botId.value)),
-                            voiceActive:
-                                footerOpen && voiceBotId == bot.botId.value,
+                            onVoice: () => unawaited(
+                              _startOrSwitchVoice(botId: bot.botId.value),
+                            ),
+                            voiceClosing: voiceClosing,
                             dictationState:
                                 dictation?.context == bot.botId.value
                                 ? dictation!.state

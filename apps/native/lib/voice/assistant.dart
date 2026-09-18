@@ -16,10 +16,12 @@
 /// over the reply (barge-in). It is not consulted about individual frames.
 ///
 /// A per-turn error from the server — a reply that produced no text, a
-/// sentence that never became sound — is a notice on the footer for a few
-/// seconds, not the end of the call. An error that carries a `code` is the
-/// call itself failing — the server has already ended it — and so is the
-/// server closing the socket, a refusal, or this client's own failure.
+/// sentence that never became sound — is a notice on the call's surface for a
+/// few seconds, not the end of the call. An error that carries a `code` is the
+/// call itself failing — the server has already ended it — and so is a
+/// refusal or this client's own failure. The server's end of the socket
+/// finishing first also ends the call, without anything having failed: the
+/// surface says it has ended rather than going on claiming a live call.
 ///
 /// Nothing here caps how long a call may last. A sleeping upstream costs
 /// nothing, so the footer may stay open silently for hours; what the server
@@ -103,6 +105,12 @@ class AssistantSessionController extends ChangeNotifier {
   VoiceUpstreamStateV1 _upstream = VoiceUpstreamStateV1.starting;
   String? _error;
 
+  /// The line a call that ended on its own leaves on the surface, or null:
+  /// the server's end of the socket finished first. Nothing failed and there
+  /// is nothing to retry, so it is not an error — but the call is over, and
+  /// no surface may go on saying it is live.
+  String? _endedLine;
+
   /// Two independent inputs decide whether this client is sending. [_userMuted]
   /// is the person's own toggle and survives everything; [_microphoneHeld] is
   /// the device being lent to dictation for a moment. Effective mute is either
@@ -126,6 +134,27 @@ class AssistantSessionController extends ChangeNotifier {
   double _micLevel = 0;
   String? _notice;
   Timer? _noticeTimer;
+
+  /// Whether the microphone has carried the room at all on this call — at or
+  /// above [voiceRoomToneLevelV1], the level a working device picks up from
+  /// an empty one — and whether the one notice about never hearing it has
+  /// been given. Between them they settle the question a live call asks: is
+  /// this microphone being heard at all?
+  bool _microphoneHeard = false;
+  bool _deafNoticed = false;
+
+  /// When the search for a signal started, on the capture's own clock: the
+  /// first frame after the call went live, and again after a frame the call
+  /// was not listening to at all. Null until such a frame has started it, and
+  /// again once the capture reopens and its clock starts over.
+  int? _deafSinceMs;
+
+  /// The call's teardown, run once. The first path that ends the call runs
+  /// it and every later one — a failure that lands after the end, the shell
+  /// disposing the session — finds that same work rather than issuing a
+  /// second round of platform calls on devices the next call may already
+  /// hold.
+  Future<void>? _teardownDone;
   String? _delegatedBotId;
   String? _delegatedBotName;
   VoiceDelegationStateV1? _delegationState;
@@ -142,7 +171,7 @@ class AssistantSessionController extends ChangeNotifier {
   /// for nothing but Resume.
   bool _paused = false;
 
-  /// How long a notice about the last reply stays on the footer.
+  /// How long a notice about the last reply stays on the call's surface.
   static const noticeDuration = Duration(seconds: 4);
 
   /// The last half second of real audio while the reply plays, sent ahead of
@@ -151,6 +180,12 @@ class AssistantSessionController extends ChangeNotifier {
   Uint8List? _silence;
 
   late SpeechGate _gate = SpeechGate(config: gateConfig);
+
+  /// Whether this session began the shared audio session. The route is begun
+  /// before the microphone opens and ended once the call is done, and only
+  /// the session that began it may end it: one disposed before it ever
+  /// started has no claim on the audio to release.
+  bool _routeBegun = false;
   VoiceSocket? _socket;
   StreamSubscription<VoiceFocusChange>? _focus;
   StreamSubscription<AudioFrame>? _frames;
@@ -172,6 +207,11 @@ class AssistantSessionController extends ChangeNotifier {
   VoiceStatusV1 get status => _status;
   VoiceUpstreamStateV1 get upstream => _upstream;
   String? get error => _error;
+
+  /// The line a call that ended without the person asking says about itself,
+  /// or null. A failure has [error]; a call the person ended has a surface
+  /// that is already going away.
+  String? get endedLine => _endedLine;
 
   /// A sentence about the last reply, shown for [noticeDuration].
   String? get notice => _notice;
@@ -228,15 +268,24 @@ class AssistantSessionController extends ChangeNotifier {
       _phase == VoiceSessionPhase.live ||
       _phase == VoiceSessionPhase.ending;
 
+  /// This call's devices, closed: the teardown's own work, or already done
+  /// where no teardown has run. The shell owns the capture and the audio
+  /// route and lends them to one call at a time, so it waits here before the
+  /// next call opens them — a teardown still in flight must not land on the
+  /// audio session that followed it. Disposal cannot wait, which is why it
+  /// is asked apart from [dispose].
+  Future<void> get released => _teardownDone ?? Future<void>.value();
+
   /// Opens the call: the microphone and the socket at the same time, so the
   /// slow part of each — the permission prompt, the upgrade round trip — is
   /// paid once rather than twice over. The handshake itself waits for both:
   /// `start_call` wakes a metered upstream, and it is not sent while the
   /// person is still answering the permission prompt.
   Future<void> start() async {
-    if (active) return;
+    if (active || _disposed) return;
     final generation = ++_generation;
     _error = null;
+    _endedLine = null;
     _userMuted = false;
     _microphoneHeld = false;
     _asleep = false;
@@ -247,16 +296,22 @@ class AssistantSessionController extends ChangeNotifier {
     _status = VoiceStatusV1.idle;
     _upstream = VoiceUpstreamStateV1.starting;
     _gate = SpeechGate(config: gateConfig);
+    _teardownDone = null;
     _opening.clear();
     _openingBytes = 0;
     _held.clear();
+    _microphoneHeard = false;
+    _deafNoticed = false;
+    _deafSinceMs = null;
     _clearNotice();
     _clearDelegation();
     _set(VoiceSessionPhase.connecting);
     player.addListener(_onPlayback);
     final connecting = _connect(generation);
     // The session before the devices: the mode decides how the microphone
-    // and the speaker are opened, so it is set before either is.
+    // and the speaker are opened, so it is set before either is — and this
+    // call now holds it until its teardown gives it back.
+    _routeBegun = true;
     await _settled(route.begin);
     if (generation != _generation || _disposed) {
       unawaited(connecting.then(_abandon));
@@ -327,6 +382,41 @@ class AssistantSessionController extends ChangeNotifier {
     });
   }
 
+  /// A live call that has carried nothing but zeros for
+  /// [voiceAssistantDeafNoticeAfterV1] says so, once, because a call can be up
+  /// and deaf: the microphone open and handing over no signal at all, which is
+  /// what the documented macOS voice-processing unit produces (`capture.dart`).
+  /// It is a notice and not an error — the call is fine and the microphone is
+  /// the problem — and it never ends the call. A microphone nobody is talking
+  /// into still carries the room, which is why the line is room tone and not
+  /// the gate's speech floor: waiting for words would call a quiet person
+  /// deaf.
+  ///
+  /// The capture's own clock is the clock here, as it is for the gate's quiet
+  /// window: the frames carry it, so a test runs the window out in a
+  /// millisecond. A frame the call is not listening to at all — before it is
+  /// live, or while the person has it paused, both of which are silence by
+  /// somebody's choice rather than a microphone nobody can hear — starts the
+  /// window again rather than counting: a call that never carried signal is
+  /// not the same as one whose person stopped talking, and only the first is
+  /// ever said.
+  void _watchForDeafness(int atMs) {
+    if (_microphoneHeard ||
+        _deafNoticed ||
+        _phase != VoiceSessionPhase.live ||
+        muted ||
+        _paused) {
+      _deafSinceMs = null;
+      return;
+    }
+    final since = _deafSinceMs ??= atMs;
+    if (atMs - since < voiceAssistantDeafNoticeAfterV1.inMilliseconds) return;
+    _deafNoticed = true;
+    _showNotice(
+      'FrockBot isn’t hearing anything. Check the microphone in your device settings.',
+    );
+  }
+
   /// One retry, inside the retry window. Then it is an error, not a loop.
   Future<VoiceSocket?> _connectOnce(int generation) async {
     final began = DateTime.now();
@@ -371,6 +461,10 @@ class AssistantSessionController extends ChangeNotifier {
         await capture.stop();
         return false;
       }
+      // The frames carry the capture's clock and it starts at zero every time
+      // the device opens, so a window started on the previous one is not a
+      // window on this one.
+      _deafSinceMs = null;
       _frames = frames.listen(_onFrame, onError: (Object _) {});
       return true;
     } on MicrophoneDenied catch (denied) {
@@ -394,6 +488,14 @@ class AssistantSessionController extends ChangeNotifier {
   void _onFrame(AudioFrame frame) {
     if (_disposed) return;
     _micLevel = frame.level;
+    // The one thing a deaf call never has: the room the microphone is
+    // listening to. Room tone is a working device, not speech — the gate's
+    // floor is where words start — so only a device handing over zeros
+    // stays under this line.
+    if (!_microphoneHeard && frame.level >= voiceRoomToneLevelV1) {
+      _microphoneHeard = true;
+    }
+    _watchForDeafness(frame.atMs);
     final decision = _gate.offer(frame.bytes, frame.level, frame.atMs);
     // Barge-in is judged before mute and before sleep: it is the one thing
     // that must reach the server while it is talking.
@@ -711,9 +813,24 @@ class AssistantSessionController extends ChangeNotifier {
     _set(VoiceSessionPhase.ended);
   }
 
+  /// The server's end of the socket finished first: the call is over and
+  /// nobody asked for it to be. Nothing failed and there is nothing to act
+  /// on, so it is not an error — but it is an end, and the surface says so
+  /// rather than going on claiming a live call.
+  ///
+  /// A failure already under way and the person's own end both outrank it:
+  /// the failure has the line that explains it, and a call the person ended
+  /// has a surface that is already going away.
   Future<void> _ended() async {
-    if (!active) return;
+    if (_disposed ||
+        _error != null ||
+        !active ||
+        _phase == VoiceSessionPhase.ending) {
+      return;
+    }
     _generation++;
+    _endedLine = 'The call ended.';
+    _notify();
     await _teardown(reason: 'server-closed');
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.ended);
@@ -723,17 +840,26 @@ class AssistantSessionController extends ChangeNotifier {
     if (_phase == VoiceSessionPhase.error) return;
     _generation++;
     _error = message;
-    // Say so now, before the teardown's awaits: the footer shows the failure
-    // the moment it is known, not after the socket has finished closing.
+    // Say so now, before the teardown's awaits: the call's surface shows the
+    // failure the moment it is known, not after the socket has finished
+    // closing.
     _notify();
     await _teardown(code: voiceCloseFailedV1, reason: message);
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.error);
   }
 
-  Future<void> _teardown({
-    int code = voiceCloseNormalV1,
-    String reason = '',
+  /// One teardown for one call. Whichever path ends it — the End control, a
+  /// failure, the server closing first, the shell disposing the session —
+  /// the first one runs the work and the rest wait on it rather than closing
+  /// the microphone, the speaker and the audio session a second time, on
+  /// devices the call after this one may already hold.
+  Future<void> _teardown({int code = voiceCloseNormalV1, String reason = ''}) =>
+      _teardownDone ??= _teardownNow(code: code, reason: reason);
+
+  Future<void> _teardownNow({
+    required int code,
+    required String reason,
   }) async {
     _reportedPlaying = false;
     _startTimer?.cancel();
@@ -752,8 +878,14 @@ class AssistantSessionController extends ChangeNotifier {
     final focus = _focus;
     _focus = null;
     await _settled(() async => focus?.cancel());
-    // The devices are closed; now the session they were opened in.
-    await _settled(route.end);
+    // The devices are closed; now the session they were opened in — and only
+    // if this call is the one that opened it. A session disposed before it
+    // started issued no `begin`, so it has nothing to give back and must not
+    // take the session away from a call that does.
+    if (_routeBegun) {
+      _routeBegun = false;
+      await _settled(route.end);
+    }
     await _settled(() async => socket?.close(code: code, reason: reason));
     _micLevel = 0;
     _opening.clear();
