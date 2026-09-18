@@ -58,8 +58,9 @@ the list stands as it was.
    Expect: the footer slides up from the bottom edge immediately, the meter's
    lobes bloom white and pale pink from the microphone before the server says
    `listening`, the call starts within ~2 s, and the call is with that Bot —
-   the control reads as pressed and Back is gone. The sidebar control still
-   starts a call with the account's General.
+   the control reads as pressed and Back is gone. The composer is the only way
+   in: the sidebar's list-root row carries no voice control, so there is no
+   entry that starts a call without naming a Bot.
 2. Ask "what bots do I have". Expect: the reply is spoken in **this Bot's**
    voice, the same meter blooms deep rose from the playback, the reply names
    the other Bots. Listen for the gap before the first word: one session

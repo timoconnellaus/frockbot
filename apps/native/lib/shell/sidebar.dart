@@ -1615,9 +1615,6 @@ class _Header extends StatelessWidget {
         scheme.primary.withValues(alpha: 0.14),
       ),
     );
-    // The voice control answers the finger, not the tap: it takes the active
-    // colour the moment it is touched, so the press reads as instant however
-    // long the call takes to open behind it.
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 10, 6),
       child: Row(

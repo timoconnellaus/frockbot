@@ -21,10 +21,11 @@ the voice control while the Bot page becomes a focused voice mode.
 - Decision 7's **enlarged character and on-page mute**, and with them the
   retirement of the account-wide footer. The footer still carries mute,
   End and the meter.
-- Decision 7 says the sidebar `voice-start` is removed, but decision 1
-  says a call started "from the list root" opens with General. Those pull
-  against each other — the sidebar control _is_ the list-root entry — so
-  it has been left in place pending a decision.
+
+Decision 7's sidebar `voice-start` and decision 1's list-root entry pulled
+against each other — the sidebar control _is_ the list-root entry — and on
+2026-09-18 the control was **removed** rather than generalised: a call always
+names a Bot, and the Bot's composer is the only way in.
 
 Decision 9 was overtaken before it was built: PR #534 made every call
 fresh, so answers that settle while nobody is listening are no longer
