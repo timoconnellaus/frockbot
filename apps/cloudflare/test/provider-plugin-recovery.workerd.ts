@@ -238,6 +238,21 @@ test("eviction after upstream acceptance cannot dispatch the durable model reque
   expect(attempts).toHaveLength(2);
   expect(recovered.status).toBe("failed");
   expect(recovered.failure).toContain("not sent twice");
+  const usage = recovered.events.filter(
+    (event) => event.type === "model/usage" && event.requestId === requestId,
+  );
+  // Refusing a second dispatch cannot erase the possible cost of the first
+  // accepted call, whose outcome was lost before accounting became durable.
+  expect(usage).toHaveLength(1);
+  expect(usage[0]).toMatchObject({
+    type: "model/usage",
+    requestId,
+    estimated: true,
+  });
+  if (usage[0]?.type !== "model/usage") {
+    throw new Error("the lost model outcome has no durable usage estimate");
+  }
+  expect(usage[0].inputTokens).toBeGreaterThan(0);
   expect(recovered.events.some((event) => event.type === "tool/call")).toBe(
     false,
   );
