@@ -10,13 +10,9 @@ class MainFlutterWindow: NSWindow {
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
 
-    // No title bar: the app runs to the window's edge and draws its own
-    // chrome, the way a desktop tool does. The traffic lights stay where
-    // macOS puts them; the Flutter app keeps a strip across the top of the
-    // window clear for them (see `desktopTitleBarInset` in
-    // `shell/desktop_layout.dart`) and asks, over the channel below, for the
-    // window to follow a drag that starts anywhere in that strip and to zoom
-    // on a double-click there.
+    // No title bar: the app runs to the window's edge and its existing headers
+    // form the chrome. The traffic lights overlay that row, and Flutter asks
+    // over the channel below for a header drag to move the window.
     self.titleVisibility = .hidden
     self.titlebarAppearsTransparent = true
     self.styleMask.insert(.fullSizeContentView)
@@ -29,9 +25,6 @@ class MainFlutterWindow: NSWindow {
       switch call.method {
       case "startDrag":
         if let event = NSApp.currentEvent { self.performDrag(with: event) }
-        result(nil)
-      case "zoom":
-        self.performZoom(nil)
         result(nil)
       default:
         result(FlutterMethodNotImplemented)

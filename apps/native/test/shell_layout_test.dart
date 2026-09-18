@@ -690,53 +690,44 @@ void main() {
       },
     );
 
-    testWidgets(
-      'on a Mac the strip is one inset at a desk and the page inset in one column',
-      (tester) async {
-        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-        Widget layout() => MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          builder: (context, child) => DesktopTitleBarPadding(child: child!),
-          home: ShellLayout(
-            panelOpen: false,
-            onDismiss: () {},
-            conversationOpen: true,
-            onBack: () {},
-            sidebar: const Align(
-              alignment: Alignment.topLeft,
-              child: Text('bots'),
-            ),
-            conversation: const Align(
-              alignment: Alignment.topLeft,
-              child: Text('thread'),
-            ),
-            rightPanel: null,
+    testWidgets('on a Mac the shell starts at the window top at every tier', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      Widget layout() => MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: ShellLayout(
+          panelOpen: false,
+          onDismiss: () {},
+          conversationOpen: true,
+          onBack: () {},
+          sidebar: const Align(
+            alignment: Alignment.topLeft,
+            child: Text('bots'),
           ),
-        );
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.resetDevicePixelRatio);
-        addTearDown(tester.view.resetPhysicalSize);
+          conversation: const Align(
+            alignment: Alignment.topLeft,
+            child: Text('thread'),
+          ),
+          rightPanel: null,
+        ),
+      );
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
 
-        tester.view.physicalSize = const Size(1440, 900);
-        await tester.pumpWidget(layout());
-        await tester.pumpAndSettle();
-        // Every column starts under the strip, once, and the strip itself
-        // runs the whole width of the window above them.
-        expect(tester.getTopLeft(find.text('bots')).dy, desktopTitleBarInset);
-        expect(tester.getTopLeft(find.text('thread')).dy, desktopTitleBarInset);
-        expect(
-          tester.getRect(find.byType(DesktopTitleStrip)),
-          const Rect.fromLTWH(0, 0, 1440, desktopTitleBarInset),
-        );
+      tester.view.physicalSize = const Size(1440, 900);
+      await tester.pumpWidget(layout());
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(find.text('bots')).dy, 0);
+      expect(tester.getTopLeft(find.text('thread')).dy, 0);
 
-        tester.view.physicalSize = const Size(390, 800);
-        await tester.pumpWidget(layout());
-        await tester.pumpAndSettle();
-        // One column: the conversation's page is under the traffic lights.
-        expect(tester.getTopLeft(find.text('thread')).dy, desktopTitleBarInset);
-        debugDefaultTargetPlatformOverride = null;
-      },
-    );
+      tester.view.physicalSize = const Size(390, 800);
+      await tester.pumpWidget(layout());
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(find.text('thread')).dy, 0);
+    });
 
     testWidgets('an archived row stays put, and a pinned tile is not a row', (
       tester,
