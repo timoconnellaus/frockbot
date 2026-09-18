@@ -159,7 +159,10 @@ describe("approval cards through the gateway", () => {
       rendered?.events
         .filter((event) => event.type === "send/to-user")
         .map((event) => event.payload?.type),
-    ).toEqual(["approval"]);
+      // The send the person is told by, and the Card that is its face: a
+      // locked first-party Plugin draws the approval now (ADR 0030 step 7),
+      // and the draw is recorded beside the send rather than instead of it.
+    ).toEqual(["approval", "card"]);
 
     const pending = await listApprovals(userId, botId);
     expect(pending.pending).toBe(1);
