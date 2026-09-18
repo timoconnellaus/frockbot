@@ -114,9 +114,7 @@ test("the Bot page card and the header both open the desktop itself", async ({
   await page.goBack();
   const card = sem(page, "computer-card");
   await expect(card).toBeVisible();
-  // The frame is one merged node — the screen, what it is, and what refused —
-  // so what it says is its accessible name rather than its text.
-  await expect(card).toHaveAttribute("aria-label", NO_HOST);
+  await expect(card.getByRole("group", { name: NO_HOST })).toBeVisible();
   // Said once: the window's title carries the phase as its subtitle, and
   // nothing outside that window repeats it.
   await expect(sem(page, "computer-phase")).toHaveCount(0);
