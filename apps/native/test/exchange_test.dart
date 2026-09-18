@@ -190,6 +190,9 @@ Future<void> loadFonts() async {
   }
   await inter.load();
   await (FontLoader(
+    'Manrope',
+  )..addFont(rootBundle.load('assets/fonts/manrope-latin.ttf'))).load();
+  await (FontLoader(
     'MaterialIcons',
   )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
 }
@@ -462,7 +465,7 @@ void main() {
       testWidgets('thread markers at $width in ${brightness.name}', (
         tester,
       ) async {
-        tester.view.physicalSize = Size(width, 900);
+        tester.view.physicalSize = Size(width, 1800);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);

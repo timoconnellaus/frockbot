@@ -79,7 +79,7 @@ function roster(hooks: string[] = []): BotPluginRosterV1 {
                 grants: [],
                 contextKeys: [],
               },
-            } as BotPluginRosterV1["members"][number],
+            } as unknown as BotPluginRosterV1["members"][number],
           ],
   };
 }

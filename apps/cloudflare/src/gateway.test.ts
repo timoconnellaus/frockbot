@@ -41,7 +41,10 @@ import {
   createShellCompositionHost,
 } from "@frockbot/app/shell/backend-composition";
 import { executeBotTurn } from "@frockbot/app/shell/backend-runner";
-import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
+import {
+  randomAvatarAppearanceV1,
+  type BotDirectoryViewV1,
+} from "@frockbot/app/flock/shared";
 import {
   createClientRunStopReceiptV1,
   decodeClientRunLookupV1,
@@ -763,11 +766,13 @@ class MemoryConfiguration
   ) {
     return this.updateLook(request);
   }
-  mirrorBotLook() {
+  mirrorBotLook(
+    _request: Parameters<UserConfigurationBinding["mirrorBotLook"]>[0],
+  ): Promise<BotDirectoryViewV1> {
     return Promise.resolve({
-      schemaVersion: 1 as const,
+      schemaVersion: 1,
       revision: 1,
-      bots: [] as const,
+      bots: [],
     });
   }
   readBotVoice(

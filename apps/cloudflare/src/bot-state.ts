@@ -1401,13 +1401,14 @@ export class BotState extends DurableObject<BotStateEnv> {
       registration,
       appearance: user.appearance?.look ?? "ink",
       timezone: userTimezoneV1(user.profile),
-      mirror: (look, document) =>
-        userConfigurationV1(shell.state, identity).mirrorBotLook(
+      mirror: async (look, document) => {
+        await userConfigurationV1(shell.state, identity).mirrorBotLook(
           identity.userId,
           identity.botId,
           look,
           document,
-        ),
+        );
+      },
     });
   }
 
