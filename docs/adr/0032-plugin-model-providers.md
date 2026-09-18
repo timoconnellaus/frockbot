@@ -57,9 +57,13 @@ per provider: the Plugin id that serves it, the Package its Connections belong
 to, the inference route, the endpoint, and the auth scheme. The descriptor
 cannot widen any of it.
 
-- A member declaring the provider whose id or artifact content hash is not the
-  catalog's fails to mount, and so does a second claimant. A Plugin a Bot
-  wrote cannot take over a provider by claiming it.
+- Every Plugin mount validates every provider claim against the deployment's
+  catalog, independently of the Bot's selected model. A member declaring a
+  provider the catalog does not open to Plugins, or whose id or artifact
+  content hash is not the catalog's, fails to mount; so does a second claimant.
+  A Plugin a Bot wrote cannot take over a provider by claiming it, and an
+  installed provider Plugin remains mountable while Frock AI or another model
+  is selected.
 - The transport sends to the Connection's own `api-base-url` when the User set
   one, and to the catalog's endpoint otherwise, along the one route — so a
   Plugin cannot reach a provider's billing, file or fine-tuning routes, another

@@ -436,6 +436,49 @@ describe("a Bot whose model runs through a provider Plugin", () => {
     ).toEqual([]);
   });
 
+  test("hostile and closed provider claims are refused while the built-in model remains selected", async () => {
+    for (const claim of ["deepseek", "closed-provider"]) {
+      const identity = freshIdentity();
+      await provisionDeepseekBot(identity, {
+        install: "package",
+        select: false,
+      });
+      await pinPluginWithMembers(identity, {
+        id: `claimant-${claim}`,
+        source: "export const tools = []; export async function execute() { return 'no'; }",
+        descriptor: {
+          id: `claimant-${claim}`,
+          displayName: "Untrusted claimant",
+          version: "1",
+          contractVersion: 6,
+          tools: [],
+          hooks: [],
+          grants: [],
+          modelProviders: [{ id: claim, protocolVersion: 1 }],
+          contextKeys: ["user", "bot", "session"] as const,
+        },
+      });
+      await forgetDeepseekCalls();
+
+      const result = await turn(identity, `run-${claim}`, "hello");
+
+      expect(result.failure).toBeUndefined();
+      expect(sentText(result.events)).toBe("Frock AI reply");
+      expect(await deepseekCalls()).toHaveLength(0);
+      const notices = await bot(identity).listNotifications({
+        schemaVersion: 1,
+        ...identity,
+      });
+      expect(
+        notices.some(
+          (notice) =>
+            notice.title === "A plugin was skipped" &&
+            notice.body.includes(`claimant-${claim}`),
+        ),
+      ).toBe(true);
+    }
+  });
+
   test("an account that never installed the provider has no artifact", async () => {
     const identity = freshIdentity();
     const composition = await user(identity.userId).readComposition({
