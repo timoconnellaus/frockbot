@@ -617,19 +617,21 @@ authentication have all already happened. The diagnostics are the answer to
 that one question and nothing else.
 
 They are off. A client build turns them on for itself with
-`--dart-define FROCKBOT_VOICE_DIAGNOSTICS=true`, which only the separate
-development desktop app sets; every shipped build compiles them out
-(`apps/native/lib/voice/diagnostics.dart`). A build that opted in generates one
-random v4 UUID per call, puts it on the assistant socket as `?trace=`, and
-writes a line per milestone under it. Native diagnostic builds additionally
-write `voice timing {json}` lines to `events.jsonl` inside a fresh
-`frockbot-voice-timings-*` directory in the app's system temporary directory.
-This captures normally launched macOS apps whose stdout is not available in
-unified logs. File writes add a small amount of diagnostic overhead; they run
-only in opt-in builds. Remove these temporary diagnostic directories when
-finished. The server writes its own lines under the
-same id — but only when the value is a UUID. Anything else enables nothing and
-is never echoed anywhere.
+`--dart-define FROCKBOT_VOICE_DIAGNOSTICS=true`; every shipped build compiles
+them out (`apps/native/lib/voice/diagnostics.dart`). In this repository the one
+build that sets it is the development desktop app, built with
+`bun run update:desktop --voice-diagnostics`
+([`apps/native/README.md`](../apps/native/README.md), "macOS"). A build that
+opted in generates one random v4 UUID per call, puts it on the assistant socket
+as `?trace=`, and writes a line per milestone under it. Native diagnostic
+builds additionally write `voice timing {json}` lines to `events.jsonl` inside
+a fresh `frockbot-voice-timings-*` directory in the app's system temporary
+directory (`$TMPDIR`). This captures normally launched macOS apps whose stdout
+is not available in unified logs. File writes add a small amount of diagnostic
+overhead; they run only in opt-in builds. Remove these temporary diagnostic
+directories when finished. The server writes its own lines under the same id —
+but only when the value is a UUID. Anything else enables nothing and is never
+echoed anywhere.
 
 The trace is not a credential and grants nothing: the bearer header still
 decides who may open the socket, the id names nobody, is never stored in the
@@ -652,8 +654,8 @@ never subtract one side's elapsed from another's.
   `call.start-sent`, `microphone.first-frame` (with `silent`, so a device
   handing over zeros is told from one that never opened),
   `microphone.first-signal`, `microphone.first-speech` (the energy gate's
-  decision, not a transcript), `upstream.starting`/`upstream.awake`,
-  `call.listening`, `audio.first-down`, `player.first-feed`,
+  decision, not a transcript), `upstream.asleep`/`upstream.starting`/
+  `upstream.awake`, `call.listening`, `audio.first-down`, `player.first-feed`,
   `player.first-played`, and `call.end`/`call.ended`/`call.failed`. Read the
   names per milestone rather than as one order: the socket attempt runs beside
   the route and the capture, so `socket.open` precedes `route.begin` and

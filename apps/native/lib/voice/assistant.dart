@@ -122,9 +122,9 @@ class AssistantSessionController extends ChangeNotifier {
   /// * `microphone.first-signal` — the first frame carrying the room at all.
   /// * `microphone.first-speech` — the first frame the energy gate called
   ///   speech. Not a transcript and not a word: an amplitude decision.
-  /// * `upstream.starting` / `upstream.awake` — the first `voice/state` frame
-  ///   saying each; `awake` means the server's Live session acknowledged its
-  ///   setup.
+  /// * `upstream.asleep` / `upstream.starting` / `upstream.awake` — the first
+  ///   `voice/state` frame saying each; `awake` means the server's Live session
+  ///   acknowledged its setup.
   /// * `call.listening` — the first `status: listening`: the call is live.
   /// * `audio.first-down` — the first audio frame this client received, with
   ///   its `bytes`. The reply exists at this point; nobody has heard it.
