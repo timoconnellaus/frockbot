@@ -64,7 +64,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 30. **The GUI-shell refusal is a regex plus a PATH shim**, defeatable with one `export`. It is a policy control, not a security boundary. It is now declared rather than assumed: `capabilities.refuseGuiCommand` is the host's own sentence, `computer_exec` asks before it runs anything and answers in those words, and a host with no such policy simply refuses nothing.
 
-31. **Provider connections:** the 40 providers in the pinned Harness catalog (39 API-key options and six OAuth options) have a shared connection lifecycle, encrypted credentials, model catalogs, and runtime adapters. See [model providers](model-providers.md) for setup and provider-specific limitations.
+31. **Provider connections:** the 40 providers in the pinned Harness catalog (39 API-key options and six OAuth options) have a shared connection lifecycle, encrypted credentials, model catalogs, and runtime adapters — except DeepSeek, which this deployment serves only through an account-installed Plugin and so has no compiled adapter ([ADR 0032](adr/0032-plugin-model-providers.md)). See [model providers](model-providers.md) for setup and provider-specific limitations.
 
 32. **The default provider is an echo stub.** Any path that fails to apply `modelSelection` answers `"Built-in model: <message>"` rather than raising an error. Still true, and now more visible: with three providers registered, a selection that silently falls through is harder to spot than when there were two.
 

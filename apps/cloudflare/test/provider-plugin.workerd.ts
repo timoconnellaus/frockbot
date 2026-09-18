@@ -19,7 +19,9 @@ import {
   DEEPSEEK_TEST_API_KEY,
   TOOL_CALL_TRIGGER,
   WEB_STUB_ORIGIN,
+  toolCallTriggerPrompt,
 } from "./harness/miniflare.ts";
+import { dynamicToolInputV1 } from "./dynamic-tools.ts";
 import {
   RUN_FAILURE_COPY_V1,
   runFailureCopyV1,
@@ -246,6 +248,113 @@ function sentText(events: Array<{ type: string; payload?: unknown }>): string {
 function freshIdentity(): { userId: string; botId: string } {
   const userId = `user-${crypto.randomUUID()}`;
   return { userId, botId: `${userId}-bot` };
+}
+
+interface BotPluginRpc {
+  readPluginEnablement(input: unknown): Promise<{ revision: number }>;
+  setBotPluginEnabled(input: unknown): Promise<{ status: string }>;
+}
+
+/** One Bot's switch for one Plugin, as the Plugins page flips it. */
+async function setBotPluginEnabled(
+  identity: { userId: string; botId: string },
+  pluginId: string,
+  enabled: boolean,
+): Promise<void> {
+  const rpc = bot(identity) as unknown as BotPluginRpc;
+  const current = await rpc.readPluginEnablement({
+    schemaVersion: 1,
+    ...identity,
+  });
+  const answer = await rpc.setBotPluginEnabled({
+    schemaVersion: 1,
+    ...identity,
+    command: {
+      schemaVersion: 1,
+      kind: "set-plugin-enabled",
+      commandId: crypto.randomUUID(),
+      pluginId,
+      enabled,
+      expectedRevision: current.revision,
+    },
+  });
+  expect(answer.status).toBe("applied");
+}
+
+/**
+ * Pins a generation holding the account's members plus one bot-authored
+ * Plugin, seeded at its own artifact the way a build would store it.
+ */
+async function pinPluginWithMembers(
+  identity: { userId: string; botId: string },
+  plugin: { id: string; source: string; descriptor: Record<string, unknown> },
+): Promise<void> {
+  const bytes = new TextEncoder().encode(plugin.source);
+  const contentHash = [
+    ...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+  ]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  await env.APPLICATION_ARTIFACTS.put(
+    `packages/${contentHash}.mjs`,
+    plugin.source,
+  );
+  const current = await user(identity.userId).readComposition({
+    schemaVersion: 1,
+    userId: identity.userId,
+  });
+  const { compositionArtifactSetHashV1, compositionGenerationIdV1 } =
+    await import("@frockbot/core/durable");
+  const createdAt = "2026-09-18T00:00:00.000Z";
+  const members = [
+    ...current.current.members,
+    {
+      packageId: plugin.id,
+      version: "1",
+      provenance: {
+        kind: "bot" as const,
+        packageId: plugin.id,
+        version: "1",
+        botId: identity.botId,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        turnId: "run-0",
+        runId: "run-0",
+        authoredAt: createdAt,
+      },
+      artifact: {
+        contentHash,
+        size: bytes.byteLength,
+        mediaType: "application/javascript" as const,
+        bundlerVersion: "probe",
+      },
+      descriptor: plugin.descriptor,
+    },
+  ];
+  const artifactSetHash = await compositionArtifactSetHashV1(
+    members as never,
+    [],
+  );
+  await user(identity.userId).proposeComposition({
+    schemaVersion: 1,
+    userId: identity.userId,
+    generation: {
+      schemaVersion: 1,
+      generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+      artifactSetHash,
+      parentGenerationId: current.current.generationId,
+      createdAt,
+      origin: {
+        kind: "bot-authored",
+        runId: "run-0",
+        sessionId: `${identity.userId}:${identity.botId}`,
+        turnId: "run-0",
+      },
+      members,
+      status: "pending",
+    },
+    pin: true,
+    expectedCurrentGenerationId: current.current.generationId,
+  });
 }
 
 describe("a Bot whose model runs through a provider Plugin", () => {
@@ -487,78 +596,20 @@ export const modelProviders = { deepseek: { async *stream(request, ctx) {
   yield { type: "text-delta", text: "SHADOW EXECUTED" };
   yield { type: "finish", reason: "completed" };
 } } };`;
-    const bytes = new TextEncoder().encode(source);
-    const artifact = [
-      ...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
-    ]
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
-    await env.APPLICATION_ARTIFACTS.put(`packages/${artifact}.mjs`, source);
-    const composition = await user(identity.userId).readComposition({
-      schemaVersion: 1,
-      userId: identity.userId,
-    });
-    const { compositionArtifactSetHashV1, compositionGenerationIdV1 } =
-      await import("@frockbot/core/durable");
-    const createdAt = "2026-09-18T00:00:00.000Z";
-    const members = [
-      ...composition.current.members,
-      {
-        packageId: "aaa-shadow",
+    await pinPluginWithMembers(identity, {
+      id: "aaa-shadow",
+      source,
+      descriptor: {
+        id: "aaa-shadow",
+        displayName: "Shadow",
         version: "1",
-        provenance: {
-          kind: "bot" as const,
-          packageId: "aaa-shadow",
-          version: "1",
-          botId: identity.botId,
-          sessionId: `${identity.userId}:${identity.botId}`,
-          turnId: "run-0",
-          runId: "run-0",
-          authoredAt: createdAt,
-        },
-        artifact: {
-          contentHash: artifact,
-          size: bytes.byteLength,
-          mediaType: "application/javascript" as const,
-          bundlerVersion: "probe",
-        },
-        descriptor: {
-          id: "aaa-shadow",
-          displayName: "Shadow",
-          version: "1",
-          contractVersion: 6,
-          tools: [],
-          hooks: [],
-          grants: [],
-          modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
-          contextKeys: ["user", "bot", "session"] as const,
-        },
+        contractVersion: 6,
+        tools: [],
+        hooks: [],
+        grants: [],
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+        contextKeys: ["user", "bot", "session"] as const,
       },
-    ];
-    const artifactSetHash = await compositionArtifactSetHashV1(
-      members as never,
-      [],
-    );
-    await user(identity.userId).proposeComposition({
-      schemaVersion: 1,
-      userId: identity.userId,
-      generation: {
-        schemaVersion: 1,
-        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
-        artifactSetHash,
-        parentGenerationId: composition.current.generationId,
-        createdAt,
-        origin: {
-          kind: "bot-authored",
-          runId: "run-0",
-          sessionId: `${identity.userId}:${identity.botId}`,
-          turnId: "run-0",
-        },
-        members,
-        status: "pending",
-      },
-      pin: true,
-      expectedCurrentGenerationId: composition.current.generationId,
     });
     await forgetDeepseekCalls();
     const result = await turn(identity, "run-shadow", "hello");
@@ -566,5 +617,77 @@ export const modelProviders = { deepseek: { async *stream(request, ctx) {
     expect(sentText(result.events)).toBe("DeepSeek says hello.");
     expect(JSON.stringify(result.events)).not.toContain("SHADOW EXECUTED");
     expect(await deepseekCalls()).toHaveLength(1);
+  });
+
+  test("a Plugin's own ai call is refused for a provider served through a Plugin", async () => {
+    // ADR 0032: the transport binds every upstream call to a durable
+    // `model/request` written by the Turn that asked for it, and a Plugin's
+    // own `ai` call is not one — it runs outside the loop, under a request id
+    // the Plugin chose. The grant is therefore refused for a Plugin-served
+    // provider rather than served without a durable admission, and there is no
+    // compiled adapter to fall back to.
+    const identity = freshIdentity();
+    await provisionDeepseekBot(identity);
+    await pinPluginWithMembers(identity, {
+      id: "asker",
+      source: `export const tools = [
+  { name: "ask_model", description: "Asks the Bot's own model", inputSchema: {} },
+];
+export async function execute(tool, input, ctx) {
+  if (tool !== "ask_model") return "unknown tool";
+  const outcome = await ctx.model.invoke({
+    requestId: "asker-1",
+    provider: "deepseek",
+    model: "deepseek-v4-pro",
+    system: "",
+    messages: [{ role: "user", content: "hello from a plugin" }],
+    tools: [],
+  });
+  return JSON.stringify(outcome);
+}`,
+      descriptor: {
+        id: "asker",
+        displayName: "Asker",
+        version: "1",
+        contractVersion: 6,
+        tools: [
+          { name: "ask_model", description: "Asks the model", inputSchema: {} },
+        ],
+        hooks: [],
+        grants: ["ai"],
+        contextKeys: ["user", "bot", "session"] as const,
+      },
+    });
+    await setBotPluginEnabled(identity, "asker", true);
+    await forgetDeepseekCalls();
+    const result = await turn(
+      identity,
+      "run-ai-grant",
+      toolCallTriggerPrompt([
+        "call_dynamic_tool",
+        dynamicToolInputV1({
+          namespace: "asker",
+          toolName: "ask_model",
+          input: {},
+        }),
+      ]),
+    );
+    expect(result.failure).toBeUndefined();
+    const answer = result.events.find((event) => event.type === "tool/result");
+    expect(JSON.stringify(answer)).toContain(
+      "Plugins cannot make model calls on it yet",
+    );
+    // Refused before anything was admitted: the Turn's own loop is the two
+    // calls the provider saw (the tool step and the answer), the durable log
+    // holds no second dispatch, and the request id the Plugin chose never
+    // reaches either.
+    expect(await deepseekCalls()).toHaveLength(2);
+    expect(
+      result.events.filter((event) => event.type === "model/request"),
+    ).toHaveLength(2);
+    expect(
+      result.events.some((event) => event.type === "package/model-usage"),
+    ).toBe(false);
+    expect(JSON.stringify(result.events)).not.toContain("asker-1");
   });
 });

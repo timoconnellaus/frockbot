@@ -161,13 +161,17 @@ no-effect result. The kernel records the estimate and settles the Turn rather
 than dispatching again, because whether the provider billed is exactly what is
 unknown.
 
-The clock is the one failure that is read both ways, and it is read by what the
-host dispatched rather than by what the clock says. A deadline that arrives
-while the answer was still being waited on is uncertainty, because the request
-left and may have been accepted. A worker that hung before it ever reached the
-transport — or before the transport issued anything — dispatched nothing, so
-the deadline's own sentence is a definitive failure and no estimate is written
-for a call nobody made.
+A failure that arrives before the request left is read by what the host
+dispatched rather than by the kind of failure it is, and the clock is the case
+that makes that visible. A deadline that arrives while the answer was still
+being waited on is uncertainty, because the request left and may have been
+accepted. A worker that hung before it ever reached the
+transport — or before the transport issued anything, as a Stop that arrived
+before the provider began does — dispatched nothing, so the failure's own
+sentence (the deadline's, or the Stop's) is definitive and no estimate is
+written for a call nobody made. The one exception is the effect whose earlier
+dispatch the log never accounted for: it keeps the estimate that stands for
+that call.
 
 ### Credentials never cross into the Plugin
 

@@ -4,6 +4,8 @@ FrockBot ships 40 provider entries: 39 with API-key support and six with OAuth s
 
 Enable a provider in Settings, connect its API key or choose **Sign in**, then select one of its models. Connections belong to the User and are available to every Bot they own. Keys are encrypted server-side. Saving a catalog-provider key does not run a paid inference probe; invalid credentials are reported when a Turn first uses them. Radius reads its authenticated catalog when connecting.
 
+DeepSeek is served by an installed Plugin rather than a compiled adapter ([ADR 0032](adr/0032-plugin-model-providers.md)). Connecting it in Models — **Add a provider**, then **Connect provider** — installs the deployment's DeepSeek Plugin on the account, and the account's Plugins list then shows it with **Remove** to uninstall. Its key is still an ordinary account Connection held server-side, and the Plugin never sees it. A Bot whose model names DeepSeek and whose account holds no such Plugin fails before anything is sent, with a sentence naming the missing Plugin and pointing at Models; uninstalling the Plugin returns a Bot that was using it to the platform default (Frock AI), and the model line reports the chosen model as unavailable. Everything else in the catalog keeps its compiled adapter.
+
 ## Included providers
 
 - Amazon Bedrock (`amazon-bedrock`)
@@ -74,7 +76,7 @@ Claude subscription OAuth is excluded because Anthropic disallows third-party ap
 
 ## Runtime guarantees
 
-Provider requests receive the durable request ID as an idempotency header and have SDK retries disabled. A header is not a guarantee that a vendor deduplicates requests: uncertain network failures are not classified as safe-to-retry rejections. Credential settlement follows the committed model outcome.
+Provider requests receive the durable request ID as an idempotency header and have SDK retries disabled. A header is not a guarantee that a vendor deduplicates requests: uncertain network failures are not classified as safe-to-retry rejections. Credential settlement follows the committed model outcome. A Plugin-served provider admits one upstream call per request ID: once the request has left, an answer that is lost or never confirmed stops the Turn with the estimated usage recorded and is never dispatched again, so sending the message again is a new request rather than a retry of the same one.
 
 Tool calls are released only after a successful terminal response. Signed response content needed by Gemini and other providers is preserved in the durable assistant event and replayed only to the same provider, model, Connection, and credential generation. It is not rendered as assistant text. Partial streams without a terminal event fail explicitly. Structured output uses the existing prompt fallback and FrockBot validation.
 
