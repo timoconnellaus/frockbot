@@ -34,9 +34,17 @@ Map<String, Object?> studioDocument() => {
 Theme shellTheme(WidgetTester tester) =>
     tester.widget<Theme>(find.byKey(const ValueKey('shell-theme')));
 
-Theme threadTheme(WidgetTester tester, String botId) => tester.widget<Theme>(
-  find.byKey(ValueKey('thread-theme-$botId')),
-);
+Theme threadTheme(WidgetTester tester, String botId) =>
+    tester.widget<Theme>(find.byKey(ValueKey('thread-theme-$botId')));
+
+Color threadWindow(WidgetTester tester, String botId) => tester
+    .widget<ColoredBox>(
+      find.descendant(
+        of: find.byKey(ValueKey('thread-theme-$botId')),
+        matching: find.byType(ColoredBox),
+      ),
+    )
+    .color!;
 
 void main() {
   testWidgets(
@@ -64,10 +72,18 @@ void main() {
         threadTheme(tester, 'bot-one').data.scaffoldBackgroundColor,
         FrockTheme.fromDocument(ThemeDocument.ink).scaffoldBackgroundColor,
       );
+      expect(
+        threadWindow(tester, 'bot-one'),
+        FrockTheme.fromDocument(ThemeDocument.ink).scaffoldBackgroundColor,
+      );
       await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
       await tester.pump();
       expect(
         threadTheme(tester, 'bot-two').data.scaffoldBackgroundColor,
+        FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
+      );
+      expect(
+        threadWindow(tester, 'bot-two'),
         FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
       );
     },
@@ -103,6 +119,7 @@ void main() {
         threadTheme(tester, 'bot-one').data.scaffoldBackgroundColor,
         paper.scaffoldBackgroundColor,
       );
+      expect(threadWindow(tester, 'bot-one'), paper.scaffoldBackgroundColor);
       expect(
         shellTheme(tester).data.colorScheme.surface,
         paper.colorScheme.surface,
@@ -111,6 +128,10 @@ void main() {
       await tester.pump();
       expect(
         threadTheme(tester, 'bot-two').data.scaffoldBackgroundColor,
+        FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
+      );
+      expect(
+        threadWindow(tester, 'bot-two'),
         FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
       );
       expect(
@@ -162,6 +183,10 @@ void main() {
         threadTheme(tester, 'bot-one').data.scaffoldBackgroundColor,
         FrockTheme.fromDocument(ThemeDocument.ink).scaffoldBackgroundColor,
       );
+      expect(
+        threadWindow(tester, 'bot-one'),
+        FrockTheme.fromDocument(ThemeDocument.ink).scaffoldBackgroundColor,
+      );
       await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
       await tester.pump();
       expect(
@@ -169,9 +194,10 @@ void main() {
         FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
       );
       expect(
-        seen.where((path) => path.contains('/look')),
-        isEmpty,
+        threadWindow(tester, 'bot-two'),
+        FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
       );
+      expect(seen.where((path) => path.contains('/look')), isEmpty);
       botsGate.complete();
     },
   );

@@ -1232,8 +1232,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       }
     }
     try {
-      final settings = (await widget.api.request('/api/settings?view=2'))!
-          as Map;
+      final settings =
+          (await widget.api.request('/api/settings?view=2'))! as Map;
       final look = parseAccountLook(
         (settings['appearance'] as Map?)?['look'] as String?,
       );
@@ -2271,9 +2271,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final single = tier == ShellTier.single;
     final bot = selected;
     final accountTheme = _accountThemeOf(context);
-    final threadTheme = bot == null
-        ? accountTheme
-        : _botThemeOf(context, bot);
+    final threadTheme = bot == null ? accountTheme : _botThemeOf(context, bot);
     final session = voiceSession;
     // Voice mode is this Bot being the one on the call: its thread and its
     // composer give way to the call itself (ADR 0031). A call with another
@@ -2321,35 +2319,36 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         : _ThemedPreferred(
                             theme: threadTheme,
                             child: ChatHeader(
-                            name: _name(bot),
-                            connection: selectedConnection,
-                            textScale:
-                                MediaQuery.textScalerOf(context).scale(14) / 14,
-                            // A phone's bar is GrokBot's three things; the wider tiers
-                            // name each entry of the right panel beside the title.
-                            //
-                            // In voice mode there is no Back (ADR 0029): the
-                            // way out of the Bot you are talking to is to end
-                            // the call, and a control that left the page with
-                            // the call still running would be a trap.
-                            voiceMode: voiceHere,
-                            onBack: single && !voiceHere ? _openBack : null,
-                            phone: single,
-                            onOpenBot: () => _openPanel('bot-page'),
-                            computerRunning:
-                                computer?.available == true &&
-                                (computer!.state.running ||
-                                    _botComputerRunning),
-                            onComputer: computer?.available == true
-                                ? () => _openPanel('computer')
-                                : null,
-                            onTogglePanel: single || rightPanel == null
-                                ? null
-                                : _togglePanel,
-                            panelShown: tier == ShellTier.triple
-                                ? !panelCollapsed
-                                : panelOpen,
-                          ),
+                              name: _name(bot),
+                              connection: selectedConnection,
+                              textScale:
+                                  MediaQuery.textScalerOf(context).scale(14) /
+                                  14,
+                              // A phone's bar is GrokBot's three things; the wider tiers
+                              // name each entry of the right panel beside the title.
+                              //
+                              // In voice mode there is no Back (ADR 0029): the
+                              // way out of the Bot you are talking to is to end
+                              // the call, and a control that left the page with
+                              // the call still running would be a trap.
+                              voiceMode: voiceHere,
+                              onBack: single && !voiceHere ? _openBack : null,
+                              phone: single,
+                              onOpenBot: () => _openPanel('bot-page'),
+                              computerRunning:
+                                  computer?.available == true &&
+                                  (computer!.state.running ||
+                                      _botComputerRunning),
+                              onComputer: computer?.available == true
+                                  ? () => _openPanel('computer')
+                                  : null,
+                              onTogglePanel: single || rightPanel == null
+                                  ? null
+                                  : _togglePanel,
+                              panelShown: tier == ShellTier.triple
+                                  ? !panelCollapsed
+                                  : panelOpen,
+                            ),
                           ),
                     conversationOpen: bot != null && conversationOpen,
                     onBack: _openBack,
@@ -2422,98 +2421,107 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         'thread-theme-${bot?.botId.value ?? 'none'}',
                       ),
                       data: threadTheme,
-                      child: voiceHere
-                        ? VoiceMode(
-                            key: ValueKey('voice-${bot.botId.value}'),
-                            session: session,
-                            botName: _name(bot),
-                            characterId: bot.avatar.characterId,
-                            primary: bot.avatar.primary,
-                            onEnd: () =>
-                                unawaited(_endVoice(reason: 'end-button')),
-                            onOpenWork: _openVoiceWork,
-                          )
-                        : bot == null
-                        ? NoConversation(
-                            empty: bots.isEmpty,
-                            failure: bots.isEmpty ? error : null,
-                            action: 'Refresh Bots',
-                            onAction: () => unawaited(load()),
-                          )
-                        : ConversationView(
-                            key: ValueKey(
-                              '${widget.userId}:${bot.botId.value}',
-                            ),
-                            sessions: widget.sessions,
-                            api: widget.api,
-                            store: widget.store,
-                            userId: widget.userId,
-                            botId: bot.botId.value,
-                            general: bot.botId.value == generalBotId,
-                            featuresRevision: featuresRevision,
-                            onOpenRun: _openRun,
-                            onOpenExchange: _openExchange,
-                            backgroundOf: _background,
-                            primaryOf: _primary,
-                            nameOf: _botNameOf,
-                            outOfCredit: credit?.canSpend == false,
-                            onOpenBilling: () => unawaited(_openBilling()),
-                            onMessageActions: (line, {position}) => unawaited(
-                              _messageActions(line, position: position),
-                            ),
-                            onReadLatest: (messageId) =>
-                                _readLatest(bot.botId.value, messageId),
-                            unreadFromMessageId: activity
-                                .unread[bot.botId.value]
-                                ?.unreadFromMessageId,
-                            background: _background(bot.botId.value),
-                            primary: _primary(bot.botId.value),
-                            onDictate: () => unawaited(_dictate()),
-                            onStopDictation: () => unawaited(_stopDictation()),
-                            // Voice, on the Bot whose page this is (ADR 0029).
-                            onVoice: () => unawaited(
-                              _startOrSwitchVoice(botId: bot.botId.value),
-                            ),
-                            voiceClosing: voiceClosing,
-                            dictationState:
-                                dictation?.context == bot.botId.value
-                                ? dictation!.state
-                                : DictationState.idle,
-                            // The offer belongs to the composer the capture
-                            // was dictated into, exactly as the words do.
-                            canRevertDictation: () =>
-                                dictation?.context == bot.botId.value &&
-                                dictation!.cleaned,
-                            onRevertDictation:
-                                dictation?.context == bot.botId.value
-                                ? dictation!.revertCleanup
-                                : null,
-                            dictationLevel: dictation?.level,
-                            onWorkingChanged: (runId) {
-                              if (runId == workingRunId || !mounted) return;
-                              final settled =
-                                  workingRunId != null && runId == null;
-                              setState(() => workingRunId = runId);
-                              // A Turn is how an Applet comes into existence, and the
-                              // Bot's page names the Applets the Bot holds — so the
-                              // directory is re-read when the Turn that may have changed
-                              // it ends. Read on adoption alone, a Bot that had just made
-                              // its first Applet had no way to it until the page was
-                              // reloaded.
-                              final canvas = appletCanvas;
-                              if (settled && canvas != null) {
-                                unawaited(canvas.load());
-                              }
-                            },
-                            onConnectionChanged: (botId, state) {
-                              if (!mounted ||
-                                  selected?.botId.value != botId ||
-                                  selectedConnection == state) {
-                                return;
-                              }
-                              setState(() => selectedConnection = state);
-                            },
-                          ),
+                      // The layout Scaffold around this column still
+                      // belongs to the account look. Paint the thread
+                      // window here so Studio paper does not sit as
+                      // dark type on the app's ink.
+                      child: ColoredBox(
+                        color: threadTheme.scaffoldBackgroundColor,
+                        child: voiceHere
+                            ? VoiceMode(
+                                key: ValueKey('voice-${bot.botId.value}'),
+                                session: session,
+                                botName: _name(bot),
+                                characterId: bot.avatar.characterId,
+                                primary: bot.avatar.primary,
+                                onEnd: () =>
+                                    unawaited(_endVoice(reason: 'end-button')),
+                                onOpenWork: _openVoiceWork,
+                              )
+                            : bot == null
+                            ? NoConversation(
+                                empty: bots.isEmpty,
+                                failure: bots.isEmpty ? error : null,
+                                action: 'Refresh Bots',
+                                onAction: () => unawaited(load()),
+                              )
+                            : ConversationView(
+                                key: ValueKey(
+                                  '${widget.userId}:${bot.botId.value}',
+                                ),
+                                sessions: widget.sessions,
+                                api: widget.api,
+                                store: widget.store,
+                                userId: widget.userId,
+                                botId: bot.botId.value,
+                                general: bot.botId.value == generalBotId,
+                                featuresRevision: featuresRevision,
+                                onOpenRun: _openRun,
+                                onOpenExchange: _openExchange,
+                                backgroundOf: _background,
+                                primaryOf: _primary,
+                                nameOf: _botNameOf,
+                                outOfCredit: credit?.canSpend == false,
+                                onOpenBilling: () => unawaited(_openBilling()),
+                                onMessageActions: (line, {position}) =>
+                                    unawaited(
+                                      _messageActions(line, position: position),
+                                    ),
+                                onReadLatest: (messageId) =>
+                                    _readLatest(bot.botId.value, messageId),
+                                unreadFromMessageId: activity
+                                    .unread[bot.botId.value]
+                                    ?.unreadFromMessageId,
+                                background: _background(bot.botId.value),
+                                primary: _primary(bot.botId.value),
+                                onDictate: () => unawaited(_dictate()),
+                                onStopDictation: () =>
+                                    unawaited(_stopDictation()),
+                                // Voice, on the Bot whose page this is (ADR 0029).
+                                onVoice: () => unawaited(
+                                  _startOrSwitchVoice(botId: bot.botId.value),
+                                ),
+                                voiceClosing: voiceClosing,
+                                dictationState:
+                                    dictation?.context == bot.botId.value
+                                    ? dictation!.state
+                                    : DictationState.idle,
+                                // The offer belongs to the composer the capture
+                                // was dictated into, exactly as the words do.
+                                canRevertDictation: () =>
+                                    dictation?.context == bot.botId.value &&
+                                    dictation!.cleaned,
+                                onRevertDictation:
+                                    dictation?.context == bot.botId.value
+                                    ? dictation!.revertCleanup
+                                    : null,
+                                dictationLevel: dictation?.level,
+                                onWorkingChanged: (runId) {
+                                  if (runId == workingRunId || !mounted) return;
+                                  final settled =
+                                      workingRunId != null && runId == null;
+                                  setState(() => workingRunId = runId);
+                                  // A Turn is how an Applet comes into existence, and the
+                                  // Bot's page names the Applets the Bot holds — so the
+                                  // directory is re-read when the Turn that may have changed
+                                  // it ends. Read on adoption alone, a Bot that had just made
+                                  // its first Applet had no way to it until the page was
+                                  // reloaded.
+                                  final canvas = appletCanvas;
+                                  if (settled && canvas != null) {
+                                    unawaited(canvas.load());
+                                  }
+                                },
+                                onConnectionChanged: (botId, state) {
+                                  if (!mounted ||
+                                      selected?.botId.value != botId ||
+                                      selectedConnection == state) {
+                                    return;
+                                  }
+                                  setState(() => selectedConnection = state);
+                                },
+                              ),
+                      ),
                     ),
                   ),
                   ?_appletFrameHolder(context),
