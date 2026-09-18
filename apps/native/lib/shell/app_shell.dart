@@ -55,6 +55,7 @@ import '../view/sample_page.dart';
 import '../voice/assistant.dart';
 import '../voice/capabilities.dart';
 import '../voice/capture.dart';
+import '../voice/diagnostics.dart';
 import '../voice/dictation.dart';
 import '../voice/footer.dart';
 import '../voice/voice_mode.dart';
@@ -491,9 +492,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final borrowed = microphone.acquireForAssistant();
     final previous = voiceSession;
     previous?.dispose();
+    // One id for this call, or null in every build that did not opt in: the
+    // socket's `trace` and the controller's lines are the same call seen from
+    // two ends.
+    final diagnostics = voiceDiagnosticsV1();
     final session = AssistantSessionController(
-      openSocket: assistantSocketOpenerV1(widget.api),
+      openSocket: assistantSocketOpenerV1(widget.api, diagnostics: diagnostics),
       botId: botId,
+      diagnostics: diagnostics,
       capture: voiceCapture ??= RecordVoiceCapture(
         minimumBuffer: audioRoute.minimumCaptureBuffer,
       ),

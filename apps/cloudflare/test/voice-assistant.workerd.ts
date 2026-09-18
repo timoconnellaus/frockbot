@@ -135,9 +135,13 @@ async function open(
   userId: string,
   headers: Record<string, string> = {},
   device = "phone",
+  query: Record<string, string> = {},
 ): Promise<Opened> {
   const url = new URL(VOICE_ASSISTANT_INTERNAL_PATH, "https://voice.internal");
   url.searchParams.set("version", "1");
+  for (const [name, value] of Object.entries(query)) {
+    url.searchParams.set(name, value);
+  }
   const response = await assistant(userId).fetch(
     new Request(url, {
       headers: {
@@ -1219,5 +1223,254 @@ describe("what the session remembers between calls", () => {
       (jobs) => jobs.some((job) => job.callId === callId),
       "the abandoned call's memory job",
     );
+  });
+});
+
+/**
+ * The opt-in latency diagnostics (`docs/voice.md`, "Timing a slow call").
+ *
+ * What these prove is the object's own behaviour on a real socket: that a
+ * call which asked for nothing gets nothing, that a value which is not a UUID
+ * is not an opt-in, and that the milestones a call does write bound the steps
+ * they claim to — a slow read, a slow upstream — and carry nothing anyone
+ * said.
+ */
+describe("timing a call that asked to be timed", () => {
+  const traceId = () => crypto.randomUUID();
+
+  test("a call that asked for nothing writes no timing line", async () => {
+    const userId = `voice-untraced-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    opened.socket.send(pcm(1));
+    await settle();
+    expect(await stub.probeTimings()).toEqual([]);
+    // The ordinary operational record is untouched: diagnostics are extra
+    // lines, never a replacement for the ones every call writes.
+    expect((await stub.probeTraces()).map((line) => line.event)).toContain(
+      "call-admitted",
+    );
+  });
+
+  test("a trace that is not a UUID is not an opt-in", async () => {
+    const userId = `voice-bad-trace-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    for (const trace of [
+      "not-a-uuid",
+      "../../etc/passwd",
+      "6f1a2b3c-4d5e-4f60-8a1b",
+      `${crypto.randomUUID()} and a sentence`,
+    ]) {
+      const opened = await open(userId, {}, "phone", { trace });
+      await startCall(opened);
+      opened.socket.close();
+      await opened.closed;
+    }
+    expect(await stub.probeTimings()).toEqual([]);
+  });
+
+  test("a valid trace writes the call's milestones under one id", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-timed-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const trace = traceId();
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId, {}, "phone", { trace });
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+    const timings = await eventually(
+      () => stub.probeTimings(),
+      (lines) => lines.some((line) => line.event === "listening"),
+      "the listening milestone",
+    );
+    const events = timings.map((line) => line.event);
+    // The order is the order a call is actually admitted in: the socket, the
+    // frame, the ledger, the Bot, the prompt, the upstream.
+    const ordered = [
+      "connected",
+      "start-call",
+      "cap-checked",
+      "ledger-checked",
+      "call-admitted",
+      "target-resolved",
+      "prompt-context-start",
+      "prompt-context-ready",
+    ];
+    for (const event of ordered) expect(events).toContain(event);
+    expect(events.filter((event) => ordered.includes(event))).toEqual(ordered);
+    const upstream = [
+      "upstream-open-start",
+      "upstream-socket-open",
+      "upstream-setup-sent",
+      "upstream-setup-ack",
+      "listening",
+    ];
+    for (const event of upstream) expect(events).toContain(event);
+    expect(events.filter((event) => upstream.includes(event))).toEqual(
+      upstream,
+    );
+    // Every constituent of the prompt is on record, because any one of them
+    // can be the slow one.
+    for (const read of [
+      "prompt-directory",
+      "prompt-user-memory",
+      "prompt-timezone",
+      "prompt-voice-memory",
+      "prompt-bot-identity",
+      "prompt-bot-memory",
+      "prompt-bot-history",
+      "session-voice-memory",
+    ]) {
+      expect(events).toContain(read);
+      expect(
+        timings.find((line) => line.event === read)!.durationMs,
+      ).toBeGreaterThanOrEqual(0);
+    }
+    for (const line of timings) {
+      expect(line.trace).toBe(trace);
+      expect(line.side).toBe("server");
+      expect(line.elapsedMs).toBeGreaterThanOrEqual(0);
+      expect(Number.isNaN(Date.parse(line.at))).toBe(false);
+    }
+  });
+
+  test("a slow prompt read is bounded by its own milestone", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-slow-context-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ slowDirectoryMs: 400 });
+    const opened = await open(identity.userId, {}, "phone", {
+      trace: traceId(),
+    });
+    await startCall(opened, identity.botId);
+    const timings = await eventually(
+      () => stub.probeTimings(),
+      (lines) => lines.some((line) => line.event === "prompt-context-ready"),
+      "the prompt context finishing",
+    );
+    const at = (event: string) =>
+      timings.find((line) => line.event === event)!.elapsedMs;
+    // The directory is the read that was held, and the context cannot be
+    // ready before it — which is what makes this the line to read when a
+    // call is slow to answer.
+    const reading = at("prompt-directory") - at("prompt-context-start");
+    expect(reading).toBeGreaterThan(200);
+    expect(
+      timings.find((line) => line.event === "prompt-directory")!.durationMs,
+    ).toBeGreaterThan(200);
+    expect(at("prompt-context-ready")).toBeGreaterThanOrEqual(
+      at("prompt-directory"),
+    );
+  });
+
+  test("a slow upstream is bounded by its own two milestones", async () => {
+    const userId = `voice-slow-upstream-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeSetScript({ slowUpstreamMs: 400 });
+    const opened = await open(userId, {}, "phone", { trace: traceId() });
+    await startCall(opened);
+    const timings = await eventually(
+      () => stub.probeTimings(),
+      (lines) => lines.some((line) => line.event === "upstream-setup-ack"),
+      "the upstream acknowledging its setup",
+    );
+    const at = (event: string) =>
+      timings.find((line) => line.event === event)!.elapsedMs;
+    const connecting = at("upstream-socket-open") - at("upstream-open-start");
+    expect(connecting).toBeGreaterThan(200);
+    // And the object's own work before it is not charged to the upstream.
+    expect(at("upstream-open-start")).toBeLessThan(at("upstream-socket-open"));
+  });
+
+  test("the first sound each way says so once, and says which", async () => {
+    const userId = `voice-timed-audio-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId, {}, "phone", { trace: traceId() });
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    for (const tag of [1, 2, 3]) opened.socket.send(pcm(tag));
+    await stub.probeHears("what's the weather");
+    await stub.probeSays("It is sunny in Sydney.", 960);
+    const timings = await eventually(
+      () => stub.probeTimings(),
+      (lines) => lines.some((line) => line.event === "client-audio-out-first"),
+      "the model's first sound reaching the client",
+    );
+    const events = timings.map((line) => line.event);
+    // One line per "first", however many frames followed it.
+    for (const once of [
+      "client-audio-first",
+      "upstream-audio-first",
+      "client-audio-out-first",
+      "upstream-audio-sent",
+    ]) {
+      expect(events.filter((event) => event === once)).toHaveLength(1);
+    }
+    expect(
+      timings.find((line) => line.event === "client-audio-first")!.bytes,
+    ).toBe(1280);
+    // Received from Google, then handed to the client: two milestones with
+    // this object's own turn admission between them.
+    expect(events.indexOf("upstream-audio-first")).toBeLessThan(
+      events.indexOf("client-audio-out-first"),
+    );
+    await stub.probeEndsTurn();
+  });
+
+  test("no diagnostic line carries anything anyone said", async () => {
+    const userId = `voice-timed-private-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId, {}, "phone", { trace: traceId() });
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    opened.socket.send(pcm(1));
+    await exchange(
+      stub,
+      "my passphrase is hunter2",
+      "I will not repeat that back.",
+    );
+    const timings = await stub.probeTimings();
+    const written = JSON.stringify(timings);
+    for (const forbidden of [
+      "hunter2",
+      "passphrase",
+      "repeat that back",
+      "key=",
+      "voice-upstream.invalid",
+      "Bearer",
+    ]) {
+      expect(written).not.toContain(forbidden);
+    }
+    // And every field written is one this object named.
+    const allowed = new Set([
+      "trace",
+      "side",
+      "event",
+      "elapsedMs",
+      "durationMs",
+      "at",
+      "device",
+      "code",
+      "wasClean",
+      "admission",
+      "displaced",
+      "bytes",
+      "buffered",
+      "failed",
+      "run",
+      "asTurn",
+    ]);
+    for (const line of timings) {
+      for (const key of Object.keys(line)) expect(allowed.has(key)).toBe(true);
+    }
   });
 });

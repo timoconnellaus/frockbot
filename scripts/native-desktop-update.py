@@ -204,7 +204,7 @@ def register_installed_app():
     run([LSREGISTER, "-f", INSTALL_APP])
 
 
-def build_commands(name, number):
+def build_commands(name, number, *, voice_diagnostics=False):
     """Flutter writes the build configuration; xcodebuild builds the dev identity.
 
     `flutter build macos` cannot pass build settings to xcodebuild, and a
@@ -217,7 +217,8 @@ def build_commands(name, number):
         [FLUTTER, "build", "macos", "--release", "--config-only", f"--build-name={name}",
          f"--build-number={number}", f"--dart-define=FROCKBOT_ORIGIN={hosted_origin()}",
          f"--dart-define=FROCKBOT_APP_VERSION={name}+{number}",
-         "--dart-define=FROCKBOT_DESKTOP_DEV=true"],
+         "--dart-define=FROCKBOT_DESKTOP_DEV=true",
+         *(["--dart-define=FROCKBOT_VOICE_DIAGNOSTICS=true"] if voice_diagnostics else [])],
         ["xcodebuild", "build", "-workspace", "macos/Runner.xcworkspace", "-scheme", "Runner",
          "-configuration", "Release", "-derivedDataPath", DERIVED_DATA,
          "-destination", "platform=macOS", "-allowProvisioningUpdates", "FROCKBOT_DESKTOP_DEV=YES"],
@@ -231,12 +232,19 @@ def main():
         action="store_true",
         help="verify source versions and prerequisites without building or installing",
     )
+    parser.add_argument(
+        "--voice-diagnostics",
+        action="store_true",
+        help="include opt-in voice timing logs in the development app",
+    )
     args = parser.parse_args()
 
     name, number, protocol = source_versions()
     if not FLUTTER.is_file():
         raise RuntimeError(f"Pinned Flutter executable is missing: {FLUTTER}")
     print(f"{APP_NAME} macOS {name}+{number} ({BUNDLE_ID}); client protocol {protocol}; source {ROOT}")
+    if args.voice_diagnostics:
+        print("Voice timing diagnostics enabled for this development build.")
     notice = legacy_install_notice()
     if notice:
         print(notice)
@@ -245,7 +253,7 @@ def main():
         return
 
     run(["bun", "scripts/check-client-protocol.ts"], cwd=ROOT)
-    for command in build_commands(name, number):
+    for command in build_commands(name, number, voice_diagnostics=args.voice_diagnostics):
         run(command, cwd=NATIVE)
     inspect_app(BUILD_APP, name, number)
     install(BUILD_APP, name, number)

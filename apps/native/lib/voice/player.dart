@@ -11,7 +11,34 @@ import 'package:flutter/services.dart';
 import 'protocol.dart' show voiceAssistantOutputSampleRateV1;
 import 'speech_gate.dart' show pcm16Rms;
 
+/// The first buffer this call handed to the device.
+///
+/// This is the moment the platform speaker was *given* audio, not the moment
+/// the room heard it: the device has its own queue and its own latency, and
+/// nothing in this process can observe the air. Read it as the last thing this
+/// client did before the sound was out of its hands.
+const voicePlayerFirstFeedV1 = 'player.first-feed';
+
+/// The device's first receipt: one fed buffer has passed the playback head.
+///
+/// The nearest thing to native output this client can actually observe, and
+/// still not an audible start — a receipt follows the head by the device's
+/// own buffer. What it does prove is that the platform speaker accepted and
+/// consumed audio, which is what tells a fed-but-silent device apart from a
+/// working one.
+const voicePlayerFirstPlayedV1 = 'player.first-played';
+
 abstract class VoicePlayer extends ChangeNotifier {
+  /// A lifecycle notice for opt-in diagnostics, or null — which is every
+  /// shipped build. A plain callback and nothing else: no polling, no session
+  /// state of its own, and the player neither knows what a trace is nor holds
+  /// one. The controller sets it for the length of a call and clears it in the
+  /// teardown.
+  ///
+  /// The names are [voicePlayerFirstFeedV1] and [voicePlayerFirstPlayedV1],
+  /// and what each means is written beside it.
+  void Function(String event)? onDiagnostic;
+
   Future<void> configure(int sampleRate);
   void write(Uint8List chunk);
   Future<void> interrupt();
@@ -55,6 +82,12 @@ class PcmVoicePlayer extends VoicePlayer {
   bool _configured = false;
   bool _closed = false;
   bool _rebuilding = false;
+
+  /// Whether each of the two diagnostic milestones has been said. One player
+  /// is one call, so "first" means first of the call; an interrupt rebuilds
+  /// the device but does not make the next buffer the first one again.
+  bool _fedOnce = false;
+  bool _playedOnce = false;
 
   /// The epoch the shared native speaker was last asked to own, so that a
   /// delayed release cannot tear down a newer owner's device.
@@ -121,6 +154,10 @@ class PcmVoicePlayer extends VoicePlayer {
       return;
     }
     if (call.method != 'played' || !_sent.containsKey(args['sequence'])) return;
+    if (!_playedOnce) {
+      _playedOnce = true;
+      onDiagnostic?.call(voicePlayerFirstPlayedV1);
+    }
     _sent.remove(args['sequence']);
     _pump();
     _completeDrains();
@@ -169,6 +206,10 @@ class PcmVoicePlayer extends VoicePlayer {
       final sequence = ++_sequence;
       final epoch = _epoch;
       _sent[sequence] = pcm16Rms(bytes);
+      if (!_fedOnce) {
+        _fedOnce = true;
+        onDiagnostic?.call(voicePlayerFirstFeedV1);
+      }
       unawaited(
         _channel
             .invokeMethod<void>('feed', {

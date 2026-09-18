@@ -186,6 +186,7 @@ import {
   gatewayModelForFrockRequestV1,
 } from "@frockbot/providers/frock-ai/catalog";
 import { voiceDictationConfiguredV1 } from "@frockbot/app/voice/dictation-upstream";
+import { voiceAssistantEdgeTimingOfV1 } from "@frockbot/app/voice/diagnostics";
 import type { VoiceGatewayDependencies } from "./contracts.js";
 import {
   decodeRpcEnvelopeV1,
@@ -2625,131 +2626,142 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     let mountedBackend:
       Awaited<ReturnType<typeof createGatewayBackendContributions>> | undefined;
+    // Opt-in voice diagnostics for the assistant upgrade and nothing else.
+    // The entry is the first thing that happens to this request in this
+    // Worker; everything the voice object can see starts long after it.
+    const timing = voiceAssistantEdgeTimingOfV1(request.url);
+    timing?.mark("edge-fetch");
     try {
       // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
       // workers-types cannot infer the generated local RPC stubs.
       const runtimeExports = ctx.exports as unknown as RuntimeExports;
       mountedBackend = await createGatewayBackendContributions(env);
+      timing?.mark("edge-backend-ready");
       // Which `env` secret the native door signs with belongs to the auth
       // Package: the hosted build keeps signing with the live
       // `BETTER_AUTH_SECRET`, and a build without better-auth has its own key.
       const nativeTokenSecret = AUTH_PACKAGE_V1.nativeTokenSecret.read(env);
-      const gateway = createGateway({
-        loader: env.USER_APPLICATIONS,
-        artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
-        uiArtifactHosts: (env.UI_ARTIFACT_HOSTS ?? "")
-          .split(",")
-          .map((host) => host.trim())
-          .filter(Boolean),
-        registerPush: (userId, registration) =>
-          env.USER_CONFIGURATIONS.get(
-            env.USER_CONFIGURATIONS.idFromName(userId),
-          ).registerPush({ userId, registration }),
-        auth: AUTH_PACKAGE_V1.create(env, {
-          mayCreateIdentity: (candidate) => mayCreateIdentity(env, candidate),
-        }),
-        // The deployment's own origin, which is what `BETTER_AUTH_URL` is: a
-        // development stack points it at its own host — the emulator reaches
-        // this machine as 10.0.2.2, never as the hosted origin — and a
-        // deployment that names none offers no native sign-in.
-        ...(env.BETTER_AUTH_URL &&
-        nativeReturnUrisFor(env, env.BETTER_AUTH_URL).length > 0 &&
-        nativeTokenSecret
-          ? {
-              nativeAuth: createNativeAuth({
-                secret: nativeTokenSecret,
-                auth: AUTH_PACKAGE_V1.create(env, {
-                  mayCreateIdentity: (candidate) =>
-                    mayCreateIdentity(env, candidate),
+      const gateway = createGateway(
+        {
+          loader: env.USER_APPLICATIONS,
+          artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
+          uiArtifactHosts: (env.UI_ARTIFACT_HOSTS ?? "")
+            .split(",")
+            .map((host) => host.trim())
+            .filter(Boolean),
+          registerPush: (userId, registration) =>
+            env.USER_CONFIGURATIONS.get(
+              env.USER_CONFIGURATIONS.idFromName(userId),
+            ).registerPush({ userId, registration }),
+          auth: AUTH_PACKAGE_V1.create(env, {
+            mayCreateIdentity: (candidate) => mayCreateIdentity(env, candidate),
+          }),
+          // The deployment's own origin, which is what `BETTER_AUTH_URL` is: a
+          // development stack points it at its own host — the emulator reaches
+          // this machine as 10.0.2.2, never as the hosted origin — and a
+          // deployment that names none offers no native sign-in.
+          ...(env.BETTER_AUTH_URL &&
+          nativeReturnUrisFor(env, env.BETTER_AUTH_URL).length > 0 &&
+          nativeTokenSecret
+            ? {
+                nativeAuth: createNativeAuth({
+                  secret: nativeTokenSecret,
+                  auth: AUTH_PACKAGE_V1.create(env, {
+                    mayCreateIdentity: (candidate) =>
+                      mayCreateIdentity(env, candidate),
+                  }),
+                  returnUris: nativeReturnUrisFor(env, env.BETTER_AUTH_URL),
+                  origin: env.BETTER_AUTH_URL,
+                  // The development door signs the app in as the development
+                  // identity in place of Google.
+                  ...(developmentAuthAllowed(env)
+                    ? { developmentUserId: DEVELOPMENT_USER_ID }
+                    : {}),
+                  admit: async (userId) => {
+                    // The stored identity, not anything the bearer carries: the
+                    // email an invitation binds to and the admin allowlist reads
+                    // are the identity provider's.
+                    return admitStoredAccount(env, userId);
+                  },
+                  session: async (userId, operation) => {
+                    const stub = env.USER_CONFIGURATIONS.get(
+                      env.USER_CONFIGURATIONS.idFromName(userId),
+                    );
+                    // SAFETY: this binding names UserConfiguration; this is its reviewed RPC.
+                    const rpc = stub as unknown as Pick<
+                      UserConfiguration,
+                      "nativeSession"
+                    >;
+                    const result = await rpc.nativeSession(operation);
+                    if (result.schemaVersion !== 1 || result.status !== "ok")
+                      throw new Error("Sign-in was refused");
+                    return result.record;
+                  },
                 }),
-                returnUris: nativeReturnUrisFor(env, env.BETTER_AUTH_URL),
-                origin: env.BETTER_AUTH_URL,
-                // The development door signs the app in as the development
-                // identity in place of Google.
-                ...(developmentAuthAllowed(env)
-                  ? { developmentUserId: DEVELOPMENT_USER_ID }
-                  : {}),
-                admit: async (userId) => {
-                  // The stored identity, not anything the bearer carries: the
-                  // email an invitation binds to and the admin allowlist reads
-                  // are the identity provider's.
-                  return admitStoredAccount(env, userId);
-                },
-                session: async (userId, operation) => {
-                  const stub = env.USER_CONFIGURATIONS.get(
-                    env.USER_CONFIGURATIONS.idFromName(userId),
-                  );
-                  // SAFETY: this binding names UserConfiguration; this is its reviewed RPC.
-                  const rpc = stub as unknown as Pick<
-                    UserConfiguration,
-                    "nativeSession"
-                  >;
-                  const result = await rpc.nativeSession(operation);
-                  if (result.schemaVersion !== 1 || result.status !== "ok")
-                    throw new Error("Sign-in was refused");
-                  return result.record;
-                },
-              }),
+              }
+            : {}),
+          admitAccount: (identity) => admitAccount(env, identity),
+          ...(env.FROCKBOT_ADMIN_EMAILS
+            ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
+            : {}),
+          applicationHashFor: async () => env.DEFAULT_APPLICATION_HASH,
+          waitUntil: (promise) => ctx.waitUntil(promise),
+          botStateFor: (userId) =>
+            runtimeExports.UserBotState({ props: { userId } }),
+          userConfigurationFor: (userId): UserConfigurationBinding =>
+            userConfigurationStub(env, userId),
+          botConfigurationFor: (userId, botId): BotConfigurationBinding =>
+            botStateStub(env, userId, botId),
+          ...(env.APPLET_VIEWER_SECRET
+            ? { appletViewerSecret: env.APPLET_VIEWER_SECRET }
+            : {}),
+          admitAppletViewer: (userId) => checkStoredAccount(env, userId),
+          appletStateFor: (userId, appletId) =>
+            env.APPLET_STATES.get(
+              env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
+            ),
+          appletAccessFor: async (userId, botId, appletId) => {
+            try {
+              await userAppletDirectoryStub(env, userId).readApplet({
+                schemaVersion: 1,
+                userId,
+                botId,
+                appletId,
+              });
+              return true;
+            } catch (error) {
+              // Only the directory's settled "no access" closes the door; a
+              // blip is thrown so the socket fails as retryable, not as gone.
+              if (
+                error instanceof Error &&
+                error.name === "AppletUnavailableError"
+              )
+                return false;
+              throw error;
             }
-          : {}),
-        admitAccount: (identity) => admitAccount(env, identity),
-        ...(env.FROCKBOT_ADMIN_EMAILS
-          ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
-          : {}),
-        applicationHashFor: async () => env.DEFAULT_APPLICATION_HASH,
-        waitUntil: (promise) => ctx.waitUntil(promise),
-        botStateFor: (userId) =>
-          runtimeExports.UserBotState({ props: { userId } }),
-        userConfigurationFor: (userId): UserConfigurationBinding =>
-          userConfigurationStub(env, userId),
-        botConfigurationFor: (userId, botId): BotConfigurationBinding =>
-          botStateStub(env, userId, botId),
-        ...(env.APPLET_VIEWER_SECRET
-          ? { appletViewerSecret: env.APPLET_VIEWER_SECRET }
-          : {}),
-        admitAppletViewer: (userId) => checkStoredAccount(env, userId),
-        appletStateFor: (userId, appletId) =>
-          env.APPLET_STATES.get(
-            env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
-          ),
-        appletAccessFor: async (userId, botId, appletId) => {
-          try {
-            await userAppletDirectoryStub(env, userId).readApplet({
-              schemaVersion: 1,
-              userId,
-              botId,
-              appletId,
-            });
-            return true;
-          } catch (error) {
-            // Only the directory's settled "no access" closes the door; a
-            // blip is thrown so the socket fails as retryable, not as gone.
-            if (
-              error instanceof Error &&
-              error.name === "AppletUnavailableError"
-            )
-              return false;
-            throw error;
-          }
+          },
+          openBotStateChannel: (userId, botId, request, context) =>
+            openOwnedBotStateChannel(env, userId, botId, request, context),
+          voice: voiceGatewayDependencies(env),
+          backendContributions: [
+            ...mountedBackend.contributions,
+            billingRoutes(
+              env,
+              (userId) =>
+                env.USER_CONFIGURATIONS.get(
+                  env.USER_CONFIGURATIONS.idFromName(userId),
+                ) as unknown as BillingAccountRpc,
+            ),
+          ],
+          debug: debugSurface(env),
+          allowedClientOrigins: allowedClientOrigins(env),
+          allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
         },
-        openBotStateChannel: (userId, botId, request, context) =>
-          openOwnedBotStateChannel(env, userId, botId, request, context),
-        voice: voiceGatewayDependencies(env),
-        backendContributions: [
-          ...mountedBackend.contributions,
-          billingRoutes(
-            env,
-            (userId) =>
-              env.USER_CONFIGURATIONS.get(
-                env.USER_CONFIGURATIONS.idFromName(userId),
-              ) as unknown as BillingAccountRpc,
-          ),
-        ],
-        debug: debugSurface(env),
-        allowedClientOrigins: allowedClientOrigins(env),
-        allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
-      });
-      return await gateway(request);
+        timing,
+      );
+      const answer = await gateway(request);
+      timing?.mark("edge-answered", { status: answer.status });
+      return answer;
     } catch (error) {
       // The outermost boundary. Building the gateway can fail before any route
       // runs — an unavailable binding, a Contribution that will not mount — and

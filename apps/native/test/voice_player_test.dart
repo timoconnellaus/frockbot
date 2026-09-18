@@ -196,6 +196,35 @@ void main() {
     },
   );
 
+  test('the first buffer fed and the first one played are said once', () async {
+    final player = PcmVoicePlayer();
+    final said = <String>[];
+    player.onDiagnostic = said.add;
+    await player.configure(24000);
+    expect(said, isEmpty);
+
+    // Ten buffers reach the device; the first of them is the feed.
+    player.write(Uint8List(16000));
+    await Future<void>.delayed(Duration.zero);
+    expect(fed, hasLength(10));
+    expect(said, [voicePlayerFirstFeedV1]);
+
+    // The device's first receipt is the other name; later ones are not it.
+    await receipt(fed.first);
+    expect(said, [voicePlayerFirstFeedV1, voicePlayerFirstPlayedV1]);
+    await receipt(fed[1]);
+    expect(said, [voicePlayerFirstFeedV1, voicePlayerFirstPlayedV1]);
+
+    // Rebuilding the device on an interrupt does not make the next buffer
+    // the first one again.
+    await player.interrupt();
+    player.write(Uint8List(1600));
+    await Future<void>.delayed(Duration.zero);
+    await receipt(fed.last);
+    expect(said, [voicePlayerFirstFeedV1, voicePlayerFirstPlayedV1]);
+    await player.close();
+  });
+
   test(
     'a receipt from a closed player cannot finish its replacement',
     () async {
