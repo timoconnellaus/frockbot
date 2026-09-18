@@ -17,7 +17,14 @@
 // because no session is ever minted. Those claims want a Computer, and
 // inventing one in the browser would prove the stub rather than the product.
 import type { Page, TestInfo } from "@playwright/test";
-import { test, expect, createBot, openApplication, sem } from "./fixtures.ts";
+import {
+  test,
+  expect,
+  createBot,
+  openApplication,
+  sem,
+  settle,
+} from "./fixtures.ts";
 import { e2eComputerConfiguredV1 } from "./harness.ts";
 
 const PHONE = { width: 390, height: 844 } as const;
@@ -169,13 +176,24 @@ test("a deployment with no Computer says so and opens nothing", async ({
 
   const card = sem(page, "computer-card");
   await expect(card).toBeVisible({ timeout: 60_000 });
-  await expect(card).toHaveAttribute("aria-label", /No computer/u);
-  await expect(card).toHaveAttribute("aria-label", /This Bot has no computer/u);
+  // The row is one merged node — a dot, the state and the way in — and what it
+  // says is that node's accessible name, which the engine groups onto a child
+  // of the card rather than onto the card itself. So the card says "No
+  // computer", and it says it there.
+  await expect(card.getByRole("group", { name: /No computer/u })).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("computer-presence-unconfigured.png"),
   });
 
-  await card.click();
+  // There is nothing behind the card to open, so it is inert: not a button, no
+  // pointer events on its node, and a click there is refused as intercepted.
+  // What a user does is tap where the card is drawn, so the press goes to its
+  // coordinates — and it lands on nothing that opens a window.
+  const box = await card.boundingBox();
+  expect(box, "the card has no box to tap").not.toBeNull();
+  if (!box) return;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await settle(page);
   await expect(sem(page, "computer-viewer")).toHaveCount(0);
 });
