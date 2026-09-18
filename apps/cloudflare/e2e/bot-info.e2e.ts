@@ -86,15 +86,13 @@ test("the panel opens on the Bot page and its rows push onto it", async ({
 
   await settle(page);
   await door(page, "Computer").click();
-  await expect(sem(page, "computer-card")).toBeVisible({ timeout: 60_000 });
-  await expect(
-    says(sem(page, "shell-right-panel"), "Computer").first(),
-  ).toBeVisible();
-  // The card is the whole statement: no caption repeats it underneath.
+  await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
+  // Computer opens a full window; returning restores the Bot page.
   await expect(says(page, "Observed's screen")).toHaveCount(0);
 
   await settle(page);
-  await press(sem(page, "right-panel-back"));
+  await page.goBack();
+  await expect(sem(page, "bot-page").first()).toBeVisible();
   await settle(page);
   await press(sem(page, "bot-page-routines-all"));
   await expect(sem(page, "routines-document")).toBeVisible({ timeout: 60_000 });
