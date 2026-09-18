@@ -1196,4 +1196,213 @@ describe("Computer Bot Durable Object Contribution", () => {
     expect(projected.viewerSession).toBeUndefined();
     expect(providerCalls).toBe(0);
   });
+
+  /**
+   * The eviction case, end to end: the viewer record outlives the object that
+   * minted it, and the URL beside it did not. A connect on the reconstructed
+   * object has to come back through the session that is already there rather
+   * than provisioning a second desktop for a Bot that already has one.
+   */
+  test("a connect after eviction attaches the stored viewer without waking the host", async () => {
+    const storage = new MemoryStorage();
+    await storage.put(COMPUTER_VIEWER_RECORD_KEY, {
+      version: 1,
+      id: "viewer-1",
+      expiresAt: "2026-09-02T00:01:30.000Z",
+    });
+    let opens = 0;
+    let connects = 0;
+    const renewedWith: string[] = [];
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: (_userId, _botId, effectId) => {
+        opens += 1;
+        // The attach is charged as this command's own effect, so a replayed
+        // command settles against the reservation it already made.
+        expect(effectId).toBe("computer:connect-after-eviction");
+        return Promise.resolve(
+          fakeHandle({
+            presence: () => {
+              connects += 1;
+              throw new Error("a warm attach must not run the cold prepare");
+            },
+            renewViewer: (sessionId) => {
+              renewedWith.push(sessionId);
+              return Promise.resolve({
+                id: sessionId,
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-02T00:02:00.000Z",
+              });
+            },
+          }),
+        );
+      },
+      now: () => new Date("2026-09-02T00:00:30.000Z"),
+    });
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-after-eviction"),
+    );
+    await contribution.settleScheduledWork();
+
+    expect(connects).toBe(0);
+    expect(renewedWith).toEqual(["viewer-1"]);
+    // One host session for one host call: the ensure, the display allocation
+    // and the five connect steps are all skipped.
+    expect(opens).toBe(1);
+    const projected = await contribution.read("user-1", "scout");
+    expect(projected).toMatchObject({ phase: "ready" });
+    expect(projected.viewerSession).toMatchObject({
+      id: "viewer-1",
+      url: "https://viewer.invalid/secret",
+      expiresAt: "2026-09-02T00:02:00.000Z",
+    });
+    // The bearer URL is still the one thing that never reaches storage.
+    expect(JSON.stringify([...storage.values.values()])).not.toContain(
+      "viewer.invalid",
+    );
+  });
+
+  test("an attach the Computer refuses falls through to the cold connect", async () => {
+    const storage = new MemoryStorage();
+    await storage.put(COMPUTER_VIEWER_RECORD_KEY, {
+      version: 1,
+      id: "viewer-gone",
+      expiresAt: "2026-09-02T00:01:30.000Z",
+    });
+    let connects = 0;
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: () => {
+              connects += 1;
+              return Promise.resolve({
+                id: "viewer-2",
+                url: "https://viewer.invalid/fresh",
+                expiresAt: "2026-09-02T00:02:00.000Z",
+              });
+            },
+            // What the Fly host answers for a session the Computer no longer
+            // holds material for: `host-client.ts` maps the host's
+            // `not-found` onto `provider-failure`.
+            renewViewer: () =>
+              Promise.reject(
+                new ComputerError(
+                  "provider-failure",
+                  "The Computer viewer session is not available",
+                ),
+              ),
+          }),
+        ),
+      now: () => new Date("2026-09-02T00:00:30.000Z"),
+    });
+
+    const receipt = await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-attach-refused"),
+    );
+    await contribution.settleScheduledWork();
+
+    // The refused attach is an optimisation that did not apply, never a
+    // failure the User is told about: the connect is applied and ready.
+    expect(receipt).toMatchObject({ status: "accepted" });
+    expect(connects).toBe(1);
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "ready",
+      viewerSession: { id: "viewer-2" },
+    });
+  });
+
+  test("an expired viewer record is a cold prepare, not an attach", async () => {
+    const storage = new MemoryStorage();
+    await storage.put(COMPUTER_VIEWER_RECORD_KEY, {
+      version: 1,
+      id: "viewer-stale",
+      expiresAt: "2026-09-02T00:00:00.000Z",
+    });
+    let connects = 0;
+    let renews = 0;
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: () => {
+              connects += 1;
+              return Promise.resolve({
+                id: "viewer-3",
+                url: "https://viewer.invalid/fresh",
+                expiresAt: "2026-09-02T00:02:00.000Z",
+              });
+            },
+            renewViewer: (sessionId) => {
+              renews += 1;
+              return Promise.resolve({
+                id: sessionId,
+                url: "https://viewer.invalid/stale",
+                expiresAt: "2026-09-02T00:02:00.000Z",
+              });
+            },
+          }),
+        ),
+      now: () => new Date("2026-09-02T00:01:00.000Z"),
+    });
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-expired-record"),
+    );
+    await contribution.settleScheduledWork();
+
+    expect(renews).toBe(0);
+    expect(connects).toBe(1);
+  });
+
+  /**
+   * The card polls this read every 1.5 seconds while a Computer is working,
+   * and `viewer renew` is a charged host operation. Reading what the Computer
+   * is doing must therefore never renew anything: recovery is a command with a
+   * durable intent behind it, and this is the line between the two.
+   */
+  test("a projection read never renews a viewer, however often it is polled", async () => {
+    const storage = new MemoryStorage();
+    await storage.put(COMPUTER_VIEWER_RECORD_KEY, {
+      version: 1,
+      id: "viewer-1",
+      expiresAt: "2026-09-02T00:01:30.000Z",
+    });
+    let opens = 0;
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => {
+        opens += 1;
+        throw new Error("a read must not reach the Computer");
+      },
+      now: () => new Date("2026-09-02T00:00:30.000Z"),
+    });
+
+    for (let poll = 0; poll < 5; poll += 1) {
+      const projected = await contribution.read("user-1", "scout");
+      // A session it cannot speak for is not one it offers: the record alone
+      // makes the Computer reconnectable, not ready.
+      expect(projected.viewerSession).toBeUndefined();
+      expect(projected.phase).toBe("idle");
+      expect(projected.message).toBe("Reconnect to pick up where you left off");
+    }
+    expect(opens).toBe(0);
+  });
 });

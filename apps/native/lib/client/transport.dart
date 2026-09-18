@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -114,6 +115,38 @@ class NativeApi {
     int limit = 512000,
     bool authenticated = true,
   }) async {
+    final bytes = await _fetch(
+      path,
+      body: body,
+      limit: limit,
+      authenticated: authenticated,
+    );
+    try {
+      return decodeBoundedJson(utf8.decode(bytes), maxBytes: limit);
+    } on FormatException {
+      throw const RequestFailure('Couldn’t read that reply. Please reconnect.');
+    }
+  }
+
+  /// One authenticated answer that is not JSON: today, a Computer capture on
+  /// the Workspace read route.
+  ///
+  /// The projection names that capture as a path on this same origin, and the
+  /// route behind it is authenticated. An `<img>` — which is what
+  /// `Image.network` is — carries no session there and is answered 401, so the
+  /// card drew its "no computer" placeholder over a capture that existed. The
+  /// bytes come back through the one client that holds the credential instead,
+  /// and [path] is checked exactly as [request] checks its own, so a
+  /// projection can never point this client's credential at another origin.
+  Future<Uint8List> bytes(String path, {int limit = 4000000}) async =>
+      Uint8List.fromList(await _fetch(path, limit: limit, authenticated: true));
+
+  Future<List<int>> _fetch(
+    String path, {
+    Object? body,
+    required int limit,
+    required bool authenticated,
+  }) async {
     if (!path.startsWith('/') ||
         path.startsWith('//') ||
         path.contains(r'\') ||
@@ -174,11 +207,9 @@ class NativeApi {
         }
         throw RequestFailure(message, response.statusCode, _refusalCode(bytes));
       }
-      return decodeBoundedJson(utf8.decode(bytes), maxBytes: limit);
+      return bytes;
     } on RequestFailure {
       rethrow;
-    } on FormatException {
-      throw const RequestFailure('Couldn’t read that reply. Please reconnect.');
     } on Exception {
       throw const RequestFailure(
         'Couldn’t reach FrockBot. Check your connection and try again.',

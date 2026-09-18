@@ -969,7 +969,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     computer = null;
     _setCatalog(null);
     slots.remove(ShellSlot.rightPanel, 'applet');
-    slots.remove(ShellSlot.rightPanel, 'computer');
     unawaited(controller.load());
     unawaited(inbox.load());
     unawaited(_adoptComposition(botId));
@@ -994,21 +993,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     final machine = ComputerController(widget.api, botId);
     computer = machine;
-    machine.addListener(() {
-      if (!mounted) return;
-      // The Computer is registered only once the deployment has said it has
-      // one, so a card never appears and then disappears.
-      if (machine.available &&
-          !slots.keys(ShellSlot.rightPanel).contains('computer')) {
-        slots.register(
-          ShellSlot.rightPanel,
-          'computer',
-          (context) => _computerPanel(machine, botId),
-          label: 'Computer',
-        );
-      }
-      _repaint();
-    });
+    // The Computer is not a panel entry: it is one destination, the desktop
+    // full window, opened from the card and from the bar's own icon.
+    machine.addListener(_repaint);
     unawaited(machine.read());
     if (mounted) setState(() {});
   }
@@ -1386,7 +1373,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget _panelHeader(wire.BotRegistration bot, String? key) {
     final theme = Theme.of(context);
     final botId = bot.botId.value;
-    final phase = key == 'computer' ? computer?.said : null;
     return SizedBox(
       height: 52,
       child: Padding(
@@ -1431,15 +1417,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (phase != null && phase.isNotEmpty)
-                    Text(
-                      phase,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
                 ],
               ),
             ),
@@ -1513,7 +1490,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         computer: computer,
         turnRunning: workingRunId != null,
         onOpenComputer: computer?.available == true
-            ? () => _openPanel('computer', push: true)
+            ? () => unawaited(_openComputerViewer())
             : null,
         inbox: routineInbox,
         onOpenRun: (run) => _openRoutineRun(botId, run),
@@ -1577,18 +1554,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         },
       );
 
-  /// The Computer sub-page: the live frame and the two things a person can do
-  /// to it. The phase is the header's subtitle, said once.
-  Widget _computerPanel(ComputerController machine, String botId) =>
-      SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-        child: ComputerCard(
-          controller: machine,
-          turnRunning: workingRunId != null,
-          surface: ComputerSurface.page,
-          botName: _botNameOf(botId),
-        ),
-      );
+  /// The desktop, full window: the one Computer destination this shell has.
+  ///
+  /// The bar's icon, the Bot page's card and the search hit all arrive here,
+  /// at the same window on the same session, with Take control inside it.
+  Future<void> _openComputerViewer() async {
+    final machine = computer;
+    if (machine == null || !machine.available) return;
+    final name = selected == null ? null : _name(selected!);
+    await openComputerViewerV1(context, machine, botName: name);
+  }
 
   /// Opens one right-panel entry. On the phone the panel is a page: a drawer
   /// over a full-width conversation is the same thing with less room and a
@@ -1934,10 +1909,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _pushApplet();
       return;
     }
-    if (key == 'computer' && computer != null) {
-      _push(_computerPage(bot, computer!));
-      return;
-    }
     if (controller == null) return;
     if (key == 'bot-settings') {
       _push(
@@ -1953,36 +1924,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     _push(_botPage(bot));
   }
-
-  /// The Computer as a phone's page: the frame, the controls, and the phase
-  /// as the bar's subtitle rather than a strip under it.
-  Widget _computerPage(wire.BotRegistration bot, ComputerController machine) =>
-      AnimatedBuilder(
-        animation: machine,
-        builder: (context, _) => Scaffold(
-          appBar: AppBar(
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Computer'),
-                Text(
-                  machine.said,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          body: SafeArea(
-            top: false,
-            child: _computerPanel(machine, bot.botId.value),
-          ),
-        ),
-      );
 
   /// The Bot's page on a phone: its name and its face in the bar, the gear in
   /// the corner, and the same scroll the panel's root draws.
@@ -2132,7 +2073,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     slots.remove(ShellSlot.rightPanel, 'routines');
     slots.remove(ShellSlot.rightPanel, 'plugins');
     slots.remove(ShellSlot.rightPanel, 'applet');
-    slots.remove(ShellSlot.rightPanel, 'computer');
     botSettings?.dispose();
     routineInbox?.dispose();
     appletCanvas?.dispose();
@@ -2252,7 +2192,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 (computer!.state.running ||
                                     _botComputerRunning),
                             onComputer: computer?.available == true
-                                ? () => _openPanel('computer')
+                                ? () => unawaited(_openComputerViewer())
                                 : null,
                             onTogglePanel: single || rightPanel == null
                                 ? null
@@ -2498,11 +2438,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             'Personal details',
           ),
           if (computer?.available == true)
-            const SearchAction(
-              'computer',
-              'Settings: Computer',
-              'Current chat',
-            ),
+            const SearchAction('computer', 'Computer', 'Current chat'),
           const SearchAction('billing', 'Settings: Usage & Billing', 'Account'),
           const SearchAction('plugins', 'Plugins', 'Account'),
           const SearchAction(
@@ -2528,7 +2464,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         case 'settings':
           _openSettings();
         case 'computer':
-          _openPanel('computer');
+          unawaited(_openComputerViewer());
         case 'billing':
           unawaited(_openBilling());
         case 'plugins':

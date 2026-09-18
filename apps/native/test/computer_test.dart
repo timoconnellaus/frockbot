@@ -1,5 +1,10 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/computer/card.dart';
 import 'package:frockbot_native/computer/client.dart';
@@ -38,11 +43,45 @@ Map<String, Object?> projection({
             'path': 'screen.png',
             'capturedAt': '2026-09-05T01:00:00.000Z',
             'contentHash': 'abc',
-            'url': 'https://shots.example/abc.png',
+            // The authority's own spelling: a path on this account's
+            // authenticated origin, never an address anything anonymous can
+            // read. `computer/bot.ts` builds exactly this.
+            'url': capturePathV1,
           },
         ]
       : <Object?>[],
 };
+
+/// The Workspace read route, as the projection names it.
+const capturePathV1 =
+    '/api/bots/bot-1/workspace/file?path=%7B%22root%22%3A%7B%22kind%22%3A%22package-declared%22%7D%2C%22path%22%3A%22screen.png%22%7D';
+
+/// One decodable picture: a 1×1 PNG, which is what the route answers with.
+final capturePngV1 = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA'
+  '60e6kgAAAABJRU5ErkJggg==',
+);
+
+/// A gateway that answers the projection, and answers the capture's bytes the
+/// way the Workspace read route does — to the client that carries the session,
+/// and to nothing else.
+class CaptureApi extends SettingsApi {
+  CaptureApi(super.store, super.handler, {this.picture});
+
+  /// Absent stands for the route refusing this read.
+  final Uint8List? picture;
+  final reads = <String>[];
+
+  @override
+  Future<Uint8List> bytes(String path, {int limit = 4000000}) async {
+    reads.add(path);
+    final held = picture;
+    if (held == null) {
+      throw const RequestFailure('Please sign in again.', 401);
+    }
+    return held;
+  }
+}
 
 void main() {
   group('Bot Computer activity', () {
@@ -297,9 +336,9 @@ void main() {
     expect(viewerUrlForControlV1(driving, false), contains('view_only=1'));
   });
 
-  /// Every surface that says one line about the Computer — the card, the
-  /// phone's page, the desktop panel's header — asks the controller for it, so
-  /// a refusal cannot be silent on one of them and said on the others.
+  /// Both surfaces that say one line about the Computer — the card's status
+  /// row and the full window's subtitle — ask the controller for it, so a
+  /// refusal cannot be silent on one of them and said on the other.
   test('a Computer that refused says that, not the phase it was in', () async {
     var reads = 0;
     final controller = ComputerController(
@@ -322,16 +361,76 @@ void main() {
     controller.dispose();
   });
 
-  group('the card', () {
-    Future<ComputerController> open(
-      WidgetTester tester,
-      Map<String, Object?> answer,
-    ) async {
+  /// The seam the capture actually crosses. The projection carries a path on
+  /// this account's own authenticated origin, so reading it is a request this
+  /// client makes with its session on it — not a URL handed to an anonymous
+  /// image loader, which is what drew a placeholder over a capture that was
+  /// there.
+  group('the capture read', () {
+    test('resolves the projection path and signs it', () async {
       final store = MemoryStore();
-      final controller = ComputerController(
-        SettingsApi(store, (path, body) async => answer),
-        'bot-1',
+      store.values['session'] = jsonEncode({
+        'schemaVersion': 1,
+        'sessionId': 'session-1',
+        'userId': 'user-1',
+        'expiresAt': '2026-09-09T00:00:00.000Z',
+        'sessionToken': 'token-1',
+      });
+      final asked = <http.BaseRequest>[];
+      final api = NativeApi(
+        store,
+        client: MockClient((request) async {
+          asked.add(request);
+          return http.Response.bytes(
+            capturePngV1,
+            200,
+            headers: {'content-type': 'image/png'},
+          );
+        }),
       );
+
+      final bytes = await api.bytes(capturePathV1);
+
+      expect(bytes, capturePngV1);
+      expect(asked.single.method, 'GET');
+      expect(asked.single.url.path, '/api/bots/bot-1/workspace/file');
+      expect(
+        asked.single.url.queryParameters['path'],
+        contains('"path":"screen.png"'),
+      );
+      expect(asked.single.headers['authorization'], 'Bearer token-1');
+      api.close();
+    });
+
+    test('a refused capture is a refusal, not a decoded picture', () async {
+      final store = MemoryStore();
+      final api = NativeApi(
+        store,
+        client: MockClient(
+          (request) async => http.Response('{"error":"Unauthorized"}', 401),
+        ),
+      );
+
+      await expectLater(
+        api.bytes(capturePathV1),
+        throwsA(isA<RequestFailure>()),
+      );
+      api.close();
+    });
+  });
+
+  group('the card', () {
+    Future<(ComputerController, CaptureApi)> card(
+      WidgetTester tester,
+      Map<String, Object?> answer, {
+      Uint8List? picture,
+    }) async {
+      final api = CaptureApi(
+        MemoryStore(),
+        (path, body) async => answer,
+        picture: picture,
+      );
+      final controller = ComputerController(api, 'bot-1');
       await tester.pumpWidget(
         MaterialApp(
           theme: FrockTheme.theme(Brightness.dark),
@@ -339,8 +438,13 @@ void main() {
         ),
       );
       await tester.pump();
-      return controller;
+      return (controller, api);
     }
+
+    Future<ComputerController> open(
+      WidgetTester tester,
+      Map<String, Object?> answer,
+    ) async => (await card(tester, answer, picture: capturePngV1)).$1;
 
     /// The card polls and ticks; a test that leaves either running fails the
     /// binding's own invariant rather than the assertion it came for.
@@ -460,6 +564,64 @@ void main() {
       final controller = await open(tester, projection());
       await tester.pump();
       expect(find.textContaining('Ready · captured'), findsOneWidget);
+      await close(tester, controller);
+    });
+
+    /// The capture is on the authenticated origin. Drawing it is a read this
+    /// client signs, and what lands on the card is the picture — not the
+    /// "Computer" placeholder an anonymous image loader falls back to when the
+    /// route answers 401.
+    testWidgets('a filed capture is drawn from authenticated bytes', (
+      tester,
+    ) async {
+      final (controller, api) = await card(
+        tester,
+        projection(),
+        picture: capturePngV1,
+      );
+      await tester.pump();
+
+      expect(api.reads, [capturePathV1]);
+      expect(find.byIcon(Icons.desktop_windows_outlined), findsNothing);
+      expect(find.text('Computer'), findsNothing);
+      final drawn = tester.widget<Image>(find.byType(Image));
+      expect(drawn.image, isA<MemoryImage>());
+      await close(tester, controller);
+    });
+
+    testWidgets('the same capture is read once, however often the card polls', (
+      tester,
+    ) async {
+      final (controller, api) = await card(
+        tester,
+        projection(),
+        picture: capturePngV1,
+      );
+      await tester.pump();
+      for (var poll = 0; poll < 3; poll += 1) {
+        await controller.read();
+        await tester.pump();
+      }
+
+      expect(api.reads, [capturePathV1]);
+      await close(tester, controller);
+    });
+
+    testWidgets('a capture the route refuses leaves the card saying so', (
+      tester,
+    ) async {
+      final (controller, api) = await card(tester, projection());
+      await tester.pump();
+
+      expect(find.byType(Image), findsNothing);
+      expect(find.byIcon(Icons.desktop_windows_outlined), findsOneWidget);
+      // And it asks once. The card repaints every second; a refusal the next
+      // paint retried would be a request a second at a route that is refusing.
+      for (var poll = 0; poll < 3; poll += 1) {
+        await controller.read();
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(api.reads, [capturePathV1]);
       await close(tester, controller);
     });
 

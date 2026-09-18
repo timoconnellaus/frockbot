@@ -14,6 +14,7 @@ import {
   type ComputerConnectionProgressV1,
   type ComputerControlLease,
   type ComputerHostSessionV1,
+  type ComputerViewerSession,
 } from "@frockbot/computer/core/host";
 import type {
   WorkspaceFilesV1,
@@ -898,10 +899,89 @@ export class ComputerBotBackendContribution {
     });
   }
 
+  /**
+   * The fast way back to a desktop that is already up.
+   *
+   * A `connect` for a Bot that still holds an unexpired viewer record is an
+   * attach, not a cold prepare: the resident URL where this object still has
+   * one, and otherwise a single `viewer.renew` on the session the record
+   * names — no host wake, no ensure script, no provisioning steps. Surviving
+   * eviction is exactly this case: the record outlives the object that minted
+   * it, and only the URL beside it was lost.
+   *
+   * It is reached from an authenticated command that has already recorded its
+   * durable intent, and from nowhere else. A projection read must never renew:
+   * the renew is a charged host operation and the card polls every 1.5 seconds
+   * while a Computer is working, so a read that attached would bill watching
+   * the card. The renew carries this command's own effect id, so a replayed
+   * command settles against the reservation it already made.
+   *
+   * The record's expiry bounds the guess — past it nothing says the desktop is
+   * still there — and every refusal falls through to the full connect rather
+   * than being reported, because the cold path does everything the attach was
+   * trying to do and more.
+   */
+  private async attach(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<boolean> {
+    const storedValue = await this.host.storage.get<unknown>(
+      COMPUTER_VIEWER_RECORD_KEY,
+    );
+    const stored = decoded(storedValue, decodeStoredViewer);
+    if (!stored || !isFresh(stored.expiresAt, this.now())) return false;
+    if (this.#liveViewer?.id === stored.id) {
+      await this.recordViewer(this.#liveViewer);
+      return true;
+    }
+    let renewed: ComputerViewerSession | undefined;
+    try {
+      renewed = await this.withComputer(userId, command, async (computer) => {
+        if (!computer.viewer) return undefined;
+        return computer.viewer.renew(stored.id, {
+          effectId: `computer:${command.commandId}:attach-viewer`,
+        });
+      });
+    } catch {
+      return false;
+    }
+    if (!renewed || renewed.id !== stored.id || !renewed.expiresAt) {
+      return false;
+    }
+    await this.recordViewer({
+      id: renewed.id,
+      url: renewed.url,
+      expiresAt: renewed.expiresAt,
+    });
+    return true;
+  }
+
+  /**
+   * Records one live viewer: the session id and its expiry durably, the bearer
+   * URL in this instance alone.
+   */
+  private async recordViewer(viewer: LiveViewer): Promise<void> {
+    await this.host.storage.put({
+      [COMPUTER_VIEWER_RECORD_KEY]: {
+        version: 1,
+        id: viewer.id,
+        expiresAt: viewer.expiresAt,
+      } satisfies StoredViewerV1,
+      [COMPUTER_PROVIDER_RECORD_KEY]: {
+        version: 2,
+        phase: "ready",
+        message: "Computer ready",
+        recordedAt: this.now().toISOString(),
+      } satisfies StoredProviderAnswerV2,
+    });
+    this.#liveViewer = { ...viewer };
+  }
+
   private async connect(
     userId: string,
     command: ComputerCommandV1,
   ): Promise<void> {
+    if (await this.attach(userId, command)) return;
     const intentValue = await this.host.storage.get<unknown>(
       `${COMPUTER_INTENT_PREFIX}${command.commandId}`,
     );
@@ -1088,24 +1168,11 @@ export class ComputerBotBackendContribution {
     if (renewed.id !== current.id || !renewed.expiresAt) {
       throw new Error("The Computer returned an invalid viewer renewal");
     }
-    await this.host.storage.put({
-      [COMPUTER_VIEWER_RECORD_KEY]: {
-        version: 1,
-        id: renewed.id,
-        expiresAt: renewed.expiresAt,
-      } satisfies StoredViewerV1,
-      [COMPUTER_PROVIDER_RECORD_KEY]: {
-        version: 2,
-        phase: "ready",
-        message: "Computer ready",
-        recordedAt: this.now().toISOString(),
-      } satisfies StoredProviderAnswerV2,
-    });
-    this.#liveViewer = {
+    await this.recordViewer({
       id: renewed.id,
       url: renewed.url,
       expiresAt: renewed.expiresAt,
-    };
+    });
   }
 
   private async releaseControl(
