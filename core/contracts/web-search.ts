@@ -10,7 +10,8 @@
 // This module holds no transport. `providers/ollama-cloud` implements
 // {@link WebSearchV1} over `POST {apiBaseUrl}/api/web_search`; this Package
 // never imports it.
-import type { ToolDefinition, ToolSchema } from "./tool-execution.js";
+import type { ToolDefinition } from "./tool-execution.js";
+import type { ToolSchema } from "./types.js";
 
 export const WEB_SEARCH_TOOL_NAME_V1 = "web_search";
 

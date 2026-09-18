@@ -56,10 +56,23 @@ export interface CredentialUserBackendV1 {
     now?: string;
   }): Promise<void>;
   activate(
-    connectionId: string,
-    generation: string,
+    input: {
+      accountId: string;
+      connectionId: string;
+      packageId: string;
+      generation: string;
+    },
     storage?: CredentialTransaction,
   ): Promise<void>;
+  openPreparedSecret(input: PreparedApiKeyCredential): Promise<string>;
+  refreshActiveSecret(input: {
+    accountId: string;
+    connectionId: string;
+    packageId: string;
+    generation: string;
+    needsRefresh(secret: string): boolean;
+    refresh(secret: string): Promise<string>;
+  }): Promise<void>;
   discardPending(
     connectionId: string,
     generation: string,
@@ -85,7 +98,6 @@ export interface CredentialUserBackendV1 {
   ): Promise<CredentialLeaseV1>;
   openLease(input: {
     accountId: string;
-    connectionId: string;
     packageId: string;
     lease: CredentialLeaseV1;
   }): Promise<string>;
