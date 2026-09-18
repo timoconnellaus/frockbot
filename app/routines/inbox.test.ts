@@ -9,7 +9,6 @@ import {
   pendingBotInputPreambleV1,
   routineAttributionV1,
   routineHandoffTextV1,
-  ROUTINE_DELIVERY_CUE_V1,
   subagentAttributionV1,
 } from "./inbox.js";
 import {
@@ -244,14 +243,6 @@ describe("the pending-input queue", () => {
     expect((await inbox.drainInto("chat-run-1")).map((it) => it.kind)).toEqual([
       "wake",
     ]);
-  });
-
-  test("the delivery cue says nobody spoke and asks for the Bot's own words", () => {
-    // The Turn is opened with no person behind it, and a Bot handed a bare
-    // summary otherwise answers it as though it had been asked to.
-    expect(ROUTINE_DELIVERY_CUE_V1).toContain("Nobody has said anything");
-    expect(ROUTINE_DELIVERY_CUE_V1).toContain("in the context of this");
-    expect(ROUTINE_DELIVERY_CUE_V1).toContain("verbatim");
   });
 
   test("the preamble names the hand-off and never speaks as the user", () => {

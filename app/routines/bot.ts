@@ -613,16 +613,6 @@ export async function settleScheduledWork(
 }
 
 /**
- * Drain the Routines that are owed a firing.
- *
- * The scheduler mints the durable firing; this closure is the only thing that
- * admits a Turn for it, and it does so with `authority.run` — a direct call
- * inside the Durable Object. `turnType: "automation"` and the recorded origin
- * come from `routineTurnCommandV1`, and the fire id *is* the run id, so a
- * retry after eviction is refused by the kernel's own idempotency rather than
- * running the Routine a second time.
- */
-/**
  * Open the conversational Turn a waiting hand-off is owed.
  *
  * A firing hands off with `wake_parent`, and that hand-off is drained into the
@@ -690,6 +680,16 @@ async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
   }
 }
 
+/**
+ * Drain the Routines that are owed a firing.
+ *
+ * The scheduler mints the durable firing; this closure is the only thing that
+ * admits a Turn for it, and it does so with `authority.run` — a direct call
+ * inside the Durable Object. `turnType: "automation"` and the recorded origin
+ * come from `routineTurnCommandV1`, and the fire id *is* the run id, so a
+ * retry after eviction is refused by the kernel's own idempotency rather than
+ * running the Routine a second time.
+ */
 async function settleRoutineFirings(state: ShellBotStateV1): Promise<void> {
   const identity = await state.authority.readDurableIdentity();
   if (!identity) return;
