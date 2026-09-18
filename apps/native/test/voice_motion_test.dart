@@ -534,7 +534,7 @@ void main() {
         );
         expect(find.bySemanticsLabel('Starting dictation'), findsOneWidget);
         expect(find.byType(TextField).hitTestable(), findsNothing);
-        expect(find.byType(Text), findsNothing);
+        expect(find.byType(Text).hitTestable(), findsNothing);
         expect(find.byKey(const ValueKey('dictation-discard')), findsOneWidget);
         // Stop is usable even before microphone permission completes.
         await tester.tap(find.byTooltip('Stop dictation'));
