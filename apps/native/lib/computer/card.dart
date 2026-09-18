@@ -310,10 +310,11 @@ class _ComputerCardState extends State<ComputerCard> {
         future: controller.capture(screenshot),
         builder: (context, read) {
           final bytes = read.data;
-          if (read.hasError)
+          if (read.hasError) {
             return const Center(
               child: Text('Couldn’t load the computer screenshot.'),
             );
+          }
           if (bytes == null) return _placeholder(context, opening);
           return Image.memory(
             bytes,
