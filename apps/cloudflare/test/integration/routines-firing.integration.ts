@@ -12,7 +12,7 @@ import {
   runDurableObjectAlarm,
   runInDurableObject,
 } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   asUser,
   dueAtWithFiringHeadroomV1,
@@ -107,9 +107,11 @@ function requestTexts(run: StoredRunProbe): string[] {
 
 /**
  * Create the Routine, make it due, wake the object, and answer with the firing
- * once it has settled. The alarm returning is not the firing being over — a
- * second alarm delivery racing this one defers while the Turn executes — so the
- * durable run is read through the settled wait rather than straight after.
+ * once it and the delivery Turn it is owed have both settled. The alarm
+ * returning is not the firing being over — a second alarm delivery racing this
+ * one defers while the Turn executes — so the durable run is read through the
+ * settled wait rather than straight after, and the firing's lock is cleared
+ * before the same pass opens the delivery, so the delivery gets its own wait.
  */
 async function fireRoutine(
   userId: string,
@@ -135,7 +137,26 @@ async function fireRoutine(
   // and answers `false` for a firing that has already happened. What the firing
   // did is read from durable state, below.
   await runDurableObjectAlarm(botStub(userId, botId));
-  return settledRoutineFiringV1<StoredRunProbe>(userId, botId);
+  const automation = await settledRoutineFiringV1<StoredRunProbe>(
+    userId,
+    botId,
+  );
+  // The settled wait's own marker is the scheduler's firing lock, and that is
+  // cleared inside `settle` before `deliverPendingHandoffs` runs later in the
+  // same alarm pass. Waiting on the delivery Turn too is what makes the reads
+  // below settled: its run record exists from admission, its input and its
+  // model requests only as the Turn runs, and the transcript it lands in only
+  // once the alarm has opened it.
+  await vi.waitFor(
+    async () => {
+      const delivery = (await storedRuns(userId, botId)).find(
+        (run) => run.runId === `rd-${automation.runId}`,
+      );
+      expect(delivery?.status).toBe("completed");
+    },
+    { timeout: 5_000, interval: 50 },
+  );
+  return automation;
 }
 
 describe("a Routine firing, and what it leaves behind", () => {
