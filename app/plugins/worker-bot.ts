@@ -138,6 +138,8 @@ async function mountPluginWorkerV1(
       drawCard: (pluginId, cardId, request, context) =>
         active.drawCard(pluginId, cardId, request, context),
       executeTool: (invocation) => active.executeTool(invocation),
+      assembleTheme: (payload, original) =>
+        active.assembleTheme(payload, original),
       dispose: async () => {
         release();
         await active.dispose();

@@ -160,6 +160,26 @@ export function applicationSettingsFrame(
         },
       ],
     },
+    {
+      id: "appearance",
+      label: "Appearance",
+      fields: [
+        {
+          id: "look",
+          label: "Look",
+          kind: "select",
+          value: settings.appearance?.look ?? "ink",
+          editable: true,
+          required: true,
+          hint: "Ink is the dark look, Paper the light one. System follows your device.",
+          choices: [
+            { label: "Ink", value: "ink" },
+            { label: "Paper", value: "paper" },
+            { label: "System", value: "system" },
+          ],
+        },
+      ],
+    },
   ];
   for (const installed of settings.packages) {
     if (installed.state !== "installed") continue;
@@ -244,6 +264,21 @@ export function applicationSettingsCommand(
         ...(command.values.email ? { email: command.values.email } : {}),
         timezone: command.values.timezone,
       },
+    });
+  }
+  if (command.sectionId === "appearance") {
+    if (
+      command.unset?.length ||
+      Object.keys(command.values).some((key) => key !== "look") ||
+      (command.values.look !== "ink" &&
+        command.values.look !== "paper" &&
+        command.values.look !== "system")
+    )
+      throw new ConfigurationDecodeError("Invalid appearance fields");
+    return userCommand({
+      ...meta,
+      type: "user/update-appearance",
+      appearance: { look: command.values.look },
     });
   }
   if (!command.sectionId.startsWith("package."))

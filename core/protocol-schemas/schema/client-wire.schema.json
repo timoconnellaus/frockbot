@@ -464,6 +464,77 @@
       "required": ["schemaVersion", "characterId", "primary"],
       "additionalProperties": false
     },
+    "ThemeHex": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "ThemeTokens": {
+      "type": "object",
+      "properties": {
+        "surfaces": {
+          "type": "object",
+          "properties": {
+            "window": { "$ref": "#/$defs/ThemeHex" },
+            "surface": { "$ref": "#/$defs/ThemeHex" },
+            "raised": { "$ref": "#/$defs/ThemeHex" },
+            "text": { "$ref": "#/$defs/ThemeHex" },
+            "muted": { "$ref": "#/$defs/ThemeHex" },
+            "line": { "$ref": "#/$defs/ThemeHex" },
+            "accent": { "$ref": "#/$defs/ThemeHex" },
+            "onAccent": { "$ref": "#/$defs/ThemeHex" }
+          },
+          "required": [
+            "window",
+            "surface",
+            "raised",
+            "text",
+            "muted",
+            "line",
+            "accent",
+            "onAccent"
+          ],
+          "additionalProperties": false
+        },
+        "type": { "enum": ["manrope", "inter"] },
+        "bubbles": {
+          "type": "object",
+          "properties": {
+            "bot": { "enum": ["plain", "raised"] },
+            "me": { "enum": ["accent", "tint"] }
+          },
+          "required": ["bot", "me"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["surfaces", "type", "bubbles"],
+      "additionalProperties": false
+    },
+    "ThemeDocument": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "look": { "enum": ["ink", "paper", "studio"] },
+        "tokens": { "$ref": "#/$defs/ThemeTokens" },
+        "phases": {
+          "type": "array",
+          "maxItems": 24,
+          "items": {
+            "type": "object",
+            "properties": {
+              "after": {
+                "type": "string",
+                "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+              },
+              "tokens": { "$ref": "#/$defs/ThemeTokens" }
+            },
+            "required": ["after", "tokens"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["schemaVersion", "look", "tokens"],
+      "additionalProperties": false
+    },
     "BotRegistration": {
       "type": "object",
       "properties": {
@@ -494,6 +565,12 @@
         },
         "voice": {
           "$ref": "#/$defs/BotVoiceAppearance"
+        },
+        "look": {
+          "enum": ["inherit", "studio", "custom"]
+        },
+        "document": {
+          "$ref": "#/$defs/ThemeDocument"
         }
       },
       "required": [
@@ -817,6 +894,47 @@
         "expectedRevision",
         "botId",
         "voice"
+      ],
+      "additionalProperties": false
+    },
+    "LookIdentity": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "botId": { "$ref": "#/$defs/BotId" },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "look": { "enum": ["inherit", "studio", "custom"] },
+        "document": { "$ref": "#/$defs/ThemeDocument" }
+      },
+      "required": ["schemaVersion", "botId", "revision", "look"],
+      "additionalProperties": false
+    },
+    "BotLookCommand": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "type": { "const": "bot/update-look" },
+        "commandId": { "$ref": "#/$defs/Identifier" },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "botId": { "$ref": "#/$defs/BotId" },
+        "look": { "enum": ["inherit", "studio", "custom"] },
+        "document": { "$ref": "#/$defs/ThemeDocument" }
+      },
+      "required": [
+        "schemaVersion",
+        "type",
+        "commandId",
+        "expectedRevision",
+        "botId",
+        "look"
       ],
       "additionalProperties": false
     },
@@ -5139,7 +5257,7 @@
   "x-frockbot-compatibility": {
     "protocolMin": 1,
     "protocolMax": 1,
-    "minimumNativeVersion": "1.4.0",
+    "minimumNativeVersion": "1.6.0",
     "catalogs": []
   }
 }

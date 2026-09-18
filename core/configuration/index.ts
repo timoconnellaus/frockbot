@@ -33,6 +33,10 @@ import {
   isPublicIdentifier,
   isRpcIdentifier,
 } from "./identifiers.js";
+import {
+  decodeAccountAppearanceV1,
+  type AccountAppearanceV1,
+} from "@frockbot/core/theme";
 export { isBotIdV1 } from "./bot-id.js";
 export {
   decodeInstalledPackageSettingsPatchV1,
@@ -257,6 +261,11 @@ export interface UserSettingsViewV1 {
   platformModel?: ModelBindingV1;
   /** Permanent account choice; the legacy browser projection omits this field. */
   accountModel?: ModelBindingV1;
+  /**
+   * How the app itself looks: Ink, Paper, or System. Absent means Ink, which
+   * is what the client painted before this field existed.
+   */
+  appearance?: AccountAppearanceV1;
 }
 
 /** The account zone used wherever the User supplies no more specific clock. */
@@ -326,6 +335,10 @@ export type ConfigurationCommandV1 =
   | (CommandMetaV1 & {
       type: "user/update-profile";
       profile: UserSettingsViewV1["profile"];
+    })
+  | (CommandMetaV1 & {
+      type: "user/update-appearance";
+      appearance: AccountAppearanceV1;
     })
   | (CommandMetaV1 & {
       /**
@@ -1368,6 +1381,14 @@ export function decodeConfigurationCommandV1(
         },
       };
     }
+    case "user/update-appearance": {
+      const command = exactCommand(input, ["appearance"]);
+      return {
+        ...commandMeta(command),
+        type: value.type,
+        appearance: decodeAccountAppearanceV1(command.appearance),
+      };
+    }
     case "user/choose-model-provider": {
       const command = exactCommand(input, ["packageId"]);
       return {
@@ -2337,7 +2358,7 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     input,
     "User settings",
     ["schemaVersion", "revision", "profile", "packages", "connections"],
-    ["platformModel", "accountModel"],
+    ["platformModel", "accountModel", "appearance"],
   );
   schemaVersion(value);
   const profile = exactRecord(
@@ -2376,6 +2397,9 @@ export function decodeUserSettingsViewV1(input: unknown): UserSettingsViewV1 {
     ...(value.platformModel === undefined
       ? {}
       : { platformModel: decodeModelBindingV1(value.platformModel) }),
+    ...(value.appearance === undefined
+      ? {}
+      : { appearance: decodeAccountAppearanceV1(value.appearance) }),
   };
 }
 

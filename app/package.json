@@ -152,6 +152,7 @@
     "./routines/store": "./routines/store.ts",
     "./routines/testing": "./routines/testing.ts",
     "./runtime": "./runtime.ts",
+    "./theme/assemble": "./theme/assemble.ts",
     "./search": "./search/index.ts",
     "./search/backend": "./search/backend.ts",
     "./search/bot": "./search/bot.ts",

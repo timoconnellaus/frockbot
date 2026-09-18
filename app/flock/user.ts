@@ -229,6 +229,43 @@ export class FlockUserBackendContribution {
     });
   }
 
+  async mirrorLook(
+    botId: string,
+    look: BotRegistrationV1["look"],
+    document: BotRegistrationV1["document"],
+  ): Promise<BotDirectoryViewV1> {
+    return this.host.storage.transaction(async (storage) => {
+      const currentValue = await storage.get<unknown>(DIRECTORY_KEY);
+      const current =
+        currentValue === undefined
+          ? initialDirectory()
+          : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(currentValue));
+      const found = current.bots.find((bot) => bot.botId === botId);
+      if (!found) return structuredClone(current);
+      const sameLook = (found.look ?? "inherit") === (look ?? "inherit");
+      const sameDocument =
+        JSON.stringify(found.document) === JSON.stringify(document);
+      if (sameLook && sameDocument) return structuredClone(current);
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        bots: current.bots.map((bot) => {
+          if (bot.botId !== botId) return bot;
+          const { document: _prior, ...rest } = bot;
+          return {
+            ...rest,
+            look: look ?? "inherit",
+            ...(document === undefined
+              ? {}
+              : { document: structuredClone(document) }),
+          };
+        }),
+      } satisfies BotDirectoryViewV1;
+      await storage.put(DIRECTORY_KEY, next);
+      return structuredClone(next);
+    });
+  }
+
   async registration(botId: string): Promise<BotRegistrationV1> {
     const found = (await this.listBots()).bots.find(
       (bot) => bot.botId === botId,
@@ -326,6 +363,7 @@ export class FlockUserBackendContribution {
       // No random voice: a Bot nobody gave one to sounds like its character,
       // which is decided when it speaks rather than frozen at registration.
       ...(bot.voice === undefined ? {} : { voice: structuredClone(bot.voice) }),
+      look: "inherit",
     };
     const next = {
       ...current,

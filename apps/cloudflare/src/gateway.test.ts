@@ -41,7 +41,10 @@ import {
   createShellCompositionHost,
 } from "@frockbot/app/shell/backend-composition";
 import { executeBotTurn } from "@frockbot/app/shell/backend-runner";
-import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
+import {
+  randomAvatarAppearanceV1,
+  type BotDirectoryViewV1,
+} from "@frockbot/app/flock/shared";
 import {
   createClientRunStopReceiptV1,
   decodeClientRunLookupV1,
@@ -731,6 +734,50 @@ class MemoryConfiguration
       revision: request.command.expectedRevision + 1,
     });
   }
+  readLook(request: Parameters<BotConfigurationBinding["readLook"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      revision: 0,
+      look: "inherit" as const,
+    });
+  }
+  updateLook(request: Parameters<BotConfigurationBinding["updateLook"]>[0]) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      commandId: request.command.commandId,
+      status: "applied" as const,
+      revision: request.command.expectedRevision + 1,
+    });
+  }
+  persistAssembledDocument(
+    request: Parameters<BotConfigurationBinding["persistAssembledDocument"]>[0],
+  ) {
+    return Promise.resolve({
+      schemaVersion: 1 as const,
+      botId: request.botId,
+      revision: 1,
+      look: "inherit" as const,
+      ...(request.document === undefined ? {} : { document: request.document }),
+    });
+  }
+  readBotLook(request: Parameters<UserConfigurationBinding["readBotLook"]>[0]) {
+    return this.readLook(request);
+  }
+  updateBotLook(
+    request: Parameters<UserConfigurationBinding["updateBotLook"]>[0],
+  ) {
+    return this.updateLook(request);
+  }
+  mirrorBotLook(
+    _request: Parameters<UserConfigurationBinding["mirrorBotLook"]>[0],
+  ): Promise<BotDirectoryViewV1> {
+    return Promise.resolve({
+      schemaVersion: 1,
+      revision: 1,
+      bots: [],
+    });
+  }
   readBotVoice(
     request: Parameters<UserConfigurationBinding["readBotVoice"]>[0],
   ) {
@@ -1128,6 +1175,19 @@ function createTestGateway(
           }),
         updateVoice: (userId, botId, command) =>
           configurationFor(userId).updateVoice({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        readLook: (userId, botId) =>
+          configurationFor(userId).readLook({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        updateLook: (userId, botId, command) =>
+          configurationFor(userId).updateLook({
             schemaVersion: 1,
             userId,
             botId,

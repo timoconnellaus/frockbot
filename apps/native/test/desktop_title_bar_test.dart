@@ -17,20 +17,17 @@ void main() {
   /// bar, with the way back and a control on its one top row.
   Widget page(VoidCallback onRefresh) => MaterialApp(
     home: Scaffold(
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(kToolbarHeight),
-        child: DesktopWindowDragRegion(
-          child: AppBar(
-            leading: const BackButton(),
-            title: const Text('Personal details'),
-            actions: [
-              IconButton(
-                tooltip: 'Refresh settings',
-                onPressed: onRefresh,
-                icon: const Icon(Icons.refresh_rounded),
-              ),
-            ],
-          ),
+      appBar: DesktopHeader(
+        child: AppBar(
+          leading: const BackButton(),
+          title: const Text('Personal details'),
+          actions: [
+            IconButton(
+              tooltip: 'Refresh settings',
+              onPressed: onRefresh,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ],
         ),
       ),
       body: const SizedBox.expand(),
@@ -55,40 +52,59 @@ void main() {
   }
 
   testWidgets(
-    'on a Mac the existing header begins at the window top and moves it on drag',
+    'on a Mac the existing header sits below the traffic lights and moves the window on drag',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      final calls = listen(tester);
-      var refreshed = 0;
-      await tester.pumpWidget(page(() => refreshed++));
-      await tester.pumpAndSettle();
+      try {
+        final calls = listen(tester);
+        var refreshed = 0;
+        await tester.pumpWidget(page(() => refreshed++));
+        await tester.pumpAndSettle();
 
-      expect(find.byType(DesktopWindowDragRegion), findsOneWidget);
-      for (final control in [
-        find.byType(BackButton),
-        find.text('Personal details'),
-        find.byTooltip('Refresh settings'),
-      ]) {
-        expect(tester.getTopLeft(control).dy, lessThan(kToolbarHeight));
+        expect(find.byType(DesktopWindowDragRegion), findsOneWidget);
+        // Extra top space, same surface: the bar is not a second row and it
+        // does not grow a border above itself.
+        expect(find.byType(Divider), findsNothing);
+        for (final control in [
+          find.byType(BackButton),
+          find.text('Personal details'),
+          find.byTooltip('Refresh settings'),
+        ]) {
+          expect(
+            tester.getTopLeft(control).dy,
+            greaterThanOrEqualTo(desktopTitleBarBand),
+          );
+          expect(
+            tester.getTopLeft(control).dy,
+            lessThan(kToolbarHeight + desktopTitleBarBand),
+          );
+        }
+        // The bar is not inset past the lights: the way back is still at the
+        // leading edge. The title sits after it, so its own x is not the test.
+        expect(
+          tester.getTopLeft(find.byType(BackButton)).dx,
+          lessThan(desktopTrafficLightLeading),
+        );
+
+        // A drag on the unused centre of the one visible header hands the window
+        // to the pointer, without a separate title strip.
+        const at = Offset(400, desktopTitleBarBand + kToolbarHeight / 2);
+        await tester.dragFrom(
+          at,
+          const Offset(80, 0),
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pumpAndSettle();
+        expect(calls, ['startDrag']);
+
+        // A real control in the same row still receives a click.
+        await tester.tap(find.byTooltip('Refresh settings'));
+        await tester.pumpAndSettle();
+        expect(refreshed, 1);
+        expect(calls, ['startDrag']);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
       }
-
-      // A drag on the unused centre of the one visible header hands the window
-      // to the pointer, without a separate title strip.
-      const at = Offset(400, kToolbarHeight / 2);
-      await tester.dragFrom(
-        at,
-        const Offset(80, 0),
-        kind: PointerDeviceKind.mouse,
-      );
-      await tester.pumpAndSettle();
-      expect(calls, ['startDrag']);
-
-      // A real control in the same row still receives a click.
-      await tester.tap(find.byTooltip('Refresh settings'));
-      await tester.pumpAndSettle();
-      expect(refreshed, 1);
-      expect(calls, ['startDrag']);
-      debugDefaultTargetPlatformOverride = null;
     },
   );
 
@@ -114,4 +130,49 @@ void main() {
     expect(refreshed, 1);
     debugDefaultTargetPlatformOverride = null;
   });
+
+  testWidgets(
+    'on a Mac a pushed page header sits below the traffic lights, not past them',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => Scaffold(
+                      appBar: DesktopHeader(
+                        child: AppBar(title: const Text('Settings')),
+                      ),
+                      body: const SizedBox.expand(),
+                    ),
+                  ),
+                ),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+        expect(
+          tester.getTopLeft(find.byType(BackButton)).dy,
+          greaterThanOrEqualTo(desktopTitleBarBand),
+        );
+        expect(
+          tester.getTopLeft(find.text('Settings')).dy,
+          greaterThanOrEqualTo(desktopTitleBarBand),
+        );
+        expect(
+          tester.getTopLeft(find.byType(BackButton)).dx,
+          lessThan(desktopTrafficLightLeading),
+        );
+        expect(find.byType(Divider), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
 }

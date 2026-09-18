@@ -162,16 +162,17 @@ test("one manifest home, disabled controls absent, reset distinct from explicit 
   const frame = applicationSettingsFrame("tim", user, [provider, control]);
   expect(frame.sections.map((s) => s.id)).toEqual([
     "profile",
+    "appearance",
     "package.preferences",
   ]);
-  expect(frame.sections[1]!.fields).toMatchObject([
+  expect(frame.sections[2]!.fields).toMatchObject([
     { id: "nullable", isSet: true, canReset: true, value: null },
     { id: "toggle", isSet: false, canReset: true },
   ]);
   user.packages[1]!.state = "disabled";
   expect(
     applicationSettingsFrame("tim", user, [provider, control]).sections,
-  ).toHaveLength(1);
+  ).toHaveLength(2);
   expect(user.packages[1]!.values).toEqual({ nullable: null });
 });
 
@@ -280,7 +281,7 @@ test("provider knobs have one Models home and disappear while disabled", () => {
   ).toMatchObject([{ id: "limit", value: 4, canReset: true }]);
   expect(
     applicationSettingsFrame("tim", user, [declared]).sections,
-  ).toHaveLength(1);
+  ).toHaveLength(2);
   user.packages[0]!.state = "disabled";
   expect(
     modelsSettingsFrame("tim", user, [declared]).sections[1]!.fields,
@@ -442,6 +443,41 @@ test("Profile owns the timezone used by Routines", () => {
       values: { name: "Tim", timezone: "Sydney-ish" },
     }),
   ).toThrow("profile.timezone is not an IANA time zone");
+});
+
+test("Appearance owns Ink, Paper, and System", () => {
+  const user = settings();
+  const appearance = applicationSettingsFrame("tim", user, [provider])
+    .sections[1]!;
+  expect(appearance).toMatchObject({
+    id: "appearance",
+    fields: [
+      {
+        id: "look",
+        kind: "select",
+        value: "ink",
+        required: true,
+      },
+    ],
+  });
+  expect(appearance.fields[0]!.choices).toEqual([
+    { label: "Ink", value: "ink" },
+    { label: "Paper", value: "paper" },
+    { label: "System", value: "system" },
+  ]);
+  expect(
+    applicationSettingsCommand({
+      schemaVersion: 1,
+      ownerId: "tim",
+      commandId: "save-appearance",
+      expectedRevision: 8,
+      sectionId: "appearance",
+      values: { look: "paper" },
+    }),
+  ).toMatchObject({
+    type: "user/update-appearance",
+    appearance: { look: "paper" },
+  });
 });
 
 test("Profile defaults to UTC and keeps a valid stored alias selectable", () => {

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { STUDIO_DOCUMENT_V1 } from "@frockbot/core/theme";
 import {
   decodeBotIdentityDirectoryViewV1,
+  decodeUpdateLookCommandV1,
   decodeUpdateVoiceCommandV1,
   decodeVoiceIdentityViewV1,
   decodeBotIdentityViewV1,
@@ -438,5 +440,41 @@ describe("a Bot's voice", () => {
     expect(() =>
       decodeVoiceIdentityViewV1({ ...record, revision: -1 }),
     ).toThrow("revision is invalid");
+  });
+});
+
+describe("a Bot's look", () => {
+  const command = {
+    schemaVersion: 1 as const,
+    type: "bot/update-look" as const,
+    commandId: "look-1",
+    expectedRevision: 0,
+    botId: "alpha",
+    look: "studio" as const,
+  };
+
+  test("decodes the command, with or without a document", () => {
+    expect(decodeUpdateLookCommandV1(command)).toEqual(command);
+    expect(
+      decodeUpdateLookCommandV1({
+        ...command,
+        look: "custom",
+        document: STUDIO_DOCUMENT_V1,
+      }),
+    ).toEqual({
+      ...command,
+      look: "custom",
+      document: STUDIO_DOCUMENT_V1,
+    });
+    expect(() =>
+      decodeUpdateLookCommandV1({ ...command, extra: true }),
+    ).toThrow("unknown or missing field");
+    expect(() =>
+      decodeUpdateLookCommandV1({
+        ...command,
+        look: "custom",
+        document: { schemaVersion: 1 },
+      }),
+    ).toThrow("theme document has invalid fields");
   });
 });

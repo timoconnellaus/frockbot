@@ -11,6 +11,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +20,7 @@ import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/settings/bot_settings.dart';
 import 'package:frockbot_native/settings/voice_settings.dart';
 import 'package:frockbot_native/shell/composer.dart';
+import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/voice/appearance.dart';
@@ -143,6 +146,37 @@ void main() {
     expect(find.byTooltip('Your Bots'), findsNothing);
     await harness.dispose(tester);
   });
+
+  testWidgets(
+    'on a Mac the full-window call header sits past the traffic lights',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      try {
+        final harness = VoiceShellHarness();
+        await harness.mount(tester, width: 1280, brightness: Brightness.dark);
+        await harness.call.start();
+        harness.showCall(botId: 'voice-bot');
+        await tester.pump();
+
+        expect(tester.getSize(byIdentifier(ShellIds.sidebar)).width, 0);
+        final name = find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('Rosemary'),
+        );
+        expect(
+          tester.getTopLeft(name).dx,
+          greaterThanOrEqualTo(desktopTrafficLightLeading),
+        );
+        expect(
+          tester.getTopLeft(byIdentifier(VoiceIds.headerPill)).dx,
+          greaterThan(desktopTrafficLightLeading),
+        );
+        await harness.dispose(tester);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
 
   testWidgets('a call with another Bot leaves this Bot its thread', (
     tester,

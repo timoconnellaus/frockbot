@@ -80,9 +80,14 @@ the loopback stubs in its `env`, minted by the Bot Durable Object for this Bot
 and Turn.
 
 The open hooks are `system-prompt/assemble`, `agent/tool-exposure`,
-`tools/pre-execute`, `tools/post-execute`, `agent/turn-stopping` and, new,
-`agent/request`. Every hook returns a plain patch, chained in Plugin order, so
-a later Plugin sees an earlier one's change. Live objects never cross.
+`tools/pre-execute`, `tools/post-execute`, `agent/turn-stopping`,
+`agent/request` and `theme/assemble`. Every hook returns a plain patch, chained
+in Plugin order, so a later Plugin sees an earlier one's change. Live objects
+never cross. `theme/assemble` can change how this Bot looks; the directory
+row is what the client paints, and switching Bots never waits on the hook.
+When a Plugin actually changes the tokens, the pick becomes Custom — that is
+where the person sees the assembled document, and where they can edit the
+tokens by hand.
 
 ### Records
 

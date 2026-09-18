@@ -62,6 +62,8 @@ import type {
   UpdateAvatarCommandV1,
   VoiceIdentityViewV1,
   UpdateVoiceCommandV1,
+  LookIdentityViewV1,
+  UpdateLookCommandV1,
 } from "@frockbot/app/flock/shared";
 import type {
   TemplateCommandV1,
@@ -520,6 +522,24 @@ export interface UserConfigurationBinding {
     botId: string;
     command: UpdateVoiceCommandV1;
   }): Promise<FlockReceiptV1>;
+  readBotLook(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<LookIdentityViewV1>;
+  updateBotLook(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: UpdateLookCommandV1;
+  }): Promise<FlockReceiptV1>;
+  mirrorBotLook(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    look: LookIdentityViewV1["look"];
+    document?: LookIdentityViewV1["document"];
+  }): Promise<BotDirectoryViewV1>;
   getBotRegistration(request: {
     schemaVersion: 1;
     userId: string;
@@ -651,6 +671,23 @@ export interface BotConfigurationBinding {
     botId: string;
     command: UpdateVoiceCommandV1;
   }): Promise<FlockReceiptV1>;
+  readLook(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<LookIdentityViewV1>;
+  updateLook(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    command: UpdateLookCommandV1;
+  }): Promise<FlockReceiptV1>;
+  persistAssembledDocument(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    document?: LookIdentityViewV1["document"];
+  }): Promise<LookIdentityViewV1>;
   readConfiguration(
     request: BotConfigurationReadRpcV1,
   ): Promise<BotSettingsViewV1>;

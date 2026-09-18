@@ -79,6 +79,14 @@ class AppletListApi extends NativeApi {
     if (path.endsWith('/voice') && path.startsWith('/api/bots/')) {
       return {'schemaVersion': 1, 'botId': path.split('/')[3], 'revision': 0};
     }
+    if (path.endsWith('/look') && path.startsWith('/api/bots/')) {
+      return {
+        'schemaVersion': 1,
+        'botId': path.split('/')[3],
+        'revision': 0,
+        'look': 'inherit',
+      };
+    }
     if (path.startsWith('/api/settings')) return account();
     throw const FormatException('offline fixture');
   }

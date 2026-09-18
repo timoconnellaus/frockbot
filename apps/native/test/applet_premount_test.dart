@@ -61,6 +61,14 @@ class PremountApi extends NativeApi {
     if (path.endsWith('/bots/bot-1/voice')) {
       return {'schemaVersion': 1, 'botId': 'bot-1', 'revision': 0};
     }
+    if (path.endsWith('/bots/bot-1/look')) {
+      return {
+        'schemaVersion': 1,
+        'botId': 'bot-1',
+        'revision': 0,
+        'look': 'inherit',
+      };
+    }
     if (path.startsWith('/api/settings')) return account();
     throw const FormatException('offline fixture');
   }

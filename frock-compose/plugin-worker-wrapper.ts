@@ -661,6 +661,7 @@ export const BOT_ISOLATE_HOOK_VALUE_KEYS_V1 = {
   "tools/pre-execute": "preparation",
   "tools/post-execute": "result",
   "agent/turn-stopping": null,
+  "theme/assemble": "document",
 } as const satisfies Record<
   (typeof BOT_ISOLATE_HOOK_EVENTS_V1)[number],
   string | null

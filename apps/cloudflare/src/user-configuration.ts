@@ -20,6 +20,7 @@ import {
   deliverPush,
   type PushUpdate,
 } from "./push.js";
+import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { DurableObject } from "cloudflare:workers";
 import { cleanUserAvatarTestState } from "./avatar-state-cleanup.js";
@@ -69,8 +70,10 @@ import {
   decodeFlockReceiptV1,
   decodeUpdateAvatarCommandV1,
   decodeUpdateVoiceCommandV1,
+  decodeUpdateLookCommandV1,
   decodeBotVoiceForFlockV1,
   decodeVoiceIdentityViewV1,
+  decodeLookIdentityViewV1,
   BotNotFoundError,
 } from "@frockbot/app/flock/shared";
 import {
@@ -2056,6 +2059,87 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       }
     }
     return receipt;
+  }
+
+  async readBotLook(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const userId = request.userId as string;
+    const botId = request.botId as string;
+    await this.assertFlockIdentity(userId);
+    return decodeLookIdentityViewV1(
+      rpcJsonSnapshotV1(
+        await this.botLookStub(userId, botId).readLook({
+          schemaVersion: 1,
+          userId,
+          botId,
+        }),
+      ),
+    );
+  }
+
+  async updateBotLook(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeUpdateLookCommandV1),
+    });
+    const userId = request.userId as string;
+    const botId = request.botId as string;
+    const command = request.command as ReturnType<
+      typeof decodeUpdateLookCommandV1
+    >;
+    await this.assertFlockIdentity(userId);
+    const bot = this.botLookStub(userId, botId);
+    const receipt = decodeFlockReceiptV1(
+      rpcJsonSnapshotV1(
+        await bot.updateLook({ schemaVersion: 1, userId, botId, command }),
+      ),
+    );
+    if (receipt.status === "applied") {
+      const identity = decodeLookIdentityViewV1(
+        rpcJsonSnapshotV1(
+          await bot.readLook({ schemaVersion: 1, userId, botId }),
+        ),
+      );
+      await (
+        await this.flockContribution()
+      ).mirrorLook(botId, identity.look, identity.document);
+    }
+    return receipt;
+  }
+
+  async mirrorBotLook(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        botId: rpcBotId,
+        look: rpcDecoded(decodeBotLookV1),
+      },
+      { document: rpcDecoded(decodeThemeDocumentV1) },
+    );
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    return (await this.flockContribution()).mirrorLook(
+      request.botId as string,
+      request.look as ReturnType<typeof decodeBotLookV1>,
+      request.document === undefined
+        ? undefined
+        : (request.document as ReturnType<typeof decodeThemeDocumentV1>),
+    );
+  }
+
+  /** The Bot object's look surface. */
+  private botLookStub(userId: string, botId: string) {
+    const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+    // SAFETY: BOT_STATES is bound to BotState; generated RPC methods are not represented by workers-types.
+    return this.env.BOT_STATES.get(id) as unknown as {
+      readLook(input: unknown): Promise<unknown>;
+      updateLook(input: unknown): Promise<unknown>;
+    };
   }
 
   /** The Bot object's voice surface. */

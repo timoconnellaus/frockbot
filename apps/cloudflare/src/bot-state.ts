@@ -136,6 +136,7 @@ import {
   executeConfiguration,
   readConfiguration,
   resolveConfiguration,
+  userConfigurationV1,
 } from "@frockbot/app/settings/bot";
 import { decideApproval, listApprovals } from "@frockbot/app/approvals/bot";
 import { cardAction, listCards, readCardView } from "@frockbot/app/cards/bot";
@@ -153,6 +154,8 @@ import {
   decodeBotRegistrationV1,
   decodeUpdateAvatarCommandV1,
   decodeUpdateVoiceCommandV1,
+  decodeUpdateLookCommandV1,
+  decodeLookIdentityViewV1,
   type BotLifecycleCommandV1,
   type BotRegistrationV1,
 } from "@frockbot/app/flock/shared";
@@ -340,6 +343,11 @@ import {
   decodeSetBotPluginEnabledCommandV1,
 } from "@frockbot/app/plugins/page";
 import { executeBotPluginToolV1 } from "@frockbot/app/plugins/views-bot";
+import {
+  assembleBotThemeV1,
+  themeAssembleDeadlineV1,
+} from "@frockbot/app/theme/assemble";
+import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
 
 function isFrockAiGatewayBindingV1(
   value: BotStateEnv["AI"],
@@ -724,6 +732,7 @@ export class BotState extends DurableObject<BotStateEnv> {
               ).size || (await transaction.get(PUSH_READ_KEY))
                 ? [Date.now() + 30_000]
                 : []),
+              ...(await themeAssembleDeadlineV1(transaction)),
             ],
             scheduledWorkInFlight: () =>
               mountedContributions
@@ -733,10 +742,12 @@ export class BotState extends DurableObject<BotStateEnv> {
               mountedContributions
                 .get(computerBotContribution)
                 ?.deferScheduledWork(transaction) ?? Promise.resolve(),
-            settleScheduledWork: () =>
-              mountedContributions
+            settleScheduledWork: async () => {
+              await (mountedContributions
                 .get(computerBotContribution)
-                ?.settleScheduledWork() ?? Promise.resolve(),
+                ?.settleScheduledWork() ?? Promise.resolve());
+              await this.assembleThemeIfDue();
+            },
             // An archived Bot admits no configuration command; the Flock
             // Contribution owns that durable lifecycle state.
             assertLifecycleActive: (storage, botId) => {
@@ -1097,7 +1108,17 @@ export class BotState extends DurableObject<BotStateEnv> {
       userId: request.userId,
       botId: request.botId,
     });
-    return executeConfiguration(shell.state, request);
+    const receipt = await executeConfiguration(shell.state, request);
+    if (request.command.type === "bot/set-package-settings") {
+      this.ctx.waitUntil(
+        this.assembleTheme({
+          schemaVersion: 1,
+          userId: request.userId,
+          botId: request.botId,
+        }).catch(() => undefined),
+      );
+    }
+    return receipt;
   }
 
   /** Which of the User's installed Plugins this Bot runs (ADR 0026). */
@@ -1211,11 +1232,21 @@ export class BotState extends DurableObject<BotStateEnv> {
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return setBotPluginEnabledV1(
+    const receipt = await setBotPluginEnabledV1(
       shell.state,
       identity,
       request.command as ReturnType<typeof decodeSetBotPluginEnabledCommandV1>,
     );
+    if (receipt.status === "applied") {
+      this.ctx.waitUntil(
+        this.assembleTheme({
+          schemaVersion: 1,
+          userId: identity.userId,
+          botId: identity.botId,
+        }).catch(() => undefined),
+      );
+    }
+    return receipt;
   }
 
   /** A non-waking projection of this Bot's durable Computer presence. */
@@ -1295,6 +1326,102 @@ export class BotState extends DurableObject<BotStateEnv> {
       identity.userId,
       request.command as ReturnType<typeof decodeUpdateVoiceCommandV1>,
     );
+  }
+
+  async readLook(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { flock, registration } = await this.materialized(identity);
+    return flock.readLook(registration, identity.userId);
+  }
+
+  async updateLook(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      command: rpcDecoded(decodeUpdateLookCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { flock, registration } = await this.materialized(identity);
+    const receipt = await flock.updateLook(
+      registration,
+      identity.userId,
+      request.command as ReturnType<typeof decodeUpdateLookCommandV1>,
+    );
+    if (receipt.status === "applied") {
+      this.ctx.waitUntil(
+        this.assembleTheme({
+          schemaVersion: 1,
+          userId: identity.userId,
+          botId: identity.botId,
+        }).catch(() => undefined),
+      );
+    }
+    return receipt;
+  }
+
+  async persistAssembledDocument(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        botId: rpcBotId,
+      },
+      { document: rpcDecoded(decodeThemeDocumentV1) },
+    );
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { flock, registration } = await this.materialized(identity);
+    return flock.persistAssembledDocument(
+      registration,
+      identity.userId,
+      request.document === undefined
+        ? undefined
+        : (request.document as ReturnType<typeof decodeThemeDocumentV1>),
+    );
+  }
+
+  async assembleTheme(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { flock, registration, shell } = await this.materialized(identity);
+    const user = decodeUserSettingsViewV1(
+      rpcJsonSnapshotV1(
+        await userConfigurationV1(shell.state, identity).readConfiguration({
+          schemaVersion: 1,
+          userId: identity.userId,
+        }),
+      ),
+    );
+    return assembleBotThemeV1(shell.state, identity, {
+      flock,
+      registration,
+      appearance: user.appearance?.look ?? "ink",
+      timezone: userTimezoneV1(user.profile),
+      mirror: async (look, document) => {
+        await userConfigurationV1(shell.state, identity).mirrorBotLook(
+          identity.userId,
+          identity.botId,
+          look,
+          document,
+        );
+      },
+    });
+  }
+
+  private async assembleThemeIfDue(): Promise<void> {
+    const due = await themeAssembleDeadlineV1(this.ctx.storage);
+    if (due.length === 0 || due[0]! > Date.now()) return;
+    const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    if (!identity) return;
+    await this.assembleTheme({
+      schemaVersion: 1,
+      userId: identity.userId,
+      botId: identity.botId,
+    });
   }
 
   async readLifecycle(input: unknown) {

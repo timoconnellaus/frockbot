@@ -176,7 +176,8 @@ function harness(
     health?: (plugins: string[]) => PluginWorkerHealthV1;
     hook?: PluginWorkerEntrypoint["hook"];
     streamModel?: PluginWorkerEntrypoint["streamModel"];
-    modelProviders?: PluginWorkerHostOptions["modelProviders"];
+    openModelProviders?: PluginWorkerHostOptions["openModelProviders"];
+    selectedModelProvider?: PluginWorkerHostOptions["selectedModelProvider"];
     receiveTrigger?: PluginWorkerEntrypoint["receiveTrigger"];
     view?: PluginWorkerEntrypoint["view"];
     cardAction?: PluginWorkerEntrypoint["cardAction"];
@@ -315,9 +316,12 @@ function harness(
     compatibilityDate: "2026-01-01",
     bindingDigest: "b".repeat(64),
     ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
-    ...(input.modelProviders === undefined
+    ...(input.openModelProviders === undefined
       ? {}
-      : { modelProviders: input.modelProviders }),
+      : { openModelProviders: input.openModelProviders }),
+    ...(input.selectedModelProvider === undefined
+      ? {}
+      : { selectedModelProvider: input.selectedModelProvider }),
   };
   return {
     host: new PluginWorkerHost(options),
@@ -1178,6 +1182,24 @@ describe("hooks", () => {
         result: { content: "hook denied", isError: true },
       },
       "tools/post-execute": { content: "hook result", isError: false },
+      "theme/assemble": {
+        schemaVersion: 1,
+        look: "ink",
+        tokens: {
+          surfaces: {
+            window: "#1f1e24",
+            surface: "#1a191e",
+            raised: "#2c2a33",
+            text: "#f6f2ee",
+            muted: "#a8a3a6",
+            line: "#3a3742",
+            accent: "#d03f64",
+            onAccent: "#ffffff",
+          },
+          type: "manrope",
+          bubbles: { bot: "raised", me: "accent" },
+        },
+      },
     };
     const subject = harness({
       health: (plugins) => ({
@@ -1257,6 +1279,16 @@ describe("hooks", () => {
       ),
     ).toMatchObject({ content: "hook result" });
     await hooks.turnStopping(agent(), 1);
+    const assembled = await active.assembleTheme(
+      {
+        document: replacement["theme/assemble"] as never,
+        look: "inherit",
+        now: "2026-09-18T12:00:00.000Z",
+        timezone: "UTC",
+      },
+      replacement["theme/assemble"] as never,
+    );
+    expect(assembled.tokens.bubbles.me).toBe("accent");
 
     expect(seen.toSorted()).toEqual([...BOT_ISOLATE_HOOK_EVENTS_V1].toSorted());
     expect(subject.hookInvocations[0]!.enabled).toEqual(["weather", "greeter"]);
@@ -1272,6 +1304,52 @@ describe("hooks", () => {
         Promise.resolve(original),
       ),
     ).toEqual(original);
+    await active.dispose();
+  });
+
+  test("assembleTheme keeps the original document when a plugin throws", async () => {
+    const original = {
+      schemaVersion: 1 as const,
+      look: "ink" as const,
+      tokens: {
+        surfaces: {
+          window: "#1f1e24",
+          surface: "#1a191e",
+          raised: "#2c2a33",
+          text: "#f6f2ee",
+          muted: "#a8a3a6",
+          line: "#3a3742",
+          accent: "#db4b6d",
+          onAccent: "#ffffff",
+        },
+        type: "manrope" as const,
+        bubbles: { bot: "raised" as const, me: "tint" as const },
+      },
+    };
+    const subject = harness({
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          healthy(pluginId, { hooks: ["theme/assemble"] }),
+        ),
+      }),
+      hook: () => Promise.reject(new Error("theme hook exploded")),
+    });
+    const prepared = await subject.host.mount([
+      member("weather", { hooks: ["theme/assemble"] }),
+    ]);
+    const active = await prepared.commit();
+    const assembled = await active.assembleTheme(
+      {
+        document: original,
+        look: "inherit",
+        now: "2026-09-18T12:00:00.000Z",
+        timezone: "UTC",
+      },
+      original,
+    );
+    expect(assembled).toEqual(original);
     await active.dispose();
   });
 
@@ -1875,24 +1953,30 @@ describe("a Plugin's cards", () => {
 });
 
 describe("the model provider one deployment serves", () => {
-  const SERVED = {
-    provider: "deepseek",
-    trusted: { pluginId: "deepseek", contentHash: "d".repeat(64) },
-    open: ["deepseek"],
+  const ARTIFACT = "d".repeat(64);
+  /** The deployment's own claim: which Plugin, at which bytes, serves it. */
+  const OPEN = [
+    { provider: "deepseek", pluginId: "deepseek", contentHash: ARTIFACT },
+  ];
+  /** The claims, plus a Bot whose model selection names that provider. */
+  const SELECTED = {
+    openModelProviders: OPEN,
+    selectedModelProvider: "deepseek",
   };
+  const declaringDeepseek = (plugins: string[]) =>
+    ({
+      schemaVersion: 1,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
+      plugins: plugins.map((pluginId) =>
+        healthy(pluginId, { modelProviders: ["deepseek"] }),
+      ),
+    }) as never;
 
   test("a Bot's claimant is refused alone, and the deployment's Plugin still serves", async () => {
     const invocations: string[] = [];
     const subject = harness({
-      modelProviders: SERVED,
-      health: (plugins) =>
-        ({
-          schemaVersion: 1,
-          contractVersion: ISOLATE_CONTRACT_VERSION,
-          plugins: plugins.map((pluginId) =>
-            healthy(pluginId, { modelProviders: ["deepseek"] }),
-          ),
-        }) as never,
+      ...SELECTED,
+      health: declaringDeepseek,
       streamModel: (invocation) => {
         invocations.push(invocation.pluginId);
         return Promise.resolve({
@@ -1912,7 +1996,7 @@ describe("the model provider one deployment serves", () => {
         modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
       }),
       member("deepseek", {
-        contentHash: SERVED.trusted.contentHash,
+        contentHash: ARTIFACT,
         modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
       }),
     ]);
@@ -1959,17 +2043,7 @@ describe("the model provider one deployment serves", () => {
   });
 
   test("the only claimant is refused when it is not the deployment's artifact", async () => {
-    const subject = harness({
-      modelProviders: SERVED,
-      health: (plugins) =>
-        ({
-          schemaVersion: 1,
-          contractVersion: ISOLATE_CONTRACT_VERSION,
-          plugins: plugins.map((pluginId) =>
-            healthy(pluginId, { modelProviders: ["deepseek"] }),
-          ),
-        }) as never,
-    });
+    const subject = harness({ ...SELECTED, health: declaringDeepseek });
     const prepared = await subject.host.mount([
       member("aaa-shadow", {
         contentHash: "e".repeat(64),
@@ -1983,20 +2057,10 @@ describe("the model provider one deployment serves", () => {
   });
 
   test("a second claimant that is not the deployment's Plugin serves nothing either", async () => {
-    const subject = harness({
-      modelProviders: SERVED,
-      health: (plugins) =>
-        ({
-          schemaVersion: 1,
-          contractVersion: ISOLATE_CONTRACT_VERSION,
-          plugins: plugins.map((pluginId) =>
-            healthy(pluginId, { modelProviders: ["deepseek"] }),
-          ),
-        }) as never,
-    });
+    const subject = harness({ ...SELECTED, health: declaringDeepseek });
     const prepared = await subject.host.mount([
       member("deepseek", {
-        contentHash: SERVED.trusted.contentHash,
+        contentHash: ARTIFACT,
         modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
       }),
       member("zzz-copy", {
@@ -2014,14 +2078,71 @@ describe("the model provider one deployment serves", () => {
     ]);
   });
 
-  test("with no provider selected, no contribution is mounted at all", async () => {
-    const subject = harness();
+  test("with no provider selected, the deployment's Plugin still mounts and serves nothing", async () => {
+    // An account installs the provider's Package before any Bot chooses the
+    // model (ADR 0032), and a Bot whose model is something else keeps the
+    // member mounted: its tools and hooks follow the Bot's own switch, and
+    // only the selection runs the contribution. Refusing it here would report
+    // a correctly installed Plugin as a failed one on every Turn.
+    const subject = harness({
+      openModelProviders: OPEN,
+      health: declaringDeepseek,
+    });
     const prepared = await subject.host.mount([
       member("deepseek", {
+        contentHash: ARTIFACT,
         modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
       }),
     ]);
+    expect(prepared.failures).toEqual([]);
+    expect(prepared.mounted).toEqual(["deepseek"]);
     const active = await prepared.commit();
     expect(active.modelProviders).toEqual([]);
+    // Its tools are registered under its own namespace, as any other member's
+    // are: a provider Plugin is a Plugin first.
+    expect(subject.namespaces).toContain("deepseek");
+    expect(subject.definitions.map((definition) => definition.name)).toContain(
+      "reverse_text",
+    );
+  });
+
+  test("with no provider selected, a foreign claimant is refused and the deployment's Plugin still mounts", async () => {
+    // The claim is judged by bytes at every mount, never by which member the
+    // generation lists first: a Bot-written claimant sorting ahead of the
+    // deployment's Plugin must not take the provider from it.
+    const subject = harness({
+      openModelProviders: OPEN,
+      health: declaringDeepseek,
+    });
+    const prepared = await subject.host.mount([
+      member("aaa-shadow", {
+        contentHash: "e".repeat(64),
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+      }),
+      member("deepseek", {
+        contentHash: ARTIFACT,
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+      }),
+    ]);
+    expect(prepared.mounted).toEqual(["deepseek"]);
+    expect(prepared.failures.map((failure) => failure.pluginId)).toEqual([
+      "aaa-shadow",
+    ]);
+    const active = await prepared.commit();
+    expect(active.modelProviders).toEqual([]);
+  });
+
+  test("with no provider selected, a provider the deployment does not open is still refused", async () => {
+    const subject = harness({ openModelProviders: OPEN });
+    const prepared = await subject.host.mount([
+      member("asker", {
+        contentHash: "a".repeat(64),
+        modelProviders: [{ id: "openai", protocolVersion: 1 }],
+      }),
+    ]);
+    expect(prepared.mounted).toEqual([]);
+    expect(prepared.failures[0]?.message).toMatch(
+      /does not open to plugins: openai/,
+    );
   });
 });

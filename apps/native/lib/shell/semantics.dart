@@ -162,6 +162,18 @@ abstract final class VoiceIds {
   static const composerDictate = 'composer-dictate';
   static const composerDictationStop = 'composer-dictation-stop';
   static const composerDictationLevel = 'composer-dictation-level';
+  static const composerDictationDiscard = 'composer-dictation-discard';
+}
+
+abstract final class LookIds {
+  static const settings = 'bot-look-settings';
+  static const preview = 'bot-look-preview';
+  static const editor = 'bot-look-editor';
+  static const typeface = 'bot-look-typeface';
+  static const botBubble = 'bot-look-bot-bubble';
+  static const meBubble = 'bot-look-me-bubble';
+  static String option(String look) => 'bot-look-$look';
+  static String surface(String name) => 'bot-look-surface-$name';
 }
 
 /// Settings: the account surfaces, and the Bot's own panel.
@@ -203,6 +215,7 @@ abstract final class SettingsIds {
   static const botHidden = 'bot-hidden-from-sidebar';
   static const botHideConfirm = 'bot-hide-confirm';
   static const botSaveStatus = 'bot-settings-status';
+  static const botLook = 'bot-settings-look';
 
   /// The Bot page: what the Bot is doing, and the doors to the rest of it.
   static const botPage = 'bot-page';

@@ -10,6 +10,7 @@ import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_native/voice/dictation.dart';
 
 import 'voice_shell_harness.dart';
 import 'widget_test.dart' show FakeTransport, MemoryStore;
@@ -143,7 +144,7 @@ void main() {
         expect(companion.hitTestable(), findsNothing);
         expect(tester.getTopLeft(field).dx, lessThan(restLeft - 24));
       } else {
-        expect(seat.left, 10);
+        expect(seat.left, 6);
         expect(fade.opacity, 1);
         expect(companion, findsOneWidget);
         expect(tester.getTopLeft(field).dx, restLeft);
@@ -156,9 +157,71 @@ void main() {
       expect(companion, findsOneWidget);
       expect(
         tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned)).left,
-        10,
+        6,
       );
       expect(tester.getTopLeft(field).dx, restLeft);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    });
+  }
+
+  for (final width in [390.0, 1280.0]) {
+    testWidgets('dictation fills the field in place at $width', (tester) async {
+      tester.view.physicalSize = Size(width, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.view.padding = FakeViewPadding(bottom: width == 390 ? 34 : 0);
+      addTearDown(tester.view.reset);
+      final store = MemoryStore();
+      final c = ChatController(
+        transport: FakeTransport(store),
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-1',
+      );
+      await c.initialize();
+      c.connection = ConnectionState.connected;
+      final level = ValueNotifier(0.65);
+      addTearDown(level.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: RepaintBoundary(
+            child: Scaffold(
+              body: ChatPane(
+                controller: c,
+                onReconnect: () async {},
+                background: 'pixel',
+                onDictate: () {},
+                onStopDictation: () {},
+                onDiscardDictation: () {},
+                onVoice: () {},
+                dictationState: DictationState.capturing,
+                dictationLevel: level,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final pill = find.byKey(const ValueKey('dictation-pill'));
+      final voice = find.byKey(const ValueKey('composer-voice'));
+      expect(pill, findsOneWidget);
+      expect(find.byKey(const ValueKey('dictation-discard')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dictation-stop')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dictation-strip')), findsOneWidget);
+      expect(find.byType(TextField).hitTestable(), findsNothing);
+      expect(
+        tester.getTopLeft(voice).dx,
+        greaterThanOrEqualTo(tester.getTopRight(pill).dx - 1),
+      );
+      expect(
+        tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned)).left,
+        6,
+      );
+      await capture(tester, 'composer-dictation-${width.toInt()}');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       c.dispose();

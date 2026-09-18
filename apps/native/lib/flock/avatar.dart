@@ -516,9 +516,13 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
         clipBehavior: Clip.none,
         children: [
           result,
+          // Over the character's shoulder, not under its feet. Hung below the
+          // box, the badge left the artboard entirely — beside the composer it
+          // floated in the gap under the field and read as a stray control
+          // rather than as this character thinking.
           Positioned(
-            right: -badge.height * 0.55,
-            bottom: -badge.height * 0.55,
+            right: -badge.height * 0.3,
+            top: -badge.height * 0.3,
             child: badge,
           ),
         ],

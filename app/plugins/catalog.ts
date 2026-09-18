@@ -21,6 +21,7 @@ import type {
   ArtifactRefV1,
   CompositionMemberV1,
 } from "@frockbot/core/durable";
+import type { PluginServedProviderClaimV1 } from "@frockbot/frock-compose";
 import { PLUGIN_SERVED_PROVIDERS_V1 } from "@frockbot/providers/catalog/definition";
 import {
   CAPABILITY_DESCRIPTIONS,
@@ -339,6 +340,22 @@ export function deploymentPluginArtifactHashV1(
     (plugin) => plugin.pluginId === pluginId,
   )?.artifact.contentHash;
 }
+
+/**
+ * Every model provider this deployment serves through a Plugin, and the Plugin
+ * and artifact that may serve each (ADR 0032). It is the deployment's own
+ * answer — the provider catalog's entry joined to the artifact the catalog
+ * ships — so it is the same answer at every mount, whether or not any Bot's
+ * model names the provider: a member declaring one of these is the
+ * deployment's Plugin at the deployment's bytes, or it is refused.
+ */
+export const PLUGIN_SERVED_PROVIDER_CLAIMS_V1: readonly PluginServedProviderClaimV1[] =
+  PLUGIN_SERVED_PROVIDERS_V1.flatMap((entry) => {
+    const contentHash = deploymentPluginArtifactHashV1(entry.pluginId);
+    return contentHash === undefined
+      ? []
+      : [{ provider: entry.provider, pluginId: entry.pluginId, contentHash }];
+  });
 
 /**
  * The catalog entries one account's Composition carries: every seeded Plugin

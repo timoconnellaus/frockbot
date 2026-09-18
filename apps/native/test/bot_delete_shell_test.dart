@@ -68,6 +68,15 @@ class DeleteHarness extends NativeApi {
     if (voice != null && body == null) {
       return {'schemaVersion': 1, 'botId': voice.group(1), 'revision': 0};
     }
+    final look = RegExp(r'^/api/bots/(\w+)/look$').firstMatch(path);
+    if (look != null && body == null) {
+      return {
+        'schemaVersion': 1,
+        'botId': look.group(1),
+        'revision': 0,
+        'look': 'inherit',
+      };
+    }
     final lifecycle = RegExp(r'^/api/bots/(\w+)/lifecycle$').firstMatch(path);
     if (lifecycle != null && body is Map) {
       lifecycleWrites.add(body);

@@ -10,6 +10,7 @@ import '../client/transport.dart';
 import '../plugins/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../settings/page.dart';
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
@@ -401,29 +402,31 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     );
     if (!widget.chrome) return content;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        automaticallyImplyLeading: widget.onClose == null,
-        leading: widget.onClose == null
-            ? null
-            : identified(
-                ShellIds.rightPanelClose,
-                IconButton(
-                  tooltip: 'Close ${title.toLowerCase()}',
-                  onPressed: widget.onClose,
-                  icon: const Icon(Icons.close),
+      appBar: DesktopHeader(
+        child: AppBar(
+          title: Text(title),
+          automaticallyImplyLeading: widget.onClose == null,
+          leading: widget.onClose == null
+              ? null
+              : identified(
+                  ShellIds.rightPanelClose,
+                  IconButton(
+                    tooltip: 'Close ${title.toLowerCase()}',
+                    onPressed: widget.onClose,
+                    icon: const Icon(Icons.close),
+                  ),
                 ),
+          actions: [
+            identified(
+              ConnectorIds.refresh,
+              IconButton(
+                tooltip: 'Refresh ${title.toLowerCase()}',
+                onPressed: loading ? null : load,
+                icon: const Icon(Icons.refresh_rounded),
               ),
-        actions: [
-          identified(
-            ConnectorIds.refresh,
-            IconButton(
-              tooltip: 'Refresh ${title.toLowerCase()}',
-              onPressed: loading ? null : load,
-              icon: const Icon(Icons.refresh_rounded),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
       body: content,
     );

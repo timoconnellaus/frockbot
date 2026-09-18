@@ -220,6 +220,23 @@ void main() {
     harness.controller.dispose();
   });
 
+  test('discard takes the capture\'s words back out of the draft', () async {
+    final harness = Harness();
+    harness.drafts.setDraft('bot-a', 'typed first');
+    await harness.controller.start('bot-a');
+    await settle();
+    harness.say('ready');
+    await settle();
+    harness.say('segment', {'text': 'and a thought'});
+    await settle();
+    expect(harness.drafts.draftFor('bot-a'), 'typed first and a thought');
+    await harness.controller.discard();
+    expect(harness.drafts.draftFor('bot-a'), 'typed first');
+    expect(harness.socket.texts, isNot(contains(frame('stop'))));
+    expect(harness.controller.active, isFalse);
+    harness.controller.dispose();
+  });
+
   test('a stop while the socket is still connecting still commits', () async {
     // The blocker this covers: a capture whose socket had not finished
     // opening when Stop was pressed used to be thrown away, opening audio and
