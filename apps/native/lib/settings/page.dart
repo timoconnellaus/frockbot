@@ -132,6 +132,7 @@ class _SettingsPageState extends State<SettingsPage>
     if (receipt['status'] == 'applied') {
       reloadWanted = true;
       saved = 'Saved.';
+      widget.onFeaturesChanged?.call();
       final chosen = chosenProviderPackageIdV1(command);
       if (viewActionKindV1(command) == 'choose-provider') {
         await _manageProvider(

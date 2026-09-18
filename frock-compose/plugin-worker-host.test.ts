@@ -1182,6 +1182,24 @@ describe("hooks", () => {
         result: { content: "hook denied", isError: true },
       },
       "tools/post-execute": { content: "hook result", isError: false },
+      "theme/assemble": {
+        schemaVersion: 1,
+        look: "ink",
+        tokens: {
+          surfaces: {
+            window: "#1f1e24",
+            surface: "#1a191e",
+            raised: "#2c2a33",
+            text: "#f6f2ee",
+            muted: "#a8a3a6",
+            line: "#3a3742",
+            accent: "#d03f64",
+            onAccent: "#ffffff",
+          },
+          type: "manrope",
+          bubbles: { bot: "raised", me: "accent" },
+        },
+      },
     };
     const subject = harness({
       health: (plugins) => ({
@@ -1261,6 +1279,16 @@ describe("hooks", () => {
       ),
     ).toMatchObject({ content: "hook result" });
     await hooks.turnStopping(agent(), 1);
+    const assembled = await active.assembleTheme(
+      {
+        document: replacement["theme/assemble"] as never,
+        look: "inherit",
+        now: "2026-09-18T12:00:00.000Z",
+        timezone: "UTC",
+      },
+      replacement["theme/assemble"] as never,
+    );
+    expect(assembled.tokens.bubbles.me).toBe("accent");
 
     expect(seen.toSorted()).toEqual([...BOT_ISOLATE_HOOK_EVENTS_V1].toSorted());
     expect(subject.hookInvocations[0]!.enabled).toEqual(["weather", "greeter"]);
@@ -1276,6 +1304,52 @@ describe("hooks", () => {
         Promise.resolve(original),
       ),
     ).toEqual(original);
+    await active.dispose();
+  });
+
+  test("assembleTheme keeps the original document when a plugin throws", async () => {
+    const original = {
+      schemaVersion: 1 as const,
+      look: "ink" as const,
+      tokens: {
+        surfaces: {
+          window: "#1f1e24",
+          surface: "#1a191e",
+          raised: "#2c2a33",
+          text: "#f6f2ee",
+          muted: "#a8a3a6",
+          line: "#3a3742",
+          accent: "#db4b6d",
+          onAccent: "#ffffff",
+        },
+        type: "manrope" as const,
+        bubbles: { bot: "raised" as const, me: "tint" as const },
+      },
+    };
+    const subject = harness({
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          healthy(pluginId, { hooks: ["theme/assemble"] }),
+        ),
+      }),
+      hook: () => Promise.reject(new Error("theme hook exploded")),
+    });
+    const prepared = await subject.host.mount([
+      member("weather", { hooks: ["theme/assemble"] }),
+    ]);
+    const active = await prepared.commit();
+    const assembled = await active.assembleTheme(
+      {
+        document: original,
+        look: "inherit",
+        now: "2026-09-18T12:00:00.000Z",
+        timezone: "UTC",
+      },
+      original,
+    );
+    expect(assembled).toEqual(original);
     await active.dispose();
   });
 

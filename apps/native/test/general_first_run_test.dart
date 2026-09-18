@@ -220,6 +220,15 @@ class FirstRunApi extends NativeApi {
     if (voice != null && body == null) {
       return {'schemaVersion': 1, 'botId': voice.group(1), 'revision': 0};
     }
+    final look = RegExp(r'^/api/bots/([^/]+)/look$').firstMatch(path);
+    if (look != null && body == null) {
+      return {
+        'schemaVersion': 1,
+        'botId': look.group(1),
+        'revision': 0,
+        'look': 'inherit',
+      };
+    }
     if (path.endsWith('/plugins') && plugins != null) {
       return {
         'schemaVersion': 1,

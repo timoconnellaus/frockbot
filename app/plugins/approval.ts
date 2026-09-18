@@ -335,6 +335,9 @@ export function pluginApprovalActionV1(
   );
   if (descriptor.hooks.length > 0) {
     parts.push(`It wraps ${descriptor.hooks.join(", ")}.`);
+    if (descriptor.hooks.includes("theme/assemble")) {
+      parts.push("This Plugin can change how this Bot looks.");
+    }
   }
   // A model provider contribution runs when a Bot's model names it, which is
   // not the switch this card asks about — so the card says what it serves and

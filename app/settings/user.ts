@@ -262,6 +262,12 @@ function applyUserCommand(
           timezone: command.profile.timezone ?? userTimezoneV1(current.profile),
         },
       };
+    case "user/update-appearance":
+      return {
+        ...current,
+        revision,
+        appearance: command.appearance,
+      };
     case "user/choose-model-provider":
       return chooseProvider(current, command.packageId);
     case "user/set-account-model": {

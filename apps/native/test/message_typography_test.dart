@@ -1,6 +1,6 @@
 /// How a message reads, by platform.
 ///
-/// Inter ships here at 400 and up, so a desktop cannot go lighter by weight:
+/// Manrope ships here at 400 and up, so a desktop cannot go lighter by weight:
 /// on the Mac the same 15-point regular that reads right on a phone draws
 /// heavy, and a Bot's emphasis at semibold heavier still. The desktop reads
 /// messages a point smaller with emphasis at medium; the phone is untouched.
@@ -44,7 +44,7 @@ void main() {
     final styles = leafStyles(tester);
     final desktop = desktops.contains(defaultTargetPlatform);
 
-    expect(styles['Plain ']!.fontFamily, 'Inter');
+    expect(styles['Plain ']!.fontFamily, 'Manrope');
     expect(styles['Plain ']!.fontWeight, FontWeight.w400);
     expect(styles['Plain ']!.height, 1.5);
     expect(styles['Plain ']!.fontSize, desktop ? 14 : 15);

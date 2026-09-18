@@ -38,8 +38,10 @@ import {
   decodeFlockReceiptV1,
   decodeVoiceIdentityViewV1,
   type BotDirectoryViewV1,
+  type BotLookV1,
   type CreateBotCommandV1,
   type FlockReceiptV1,
+  type ThemeDocumentV1,
   type UpdateVoiceCommandV1,
   type VoiceIdentityViewV1,
 } from "@frockbot/app/flock/shared";
@@ -489,6 +491,12 @@ export interface UserConfigurationRpcV1 {
     botId: string,
     command: UpdateVoiceCommandV1,
   ): Promise<FlockReceiptV1>;
+  mirrorBotLook(
+    userId: string,
+    botId: string,
+    look: BotLookV1,
+    document: ThemeDocumentV1 | undefined,
+  ): Promise<BotDirectoryViewV1>;
   createBot(
     userId: string,
     command: CreateBotCommandV1,
@@ -589,6 +597,7 @@ export function userConfigurationV1(
     createBot(input: unknown): Promise<unknown>;
     readBotVoice(input: unknown): Promise<unknown>;
     updateBotVoice(input: unknown): Promise<unknown>;
+    mirrorBotLook(input: unknown): Promise<unknown>;
     executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
     listMachines(input: unknown): Promise<unknown>;
     describeMachineTarget(input: unknown): Promise<unknown>;
@@ -652,6 +661,16 @@ export function userConfigurationV1(
     updateBotVoice: async (userId, botId, command) =>
       decodeFlockReceiptV1(
         await rpc.updateBotVoice({ schemaVersion: 1, userId, botId, command }),
+      ),
+    mirrorBotLook: async (userId, botId, look, document) =>
+      decodeDirectoryViewV1(
+        await rpc.mirrorBotLook({
+          schemaVersion: 1,
+          userId,
+          botId,
+          look,
+          ...(document === undefined ? {} : { document }),
+        }),
       ),
     executeTemplateCommand: async (userId, command) =>
       decodeTemplateShareReceiptV1(

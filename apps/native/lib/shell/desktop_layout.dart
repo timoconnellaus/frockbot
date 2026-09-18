@@ -188,6 +188,10 @@ class ShellLayout extends StatelessWidget {
 
   /// What the right panel holds, or null when no feature has filled it.
   final Widget? rightPanel;
+
+  /// When set, the panel (column or drawer) paints this Bot's look. Inherit
+  /// leaves this null so the panel stays on the account Theme.
+  final ThemeData? panelTheme;
   final bool panelOpen;
   final bool panelCollapsed;
   final VoidCallback onDismiss;
@@ -207,6 +211,7 @@ class ShellLayout extends StatelessWidget {
     required this.sidebar,
     required this.conversation,
     required this.rightPanel,
+    this.panelTheme,
     required this.panelOpen,
     this.panelCollapsed = false,
     required this.onDismiss,
@@ -231,7 +236,9 @@ class ShellLayout extends StatelessWidget {
       // collapsed column at the widest tier is simply gone, not a drawer
       // waiting under a scrim.
       final drawnPanel = tier == ShellTier.dual && panelOpen && panel != null;
-      final divider = FrockTheme.hairline(Theme.of(context).colorScheme);
+      final divider = FrockTheme.hairline(
+        (panelTheme ?? Theme.of(context)).colorScheme,
+      );
       return PopScope(
         canPop: !drawnPanel && !voiceMode,
         onPopInvokedWithResult: (didPop, _) {
@@ -282,12 +289,14 @@ class ShellLayout extends StatelessWidget {
                           ),
                         ),
                         if (inlinePanel)
-                          _Column(
-                            width: shellRightPanelWidth,
-                            border: Border(left: BorderSide(color: divider)),
-                            child: SafeArea(
-                              top: false,
-                              child: identified(ShellIds.rightPanel, panel),
+                          _withPanelTheme(
+                            _Column(
+                              width: shellRightPanelWidth,
+                              border: Border(left: BorderSide(color: divider)),
+                              child: SafeArea(
+                                top: false,
+                                child: identified(ShellIds.rightPanel, panel),
+                              ),
                             ),
                           ),
                       ],
@@ -300,16 +309,31 @@ class ShellLayout extends StatelessWidget {
               child: _Scrim(open: drawnPanel, onDismiss: onDismiss),
             ),
             if (panel != null && tier == ShellTier.dual)
-              _Drawer(
-                open: drawnPanel,
-                width: min(shellRightPanelWidth, constraints.maxWidth),
-                child: identified(ShellIds.rightPanel, panel),
+              _withPanelTheme(
+                _Drawer(
+                  open: drawnPanel,
+                  width: min(shellRightPanelWidth, constraints.maxWidth),
+                  child: identified(ShellIds.rightPanel, panel),
+                ),
               ),
           ],
         ),
       );
     },
   );
+
+  Widget _withPanelTheme(Widget child) {
+    final theme = panelTheme;
+    if (theme == null) return child;
+    return Theme(
+      key: const ValueKey('panel-theme'),
+      data: theme,
+      child: ColoredBox(
+        color: theme.scaffoldBackgroundColor,
+        child: child,
+      ),
+    );
+  }
 
   /// One column. The Bot list is the root page; the conversation slides over
   /// it and Back slides it away. The right panel's entries are pages of their

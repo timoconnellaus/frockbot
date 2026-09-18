@@ -99,7 +99,7 @@ The one Dynamic Worker per User that holds every installed Plugin as a module ma
 _Avoid_: Isolate per plugin, runtime bundle
 
 **Hook**:
-One of the six loop events a Plugin may wrap — `system-prompt/assemble`, `agent/tool-exposure`, `tools/pre-execute`, `tools/post-execute`, `agent/turn-stopping`, `agent/request` — each answering with a plain patch, chained in Plugin order.
+A named event a Plugin may wrap — the loop events `system-prompt/assemble`, `agent/tool-exposure`, `tools/pre-execute`, `tools/post-execute`, `agent/turn-stopping`, `agent/request`, and `theme/assemble` outside a Turn — each answering with a plain patch, chained in Plugin order.
 _Avoid_: Middleware, interceptor, action
 
 **Seed state**:

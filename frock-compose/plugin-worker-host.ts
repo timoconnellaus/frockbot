@@ -492,6 +492,16 @@ export interface ActivePluginWorker {
   executeTool(
     invocation: PluginWorkerToolInvocationV1,
   ): Promise<IsolateToolResultV1>;
+  /**
+   * Assembles this Bot's look outside any Turn. `theme/assemble` is not a
+   * loop event: `_select` never waits on it, and the Agent loop never fires
+   * it. A Plugin that throws or answers with a document the kernel refuses
+   * is skipped and the last good document is kept.
+   */
+  assembleTheme(
+    payload: LoopEventPayloadMapV1["theme/assemble"],
+    original: LoopEventReturnMapV1["theme/assemble"],
+  ): Promise<LoopEventReturnMapV1["theme/assemble"]>;
   dispose(): Promise<void>;
 }
 
@@ -805,6 +815,7 @@ export class PluginWorkerHost {
                 content: `plugin "${invocation.pluginId}" did not mount in this generation`,
                 isError: true,
               }),
+            assembleTheme: (_payload, original) => Promise.resolve(original),
             dispose: () => Promise.resolve(),
           }),
       };
@@ -1223,6 +1234,19 @@ export class PluginWorkerHost {
               );
             }
           },
+          assembleTheme: async (payload, original) => {
+            if (disposed) return original;
+            const plugins = declaring.get("theme/assemble") ?? [];
+            if (plugins.length === 0) return original;
+            return this.invokeHook(
+              entrypoint,
+              enabled,
+              plugins,
+              "theme/assemble",
+              payload,
+              original,
+            );
+          },
           dispose: () => {
             if (disposed) return Promise.resolve();
             disposed = true;
@@ -1558,6 +1582,10 @@ export class PluginWorkerHost {
             );
           },
         });
+      case "theme/assemble":
+        // Not a loop event. `assembleTheme` on the active worker is the
+        // only caller; registering a listener here would never fire.
+        return () => {};
     }
   }
 

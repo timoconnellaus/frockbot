@@ -47,6 +47,8 @@ import '../settings/bot_settings.dart';
 import '../settings/page.dart';
 import '../settings/voice_settings.dart';
 import '../templates/page.dart';
+import '../theme/document.dart';
+import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../update/app_version.dart';
 import '../view/sample_page.dart';
@@ -153,6 +155,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Map<String, SidebarProfile> profiles = {};
   Set<String> archived = {};
   wire.BotRegistration? selected;
+
+  /// Account look: Ink, Paper, or System. Paints the shell in the same
+  /// frame as a Bot switch. A Bot with its own look (Studio or a stored
+  /// document) overlays the thread and right panel; Inherit does not.
+  AccountLook accountLook = AccountLook.ink;
+  String accountTimezone = 'UTC';
 
   /// The Bot the account was given as General, from the authority.
   String? generalBotId;
@@ -319,6 +327,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // is what locks the zone until it is accounted for.
     unawaited(lifecycle.restore());
     unawaited(load());
+    unawaited(_loadAppearance());
     _startPolling();
     unawaited(push.start());
   }
@@ -826,6 +835,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _readBackBotSettings() async {
     await _loadIdentities();
     await activity.load();
+    await load();
   }
 
   /// Draws a Bot profile change before the round trip that confirms it: the
@@ -907,6 +917,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _featuresChanged([String? botId]) {
+    unawaited(_loadAppearance());
     if (mounted && (botId == null || selected?.botId.value == botId)) {
       setState(() => featuresRevision += 1);
       unawaited(botSettings?.refreshPlugins() ?? Future<void>.value());
@@ -1200,9 +1211,124 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  ThemeData _accountThemeOf(BuildContext context) => FrockTheme.fromDocument(
+    namedLookDocument(
+      resolveAccountNamedLook(
+        accountLook,
+        MediaQuery.platformBrightnessOf(context),
+      ),
+    ),
+    timezone: accountTimezone,
+  );
+
+  ThemeData _botThemeOf(BuildContext context, wire.BotRegistration bot) =>
+      FrockTheme.fromDocument(
+        paintDocumentFor(
+          look: parseBotLook(bot.look),
+          document: bot.document?.toJson(),
+          account: accountLook,
+          platform: MediaQuery.platformBrightnessOf(context),
+        ),
+        timezone: accountTimezone,
+      );
+
+  bool _botHasOwnLook(wire.BotRegistration? bot) =>
+      bot != null &&
+      botHasOwnLook(
+        look: parseBotLook(bot.look),
+        document: bot.document?.toJson(),
+      );
+
+  Widget _botLookScope({
+    required String key,
+    required ThemeData theme,
+    required Widget child,
+  }) => Theme(
+    key: ValueKey(key),
+    data: theme,
+    child: ColoredBox(color: theme.scaffoldBackgroundColor, child: child),
+  );
+
+  Widget _maybeBotLookScope({
+    required bool wrap,
+    required String key,
+    required ThemeData theme,
+    required Widget child,
+  }) => wrap ? _botLookScope(key: key, theme: theme, child: child) : child;
+
+  PreferredSizeWidget _maybeThemedPreferred({
+    required ThemeData theme,
+    required bool wrap,
+    required PreferredSizeWidget child,
+  }) => wrap ? _ThemedPreferred(theme: theme, child: child) : child;
+
+  /// Phone pages that stand in for the right panel pick up this Bot's look
+  /// when it has one; otherwise they stay on the account Theme `_push` wraps.
+  Widget _panelPage(Widget page) {
+    final bot = selected;
+    if (!_botHasOwnLook(bot)) return page;
+    return _botLookScope(
+      key: 'panel-theme-${bot!.botId.value}',
+      theme: _botThemeOf(context, bot),
+      child: page,
+    );
+  }
+
+  Widget _withAccountTheme(BuildContext context, Widget child) =>
+      Theme(data: _accountThemeOf(context), child: child);
+
+  Future<void> _loadAppearance() async {
+    final cacheKey = 'appearance/${widget.userId}';
+    final cached = await widget.store.read(cacheKey);
+    if (cached != null && mounted) {
+      try {
+        final value = jsonDecode(cached);
+        if (value is Map) {
+          setState(() {
+            accountLook = parseAccountLook(value['look'] as String?);
+            final timezone = value['timezone'];
+            if (timezone is String && timezone.isNotEmpty) {
+              accountTimezone = timezone;
+            }
+          });
+        }
+      } catch (_) {
+        await widget.store.delete(cacheKey);
+      }
+    }
+    try {
+      final settings =
+          (await widget.api.request('/api/settings?view=2'))! as Map;
+      final look = parseAccountLook(
+        (settings['appearance'] as Map?)?['look'] as String?,
+      );
+      final timezone =
+          (settings['profile'] as Map?)?['timezone'] as String? ?? 'UTC';
+      try {
+        await widget.store.write(
+          cacheKey,
+          jsonEncode({'look': look.name, 'timezone': timezone}),
+        );
+      } catch (_) {
+        // Appearance cache only speeds the next cold start.
+      }
+      if (!mounted) return;
+      setState(() {
+        accountLook = look;
+        accountTimezone = timezone;
+      });
+    } catch (_) {
+      // Ink is the product default; a cached look still paints.
+    }
+  }
+
   void _push(Widget page) {
     push.reading(null);
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => _withAccountTheme(routeContext, page),
+      ),
+    );
   }
 
   /// Back from a conversation on a phone: the list again, with nothing of the
@@ -1406,92 +1532,98 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// thing in it, and closing empties the stack — reopening the panel is
   /// opening the Bot page, never whatever was last read three Bots ago.
   Widget _panelHeader(wire.BotRegistration bot, String? key) {
-    final theme = Theme.of(context);
-    final botId = bot.botId.value;
-    final phase = key == 'computer' ? computer?.said : null;
-    return SizedBox(
-      height: 52,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(key == null ? 16 : 8, 0, 8, 0),
-        child: Row(
-          children: [
-            if (key == null) ...[
-              CharacterAvatar(
-                size: 28,
-                characterId: _background(botId),
-                primary: _primary(botId),
-                motion: CharacterMotion.quiet,
-              ),
-              const SizedBox(width: 10),
-            ] else
-              identified(
-                ShellIds.rightPanelBack,
-                IconButton(
-                  tooltip: 'Back',
-                  onPressed: () => setState(panelStack.removeLast),
-                  style: _panelControl(theme),
-                  icon: const Icon(Icons.chevron_left_rounded),
-                ),
-              ),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // A heading of its own, rather than a leaf the engine merges
-                  // into the row beside it: what the panel is showing is the
-                  // one thing a reader needs read out first.
-                  Semantics(
-                    header: true,
-                    child: Text(
-                      key == null ? _name(bot) : _panelTitle(key) ?? _name(bot),
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+    return Builder(
+      builder: (context) {
+        final theme = Theme.of(context);
+        final botId = bot.botId.value;
+        final phase = key == 'computer' ? computer?.said : null;
+        return SizedBox(
+          height: 52,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(key == null ? 16 : 8, 0, 8, 0),
+            child: Row(
+              children: [
+                if (key == null) ...[
+                  CharacterAvatar(
+                    size: 28,
+                    characterId: _background(botId),
+                    primary: _primary(botId),
+                    motion: CharacterMotion.quiet,
+                  ),
+                  const SizedBox(width: 10),
+                ] else
+                  identified(
+                    ShellIds.rightPanelBack,
+                    IconButton(
+                      tooltip: 'Back',
+                      onPressed: () => setState(panelStack.removeLast),
+                      style: _panelControl(theme),
+                      icon: const Icon(Icons.chevron_left_rounded),
                     ),
                   ),
-                  if (phase != null && phase.isNotEmpty)
-                    Text(
-                      phase,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // A heading of its own, rather than a leaf the engine merges
+                      // into the row beside it: what the panel is showing is the
+                      // one thing a reader needs read out first.
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          key == null
+                              ? _name(bot)
+                              : _panelTitle(key) ?? _name(bot),
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ],
-              ),
-            ),
-            if (key == null)
-              identified(
-                SettingsIds.botPageSettings,
-                IconButton(
-                  tooltip: 'Bot settings',
-                  onPressed: () => _openPanel('bot-settings', push: true),
-                  style: _panelControl(theme),
-                  icon: const Icon(Icons.settings_outlined),
+                      if (phase != null && phase.isNotEmpty)
+                        Text(
+                          phase,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            identified(
-              ShellIds.rightPanelClose,
-              IconButton(
-                tooltip: 'Close the panel',
-                onPressed: () => setState(() {
-                  panelOpen = false;
-                  panelCollapsed = true;
-                  panelStack.clear();
-                  panelPackage = null;
-                }),
-                style: _panelControl(theme),
-                icon: const Icon(Icons.close_rounded),
-              ),
+                if (key == null)
+                  identified(
+                    SettingsIds.botPageSettings,
+                    IconButton(
+                      tooltip: 'Bot settings',
+                      onPressed: () => _openPanel('bot-settings', push: true),
+                      style: _panelControl(theme),
+                      icon: const Icon(Icons.settings_outlined),
+                    ),
+                  ),
+                identified(
+                  ShellIds.rightPanelClose,
+                  IconButton(
+                    tooltip: 'Close the panel',
+                    onPressed: () => setState(() {
+                      panelOpen = false;
+                      panelCollapsed = true;
+                      panelStack.clear();
+                      panelPackage = null;
+                    }),
+                    style: _panelControl(theme),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -1928,27 +2060,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (bot == null) return;
     if (key == 'plugins') {
       _push(
-        PluginsPage(
-          onFeaturesChanged: () => _featuresChanged(bot.botId.value),
-          api: widget.api,
-          store: widget.store,
-          userId: widget.userId,
-          botId: bot.botId.value,
-          botName: _name(bot),
+        _panelPage(
+          PluginsPage(
+            onFeaturesChanged: () => _featuresChanged(bot.botId.value),
+            api: widget.api,
+            store: widget.store,
+            userId: widget.userId,
+            botId: bot.botId.value,
+            botName: _name(bot),
+          ),
         ),
       );
       return;
     }
     if (key == 'routines') {
       _push(
-        RoutinesView(
-          api: widget.api,
-          store: widget.store,
-          userId: widget.userId,
-          botId: bot.botId.value,
-          botName: _name(bot),
-          onOpenRun: _openRun,
-          onInbox: routineInbox?.adopt,
+        _panelPage(
+          RoutinesView(
+            api: widget.api,
+            store: widget.store,
+            userId: widget.userId,
+            botId: bot.botId.value,
+            botName: _name(bot),
+            onOpenRun: _openRun,
+            onInbox: routineInbox?.adopt,
+          ),
         ),
       );
       return;
@@ -1958,33 +2094,37 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     if (key == 'computer' && computer != null) {
-      _push(_computerPage(bot, computer!));
+      _push(_panelPage(_computerPage(bot, computer!)));
       return;
     }
     if (controller == null) return;
     if (key == 'voice') {
       _push(
-        BotVoicePage(
-          controller: controller,
-          characterId: _background(bot.botId.value),
-          primary: _primary(bot.botId.value),
+        _panelPage(
+          BotVoicePage(
+            controller: controller,
+            characterId: _background(bot.botId.value),
+            primary: _primary(bot.botId.value),
+          ),
         ),
       );
       return;
     }
     if (key == 'bot-settings') {
       _push(
-        Scaffold(
-          appBar: DesktopHeader(child: AppBar(title: const Text('Settings'))),
-          body: SafeArea(
-            top: false,
-            child: _botSettings(bot.botId.value, controller),
+        _panelPage(
+          Scaffold(
+            appBar: DesktopHeader(child: AppBar(title: const Text('Settings'))),
+            body: SafeArea(
+              top: false,
+              child: _botSettings(bot.botId.value, controller),
+            ),
           ),
         ),
       );
       return;
     }
-    _push(_botPage(bot));
+    _push(_panelPage(_botPage(bot)));
   }
 
   /// The Computer as a phone's page: the frame, the controls, and the phase
@@ -2224,6 +2364,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final tier = shellTierForWidth(MediaQuery.sizeOf(context).width);
     final single = tier == ShellTier.single;
     final bot = selected;
+    final accountTheme = _accountThemeOf(context);
+    final ownLook = _botHasOwnLook(bot);
+    final botTheme = ownLook ? _botThemeOf(context, bot!) : accountTheme;
     final session = voiceSession;
     // Voice mode is this Bot being the one on the call: its thread and its
     // composer give way to the call itself (ADR 0031). A call with another
@@ -2268,35 +2411,40 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ShellLayout(
                     header: bot == null
                         ? null
-                        : ChatHeader(
-                            name: _name(bot),
-                            connection: selectedConnection,
-                            textScale:
-                                MediaQuery.textScalerOf(context).scale(14) / 14,
-                            // A phone's bar is GrokBot's three things; the wider tiers
-                            // name each entry of the right panel beside the title.
-                            //
-                            // In voice mode there is no Back (ADR 0029): the
-                            // way out of the Bot you are talking to is to end
-                            // the call, and a control that left the page with
-                            // the call still running would be a trap.
-                            voiceMode: voiceHere,
-                            onBack: single && !voiceHere ? _openBack : null,
-                            phone: single,
-                            onOpenBot: () => _openPanel('bot-page'),
-                            computerRunning:
-                                computer?.available == true &&
-                                (computer!.state.running ||
-                                    _botComputerRunning),
-                            onComputer: computer?.available == true
-                                ? () => _openPanel('computer')
-                                : null,
-                            onTogglePanel: single || rightPanel == null
-                                ? null
-                                : _togglePanel,
-                            panelShown: tier == ShellTier.triple
-                                ? !panelCollapsed
-                                : panelOpen,
+                        : _maybeThemedPreferred(
+                            theme: botTheme,
+                            wrap: ownLook,
+                            child: ChatHeader(
+                              name: _name(bot),
+                              connection: selectedConnection,
+                              textScale:
+                                  MediaQuery.textScalerOf(context).scale(14) /
+                                  14,
+                              // A phone's bar is GrokBot's three things; the wider tiers
+                              // name each entry of the right panel beside the title.
+                              //
+                              // In voice mode there is no Back (ADR 0029): the
+                              // way out of the Bot you are talking to is to end
+                              // the call, and a control that left the page with
+                              // the call still running would be a trap.
+                              voiceMode: voiceHere,
+                              onBack: single && !voiceHere ? _openBack : null,
+                              phone: single,
+                              onOpenBot: () => _openPanel('bot-page'),
+                              computerRunning:
+                                  computer?.available == true &&
+                                  (computer!.state.running ||
+                                      _botComputerRunning),
+                              onComputer: computer?.available == true
+                                  ? () => _openPanel('computer')
+                                  : null,
+                              onTogglePanel: single || rightPanel == null
+                                  ? null
+                                  : _togglePanel,
+                              panelShown: tier == ShellTier.triple
+                                  ? !panelCollapsed
+                                  : panelOpen,
+                            ),
                           ),
                     conversationOpen: bot != null && conversationOpen,
                     onBack: _openBack,
@@ -2309,6 +2457,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
                     rightPanel: rightPanel,
+                    panelTheme: ownLook ? botTheme : null,
                     sidebar:
                         appletsMode &&
                             !single &&
@@ -2364,100 +2513,106 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onSwipeHide: (botId) =>
                                 unawaited(_runBotAction(botId, BotAction.hide)),
                           ),
-                    conversation: voiceHere
-                        ? VoiceMode(
-                            key: ValueKey('voice-${bot.botId.value}'),
-                            session: session,
-                            botName: _name(bot),
-                            characterId: bot.avatar.characterId,
-                            primary: bot.avatar.primary,
-                            onEnd: () =>
-                                unawaited(_endVoice(reason: 'end-button')),
-                            onOpenWork: _openVoiceWork,
-                          )
-                        : bot == null
-                        ? NoConversation(
-                            empty: bots.isEmpty,
-                            failure: bots.isEmpty ? error : null,
-                            action: 'Refresh Bots',
-                            onAction: () => unawaited(load()),
-                          )
-                        : ConversationView(
-                            key: ValueKey(
-                              '${widget.userId}:${bot.botId.value}',
+                    conversation: _maybeBotLookScope(
+                      wrap: ownLook,
+                      key: 'thread-theme-${bot?.botId.value ?? 'none'}',
+                      theme: botTheme,
+                      child: voiceHere
+                          ? VoiceMode(
+                              key: ValueKey('voice-${bot.botId.value}'),
+                              session: session,
+                              botName: _name(bot),
+                              characterId: bot.avatar.characterId,
+                              primary: bot.avatar.primary,
+                              onEnd: () =>
+                                  unawaited(_endVoice(reason: 'end-button')),
+                              onOpenWork: _openVoiceWork,
+                            )
+                          : bot == null
+                          ? NoConversation(
+                              empty: bots.isEmpty,
+                              failure: bots.isEmpty ? error : null,
+                              action: 'Refresh Bots',
+                              onAction: () => unawaited(load()),
+                            )
+                          : ConversationView(
+                              key: ValueKey(
+                                '${widget.userId}:${bot.botId.value}',
+                              ),
+                              sessions: widget.sessions,
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                              botId: bot.botId.value,
+                              general: bot.botId.value == generalBotId,
+                              featuresRevision: featuresRevision,
+                              onOpenRun: _openRun,
+                              onOpenExchange: _openExchange,
+                              backgroundOf: _background,
+                              primaryOf: _primary,
+                              nameOf: _botNameOf,
+                              outOfCredit: credit?.canSpend == false,
+                              onOpenBilling: () => unawaited(_openBilling()),
+                              onMessageActions: (line, {position}) => unawaited(
+                                _messageActions(line, position: position),
+                              ),
+                              onReadLatest: (messageId) =>
+                                  _readLatest(bot.botId.value, messageId),
+                              unreadFromMessageId: activity
+                                  .unread[bot.botId.value]
+                                  ?.unreadFromMessageId,
+                              background: _background(bot.botId.value),
+                              primary: _primary(bot.botId.value),
+                              onDictate: () => unawaited(_dictate()),
+                              onStopDictation: () =>
+                                  unawaited(_stopDictation()),
+                              onDiscardDictation: () =>
+                                  unawaited(_discardDictation()),
+                              // Voice, on the Bot whose page this is (ADR 0029).
+                              onVoice: () => unawaited(
+                                _startOrSwitchVoice(botId: bot.botId.value),
+                              ),
+                              voiceClosing: voiceClosing,
+                              dictationState:
+                                  dictation?.context == bot.botId.value
+                                  ? dictation!.state
+                                  : DictationState.idle,
+                              // The offer belongs to the composer the capture
+                              // was dictated into, exactly as the words do.
+                              canRevertDictation: () =>
+                                  dictation?.context == bot.botId.value &&
+                                  dictation!.cleaned,
+                              onRevertDictation:
+                                  dictation?.context == bot.botId.value
+                                  ? dictation!.revertCleanup
+                                  : null,
+                              dictationLevel: dictation?.level,
+                              onWorkingChanged: (runId) {
+                                if (runId == workingRunId || !mounted) return;
+                                final settled =
+                                    workingRunId != null && runId == null;
+                                setState(() => workingRunId = runId);
+                                // A Turn is how an Applet comes into existence, and the
+                                // Bot's page names the Applets the Bot holds — so the
+                                // directory is re-read when the Turn that may have changed
+                                // it ends. Read on adoption alone, a Bot that had just made
+                                // its first Applet had no way to it until the page was
+                                // reloaded.
+                                final canvas = appletCanvas;
+                                if (settled && canvas != null) {
+                                  unawaited(canvas.load());
+                                }
+                              },
+                              onConnectionChanged: (botId, state) {
+                                if (!mounted ||
+                                    selected?.botId.value != botId ||
+                                    selectedConnection == state) {
+                                  return;
+                                }
+                                setState(() => selectedConnection = state);
+                              },
                             ),
-                            sessions: widget.sessions,
-                            api: widget.api,
-                            store: widget.store,
-                            userId: widget.userId,
-                            botId: bot.botId.value,
-                            general: bot.botId.value == generalBotId,
-                            featuresRevision: featuresRevision,
-                            onOpenRun: _openRun,
-                            onOpenExchange: _openExchange,
-                            backgroundOf: _background,
-                            primaryOf: _primary,
-                            nameOf: _botNameOf,
-                            outOfCredit: credit?.canSpend == false,
-                            onOpenBilling: () => unawaited(_openBilling()),
-                            onMessageActions: (line, {position}) => unawaited(
-                              _messageActions(line, position: position),
-                            ),
-                            onReadLatest: (messageId) =>
-                                _readLatest(bot.botId.value, messageId),
-                            unreadFromMessageId: activity
-                                .unread[bot.botId.value]
-                                ?.unreadFromMessageId,
-                            background: _background(bot.botId.value),
-                            primary: _primary(bot.botId.value),
-                            onDictate: () => unawaited(_dictate()),
-                            onStopDictation: () => unawaited(_stopDictation()),
-                            onDiscardDictation: () =>
-                                unawaited(_discardDictation()),
-                            // Voice, on the Bot whose page this is (ADR 0029).
-                            onVoice: () => unawaited(
-                              _startOrSwitchVoice(botId: bot.botId.value),
-                            ),
-                            voiceClosing: voiceClosing,
-                            dictationState:
-                                dictation?.context == bot.botId.value
-                                ? dictation!.state
-                                : DictationState.idle,
-                            // The offer belongs to the composer the capture
-                            // was dictated into, exactly as the words do.
-                            canRevertDictation: () =>
-                                dictation?.context == bot.botId.value &&
-                                dictation!.cleaned,
-                            onRevertDictation:
-                                dictation?.context == bot.botId.value
-                                ? dictation!.revertCleanup
-                                : null,
-                            dictationLevel: dictation?.level,
-                            onWorkingChanged: (runId) {
-                              if (runId == workingRunId || !mounted) return;
-                              final settled =
-                                  workingRunId != null && runId == null;
-                              setState(() => workingRunId = runId);
-                              // A Turn is how an Applet comes into existence, and the
-                              // Bot's page names the Applets the Bot holds — so the
-                              // directory is re-read when the Turn that may have changed
-                              // it ends. Read on adoption alone, a Bot that had just made
-                              // its first Applet had no way to it until the page was
-                              // reloaded.
-                              final canvas = appletCanvas;
-                              if (settled && canvas != null) {
-                                unawaited(canvas.load());
-                              }
-                            },
-                            onConnectionChanged: (botId, state) {
-                              if (!mounted ||
-                                  selected?.botId.value != botId ||
-                                  selectedConnection == state) {
-                                return;
-                              }
-                              setState(() => selectedConnection = state);
-                            },
-                          ),
+                    ),
                   ),
                   ?_appletFrameHolder(context),
                 ],
@@ -2493,9 +2648,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
     return SearchShortcutListener(
       onOpen: () => unawaited(_openSearch()),
-      child: ColoredBox(
-        color: Theme.of(context).colorScheme.surface,
-        child: shell,
+      child: Theme(
+        key: const ValueKey('shell-theme'),
+        data: accountTheme,
+        child: Builder(
+          builder: (context) => ColoredBox(
+            color: Theme.of(context).colorScheme.surface,
+            child: shell,
+          ),
+        ),
       ),
     );
   }
@@ -2673,11 +2834,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(
       showDialog<void>(
         context: context,
-        builder: (_) => MarketplaceDialog(
-          onFeaturesChanged: _featuresChanged,
-          api: widget.api,
-          store: widget.store,
-          userId: widget.userId,
+        builder: (dialogContext) => _withAccountTheme(
+          dialogContext,
+          MarketplaceDialog(
+            onFeaturesChanged: _featuresChanged,
+            api: widget.api,
+            store: widget.store,
+            userId: widget.userId,
+          ),
         ),
       ),
     );
@@ -3113,4 +3277,16 @@ class _ExchangeScreenState extends State<_ExchangeScreen> {
       ),
     ),
   );
+}
+
+class _ThemedPreferred extends StatelessWidget implements PreferredSizeWidget {
+  final ThemeData theme;
+  final PreferredSizeWidget child;
+  const _ThemedPreferred({required this.theme, required this.child});
+
+  @override
+  Size get preferredSize => child.preferredSize;
+
+  @override
+  Widget build(BuildContext context) => Theme(data: theme, child: child);
 }

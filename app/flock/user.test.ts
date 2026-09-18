@@ -178,6 +178,49 @@ describe("Flock User contribution", () => {
     expect(untouched.bots.map((bot) => bot.botId)).toEqual(["alpha"]);
   });
 
+  test("mirrors an assembled look into the directory the client paints", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      commandBotLifecycle: () => Promise.reject(new Error("not used")),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
+    });
+    await contribution.createBot("user-1", command());
+    const document = {
+      schemaVersion: 1 as const,
+      look: "studio" as const,
+      tokens: {
+        surfaces: {
+          window: "#faf7f2",
+          surface: "#ffffff",
+          raised: "#f2ece4",
+          text: "#1e1d27",
+          muted: "#6d6974",
+          line: "#e7e0d9",
+          accent: "#c23359",
+          onAccent: "#ffffff",
+        },
+        type: "manrope" as const,
+        bubbles: { bot: "plain" as const, me: "accent" as const },
+      },
+    };
+    const mirrored = await contribution.mirrorLook("alpha", "studio", document);
+    expect(mirrored.revision).toBe(2);
+    expect((await contribution.listBots()).bots).toMatchObject([
+      { botId: "alpha", look: "studio", document },
+    ]);
+    expect(
+      (await contribution.mirrorLook("alpha", "studio", document)).revision,
+    ).toBe(2);
+    const dropped = await contribution.mirrorLook(
+      "alpha",
+      "inherit",
+      undefined,
+    );
+    expect(dropped.bots[0]).toMatchObject({ look: "inherit" });
+    expect(dropped.bots[0]).not.toHaveProperty("document");
+  });
+
   test("admits a Bot without consulting User model state", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockUserBackendContribution({

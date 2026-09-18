@@ -384,6 +384,87 @@
     "value": null
   },
   {
+    "name": "ThemeHex wrong shape",
+    "schema": "ThemeHex",
+    "value": "d03f64"
+  },
+  {
+    "name": "ThemeTokens unknown typeface",
+    "schema": "ThemeTokens",
+    "value": {
+      "surfaces": {
+        "window": "#1f1e24",
+        "surface": "#1a191e",
+        "raised": "#2c2a33",
+        "text": "#f6f2ee",
+        "muted": "#a8a3a6",
+        "line": "#3a3742",
+        "accent": "#d03f64",
+        "onAccent": "#ffffff"
+      },
+      "type": "serif",
+      "bubbles": { "bot": "raised", "me": "tint" }
+    }
+  },
+  {
+    "name": "ThemeDocument unknown field",
+    "schema": "ThemeDocument",
+    "value": {
+      "schemaVersion": 1,
+      "look": "ink",
+      "tokens": {
+        "surfaces": {
+          "window": "#1f1e24",
+          "surface": "#1a191e",
+          "raised": "#2c2a33",
+          "text": "#f6f2ee",
+          "muted": "#a8a3a6",
+          "line": "#3a3742",
+          "accent": "#db4b6d",
+          "onAccent": "#ffffff"
+        },
+        "type": "manrope",
+        "bubbles": { "bot": "raised", "me": "tint" }
+      },
+      "grants": true
+    }
+  },
+  {
+    "name": "LookIdentity unknown look",
+    "schema": "LookIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "revision": 2,
+      "look": "paper"
+    }
+  },
+  {
+    "name": "BotLookCommand wrong look",
+    "schema": "BotLookCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/update-look",
+      "commandId": "command-1",
+      "expectedRevision": 2,
+      "botId": "default",
+      "look": "paper"
+    }
+  },
+  {
+    "name": "BotLookCommand invalid document",
+    "schema": "BotLookCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/update-look",
+      "commandId": "command-1",
+      "expectedRevision": 2,
+      "botId": "default",
+      "look": "custom",
+      "document": { "schemaVersion": 1 }
+    }
+  },
+  {
     "name": "BotDirectory wrong shape",
     "schema": "BotDirectory",
     "value": null

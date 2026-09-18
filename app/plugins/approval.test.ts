@@ -218,6 +218,19 @@ describe("a Plugin intent", () => {
     expect(action).toContain("storage, http");
     expect(action).toContain("api.example.com");
     expect(pluginApprovalRiskV1(MEMBER)).toBe("high");
+    const themed = pluginApprovalActionV1(
+      {
+        descriptor: {
+          ...DESCRIPTOR,
+          hooks: ["theme/assemble"],
+          grants: [],
+          network: undefined,
+        },
+      },
+      "Run",
+    );
+    expect(themed).toContain("theme/assemble");
+    expect(themed).toContain("This Plugin can change how this Bot looks.");
     const quiet = {
       descriptor: { ...DESCRIPTOR, grants: [], network: undefined, hooks: [] },
     };

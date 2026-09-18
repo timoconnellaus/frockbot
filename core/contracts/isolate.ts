@@ -45,14 +45,16 @@ import type {
  * handlers a plugin declares, and `ctx.email` under the `http` grant.
  * Version 6 is model providers: `streamModel` and the credentialed
  * `ctx.modelTransport` call one provider contribution makes.
+ * Version 7 is `theme/assemble`: a Plugin may wrap the Bot's look
+ * without holding a Turn open.
  */
-export const ISOLATE_CONTRACT_VERSION = 6;
+export const ISOLATE_CONTRACT_VERSION = 7;
 
 /** Every contract version the kernel still decodes. */
-export type IsolateContractVersion = 1 | 2 | 3 | 4 | 5 | 6;
+export type IsolateContractVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [
-  1, 2, 3, 4, 5, 6,
+  1, 2, 3, 4, 5, 6, 7,
 ];
 
 /** The upper bound on a single isolate invocation, enforced on both sides. */
