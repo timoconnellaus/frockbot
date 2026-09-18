@@ -1,17 +1,18 @@
-// What a Routine firing does to the conversation, end to end: nothing visible,
-// and one durable thing.
+// What a Routine firing does to the conversation, end to end: nothing in its
+// own voice, and two durable things.
 //
 // A firing runs as an automation Turn. It cannot speak to the user — that is
 // `turn-admission.integration.ts`'s `send_to_user` denial, referenced here and
 // not repeated — so its only way back is `wake_parent`, and what that produces
-// is a completion-inbox entry and a pending input the Bot's next conversational
-// Turn carries. The visible transcript never learns any of it happened.
+// is a completion-inbox entry and a delivery Turn the alarm opens on the Bot's
+// own conversation. The firing's own run never reaches the visible transcript;
+// the delivery Turn is an ordinary chat Turn, and does.
 import {
   env,
   runDurableObjectAlarm,
   runInDurableObject,
 } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   asUser,
   dueAtWithFiringHeadroomV1,
@@ -56,7 +57,10 @@ async function makeDue(userId: string, botId: string): Promise<void> {
 interface StoredRunProbe {
   runId: string;
   status: string;
-  admission?: { turnType: string; origin?: { routineId: string } };
+  admission?: {
+    turnType: string;
+    origin?: { kind?: string; routineId?: string };
+  };
   events: Array<{ type: string; request?: { messages?: unknown } }>;
 }
 
@@ -103,9 +107,11 @@ function requestTexts(run: StoredRunProbe): string[] {
 
 /**
  * Create the Routine, make it due, wake the object, and answer with the firing
- * once it has settled. The alarm returning is not the firing being over — a
- * second alarm delivery racing this one defers while the Turn executes — so the
- * durable run is read through the settled wait rather than straight after.
+ * once it and the delivery Turn it is owed have both settled. The alarm
+ * returning is not the firing being over — a second alarm delivery racing this
+ * one defers while the Turn executes — so the durable run is read through the
+ * settled wait rather than straight after, and the firing's lock is cleared
+ * before the same pass opens the delivery, so the delivery gets its own wait.
  */
 async function fireRoutine(
   userId: string,
@@ -131,18 +137,33 @@ async function fireRoutine(
   // and answers `false` for a firing that has already happened. What the firing
   // did is read from durable state, below.
   await runDurableObjectAlarm(botStub(userId, botId));
-  return settledRoutineFiringV1<StoredRunProbe>(userId, botId);
+  const automation = await settledRoutineFiringV1<StoredRunProbe>(
+    userId,
+    botId,
+  );
+  // The settled wait's own marker is the scheduler's firing lock, and that is
+  // cleared inside `settle` before `deliverPendingHandoffs` runs later in the
+  // same alarm pass. Waiting on the delivery Turn too is what makes the reads
+  // below settled: its run record exists from admission, its input and its
+  // model requests only as the Turn runs, and the transcript it lands in only
+  // once the alarm has opened it.
+  await vi.waitFor(
+    async () => {
+      const delivery = (await storedRuns(userId, botId)).find(
+        (run) => run.runId === `rd-${automation.runId}`,
+      );
+      expect(delivery?.status).toBe("completed");
+    },
+    { timeout: 5_000, interval: 50 },
+  );
+  return automation;
 }
 
 describe("a Routine firing, and what it leaves behind", () => {
-  it("lands one inbox entry and leaves the visible transcript untouched", async () => {
+  it("lands one inbox entry and one delivery Turn, and no firing", async () => {
     const userId = freshUserId("routines-firing");
     const botId = "routines-firing-bot";
     await provisionThroughGateway({ userId, botId });
-
-    const before = (await expectOkJson(
-      await asUser(userId, `/api/bots/${botId}/turns`),
-    )) as { runs: Array<{ runId: string }> };
 
     const automation = await fireRoutine(userId, botId);
 
@@ -152,14 +173,23 @@ describe("a Routine firing, and what it leaves behind", () => {
       automation.events.some((event) => event.type === "wake/parent"),
     ).toBe(true);
 
-    // THE TRANSCRIPT. `GET /turns` is the visible-conversation projection and
-    // it does not move: an automation run is reachable only through the run log.
+    // THE TRANSCRIPT. `GET /turns` is the visible-conversation projection, and
+    // the firing is not in it: an automation run is reachable only through the
+    // run log. What the conversation gains is the delivery Turn its hand-off is
+    // owed, and only that — an ordinary chat Turn, opened by the alarm so the
+    // Bot can answer without being spoken to first.
+    //
+    // Its input is projected empty because it is the hand-off and a cue saying
+    // nobody spoke, never the person's own words, and this field is their
+    // bubble. The cue reaching a client as their message would read as them
+    // having asked for the very thing the Bot is about to volunteer.
     const turns = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/turns`),
-    )) as { runs: Array<{ runId: string }> };
-    expect(turns.runs.map((run) => run.runId)).toEqual(
-      before.runs.map((run) => run.runId),
-    );
+    )) as { runs: Array<{ runId: string; input: string }> };
+    expect(turns.runs.map((run) => run.runId)).toEqual([
+      `rd-${automation.runId}`,
+    ]);
+    expect(turns.runs[0]!.input).toBe("");
 
     // THE INBOX. Exactly one entry, attributed to the Routine, unread.
     const inbox = (await expectOkJson(
@@ -224,7 +254,7 @@ describe("a Routine firing, and what it leaves behind", () => {
     ).toBe(404);
   });
 
-  it("hands the firing to the next chat Turn, without its transcript", async () => {
+  it("hands the firing to a delivery Turn, never to the person's own", async () => {
     const userId = freshUserId("routines-handoff");
     const botId = "routines-handoff-bot";
     await provisionThroughGateway({ userId, botId });
@@ -249,7 +279,36 @@ describe("a Routine firing, and what it leaves behind", () => {
       ),
     ).toBe(true);
 
-    // THE NEXT CHAT TURN carries the hand-off as durable input.
+    // THE DELIVERY TURN carries it instead. The alarm opened one on the Bot's
+    // own conversation, so this is the Bot answering unasked with the
+    // conversation in front of it — which is the whole reason the hand-off is
+    // delivered through a Turn rather than posted as the firing's own words.
+    const runs = await storedRuns(userId, botId);
+    const delivery = runs.find(
+      (run) => run.runId === `rd-${automation.runId}`,
+    )!;
+    expect(delivery.admission).toMatchObject({
+      turnType: "chat",
+      origin: { kind: "routine-delivery" },
+    });
+    // The hand-off, as this Turn's own input, so the model request is
+    // reconstructible from durable state.
+    const delivered = inputTexts(delivery);
+    expect(delivered.some((text) => text.includes(HANDOFF))).toBe(true);
+    // …and a cue saying nobody spoke, or a Bot handed a bare summary answers
+    // it as though it had been asked to.
+    expect(
+      delivered.some((text) => text.includes("Nobody has said anything")),
+    ).toBe(true);
+    // Delivered into the conversation, not into a Session blind to it: the
+    // Turn reads the history the firing could not see.
+    expect(
+      requestTexts(delivery).some((text) => text.includes("mango pickle")),
+    ).toBe(true);
+
+    // THE PERSON'S OWN NEXT TURN is not told again. It runs on what they
+    // typed, and the hand-off reaches its model only as an earlier Turn's
+    // input, the way any history does.
     const afterRunId = await chatTurn(
       userId,
       botId,
@@ -260,10 +319,7 @@ describe("a Routine firing, and what it leaves behind", () => {
       (run) => run.runId === afterRunId,
     )!;
     const chatRequests = requestTexts(chat);
-    expect(chatRequests.some((text) => text.includes(HANDOFF))).toBe(true);
-    // It arrived as this Turn's own input, recorded on the log, so the model
-    // request is reconstructible from durable state.
-    expect(inputTexts(chat).some((text) => text.includes(HANDOFF))).toBe(true);
+    expect(inputTexts(chat).some((text) => text.includes(HANDOFF))).toBe(false);
     // …and not the automation Turn's transcript. The firing's cue never
     // reaches the conversation's prompt.
     expect(
@@ -274,21 +330,28 @@ describe("a Routine firing, and what it leaves behind", () => {
       true,
     );
 
-    // The transcript shows the two chat Turns and neither the firing nor a
-    // separate message for the hand-off.
+    // The transcript shows the two chat Turns with the delivery Turn between
+    // them, and no firing. The delivery Turn's input is the hand-off, not
+    // anything the person said, so it is projected empty rather than drawn as
+    // a bubble they never typed.
     const turns = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/turns`),
     )) as { runs: Array<{ runId: string; input: string }> };
     expect(turns.runs.map((run) => run.runId)).toEqual([
       beforeRunId,
+      delivery.runId,
       afterRunId,
     ]);
     // The visible input is what the person typed, not what the Bot was told.
-    expect(turns.runs[1]!.input).toBe("what happened overnight?");
+    expect(turns.runs.map((run) => run.input)).toEqual([
+      "remember the mango pickle",
+      "",
+      "what happened overnight?",
+    ]);
 
     // The hand-off is delivered once. A third Turn is not given it again — its
-    // own input is only what the person typed, though the second Turn's input
-    // is of course still in the history, as any Turn's is.
+    // own input is only what the person typed, though the delivery's input is
+    // of course still in the history, as any Turn's is.
     const thirdRunId = await chatTurn(
       userId,
       botId,
