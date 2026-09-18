@@ -102,9 +102,12 @@ voice name is either one of the thirty or it is refused by the decoder.
 (`apps/native/lib/settings/voice_settings.dart`) is the same two halves: a
 timbre picked from the thirty, and a delivery picked from presets, with the
 person's own words last. It saves as the About card does — the moment a
-choice is made, and a moment after the last keystroke — and there is no
-preview, because no endpoint speaks a sample: the way to hear a change is to
-call. It reads and writes `GET`/`POST /api/bots/:botId/voice`
+choice is made, and a moment after the last keystroke. The timbre picker
+plays a minted clip of that mouth (`apps/native/assets/voices/<voice>.wav`,
+recited by Gemini TTS from `scripts/mint-voice-previews.ts` so a Live
+session is not opened just to hear it). Accent, attitude and the dials are
+still only heard on a call: they are prose in the instruction, not a
+typed Live field. It reads and writes `GET`/`POST /api/bots/:botId/voice`
 (`VoiceIdentityV1`, and a `bot/update-voice` command fenced on the Bot's own
 voice revision, which is separate from its avatar's). The Bot Durable Object
 is the authority and the User's directory mirrors what it reports wearing:

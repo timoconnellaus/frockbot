@@ -47,6 +47,7 @@ flutter:
   assets:
     - assets/characters/
     - assets/connectors/
+    - assets/voices/
     - shorebird.yaml
   fonts:
     - family: Inter

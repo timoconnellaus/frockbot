@@ -157,6 +157,7 @@ abstract final class VoiceIds {
   static const disfluency = 'voice-disfluency';
   static const custom = 'voice-custom';
   static const picker = 'voice-picker';
+  static String hear(String voiceName) => 'voice-hear-$voiceName';
 
   static const composerVoice = 'composer-voice';
   static const composerDictate = 'composer-dictate';
