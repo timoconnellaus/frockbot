@@ -24,6 +24,7 @@ import {
   type ViewDocument,
   type ViewNode,
 } from "@frockbot/core/protocol-schemas";
+import { countViewNodesV1 } from "./view-document.js";
 
 /** The schema's cap on declared actions. */
 export const VIEW_ACTION_LIMIT_V1 = 32;
@@ -102,18 +103,6 @@ function credentialLine(status: Section["credentialStatus"]): string {
     default:
       return "Ready to use";
   }
-}
-
-function countNodes(node: ViewNode): number {
-  if (node.type === "group")
-    return (
-      1 + node.children.reduce((total, child) => total + countNodes(child), 0)
-    );
-  if (node.type === "list")
-    return (
-      1 + node.rows.reduce((total, row) => total + countNodes(row.node), 0)
-    );
-  return 1;
 }
 
 /**
@@ -293,7 +282,7 @@ export function settingsDocumentV1(frame: SettingsFrame): ViewDocument {
       index,
       VIEW_ACTION_LIMIT_V1 - actions.length,
     );
-    const cost = countNodes(projected.node);
+    const cost = countViewNodesV1(projected.node);
     if (
       nodes + cost > VIEW_NODE_LIMIT_V1 ||
       actions.length + projected.actions.length > VIEW_ACTION_LIMIT_V1
