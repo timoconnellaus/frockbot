@@ -239,7 +239,7 @@ The checklist of GrokBot capabilities FrockBot must match, kept in `docs/grokbot
 _Avoid_: Feature list, roadmap
 
 **Provenance**:
-The recorded origin of a Package or change: first-party, User, or Bot, and for a Bot the Session and Turn that produced it.
+The recorded origin of a Package or change: first-party, User, or Bot, and for a Bot the Session and Turn that produced it. A provider Plugin's Composition member carries `installed`: the deployment ships it, the account's own Package command installs it, and reconciliation leaves it where the User put it ([ADR 0032](docs/adr/0032-plugin-model-providers.md)).
 _Avoid_: Author, source
 
 **Routine**:
