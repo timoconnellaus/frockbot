@@ -1385,10 +1385,10 @@
     color: var(--pink-dark);
     font-size: 0.9em;
   }
+  /* No overflow here on desktop: a scroll container would capture the
+     sticky header, and the page is what scrolls. Phones get one below. */
   .reach-grid-wrap {
     margin-top: 20px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
   }
   .reach-grid {
     --tick-live: #1d9a5b;
@@ -1410,10 +1410,12 @@
     text-align: center;
     vertical-align: middle;
   }
+  /* Sticks to the top of the viewport until the table scrolls past. */
   .reach-grid thead th {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 3;
+    padding-top: 12px;
     padding-bottom: 12px;
     background: #fff;
     border-bottom: 2px solid var(--ink);
@@ -1685,6 +1687,8 @@
     .reach-grid-wrap {
       margin-inline: -16px;
       padding-inline: 16px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
     }
     /* Pin the capability names while the platform columns scroll. */
     .reach-grid th[scope="row"] {
