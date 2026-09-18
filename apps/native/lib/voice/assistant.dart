@@ -144,7 +144,8 @@ class AssistantSessionController extends ChangeNotifier {
 
   /// When the search for a signal started, on the capture's own clock: the
   /// first frame after the call went live, and again after a frame the call
-  /// was not listening to at all. Null until such a frame has started it.
+  /// was not listening to at all. Null until such a frame has started it, and
+  /// again once the capture reopens and its clock starts over.
   int? _deafSinceMs;
   String? _delegatedBotId;
   String? _delegatedBotName;
@@ -432,6 +433,10 @@ class AssistantSessionController extends ChangeNotifier {
         await capture.stop();
         return false;
       }
+      // The frames carry the capture's clock and it starts at zero every time
+      // the device opens, so a window started on the previous one is not a
+      // window on this one.
+      _deafSinceMs = null;
       _frames = frames.listen(_onFrame, onError: (Object _) {});
       return true;
     } on MicrophoneDenied catch (denied) {

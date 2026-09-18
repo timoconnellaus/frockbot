@@ -539,6 +539,37 @@ void main() {
     },
   );
 
+  test(
+    'the deaf window is measured on the clock the capture is running',
+    () async {
+      final harness = Harness();
+      await harness.live();
+      // The capture opened before the handshake finished, so the call goes live
+      // seconds into its clock, and the window starts there.
+      harness.at = 3000;
+      await harness.feed(_quiet, 6000);
+      expect(harness.controller.notice, isNull);
+
+      // Muting closes the device and unmuting opens it again: the frames carry
+      // a clock from zero, and ten seconds of silence is ten seconds of that
+      // one, not ten seconds counted from the clock the device had before.
+      harness.controller.setMuted(true);
+      await settle();
+      harness.controller.setMuted(false);
+      await settle();
+      harness.at = 0;
+      await harness.feed(
+        _quiet,
+        voiceAssistantDeafNoticeAfterV1.inMilliseconds + _frameMs,
+      );
+
+      expect(harness.controller.notice, isNotNull);
+      expect(harness.controller.error, isNull);
+      expect(harness.controller.active, isTrue);
+      harness.controller.dispose();
+    },
+  );
+
   test('a socket that arrives after the call ended is abandoned', () async {
     final deferred = Completer<VoiceSocket>();
     final harness = Harness(deferred: deferred);

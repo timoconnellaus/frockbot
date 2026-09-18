@@ -40,6 +40,7 @@ class _VoiceFooterState extends State<VoiceFooter> {
     bool,
     String?,
     String?,
+    String?,
     VoiceSessionPhase,
     String?,
     VoiceDelegationStateV1?,
@@ -53,10 +54,19 @@ class _VoiceFooterState extends State<VoiceFooter> {
     widget.session.addListener(_changed);
   }
 
-  (bool, String?, String?, VoiceSessionPhase, String?, VoiceDelegationStateV1?)
+  (
+    bool,
+    String?,
+    String?,
+    String?,
+    VoiceSessionPhase,
+    String?,
+    VoiceDelegationStateV1?,
+  )
   _readPresentation() => (
     widget.session.muted,
     widget.session.error,
+    widget.session.endedLine,
     widget.session.notice,
     widget.session.phase,
     widget.session.delegatedBotId,

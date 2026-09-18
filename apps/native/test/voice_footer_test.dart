@@ -276,6 +276,47 @@ void main() {
     expect(find.byKey(voiceFooterAnimationKey), findsOneWidget);
   });
 
+  testWidgets(
+    'a call the server closed first says so before the device lets go',
+    (tester) async {
+      final socket = FakeVoiceSocket();
+      final capture = FakeVoiceCapture();
+      final controller = AssistantSessionController(
+        openSocket: () async => socket,
+        capture: capture,
+        player: FakeVoicePlayer(),
+      );
+      addTearDown(controller.dispose);
+      await mount(tester, controller, width: 390);
+      unawaited(controller.start());
+      await tester.pump();
+      socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+      socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+      await tester.pump();
+
+      // The device is slow to let go: the teardown is inside its own stop when
+      // the call has already ended, so the phase is still the live one.
+      final gate = Completer<void>();
+      capture.stopGate = gate;
+      unawaited(socket.finish());
+      await tester.runAsync(() => settle());
+      await tester.pump();
+
+      // The line is the only thing that has changed: the footer has to paint
+      // it from the ending alone, without waiting for the phase to flip.
+      expect(controller.phase, VoiceSessionPhase.live);
+      expect(find.text('The call ended.'), findsOneWidget);
+      expect(find.byKey(voiceFooterAnimationKey), findsNothing);
+      expect(find.bySemanticsLabel('Mute microphone'), findsNothing);
+
+      gate.complete();
+      await tester.runAsync(() => settle());
+      await tester.pump();
+      expect(controller.phase, VoiceSessionPhase.ended);
+      expect(find.text('The call ended.'), findsOneWidget);
+    },
+  );
+
   testWidgets('the Bot being consulted rises into the voice stage', (
     tester,
   ) async {
