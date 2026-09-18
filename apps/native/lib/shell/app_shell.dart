@@ -582,6 +582,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  Future<void> _discardDictation() async {
+    final controller = dictation;
+    if (controller == null || !controller.active) return;
+    await controller.discard();
+    if (mounted) setState(() {});
+  }
+
   /// The draft of the Bot a capture is bound to, so the words land beside
   /// anything the person typed rather than over it.
   String _readDictatedDraft(Object context) =>
@@ -2375,6 +2382,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             primary: _primary(bot.botId.value),
                             onDictate: () => unawaited(_dictate()),
                             onStopDictation: () => unawaited(_stopDictation()),
+                            onDiscardDictation: () =>
+                                unawaited(_discardDictation()),
                             // Voice, on the Bot whose page this is (ADR 0029).
                             onVoice: () => unawaited(
                               _startOrSwitchVoice(botId: bot.botId.value),

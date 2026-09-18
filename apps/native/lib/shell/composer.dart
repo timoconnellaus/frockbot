@@ -64,6 +64,20 @@ bool get enterSends => !isNativeMobile;
 /// centred against the one-line field this produces.
 const EdgeInsets composerFieldPadding = EdgeInsets.fromLTRB(16, 12, 4, 12);
 
+/// How far a control inside the field sits from the field's edge — the same
+/// number on every side, so a round control is concentric with the round end
+/// it sits in.
+const double composerControlInset = 4;
+
+/// The painted size of a control inside the field, from the field's own
+/// height. The touch target stays the platform minimum: the circle shrinks,
+/// the thing a thumb has to hit does not.
+double composerControlExtent(double fieldHeight) =>
+    fieldHeight - 2 * composerControlInset;
+
+/// The glyph inside one of those controls, at half its circle.
+double composerControlIconSize(double extent) => (extent / 2).roundToDouble();
+
 /// An [AnimatedSwitcher] layout where the outgoing child is only a picture:
 /// it stays visible for the cross-fade but cannot be pressed, and a screen
 /// reader is not read the label it is leaving behind on top of the new one.
@@ -187,13 +201,16 @@ class Composer extends StatefulWidget {
   /// Commits the dictation into the editable draft. It never sends.
   final VoidCallback? onStopDictation;
 
+  /// Abandons the dictation and takes its words back out of the draft.
+  final VoidCallback? onDiscardDictation;
+
   /// Starts a voice call with this Bot, or moves the open one to it
   /// (ADR 0029).
   ///
-  /// Its own control, to the right of the one that morphs between dictate,
-  /// send and stop: voice is not a mode of the draft, and a target that moved
-  /// under the thumb would be pressed by accident. Absent on a client with no
-  /// microphone, like dictation.
+  /// Its own control, outside the field and to the right of it: voice is not
+  /// a mode of the draft, and a target that moved under the thumb would be
+  /// pressed by accident. Absent on a client with no microphone, like
+  /// dictation.
   final VoidCallback? onVoice;
 
   /// Whether a call is still closing: the control is held until it finishes,
@@ -229,6 +246,7 @@ class Composer extends StatefulWidget {
     required this.skills,
     this.onDictate,
     this.onStopDictation,
+    this.onDiscardDictation,
     this.onVoice,
     this.voiceClosing = false,
     this.dictationState = DictationState.idle,
@@ -318,7 +336,7 @@ class _ComposerState extends State<Composer> {
   /// while the call is with this Bot the whole composer is gone — voice mode
   /// is drawn in its place — so the way out of a call is not here. While a
   /// previous call is still closing it is held.
-  Widget _voiceButton(BuildContext context) {
+  Widget _voiceButton(BuildContext context, double extent) {
     final theme = Theme.of(context);
     final closing = widget.voiceClosing;
     return identified(
@@ -328,10 +346,10 @@ class _ComposerState extends State<Composer> {
         tooltip: 'Talk to this Bot',
         onPressed: closing ? null : widget.onVoice,
         style: IconButton.styleFrom(
-          minimumSize: Size.square(chatControlExtent),
-          fixedSize: Size.square(chatControlExtent),
+          minimumSize: Size.square(extent),
+          fixedSize: Size.square(extent),
           padding: EdgeInsets.zero,
-          iconSize: chatIconSize,
+          iconSize: composerControlIconSize(extent),
           shape: const CircleBorder(),
           foregroundColor: closing
               ? theme.disabledColor
@@ -342,21 +360,26 @@ class _ComposerState extends State<Composer> {
     );
   }
 
+  /// The one action in the field's corner. [dictating] is passed rather than
+  /// read, because the draft's own corner keeps the draft's action even while
+  /// a capture is standing in front of it.
   Widget _actionButton(
     BuildContext context, {
+    required bool dictating,
     required bool dictatable,
     required bool canSend,
+    required double extent,
   }) {
     final theme = Theme.of(context);
     return KeyedSubtree(
       key: ValueKey(
-        widget.dictating
+        dictating
             ? 'recording-action'
             : dictatable
             ? 'dictate-action'
             : 'send-action',
       ),
-      child: widget.dictating
+      child: dictating
           ? identified(
               VoiceIds.composerDictationStop,
               IconButton.filled(
@@ -369,8 +392,8 @@ class _ComposerState extends State<Composer> {
                     : widget.onStopDictation,
                 style: IconButton.styleFrom(
                   shape: const CircleBorder(),
-                  minimumSize: Size.square(chatControlExtent),
-                  fixedSize: Size.square(chatControlExtent),
+                  minimumSize: Size.square(extent),
+                  fixedSize: Size.square(extent),
                   padding: EdgeInsets.zero,
                 ),
                 icon: voiceIconTransition(
@@ -390,7 +413,7 @@ class _ComposerState extends State<Composer> {
                       : Icon(
                           Icons.stop_rounded,
                           key: const ValueKey('recording'),
-                          size: chatIconSize,
+                          size: composerControlIconSize(extent),
                         ),
                 ),
               ),
@@ -403,10 +426,10 @@ class _ComposerState extends State<Composer> {
                 tooltip: 'Dictate message',
                 onPressed: widget.onDictate,
                 style: IconButton.styleFrom(
-                  minimumSize: Size.square(chatControlExtent),
-                  fixedSize: Size.square(chatControlExtent),
+                  minimumSize: Size.square(extent),
+                  fixedSize: Size.square(extent),
                   padding: EdgeInsets.zero,
-                  iconSize: chatIconSize,
+                  iconSize: composerControlIconSize(extent),
                   backgroundColor: theme.colorScheme.onSurface.withValues(
                     alpha: 0.08,
                   ),
@@ -423,10 +446,10 @@ class _ComposerState extends State<Composer> {
                 tooltip: 'Send',
                 onPressed: canSend ? _send : null,
                 style: IconButton.styleFrom(
-                  minimumSize: Size.square(chatControlExtent),
-                  fixedSize: Size.square(chatControlExtent),
+                  minimumSize: Size.square(extent),
+                  fixedSize: Size.square(extent),
                   padding: EdgeInsets.zero,
-                  iconSize: chatIconSize,
+                  iconSize: composerControlIconSize(extent),
                   shape: const CircleBorder(),
                   disabledBackgroundColor: theme.colorScheme.onSurface
                       .withValues(alpha: 0.06),
@@ -461,15 +484,14 @@ class _ComposerState extends State<Composer> {
               (fieldStyle?.height ?? 1.0) +
           theme.visualDensity.baseSizeAdjustment.dy,
     );
-    Widget corner(Widget button) => Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      child: SizedBox(
-        height: oneLine,
-        child: Center(child: button),
-      ),
-    );
     final dictatable = widget.onDictate != null && text.trim().isEmpty;
     final skills = widget.skills;
+    final field = _field(
+      context,
+      oneLine: oneLine,
+      dictatable: dictatable,
+      canSend: canSend,
+    );
     final draft = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -524,132 +546,43 @@ class _ComposerState extends State<Composer> {
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-          child: AnimatedContainer(
-            duration: FrockTheme.motion(context, voiceEnterDuration),
-            curve: Curves.easeOutCubic,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: widget.focus.hasFocus
-                    ? Color.alphaBlend(
-                        theme.colorScheme.primary.withValues(alpha: 0.55),
-                        theme.colorScheme.outlineVariant,
-                      )
-                    : FrockTheme.hairline(theme.colorScheme),
-              ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                // The draft keeps its place in the layout even while it is
+                // covered. A capture is exactly the size of the field it
+                // stands in for, so neither the row nor the thread above it
+                // moves when one begins or ends.
+                child: Stack(
                   children: [
-                    Expanded(
-                      child: CallbackShortcuts(
-                        bindings: {
-                          const SingleActivator(
-                            LogicalKeyboardKey.enter,
-                            meta: true,
-                          ): _send,
-                          const SingleActivator(
-                            LogicalKeyboardKey.enter,
-                            control: true,
-                          ): _send,
-                          // A bare Enter (Shift+Enter is left to the field, which
-                          // breaks the line) sends, or takes the highlighted Skill
-                          // while the popover is up. An empty or oversized draft
-                          // swallows it rather than growing by a blank line.
-                          if (enterSends) ...{
-                            const SingleActivator(LogicalKeyboardKey.enter):
-                                _enter,
-                            const SingleActivator(
-                              LogicalKeyboardKey.numpadEnter,
-                            ): _enter,
-                          },
-                          if (skills != null && skills.open) ...{
-                            const SingleActivator(
-                              LogicalKeyboardKey.arrowUp,
-                            ): () =>
-                                skills.move(-1),
-                            const SingleActivator(
-                              LogicalKeyboardKey.arrowDown,
-                            ): () =>
-                                skills.move(1),
-                            const SingleActivator(LogicalKeyboardKey.escape):
-                                skills.close,
-                          },
-                        },
-                        child: identified(
-                          ShellIds.composer,
-                          Semantics(
-                            label: 'Message your Bot',
-                            child: SteadyCaret(
-                              child: TextField(
-                                key: const ValueKey('composer'),
-                                controller: widget.editor,
-                                focusNode: widget.focus,
-                                style: fieldStyle,
-                                minLines: 1,
-                                maxLines: 6,
-                                keyboardType: TextInputType.multiline,
-                                textInputAction: TextInputAction.newline,
-                                decoration: InputDecoration(
-                                  hintText: 'Message your Bot',
-                                  filled: false,
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  contentPadding: composerFieldPadding,
-                                  counterText: '',
-                                ),
-                                onChanged: (value) {
-                                  AcceptanceMetrics.instance.inputChanged();
-                                  widget.onChanged(value);
-                                  _refreshPopover();
-                                  setState(() {});
-                                },
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+                    Visibility(
+                      visible: !widget.dictating,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: field,
                     ),
-                    corner(
-                      AnimatedSwitcher(
-                        duration: FrockTheme.motion(context, FrockTheme.enter),
-                        switchInCurve: Curves.easeOutCubic,
-                        switchOutCurve: Curves.easeInCubic,
-                        // Outgoing controls remain visible, but cannot be pressed
-                        // or announced after the current action has changed.
-                        layoutBuilder: _quietOutgoing,
-                        transitionBuilder: (child, animation) => FadeTransition(
-                          opacity: animation,
-                          child: ScaleTransition(
-                            scale: Tween<double>(
-                              begin: 0.8,
-                              end: 1,
-                            ).animate(animation),
-                            child: child,
-                          ),
-                        ),
-                        child: widget.dictating
-                            ? const SizedBox(width: 48, height: 48)
-                            : _actionButton(
-                                context,
-                                dictatable: dictatable,
-                                canSend: canSend,
-                              ),
-                      ),
-                    ),
-                    // Voice, to the right of the morph and never part of it
-                    // (ADR 0029). It is the same target whatever the draft is
-                    // doing, so the thumb can find it without looking.
-                    if (widget.onVoice != null) corner(_voiceButton(context)),
+                    if (widget.dictating)
+                      Positioned.fill(child: _capturePill(context, oneLine)),
                   ],
                 ),
-              ],
-            ),
+              ),
+              // Voice, outside the field and never part of it (ADR 0029). It
+              // is the same target whatever the draft is doing, so the thumb
+              // can find it without looking and the field beside it never
+              // changes width under a capture.
+              if (widget.onVoice != null)
+                SizedBox(
+                  height: oneLine,
+                  child: Center(
+                    child: _voiceButton(
+                      context,
+                      composerControlExtent(oneLine),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
         if (turnTextCounterVisible(text))
@@ -664,70 +597,233 @@ class _ComposerState extends State<Composer> {
           ),
       ],
     );
-    return Stack(
-      alignment: Alignment.bottomCenter,
-      clipBehavior: Clip.none,
-      children: [
-        // Reserve the resting composer height while its editor is offstage.
-        // The dock can grow from it without collapsing the conversation first.
-        SizedBox(height: oneLine + 14 + MediaQuery.paddingOf(context).bottom),
-        Visibility(
-          visible: !widget.dictating,
-          maintainState: true,
-          child: SafeArea(top: false, child: draft),
+    return SafeArea(top: false, child: draft);
+  }
+
+  /// The capture in the field's place: the meter, the way out, and the way to
+  /// throw it away.
+  ///
+  /// The draft is not editable while it runs — the words are still arriving —
+  /// so the field is stood in for rather than disabled in place.
+  Widget _capturePill(BuildContext context, double oneLine) {
+    final theme = Theme.of(context);
+    final extent = composerControlExtent(oneLine);
+    Widget corner(Widget button) => SizedBox(
+      height: oneLine,
+      child: Center(child: button),
+    );
+    return Container(
+      key: const ValueKey('dictation-pill'),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(
+          theme.colorScheme.primary.withValues(alpha: 0.07),
+          theme.colorScheme.surfaceContainerHighest,
         ),
-        VoiceReveal(
-          visible: widget.dictating,
-          child: Material(
-            key: const ValueKey('dictation-dock'),
-            color: Color.alphaBlend(
-              theme.colorScheme.primary.withValues(alpha: 0.07),
-              theme.colorScheme.surfaceContainerHighest,
-            ),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Semantics(
-                  container: true,
-                  liveRegion: true,
-                  label: switch (widget.dictationState) {
-                    DictationState.starting => 'Starting dictation',
-                    DictationState.stopping => 'Finishing dictation',
-                    DictationState.cleaning => 'Tidying what you said',
-                    _ => 'Listening for dictation',
-                  },
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(
-                          height: 48,
-                          child: widget.dictationLevel == null
-                              ? const SizedBox.shrink()
-                              : identified(
-                                  VoiceIds.composerDictationLevel,
-                                  VoiceWaveform(
-                                    source: widget.dictationLevel!,
-                                    microphone: () =>
-                                        widget.dictationLevel!.value,
-                                    enabled:
-                                        widget.dictationState ==
-                                        DictationState.capturing,
-                                  ),
-                                ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          // The way out of the capture at one end, the way to keep it at the
+          // other, and everything between them is the sound: the strip runs
+          // the width of whatever the row happens to be, so a phone and a
+          // desktop both show as much of the capture as they have room for.
+          corner(_discardButton(context, extent)),
+          Expanded(
+            child: Semantics(
+              container: true,
+              liveRegion: true,
+              label: switch (widget.dictationState) {
+                DictationState.starting => 'Starting dictation',
+                DictationState.stopping ||
+                DictationState.cleaning => 'Finishing dictation',
+                _ => 'Listening for dictation',
+              },
+              child: Center(
+                child: SizedBox(
+                  key: const ValueKey('dictation-strip'),
+                  height: 26,
+                  width: double.infinity,
+                  child: widget.dictationLevel == null
+                      ? const SizedBox.shrink()
+                      : identified(
+                          VoiceIds.composerDictationLevel,
+                          DictationWaveform(
+                            level: widget.dictationLevel!,
+                            capturing:
+                                widget.dictationState ==
+                                DictationState.capturing,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 24),
-                      _actionButton(context, dictatable: false, canSend: false),
-                    ],
-                  ),
                 ),
               ),
             ),
           ),
+          corner(
+            _actionButton(
+              context,
+              dictating: true,
+              dictatable: false,
+              canSend: false,
+              extent: extent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The draft itself: the field, and the action in its corner.
+  Widget _field(
+    BuildContext context, {
+    required double oneLine,
+    required bool dictatable,
+    required bool canSend,
+  }) {
+    final theme = Theme.of(context);
+    final extent = composerControlExtent(oneLine);
+    Widget corner(Widget button) => SizedBox(
+      height: oneLine,
+      child: Center(child: button),
+    );
+    final fieldStyle = theme.textTheme.bodyLarge?.copyWith(
+      fontWeight: FontWeight.w400,
+    );
+    final skills = widget.skills;
+    return AnimatedContainer(
+      duration: FrockTheme.motion(context, voiceEnterDuration),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: widget.focus.hasFocus
+              ? Color.alphaBlend(
+                  theme.colorScheme.primary.withValues(alpha: 0.55),
+                  theme.colorScheme.outlineVariant,
+                )
+              : FrockTheme.hairline(theme.colorScheme),
         ),
-      ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.enter, meta: true):
+                        _send,
+                    const SingleActivator(
+                      LogicalKeyboardKey.enter,
+                      control: true,
+                    ): _send,
+                    if (enterSends) ...{
+                      const SingleActivator(LogicalKeyboardKey.enter): _enter,
+                      const SingleActivator(LogicalKeyboardKey.numpadEnter):
+                          _enter,
+                    },
+                    if (skills != null && skills.open) ...{
+                      const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+                          skills.move(-1),
+                      const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+                          skills.move(1),
+                      const SingleActivator(LogicalKeyboardKey.escape):
+                          skills.close,
+                    },
+                  },
+                  child: identified(
+                    ShellIds.composer,
+                    Semantics(
+                      label: 'Message your Bot',
+                      child: SteadyCaret(
+                        child: TextField(
+                          key: const ValueKey('composer'),
+                          controller: widget.editor,
+                          focusNode: widget.focus,
+                          style: fieldStyle,
+                          minLines: 1,
+                          maxLines: 6,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          decoration: InputDecoration(
+                            hintText: 'Message your Bot',
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: composerFieldPadding,
+                            counterText: '',
+                          ),
+                          onChanged: (value) {
+                            AcceptanceMetrics.instance.inputChanged();
+                            widget.onChanged(value);
+                            _refreshPopover();
+                            setState(() {});
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              corner(
+                AnimatedSwitcher(
+                  duration: FrockTheme.motion(context, FrockTheme.enter),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  layoutBuilder: _quietOutgoing,
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(
+                      scale: Tween<double>(
+                        begin: 0.8,
+                        end: 1,
+                      ).animate(animation),
+                      child: child,
+                    ),
+                  ),
+                  child: _actionButton(
+                    context,
+                    dictating: false,
+                    dictatable: dictatable,
+                    canSend: canSend,
+                    extent: extent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Throws the capture away: the words it put in the draft go with it, which
+  /// is the whole difference between this and the control beside it.
+  Widget _discardButton(BuildContext context, double extent) {
+    final theme = Theme.of(context);
+    return identified(
+      VoiceIds.composerDictationDiscard,
+      IconButton(
+        key: const ValueKey('dictation-discard'),
+        tooltip: 'Discard dictation',
+        onPressed: widget.onDiscardDictation,
+        style: IconButton.styleFrom(
+          minimumSize: Size.square(extent),
+          fixedSize: Size.square(extent),
+          padding: EdgeInsets.zero,
+          iconSize: composerControlIconSize(extent),
+          shape: const CircleBorder(),
+          backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.08),
+          foregroundColor: theme.colorScheme.onSurfaceVariant,
+        ),
+        icon: const Icon(Icons.delete_outline_rounded),
+      ),
     );
   }
 }
