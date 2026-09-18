@@ -824,6 +824,12 @@
     white-space: pre;
     tab-size: 2;
   }
+  /* A block that follows the heading directly needs the gap `.open-split`
+     gives the ones inside it, or it collides with the buttons above. */
+  .split-heading + .code-block,
+  .split-heading + .terminal {
+    margin-top: 48px;
+  }
   .code-block .k {
     color: #ff7aa2;
   }
@@ -1350,10 +1356,235 @@
   .legal-footer-shell {
     min-height: 125px;
   }
+  /* Open-source page: what a plugin can reach */
+  .reach-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin-top: 28px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+  .reach-legend span {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .reach-dot {
+    width: 9px;
+    height: 9px;
+    flex: none;
+    border-radius: 50%;
+    border: 2px solid var(--pink);
+    background: var(--pink);
+  }
+  .is-planned .reach-dot {
+    border-color: #c6c1cb;
+    background: transparent;
+  }
+  .reach-rails {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-top: 24px;
+  }
+  .reach-rails-3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .reach-subhead {
+    margin-top: 40px;
+    font-family: "Archivo Black", "Arial Black", sans-serif;
+    font-size: 1.15rem;
+    letter-spacing: -0.01em;
+  }
+  .reach-chips code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.73rem;
+    color: var(--pink-dark);
+  }
+  .reach-status {
+    margin-top: 8px;
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+  .reach-api {
+    display: grid;
+    gap: 2px;
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .reach-api li {
+    padding: 9px 0;
+    border-top: 1px solid var(--line);
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+  .reach-api li:first-child {
+    border-top: 0;
+  }
+  .reach-api b {
+    display: block;
+    font-weight: 400;
+  }
+  .reach-api code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.76rem;
+    color: var(--pink-dark);
+    word-break: break-word;
+  }
+  .reach-api span {
+    display: block;
+    margin-top: 3px;
+    color: var(--muted);
+  }
+  .reach-kind {
+    float: right;
+    margin-left: 12px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--cream);
+    color: var(--muted);
+    font-family: "Manrope", system-ui, sans-serif;
+    font-style: normal;
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  /* One colour per kind, shared by the key and every badge. */
+  .k-slot {
+    background: #fce2ea;
+    color: #b33257;
+  }
+  .k-entry {
+    background: #fbeccd;
+    color: #8a5c10;
+  }
+  .k-trigger {
+    background: #d9eee6;
+    color: #1d6a53;
+  }
+  .k-handler {
+    background: #e9e3f7;
+    color: #56469b;
+  }
+  .k-action {
+    background: #dfe9f7;
+    color: #2a5a8f;
+  }
+  .reach-foot {
+    margin-top: 16px;
+    max-width: 78ch;
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.6;
+  }
+  .reach-foot b {
+    color: var(--pink-dark);
+  }
+  .reach-foot-lead {
+    margin-top: 8px;
+  }
+  .reach-api sup {
+    color: var(--pink-dark);
+    font-size: 0.7em;
+  }
+  .reach-kinds {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-top: 32px;
+  }
+  .reach-kinds div {
+    padding: 16px 18px;
+    border-radius: 18px;
+    background: var(--cream);
+  }
+  .reach-kinds b {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .reach-kinds p {
+    margin-top: 10px;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+  .reach-rail {
+    padding: 22px;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: #fff;
+  }
+  .reach-rail h3 {
+    font-family: "Archivo Black", "Arial Black", sans-serif;
+    font-size: 1.05rem;
+    letter-spacing: -0.01em;
+  }
+  .reach-rail > p {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+  .reach-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .reach-chips li {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    padding: 6px 11px;
+    border-radius: 999px;
+    background: var(--cream);
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .reach-chips li.is-planned {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--line);
+    color: var(--muted);
+  }
+  .reach-note {
+    margin-top: 28px;
+    padding: 20px 24px;
+    border-radius: 20px;
+    background: var(--blush);
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+  .reach-note b {
+    font-family: "Caveat", cursive;
+    font-size: 1.3rem;
+    color: var(--pink-dark);
+  }
 }
 
 @layer responsive {
   @media (max-width: 1100px) {
+    .reach-rails-3 {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .reach-kinds {
+      grid-template-columns: repeat(3, 1fr);
+    }
     .site-nav {
       gap: 20px;
     }
@@ -1376,6 +1607,13 @@
   }
 
   @media (max-width: 860px) {
+    .reach-rails,
+    .reach-rails-3 {
+      grid-template-columns: 1fr;
+    }
+    .reach-kinds {
+      grid-template-columns: repeat(2, 1fr);
+    }
     .container {
       width: min(100% - 32px, var(--container));
     }

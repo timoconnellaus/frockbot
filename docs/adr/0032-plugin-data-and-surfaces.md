@@ -236,6 +236,30 @@ for a fixed number of releases — an archived Bot woken months later must still
 mount. After the deploy, a real Bot reply is verified before the change is
 called done.
 
+### Five kinds, so a device capability has somewhere to land
+
+Every extension point is one of five kinds, and naming them now is what keeps
+the client work from inventing a sixth shape per platform:
+
+- **Slot** — the host asks the plugin what to draw and draws it.
+- **Entry** — a person starts a Turn from outside the app.
+- **Trigger** — an event starts a run with nobody watching.
+- **Handler** — the system asks a question and waits for the verdict on its own
+  deadline.
+- **Action** — a tool the Bot calls to reach the device or the network.
+
+Slots, triggers and actions exist today; actions are tools. **Entry** and
+**handler** are new and are specified when the first client capability needs
+them, not here. A handler is the one with a genuinely different shape: it is
+synchronous, it answers on someone else's deadline, and a plugin that misses it
+must fail closed.
+
+The rule this settles is which side of the line a capability sits on. A watched
+folder, a scheduled run and a local database are the app's own runtime and
+reach a plugin through the grants it already has. An extension point is for a
+system the app does not own — the notification stream, the share sheet, the
+call pipeline, another application — and each one names its kind.
+
 ## What this ADR does not decide
 
 - **The numbers.** Re-render cadence and byte caps per slot are configuration,

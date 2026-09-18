@@ -880,6 +880,1062 @@
         </div>
       </section>
 
+      <section class="section" id="reach" aria-labelledby="reach-title">
+        <div class="container">
+          <div class="split-heading split-heading-bottom">
+            <div>
+              <p class="section-label">What a plugin reaches</p>
+              <h2 id="reach-title">
+                It doesn't live<br /><em>in a settings page.</em>
+              </h2>
+            </div>
+            <div>
+              <p>
+                A plugin declares where it renders, and the app draws it there.
+                One plugin can be a panel in the sidebar, a strip that updates
+                above the chat while the Bot works, and a card in the thread
+                with buttons on it — from one file, on web, Mac and phone,
+                without shipping a line of client code.
+              </p>
+              <p>
+                Some of this runs today and some of it is the plan. The dots say
+                which, and the design is public before the code:
+                <b>ADR 0032</b> is the proposal, and the twelve scenarios it is
+                measured against are in the repo beside it.
+              </p>
+              <p class="open-actions">
+                <a
+                  class="button button-outline"
+                  href="https://github.com/timoconnellaus/frockbot/blob/main/docs/adr/0032-plugin-data-and-surfaces.md"
+                  >ADR 0032 <span aria-hidden="true">→</span></a
+                >
+                <a
+                  class="button button-outline"
+                  href="https://github.com/timoconnellaus/frockbot/blob/main/docs/plugin-scenarios.md"
+                  >The twelve scenarios <span aria-hidden="true">→</span></a
+                >
+              </p>
+            </div>
+          </div>
+
+          <figure class="open-figure" aria-labelledby="reach-caption">
+            <svg
+              viewBox="0 0 1100 480"
+              role="img"
+              aria-labelledby="reach-caption"
+              font-family="Manrope, system-ui, sans-serif"
+            >
+              <!-- desktop window -->
+              <rect
+                x="30"
+                y="30"
+                width="610"
+                height="420"
+                rx="18"
+                fill="#fff"
+                stroke="#e7e0d9"
+              />
+              <circle cx="52" cy="52" r="4" fill="#e7e0d9" />
+              <circle cx="68" cy="52" r="4" fill="#e7e0d9" />
+              <circle cx="84" cy="52" r="4" fill="#e7e0d9" />
+              <text
+                x="335"
+                y="56"
+                text-anchor="middle"
+                font-size="11"
+                fill="#6d6974"
+              >
+                FrockBot
+              </text>
+
+              <!-- sidebar -->
+              <rect
+                x="44"
+                y="80"
+                width="140"
+                height="356"
+                rx="12"
+                fill="#faf7f2"
+              />
+              <text x="58" y="104" font-size="10" fill="#6d6974">Sunny</text>
+              <text x="58" y="128" font-size="10" fill="#6d6974">Pixel</text>
+              <text x="58" y="152" font-size="10" fill="#6d6974">Guardian</text>
+              <rect
+                x="54"
+                y="176"
+                width="120"
+                height="28"
+                rx="9"
+                fill="#fce2ea"
+                stroke="#db4b6d"
+                stroke-width="1.5"
+              />
+              <text
+                x="66"
+                y="194"
+                font-size="10"
+                font-weight="700"
+                fill="#db4b6d"
+              >
+                Quotes
+              </text>
+              <circle cx="184" cy="190" r="11" fill="#db4b6d" />
+              <text
+                x="184"
+                y="194"
+                text-anchor="middle"
+                font-size="11"
+                font-weight="700"
+                fill="#fff"
+              >
+                1
+              </text>
+
+              <!-- thread -->
+              <rect
+                x="212"
+                y="92"
+                width="252"
+                height="30"
+                rx="10"
+                fill="#faf7f2"
+              />
+              <text x="226" y="111" font-size="10" fill="#6d6974">
+                Three quotes came in overnight.
+              </text>
+              <rect
+                x="388"
+                y="132"
+                width="226"
+                height="28"
+                rx="10"
+                fill="#1e1d27"
+              />
+              <text x="402" y="151" font-size="10" fill="#fff">
+                Draft the one for Dave.
+              </text>
+
+              <!-- a card in the thread -->
+              <rect
+                x="212"
+                y="176"
+                width="302"
+                height="98"
+                rx="14"
+                fill="#fff"
+                stroke="#db4b6d"
+                stroke-dasharray="4 3"
+              />
+              <text
+                x="228"
+                y="200"
+                font-size="10"
+                font-weight="700"
+                fill="#1e1d27"
+              >
+                Quote · Dave Chen · $1,840
+              </text>
+              <rect
+                x="228"
+                y="210"
+                width="184"
+                height="6"
+                rx="3"
+                fill="#faf7f2"
+              />
+              <rect
+                x="228"
+                y="222"
+                width="140"
+                height="6"
+                rx="3"
+                fill="#faf7f2"
+              />
+              <rect
+                x="228"
+                y="238"
+                width="66"
+                height="22"
+                rx="11"
+                fill="#db4b6d"
+              />
+              <text
+                x="261"
+                y="253"
+                text-anchor="middle"
+                font-size="9"
+                font-weight="700"
+                fill="#fff"
+              >
+                Send
+              </text>
+              <rect
+                x="302"
+                y="238"
+                width="66"
+                height="22"
+                rx="11"
+                fill="#fff"
+                stroke="#e7e0d9"
+              />
+              <text
+                x="335"
+                y="253"
+                text-anchor="middle"
+                font-size="9"
+                font-weight="700"
+                fill="#1e1d27"
+              >
+                Edit
+              </text>
+              <circle cx="522" cy="184" r="11" fill="#db4b6d" />
+              <text
+                x="522"
+                y="188"
+                text-anchor="middle"
+                font-size="11"
+                font-weight="700"
+                fill="#fff"
+              >
+                3
+              </text>
+
+              <!-- strip above the composer -->
+              <rect
+                x="212"
+                y="360"
+                width="402"
+                height="32"
+                rx="10"
+                fill="#fce2ea"
+                stroke="#db4b6d"
+                stroke-dasharray="4 3"
+              />
+              <text
+                x="226"
+                y="380"
+                font-size="10"
+                font-weight="700"
+                fill="#db4b6d"
+              >
+                3 jobs today · next 10:30, Dave Chen · 1 quote waiting
+              </text>
+              <circle cx="600" cy="376" r="11" fill="#db4b6d" />
+              <text
+                x="600"
+                y="380"
+                text-anchor="middle"
+                font-size="11"
+                font-weight="700"
+                fill="#fff"
+              >
+                2
+              </text>
+              <rect
+                x="212"
+                y="402"
+                width="402"
+                height="32"
+                rx="12"
+                fill="#faf7f2"
+                stroke="#e7e0d9"
+              />
+              <text x="226" y="422" font-size="10" fill="#6d6974">
+                Message Sunny…
+              </text>
+
+              <!-- phone -->
+              <rect
+                x="676"
+                y="40"
+                width="168"
+                height="400"
+                rx="30"
+                fill="#fff"
+                stroke="#e7e0d9"
+                stroke-width="2"
+              />
+              <rect
+                x="734"
+                y="56"
+                width="52"
+                height="7"
+                rx="3.5"
+                fill="#e7e0d9"
+              />
+              <rect
+                x="690"
+                y="76"
+                width="140"
+                height="330"
+                rx="20"
+                fill="#faf7f2"
+              />
+              <text
+                x="760"
+                y="98"
+                text-anchor="middle"
+                font-size="10"
+                font-weight="700"
+                fill="#1e1d27"
+              >
+                Sunny
+              </text>
+              <rect
+                x="700"
+                y="110"
+                width="104"
+                height="22"
+                rx="8"
+                fill="#fff"
+              />
+              <rect
+                x="716"
+                y="140"
+                width="104"
+                height="20"
+                rx="8"
+                fill="#1e1d27"
+              />
+              <rect
+                x="700"
+                y="172"
+                width="120"
+                height="52"
+                rx="10"
+                fill="#fff"
+                stroke="#db4b6d"
+                stroke-dasharray="3 2"
+              />
+              <text
+                x="710"
+                y="192"
+                font-size="8"
+                font-weight="700"
+                fill="#1e1d27"
+              >
+                Quote · Dave
+              </text>
+              <rect
+                x="710"
+                y="200"
+                width="70"
+                height="5"
+                rx="2.5"
+                fill="#faf7f2"
+              />
+              <rect
+                x="710"
+                y="210"
+                width="48"
+                height="5"
+                rx="2.5"
+                fill="#faf7f2"
+              />
+              <rect
+                x="700"
+                y="300"
+                width="120"
+                height="26"
+                rx="8"
+                fill="#fce2ea"
+                stroke="#db4b6d"
+                stroke-dasharray="4 3"
+              />
+              <text
+                x="710"
+                y="317"
+                font-size="8"
+                font-weight="700"
+                fill="#db4b6d"
+              >
+                3 jobs today
+              </text>
+              <circle cx="828" cy="313" r="11" fill="#db4b6d" />
+              <text
+                x="828"
+                y="317"
+                text-anchor="middle"
+                font-size="11"
+                font-weight="700"
+                fill="#fff"
+              >
+                4
+              </text>
+              <rect
+                x="700"
+                y="336"
+                width="120"
+                height="24"
+                rx="8"
+                fill="#fff"
+                stroke="#e7e0d9"
+              />
+              <text
+                x="760"
+                y="468"
+                text-anchor="middle"
+                font-size="10"
+                fill="#6d6974"
+              >
+                One plugin. Every client.
+              </text>
+
+              <!-- key -->
+              <text
+                x="880"
+                y="50"
+                font-size="10"
+                font-weight="700"
+                letter-spacing="1.2"
+                fill="#6d6974"
+              >
+                WHERE IT SHOWS UP
+              </text>
+              <g font-size="12" font-weight="700" fill="#1e1d27">
+                <circle cx="891" cy="92" r="11" fill="#db4b6d" />
+                <text x="891" y="96" text-anchor="middle" fill="#fff">1</text>
+                <text x="912" y="88">A panel of its own</text>
+                <text
+                  x="912"
+                  y="106"
+                  font-size="10"
+                  font-weight="400"
+                  fill="#6d6974"
+                >
+                  sidebar.entries — beside Routines
+                </text>
+                <text
+                  x="912"
+                  y="122"
+                  font-size="10"
+                  font-weight="700"
+                  fill="#6d6974"
+                >
+                  in the plan
+                </text>
+
+                <circle cx="891" cy="176" r="11" fill="#db4b6d" />
+                <text x="891" y="180" text-anchor="middle" fill="#fff">2</text>
+                <text x="912" y="172">A strip above the chat</text>
+                <text
+                  x="912"
+                  y="190"
+                  font-size="10"
+                  font-weight="400"
+                  fill="#6d6974"
+                >
+                  moves while the Bot is working
+                </text>
+                <text
+                  x="912"
+                  y="206"
+                  font-size="10"
+                  font-weight="700"
+                  fill="#6d6974"
+                >
+                  in the plan
+                </text>
+
+                <circle cx="891" cy="260" r="11" fill="#db4b6d" />
+                <text x="891" y="264" text-anchor="middle" fill="#fff">3</text>
+                <text x="912" y="256">A card in the thread</text>
+                <text
+                  x="912"
+                  y="274"
+                  font-size="10"
+                  font-weight="400"
+                  fill="#6d6974"
+                >
+                  its own buttons, its own actions
+                </text>
+                <text
+                  x="912"
+                  y="290"
+                  font-size="10"
+                  font-weight="700"
+                  fill="#db4b6d"
+                >
+                  live today
+                </text>
+
+                <circle cx="891" cy="344" r="11" fill="#db4b6d" />
+                <text x="891" y="348" text-anchor="middle" fill="#fff">4</text>
+                <text x="912" y="340">The same, on the phone</text>
+                <text
+                  x="912"
+                  y="358"
+                  font-size="10"
+                  font-weight="400"
+                  fill="#6d6974"
+                >
+                  declared once, drawn natively
+                </text>
+                <text
+                  x="912"
+                  y="374"
+                  font-size="10"
+                  font-weight="700"
+                  fill="#6d6974"
+                >
+                  in the plan
+                </text>
+              </g>
+            </svg>
+            <figcaption id="reach-caption">
+              One plugin for a plumber: a trigger takes the quote off the
+              website, a store keeps it, and the same plugin draws the list in
+              the sidebar, the running total above the composer and the draft as
+              a card. The Bot writes all of it; you approve it once.
+            </figcaption>
+          </figure>
+
+          <p class="reach-legend">
+            <span><i class="reach-dot"></i>Live today</span>
+            <span class="is-planned"><i class="reach-dot"></i>In the plan</span>
+          </p>
+
+          <h3 class="reach-subhead">Five kinds of extension point</h3>
+          <div class="reach-kinds">
+            <div>
+              <b class="k-slot">Slot</b>
+              <p>The host asks the plugin what to draw, and draws it.</p>
+            </div>
+            <div>
+              <b class="k-entry">Entry</b>
+              <p>A person starts a Turn from outside the app.</p>
+            </div>
+            <div>
+              <b class="k-trigger">Trigger</b>
+              <p>An event starts a run with nobody watching.</p>
+            </div>
+            <div>
+              <b class="k-handler">Handler</b>
+              <p>The system asks a question and waits for the verdict.</p>
+            </div>
+            <div>
+              <b class="k-action">Action</b>
+              <p>A tool the Bot calls to reach the device or the network.</p>
+            </div>
+          </div>
+
+          <h3 class="reach-subhead">In the app</h3>
+          <div class="reach-rails">
+            <div class="reach-rail">
+              <h3>Slots</h3>
+              <p>
+                Where a plugin may render. It sends a description of the
+                surface, never code that runs on your machine.
+              </p>
+              <ul class="reach-chips">
+                <li><i class="reach-dot"></i><code>cards</code></li>
+                <li><i class="reach-dot"></i><code>settings.sections</code></li>
+                <li class="is-planned">
+                  <i class="reach-dot"></i><code>sidebar.entries</code>
+                </li>
+                <li class="is-planned">
+                  <i class="reach-dot"></i><code>composer.toolbar</code>
+                </li>
+                <li class="is-planned">
+                  <i class="reach-dot"></i><code>message.actions</code>
+                </li>
+                <li class="is-planned">
+                  <i class="reach-dot"></i><code>bot.profile</code>
+                </li>
+              </ul>
+            </div>
+            <div class="reach-rail">
+              <h3>Grants</h3>
+              <p>
+                What it may hold and reach, declared in the descriptor and
+                approved by you before it mounts.
+              </p>
+              <ul class="reach-chips">
+                <li><i class="reach-dot"></i><code>storage</code></li>
+                <li><i class="reach-dot"></i><code>http</code></li>
+                <li><i class="reach-dot"></i><code>ai</code></li>
+                <li><i class="reach-dot"></i><code>schedule</code></li>
+                <li><i class="reach-dot"></i><code>memory</code></li>
+                <li><i class="reach-dot"></i><code>workspace</code></li>
+                <li><i class="reach-dot"></i><code>triggers</code></li>
+                <li><i class="reach-dot"></i><code>skills</code></li>
+                <li class="is-planned">
+                  <i class="reach-dot"></i><code>stores</code>
+                </li>
+                <li class="is-planned">
+                  <i class="reach-dot"></i><code>files</code>
+                </li>
+                <li class="is-planned">
+                  <i class="reach-dot"></i><code>computer</code>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <h3 class="reach-subhead">On the phone</h3>
+          <p class="reach-foot reach-foot-lead">
+            Not listed: the app's own runtime. Background work, scheduled runs,
+            its files and its database are things FrockBot already does, and a
+            plugin gets them wherever it runs. These are the systems the app
+            does not own, and the hook each one offers.
+          </p>
+          <div class="reach-rails">
+            <div class="reach-rail">
+              <h3>Android</h3>
+              <span class="reach-status is-planned"
+                ><i class="reach-dot"></i>In the plan</span
+              >
+              <ul class="reach-api">
+                <li>
+                  <b
+                    ><code>NotificationListenerService</code><sup>&dagger;</sup
+                    ><em class="reach-kind k-trigger">trigger</em></b
+                  ><span
+                    >any app's notifications, and an inline reply back</span
+                  >
+                </li>
+                <li>
+                  <b
+                    ><code>CallScreeningService</code
+                    ><em class="reach-kind k-handler">handler</em></b
+                  ><span>answer or reject before the phone rings</span>
+                </li>
+                <li>
+                  <b
+                    ><code>AppWidgetProvider</code> · <code>Glance</code
+                    ><em class="reach-kind k-slot">slot</em></b
+                  ><span>home and lock screen widgets</span>
+                </li>
+                <li>
+                  <b
+                    ><code>TileService</code
+                    ><em class="reach-kind k-entry">entry</em></b
+                  ><span>a Quick Settings tile that fires a Routine</span>
+                </li>
+                <li>
+                  <b
+                    ><code>ACTION_SEND</code> · <code>ShortcutManager</code
+                    ><em class="reach-kind k-entry">entry</em></b
+                  ><span>the share sheet, with a Bot as a direct target</span>
+                </li>
+                <li>
+                  <b
+                    ><code>shortcuts.xml</code> App Actions<em
+                      class="reach-kind k-entry"
+                      >entry</em
+                    ></b
+                  ><span>"Hey Google, ask Sunny…"</span>
+                </li>
+                <li>
+                  <b
+                    ><code>InputMethodService</code
+                    ><em class="reach-kind k-handler">handler</em></b
+                  ><span>a keyboard that asks a Bot, inside any app</span>
+                </li>
+                <li>
+                  <b
+                    ><code>GeofencingClient</code> ·
+                    <code>ActivityRecognitionClient</code><sup>&dagger;</sup
+                    ><em class="reach-kind k-trigger">trigger</em></b
+                  ><span>arrive, leave, driving, walking</span>
+                </li>
+                <li>
+                  <b
+                    ><code>CompanionDeviceManager</code> · BLE<em
+                      class="reach-kind k-trigger"
+                      >trigger</em
+                    ></b
+                  ><span>watches, scales and sensors</span>
+                </li>
+                <li>
+                  <b
+                    ><code>HealthConnectClient</code><sup>&dagger;</sup
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>sleep, steps and workouts, read and write</span>
+                </li>
+                <li>
+                  <b
+                    ><code>ContactsContract</code> ·
+                    <code>CalendarContract</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>two-way sync with the phone's own data</span>
+                </li>
+                <li>
+                  <b
+                    ><code>SmsManager</code><sup>&dagger;</sup
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>send and read, as the default SMS app</span>
+                </li>
+                <li>
+                  <b
+                    ><code>CameraX</code> · ML Kit<em
+                      class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span>scan and OCR on the device, upload nothing</span>
+                </li>
+                <li>
+                  <b
+                    ><code>MediaProjection</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>record the screen for one consented session</span>
+                </li>
+                <li>
+                  <b
+                    >AICore · <code>Gemini Nano</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>an on-device model for private Bots</span>
+                </li>
+              </ul>
+            </div>
+            <div class="reach-rail">
+              <h3>iPhone</h3>
+              <span class="reach-status is-planned"
+                ><i class="reach-dot"></i>In the plan</span
+              >
+              <ul class="reach-api">
+                <li>
+                  <b
+                    ><code>WidgetKit</code
+                    ><em class="reach-kind k-slot">slot</em></b
+                  ><span>home screen, lock screen and StandBy</span>
+                </li>
+                <li>
+                  <b
+                    ><code>ActivityKit</code
+                    ><em class="reach-kind k-slot">slot</em></b
+                  ><span>Live Activities and the Dynamic Island</span>
+                </li>
+                <li>
+                  <b
+                    ><code>AppIntents</code
+                    ><em class="reach-kind k-entry">entry</em></b
+                  ><span
+                    >Siri, Shortcuts, Spotlight and Apple Intelligence</span
+                  >
+                </li>
+                <li>
+                  <b
+                    ><code>ControlWidget</code
+                    ><em class="reach-kind k-entry">entry</em></b
+                  ><span>Control Centre and the Action button</span>
+                </li>
+                <li>
+                  <b
+                    >Share and Action extensions<em class="reach-kind k-entry"
+                      >entry</em
+                    ></b
+                  ><span>any app's share sheet, straight to one Bot</span>
+                </li>
+                <li>
+                  <b
+                    ><code>PushToTalk</code> · <code>CallKit</code
+                    ><sup>&dagger;</sup
+                    ><em class="reach-kind k-entry">entry</em></b
+                  ><span>hands-free voice from the lock screen</span>
+                </li>
+                <li>
+                  <b
+                    ><code>CallDirectory</code> extension<em
+                      class="reach-kind k-handler"
+                      >handler</em
+                    ></b
+                  ><span
+                    >caller ID and blocking from the Bot's own records</span
+                  >
+                </li>
+                <li>
+                  <b
+                    ><code>IdentityLookup</code> extension<em
+                      class="reach-kind k-handler"
+                      >handler</em
+                    ></b
+                  ><span>sort unknown senders out of Messages</span>
+                </li>
+                <li>
+                  <b
+                    ><code>CoreLocation</code
+                    ><em class="reach-kind k-trigger">trigger</em></b
+                  ><span>geofences and significant-change, app closed</span>
+                </li>
+                <li>
+                  <b
+                    ><code>HealthKit</code><sup>&dagger;</sup
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>read and write, behind its own consent screen</span>
+                </li>
+                <li>
+                  <b
+                    ><code>Contacts</code> · <code>EventKit</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>two-way sync with the phone's own data</span>
+                </li>
+                <li>
+                  <b
+                    ><code>VisionKit</code> · <code>DataScanner</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>document scan and OCR on the device</span>
+                </li>
+                <li>
+                  <b
+                    ><code>CoreNFC</code> · <code>PassKit</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>tags, and passes a Bot issues to Wallet</span>
+                </li>
+                <li>
+                  <b
+                    ><code>FoundationModels</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>Apple's on-device model for private Bots</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <p class="reach-foot">
+            <b>&dagger;</b> Gated by the stores, not by us. Notifications,
+            background location and health each need a Play declaration; Push to
+            Talk and CallKit need an entitlement Apple grants case by case;
+            health data carries its own consent rules on both platforms. SMS is
+            the hard one, because Android gives it only to your default SMS app.
+            Two things people ask for are deliberately absent: driving other
+            apps through the Android accessibility service, and filtering
+            traffic through a VPN service. Both read as data harvesting to a
+            reviewer, and neither is worth the app.
+          </p>
+
+          <h3 class="reach-subhead">On the desktop</h3>
+          <p class="reach-foot reach-foot-lead">
+            Same rule, and no store: the desktop app is a long-running local
+            process, so watching a folder or holding a database is ordinary work
+            rather than a capability to announce. What is worth announcing is
+            everything it can reach outside itself, and the only gate is the
+            permission prompt you accept.
+          </p>
+          <div class="reach-rails reach-rails-3">
+            <div class="reach-rail">
+              <h3>macOS</h3>
+              <span class="reach-status is-planned"
+                ><i class="reach-dot"></i>In the plan</span
+              >
+              <ul class="reach-api">
+                <li>
+                  <b
+                    ><code>NSStatusItem</code
+                    ><em class="reach-kind k-slot">slot</em></b
+                  ><span>a menu bar item, one per Bot</span>
+                </li>
+                <li>
+                  <b
+                    ><code>RegisterEventHotKey</code
+                    ><em class="reach-kind k-entry">entry</em></b
+                  ><span>select anywhere, ask a Bot</span>
+                </li>
+                <li>
+                  <b
+                    ><code>NSPasteboard</code> · Services<em
+                      class="reach-kind k-entry"
+                      >entry</em
+                    ></b
+                  ><span>act on a selection from any app</span>
+                </li>
+                <li>
+                  <b
+                    ><code>MailKit</code> extension<em
+                      class="reach-kind k-handler"
+                      >handler</em
+                    ></b
+                  ><span>label, file and draft inside Mail</span>
+                </li>
+                <li>
+                  <b
+                    ><code>ScreenCaptureKit</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>system audio and screen, for meetings</span>
+                </li>
+                <li>
+                  <b
+                    ><code>AXUIElement</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>read and drive any app on screen</span>
+                </li>
+                <li>
+                  <b
+                    >Apple Events · JXA<em class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span
+                    >script Mail, Calendar, Numbers, anything scriptable</span
+                  >
+                </li>
+                <li>
+                  <b
+                    ><code>CoreSpotlight</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>index and query what you already have</span>
+                </li>
+                <li>
+                  <b
+                    ><code>CoreML</code> · MLX<em class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span>a local model for private Bots</span>
+                </li>
+                <li>
+                  <b>Bonjour<em class="reach-kind k-action">action</em></b
+                  ><span>find the printer, the NAS, the Pi</span>
+                </li>
+              </ul>
+            </div>
+            <div class="reach-rail">
+              <h3>Windows</h3>
+              <span class="reach-status is-planned"
+                ><i class="reach-dot"></i>In the plan</span
+              >
+              <ul class="reach-api">
+                <li>
+                  <b
+                    ><code>Shell_NotifyIcon</code
+                    ><em class="reach-kind k-slot">slot</em></b
+                  ><span>a tray icon, one per Bot</span>
+                </li>
+                <li>
+                  <b
+                    >Widgets Board · Jump Lists<em class="reach-kind k-slot"
+                      >slot</em
+                    ></b
+                  ><span>a Bot on the board and the taskbar</span>
+                </li>
+                <li>
+                  <b
+                    >Toast notifications<em class="reach-kind k-slot"
+                      >slot</em
+                    ></b
+                  ><span>actionable notifications with inline reply</span>
+                </li>
+                <li>
+                  <b
+                    ><code>RegisterHotKey</code
+                    ><em class="reach-kind k-entry">entry</em></b
+                  ><span>select anywhere, ask a Bot</span>
+                </li>
+                <li>
+                  <b
+                    ><code>DataTransferManager</code
+                    ><em class="reach-kind k-entry">entry</em></b
+                  ><span>the Windows share contract</span>
+                </li>
+                <li>
+                  <b
+                    ><code>Windows.Graphics.Capture</code> · WASAPI<em
+                      class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span>screen and system audio, for meetings</span>
+                </li>
+                <li>
+                  <b
+                    ><code>IUIAutomation</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>read and drive any app on screen</span>
+                </li>
+                <li>
+                  <b
+                    >PowerShell · COM<em class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span>script Outlook, Excel, anything automatable</span>
+                </li>
+                <li>
+                  <b
+                    >Windows Search · <code>IFilter</code
+                    ><em class="reach-kind k-action">action</em></b
+                  ><span>index and query what you already have</span>
+                </li>
+                <li>
+                  <b
+                    >Windows ML · DirectML<em class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span>a local model for private Bots</span>
+                </li>
+              </ul>
+            </div>
+            <div class="reach-rail">
+              <h3>Linux</h3>
+              <span class="reach-status is-planned"
+                ><i class="reach-dot"></i>In the plan</span
+              >
+              <ul class="reach-api">
+                <li>
+                  <b
+                    ><code>StatusNotifierItem</code
+                    ><em class="reach-kind k-slot">slot</em></b
+                  ><span>a tray icon, one per Bot</span>
+                </li>
+                <li>
+                  <b
+                    ><code>org.freedesktop.Notifications</code
+                    ><em class="reach-kind k-slot">slot</em></b
+                  ><span>actionable notifications with inline reply</span>
+                </li>
+                <li>
+                  <b
+                    ><code>portal.GlobalShortcuts</code
+                    ><em class="reach-kind k-entry">entry</em></b
+                  ><span>select anywhere, ask a Bot</span>
+                </li>
+                <li>
+                  <b
+                    ><code>portal.ScreenCast</code> · PipeWire<em
+                      class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span>screen and system audio, for meetings</span>
+                </li>
+                <li>
+                  <b>AT-SPI2<em class="reach-kind k-action">action</em></b
+                  ><span>read and drive any app on screen</span>
+                </li>
+                <li>
+                  <b
+                    >D-Bus session bus<em class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span>talk to any app that exposes an interface</span>
+                </li>
+                <li>
+                  <b
+                    >Tracker · Baloo<em class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span>index and query what you already have</span>
+                </li>
+                <li>
+                  <b
+                    >Secret Service<em class="reach-kind k-action"
+                      >action</em
+                    ></b
+                  ><span>keyring-backed credentials</span>
+                </li>
+                <li>
+                  <b>Avahi<em class="reach-kind k-action">action</em></b
+                  ><span>find the printer, the NAS, the Pi</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <p class="reach-note">
+            <b>The catch, stated plainly.</b> A plugin never ships code that
+            runs on your machine. It describes what it wants drawn and the app
+            draws it, which is why the same plugin looks right on a phone it was
+            never written for — and why a plugin you install from someone else
+            can't paint its own buttons over yours.
+          </p>
+        </div>
+      </section>
+
       <section class="section pricing" id="run" aria-labelledby="run-title">
         <div class="container">
           <div class="split-heading split-heading-bottom">
