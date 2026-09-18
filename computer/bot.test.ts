@@ -1411,6 +1411,98 @@ describe("Computer Bot Durable Object Contribution", () => {
     });
   });
 
+  /**
+   * The intent's own window: a Bot is browsing, so the shared runtime updates
+   * under it, and the User taps Open while that update is in flight. The host
+   * refuses the attach in its `computer-updating` vocabulary; the connect has
+   * to take that as "not confirmed yet", wait the update out and join. Read
+   * as a final failure, that refusal leaves the one gesture the User made
+   * showing an update that never ends.
+   */
+  test("a connect during an in-flight update waits it out and joins", async () => {
+    const storage = new MemoryStorage();
+    let attaches = 0;
+    let joins = 0;
+    let contribution: ReturnType<typeof createComputerBotBackendContribution>;
+    contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            openViewer: () => {
+              attaches += 1;
+              return Promise.reject(
+                new ComputerError(
+                  "updating",
+                  "Updating the Computer runtime",
+                  true,
+                ),
+              );
+            },
+            presence: async (options) => {
+              joins += 1;
+              await options?.onProgress?.({
+                version: 1,
+                kind: "update",
+                step: "updating",
+                label: "Updating the Computer runtime",
+                index: 1,
+                total: 1,
+              });
+              // While it waits, the card carries the host's own phase, not the
+              // sentence the refused attach was told.
+              expect(await contribution.read("user-1", "scout")).toMatchObject({
+                phase: "updating",
+                message: "Updating the Computer runtime",
+                progress: {
+                  kind: "update",
+                  steps: [
+                    {
+                      label: "Updating the Computer runtime",
+                      status: "active",
+                    },
+                  ],
+                },
+              });
+              return {
+                id: "viewer-updated",
+                url: "https://viewer.invalid/updated",
+                expiresAt: "2026-09-02T00:02:00.000Z",
+              };
+            },
+          }),
+        ),
+      now: () => new Date("2026-09-02T00:00:30.000Z"),
+    });
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "connect-mid-update"),
+    );
+    await contribution.settleScheduledWork();
+
+    expect(attaches).toBe(1);
+    expect(joins).toBe(1);
+    expect(
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("connect", "connect-mid-update"),
+      ),
+    ).toMatchObject({ status: "applied" });
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "ready",
+      message: "Computer ready",
+      viewerSession: {
+        id: "viewer-updated",
+        url: "https://viewer.invalid/updated",
+      },
+    });
+  });
+
   test("an expired viewer record is a cold prepare, not an attach", async () => {
     const storage = new MemoryStorage();
     await storage.put(COMPUTER_VIEWER_RECORD_KEY, {

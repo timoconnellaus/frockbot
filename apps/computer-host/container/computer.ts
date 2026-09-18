@@ -2476,10 +2476,14 @@ export class ComputerHost {
     if (operation.kind !== "viewer") {
       throw new ComputerHostError("invalid-request", "not a viewer call", 400);
     }
-    if (this.updates.has(request.identity.userId)) {
+    const updating = this.updates.get(request.identity.userId);
+    if (updating) {
+      // The current phase, not a sentence about updating: this message is
+      // read as the label of the step the User is waiting on, exactly as the
+      // bounded wait above answers it.
       throw new ComputerHostError(
         "computer-updating",
-        "The Computer is updating",
+        updating.progress.label,
         409,
         true,
       );

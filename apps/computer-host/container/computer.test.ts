@@ -1204,6 +1204,58 @@ describe("open", () => {
     expect((await first).status).toBe(200);
   });
 
+  test("a viewer call during that update names the phase it is waiting on", async () => {
+    const client = new FakeSpritesClient();
+    const host = new ComputerHost({
+      client,
+      baseSpriteName: "frockbot",
+      digest,
+      now: () => Date.parse("2026-08-31T00:00:00.000Z"),
+      provisionPollMs: 30,
+    });
+    const sprite = new FakeSprite(host.spriteNameFor("user-1"));
+    client.sprites.set(sprite.name, sprite);
+    writeFile(
+      sprite,
+      COMPUTER_HOST_STATE_PATH,
+      JSON.stringify({ version: 1, generation: 4 }),
+    );
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    writeFile(
+      sprite,
+      `/home/box/.frockbot/bots/bot-1-${digest("bot-1").slice(0, 12)}/slot`,
+      "3\n",
+    );
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+
+    const updating = host.handle(
+      request({ kind: "open" }, { effectId: "open-1" }),
+    );
+    while (
+      !sprite.commands.some((command) =>
+        command.stdin.includes(`${PROVISION_SCRIPT} update`),
+      )
+    ) {
+      await Bun.sleep(1);
+    }
+    const refused = await host.handle(
+      request({ kind: "viewer", action: "open" }, { effectId: "viewer-1" }),
+    );
+
+    expect(refused.status).toBe(409);
+    // The step the User is waiting on, not a sentence about updating: this is
+    // the message a Bot's tool call and the card read as the phase.
+    expect(decodeComputerHostProblemV1(await refused.json())).toMatchObject({
+      code: "computer-updating",
+      retryable: true,
+      message: updatingRuntime.label,
+    });
+    expect((await updating).status).toBe(200);
+  });
+
   test("refuses when every desktop slot belongs to a live tenant", async () => {
     const { host, sprite } = provisioned();
     sprite.scripts = [{ stdout: [`${NO_SLOTS_MARKER}\n`], exitCode: 75 }];

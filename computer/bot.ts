@@ -923,8 +923,16 @@ export class ComputerBotBackendContribution {
           : computer.viewer.open(options);
       });
     } catch (error) {
-      if (error instanceof ComputerError && error.code === "not-found")
+      // A missing desktop and one that is mid-update are the same answer from
+      // here: no running viewer was confirmed. The connect below waits that
+      // update out and joins; read as a failure, this refusal would end the
+      // User's one gesture on an update that never finishes.
+      if (
+        error instanceof ComputerError &&
+        (error.code === "not-found" || error.code === "updating")
+      ) {
         return false;
+      }
       throw error;
     }
     if (!session) return false;
