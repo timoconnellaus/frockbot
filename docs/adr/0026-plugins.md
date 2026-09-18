@@ -143,7 +143,9 @@ because they cannot be enforced per Plugin inside one isolate.
 ### Catalog and seed states
 
 Plugins come from two places: the deployment catalog, seeded at deploy, and a
-Bot writing one in conversation. There is no upload path and no marketplace.
+Bot writing one in conversation. There is no third-party upload or publishing
+path; the Marketplace exposes only the deployment catalog entries marked
+`installable` ([ADR 0032](0032-plugin-model-providers.md)).
 
 A seeded Plugin has one of four states: `locked` (on for every Bot, the User
 cannot disable it), `default-on` (on for new Bots, the User may disable it per

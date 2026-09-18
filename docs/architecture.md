@@ -613,7 +613,7 @@ account's list, and the neighbouring account-wide switchboard is titled
 draws `ConnectionsFrame` (`/api/settings/connections`) itself. Its connector
 half is the default Marketplace tab: a page from the storefront icon on a
 phone's Bot list, a dialog (`MarketplaceDialog`) from the foot of the sidebar
-on a desktop, the same page laid out three rows across. A second Plugins tab
+on a desktop, the same page laid out three cards across. A second Plugins tab
 reads the server-owned `PluginsFrame` projection from
 `/api/settings/marketplace/plugins?as=document` and carries only installable
 catalog entries. Either way it is a card per

@@ -682,9 +682,9 @@ class ViewTextNode extends StatelessWidget {
 /// the record and replaces its contents with a notice saying so, and inventing
 /// that notice here would be inventing what the authority said.
 ///
-/// Uninstalling a provider Plugin is the same shape: the Plugins row only
-/// lists what the account has installed, so removing the installation takes
-/// the row with it rather than leaving it to redraw as "not installed".
+/// Uninstalling a provider Plugin is the same optimistic shape: its current
+/// card disappears while the authoritative reread decides whether the surface
+/// omits it or redraws it as an installable Marketplace offer.
 const _removesGroupIds = {'delete-routine', 'uninstall-package'};
 
 /// Whether pressing this action removes the group around it.

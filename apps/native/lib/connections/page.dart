@@ -37,7 +37,7 @@ class ConnectionsPage extends StatefulWidget {
   final Future<bool> Function(Uri)? openBrowser;
   final VoidCallback? onFeaturesChanged;
 
-  /// Whether the rows are laid out three across: the Marketplace as a desktop
+  /// Whether the cards are laid out three across: the Marketplace as a desktop
   /// dialog draws it. A phone is always one column, a tablet two.
   final bool grid;
 
@@ -1249,11 +1249,11 @@ class _ApiKeyFormState extends State<_ApiKeyForm> {
   }
 }
 
-/// How wide the Marketplace dialog gets, which is room for three rows across.
+/// How wide the Marketplace dialog gets, which is room for three cards across.
 const marketplaceDialogWidth = 960.0;
 
 /// The Marketplace as a desktop draws it: a dialog over the shell, holding the
-/// same page a phone pushes, laid out three rows across.
+/// same page a phone pushes, laid out three cards across.
 ///
 /// A dialog rather than a page because on a desktop the list of Bots and the
 /// conversation stay where they are; connecting a service is a visit, not a
