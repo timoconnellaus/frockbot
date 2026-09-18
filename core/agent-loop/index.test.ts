@@ -2,6 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   decodeSessionEvent,
   LlmEffectNotStartedError,
+  MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
+  ModelOutcomeUncertainErrorV1,
+  ModelProviderFailureError,
   type LlmProvider,
   LoopHookListV1,
   type NormalizedModelRequest,
@@ -227,6 +230,144 @@ describe("AgentLoop", () => {
     if (usage[0]?.type !== "model/usage") throw new Error("usage missing");
     expect(usage[0].inputTokens).toBeGreaterThan(0);
     expect(usage[0].outputTokens).toBeGreaterThan(0);
+  });
+
+  test("settles an uncertain outcome with one estimate for its own request id", async () => {
+    // What a provider Plugin's adapter relies on: the uncertain outcome is a
+    // call that may have been billed, so the kernel writes the estimate under
+    // the id the log already carries and does not dispatch it again.
+    let dispatches = 0;
+    const provider: LlmProvider = {
+      id: "uncertain-outcome",
+      async *stream() {
+        dispatches += 1;
+        throw new ModelOutcomeUncertainErrorV1(
+          "the provider never confirmed this call",
+        );
+      },
+    };
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-usage",
+      sessionId: "uncertain-usage",
+      provider: provider.id,
+      model: "unconfirmed-model",
+    });
+
+    handle.agent.send("try once");
+    await handle.agent.whenIdle();
+
+    const usage = handle.agent.session.events.filter(
+      (event) => event.type === "model/usage",
+    );
+    expect(usage).toHaveLength(1);
+    expect(usage[0]).toMatchObject({
+      type: "model/usage",
+      provider: "uncertain-outcome",
+      model: "unconfirmed-model",
+      estimated: true,
+    });
+    if (usage[0]?.type !== "model/usage") throw new Error("usage missing");
+    expect(usage[0].inputTokens).toBeGreaterThan(0);
+    expect(
+      handle.agent.session.events.find(
+        (event) => event.type === "model/request",
+      ),
+    ).toMatchObject({ request: { requestId: usage[0].requestId } });
+    expect(dispatches).toBe(1);
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/retry",
+      ),
+    ).toHaveLength(0);
+    expect(
+      handle.agent.session.events.findLast(
+        (event) => event.type === "turn/end",
+      ),
+    ).toMatchObject({ type: "turn/end", outcome: "model-error" });
+  });
+
+  test("a definitive provider failure is a call that did not happen", async () => {
+    // The other half of the accounting: only a classified provider failure
+    // means the provider refused before doing any work, which is why nothing
+    // is written for it — a Plugin cannot turn a paid call into one of these.
+    let dispatches = 0;
+    const provider: LlmProvider = {
+      id: "refused-call",
+      async *stream() {
+        dispatches += 1;
+        throw new ModelProviderFailureError({
+          classification: "permanent",
+          reason: "a refused key",
+        });
+      },
+    };
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-usage",
+      sessionId: "refused-usage",
+      provider: provider.id,
+      model: "refused-model",
+    });
+
+    handle.agent.send("try once");
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/usage",
+      ),
+    ).toHaveLength(0);
+    expect(dispatches).toBe(1);
+    expect(
+      handle.agent.session.events.findLast(
+        (event) => event.type === "turn/end",
+      ),
+    ).toMatchObject({ type: "turn/end", outcome: "model-error" });
+  });
+
+  test("a deadline that dispatched nothing writes no usage and says what happened", async () => {
+    // What a provider Plugin's adapter produces when the worker hung before it
+    // reached the transport: nothing left the host, so no estimate is written,
+    // and the deadline's own sentence is what the run records and a person
+    // reads.
+    const provider: LlmProvider = {
+      id: "deadline-before-dispatch",
+      async *stream() {
+        throw new ModelProviderFailureError({
+          classification: "permanent",
+          reason: MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
+        });
+      },
+    };
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-usage",
+      sessionId: "deadline-usage",
+      provider: provider.id,
+      model: "silent-model",
+    });
+
+    handle.agent.send("try once");
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/usage",
+      ),
+    ).toHaveLength(0);
+    expect(
+      handle.agent.session.events.findLast(
+        (event) => event.type === "turn/end",
+      ),
+    ).toMatchObject({
+      type: "turn/end",
+      outcome: "model-error",
+      reason: expect.stringContaining(MODEL_FIRST_BYTE_DEADLINE_REASON_V1),
+    });
   });
 
   test("journals a structured-output downgrade and typed validation failure", async () => {

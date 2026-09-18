@@ -75,6 +75,7 @@ function member(
     tools?: string[];
     provides?: { name: string; version: number }[];
     consumes?: { name: string; version: number }[];
+    modelProviders?: { id: string; protocolVersion: number }[];
     contractVersion?: number;
     contentHash?: string;
   } = {},
@@ -95,6 +96,9 @@ function member(
       })),
       hooks: overrides.hooks ?? [],
       grants: overrides.grants ?? [],
+      ...(overrides.modelProviders
+        ? { modelProviders: overrides.modelProviders }
+        : {}),
       ...(overrides.provides ? { provides: overrides.provides } : {}),
       ...(overrides.consumes ? { consumes: overrides.consumes } : {}),
       ...(overrides.views ? { views: overrides.views } : {}),
@@ -142,6 +146,7 @@ function healthy(
     provides: [],
     consumes: [],
     triggers: [],
+    modelProviders: [],
     views: [],
     cards: [],
     ...overrides,
@@ -170,6 +175,8 @@ function harness(
   input: {
     health?: (plugins: string[]) => PluginWorkerHealthV1;
     hook?: PluginWorkerEntrypoint["hook"];
+    streamModel?: PluginWorkerEntrypoint["streamModel"];
+    modelProviders?: PluginWorkerHostOptions["modelProviders"];
     receiveTrigger?: PluginWorkerEntrypoint["receiveTrigger"];
     view?: PluginWorkerEntrypoint["view"];
     cardAction?: PluginWorkerEntrypoint["cardAction"];
@@ -221,6 +228,13 @@ function harness(
         isError: false,
       });
     },
+    streamModel: (invocation) =>
+      input.streamModel?.(invocation) ??
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        status: "refused" as const,
+        reason: "this fake serves no model provider",
+      }),
     view: (invocation) =>
       input.view?.(invocation) ??
       Promise.resolve({
@@ -301,6 +315,9 @@ function harness(
     compatibilityDate: "2026-01-01",
     bindingDigest: "b".repeat(64),
     ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
+    ...(input.modelProviders === undefined
+      ? {}
+      : { modelProviders: input.modelProviders }),
   };
   return {
     host: new PluginWorkerHost(options),
@@ -1854,5 +1871,157 @@ describe("a Plugin's cards", () => {
     expect(
       subject.definitions.map((definition) => definition.name),
     ).not.toContain("mail_draft");
+  });
+});
+
+describe("the model provider one deployment serves", () => {
+  const SERVED = {
+    provider: "deepseek",
+    trusted: { pluginId: "deepseek", contentHash: "d".repeat(64) },
+    open: ["deepseek"],
+  };
+
+  test("a Bot's claimant is refused alone, and the deployment's Plugin still serves", async () => {
+    const invocations: string[] = [];
+    const subject = harness({
+      modelProviders: SERVED,
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) =>
+            healthy(pluginId, { modelProviders: ["deepseek"] }),
+          ),
+        }) as never,
+      streamModel: (invocation) => {
+        invocations.push(invocation.pluginId);
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "streaming" as const,
+          events: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.close();
+            },
+          }),
+        });
+      },
+    });
+    const prepared = await subject.host.mount([
+      member("aaa-shadow", {
+        contentHash: "e".repeat(64),
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+      }),
+      member("deepseek", {
+        contentHash: SERVED.trusted.contentHash,
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+      }),
+    ]);
+    expect(prepared.mounted).toContain("deepseek");
+    expect(prepared.mounted).not.toContain("aaa-shadow");
+    expect(prepared.failures).toEqual([
+      {
+        pluginId: "aaa-shadow",
+        phase: "resolve",
+        message: expect.stringMatching(
+          /serves only through the Plugin "deepseek"/,
+        ),
+      },
+    ]);
+    const active = await prepared.commit();
+    expect(active.modelProviders).toEqual([
+      { pluginId: "deepseek", providerId: "deepseek", protocolVersion: 1 },
+    ]);
+    // The shadow claimant's provider never reaches the worker — and neither
+    // does its code, which is what a credentialed call would need.
+    const shadow = await active.streamModel({
+      schemaVersion: 1,
+      pluginId: "aaa-shadow",
+      provider: "deepseek",
+      protocolVersion: 1,
+      request: {} as never,
+      transportId: "transport-1",
+      deadlineMs: 1_000,
+      firstEventDeadlineMs: 1_000,
+    } as never);
+    expect(shadow).toMatchObject({ status: "refused" });
+    expect(invocations).toEqual([]);
+    await active.streamModel({
+      schemaVersion: 1,
+      pluginId: "deepseek",
+      provider: "deepseek",
+      protocolVersion: 1,
+      request: {} as never,
+      transportId: "transport-1",
+      deadlineMs: 1_000,
+      firstEventDeadlineMs: 1_000,
+    } as never);
+    expect(invocations).toEqual(["deepseek"]);
+  });
+
+  test("the only claimant is refused when it is not the deployment's artifact", async () => {
+    const subject = harness({
+      modelProviders: SERVED,
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) =>
+            healthy(pluginId, { modelProviders: ["deepseek"] }),
+          ),
+        }) as never,
+    });
+    const prepared = await subject.host.mount([
+      member("aaa-shadow", {
+        contentHash: "e".repeat(64),
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+      }),
+    ]);
+    expect(prepared.mounted).toEqual([]);
+    expect(prepared.failures[0]?.message).toMatch(/serves only through/);
+    const active = await prepared.commit();
+    expect(active.modelProviders).toEqual([]);
+  });
+
+  test("a second claimant that is not the deployment's Plugin serves nothing either", async () => {
+    const subject = harness({
+      modelProviders: SERVED,
+      health: (plugins) =>
+        ({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: plugins.map((pluginId) =>
+            healthy(pluginId, { modelProviders: ["deepseek"] }),
+          ),
+        }) as never,
+    });
+    const prepared = await subject.host.mount([
+      member("deepseek", {
+        contentHash: SERVED.trusted.contentHash,
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+      }),
+      member("zzz-copy", {
+        contentHash: "f".repeat(64),
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+      }),
+    ]);
+    expect(prepared.mounted).toEqual(["deepseek"]);
+    expect(prepared.failures.map((failure) => failure.pluginId)).toEqual([
+      "zzz-copy",
+    ]);
+    const active = await prepared.commit();
+    expect(active.modelProviders.map((entry) => entry.pluginId)).toEqual([
+      "deepseek",
+    ]);
+  });
+
+  test("with no provider selected, no contribution is mounted at all", async () => {
+    const subject = harness();
+    const prepared = await subject.host.mount([
+      member("deepseek", {
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+      }),
+    ]);
+    const active = await prepared.commit();
+    expect(active.modelProviders).toEqual([]);
   });
 });

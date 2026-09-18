@@ -57,6 +57,7 @@ import { modelCharge, modelCost } from "@frockbot/app/billing/model";
 import { FROCK_AI_PROVIDER_TYPE } from "@frockbot/providers/frock-ai/catalog";
 import { memoryScopeRootV1 } from "@frockbot/app/memory/roots";
 import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
+import { pluginServedProviderV1 } from "@frockbot/providers/catalog/definition";
 import {
   readBotSettingsV1,
   userConfigurationV1,
@@ -67,6 +68,7 @@ import type { ShellIsolateMountOptions } from "@frockbot/app/shell/backend-compo
 import { createBotMemoryHost } from "@frockbot/app/shell/backend-memory";
 import { agentRuntime } from "@frockbot/app/shell/runtime-mount";
 import { admitRunEffect } from "@frockbot/app/shell/turn";
+import { activeIsolateTurn, isolateCallAdmittedV1 } from "./authority.js";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import {
   approvalKeyV1,
@@ -380,6 +382,18 @@ export async function isolateInvokeModel(
   const settings = await readBotSettingsV1(state, identity);
   const authority = await isolateAuthoritySnapshot(state, identity, settings);
   const admitted = authority.model;
+  if (admitted && pluginServedProviderV1(admitted.provider)) {
+    // The transport binds every upstream call to a durable `model/request` in
+    // the Turn that asked for it. A Plugin's own `ai` call is not one: it is
+    // made outside the loop, under a request id the Plugin chose. Serving it
+    // would mean loosening that binding for the whole provider, so the honest
+    // answer is that this provider does not serve it yet.
+    return {
+      status: "unavailable",
+      reason:
+        "this Bot's model provider runs as a Plugin, and Plugins cannot make model calls on it yet",
+    };
+  }
   if (
     !admitted ||
     input.request.provider !== admitted.provider ||
@@ -803,6 +817,13 @@ export async function isolateWorkspaceDelete(
   };
 }
 
+/**
+ * One credentialed upstream call for one admitted model dispatch (ADR 0032).
+ * Exported beside every other grant so the Durable Object reaches the whole
+ * loopback surface through this one module.
+ */
+export { isolateModelTransport } from "./model-transport.js";
+
 export async function isolateConnection(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
@@ -1019,65 +1040,6 @@ async function isolateMemoryHost(
     }
   }
   return host;
-}
-
-/**
- * Whether a loopback call is admitted at all: it names the resident Turn, or
- * a standalone call this object registered (a trigger delivery, a section
- * render, a control's press), and that Turn or call mounted the Plugin the
- * scope names. Grants that need nothing but the Bot's own storage or
- * authority gate on this; the `schedule` grant needs the Turn's runtime and
- * gates on {@link activeIsolateTurn}.
- */
-function isolateCallAdmittedV1(
-  state: ShellBotStateV1,
-  input: {
-    runId: string;
-    sessionId: string;
-    turnId: string;
-    packageId: string;
-    generationId: string;
-  },
-): boolean {
-  if (activeIsolateTurn(state, input)) return true;
-  const call = state.turn.standalone(input.runId);
-  return (
-    call !== undefined &&
-    call.sessionId === input.sessionId &&
-    call.turnId === input.turnId &&
-    call.generationId === input.generationId &&
-    call.members.some(
-      (member) => member.packageId === input.packageId && member.artifact,
-    )
-  );
-}
-
-function activeIsolateTurn(
-  state: ShellBotStateV1,
-  input: {
-    runId: string;
-    sessionId: string;
-    turnId: string;
-    packageId: string;
-    generationId: string;
-  },
-): ActiveTurnV1 | undefined {
-  const active = state.turn.current;
-  if (
-    !active ||
-    active.runId !== input.runId ||
-    active.sessionId !== input.sessionId ||
-    active.turnId !== input.turnId ||
-    active.generationId !== input.generationId ||
-    // Every capability call names the Plugin it is for, from the scope the
-    // wrapper put on it; the gate is that this generation mounted that Plugin.
-    !active.mounted.generation.members.some(
-      (member) => member.packageId === input.packageId && member.artifact,
-    )
-  ) {
-    return undefined;
-  }
-  return active;
 }
 
 async function isolateToolEffectId(

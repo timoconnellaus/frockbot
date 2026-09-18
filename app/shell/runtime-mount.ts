@@ -7,9 +7,21 @@
 
 import {
   decodeSendToUserPayloadV1,
+  PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1,
   type NormalizedModelRequest,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+import {
+  pluginServedProviderV1,
+  PLUGIN_SERVED_PROVIDER_IDS_V1,
+} from "@frockbot/providers/catalog/definition";
+import {
+  createPluginModelHostV1,
+  pluginModelOutputBoundV1,
+  type ShellPluginModelHostV1,
+} from "@frockbot/app/isolates/model-transport";
+import { readPinnedCompositionGenerationV1 } from "@frockbot/app/composition/bot";
+import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "@frockbot/app/plugins/catalog";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import {
@@ -72,6 +84,71 @@ import { executionPackagesV1, type ShellBotStateV1 } from "./backend-state.js";
 import { decodeClientTurnV1 } from "./run-protocol.js";
 import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 
+/**
+ * The model provider Plugin host for one mount (ADR 0032), or the reason a
+ * person reads instead.
+ *
+ * A provider this deployment serves only through a Plugin cannot be served
+ * without one: there is no compiled adapter to fall back to, by design. The
+ * account's pinned Composition — the mirror the admission has just adopted —
+ * is what says whether one is installed. Absent, the Turn fails here with the
+ * sentence that names the missing Plugin; present, the mount registers the
+ * contribution and the transport carries the credential.
+ */
+async function pluginModelHostV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  input: {
+    provider: string;
+    connectionId: string;
+    connectionGeneration: string;
+    model: string;
+    /** The selected model's own output ceiling, when its catalog states one. */
+    modelMaxOutputTokens?: number;
+    generationId?: string;
+  },
+): Promise<ShellPluginModelHostV1> {
+  const served = pluginServedProviderV1(input.provider);
+  if (!served) {
+    throw new Error(PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1);
+  }
+  const generation =
+    input.generationId === undefined
+      ? await state.authority.composition.current()
+      : await readPinnedCompositionGenerationV1(
+          state,
+          identity,
+          input.generationId,
+        );
+  // Installed means the account's own installation of the deployment's Plugin
+  // at the deployment's artifact: the id and the content hash both have to be
+  // the catalog's, so a Plugin a Bot wrote cannot stand in for it.
+  const catalog = DEPLOYMENT_PLUGIN_CATALOG_V1.find(
+    (plugin) => plugin.pluginId === served.pluginId,
+  );
+  const installed = (generation?.members ?? []).some(
+    (member) =>
+      member.packageId === served.pluginId &&
+      member.artifact.contentHash === catalog?.artifact.contentHash &&
+      (member.descriptor.modelProviders ?? []).some(
+        (contribution) => contribution.id === served.provider,
+      ),
+  );
+  if (!installed || !state.env.BOT_PACKAGES) {
+    throw new Error(PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1);
+  }
+  return createPluginModelHostV1(state, identity, {
+    provider: served,
+    connectionId: input.connectionId,
+    connectionGeneration: input.connectionGeneration,
+    model: input.model,
+    maxOutputTokens: pluginModelOutputBoundV1(
+      served.maxOutputTokens,
+      input.modelMaxOutputTokens,
+    ),
+  });
+}
+
 /** Narrow RPC for the User-wide agent-lane concurrency lease. */
 function agentTurnSlots(state: ShellBotStateV1, identity: BotIdentity) {
   const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
@@ -121,6 +198,13 @@ export async function agentRuntime(
   agentPackages: FoundationAgentPackage[];
   capabilities: EnabledCapabilityV1[];
   modelSelection: RuntimeModelSelection;
+  /**
+   * The model provider Plugin host for this mount, present exactly when the
+   * Bot's model names a provider this deployment serves only through a Plugin
+   * (ADR 0032). The Composition mount registers the Plugin's contribution
+   * into the Turn's `llm` registry through it.
+   */
+  pluginModel?: ShellPluginModelHostV1;
 }> {
   const userConfiguration = userConfigurationV1(state, identity);
   // Three gates below ask the User object for the same account features
@@ -599,42 +683,70 @@ export async function agentRuntime(
     );
   }
   const bindingPackageId = binding.packageId;
-  agentPackages.push(
-    state.application.runtime.model(binding, {
-      accountId: identity.userId,
-      connectionId: binding.connection.connectionId,
-      leaseCredential: (
-        effectId,
-        expectedGeneration,
-      ): Promise<CredentialLeaseV1> => {
-        if (!expectedGeneration) {
-          throw new Error("Model request Connection generation is unavailable");
-        }
-        return userConfiguration.leaseModelCredential(
-          identity.userId,
-          binding.connection!.connectionId,
-          effectiveModel.providerModelId,
+  // A provider this deployment serves only through a Plugin has no compiled
+  // adapter, so the one thing that can serve this Turn's model is an installed
+  // Plugin. Missing it is answered here, before the Turn mounts and before
+  // anything could be sent: the sentence is the one a person reads.
+  // The selected model's own output ceiling, when the Connection's catalog —
+  // the provider's own list, as the account discovered it — states one. The
+  // deployment's bound for the provider is the other half of the same limit.
+  const selectedModelLimit = binding.connection.modelCatalog?.models.find(
+    (candidate) => candidate.providerModelId === effectiveModel.providerModelId,
+  )?.maxOutputTokens;
+  const pluginModel = PLUGIN_SERVED_PROVIDER_IDS_V1.includes(
+    binding.providerType,
+  )
+    ? await pluginModelHostV1(state, identity, {
+        provider: binding.providerType,
+        connectionId: binding.connection.connectionId,
+        connectionGeneration: binding.connection.generation ?? "",
+        model: effectiveModel.providerModelId,
+        ...(selectedModelLimit === undefined
+          ? {}
+          : { modelMaxOutputTokens: selectedModelLimit }),
+        generationId: turn?.compositionGenerationId,
+      })
+    : undefined;
+  if (!pluginModel) {
+    agentPackages.push(
+      state.application.runtime.model(binding, {
+        accountId: identity.userId,
+        connectionId: binding.connection.connectionId,
+        leaseCredential: (
           effectId,
           expectedGeneration,
-        );
-      },
-      settleCredential: (effectId) =>
-        userConfiguration.settleModelCredential(
-          identity.userId,
-          binding.connection!.connectionId,
-          bindingPackageId,
-          effectId,
-        ),
-      ...(state.env.FROCK_AI
-        ? {
-            frockAiAutoRoute: state.env.FROCK_AI.autoRoute,
-            runFrockAiChatCompletion: (gatewayModel, body) =>
-              state.env.FROCK_AI!.runChatCompletion(gatewayModel, body),
+        ): Promise<CredentialLeaseV1> => {
+          if (!expectedGeneration) {
+            throw new Error(
+              "Model request Connection generation is unavailable",
+            );
           }
-        : {}),
-      fetch: state.outboundFetch,
-    }),
-  );
+          return userConfiguration.leaseModelCredential(
+            identity.userId,
+            binding.connection!.connectionId,
+            effectiveModel.providerModelId,
+            effectId,
+            expectedGeneration,
+          );
+        },
+        settleCredential: (effectId) =>
+          userConfiguration.settleModelCredential(
+            identity.userId,
+            binding.connection!.connectionId,
+            bindingPackageId,
+            effectId,
+          ),
+        ...(state.env.FROCK_AI
+          ? {
+              frockAiAutoRoute: state.env.FROCK_AI.autoRoute,
+              runFrockAiChatCompletion: (gatewayModel, body) =>
+                state.env.FROCK_AI!.runChatCompletion(gatewayModel, body),
+            }
+          : {}),
+        fetch: state.outboundFetch,
+      }),
+    );
+  }
   // The slugs `<available_subagent_models>` renders, and the only ones a
   // `Task` call may name. They come from User enablement as resolved for this
   // Turn — never anything the Bot claimed about a model.
@@ -667,6 +779,7 @@ export async function agentRuntime(
   return {
     agentPackages,
     capabilities: structuredClone(plan.capabilities),
+    ...(pluginModel ? { pluginModel } : {}),
     modelSelection: {
       provider: binding.providerType,
       model: effectiveModel.providerModelId,

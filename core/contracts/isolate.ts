@@ -31,6 +31,10 @@ import {
   type ToolSchema,
 } from "./types.js";
 import { STRUCTURED_OUTPUT_ISSUE_LIMIT_V1 } from "./structured-output.js";
+import type {
+  PluginModelTransportOutcomeV1,
+  PluginModelTransportRequestV1,
+} from "./plugin-model.js";
 
 /**
  * The wire contract version the kernel wrapper emits. Version 2 added
@@ -39,14 +43,16 @@ import { STRUCTURED_OUTPUT_ISSUE_LIMIT_V1 } from "./structured-output.js";
  * generated index, the `agent/request` hook, services a plugin provides and
  * consumes, and triggers. Version 5 is Cards: `renderCard` and the card
  * handlers a plugin declares, and `ctx.email` under the `http` grant.
+ * Version 6 is model providers: `streamModel` and the credentialed
+ * `ctx.modelTransport` call one provider contribution makes.
  */
-export const ISOLATE_CONTRACT_VERSION = 5;
+export const ISOLATE_CONTRACT_VERSION = 6;
 
 /** Every contract version the kernel still decodes. */
-export type IsolateContractVersion = 1 | 2 | 3 | 4 | 5;
+export type IsolateContractVersion = 1 | 2 | 3 | 4 | 5 | 6;
 
 const ISOLATE_CONTRACT_VERSIONS: readonly IsolateContractVersion[] = [
-  1, 2, 3, 4, 5,
+  1, 2, 3, 4, 5, 6,
 ];
 
 /** The upper bound on a single isolate invocation, enforced on both sides. */
@@ -409,6 +415,16 @@ export interface BotCapabilitiesStub {
     scope: IsolateScopeV1,
     connectionId: string,
   ): Promise<IsolateConnectionOutcomeV1>;
+  /**
+   * The one credentialed call a model provider Plugin may make (ADR 0032):
+   * the host resolves the Connection, checks the destination, attaches the
+   * secret server-side and streams the provider's bytes back. The ticket it
+   * carries is the host's own, minted for one admitted model dispatch.
+   */
+  modelTransport(
+    scope: IsolateScopeV1,
+    request: PluginModelTransportRequestV1,
+  ): Promise<PluginModelTransportOutcomeV1>;
   schedule(
     scope: IsolateScopeV1,
     request: IsolateScheduleRequestV1,
@@ -525,6 +541,14 @@ export interface BotPackageContextV1 {
       request: IsolateWorkspaceDeleteRequestV1,
     ): Promise<IsolateWorkspaceOutcomeV1>;
   };
+  /**
+   * A model provider contribution's one credentialed call (ADR 0032). It is
+   * present exactly while the host is serving that contribution's model call,
+   * and the ticket it carries is the host's own — one call, one ticket.
+   */
+  readonly modelTransport?: (
+    request: PluginModelTransportRequestV1,
+  ) => Promise<PluginModelTransportOutcomeV1>;
   /** The `http` grant: a named service, credential attached server-side. */
   readonly connection?: (
     connectionId: string,
@@ -562,6 +586,21 @@ export interface BotPackageHookContextV1 extends BotPackageContextV1 {
   readonly tool?: never;
   readonly event: BotIsolateHookEventNameV1;
 }
+
+/**
+ * The `ctx` members that are present only while the host is serving the
+ * contribution's own model call: the one credentialed transport a provider
+ * Plugin composes its upstream call through (ADR 0032).
+ *
+ * Every other member of `BotPackageContextV1` is either common to both
+ * contexts or opened by a grant the Plugin declared, so these are the keys a
+ * tool or hook context never holds. The generated self-inspection catalog
+ * names them apart from the rest for exactly that reason: the wrapper's own
+ * key list is the union of every member, and a call that is not being served
+ * must not look like it carries a transport.
+ */
+export const BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1: readonly (keyof BotPackageContextV1)[] =
+  ["modelTransport"];
 
 /**
  * Everything Bot code can see. Nothing else is in scope: `globalOutbound` is

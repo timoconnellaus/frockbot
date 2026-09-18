@@ -44,9 +44,14 @@ which `applet_create` writes through the Workspace.
 
 A Plugin (ADR 0026) is written against `@frockbot/applet-sdk/plugin`, which
 is declarations only: `plugin.ts` exports `tools` and `execute`, and may
-export `hooks`, `services`, `triggers` and `views`, beside a `plugin.json` descriptor.
+export `hooks`, `services`, `triggers`, `views` and `modelProviders`, beside a `plugin.json` descriptor.
 `tools` may be empty — a Plugin that only serves hooks is admissible, because
-the kernel's own descriptor contract admits one.
+the kernel's own descriptor contract admits one. A model provider
+(`PluginModelProvider`, ADR 0032) answers a normalized model request with
+normalized stream events and makes its one upstream call through
+`ctx.modelTransport`; the deployment serves it only from the artifact its own
+provider catalog names, so this is not a way for a Bot-written Plugin to reach
+a provider.
 `runPluginBuildV1(directory, { mode, id })` is four stages — `descriptor`,
 `typecheck`, `bundle`, `describe` — with no lint stage, because a Plugin's
 reach is a grant the descriptor declares and the kernel enforces. The bundle

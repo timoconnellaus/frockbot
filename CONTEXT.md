@@ -91,7 +91,7 @@ One environment-specific part of a package, such as desktop-host behavior, agent
 _Avoid_: Package
 
 **Plugin**:
-Code that wraps a Bot's loop, adds tools, keeps its own data or reaches the network, and was not there at build time: seeded by the deployment at runtime or written by a Bot. It declares itself with a Frock Compose descriptor — hooks, tools, hosts, grants, slots, settings schema, provides and consumes, triggers, contract version — and is installed per User, enabled per Bot. The user-facing noun for the Plugins page, which also lists the first-party features a User may turn off per Bot; those are app code with a flag, never a Plugin.
+Code that wraps a Bot's loop, adds tools, keeps its own data or reaches the network, and was not there at build time: seeded by the deployment at runtime or written by a Bot. It declares itself with a Frock Compose descriptor — hooks, tools, hosts, grants, slots, settings schema, provides and consumes, triggers, model providers, contract version — and is installed per User, enabled per Bot. A **model provider Plugin** serves one provider's model protocol: the kernel hands it a normalized request, it answers with normalized stream events, and its one upstream call goes through the host, which is the only thing holding the Connection's credential (ADR 0032). The user-facing noun for the Plugins page, which also lists the first-party features a User may turn off per Bot; those are app code with a flag, never a Plugin.
 _Avoid_: Package, extension, capability
 
 **Plugin worker**:
@@ -103,7 +103,7 @@ One of the six loop events a Plugin may wrap — `system-prompt/assemble`, `agen
 _Avoid_: Middleware, interceptor, action
 
 **Seed state**:
-How the deployment ships a Plugin: `locked` (on for every Bot, no switch), `default-on` (on unless a Bot switches it off), `default-off` (off until a Bot switches it on) or `admin-gated` (absent from the account until an admin opens it, then on unless a Bot switches it off).
+How the deployment ships a Plugin: `locked` (on for every Bot, no switch), `default-on` (on unless a Bot switches it off), `default-off` (off until a Bot switches it on), `admin-gated` (absent from the account until an admin opens it, then on unless a Bot switches it off) or `installable` (in the catalog and seeded on no account: the account's own Package command installs and removes it, which is what a provider Plugin is until there is a marketplace — ADR 0032).
 _Avoid_: Tier, preinstall flag
 
 **Plugin trigger**:

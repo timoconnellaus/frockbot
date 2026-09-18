@@ -14,6 +14,7 @@ import {
   settlePluginIntentV1,
   type PluginIntentRecordV1,
 } from "./approval.js";
+import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "./catalog.js";
 
 const DESCRIPTOR = decodePluginDescriptorV1({
   id: "notes",
@@ -285,5 +286,75 @@ describe("a Plugin intent", () => {
     );
     expect(action).toContain("It reaches api.example.com.");
     expect(action).not.toContain("send email");
+  });
+});
+
+describe("what a card says about a declared model provider", () => {
+  /** The deployment's own DeepSeek artifact, as the catalog ships it. */
+  function claimedMember(contentHash: string, id = "deepseek") {
+    return {
+      ...MEMBER,
+      packageId: id,
+      artifact: { ...MEMBER.artifact, contentHash },
+      descriptor: decodePluginDescriptorV1({
+        id,
+        displayName: id,
+        version: "1",
+        contractVersion: 4,
+        tools: [],
+        hooks: [],
+        grants: [],
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+        contextKeys: ["user", "bot", "session"],
+      }),
+    };
+  }
+
+  test("the deployment's own Plugin, at its own artifact, is the one that carries the credential", () => {
+    const authoritative = DEPLOYMENT_PLUGIN_CATALOG_V1.find(
+      (plugin) => plugin.pluginId === "deepseek",
+    )!;
+    const action = pluginApprovalActionV1(
+      claimedMember(authoritative.artifact.contentHash),
+      "Run",
+    );
+    expect(action).toContain("It provides DeepSeek models.");
+    expect(action).toContain("the key never reaches the Plugin");
+  });
+
+  test("a Plugin claiming the provider at another artifact carries no credential, and the card says so", () => {
+    for (const claimed of [
+      // A Bot-written Plugin naming itself after the provider.
+      claimedMember("b".repeat(64)),
+      // A member whose descriptor is right but whose bytes are not.
+      claimedMember("b".repeat(64), "shadow"),
+    ]) {
+      const action = pluginApprovalActionV1(claimed, "Run");
+      expect(action).toContain(
+        "It declares the deepseek model provider this deployment does not serve through this Plugin",
+      );
+      expect(action).not.toContain("the key never reaches the Plugin");
+    }
+  });
+
+  test("a provider the deployment serves through no Plugin at all is refused the same way", () => {
+    const action = pluginApprovalActionV1(
+      {
+        ...claimedMember("b".repeat(64)),
+        descriptor: decodePluginDescriptorV1({
+          id: "shadow",
+          displayName: "Shadow",
+          version: "1",
+          contractVersion: 4,
+          tools: [],
+          hooks: [],
+          grants: [],
+          modelProviders: [{ id: "openai", protocolVersion: 1 }],
+          contextKeys: ["user", "bot", "session"],
+        }),
+      },
+      "Run",
+    );
+    expect(action).toContain("does not serve through this Plugin");
   });
 });

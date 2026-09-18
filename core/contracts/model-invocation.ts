@@ -57,6 +57,40 @@ export class ModelProviderFailureError extends Error {
   }
 }
 
+/**
+ * What a person is told when a model call was dispatched and its outcome is
+ * unknown: the answer was lost rather than refused.
+ *
+ * It is user-facing copy in the register the deadlines use, because the
+ * alternative is the generic "couldn't reply", which says nothing about why
+ * sending the same message again is the right next move.
+ */
+export const MODEL_OUTCOME_UNCERTAIN_REASON_V1 =
+  "This Bot's model request went out and its answer was lost, so the reply was stopped rather than sent twice. Try sending your message again.";
+
+/**
+ * A model call that reached the provider and whose outcome is unknown: the
+ * stream was cut mid-answer, the provider accepted the request and never
+ * answered, or the worker carrying it died.
+ *
+ * It is deliberately not a `ModelProviderFailureError`: that class is a
+ * definitive result, and the kernel and Billing both treat it as a call that
+ * never happened. This one is the opposite — whether it billed is exactly
+ * what is unknown — so the loop settles the Turn with the estimate recorded
+ * and, above all, does not dispatch it again. Re-dispatching is not the
+ * provider's decision to make: one request id is one upstream call.
+ */
+export class ModelOutcomeUncertainErrorV1 extends Error {
+  constructor(reason?: unknown) {
+    super(
+      typeof reason === "string" && reason.trim()
+        ? reason.trim().slice(0, MODEL_PROVIDER_FAILURE_REASON_MAX_LENGTH_V1)
+        : MODEL_OUTCOME_UNCERTAIN_REASON_V1,
+    );
+    this.name = "ModelOutcomeUncertainError";
+  }
+}
+
 /** @deprecated Providers should raise a classified failure instead. */
 export class LlmEffectNotStartedError extends ModelProviderFailureError {
   constructor(message: string) {

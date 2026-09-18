@@ -33,6 +33,18 @@ export type PackageProvenanceV1 =
       turnId: string;
       runId: string;
       authoredAt: string;
+    }
+  | {
+      /**
+       * A Plugin the account installed with its own package command (ADR
+       * 0032). It is not seeded — the deployment ships it, the User installs
+       * it — and reconciliation leaves it exactly where the User put it.
+       */
+      kind: "installed";
+      packageId: string;
+      version: string;
+      userId: string;
+      installedAt: string;
     };
 
 export interface ArtifactRefV1 {
@@ -373,6 +385,11 @@ function decodePackageProvenanceV1(
     boundedString(value.turnId, `${label}.turnId`, 128);
     boundedString(value.runId, `${label}.runId`, 128);
     timestamp(value.authoredAt, `${label}.authoredAt`);
+  } else if (kind === "installed") {
+    exactKeys(value, [...common, "userId", "installedAt"], [], label);
+    identity();
+    boundedString(value.userId, `${label}.userId`, 256);
+    timestamp(value.installedAt, `${label}.installedAt`);
   } else {
     throw new Error(`${label}.kind is invalid`);
   }

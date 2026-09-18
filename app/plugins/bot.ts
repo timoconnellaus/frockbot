@@ -26,10 +26,12 @@ import {
   readPluginEnablementV1,
   setPluginEnabledV1,
 } from "./enablement.js";
-import type {
-  BotPluginRowV1,
-  BotPluginsFrameV1,
-  SetBotPluginEnabledCommandV1,
+import {
+  isPureModelProviderPluginV1,
+  pluginServedModelProviderIdsForMemberV1,
+  type BotPluginRowV1,
+  type BotPluginsFrameV1,
+  type SetBotPluginEnabledCommandV1,
 } from "./page.js";
 import { renderBotPluginSectionsV1 } from "./views-bot.js";
 import { readBotPluginRosterV1 } from "./worker-bot.js";
@@ -84,6 +86,16 @@ export async function readBotPluginsFrameV1(
       (plugin) => plugin.pluginId === member.packageId,
     );
     const quarantine = health.get(member.packageId);
+    // What this deployment actually serves through *this* Plugin, not what
+    // its descriptor claims: the member has to be the catalog's own Plugin at
+    // the catalog's own artifact, or nothing here carries a credential.
+    const servedProviders = pluginServedModelProviderIdsForMemberV1({
+      packageId: member.packageId,
+      artifact: member.artifact,
+      modelProviders: (member.descriptor.modelProviders ?? []).map(
+        (provider) => provider.id,
+      ),
+    });
     rows.push({
       ...(quarantine?.quarantinedAt !== undefined
         ? { quarantined: pluginQuarantineCopyV1(quarantine) }
@@ -96,12 +108,24 @@ export async function readBotPluginsFrameV1(
       kind: seeded ? "seeded" : "authored",
       ...(seeded ? { seed: seeded.seed } : {}),
       on: pluginRunsForBotV1(seeded?.seed, member.packageId, enablement),
-      switchable: pluginSwitchableV1(seeded?.seed),
+      // A Plugin that contributes only a model provider has nothing for this
+      // switch to turn on: choosing the model is what runs it, so it reads as
+      // a provider row and offers no control that would do nothing.
+      switchable:
+        pluginSwitchableV1(seeded?.seed) &&
+        !isPureModelProviderPluginV1({
+          modelProviders: servedProviders,
+          tools: member.descriptor.tools,
+          hooks: member.descriptor.hooks,
+        }),
       ...(member.descriptor.network
         ? { network: member.descriptor.network }
         : {}),
       ...(member.descriptor.grants.length > 0
         ? { grants: member.descriptor.grants }
+        : {}),
+      ...(servedProviders.length > 0
+        ? { modelProviders: servedProviders }
         : {}),
     });
   }

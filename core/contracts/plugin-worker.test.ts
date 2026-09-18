@@ -34,13 +34,13 @@ const MEMBER_B = {
 describe("the plugin worker's identity", () => {
   test("hashes the same module set differently when the mount order differs", async () => {
     const forward = await pluginWorkerModuleSetHashV1({
-      contractVersion: 4,
+      contractVersion: 5,
       indexVersion: "index-v1",
       members: [MEMBER_A, MEMBER_B],
       bindingDigest: DIGEST,
     });
     const reversed = await pluginWorkerModuleSetHashV1({
-      contractVersion: 4,
+      contractVersion: 5,
       indexVersion: "index-v1",
       members: [MEMBER_B, MEMBER_A],
       bindingDigest: DIGEST,
@@ -52,7 +52,7 @@ describe("the plugin worker's identity", () => {
 
   test("changes with the contract, the index, an artifact or the bindings", async () => {
     const base = {
-      contractVersion: 4 as const,
+      contractVersion: 5 as const,
       indexVersion: "index-v1",
       members: [MEMBER_A],
       bindingDigest: DIGEST,
@@ -74,7 +74,7 @@ describe("the plugin worker's identity", () => {
   test("refuses duplicate members and non-hex hashes", async () => {
     await expect(
       pluginWorkerModuleSetHashV1({
-        contractVersion: 4,
+        contractVersion: 5,
         indexVersion: "index-v1",
         members: [MEMBER_A, { ...MEMBER_A, contentHash: HASH_B }],
         bindingDigest: DIGEST,
@@ -82,7 +82,7 @@ describe("the plugin worker's identity", () => {
     ).rejects.toThrow(/duplicate/);
     await expect(
       pluginWorkerModuleSetHashV1({
-        contractVersion: 4,
+        contractVersion: 5,
         indexVersion: "index-v1",
         members: [{ ...MEMBER_A, contentHash: "not hex" }],
         bindingDigest: DIGEST,
@@ -120,13 +120,14 @@ const healthyPlugin = {
   triggers: ["forecast_ready"],
   views: ["weather.settings"],
   cards: [{ id: "draft", actions: ["details"] }],
+  modelProviders: [],
 };
 
 describe("plugin worker health", () => {
   test("decodes every plugin the index mounted", () => {
     const health = decodePluginWorkerHealthV1({
       schemaVersion: 1,
-      contractVersion: 4,
+      contractVersion: 5,
       plugins: [
         healthyPlugin,
         {
@@ -140,10 +141,11 @@ describe("plugin worker health", () => {
           triggers: [],
           views: [],
           cards: [],
+          modelProviders: [],
         },
       ],
     });
-    expect(health.contractVersion).toBe(4);
+    expect(health.contractVersion).toBe(5);
     expect(health.plugins.map((plugin) => plugin.pluginId)).toEqual([
       "weather",
       "greeter",
@@ -159,10 +161,10 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 4,
+        contractVersion: 5,
         plugins: [],
       }),
-    ).toEqual({ schemaVersion: 1, contractVersion: 4, plugins: [] });
+    ).toEqual({ schemaVersion: 1, contractVersion: 5, plugins: [] });
     expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
@@ -187,7 +189,7 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 4,
+        contractVersion: 5,
         plugins: [hooklessPlugin],
       }).plugins[0],
     ).toMatchObject({
@@ -200,21 +202,21 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 4,
+        contractVersion: 5,
         plugins: [{ ...healthyPlugin, reason: "fine" }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 4,
+        contractVersion: 5,
         plugins: [{ ...healthyPlugin, ok: false }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
     expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 4,
+        contractVersion: 5,
         plugins: [healthyPlugin, healthyPlugin],
       }),
     ).toThrow(/duplicate/);
@@ -224,21 +226,21 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 4,
+        contractVersion: 5,
         plugins: [{ ...healthyPlugin, hooks: ["agent/request-error"] }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/hooks/) });
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 4,
+        contractVersion: 5,
         plugins: [{ ...healthyPlugin, triggers: ["Forecast Ready"] }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/triggers/) });
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 4,
+        contractVersion: 5,
         plugins: [{ ...healthyPlugin, extra: true }],
       }).plugins[0],
     ).toMatchObject({
@@ -248,7 +250,7 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 4,
+        contractVersion: 5,
         plugins: [{ ...healthyPlugin, pluginId: "Not An Id" }, healthyPlugin],
       }).plugins.map((plugin) => plugin.pluginId),
     ).toEqual(["weather"]);

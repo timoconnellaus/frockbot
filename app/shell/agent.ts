@@ -704,29 +704,49 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
               // Two deadlines, one call: the compaction's own, and the abort
               // a newly admitted Turn raises when it takes the log back.
               const cancelled = AbortSignal.any([request.signal, signal]);
-              const result =
-                await runtime.llm.structured<CompactionSummaryPayloadV1>(
-                  {
-                    requestId: `compaction-${crypto.randomUUID()}`,
-                    provider: request.provider,
-                    model: request.model,
-                    system: request.system,
-                    messages: request.messages,
-                    tools: [],
-                    ...(request.modelBinding
-                      ? { modelBinding: request.modelBinding }
-                      : {}),
-                  },
-                  {
-                    name: "conversation_compaction",
-                    schema: COMPACTION_RESPONSE_SCHEMA_V1,
-                  },
-                  cancelled,
-                );
-              if (result.status === "failed") {
-                throw new Error(result.failure.message);
+              try {
+                const result =
+                  await runtime.llm.structured<CompactionSummaryPayloadV1>(
+                    {
+                      // The intent's own effect id, never a fresh one: the
+                      // summariser is a model effect like any other, and the
+                      // id is what the durable log and the host's dispatch
+                      // both key it by.
+                      requestId: request.effectId,
+                      provider: request.provider,
+                      model: request.model,
+                      system: request.system,
+                      messages: request.messages,
+                      tools: [],
+                      ...(request.modelBinding
+                        ? { modelBinding: request.modelBinding }
+                        : {}),
+                    },
+                    {
+                      name: "conversation_compaction",
+                      schema: COMPACTION_RESPONSE_SCHEMA_V1,
+                    },
+                    cancelled,
+                  );
+                if (result.status === "failed") {
+                  throw new Error(result.failure.message);
+                }
+                return renderCompactionSummaryV1(result.value);
+              } finally {
+                // The loop settles a model call's held resources when it
+                // dispatches it; this call is the compaction's own, outside
+                // any loop, so its lease is settled here — however the call
+                // ended. A failed settlement cannot be re-announced by a
+                // compaction, so it must not fail a summary that succeeded.
+                try {
+                  await runtime.hooks.modelOutcomeCommitted(
+                    agent,
+                    request.effectId,
+                  );
+                } catch {
+                  // Nothing left to tell.
+                }
               }
-              return renderCompactionSummaryV1(result.value);
             },
           });
         });

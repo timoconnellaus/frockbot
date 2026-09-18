@@ -157,6 +157,129 @@ export interface PluginModel {
   >;
 }
 
+/** One message in the normalized request a model provider is handed. */
+export interface PluginModelMessage {
+  role: "user" | "assistant" | "tool";
+  [key: string]: unknown;
+}
+
+/**
+ * One model request, normalized by the kernel: the same shape a Package's
+ * provider receives, minus the Connection the host holds on the Plugin's
+ * behalf.
+ */
+export interface PluginModelRequest {
+  requestId: string;
+  provider: string;
+  model: string;
+  system: string;
+  messages: PluginModelMessage[];
+  tools: { name: string; description: string; inputSchema: JsonSchema }[];
+  responseFormat?: { type: string; [key: string]: unknown };
+}
+
+/**
+ * One normalized stream event a provider answers with. The kernel decodes
+ * every field strictly, so a provider that invents an event fails its call
+ * rather than half-rendering a reply.
+ */
+export type PluginModelStreamEvent =
+  | {
+      type: "provider-state";
+      /** Opaque provider content the kernel replays on later turns. */
+      state: { [key: string]: unknown };
+    }
+  | { type: "text-delta"; text: string }
+  | {
+      /**
+       * A heartbeat: real upstream bytes that are not the reply — a reasoning
+       * model thinking, arguments still arriving. It reaches no one and shows
+       * nothing; it is how a long stretch with no visible output is told
+       * apart from a dead socket.
+       */
+      type: "progress";
+    }
+  | { type: "tool-call"; call: { id: string; name: string; input: unknown } }
+  | {
+      type: "usage";
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        cachedInputTokens?: number;
+        reasoningTokens?: number;
+      };
+    }
+  | { type: "response-format-note"; note: { [key: string]: unknown } }
+  | { type: "structured-output-failure"; failure: { [key: string]: unknown } }
+  | { type: "finish"; reason: "completed" | "tool-calls" | "max-tokens" }
+  | {
+      /**
+       * The provider refused, in the Plugin's own words. The classification
+       * tells the kernel's retry policy what to do: `permanent` is not
+       * retried, `transient` is, and `unknown` takes the kernel's default.
+       */
+      type: "provider-failure";
+      classification: "transient" | "permanent" | "unknown";
+      reason: string;
+      retryAfterMs?: number;
+    };
+
+/** What the host transport answers with. */
+export type PluginModelTransportOutcome =
+  | {
+      status: "streaming";
+      httpStatus: number;
+      /** The provider's body, streamed. Decode it as the provider frames it. */
+      body: ReadableStream<Uint8Array>;
+    }
+  | {
+      status: "refused";
+      httpStatus: number;
+      /** The host's own words; an upstream error body is never forwarded. */
+      reason: string;
+      retryAfterMs?: number;
+    }
+  | { status: "unavailable"; reason: string };
+
+/**
+ * The model transport a provider contribution may call, exactly once per
+ * model call. The host resolves the Connection, sends to the one endpoint and
+ * route the deployment serves the provider on, attaches the credential
+ * server-side and streams the provider's bytes back. A Plugin never sees the
+ * credential, cannot name a Connection or a destination, and cannot follow a
+ * redirect.
+ */
+export type PluginModelTransport = (request: {
+  /** The request body, exactly as the upstream should receive it. */
+  body: string;
+}) => Promise<PluginModelTransportOutcome>;
+
+/** `ctx` inside one model call served by this Plugin's provider contribution. */
+export interface PluginModelContext extends PluginContext {
+  /** This call's one credentialed upstream call. */
+  readonly modelTransport: PluginModelTransport;
+}
+
+/**
+ * One model provider a Plugin serves (ADR 0032). The `id` is the provider
+ * type a Bot's model selection names; the descriptor declares it too, with
+ * the protocol version, the credential scheme and the endpoint the host
+ * attaches them to, and the two are checked against each other at mount.
+ */
+export interface PluginModelProvider {
+  /**
+   * One model call: the kernel hands a normalized request and the Plugin
+   * answers with normalized events, reached through `ctx.modelTransport`.
+   */
+  stream(
+    request: PluginModelRequest,
+    ctx: PluginModelContext,
+  ): AsyncIterable<PluginModelStreamEvent>;
+}
+
+/** Every model provider the module serves, by provider id. */
+export type PluginModelProviders = Record<string, PluginModelProvider>;
+
 export type MemoryScope = "bot" | "user" | "project";
 export type MemoryTier = "profile" | "log" | "note";
 
@@ -253,6 +376,11 @@ export interface PluginContext {
   readonly settings: PluginSettings;
   /** The `ai` grant. */
   readonly model?: PluginModel;
+  /**
+   * The credentialed transport, present exactly while this Plugin is serving
+   * one of its model provider contributions. A tool call's `ctx` has none.
+   */
+  readonly modelTransport?: PluginModelTransport;
   /** The `memory` grant. */
   readonly memory?: PluginMemory;
   /** The `workspace` grant. */
@@ -611,4 +739,10 @@ export interface PluginModule {
    * the card's `dataSchema` and `render` answers with the surface.
    */
   cards?: Record<string, PluginCard>;
+  /**
+   * One entry per model provider declared under `modelProviders` in
+   * `plugin.json` (ADR 0032). A Bot that selects that provider runs this
+   * contribution; the host serves the credential through `ctx.modelTransport`.
+   */
+  modelProviders?: PluginModelProviders;
 }

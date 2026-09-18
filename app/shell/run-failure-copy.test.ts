@@ -1,7 +1,10 @@
 import { STEP_LIMIT_REASON_V1 } from "@frockbot/core/agent-loop";
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/core/contracts";
-import { MODEL_FIRST_BYTE_DEADLINE_REASON_V1 } from "@frockbot/core/contracts";
+import {
+  MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
+  PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1,
+} from "@frockbot/core/contracts";
 import {
   CREDIT_EXHAUSTED_REASON_V1,
   SUBSCRIPTION_REQUIRED_REASON_V1,
@@ -112,6 +115,18 @@ describe("runFailureCopyV1", () => {
       events: [turnEnd("interrupted")],
     });
     expect(copy).toBe(MODEL_FIRST_BYTE_DEADLINE_REASON_V1);
+  });
+
+  test("a model whose Plugin this account lacks says what to do about it", () => {
+    const copy = runFailureCopyV1({
+      failure: `Bot turn ended with outcome model-error: ${PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1}`,
+      events: [turnEnd("model-error")],
+    });
+    expect(copy).toBe(PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1);
+    assertPlainV1(copy);
+    expect(knownFailureCopyV1(copy)).toBe(copy);
+    // Installing a Plugin, not sending the same message, is the way out.
+    expect(failureNoticeV1(copy).retry).toBe(false);
   });
 
   // Billing's refusals are the one model failure the person can do something

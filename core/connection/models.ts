@@ -20,6 +20,12 @@ export interface ConnectionModelV1 {
   providerModelId: string;
   displayName: string;
   contextWindow?: number;
+  /**
+   * The most output the model itself will produce, as the provider's own
+   * catalog states it. What one call may ask for is the host's decision, but
+   * it is bounded by this: a body cannot make a model write more than it can.
+   */
+  maxOutputTokens?: number;
   capabilities: ModelCapabilityV1;
   source: "discovered" | "exact-resolution";
 }
@@ -314,6 +320,7 @@ export function decodeConnectionModelCatalogV1(
       "capabilities",
       "source",
       ...(Object.hasOwn(model, "contextWindow") ? ["contextWindow"] : []),
+      ...(Object.hasOwn(model, "maxOutputTokens") ? ["maxOutputTokens"] : []),
     ]);
     const capabilities = record(model.capabilities, "model capabilities");
     exact(capabilities, ["tools", "vision", "reasoning"]);
@@ -325,7 +332,11 @@ export function decodeConnectionModelCatalogV1(
       (model.contextWindow !== undefined &&
         (typeof model.contextWindow !== "number" ||
           !Number.isSafeInteger(model.contextWindow) ||
-          model.contextWindow <= 0))
+          model.contextWindow <= 0)) ||
+      (model.maxOutputTokens !== undefined &&
+        (typeof model.maxOutputTokens !== "number" ||
+          !Number.isSafeInteger(model.maxOutputTokens) ||
+          model.maxOutputTokens <= 0))
     ) {
       throw new Error("Connection model is invalid");
     }
@@ -335,6 +346,9 @@ export function decodeConnectionModelCatalogV1(
       ...(model.contextWindow === undefined
         ? {}
         : { contextWindow: model.contextWindow as number }),
+      ...(model.maxOutputTokens === undefined
+        ? {}
+        : { maxOutputTokens: model.maxOutputTokens as number }),
       capabilities: {
         tools: capabilities.tools,
         vision: capabilities.vision,

@@ -19,6 +19,7 @@ import type {
   IsolateStorageListOutcomeV1,
   IsolateStorageOutcomeV1,
   IsolateWorkspaceOutcomeV1,
+  PluginModelTransportOutcomeV1,
 } from "@frockbot/core/contracts";
 import {
   decodeIsolateCapabilityListV1,
@@ -66,6 +67,7 @@ interface BotIsolateRpc {
   isolateWorkspaceWrite(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
   isolateWorkspaceDelete(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
   isolateConnection(input: unknown): Promise<IsolateConnectionOutcomeV1>;
+  isolateModelTransport(input: unknown): Promise<PluginModelTransportOutcomeV1>;
   isolateSchedule(input: unknown): Promise<IsolateScheduleOutcomeV1>;
   isolateEmail(input: unknown): Promise<IsolateEmailOutcomeV1>;
   isolateStorageGet(input: unknown): Promise<IsolateStorageOutcomeV1>;
@@ -258,6 +260,27 @@ export class BotCapabilities extends WorkerEntrypoint<
       return await rpc.isolateWorkspaceDelete(envelope);
     } catch {
       return unavailable("Workspace is unavailable");
+    }
+  }
+
+  /**
+   * One credentialed upstream call for a model provider Plugin (ADR 0032).
+   * The ticket is the host's own, minted for the dispatch this call belongs
+   * to; everything else is checked on the Bot object, which is the only
+   * place that holds the Connection and the credential.
+   */
+  async modelTransport(
+    scope: unknown,
+    request: unknown,
+  ): Promise<PluginModelTransportOutcomeV1> {
+    try {
+      const { rpc, envelope } = this.scoped(scope, request);
+      return await rpc.isolateModelTransport(envelope);
+    } catch {
+      return {
+        status: "unavailable",
+        reason: "the model transport is unavailable",
+      };
     }
   }
 

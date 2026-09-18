@@ -13,6 +13,11 @@ import {
   type ViewNode,
 } from "@frockbot/core/protocol-schemas";
 import type { PluginGrantV1, PluginNetworkV1 } from "@frockbot/core/contracts";
+import {
+  pluginModelProviderDisplayNameV1,
+  pluginServedProviderV1,
+} from "@frockbot/providers/catalog/definition";
+import { deploymentPluginArtifactHashV1 } from "./catalog.js";
 import type { PluginSeedStateV1 } from "./catalog.js";
 import {
   MAX_PLUGIN_TOOL_ARGUMENTS_BYTES_V1,
@@ -37,6 +42,11 @@ export interface BotPluginRowV1 {
   network?: PluginNetworkV1;
   /** The grants the descriptor asked for; `http` also opens this deployment's sender. */
   grants?: readonly PluginGrantV1[];
+  /**
+   * The model providers the descriptor serves (ADR 0032). A Bot whose model
+   * names one of them runs it whatever this row's switch says.
+   */
+  modelProviders?: readonly string[];
   /** A first-party feature the account has not installed cannot be switched on. */
   unavailable?: string;
   /** Off after failing Turns in a row; the switch turns it on again (ADR 0026). */
@@ -227,6 +237,81 @@ export function pluginNetworkCopyV1(
   return mail ? mail : "Reaches no host of its own.";
 }
 
+/**
+ * What the row says about the model providers a Plugin serves.
+ *
+ * It says what a person can *do* with it, and nothing about how it is wired:
+ * an endpoint and a route are the deployment's business, not theirs. A Plugin
+ * whose only contribution is a provider has no switch worth pressing — its
+ * code runs when a model is chosen — so it reads as a provider row rather
+ * than as something a person turns on.
+ */
+export function pluginModelProviderCopyV1(
+  modelProviders: readonly string[] | undefined,
+): string {
+  const served = pluginServedModelProviderIdsV1(modelProviders);
+  if (served.length === 0) return "";
+  const names = served.map(pluginModelProviderDisplayNameV1);
+  return `Provides ${names.join(", ")} models. Choose a model in Models.`;
+}
+
+/**
+ * The claimed providers this deployment actually serves through a Plugin.
+ *
+ * A descriptor's claim is not authority (ADR 0032): a Plugin no deployment
+ * serves the provider through will never carry a credential, so no product
+ * surface says that it does just because its descriptor says so.
+ */
+export function pluginServedModelProviderIdsV1(
+  modelProviders: readonly string[] | undefined,
+): string[] {
+  return (modelProviders ?? []).filter(
+    (provider) => pluginServedProviderV1(provider) !== undefined,
+  );
+}
+
+/**
+ * The providers one *member* is served through, which is a fact about bytes:
+ * the member has to be the deployment's own Plugin, at the deployment's own
+ * artifact, declaring the provider that catalog entry names for it. A
+ * descriptor is a claim, and a member a Bot wrote is exactly the claimant
+ * that must not be shown as carrying this deployment's credential.
+ */
+export function pluginServedModelProviderIdsForMemberV1(member: {
+  packageId: string;
+  artifact: { contentHash: string };
+  modelProviders?: readonly string[];
+}): string[] {
+  if (
+    deploymentPluginArtifactHashV1(member.packageId) !==
+    member.artifact.contentHash
+  ) {
+    return [];
+  }
+  return (member.modelProviders ?? []).filter(
+    (provider) =>
+      pluginServedProviderV1(provider)?.pluginId === member.packageId,
+  );
+}
+
+/**
+ * Whether this Plugin's only contribution is a model provider it is actually
+ * served through. Such a row has no switch worth pressing — it runs when a
+ * model is chosen — but a Plugin with tools or hooks beside its provider is
+ * mixed: those still answer to the Bot's own switch.
+ */
+export function isPureModelProviderPluginV1(row: {
+  modelProviders?: readonly string[];
+  tools?: readonly unknown[];
+  hooks?: readonly unknown[];
+}): boolean {
+  return (
+    pluginServedModelProviderIdsV1(row.modelProviders).length > 0 &&
+    !row.tools?.length &&
+    !row.hooks?.length
+  );
+}
+
 function kindLabel(row: BotPluginRowV1): string {
   switch (row.kind) {
     case "first-party":
@@ -244,6 +329,8 @@ function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
   ];
   const reach = pluginNetworkCopyV1(row.network, row.grants);
   if (reach) lines.push({ type: "text", text: reach, style: "status" });
+  const serves = pluginModelProviderCopyV1(row.modelProviders);
+  if (serves) lines.push({ type: "text", text: serves, style: "status" });
   if (row.unavailable) {
     lines.push({ type: "text", text: row.unavailable, style: "status" });
   }

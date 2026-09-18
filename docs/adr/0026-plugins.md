@@ -154,9 +154,19 @@ removes it from the Plugins page entirely and is allowed only when it is not
 enableable — `locked` or `admin-gated` off.
 
 > Amended 2026-09-12, in step 6. `hidden` did not ship: `PLUGIN_SEED_STATES_V1`
-> in `app/plugins/catalog.ts` carries the four states only. A seeded Plugin the
+> in `app/plugins/catalog.ts` carried the four states only. A seeded Plugin the
 > page should not show is left out of the catalog, or kept `admin-gated` and
 > unopened, which the page already omits.
+
+> Amended 2026-09-18, by [ADR 0032](0032-plugin-model-providers.md). A fifth
+> state shipped with provider Plugins: `installable` is in the catalog and
+> seeded on no account, so `PLUGIN_SEED_STATES_V1` now carries five. The
+> account's own Package command installs its artifact — `user/install-package`,
+> or the Models surface's `user/choose-model-provider`, which is what "Connect
+> provider" sends — and uninstalling the Package removes it again. It runs only
+> when a Bot's switch turns it on; the model contribution it serves is the
+> exception that switch does not govern, because a Bot whose model names the
+> provider is served by it either way.
 
 The master toggle is an admin-held Account feature that gates Bot authoring
 only. Turning seeded Plugins on and off is open to every User. Off keeps the
@@ -211,6 +221,14 @@ The descriptor carries a JSON Schema for its settings; values live per Bot and
 render on the Plugin's card through the existing settings `ViewDocument`. The
 Bot edits them in conversation through the same action. Secrets never enter
 Plugin settings; a secret is a Connection.
+
+> Amended 2026-09-18, by [ADR 0032](0032-plugin-model-providers.md). A Plugin
+> may now serve a model provider: `modelProviders` in the descriptor, a
+> normalized-request/stream-events protocol, and a host transport that is the
+> only thing holding the Connection's credential. It is a sixth capability in
+> the same sense the hooks are — the descriptor declares it, the deployment's
+> provider catalog decides whether it may be served, and the Bot Durable
+> Object admits each upstream call against the Turn's own durable effect.
 
 ### Applets
 

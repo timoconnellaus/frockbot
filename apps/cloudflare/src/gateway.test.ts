@@ -2976,6 +2976,117 @@ test("Profile settings separate personal details, optional capabilities, and gen
   });
 });
 
+test("an installed provider Plugin is listed as a Plugin, and offered in Models until then", async () => {
+  const { gateway, configurations } = createTestGateway();
+  const owner = new MemoryConfiguration();
+  owner.readPluginsFrame = async () => ({
+    schemaVersion: 1,
+    ownerId: "alice",
+    revision: 1,
+    plugins: [
+      {
+        packageId: "provider-deepseek",
+        displayName: "DeepSeek",
+        state: "installed" as const,
+        home: "models" as const,
+      },
+      {
+        packageId: "provider-anthropic",
+        displayName: "Anthropic",
+        state: "not-installed" as const,
+        home: "models" as const,
+      },
+      {
+        packageId: "shell",
+        displayName: "The shell",
+        state: "installed" as const,
+        home: "none" as const,
+      },
+    ].map((item) => ({ ...item, version: "0.0.1", summary: "Models" })),
+  });
+  configurations.set("alice", owner);
+  // The built-in Package a provider Plugin rides on is invisible while it is
+  // not installed, and every other built-in stays off this surface; once the
+  // account has it, the Plugin is one of the Plugins it lists.
+  const listed = (await (
+    await gateway(request("/api/settings/plugins", "alice"))
+  ).json()) as PluginsFrame;
+  expect(listed.plugins.map((plugin) => plugin.packageId)).toEqual([
+    "provider-deepseek",
+  ]);
+});
+
+test("a provider Package the account has not installed is not one of its Plugins", async () => {
+  // Every account starts holding a disabled row for each Package the
+  // deployment turns on by default, and a provider is one of those. The row
+  // is not an installation: nothing is in the account's Composition, so the
+  // Plugins page has nothing to list until the account installs the provider
+  // in Models.
+  const { gateway, configurations } = createTestGateway();
+  const owner = new MemoryConfiguration();
+  owner.readPluginsFrame = async () => ({
+    schemaVersion: 1,
+    ownerId: "alice",
+    revision: 1,
+    plugins: [
+      {
+        packageId: "provider-deepseek",
+        displayName: "DeepSeek",
+        state: "disabled" as const,
+        home: "models" as const,
+      },
+    ].map((item) => ({ ...item, version: "0.0.1", summary: "Models" })),
+  });
+  configurations.set("alice", owner);
+  const listed = (await (
+    await gateway(request("/api/settings/plugins", "alice"))
+  ).json()) as PluginsFrame;
+  expect(listed.plugins).toEqual([]);
+});
+
+test("Custom models is offered as a capability while providers stay in Models", async () => {
+  // Both route their configuration to Models, and only one of them answers a
+  // model call: the provider is connected and turned on there, while Custom
+  // models is the choice itself and is offered here like any other capability.
+  const { gateway, configurations } = createTestGateway();
+  const owner = new MemoryConfiguration();
+  owner.readPluginsFrame = async () => ({
+    schemaVersion: 1,
+    ownerId: "alice",
+    revision: 1,
+    plugins: [
+      {
+        packageId: "custom-models",
+        displayName: "Custom models",
+        state: "installed" as const,
+        home: "models" as const,
+      },
+      {
+        packageId: "provider-ollama-cloud",
+        displayName: "Ollama Cloud",
+        state: "installed" as const,
+        home: "models" as const,
+      },
+    ].map((item) => ({ ...item, version: "0.0.1", summary: "Models" })),
+  });
+  configurations.set("alice", owner);
+  const document = (await (
+    await gateway(request("/api/settings/capabilities?as=document", "alice"))
+  ).json()) as {
+    root: { children: Array<{ title?: string; children?: unknown[] }> };
+  };
+  const titles: string[] = [];
+  const walk = (node: { title?: string; children?: unknown[] }): void => {
+    if (typeof node.title === "string") titles.push(node.title);
+    for (const child of node.children ?? []) {
+      walk(child as { title?: string; children?: unknown[] });
+    }
+  };
+  walk(document.root);
+  expect(titles).toContain("Custom models");
+  expect(titles).not.toContain("Ollama Cloud");
+});
+
 test("a built-in turned off before Plugins stopped listing it can still be turned back on", async () => {
   const { gateway, configurations } = createTestGateway();
   const owner = new MemoryConfiguration();

@@ -25,6 +25,11 @@ import {
   pluginCardToolNameV1,
 } from "@frockbot/core/contracts";
 import type { CompositionMemberV1 } from "@frockbot/core/durable";
+import {
+  pluginModelProviderDisplayNameV1,
+  pluginServedProviderV1,
+} from "@frockbot/providers/catalog/definition";
+import { deploymentPluginArtifactHashV1 } from "./catalog.js";
 import { decodeCompositionMemberV1 } from "@frockbot/core/durable";
 
 export const PLUGIN_INTENT_PREFIX = "plugin:intent:";
@@ -305,10 +310,12 @@ export async function recordPluginIntentOutcomeV1(
  * nobody could answer.
  */
 export function pluginApprovalActionV1(
-  member: Pick<CompositionMemberV1, "descriptor">,
+  member: Pick<CompositionMemberV1, "descriptor"> &
+    Partial<Pick<CompositionMemberV1, "artifact" | "packageId">>,
   verb: "Run" | "Turn on",
 ): string {
   const descriptor = member.descriptor;
+  const packageId = member.packageId ?? descriptor.id;
   const parts: string[] = [
     `${verb} the Plugin "${descriptor.displayName}" (${descriptor.id}, version ${descriptor.version}) on this Bot.`,
   ];
@@ -328,6 +335,26 @@ export function pluginApprovalActionV1(
   );
   if (descriptor.hooks.length > 0) {
     parts.push(`It wraps ${descriptor.hooks.join(", ")}.`);
+  }
+  // A model provider contribution runs when a Bot's model names it, which is
+  // not the switch this card asks about — so the card says what it serves and
+  // what choosing it means.
+  for (const provider of descriptor.modelProviders ?? []) {
+    // Whether this Plugin is the one the deployment serves the provider
+    // through is the deployment's answer, not the descriptor's: a claim is
+    // credential-backed only when this exact Plugin, at the deployment's own
+    // artifact, is the one the provider catalog names for it.
+    const served = pluginServedProviderV1(provider.id);
+    const trusted =
+      served !== undefined &&
+      served.pluginId === packageId &&
+      member.artifact !== undefined &&
+      deploymentPluginArtifactHashV1(packageId) === member.artifact.contentHash;
+    parts.push(
+      trusted
+        ? `It provides ${pluginModelProviderDisplayNameV1(provider.id)} models. Choosing one in Models runs it; the deployment sends the request with the Connection's credential attached, and the key never reaches the Plugin.`
+        : `It declares the ${provider.id} model provider this deployment does not serve through this Plugin, so it carries no credential and choosing ${provider.id} does not run it.`,
+    );
   }
   if (descriptor.grants.length > 0) {
     parts.push(`It is granted ${descriptor.grants.join(", ")}.`);

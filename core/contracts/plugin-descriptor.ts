@@ -18,6 +18,10 @@ import {
 } from "./isolate.js";
 import { isSkillReferenceNameV1, isSkillRefSlugV1 } from "./skills.js";
 import { assertEnforceableJsonSchemaV1 } from "./json-schema.js";
+import {
+  PLUGIN_MODEL_PROTOCOL_VERSIONS_V1,
+  type PluginModelProviderV1,
+} from "./plugin-model.js";
 
 /** Authority a plugin may hold. */
 export const PLUGIN_GRANTS_V1 = [
@@ -155,6 +159,13 @@ export interface PluginDescriptorV1 {
   skills?: PluginSkillV1[];
   /** The Cards the plugin draws, one Bot-facing tool each. */
   cards?: PluginCardV1[];
+  /**
+   * The model providers this Plugin serves (ADR 0032). Selecting a provider
+   * is what runs its contribution — the Plugin's tools and hooks still need
+   * the Bot's own switch — and only a provider this deployment opens to
+   * Plugins may be declared.
+   */
+  modelProviders?: PluginModelProviderV1[];
   slots?: PluginSlotV1[];
   views?: PluginViewV1[];
   /** Always all three: a plugin sees the whole context or none of it. */
@@ -195,6 +206,9 @@ const MAX_PLUGIN_SETTINGS_SCHEMA_BYTES_V1 = 65_536;
 const MAX_PLUGIN_CARDS_V1 = 16;
 const MAX_PLUGIN_CARD_ACTIONS_V1 = 16;
 const MAX_PLUGIN_CARD_SCHEMA_BYTES_V1 = 65_536;
+const MAX_PLUGIN_MODEL_PROVIDERS_V1 = 4;
+/** A model provider type: the id a model binding names. */
+const PLUGIN_PROVIDER_ID = /^[a-z][a-z0-9-]{0,63}$/;
 
 /**
  * The contract versions this deployment serves: the current one and the one
@@ -563,6 +577,39 @@ function decodePluginCardsV1(input: unknown, label: string): PluginCardV1[] {
   return cards;
 }
 
+function decodePluginModelProvidersV1(
+  input: unknown,
+  label: string,
+): PluginModelProviderV1[] {
+  const providers = boundedArray(
+    input,
+    label,
+    MAX_PLUGIN_MODEL_PROVIDERS_V1,
+  ).map((provider, index) => {
+    const itemLabel = `${label}[${index}]`;
+    const value = record(provider, itemLabel);
+    exactKeys(value, ["id", "protocolVersion"], [], itemLabel);
+    const id = boundedString(value.id, `${itemLabel}.id`, 64);
+    if (!PLUGIN_PROVIDER_ID.test(id)) {
+      throw new Error(`${itemLabel}.id is invalid`);
+    }
+    const protocolVersion = value.protocolVersion;
+    if (
+      !Number.isSafeInteger(protocolVersion) ||
+      !PLUGIN_MODEL_PROTOCOL_VERSIONS_V1.includes(protocolVersion as number)
+    ) {
+      throw new Error(`${itemLabel}.protocolVersion is not served`);
+    }
+    return { id, protocolVersion: protocolVersion as number };
+  });
+  if (
+    new Set(providers.map((provider) => provider.id)).size !== providers.length
+  ) {
+    throw new Error(`${label} contains duplicate provider ids`);
+  }
+  return providers;
+}
+
 function decodePluginSettingsSchemaV1(
   input: unknown,
   label: string,
@@ -603,6 +650,7 @@ export function decodePluginDescriptorV1(
       "triggers",
       "skills",
       "cards",
+      "modelProviders",
       "slots",
       "views",
     ],
@@ -680,6 +728,13 @@ export function decodePluginDescriptorV1(
     value.cards === undefined
       ? undefined
       : decodePluginCardsV1(value.cards, `${label}.cards`);
+  const modelProviders =
+    value.modelProviders === undefined
+      ? undefined
+      : decodePluginModelProvidersV1(
+          value.modelProviders,
+          `${label}.modelProviders`,
+        );
   // A card is offered as a tool of its own in the plugin's namespace, so a
   // declared tool of that name would be two tools with one name — and a card
   // whose tool name would not be a tool name at all is refused here rather
@@ -734,8 +789,19 @@ export function decodePluginDescriptorV1(
     ...(triggers === undefined ? {} : { triggers }),
     ...(skills === undefined ? {} : { skills }),
     ...(cards === undefined ? {} : { cards }),
+    ...(modelProviders === undefined ? {} : { modelProviders }),
     ...(slots === undefined ? {} : { slots }),
     ...(views === undefined ? {} : { views }),
     contextKeys: [...PLUGIN_CONTEXT_KEYS_V1],
   };
+}
+
+/** The model provider contribution a descriptor makes for one provider id. */
+export function pluginModelProviderV1(
+  descriptor: PluginDescriptorV1,
+  providerId: string,
+): PluginModelProviderV1 | undefined {
+  return descriptor.modelProviders?.find(
+    (provider) => provider.id === providerId,
+  );
 }

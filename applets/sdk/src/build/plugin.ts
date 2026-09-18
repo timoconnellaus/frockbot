@@ -54,6 +54,8 @@ export interface PluginDescriptionV1 {
   views: string[];
   /** The cards the module draws, by id (ADR 0030). */
   cards: string[];
+  /** The model providers the module serves, by provider id (ADR 0032). */
+  modelProviders: string[];
 }
 
 export interface PluginBuildManifestV1 extends PluginDescriptionV1 {
@@ -279,6 +281,20 @@ function names(value, label) {
   });
 }
 
+function modelProviderNames(value) {
+  if (value === undefined) return [];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error('"modelProviders" must be an object');
+  }
+  return Object.keys(value).map(function (providerId) {
+    var provider = value[providerId];
+    if (!provider || typeof provider !== "object" || typeof provider.stream !== "function") {
+      throw new Error('model provider "' + providerId + '" must export a stream function');
+    }
+    return providerId;
+  });
+}
+
 function cardNames(value) {
   if (value === undefined) return [];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -320,6 +336,7 @@ function describe() {
     triggers: names(plugin.triggers, "triggers"),
     views: names(plugin.views, "views"),
     cards: cardNames(plugin.cards),
+    modelProviders: modelProviderNames(plugin.modelProviders),
   };
 }
 
@@ -414,6 +431,7 @@ function validateDescription(input: PluginDescriptionV1): PluginDescriptionV1 {
     triggers: [...input.triggers],
     views: [...input.views],
     cards: [...(input.cards ?? [])],
+    modelProviders: [...(input.modelProviders ?? [])],
   };
 }
 

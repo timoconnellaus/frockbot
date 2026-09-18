@@ -21,7 +21,10 @@ import type {
   ArtifactRefV1,
   CompositionMemberV1,
 } from "@frockbot/core/durable";
-import { CAPABILITY_DESCRIPTIONS } from "@frockbot/app/settings/catalog-copy";
+import {
+  CAPABILITY_DESCRIPTIONS,
+  PROVIDER_PLUGIN_DESCRIPTIONS_V1,
+} from "@frockbot/app/settings/catalog-copy";
 import type { PluginEnablementV1 } from "./enablement.js";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./seeded/artifacts.generated.js";
 
@@ -30,6 +33,13 @@ export const PLUGIN_SEED_STATES_V1 = [
   "default-on",
   "default-off",
   "admin-gated",
+  /**
+   * Shipped in the catalog and seeded on no account: an `installable` Plugin
+   * joins a User's Composition when the account installs the Package it
+   * belongs to, with its own command (ADR 0032). It is the state a provider
+   * Plugin has until there is a marketplace to browse.
+   */
+  "installable",
 ] as const;
 
 export type PluginSeedStateV1 = (typeof PLUGIN_SEED_STATES_V1)[number];
@@ -230,6 +240,20 @@ const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
       "Draws a question with up to six answers and sends the one you pick back to your Bot. Always on.",
     seed: "locked",
   },
+  /**
+   * The first provider Plugin (ADR 0032). It is `installable`: shipped in the
+   * catalog, seeded on no account, and installed by the account's own
+   * `user/install-package` command for the provider Package it belongs to —
+   * which is the closest thing this deployment has to a marketplace until one
+   * exists.
+   */
+  deepseek: {
+    displayName: "DeepSeek",
+    // The account Plugins row describes the same Plugin when the account
+    // installs its Package, so the words come from one place (catalog-copy).
+    description: PROVIDER_PLUGIN_DESCRIPTIONS_V1["provider-deepseek"],
+    seed: "installable",
+  },
   email: {
     displayName: "Email",
     description:
@@ -282,6 +306,19 @@ export const DEPLOYMENT_PLUGIN_CATALOG_V1: readonly SeededPluginV1[] =
   );
 
 /**
+ * The content hash of the deployment's own artifact for one Plugin, when the
+ * deployment ships it. It is what makes "this Plugin serves this provider" a
+ * fact about bytes rather than about a descriptor a member carries.
+ */
+export function deploymentPluginArtifactHashV1(
+  pluginId: string,
+): string | undefined {
+  return DEPLOYMENT_PLUGIN_CATALOG_V1.find(
+    (plugin) => plugin.pluginId === pluginId,
+  )?.artifact.contentHash;
+}
+
+/**
  * The catalog entries one account's Composition carries: every seeded Plugin
  * except an admin-gated one the admin has not opened for this account.
  */
@@ -289,10 +326,40 @@ export function seededPluginsForAccountV1(
   catalog: readonly SeededPluginV1[],
   adminOpened: readonly string[],
 ): SeededPluginV1[] {
-  return catalog.filter(
-    (plugin) =>
-      plugin.seed !== "admin-gated" || adminOpened.includes(plugin.pluginId),
-  );
+  return catalog.filter((plugin) => {
+    // An installable Plugin is never seeded: the account's own install
+    // command is what puts it in a generation, and reconciliation there
+    // leaves it exactly where that command put it.
+    if (plugin.seed === "installable") return false;
+    return (
+      plugin.seed !== "admin-gated" || adminOpened.includes(plugin.pluginId)
+    );
+  });
+}
+
+/**
+ * An installable Plugin as a Composition member, installed by the account's
+ * own command. The provenance is what keeps it: reconciliation rewrites the
+ * seeded members and the Bot-authored ones, and leaves this one alone.
+ */
+export function installedMemberV1(
+  plugin: SeededPluginV1,
+  userId: string,
+  installedAt: string,
+): CompositionMemberV1 {
+  return {
+    packageId: plugin.pluginId,
+    version: plugin.descriptor.version,
+    provenance: {
+      kind: "installed",
+      packageId: plugin.pluginId,
+      version: plugin.descriptor.version,
+      userId,
+      installedAt,
+    },
+    artifact: plugin.artifact,
+    descriptor: plugin.descriptor,
+  };
 }
 
 /** A seeded Plugin as a Composition member; provenance is the deployment's. */
@@ -334,7 +401,9 @@ export function pluginRunsForBotV1(
 ): boolean {
   if (seed === "locked") return true;
   const flag = enablement.enabled[pluginId];
-  if (seed === undefined || seed === "default-off") return flag === true;
+  if (seed === undefined || seed === "default-off" || seed === "installable") {
+    return flag === true;
+  }
   return flag !== false;
 }
 

@@ -31,6 +31,10 @@ import {
   servedPluginContractVersionsV1,
   type PluginServiceV1,
 } from "./plugin-descriptor.js";
+import type {
+  PluginModelInvocationV1,
+  PluginWorkerModelResultV1,
+} from "./plugin-model.js";
 
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
@@ -40,6 +44,10 @@ const PLUGIN_SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const MAX_PLUGIN_VIEWS_V1 = 16;
 /** Cards one Plugin may export, matching the descriptor's bound. */
 const MAX_PLUGIN_CARDS_V1 = 16;
+/** Model providers one Plugin may serve, matching the descriptor's bound. */
+const MAX_PLUGIN_MODEL_PROVIDERS_V1 = 4;
+/** A model provider type: the id a model binding names. */
+const PLUGIN_PROVIDER_ID = /^[a-z][a-z0-9-]{0,63}$/;
 /** A card id, as the descriptor bounds it. */
 const PLUGIN_CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
 /** A card action name, as the descriptor bounds it. */
@@ -139,6 +147,11 @@ export interface PluginWorkerPluginHealthV1 {
   provides: PluginServiceV1[];
   consumes: PluginServiceV1[];
   triggers: string[];
+  /**
+   * The model providers the module serves, by id; the descriptor's
+   * `modelProviders` must match, name for name.
+   */
+  modelProviders: string[];
   /** The surfaces the module renders, by id; the descriptor's `views` must match. */
   views: string[];
   /**
@@ -403,6 +416,10 @@ export interface PluginWorkerEntrypoint {
   execute(
     invocation: PluginWorkerToolInvocationV1,
   ): Promise<IsolateToolResultV1>;
+  /** One model call served by this Plugin's provider contribution (ADR 0032). */
+  streamModel(
+    invocation: PluginModelInvocationV1,
+  ): Promise<PluginWorkerModelResultV1>;
   receiveTrigger(
     invocation: PluginWorkerTriggerInvocationV1,
   ): Promise<PluginWorkerTriggerResultV1>;
@@ -595,6 +612,7 @@ export function decodePluginWorkerHealthV1(
           provides: [],
           consumes: [],
           triggers: [],
+          modelProviders: [],
           views: [],
           cards: [],
         });
@@ -644,6 +662,7 @@ function decodePluginHealthEntryV1(
       "provides",
       "consumes",
       "triggers",
+      "modelProviders",
       "views",
       "cards",
     ],
@@ -685,6 +704,30 @@ function decodePluginHealthEntryV1(
   });
   if (new Set(triggers).size !== triggers.length) {
     throw new Error(`${itemLabel}.triggers contains duplicates`);
+  }
+  if (
+    !Array.isArray(plugin.modelProviders) ||
+    plugin.modelProviders.length > MAX_PLUGIN_MODEL_PROVIDERS_V1
+  ) {
+    throw new Error(`${itemLabel}.modelProviders must be a bounded array`);
+  }
+  const modelProviders = plugin.modelProviders.map(
+    (provider, providerIndex) => {
+      const id = boundedString(
+        provider,
+        `${itemLabel}.modelProviders[${providerIndex}]`,
+        64,
+      );
+      if (!PLUGIN_PROVIDER_ID.test(id)) {
+        throw new Error(
+          `${itemLabel}.modelProviders[${providerIndex}] is invalid`,
+        );
+      }
+      return id;
+    },
+  );
+  if (new Set(modelProviders).size !== modelProviders.length) {
+    throw new Error(`${itemLabel}.modelProviders contains duplicates`);
   }
   if (
     !Array.isArray(plugin.views) ||
@@ -764,6 +807,7 @@ function decodePluginHealthEntryV1(
     provides: decodeServices(plugin.provides, `${itemLabel}.provides`),
     consumes: decodeServices(plugin.consumes, `${itemLabel}.consumes`),
     triggers,
+    modelProviders,
   };
 }
 

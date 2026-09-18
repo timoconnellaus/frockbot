@@ -269,6 +269,7 @@ describe("a Plugin that the worker refuses", () => {
               triggers: [],
               views: [],
               cards: [],
+              modelProviders: [],
             },
             {
               pluginId: "bad",
@@ -281,6 +282,7 @@ describe("a Plugin that the worker refuses", () => {
               triggers: [],
               views: [],
               cards: [],
+              modelProviders: [],
             },
           ],
         }),
@@ -292,6 +294,12 @@ describe("a Plugin that the worker refuses", () => {
         }),
       execute: () =>
         Promise.resolve({ schemaVersion: 1, content: "ok", isError: false }),
+      streamModel: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "refused" as const,
+          reason: "no model providers",
+        }),
       receiveTrigger: () =>
         Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
       cardAction: () =>
@@ -444,6 +452,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
               triggers: [],
               views: [],
               cards: [{ id: "draft", actions: [] }],
+              modelProviders: [],
             },
           ],
         }),

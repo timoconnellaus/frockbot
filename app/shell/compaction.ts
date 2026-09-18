@@ -441,9 +441,17 @@ export interface CompactionRunnerV1 {
   budget: number;
   currentTurn: number;
   newEffectId(): string;
-  /** One bounded summariser call on the Bot's own model binding. */
+  /**
+   * One bounded summariser call on the Bot's own model binding.
+   *
+   * `effectId` is the id the intent above was recorded under, and it is the
+   * id the call must be dispatched under: it is what makes a summariser call
+   * as at-most-once as any other model effect, and what lets the host find
+   * the durable intent when the dispatch reaches it.
+   */
   summarise(
     request: CompactionModelV1 & {
+      effectId: string;
       system: string;
       messages: LlmMessage[];
       signal: AbortSignal;
@@ -523,6 +531,7 @@ export async function runCompactionV1(
   try {
     const text = await input.summarise({
       ...binding,
+      effectId,
       system: COMPACTION_SYSTEM_PROMPT_V1,
       messages: compactionRequestMessagesV1({
         messages: covered,

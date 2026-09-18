@@ -93,20 +93,26 @@ function provenanceView(
   member: CompositionMemberV1,
 ): CompositionProvenanceViewV1 {
   const provenance = member.provenance;
-  if (provenance.kind === "user") {
+  if (provenance.kind === "bot") {
     return {
-      kind: "user",
-      userId: provenance.userId,
+      kind: "bot",
+      botId: provenance.botId,
+      sessionId: provenance.sessionId,
+      turnId: provenance.turnId,
+      runId: provenance.runId,
       authoredAt: provenance.authoredAt,
     };
   }
+  // A seeded Plugin and one the account installed with its own command are
+  // both the User's, and read as one kind: the difference between them is
+  // where the artifact came from, not whose it is.
   return {
-    kind: "bot",
-    botId: provenance.botId,
-    sessionId: provenance.sessionId,
-    turnId: provenance.turnId,
-    runId: provenance.runId,
-    authoredAt: provenance.authoredAt,
+    kind: "user",
+    userId: provenance.userId,
+    authoredAt:
+      provenance.kind === "installed"
+        ? provenance.installedAt
+        : provenance.authoredAt,
   };
 }
 

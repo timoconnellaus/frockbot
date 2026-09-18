@@ -42,6 +42,12 @@ export function connectionModelV1(
     providerModelId: model.id,
     displayName: model.name,
     contextWindow: model.contextWindow,
+    // The model's own output ceiling travels with the Connection: a model
+    // call may not ask for more than the model can write, and the Plugin
+    // transport needs that bound at the Bot, where the catalog is not.
+    ...(Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0
+      ? { maxOutputTokens: model.maxTokens }
+      : {}),
     capabilities: {
       tools: true,
       vision: model.input.includes("image"),

@@ -1,8 +1,8 @@
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { settingsDocumentV1 } from "@frockbot/app/settings/document";
 import {
-  BUILT_IN_PACKAGE_IDS,
   capabilityIsOfferedV1,
+  pluginsPageRowV1,
 } from "@frockbot/app/settings/catalog-copy";
 import { pluginsDocumentV1 } from "@frockbot/app/settings/plugins-document";
 import {
@@ -907,7 +907,7 @@ export function createGateway(dependencies: GatewayDependencies) {
           plugins: frame.plugins.filter((plugin) =>
             capabilities
               ? capabilityIsOfferedV1(plugin)
-              : !BUILT_IN_PACKAGE_IDS.has(plugin.packageId),
+              : pluginsPageRowV1(plugin),
           ),
         };
         return Response.json(
