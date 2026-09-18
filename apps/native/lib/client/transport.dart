@@ -128,16 +128,7 @@ class NativeApi {
     }
   }
 
-  /// One authenticated answer that is not JSON: today, a Computer capture on
-  /// the Workspace read route.
-  ///
-  /// The projection names that capture as a path on this same origin, and the
-  /// route behind it is authenticated. An `<img>` — which is what
-  /// `Image.network` is — carries no session there and is answered 401, so the
-  /// card drew its "no computer" placeholder over a capture that existed. The
-  /// bytes come back through the one client that holds the credential instead,
-  /// and [path] is checked exactly as [request] checks its own, so a
-  /// projection can never point this client's credential at another origin.
+  /// Reads bounded binary data from an authenticated path on the app origin.
   Future<Uint8List> bytes(String path, {int limit = 4000000}) async =>
       Uint8List.fromList(await _fetch(path, limit: limit, authenticated: true));
 

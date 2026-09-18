@@ -15,6 +15,7 @@ import {
   BROWSER_LIVE_MARKER,
   BROWSER_SERVICE,
   DESKTOP_LIVE_MARKER,
+  DESKTOP_SERVICE,
   DESKTOP_SLOT_PREFIX,
   ENSURE_AGENT_SCRIPT,
   ENSURE_WINDOW_SCRIPT,
@@ -269,7 +270,13 @@ export class FakeSprite implements SpriteHandle {
       const password = bot
         ? this.files.get(`${bot}/vnc-password`)?.bytes.toString().trim()
         : undefined;
-      return token && password
+      const key = bot?.slice(BOTS_ROOT.length + 1);
+      const live =
+        !stdin.includes("/dev/tcp") ||
+        (key &&
+          this.viewIsRunning(key) &&
+          this.services.get(DESKTOP_SERVICE) === "running");
+      return token && password && live
         ? {
             stdout: [
               `${VIEWER_TOKEN_PREFIX}${token}\n`,

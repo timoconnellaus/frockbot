@@ -93,6 +93,7 @@ function fakeHandle(options: {
     expiresAt: string;
     message?: string;
   }>;
+  openViewer?(): Promise<{ id: string; url: string; expiresAt: string }>;
   renewViewer?(
     sessionId: string,
   ): Promise<{ id: string; url: string; expiresAt: string }>;
@@ -115,11 +116,17 @@ function fakeHandle(options: {
     tenant: { botId: "scout" },
     capabilities: TEST_HOST_CAPABILITIES,
     ...(options.presence ? { presence: { connect: options.presence } } : {}),
-    ...(options.renewViewer
+    ...(options.renewViewer || options.openViewer
       ? {
           viewer: {
-            open: () => Promise.reject(new Error("not used")),
-            renew: options.renewViewer,
+            open:
+              options.openViewer ??
+              (() =>
+                Promise.reject(new ComputerError("not-found", "No desktop"))),
+            renew:
+              options.renewViewer ??
+              (() =>
+                Promise.reject(new ComputerError("not-found", "No viewer"))),
             revoke: () => Promise.resolve(),
           },
         }
@@ -489,7 +496,7 @@ describe("Computer Bot Durable Object Contribution", () => {
       Date.parse(now) + COMPUTER_CONNECT_DEFERRAL_MS,
     ]);
     await cold.settleScheduledWork();
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
     expect(storage.values.has(COMPUTER_PENDING_CONNECT_KEY)).toBe(false);
     expect(
       await cold.execute(
@@ -903,7 +910,7 @@ describe("Computer Bot Durable Object Contribution", () => {
 
     expect(receipt.status).toBe("applied");
     expect(replay).toEqual(receipt);
-    expect(opens).toBe(2);
+    expect(opens).toBe(3);
     expect(workspace.writes).toHaveLength(1);
     expect(workspace.writes[0]?.writer).toEqual({
       kind: "user",
@@ -1015,7 +1022,7 @@ describe("Computer Bot Durable Object Contribution", () => {
     );
 
     expect(receipt.status).toBe("applied");
-    expect(opens).toBe(1);
+    expect(opens).toBe(2);
     expect(workspace.writes).toHaveLength(0);
   });
 
@@ -1203,6 +1210,88 @@ describe("Computer Bot Durable Object Contribution", () => {
    * object has to come back through the session that is already there rather
    * than provisioning a second desktop for a Bot that already has one.
    */
+  test("connect attaches to Bob's running desktop with no stored viewer", async () => {
+    const storage = new MemoryStorage();
+    let attaches = 0;
+    let prepares = 0;
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            openViewer: async () => {
+              attaches++;
+              return {
+                id: "bob-viewer",
+                url: "https://viewer.invalid/bob",
+                expiresAt: "2026-09-02T00:02:00.000Z",
+              };
+            },
+            presence: async () => {
+              prepares++;
+              throw new Error("must not prepare a running desktop");
+            },
+          }),
+        ),
+      now: () => new Date("2026-09-02T00:00:30.000Z"),
+    });
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "bob-warm"),
+    );
+    await contribution.settleScheduledWork();
+    expect(attaches).toBe(1);
+    expect(prepares).toBe(0);
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "ready",
+      viewerSession: { id: "bob-viewer" },
+    });
+  });
+
+  test("a transport failure during attachment is reported without repeating preparation", async () => {
+    const storage = new MemoryStorage();
+    let prepares = 0;
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            openViewer: async () => {
+              throw new ComputerError(
+                "provider-unavailable",
+                "Host timed out",
+                true,
+              );
+            },
+            presence: async () => {
+              prepares++;
+              throw new Error("must not hide transport failures");
+            },
+          }),
+        ),
+      now: () => new Date("2026-09-02T00:00:30.000Z"),
+    });
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("connect", "warm-timeout"),
+    );
+    await contribution.settleScheduledWork();
+    expect(prepares).toBe(0);
+    expect(
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("connect", "warm-timeout"),
+      ),
+    ).toMatchObject({ status: "rejected", failure: "Host timed out" });
+  });
+
   test("a connect after eviction attaches the stored viewer without waking the host", async () => {
     const storage = new MemoryStorage();
     await storage.put(COMPUTER_VIEWER_RECORD_KEY, {
@@ -1292,11 +1381,11 @@ describe("Computer Bot Durable Object Contribution", () => {
             },
             // What the Fly host answers for a session the Computer no longer
             // holds material for: `host-client.ts` maps the host's
-            // `not-found` onto `provider-failure`.
+            // `not-found` preserves a missing resource separately from a host failure.
             renewViewer: () =>
               Promise.reject(
                 new ComputerError(
-                  "provider-failure",
+                  "not-found",
                   "The Computer viewer session is not available",
                 ),
               ),

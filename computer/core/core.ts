@@ -30,6 +30,7 @@ export function computerBotPathKeyV1(botId: string): string {
 
 export type ComputerErrorCode =
   | "not-assigned"
+  | "not-found"
   | "provider-unavailable"
   | "capability-unavailable"
   | "stale-assignment"

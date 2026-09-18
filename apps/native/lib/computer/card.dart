@@ -304,13 +304,16 @@ class _ComputerCardState extends State<ComputerCard> {
       );
     }
     if (!opening && screenshot != null) {
-      // Not `Image.network`: the capture is on this account's authenticated
-      // origin, and an `<img>` carries no session there.
+      // Native captures need the account's bearer-authenticated transport.
       return FutureBuilder<Uint8List>(
         key: ValueKey(screenshot.contentHash),
         future: controller.capture(screenshot),
         builder: (context, read) {
           final bytes = read.data;
+          if (read.hasError)
+            return const Center(
+              child: Text('Couldn’t load the computer screenshot.'),
+            );
           if (bytes == null) return _placeholder(context, opening);
           return Image.memory(
             bytes,
@@ -364,13 +367,7 @@ class _ComputerCardState extends State<ComputerCard> {
       openComputerViewerV1(context, controller, botName: widget.botName);
 }
 
-/// Opens the desktop, full window, over whatever asked for it.
-///
-/// There is one destination and one way in: the card, the Computer icon in the
-/// bar and the search hit all land in this window, on this session, with Take
-/// control inside it. The page that used to sit between them drew a smaller
-/// copy of the same frame and a second set of the same two buttons, which is
-/// how a card and a page came to disagree about what the Computer was doing.
+/// Opens the full viewer immediately while the connection command runs.
 Future<void> openComputerViewerV1(
   BuildContext context,
   ComputerController controller, {
@@ -378,7 +375,7 @@ Future<void> openComputerViewerV1(
 }) async {
   // Attaching to a desktop that is already up, or waking one that is not. The
   // authority decides which; this is one command either way.
-  await controller.open();
+  unawaited(controller.open());
   if (!context.mounted) return;
   await Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -579,7 +576,8 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
                             title: 'No computer',
                             detail: said,
                             action: 'Try again',
-                            onAction: () => unawaited(controller.read()),
+                            onAction: () =>
+                                unawaited(controller.command('connect')),
                           )
                   : ComputerViewerFrame(
                       viewerUrl: url,

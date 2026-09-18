@@ -1864,6 +1864,47 @@ describe("control", () => {
 });
 
 describe("viewer", () => {
+  test("a viewer probe never provisions a missing Computer", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    const response = await host.handle(
+      request({ kind: "viewer", action: "open" }),
+    );
+    expect(response.status).toBe(404);
+    expect(client.created).toEqual([]);
+  });
+
+  test("attaches a running viewer after host eviction without adoption or setup", async () => {
+    const { client, sprite } = provisioned();
+    const key = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    writeFile(sprite, `${BOTS_ROOT}/${key}/viewer-token`, "opaque-token\n");
+    writeFile(sprite, `${BOTS_ROOT}/${key}/vnc-password`, "secret\n");
+    sprite.services.set(viewServiceNameV1(key), "running");
+    sprite.services.set(DESKTOP_SERVICE, "running");
+    const reconstructed = hostWith(client);
+    const body = await (
+      await reconstructed.handle(request({ kind: "viewer", action: "open" }))
+    ).json();
+    expect(body.session.id).toBe("opaque-token");
+    expect(sprite.commands).toHaveLength(1);
+    expect(sprite.serviceCreates).toHaveLength(0);
+    expect(client.created).toHaveLength(0);
+  });
+
+  test("refuses stale token files when the viewer is stopped", async () => {
+    const { host, sprite } = provisioned();
+    const key = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    writeFile(sprite, `${BOTS_ROOT}/${key}/viewer-token`, "opaque-token\n");
+    writeFile(sprite, `${BOTS_ROOT}/${key}/vnc-password`, "secret\n");
+    sprite.services.set(DESKTOP_SERVICE, "running");
+    const response = await host.handle(
+      request({ kind: "viewer", action: "open" }),
+    );
+    expect(response.status).toBe(404);
+    expect((await response.json()).code).toBe("not-found");
+    expect(sprite.serviceCreates).toHaveLength(0);
+  });
+
   test("builds the FrockBot viewer URL in one Sprite round trip", async () => {
     const { client, host, sprite } = provisioned();
     const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
@@ -1877,6 +1918,7 @@ describe("viewer", () => {
         mtime: new Date(),
       });
     }
+    sprite.services.set(DESKTOP_SERVICE, "running");
     await host.handle(request({ kind: "open" }));
     const commandCount = sprite.commands.length;
     const readCount = sprite.fileReads.length;
@@ -1918,6 +1960,7 @@ describe("viewer", () => {
         mtime: new Date(),
       });
     }
+    sprite.services.set(DESKTOP_SERVICE, "running");
     await host.handle(request({ kind: "open" }));
 
     const body = (await (
@@ -1938,6 +1981,8 @@ describe("viewer", () => {
       writeFile(sprite, `${BOTS_ROOT}/${botKey}/${name}`, value!);
     }
 
+    sprite.services.set(DESKTOP_SERVICE, "running");
+    await host.handle(request({ kind: "open" }));
     const response = await host.handle(
       request({
         kind: "viewer",

@@ -899,28 +899,8 @@ export class ComputerBotBackendContribution {
     });
   }
 
-  /**
-   * The fast way back to a desktop that is already up.
-   *
-   * A `connect` for a Bot that still holds an unexpired viewer record is an
-   * attach, not a cold prepare: the resident URL where this object still has
-   * one, and otherwise a single `viewer.renew` on the session the record
-   * names — no host wake, no ensure script, no provisioning steps. Surviving
-   * eviction is exactly this case: the record outlives the object that minted
-   * it, and only the URL beside it was lost.
-   *
-   * It is reached from an authenticated command that has already recorded its
-   * durable intent, and from nowhere else. A projection read must never renew:
-   * the renew is a charged host operation and the card polls every 1.5 seconds
-   * while a Computer is working, so a read that attached would bill watching
-   * the card. The renew carries this command's own effect id, so a replayed
-   * command settles against the reservation it already made.
-   *
-   * The record's expiry bounds the guess — past it nothing says the desktop is
-   * still there — and every refusal falls through to the full connect rather
-   * than being reported, because the cold path does everything the attach was
-   * trying to do and more.
-   */
+  // Viewer attachment validates the running desktop without preparing it again.
+  // It stays on the command path because opening or renewing a viewer is billed.
   private async attach(
     userId: string,
     command: ComputerCommandV1,
@@ -929,29 +909,34 @@ export class ComputerBotBackendContribution {
       COMPUTER_VIEWER_RECORD_KEY,
     );
     const stored = decoded(storedValue, decodeStoredViewer);
-    if (!stored || !isFresh(stored.expiresAt, this.now())) return false;
-    if (this.#liveViewer?.id === stored.id) {
-      await this.recordViewer(this.#liveViewer);
-      return true;
-    }
-    let renewed: ComputerViewerSession | undefined;
+    const fresh =
+      stored && isFresh(stored.expiresAt, this.now()) ? stored : undefined;
+    let session: ComputerViewerSession | undefined;
     try {
-      renewed = await this.withComputer(userId, command, async (computer) => {
+      session = await this.withComputer(userId, command, async (computer) => {
         if (!computer.viewer) return undefined;
-        return computer.viewer.renew(stored.id, {
+        const options = {
           effectId: `computer:${command.commandId}:attach-viewer`,
-        });
+        };
+        return fresh
+          ? computer.viewer.renew(fresh.id, options)
+          : computer.viewer.open(options);
       });
-    } catch {
-      return false;
+    } catch (error) {
+      if (error instanceof ComputerError && error.code === "not-found")
+        return false;
+      throw error;
     }
-    if (!renewed || renewed.id !== stored.id || !renewed.expiresAt) {
-      return false;
+    if (!session) return false;
+    if (!session.expiresAt || !isFresh(session.expiresAt, this.now())) {
+      throw new Error(
+        "The Computer returned a viewer session with no valid expiry",
+      );
     }
     await this.recordViewer({
-      id: renewed.id,
-      url: renewed.url,
-      expiresAt: renewed.expiresAt,
+      id: session.id,
+      url: session.url,
+      expiresAt: session.expiresAt,
     });
     return true;
   }

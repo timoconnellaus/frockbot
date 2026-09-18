@@ -33,6 +33,7 @@ import {
   CONTROL_SCRIPT,
   DATA_ROOT,
   DESKTOP_GUI_LEASE_KEY,
+  DESKTOP_GATEWAY_PORT,
   DESKTOP_LIVE_MARKER,
   DESKTOP_SERVICE,
   DESKTOP_SLOT_PREFIX,
@@ -2475,8 +2476,27 @@ export class ComputerHost {
     if (operation.kind !== "viewer") {
       throw new ComputerHostError("invalid-request", "not a viewer call", 400);
     }
-    const record = await this.computer(request.identity.userId);
-    const sprite = await this.spriteFor(record.spriteName);
+    if (this.updates.has(request.identity.userId)) {
+      throw new ComputerHostError(
+        "computer-updating",
+        "The Computer is updating",
+        409,
+        true,
+      );
+    }
+    let sprite: SpriteHandle;
+    try {
+      sprite = await this.spriteFor(
+        this.spriteNameFor(request.identity.userId),
+      );
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      throw new ComputerHostError(
+        "not-found",
+        "The Computer is not running",
+        404,
+      );
+    }
     const botKey = computerBotKeyV1(request.tenant.botId, this.digest);
 
     if (operation.action === "revoke") {
@@ -2520,6 +2540,12 @@ export class ComputerHost {
         `set -eu`,
         `BOT=${shellQuote(`${BOTS_ROOT}/${botKey}`)}`,
         `if [ ! -s "$BOT/viewer-token" ] || [ ! -s "$BOT/vnc-password" ]; then`,
+        `  echo ${VIEWER_MISSING_MARKER}`,
+        `  exit 69`,
+        `fi`,
+        `SLOT=$(cat "$BOT/slot" 2>/dev/null || true)`,
+        `case "$SLOT" in ''|*[!0-9]*) echo ${VIEWER_MISSING_MARKER}; exit 69;; esac`,
+        `if [ "$SLOT" -ge ${DESKTOP_SLOTS} ] || ! (exec 3<>/dev/tcp/127.0.0.1/$((${VNC_PORT_BASE} + SLOT))) 2>/dev/null || ! (exec 3<>/dev/tcp/127.0.0.1/${DESKTOP_GATEWAY_PORT}) 2>/dev/null; then`,
         `  echo ${VIEWER_MISSING_MARKER}`,
         `  exit 69`,
         `fi`,
@@ -2577,8 +2603,7 @@ export class ComputerHost {
     }
     // A Sprite handle already carries the public URL. Only a legacy/malformed
     // handle with no URL pays another API lookup.
-    const base =
-      sprite.url ?? (await this.client.getSprite(record.spriteName)).url;
+    const base = sprite.url ?? (await this.client.getSprite(sprite.name)).url;
     if (!base) {
       throw new ComputerHostError(
         "provider-unavailable",

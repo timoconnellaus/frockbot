@@ -531,11 +531,13 @@ void main() {
     });
 
     testWidgets(
-      'the full window says what refused, and offers the read again',
+      'the full window says what refused, and retries the connection',
       (tester) async {
         final store = MemoryStore();
+        final commands = <Object?>[];
         final controller = ComputerController(
           SettingsApi(store, (path, body) async {
+            if (body != null) commands.add((body as Map)['type']);
             throw const RequestFailure('The Computer host answered 503', 500);
           }),
           'bot-1',
@@ -554,6 +556,9 @@ void main() {
           find.text('The Computer host answered 503'),
           findsAtLeastNWidgets(1),
         );
+        await tester.tap(find.text('Try again'));
+        await tester.pump();
+        expect(commands, ['connect']);
         await close(tester, controller);
       },
     );
@@ -614,7 +619,10 @@ void main() {
       await tester.pump();
 
       expect(find.byType(Image), findsNothing);
-      expect(find.byIcon(Icons.desktop_windows_outlined), findsOneWidget);
+      expect(
+        find.text('Couldn’t load the computer screenshot.'),
+        findsOneWidget,
+      );
       // And it asks once. The card repaints every second; a refusal the next
       // paint retried would be a request a second at a route that is refusing.
       for (var poll = 0; poll < 3; poll += 1) {

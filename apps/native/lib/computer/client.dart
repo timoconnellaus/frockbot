@@ -11,7 +11,6 @@
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
@@ -454,18 +453,11 @@ class ComputerController extends ChangeNotifier {
     }
   }
 
-  /// Opening is one command, and the authority decides what it means: a
-  /// `connect` attaches to a desktop this Bot still holds a session for and
-  /// wakes one where it does not. `refreshViewer` renews the session a live
-  /// phase is already showing, and refuses where none exists.
+  /// The authority attaches to a running viewer or prepares a missing one.
   Future<void> open() async {
     expanded = true;
     _changed();
-    if (state.viewerUrl == null) {
-      await command(
-        _streamablePhases.contains(state.phase) ? 'refreshViewer' : 'connect',
-      );
-    }
+    if (state.viewerUrl == null) await command('connect');
     _schedule();
   }
 
