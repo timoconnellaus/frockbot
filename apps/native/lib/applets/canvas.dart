@@ -26,6 +26,7 @@ import '../client/transport.dart';
 import '../packages/frame.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/chat_icons.dart';
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../shell/transcript_model.dart';
 import '../theme/states.dart';
@@ -663,7 +664,12 @@ class _AppletCanvasState extends State<AppletCanvas> {
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 52),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+        padding: EdgeInsets.fromLTRB(
+          desktopClearsTrafficLights(context) ? desktopTrafficLightLeading : 4,
+          0,
+          4,
+          0,
+        ),
         child: Row(
           children: [
             identified(

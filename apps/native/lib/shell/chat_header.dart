@@ -103,7 +103,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
         ],
       ],
     );
-    return DesktopWindowDragRegion(
+    return DesktopHeader(
+      // A call collapses the list; the phone layout has no list beside this
+      // bar. Either way this is the window's top-left row on a Mac.
+      atWindowLeading: voiceMode || phone,
       child: AppBar(
         toolbarHeight: _toolbarHeight,
         leadingWidth: 48,

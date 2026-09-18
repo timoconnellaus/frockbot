@@ -9,6 +9,7 @@ import '../client/desktop_build.dart';
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../settings/page.dart';
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
@@ -385,7 +386,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       );
     }
     return Scaffold(
-      appBar: AppBar(
+      appBar: DesktopHeader(
+        child: AppBar(
         title: Text(title),
         automaticallyImplyLeading: widget.onClose == null,
         leading: widget.onClose == null
@@ -408,6 +410,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
             ),
           ),
         ],
+        ),
       ),
       body: identified(
         ConnectorIds.document,

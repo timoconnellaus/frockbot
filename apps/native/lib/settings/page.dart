@@ -7,6 +7,7 @@ import '../client/transport.dart';
 import '../connections/page.dart';
 import '../plugins/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/desktop_layout.dart';
 import '../shell/lifecycle.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
@@ -210,7 +211,8 @@ class _SettingsPageState extends State<SettingsPage>
     final document = state.document;
     final controller = view;
     return Scaffold(
-      appBar: AppBar(
+      appBar: DesktopHeader(
+        child: AppBar(
         title: Text(
           widget.title ??
               (widget.home == 'models' ? 'Models' : 'Personal details'),
@@ -225,6 +227,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
           ),
         ],
+        ),
       ),
       body: SafeArea(
         top: false,

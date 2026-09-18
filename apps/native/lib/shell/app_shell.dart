@@ -1060,7 +1060,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ShellTier.single) {
       _push(
         Scaffold(
-          appBar: AppBar(title: Text(entry.entry.label)),
+          appBar: DesktopHeader(child: AppBar(title: Text(entry.entry.label))),
           body: SafeArea(
             top: false,
             child: Padding(
@@ -1865,7 +1865,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ShellTier.single) {
       _push(
         Scaffold(
-          appBar: AppBar(),
+          appBar: const DesktopHeader(child: AppBar()),
           body: SafeArea(
             top: false,
             child: AppletList(
@@ -1949,7 +1949,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (key == 'bot-settings') {
       _push(
         Scaffold(
-          appBar: AppBar(title: const Text('Settings')),
+          appBar: const DesktopHeader(child: AppBar(title: Text('Settings'))),
           body: SafeArea(
             top: false,
             child: _botSettings(bot.botId.value, controller),
@@ -1967,7 +1967,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       AnimatedBuilder(
         animation: machine,
         builder: (context, _) => Scaffold(
-          appBar: AppBar(
+          appBar: DesktopHeader(
+            child: AppBar(
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -1983,6 +1984,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 ),
               ],
             ),
+            ),
           ),
           body: SafeArea(
             top: false,
@@ -1996,7 +1998,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget _botPage(wire.BotRegistration bot) {
     final botId = bot.botId.value;
     return Scaffold(
-      appBar: AppBar(
+      appBar: DesktopHeader(
+        child: AppBar(
         titleSpacing: 0,
         title: ListenableBuilder(
           listenable: avatarRevision,
@@ -2030,6 +2033,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ),
           const SizedBox(width: 4),
         ],
+        ),
       ),
       body: SafeArea(top: false, child: _botPageView(bot)),
     );
@@ -2670,7 +2674,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _openProfile() {
     _push(
       Scaffold(
-        appBar: AppBar(title: const Text('You')),
+        appBar: const DesktopHeader(child: AppBar(title: Text('You'))),
         body: identified(
           SettingsIds.profileMenu,
           SafeArea(
@@ -3054,13 +3058,15 @@ class _ExchangeScreenState extends State<_ExchangeScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
+    appBar: DesktopHeader(
+      child: AppBar(
       titleSpacing: 0,
       title: ExchangeTitle(
         self: widget.self,
         counterpart: widget.controller.counterpart,
         counterpartBackground: widget.counterpartBackground,
         counterpartPrimary: widget.counterpartPrimary,
+      ),
       ),
     ),
     body: SafeArea(

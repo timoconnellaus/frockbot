@@ -26,10 +26,30 @@ import 'semantics.dart';
 bool get desktopTitleBarless =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
 
-/// The Mac traffic lights occupy the sidebar's top-left corner. Only that
-/// column reserves space for them; 40 points leaves the avatar circle below
+/// The Mac traffic lights occupy the window's top-left corner. The Bot list
+/// is that corner in ordinary use: 40 points leaves the avatar circle below
 /// the controls while the conversation chrome stays at the top.
 const double desktopSidebarTrafficLightClearance = 40;
+
+/// When a surface fills the window — a call, a pushed page — the header is
+/// the top-left row and has to sit past the lights instead. 78 points is the
+/// cluster plus a gap after the zoom button.
+const double desktopTrafficLightLeading = 78;
+
+/// Whether this header is the window's top-left row on a Mac.
+///
+/// [atWindowLeading] is the first-route case: a call, or the phone layout,
+/// where the Bot list is not beside the header. A pushed page is always that
+/// row, which is how Settings and every other full-window route are reached.
+bool desktopClearsTrafficLights(
+  BuildContext context, {
+  bool atWindowLeading = false,
+}) {
+  if (!desktopTitleBarless) return false;
+  if (atWindowLeading) return true;
+  final route = ModalRoute.of(context);
+  return route != null && !route.isFirst;
+}
 
 /// The window's own drag gesture, which Flutter cannot perform itself.
 abstract final class DesktopWindow {
@@ -58,6 +78,38 @@ class DesktopWindowDragRegion extends StatelessWidget {
       onPanStart: (_) => DesktopWindow.startDrag(),
       child: child,
     );
+  }
+}
+
+/// A full-window [AppBar] on Mac: it drags the window, and when it is the
+/// window's top-left row it sits past the traffic lights.
+///
+/// The Bot list is that corner in ordinary use, so a conversation beside it
+/// does not pass [atWindowLeading]. A pushed page infers the same from the
+/// route, which is why Settings, Voice and every other overlay clear the
+/// lights without each one naming Mac chrome.
+class DesktopHeader extends StatelessWidget implements PreferredSizeWidget {
+  final PreferredSizeWidget child;
+  final bool atWindowLeading;
+  const DesktopHeader({
+    super.key,
+    required this.child,
+    this.atWindowLeading = false,
+  });
+
+  @override
+  Size get preferredSize => child.preferredSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final header =
+        desktopClearsTrafficLights(context, atWindowLeading: atWindowLeading)
+        ? Padding(
+            padding: const EdgeInsets.only(left: desktopTrafficLightLeading),
+            child: child,
+          )
+        : child;
+    return DesktopWindowDragRegion(child: header);
   }
 }
 

@@ -6,6 +6,7 @@ import '../audit/page.dart';
 import '../client/transport.dart';
 import '../flock/avatar.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 import 'controller.dart';
@@ -52,15 +53,17 @@ class _BotRecoveryPageState extends State<BotRecoveryPage>
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Manage Bots'),
-      actions: [
-        IconButton(
-          tooltip: 'Refresh Bots',
-          onPressed: controller.loading ? null : controller.load,
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
+    appBar: DesktopHeader(
+      child: AppBar(
+        title: const Text('Manage Bots'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh Bots',
+            onPressed: controller.loading ? null : controller.load,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
     ),
     body: SafeArea(
       child: Center(
@@ -336,7 +339,8 @@ class _BotRecoveryDetailState extends State<BotRecoveryDetail> {
           ? Duration.zero
           : const Duration(milliseconds: 220),
       child: Scaffold(
-        appBar: AppBar(
+        appBar: DesktopHeader(
+          child: AppBar(
           title: Text(widget.bot.initialName),
           bottom: const TabBar(
             isScrollable: true,
@@ -346,6 +350,7 @@ class _BotRecoveryDetailState extends State<BotRecoveryDetail> {
               Tab(text: 'Activity'),
               Tab(text: 'Setup'),
             ],
+          ),
           ),
         ),
         body: SafeArea(

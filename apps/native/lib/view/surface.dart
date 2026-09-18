@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 import 'action.dart';
@@ -234,7 +235,8 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     );
     if (!widget.chrome) return body;
     return Scaffold(
-      appBar: AppBar(
+      appBar: DesktopHeader(
+        child: AppBar(
         title: Text(widget.title),
         automaticallyImplyLeading: widget.onClose == null,
         leading: widget.onClose == null
@@ -257,6 +259,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
             ),
           ),
         ],
+        ),
       ),
       body: body,
     );

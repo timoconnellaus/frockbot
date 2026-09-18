@@ -17,20 +17,17 @@ void main() {
   /// bar, with the way back and a control on its one top row.
   Widget page(VoidCallback onRefresh) => MaterialApp(
     home: Scaffold(
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(kToolbarHeight),
-        child: DesktopWindowDragRegion(
-          child: AppBar(
-            leading: const BackButton(),
-            title: const Text('Personal details'),
-            actions: [
-              IconButton(
-                tooltip: 'Refresh settings',
-                onPressed: onRefresh,
-                icon: const Icon(Icons.refresh_rounded),
-              ),
-            ],
-          ),
+      appBar: DesktopHeader(
+        child: AppBar(
+          leading: const BackButton(),
+          title: const Text('Personal details'),
+          actions: [
+            IconButton(
+              tooltip: 'Refresh settings',
+              onPressed: onRefresh,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ],
         ),
       ),
       body: const SizedBox.expand(),
@@ -114,4 +111,41 @@ void main() {
     expect(refreshed, 1);
     debugDefaultTargetPlatformOverride = null;
   });
+
+  testWidgets(
+    'on a Mac a pushed page header sits past the traffic lights',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => Scaffold(
+                    appBar: DesktopHeader(
+                      child: AppBar(title: const Text('Voice')),
+                    ),
+                    body: const SizedBox.expand(),
+                  ),
+                ),
+              ),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(find.byType(BackButton)).dx,
+        greaterThanOrEqualTo(desktopTrafficLightLeading),
+      );
+      expect(
+        tester.getTopLeft(find.text('Voice')).dx,
+        greaterThan(desktopTrafficLightLeading),
+      );
+    },
+  );
 }

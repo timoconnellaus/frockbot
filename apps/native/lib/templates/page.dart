@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 import '../view/surface.dart';
@@ -204,13 +205,15 @@ class TemplatesPage extends StatelessWidget {
     length: 2,
     initialIndex: botId == null ? 1 : 0,
     child: Scaffold(
-      appBar: AppBar(
+      appBar: DesktopHeader(
+        child: AppBar(
         title: const Text('Bot templates'),
         bottom: const TabBar(
           tabs: [
             Tab(text: 'Share a Bot'),
             Tab(text: 'Use a template'),
           ],
+        ),
         ),
       ),
       body: TabBarView(

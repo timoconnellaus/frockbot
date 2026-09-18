@@ -14,6 +14,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../orientation.dart';
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/frock_theme.dart';
 import '../theme/dialogs.dart';
@@ -598,7 +599,8 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
     return Scaffold(
       appBar: _landscape
           ? null
-          : AppBar(
+          : DesktopHeader(
+              child: AppBar(
               // What the Computer is doing, said once: as the subtitle of the
               // one title, rather than as a strip under the chrome that
               // repeated whatever the centre of the window already said.
@@ -627,6 +629,7 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
                 ],
               ),
               actions: actions,
+              ),
             ),
       body: Stack(
         fit: StackFit.expand,

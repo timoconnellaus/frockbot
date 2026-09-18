@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import '../client/transport.dart';
 import '../shell/chat_pane.dart';
 import '../shell/semantics.dart';
+import '../shell/desktop_layout.dart';
 import '../shell/transcript_model.dart';
 import '../theme/states.dart';
 
@@ -168,7 +169,8 @@ class _RoutineRunsPageState extends State<RoutineRunsPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
+    appBar: DesktopHeader(
+      child: AppBar(
       title: const Text('Run log'),
       actions: [
         IconButton(
@@ -177,6 +179,7 @@ class _RoutineRunsPageState extends State<RoutineRunsPage> {
           icon: const Icon(Icons.refresh_rounded),
         ),
       ],
+      ),
     ),
     body: SafeArea(
       top: false,

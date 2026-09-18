@@ -16,6 +16,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../flock/avatar.dart';
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
@@ -121,7 +122,7 @@ class _BotVoicePageState extends State<BotVoicePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Voice')),
+    appBar: DesktopHeader(child: AppBar(title: const Text('Voice'))),
     body: AnimatedBuilder(
       animation: state,
       builder: (context, _) {
