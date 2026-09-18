@@ -47,6 +47,7 @@ Future<({TextEditingController editor, List<String> sent})> pumpComposer(
   bool ready = true,
   SkillMenuController? skills,
   VoidCallback? onDictate,
+  VoidCallback? onVoice,
 }) async {
   final editor = TextEditingController();
   final focus = FocusNode();
@@ -70,6 +71,7 @@ Future<({TextEditingController editor, List<String> sent})> pumpComposer(
             onChanged: (_) {},
             skills: skills,
             onDictate: onDictate,
+            onVoice: onVoice,
           ),
         ),
       ),
@@ -183,5 +185,30 @@ void main() {
     final glyph = tester.getRect(find.byType(ChatIcon));
     expect(glyph.center.dx, closeTo(button.center.dx, 0.5));
     expect(glyph.center.dy, closeTo(button.center.dy, 0.5));
+  }, variant: TargetPlatformVariant.all());
+
+  testWidgets('the call control sits outside the field', (tester) async {
+    await pumpComposer(tester, onDictate: () {}, onVoice: () {});
+    final pill = find.ancestor(
+      of: find.byKey(const ValueKey('composer')),
+      matching: find.byType(AnimatedContainer),
+    );
+    expect(
+      find.descendant(
+        of: pill,
+        matching: find.byKey(const ValueKey('dictate')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: pill,
+        matching: find.byKey(const ValueKey('composer-voice')),
+      ),
+      findsNothing,
+    );
+    final field = tester.getRect(pill);
+    final voice = tester.getRect(find.byKey(const ValueKey('composer-voice')));
+    expect(voice.left, greaterThanOrEqualTo(field.right - 1));
   }, variant: TargetPlatformVariant.all());
 }

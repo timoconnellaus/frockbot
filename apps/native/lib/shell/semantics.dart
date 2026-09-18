@@ -162,6 +162,7 @@ abstract final class VoiceIds {
   static const composerDictate = 'composer-dictate';
   static const composerDictationStop = 'composer-dictation-stop';
   static const composerDictationLevel = 'composer-dictation-level';
+  static const composerDictationDiscard = 'composer-dictation-discard';
 }
 
 /// Settings: the account surfaces, and the Bot's own panel.

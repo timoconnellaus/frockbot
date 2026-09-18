@@ -70,6 +70,9 @@ class ChatPane extends StatefulWidget {
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
 
+  /// Throws a capture away, its words with it.
+  final VoidCallback? onDiscardDictation;
+
   /// Starts a voice call with this Bot, or moves the open one to it
   /// (ADR 0029). It never ends one: while the call is with this Bot, voice
   /// mode is drawn where the composer was and there is no composer at all.
@@ -112,6 +115,7 @@ class ChatPane extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
+    this.onDiscardDictation,
     this.onVoice,
     this.voiceClosing = false,
     this.dictationState = DictationState.idle,
@@ -434,7 +438,7 @@ class _ChatPaneState extends State<ChatPane> {
         // first character slides the composer into his seat and he leaves;
         // an empty draft — send, or clearing — gives him back. A desk has
         // the room, so he stays. Dictation writing the field is not typing:
-        // the dock has to keep the seat the composer had at rest.
+        // the capture has to keep the seat the composer had at rest.
         Builder(
           builder: (context) {
             final dictating = widget.dictationState.active || _dictationHeld;
@@ -443,7 +447,7 @@ class _ChatPaneState extends State<ChatPane> {
                 _drafting &&
                 !dictating;
             // Dictation occupies the composer in place; sliding the field
-            // under a capture would move the dock. Dropping in is instant
+            // under a capture would move the strip. Dropping in is instant
             // so a capture that starts on a tucked row still lands where
             // the composer sat at rest.
             final motion = dictating
@@ -455,7 +459,7 @@ class _ChatPaneState extends State<ChatPane> {
                 AnimatedPadding(
                   duration: motion,
                   curve: Curves.easeOutCubic,
-                  padding: EdgeInsets.only(left: tuck ? 0 : avatarSize + 12),
+                  padding: EdgeInsets.only(left: tuck ? 0 : avatarSize),
                   child: _composer(c),
                 ),
                 // The field sits above the system's bottom inset (the
@@ -466,7 +470,7 @@ class _ChatPaneState extends State<ChatPane> {
                   duration: motion,
                   curve: Curves.easeOutCubic,
                   key: _companionKey,
-                  left: tuck ? -avatarSize : 10,
+                  left: tuck ? -avatarSize : 6,
                   bottom: 10 + MediaQuery.paddingOf(context).bottom,
                   child: IgnorePointer(
                     ignoring: tuck,
@@ -555,6 +559,7 @@ class _ChatPaneState extends State<ChatPane> {
     skills: skills,
     onDictate: widget.onDictate,
     onStopDictation: widget.onStopDictation,
+    onDiscardDictation: widget.onDiscardDictation,
     onVoice: widget.onVoice,
     voiceClosing: widget.voiceClosing,
     dictationState: widget.dictationState,
@@ -597,6 +602,9 @@ class ConversationView extends StatefulWidget {
   final VoidCallback? onOpenBilling;
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
+
+  /// Throws a capture away, its words with it.
+  final VoidCallback? onDiscardDictation;
 
   /// Starts a voice call with this Bot, or moves the open one to it
   /// (ADR 0029). It never ends one: while the call is with this Bot, voice
@@ -642,6 +650,7 @@ class ConversationView extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
+    this.onDiscardDictation,
     this.onVoice,
     this.voiceClosing = false,
     this.dictationState = DictationState.idle,
@@ -770,6 +779,7 @@ class _ConversationViewState extends State<ConversationView>
           onVoice: widget.onVoice,
           voiceClosing: widget.voiceClosing,
           onStopDictation: widget.onStopDictation,
+          onDiscardDictation: widget.onDiscardDictation,
           dictationState: widget.dictationState,
           canRevertDictation: widget.canRevertDictation,
           onRevertDictation: widget.onRevertDictation,
