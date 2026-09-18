@@ -449,18 +449,16 @@ describe("the conversation prompt section", () => {
   });
 
   test("every turn type is given the contract for the voice it admits", () => {
-    const ceiling = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1) ?? [];
-    for (const turnType of [
-      "chat",
-      "agent",
-      "automation",
-      "subagent",
-    ] as const satisfies readonly TurnTypeV1[]) {
-      expect(conversationPromptTextV1(turnType)).toBe(
-        ceiling.includes(turnType)
-          ? CONVERSATION_PROMPT_TEXT_V1
-          : HANDOFF_PROMPT_TEXT_V1,
-      );
+    const expected: Record<TurnTypeV1, string> = {
+      chat: CONVERSATION_PROMPT_TEXT_V1,
+      agent: CONVERSATION_PROMPT_TEXT_V1,
+      automation: HANDOFF_PROMPT_TEXT_V1,
+      subagent: HANDOFF_PROMPT_TEXT_V1,
+    };
+    for (const [turnType, text] of Object.entries(expected) as ReadonlyArray<
+      [TurnTypeV1, string]
+    >) {
+      expect(conversationPromptTextV1(turnType)).toBe(text);
     }
   });
 
