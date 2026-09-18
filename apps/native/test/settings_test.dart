@@ -339,11 +339,11 @@ void main() {
             tester.getTopLeft(control).dy,
             lessThan(kToolbarHeight + desktopTitleBarBand),
           );
-          expect(
-            tester.getTopLeft(control).dx,
-            lessThan(desktopTrafficLightLeading),
-          );
         }
+        expect(
+          tester.getTopLeft(find.byType(BackButton)).dx,
+          lessThan(desktopTrafficLightLeading),
+        );
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }

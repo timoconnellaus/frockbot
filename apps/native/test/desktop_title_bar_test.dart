@@ -78,11 +78,13 @@ void main() {
             tester.getTopLeft(control).dy,
             lessThan(kToolbarHeight + desktopTitleBarBand),
           );
-          expect(
-            tester.getTopLeft(control).dx,
-            lessThan(desktopTrafficLightLeading),
-          );
         }
+        // The bar is not inset past the lights: the way back is still at the
+        // leading edge. The title sits after it, so its own x is not the test.
+        expect(
+          tester.getTopLeft(find.byType(BackButton)).dx,
+          lessThan(desktopTrafficLightLeading),
+        );
 
         // A drag on the unused centre of the one visible header hands the window
         // to the pointer, without a separate title strip.
