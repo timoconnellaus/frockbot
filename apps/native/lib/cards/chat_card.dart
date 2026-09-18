@@ -50,7 +50,7 @@ import 'client.dart';
 import 'json.dart';
 import 'approvals.dart';
 import 'press.dart';
-import 'schema_fetch.dart';
+import 'schema_client.dart';
 import 'surface.dart';
 
 /// The transport, the Bot whose transcript the cards are in, and the signal
@@ -208,13 +208,14 @@ class _CardChatCardState extends State<CardChatCard>
       admitCardV1(answer);
       final built = SurfaceController(catalogs: [cardCatalogV1]);
       next = built;
-      // The renderer validates as it takes each message, and an unheld schema
-      // is one it would fetch. See `withoutSchemaFetchesV1`.
-      withoutSchemaFetchesV1(() {
-        for (final message in cardMessagesV1(answer, dataModel: kept)) {
-          built.handleMessage(core.A2uiMessage.fromJson(message));
-        }
-      });
+      for (final message in cardMessagesV1(answer, dataModel: kept)) {
+        // The intake is where the renderer validates, and validation resolves
+        // the draft's meta-schema: inside this zone those documents come from
+        // the build, so drawing a card never reaches the network.
+        withLocalCardSchemasV1(
+          () => built.handleMessage(core.A2uiMessage.fromJson(message)),
+        );
+      }
     } on CardRefusal catch (refused) {
       said = refused.message;
       next?.dispose();

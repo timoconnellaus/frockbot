@@ -74,6 +74,16 @@ A Card never carries code. The renderer draws catalog components and nothing
 else; a surface naming an unknown component is refused whole, the way a
 `ViewDocument` past its budget is today.
 
+Drawing a Card reaches no network. The renderer validates a surface against
+the catalog's schemas, and the schema stack resolves the `$schema` that would
+otherwise be fetched: the draft 2020-12 meta-schema, which sits in
+`apps/native/lib/cards/schema_documents.g.dart` — lifted from ajv, the same
+document set the deployment's validator uses — and is answered by the client
+the renderer's intake is run with (`cards/schema_client.dart`). That client
+refuses every other schema URI without a request, because a schema this build
+does not carry is one it cannot validate against: the catalog is compiled in,
+and a Card never makes the app fetch a schema of its own choosing.
+
 ### One payload, two authors
 
 `send_to_user` gains one member:
