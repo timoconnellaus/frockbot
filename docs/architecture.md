@@ -852,8 +852,13 @@ projection, one versioned command per action, and the two rules the card needs �
 whether the desktop or its last photograph is on screen, and what to call that.
 The card streams only a desktop that exists, to a card someone is looking at,
 while the Bot is working or has just stopped; every other answer is the stored
-capture, which costs nothing to hold. Taking control is two gestures, and only
-the second reaches the Bot.
+capture, which costs nothing to hold — read through the authenticated
+Workspace route by the client that holds the session, because the path the
+projection carries is on this account's own origin and an anonymous image
+request there is answered 401. There is one destination: the card, the bar's
+Computer icon and the search hit all open the same full window on the same
+session, with Take control in it. Taking control is two gestures, and only the
+second reaches the Bot.
 
 `lib/packages/` is the entry projection and the postMessage bridge.
 `catalog.dart` is the entry read over `/api/bots/:botId/package-ui`;
@@ -1085,6 +1090,8 @@ The container sets `sleepAfter: "30m"` with `max_instances: 3`, and its entrypoi
 ### Screenshots and live view
 
 A screenshot is one operation on the session — `screenshot.capture()` — which the Fly host implements as one guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, that answers with the PNG inline; only a capture past `SCREENSHOT_INLINE_MAX_BYTES` is followed by a `file/read` (`computer/fly/computer.ts`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is the URL a viewer session answers with, iframed directly and with no Worker proxy; the app's `frame-src` is built from the registered host's `viewerFrameOrigins` (`apps/cloudflare/src/user-application.ts`), which is `https://*.sprites.app` for Fly. FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
+
+A `connect` first asks the host for a viewer on the existing desktop (`computer/bot.ts`). A fresh stored session is renewed; otherwise a viewer is opened. The host checks the Bot's credentials and the viewer and gateway ports in one remote command, without adoption, provisioning or desktop setup. A confirmed missing viewer and an update already in flight both fall through to `presence.connect()`, which waits that update out; transport, permission and billing failures are reported. Only the session id and expiry are durable, so this path also reconstructs the in-memory bearer URL after eviction. Recovery stays on an authenticated command with a durable effect key: projection reads never renew paid viewing. A refused viewer probe is billed for its active duration rather than a viewing window.
 
 ### Tools
 

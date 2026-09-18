@@ -339,6 +339,9 @@ class ComputerController extends ChangeNotifier {
   String? failure;
   Timer? _poll;
   bool _closed = false;
+  Future<Uint8List>? _capture;
+  String? _captureHash;
+  DateTime? _captureRefusedAt;
 
   /// The one line every surface says about this Computer: what refused, or
   /// what the Computer itself last said it was doing.
@@ -377,6 +380,44 @@ class ComputerController extends ChangeNotifier {
     _changed();
   }
 
+  /// The bytes of one filed capture.
+  ///
+  /// The capture lives on the Workspace read route, which is this account's
+  /// own authenticated origin: the projection carries the path, and only the
+  /// client that holds the session can turn it into a picture. The bytes are
+  /// read once per [ComputerScreenshot.contentHash] — the same capture arrives
+  /// in every poll of an idle Computer, and asking for a picture that did not
+  /// change once a second would be a read a second for nothing.
+  Future<Uint8List> capture(ComputerScreenshot shot) {
+    final held = _capture;
+    if (held != null && _captureHash == shot.contentHash && !_captureStale) {
+      return held;
+    }
+    final reading = api.bytes(shot.url);
+    _capture = reading;
+    _captureHash = shot.contentHash;
+    _captureRefusedAt = null;
+    unawaited(
+      reading.then<void>(
+        (_) {},
+        onError: (Object _) {
+          if (identical(_capture, reading)) _captureRefusedAt = DateTime.now();
+        },
+      ),
+    );
+    return reading;
+  }
+
+  /// Whether a read that failed has waited long enough to be worth repeating.
+  ///
+  /// The card repaints every second, so a failure the next paint retried would
+  /// be a request a second at a route that is refusing. It is held for as long
+  /// as an idle projection read, and no longer: a capture that becomes
+  /// readable again appears on its own.
+  bool get _captureStale =>
+      _captureRefusedAt != null &&
+      DateTime.now().difference(_captureRefusedAt!) >= computerPollV1;
+
   void _schedule() {
     _poll?.cancel();
     if (_closed || !available) return;
@@ -412,18 +453,11 @@ class ComputerController extends ChangeNotifier {
     }
   }
 
-  /// Opening is a connect where there is nothing to connect to yet, and a
-  /// re-mint where the desktop is already up: `refreshViewer` renews a session
-  /// and refuses where none exists, so a Computer that has never been woken
-  /// has to be woken first.
+  /// The authority attaches to a running viewer or prepares a missing one.
   Future<void> open() async {
     expanded = true;
     _changed();
-    if (state.viewerUrl == null) {
-      await command(
-        _streamablePhases.contains(state.phase) ? 'refreshViewer' : 'connect',
-      );
-    }
+    if (state.viewerUrl == null) await command('connect');
     _schedule();
   }
 

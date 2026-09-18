@@ -33,6 +33,7 @@ import {
   CONTROL_SCRIPT,
   DATA_ROOT,
   DESKTOP_GUI_LEASE_KEY,
+  DESKTOP_GATEWAY_PORT,
   DESKTOP_LIVE_MARKER,
   DESKTOP_SERVICE,
   DESKTOP_SLOT_PREFIX,
@@ -2475,8 +2476,19 @@ export class ComputerHost {
     if (operation.kind !== "viewer") {
       throw new ComputerHostError("invalid-request", "not a viewer call", 400);
     }
-    const record = await this.computer(request.identity.userId);
-    const sprite = await this.spriteFor(record.spriteName);
+    let sprite: SpriteHandle;
+    try {
+      sprite = await this.spriteFor(
+        this.spriteNameFor(request.identity.userId),
+      );
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      throw new ComputerHostError(
+        "not-found",
+        "The Computer is not running",
+        404,
+      );
+    }
     const botKey = computerBotKeyV1(request.tenant.botId, this.digest);
 
     if (operation.action === "revoke") {
@@ -2510,16 +2522,36 @@ export class ComputerHost {
       return Response.json({ version: 1, effectId: request.effectId });
     }
 
-    // The ensure exec that precedes a new viewer has already minted these
-    // files and touched last-seen. Renewals still need the touch, so reading
-    // both values and recording activity are one Sprite exec rather than two
-    // filesystem requests followed by another exec (P3).
+    const updating = this.updates.get(request.identity.userId);
+    if (updating) {
+      // The current phase, not a sentence about updating: this message is
+      // read as the label of the step the User is waiting on, exactly as the
+      // bounded wait above answers it.
+      throw new ComputerHostError(
+        "computer-updating",
+        updating.progress.label,
+        409,
+        true,
+      );
+    }
+
+    // A running desktop has already been ensured: that exec minted these files
+    // and touched last-seen, and attaching to it re-runs none of that. Reading
+    // both values, confirming the tenant's slot and its VNC and gateway ports,
+    // and recording activity are one Sprite exec rather than several round
+    // trips to the Sprite (P3).
     const material = await this.run(
       sprite,
       [
         `set -eu`,
         `BOT=${shellQuote(`${BOTS_ROOT}/${botKey}`)}`,
         `if [ ! -s "$BOT/viewer-token" ] || [ ! -s "$BOT/vnc-password" ]; then`,
+        `  echo ${VIEWER_MISSING_MARKER}`,
+        `  exit 69`,
+        `fi`,
+        `SLOT=$(cat "$BOT/slot" 2>/dev/null || true)`,
+        `case "$SLOT" in ''|*[!0-9]*) echo ${VIEWER_MISSING_MARKER}; exit 69;; esac`,
+        `if [ "$SLOT" -ge ${DESKTOP_SLOTS} ] || ! (exec 3<>/dev/tcp/127.0.0.1/$((${VNC_PORT_BASE} + SLOT))) 2>/dev/null || ! (exec 3<>/dev/tcp/127.0.0.1/${DESKTOP_GATEWAY_PORT}) 2>/dev/null; then`,
         `  echo ${VIEWER_MISSING_MARKER}`,
         `  exit 69`,
         `fi`,
@@ -2577,8 +2609,7 @@ export class ComputerHost {
     }
     // A Sprite handle already carries the public URL. Only a legacy/malformed
     // handle with no URL pays another API lookup.
-    const base =
-      sprite.url ?? (await this.client.getSprite(record.spriteName)).url;
+    const base = sprite.url ?? (await this.client.getSprite(sprite.name)).url;
     if (!base) {
       throw new ComputerHostError(
         "provider-unavailable",

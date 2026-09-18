@@ -1204,6 +1204,113 @@ describe("open", () => {
     expect((await first).status).toBe(200);
   });
 
+  test("a viewer call during that update names the phase it is waiting on", async () => {
+    const client = new FakeSpritesClient();
+    const host = new ComputerHost({
+      client,
+      baseSpriteName: "frockbot",
+      digest,
+      now: () => Date.parse("2026-08-31T00:00:00.000Z"),
+      provisionPollMs: 30,
+    });
+    const sprite = new FakeSprite(host.spriteNameFor("user-1"));
+    client.sprites.set(sprite.name, sprite);
+    writeFile(
+      sprite,
+      COMPUTER_HOST_STATE_PATH,
+      JSON.stringify({ version: 1, generation: 4 }),
+    );
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    writeFile(
+      sprite,
+      `/home/box/.frockbot/bots/bot-1-${digest("bot-1").slice(0, 12)}/slot`,
+      "3\n",
+    );
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+
+    const updating = host.handle(
+      request({ kind: "open" }, { effectId: "open-1" }),
+    );
+    while (
+      !sprite.commands.some((command) =>
+        command.stdin.includes(`${PROVISION_SCRIPT} update`),
+      )
+    ) {
+      await Bun.sleep(1);
+    }
+    const refused = await host.handle(
+      request({ kind: "viewer", action: "open" }, { effectId: "viewer-1" }),
+    );
+
+    expect(refused.status).toBe(409);
+    // The step the User is waiting on, not a sentence about updating: this is
+    // the message a Bot's tool call and the card read as the phase.
+    expect(decodeComputerHostProblemV1(await refused.json())).toMatchObject({
+      code: "computer-updating",
+      retryable: true,
+      message: updatingRuntime.label,
+    });
+    expect((await updating).status).toBe(200);
+  });
+
+  test("a revoke during that update still takes the viewer down", async () => {
+    const client = new FakeSpritesClient();
+    const host = new ComputerHost({
+      client,
+      baseSpriteName: "frockbot",
+      digest,
+      now: () => Date.parse("2026-08-31T00:00:00.000Z"),
+      provisionPollMs: 30,
+    });
+    const sprite = new FakeSprite(host.spriteNameFor("user-1"));
+    client.sprites.set(sprite.name, sprite);
+    writeFile(
+      sprite,
+      COMPUTER_HOST_STATE_PATH,
+      JSON.stringify({ version: 1, generation: 4 }),
+    );
+    writeFile(sprite, PROVISION_DIGEST, "stale\n");
+    const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    writeFile(sprite, `/home/box/.frockbot/bots/${botKey}/slot`, "3\n");
+    const service = viewServiceNameV1(botKey);
+    sprite.services.set(service, "running");
+    sprite.scripts = [
+      report("running", updatingRuntime, "update"),
+      report("stopped", updateReady, "update"),
+      report("stopped", updateReady, "update"),
+    ];
+
+    const updating = host.handle(
+      request({ kind: "open" }, { effectId: "open-1" }),
+    );
+    while (
+      !sprite.commands.some((command) =>
+        command.stdin.includes(`${PROVISION_SCRIPT} update`),
+      )
+    ) {
+      await Bun.sleep(1);
+    }
+    const revoked = await host.handle(
+      request({
+        kind: "viewer",
+        action: "revoke",
+        sessionId: "opaque-token",
+      }),
+    );
+
+    expect(revoked.status).toBe(200);
+    expect(
+      sprite.commands.some((command) =>
+        command.stdin.includes("'opaque-token'"),
+      ),
+    ).toBe(true);
+    expect(sprite.serviceStops).toContain(service);
+    expect((await updating).status).toBe(200);
+  });
+
   test("refuses when every desktop slot belongs to a live tenant", async () => {
     const { host, sprite } = provisioned();
     sprite.scripts = [{ stdout: [`${NO_SLOTS_MARKER}\n`], exitCode: 75 }];
@@ -1864,6 +1971,47 @@ describe("control", () => {
 });
 
 describe("viewer", () => {
+  test("a viewer probe never provisions a missing Computer", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    const response = await host.handle(
+      request({ kind: "viewer", action: "open" }),
+    );
+    expect(response.status).toBe(404);
+    expect(client.created).toEqual([]);
+  });
+
+  test("attaches a running viewer after host eviction without adoption or setup", async () => {
+    const { client, sprite } = provisioned();
+    const key = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    writeFile(sprite, `${BOTS_ROOT}/${key}/viewer-token`, "opaque-token\n");
+    writeFile(sprite, `${BOTS_ROOT}/${key}/vnc-password`, "secret\n");
+    sprite.services.set(viewServiceNameV1(key), "running");
+    sprite.services.set(DESKTOP_SERVICE, "running");
+    const reconstructed = hostWith(client);
+    const body = await (
+      await reconstructed.handle(request({ kind: "viewer", action: "open" }))
+    ).json();
+    expect(body.session.id).toBe("opaque-token");
+    expect(sprite.commands).toHaveLength(1);
+    expect(sprite.serviceCreates).toHaveLength(0);
+    expect(client.created).toHaveLength(0);
+  });
+
+  test("refuses stale token files when the viewer is stopped", async () => {
+    const { host, sprite } = provisioned();
+    const key = `bot-1-${digest("bot-1").slice(0, 12)}`;
+    writeFile(sprite, `${BOTS_ROOT}/${key}/viewer-token`, "opaque-token\n");
+    writeFile(sprite, `${BOTS_ROOT}/${key}/vnc-password`, "secret\n");
+    sprite.services.set(DESKTOP_SERVICE, "running");
+    const response = await host.handle(
+      request({ kind: "viewer", action: "open" }),
+    );
+    expect(response.status).toBe(404);
+    expect((await response.json()).code).toBe("not-found");
+    expect(sprite.serviceCreates).toHaveLength(0);
+  });
+
   test("builds the FrockBot viewer URL in one Sprite round trip", async () => {
     const { client, host, sprite } = provisioned();
     const botKey = `bot-1-${digest("bot-1").slice(0, 12)}`;
@@ -1877,6 +2025,7 @@ describe("viewer", () => {
         mtime: new Date(),
       });
     }
+    sprite.services.set(DESKTOP_SERVICE, "running");
     await host.handle(request({ kind: "open" }));
     const commandCount = sprite.commands.length;
     const readCount = sprite.fileReads.length;
@@ -1918,6 +2067,7 @@ describe("viewer", () => {
         mtime: new Date(),
       });
     }
+    sprite.services.set(DESKTOP_SERVICE, "running");
     await host.handle(request({ kind: "open" }));
 
     const body = (await (
@@ -1938,6 +2088,8 @@ describe("viewer", () => {
       writeFile(sprite, `${BOTS_ROOT}/${botKey}/${name}`, value!);
     }
 
+    sprite.services.set(DESKTOP_SERVICE, "running");
+    await host.handle(request({ kind: "open" }));
     const response = await host.handle(
       request({
         kind: "viewer",

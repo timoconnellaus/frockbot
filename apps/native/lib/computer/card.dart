@@ -9,6 +9,7 @@
 library;
 
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -18,7 +19,6 @@ import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/frock_theme.dart';
 import '../theme/dialogs.dart';
-import '../theme/rows.dart';
 import '../theme/states.dart';
 import '../view/embed.dart';
 import '../view/host_frame.dart';
@@ -99,20 +99,6 @@ class ComputerOpening extends StatelessWidget {
   );
 }
 
-/// Which of the Computer's two in-place surfaces this is.
-///
-/// One widget for both, because both are the same live frame with the same
-/// streaming rules around it, and a second copy of those rules is how a card
-/// and a page come to disagree about whether the Bot is working.
-enum ComputerSurface {
-  /// The Bot page's card: the screen, and one line under it that always says
-  /// what the Computer is doing and offers the way in.
-  card,
-
-  /// The Computer sub-page: the screen, the two controls, and the capture.
-  page,
-}
-
 /// The card: the screen, and one line saying whether it is the desktop or a
 /// photograph of it.
 class ComputerCard extends StatefulWidget {
@@ -120,20 +106,19 @@ class ComputerCard extends StatefulWidget {
 
   /// A Turn is executing for this Bot right now.
   final bool turnRunning;
-  final ComputerSurface surface;
 
   /// Whose Computer this is, so the full window can say so.
   final String? botName;
 
-  /// Where the card's "Open" goes: the Computer sub-page, inside the panel on
-  /// a desktop and pushed on a phone. Without one the card opens the full
-  /// window itself, which is what it did before there was a sub-page.
+  /// How this surface opens the desktop, where the shell wants to own that —
+  /// it knows the Bot's name and where the window belongs. Without one the
+  /// card opens the full window itself. Either way there is one destination:
+  /// the desktop, full window, with Take control in it.
   final VoidCallback? onOpen;
   const ComputerCard({
     super.key,
     required this.controller,
     this.turnRunning = false,
-    this.surface = ComputerSurface.card,
     this.botName,
     this.onOpen,
   });
@@ -217,28 +202,17 @@ class _ComputerCardState extends State<ComputerCard> {
         : widget.onOpen ?? () => unawaited(_open(context));
     final screen = Semantics(
       button: !unconfigured,
-      label: widget.surface == ComputerSurface.page
-          ? 'Computer screen'
-          : 'Open computer in full window',
+      label: 'Open computer in full window',
       child: AspectRatio(
         aspectRatio: 16 / 10,
         child: Material(
           clipBehavior: Clip.antiAlias,
           color: theme.colorScheme.surfaceContainerHighest,
-          shape: widget.surface == ComputerSurface.page
-              ? RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: theme.colorScheme.outlineVariant),
-                )
-              : const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
-                ),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+          ),
           child: InkWell(
-            onTap: widget.surface == ComputerSurface.page
-                ? (unconfigured || controller.busy
-                      ? null
-                      : () => unawaited(_open(context)))
-                : open,
+            onTap: open,
             child: _screen(context, opening, screenshot),
           ),
         ),
@@ -251,17 +225,15 @@ class _ComputerCardState extends State<ComputerCard> {
       },
       child: identified(
         ComputerIds.card,
-        widget.surface == ComputerSurface.page
-            ? _page(context, screen, screenshot)
-            : Card(
-                margin: EdgeInsets.zero,
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [screen, _statusRow(context, status, open)],
-                ),
-              ),
+        Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [screen, _statusRow(context, status, open)],
+          ),
+        ),
       ),
     );
   }
@@ -305,9 +277,12 @@ class _ComputerCardState extends State<ComputerCard> {
                     ),
                   ),
                 ),
+                // Where it goes, said in the icon: the desktop fills the
+                // window rather than opening another page with a smaller copy
+                // of this same frame on it.
                 Icon(
-                  Icons.chevron_right_rounded,
-                  size: 18,
+                  Icons.open_in_full_rounded,
+                  size: 16,
                   color: theme.colorScheme.primary,
                 ),
               ],
@@ -315,82 +290,6 @@ class _ComputerCardState extends State<ComputerCard> {
           ),
         ),
       ),
-    );
-  }
-
-  /// The Computer sub-page: the live frame, the two things a person can do to
-  /// it, and the photograph it last filed.
-  Widget _page(
-    BuildContext context,
-    Widget screen,
-    ComputerScreenshot? screenshot,
-  ) {
-    final state = controller.state;
-    final human = state.phase == 'human-control';
-    final opening = state.phase == 'provisioning' || state.phase == 'updating';
-    final wide = MediaQuery.sizeOf(context).width > 640;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        screen,
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: identified(
-                human ? ComputerIds.releaseControl : ComputerIds.takeControl,
-                OutlinedButton(
-                  style: frockCompactButton(context).copyWith(
-                    minimumSize: WidgetStateProperty.all(const Size(0, 40)),
-                  ),
-                  onPressed:
-                      controller.busy ||
-                          opening ||
-                          state.viewerUrl == null ||
-                          state.phase == 'taking-control'
-                      ? null
-                      : () => unawaited(
-                          human
-                              ? controller.releaseControl()
-                              : confirmComputerTakeControlV1(
-                                  context,
-                                  controller,
-                                ),
-                        ),
-                  child: Text(human ? 'Release control' : 'Take control'),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton(
-                style: frockCompactButton(context).copyWith(
-                  minimumSize: WidgetStateProperty.all(const Size(0, 40)),
-                ),
-                onPressed: controller.busy
-                    ? null
-                    : () => unawaited(_open(context)),
-                child: Text(wide ? 'Full window' : 'Full screen'),
-              ),
-            ),
-          ],
-        ),
-        if (screenshot != null) ...[
-          const SizedBox(height: 12),
-          FrockRowGroup(
-            rows: [
-              FrockRow(
-                title: 'Last capture',
-                subtitle: computerSnapshotAgeLabelV1(
-                  _now.difference(screenshot.capturedAt),
-                ),
-                onTap: () => unawaited(_open(context)),
-              ),
-            ],
-          ),
-        ],
-      ],
     );
   }
 
@@ -406,11 +305,24 @@ class _ComputerCardState extends State<ComputerCard> {
       );
     }
     if (!opening && screenshot != null) {
-      return Image.network(
-        screenshot.url,
+      // Native captures need the account's bearer-authenticated transport.
+      return FutureBuilder<Uint8List>(
         key: ValueKey(screenshot.contentHash),
-        fit: BoxFit.cover,
-        errorBuilder: (context, _, _) => _placeholder(context, opening),
+        future: controller.capture(screenshot),
+        builder: (context, read) {
+          final bytes = read.data;
+          if (read.hasError) {
+            return const Center(
+              child: Text('Couldn’t load the computer screenshot.'),
+            );
+          }
+          if (bytes == null) return _placeholder(context, opening);
+          return Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            errorBuilder: (context, _, _) => _placeholder(context, opening),
+          );
+        },
       );
     }
     return _placeholder(context, opening);
@@ -435,10 +347,9 @@ class _ComputerCardState extends State<ComputerCard> {
                     _ => 'Computer',
                   }, style: Theme.of(context).textTheme.titleSmall),
                   // The card's own status row says the state under the frame,
-                  // so the frame does not say it a second time. The page and
-                  // the window have no such row, and do.
-                  if (widget.surface == ComputerSurface.page ||
-                      controller.failure != null) ...[
+                  // so the frame does not say it a second time. A refusal is
+                  // the exception: it is what the reader needs first.
+                  if (controller.failure != null) ...[
                     const SizedBox(height: 4),
                     Text(
                       // What refused, where something did: a projection nobody
@@ -454,18 +365,28 @@ class _ComputerCardState extends State<ComputerCard> {
     );
   }
 
-  Future<void> _open(BuildContext context) async {
-    await controller.open();
-    if (!context.mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) =>
-            ComputerViewerPage(controller: controller, botName: widget.botName),
-      ),
-    );
-    await controller.close();
-  }
+  Future<void> _open(BuildContext context) =>
+      openComputerViewerV1(context, controller, botName: widget.botName);
+}
+
+/// Opens the full viewer immediately while the connection command runs.
+Future<void> openComputerViewerV1(
+  BuildContext context,
+  ComputerController controller, {
+  String? botName,
+}) async {
+  // Attaching to a desktop that is already up, or waking one that is not. The
+  // authority decides which; this is one command either way.
+  unawaited(controller.open());
+  if (!context.mounted) return;
+  await Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) =>
+          ComputerViewerPage(controller: controller, botName: botName),
+    ),
+  );
+  await controller.close();
 }
 
 /// The full-window viewer: the desktop, who is driving it, and the one way to
@@ -659,7 +580,8 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
                             title: 'No computer',
                             detail: said,
                             action: 'Try again',
-                            onAction: () => unawaited(controller.read()),
+                            onAction: () =>
+                                unawaited(controller.command('connect')),
                           )
                   : ComputerViewerFrame(
                       viewerUrl: url,

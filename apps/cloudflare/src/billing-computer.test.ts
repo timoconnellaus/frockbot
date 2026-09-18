@@ -105,6 +105,22 @@ function exec(timeoutMs: number, stream = false): ComputerHostOperationV1 {
 }
 
 describe("prepaidComputerHost", () => {
+  test("a missing warm viewer bills only the probe, not a viewing window", async () => {
+    const account = new AccountSpy();
+    const computer = host(() =>
+      Response.json({ code: "not-found" }, { status: 404 }),
+    );
+    const billed = prepaidComputerHost(
+      computer.fetcher,
+      () => account.rpc(),
+      () => 100,
+    );
+    expect(
+      (await billed.fetch(request({ kind: "viewer", action: "open" }))).status,
+    ).toBe(404);
+    expect(account.settlements[0]?.quantities).toEqual({ activeSeconds: 1 });
+  });
+
   test("reserves the operation maximum and settles rounded active time", async () => {
     const account = new AccountSpy();
     let now = 1_000;

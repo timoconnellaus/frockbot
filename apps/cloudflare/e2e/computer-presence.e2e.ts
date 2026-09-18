@@ -1,4 +1,4 @@
-// The right-panel Computer card and the full-window viewer it opens, against a
+// The Bot page's Computer card and the full-window viewer it opens, against a
 // deployment whose Computer host is not there.
 //
 // That is the harness on purpose: `COMPUTER_HOST` is declared exactly as
@@ -8,15 +8,23 @@
 // registered, the phase is `idle` — and no desktop behind it.
 //
 // What that leaves provable is the shell, the client state machine and the way
-// out: the card is on the panel and says what it knows, the first press opens
-// the full window, and the window says there is no desktop in the host's own
-// words instead of framing one. What it does not leave provable is anything
+// out: the card is on the Bot page and says what it knows, one press — the
+// header's icon or the card itself — opens the full window with nothing in
+// between, and the window says there is no desktop in the host's own words
+// instead of framing one. What it does not leave provable is anything
 // downstream of a minted viewer session — the view-only frame, Take control
 // and its confirmation, the live preview and the snapshot it settles back to —
 // because no session is ever minted. Those claims want a Computer, and
 // inventing one in the browser would prove the stub rather than the product.
 import type { Page, TestInfo } from "@playwright/test";
-import { test, expect, createBot, openApplication, sem } from "./fixtures.ts";
+import {
+  test,
+  expect,
+  createBot,
+  openApplication,
+  sem,
+  settle,
+} from "./fixtures.ts";
 import { e2eComputerConfiguredV1 } from "./harness.ts";
 
 const PHONE = { width: 390, height: 844 } as const;
@@ -50,21 +58,21 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
 }
 
 /**
- * Show the Computer in the right panel.
+ * Open the desktop from the chat header.
  *
- * The chat header keeps two icons — the Computer and the panel's own switch —
- * and an icon button's name is its tooltip. The header's is the first in the
- * document; the sub-page it opens names itself in the panel header.
+ * The header keeps two icons — the Computer and the panel's own switch — and an
+ * icon button's name is its tooltip. The header's Computer is the first in the
+ * document, and it opens one thing: the desktop, full window.
  */
-async function openComputerPanel(page: Page): Promise<void> {
+async function openComputerViewer(page: Page): Promise<void> {
   await page
     .getByRole("button", { name: "Computer", exact: true })
     .first()
     .click();
-  await expect(sem(page, "computer-card")).toBeVisible({ timeout: 60_000 });
+  await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
 }
 
-test("the right-panel card shows the Computer and expands on first click", async ({
+test("the Bot page card and the header both open the desktop itself", async ({
   page,
   userId,
 }, testInfo: TestInfo) => {
@@ -81,25 +89,17 @@ test("the right-panel card shows the Computer and expands on first click", async
   // says is its accessible name rather than its text.
   await expect(status).toHaveAttribute("aria-label", /Ready to start/u);
   await expect(sem(page, "bot-page-computer")).toBeVisible();
-
-  await openComputerPanel(page);
-  const card = sem(page, "computer-card");
-  // The sub-page is the screen and its two controls; the phase is the panel
-  // header's subtitle rather than a line under the frame.
-  await expect(
-    page.getByRole("button", { name: "Full window", exact: true }),
-  ).toBeVisible();
-  await expect(page.locator("iframe")).toHaveCount(0);
   await page.screenshot({
     path: testInfo.outputPath("computer-presence-desktop.png"),
   });
 
-  // The first press expands the full window. With no desktop to frame it says
-  // so, in the words of whatever refused, and offers the read again — rather
-  // than an empty frame, or a Take control over nothing.
-  await card.click();
+  // The header's icon opens the desktop itself. There is no page between the
+  // two carrying a smaller copy of the same frame: one press, one window.
+  await openComputerViewer(page);
   const viewer = sem(page, "computer-viewer");
-  await expect(viewer).toBeVisible({ timeout: 60_000 });
+  // With no desktop to frame it says so, in the words of whatever refused, and
+  // offers the read again — rather than an empty frame, or a Take control over
+  // nothing.
   await expect(viewer).toContainText("No computer");
   await expect(viewer).toContainText("Try again");
   await expect(sem(page, "computer-phase")).toContainText(NO_HOST);
@@ -110,58 +110,54 @@ test("the right-panel card shows the Computer and expands on first click", async
     path: testInfo.outputPath("computer-presence-expanded.png"),
   });
 
-  // The way out of a full-window surface is the way back: the panel is where
-  // it was, and the card now carries what the window learned.
+  // Reading again against a host that is still not there keeps the window and
+  // the sentence: a retry that cannot succeed must not look like one that did.
+  await viewer.getByRole("button", { name: "Try again" }).click();
+  await expect(viewer).toContainText("No computer");
+  await expect(sem(page, "computer-phase")).toContainText(NO_HOST);
+
+  // The way out of a full-window surface is the way back: the Bot page is
+  // where it was, and its card now carries what the window learned.
   await page.goBack();
+  const card = sem(page, "computer-card");
   await expect(card).toBeVisible();
-  // The frame is one merged node — the screen, what it is, and what refused —
-  // so what it says is its accessible name rather than its text.
-  await expect(card).toHaveAttribute("aria-label", NO_HOST);
-  // Said once: the window's title carries the phase as its subtitle, and the
-  // 28-point strip that repeated it is gone.
+  await expect(card.getByRole("group", { name: NO_HOST })).toBeVisible();
+  // Said once: the window's title carries the phase as its subtitle, and
+  // nothing outside that window repeats it.
   await expect(sem(page, "computer-phase")).toHaveCount(0);
+
+  // And the card's own way in lands in the same window on the same session.
+  await card.click();
+  await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
 });
 
-test("the right-panel Computer card fits the mobile shell", async ({
+test("the Computer opens to the same window on the mobile shell", async ({
   page,
   userId,
 }, testInfo: TestInfo) => {
   test.skip(!CONFIGURED, OTHER_STATE);
   await openApplication(page, userId);
   await createBot(page, "Pocket");
-  // Waiting at a width where the panel is a column is waiting for the Computer
-  // to have registered at all: the shell adds it to the panel when the
-  // deployment answers for one, and the phone's own list of panels is built
-  // once, from whatever had registered when it opened.
-  await openComputerPanel(page);
   await page.setViewportSize(PHONE);
 
-  // At this width the right panel is not a column: its entries are pages, and
-  // the header names each of them itself rather than offering a list once one
-  // of them is opened.
-  // The header's, which is the first one in the document. The panel it opens
-  // names itself too — with `aria-current` on it, because it is the one being
-  // shown — and the desktop leg above has already opened it once, so both are
-  // in the tree by the time the width changes.
-  await page
-    .getByRole("button", { name: "Computer", exact: true })
-    .first()
-    .click();
-  const card = sem(page, "computer-card");
-  await expect(card).toBeVisible({ timeout: 60_000 });
-
-  // A page, so the card has the whole width rather than a drawer's slice of it.
-  const box = await card.boundingBox();
+  // At this width the conversation has the screen and the bar's Computer icon
+  // is the way in. It opens the desktop itself: there is no page between the
+  // icon and the window at any width.
+  await openComputerViewer(page);
+  const viewer = sem(page, "computer-viewer");
+  await expect(viewer).toContainText("No computer");
+  await expect(viewer).toContainText("Try again");
+  // A window, not a drawer's slice of one.
+  const box = await viewer.boundingBox();
   expect(box?.width ?? 0).toBeGreaterThan(PHONE.width - 48);
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("computer-presence-mobile.png"),
   });
 
-  // And it opens from here too, onto the same full-window surface.
-  await card.click();
-  await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
-  await expect(sem(page, "computer-viewer")).toContainText("No computer");
+  // And back is back: the conversation, with nothing of the window left over.
+  await page.goBack();
+  await expect(sem(page, "computer-viewer")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
 });
 
@@ -178,15 +174,26 @@ test("a deployment with no Computer says so and opens nothing", async ({
   await openApplication(page, userId);
   await createBot(page, "Bare");
 
-  await openComputerPanel(page);
   const card = sem(page, "computer-card");
-  await expect(card).toHaveAttribute("aria-label", /No computer/u);
-  await expect(card).toHaveAttribute("aria-label", /This Bot has no computer/u);
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  // The row is one merged node — a dot, the state and the way in — and what it
+  // says is that node's accessible name, which the engine groups onto a child
+  // of the card rather than onto the card itself. So the card says "No
+  // computer", and it says it there.
+  await expect(card.getByRole("group", { name: /No computer/u })).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath("computer-presence-unconfigured.png"),
   });
 
-  await card.click();
+  // There is nothing behind the card to open, so it is inert: not a button, no
+  // pointer events on its node, and a click there is refused as intercepted.
+  // What a user does is tap where the card is drawn, so the press goes to its
+  // coordinates — and it lands on nothing that opens a window.
+  const box = await card.boundingBox();
+  expect(box, "the card has no box to tap").not.toBeNull();
+  if (!box) return;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await settle(page);
   await expect(sem(page, "computer-viewer")).toHaveCount(0);
 });

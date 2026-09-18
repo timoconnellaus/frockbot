@@ -192,7 +192,7 @@ const ERROR_CODES: Record<ComputerHostErrorCodeV1, ComputerErrorCode> = {
   // The token is wrong or missing. That is a deployment fault, not a Computer
   // fault, and retrying it changes nothing.
   "not-authorized": "provider-failure",
-  "not-found": "provider-failure",
+  "not-found": "not-found",
   conflict: "conflict",
   "limit-exceeded": "limit-exceeded",
   "human-control-active": "human-control-active",

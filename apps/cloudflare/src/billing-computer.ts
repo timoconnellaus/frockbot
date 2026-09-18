@@ -50,8 +50,9 @@ function maximumDuration(operation: ComputerHostOperationV1): number {
 function billedDuration(
   operation: ComputerHostOperationV1,
   elapsedMs: number,
+  granted = true,
 ): number {
-  if (operation.kind === "viewer") {
+  if (operation.kind === "viewer" && granted) {
     if (operation.action === "open") return VIEWER_OPEN_MS;
     if (operation.action === "renew") return VIEWER_RENEW_MS;
   }
@@ -196,9 +197,13 @@ export function prepaidComputerHost(
         }
 
         const started = now();
-        const settle = async () => {
+        const settle = async (granted = true) => {
           if (!reservation?.created) return;
-          const durationMs = billedDuration(operation, now() - started);
+          const durationMs = billedDuration(
+            operation,
+            now() - started,
+            granted,
+          );
           const chargeMicros = computerChargeMicros(durationMs);
           await billing.settleUsage({
             userId: identity.userId,
@@ -220,7 +225,7 @@ export function prepaidComputerHost(
             ? operation.stream
             : operation.kind === "open" && operation.stream;
         if (streaming) return await responseWithSettlement(response, settle);
-        await settle();
+        await settle(response.ok);
         return response;
       };
     },

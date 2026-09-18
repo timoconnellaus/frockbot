@@ -14,6 +14,7 @@ import {
   type ComputerConnectionProgressV1,
   type ComputerControlLease,
   type ComputerHostSessionV1,
+  type ComputerViewerSession,
 } from "@frockbot/computer/core/host";
 import type {
   WorkspaceFilesV1,
@@ -898,10 +899,82 @@ export class ComputerBotBackendContribution {
     });
   }
 
+  // Viewer attachment validates the running desktop without preparing it again.
+  // It stays on the command path because opening or renewing a viewer is billed.
+  private async attach(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<boolean> {
+    const storedValue = await this.host.storage.get<unknown>(
+      COMPUTER_VIEWER_RECORD_KEY,
+    );
+    const stored = decoded(storedValue, decodeStoredViewer);
+    const fresh =
+      stored && isFresh(stored.expiresAt, this.now()) ? stored : undefined;
+    let session: ComputerViewerSession | undefined;
+    try {
+      session = await this.withComputer(userId, command, async (computer) => {
+        if (!computer.viewer) return undefined;
+        const options = {
+          effectId: `computer:${command.commandId}:attach-viewer`,
+        };
+        return fresh
+          ? computer.viewer.renew(fresh.id, options)
+          : computer.viewer.open(options);
+      });
+    } catch (error) {
+      // A missing desktop and one that is mid-update are the same answer from
+      // here: no running viewer was confirmed. The connect below waits that
+      // update out and joins; read as a failure, this refusal would end the
+      // User's one gesture on an update that never finishes.
+      if (
+        error instanceof ComputerError &&
+        (error.code === "not-found" || error.code === "updating")
+      ) {
+        return false;
+      }
+      throw error;
+    }
+    if (!session) return false;
+    if (!session.expiresAt || !isFresh(session.expiresAt, this.now())) {
+      throw new Error(
+        "The Computer returned a viewer session with no valid expiry",
+      );
+    }
+    await this.recordViewer({
+      id: session.id,
+      url: session.url,
+      expiresAt: session.expiresAt,
+    });
+    return true;
+  }
+
+  /**
+   * Records one live viewer: the session id and its expiry durably, the bearer
+   * URL in this instance alone.
+   */
+  private async recordViewer(viewer: LiveViewer): Promise<void> {
+    await this.host.storage.put({
+      [COMPUTER_VIEWER_RECORD_KEY]: {
+        version: 1,
+        id: viewer.id,
+        expiresAt: viewer.expiresAt,
+      } satisfies StoredViewerV1,
+      [COMPUTER_PROVIDER_RECORD_KEY]: {
+        version: 2,
+        phase: "ready",
+        message: "Computer ready",
+        recordedAt: this.now().toISOString(),
+      } satisfies StoredProviderAnswerV2,
+    });
+    this.#liveViewer = { ...viewer };
+  }
+
   private async connect(
     userId: string,
     command: ComputerCommandV1,
   ): Promise<void> {
+    if (await this.attach(userId, command)) return;
     const intentValue = await this.host.storage.get<unknown>(
       `${COMPUTER_INTENT_PREFIX}${command.commandId}`,
     );
@@ -1088,24 +1161,11 @@ export class ComputerBotBackendContribution {
     if (renewed.id !== current.id || !renewed.expiresAt) {
       throw new Error("The Computer returned an invalid viewer renewal");
     }
-    await this.host.storage.put({
-      [COMPUTER_VIEWER_RECORD_KEY]: {
-        version: 1,
-        id: renewed.id,
-        expiresAt: renewed.expiresAt,
-      } satisfies StoredViewerV1,
-      [COMPUTER_PROVIDER_RECORD_KEY]: {
-        version: 2,
-        phase: "ready",
-        message: "Computer ready",
-        recordedAt: this.now().toISOString(),
-      } satisfies StoredProviderAnswerV2,
-    });
-    this.#liveViewer = {
+    await this.recordViewer({
       id: renewed.id,
       url: renewed.url,
       expiresAt: renewed.expiresAt,
-    };
+    });
   }
 
   private async releaseControl(
