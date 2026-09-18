@@ -16,8 +16,8 @@
 /// over the reply (barge-in). It is not consulted about individual frames.
 ///
 /// A per-turn error from the server — a reply that produced no text, a
-/// sentence that never became sound — is a notice on the footer for a few
-/// seconds, not the end of the call. An error that carries a `code` is the
+/// sentence that never became sound — is a notice on the call's surface for a
+/// few seconds, not the end of the call. An error that carries a `code` is the
 /// call itself failing — the server has already ended it — and so is a
 /// refusal or this client's own failure. The server's end of the socket
 /// finishing first also ends the call, without anything having failed: the
@@ -171,7 +171,7 @@ class AssistantSessionController extends ChangeNotifier {
   /// for nothing but Resume.
   bool _paused = false;
 
-  /// How long a notice about the last reply stays on the footer.
+  /// How long a notice about the last reply stays on the call's surface.
   static const noticeDuration = Duration(seconds: 4);
 
   /// The last half second of real audio while the reply plays, sent ahead of
@@ -840,8 +840,9 @@ class AssistantSessionController extends ChangeNotifier {
     if (_phase == VoiceSessionPhase.error) return;
     _generation++;
     _error = message;
-    // Say so now, before the teardown's awaits: the footer shows the failure
-    // the moment it is known, not after the socket has finished closing.
+    // Say so now, before the teardown's awaits: the call's surface shows the
+    // failure the moment it is known, not after the socket has finished
+    // closing.
     _notify();
     await _teardown(code: voiceCloseFailedV1, reason: message);
     _status = VoiceStatusV1.idle;

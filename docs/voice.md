@@ -450,7 +450,7 @@ answer to a resumption handle it has forgotten (see Sleep and wake).
 
 An error frame that carries a `code` still means the call itself has failed
 and has been torn down behind it; the client ends the call and shows the
-failure rather than leaving a live-looking footer over a socket nobody is
+failure rather than leaving a live-looking surface over a socket nobody is
 listening on.
 
 A `subagent` result that settles while the call is live goes back to the
@@ -1147,7 +1147,9 @@ drawn as held, and refusing the press, until the session has finished ending.
 One call has one teardown, whichever path reaches it — End, a failure, the
 server closing first, the shell disposing the session that is over — so a
 superseded session can never close the capture or the audio session a second
-time, and a session disposed before it started has no claim to release at all.
+time, and a session disposed before it started has nothing to give back: it
+never begins the audio session, and the platform is never asked to stop a
+recorder that never opened.
 The capture and the Android audio session are the shell's, lent to one call at
 a time: the next call's press waits on `AssistantSessionController.released`
 before it opens them. Nothing is queued: the control says so, and the person

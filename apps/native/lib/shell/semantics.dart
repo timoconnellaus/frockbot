@@ -136,7 +136,7 @@ abstract final class VoiceIds {
   static const activity = 'voice-activity';
 
   /// The one line the call is saying on its own surface: a failure that
-  /// ended it, or a notice that is borrowing the stage.
+  /// ended it, the end itself, or a notice that is borrowing the stage.
   static const modeNotice = 'voice-mode-notice';
   static const pause = 'voice-pause';
   static const resume = 'voice-resume';

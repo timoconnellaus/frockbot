@@ -111,8 +111,9 @@ the list stands as it was.
 10. Mute, speak, unmute, speak. Expect: nothing reaches the session while
     muted; the first phrase after unmuting does.
 11. Open the same account on a second device and start voice there. Expect:
-    the first device's footer shows "moved to another device"; the second
-    works. Reload the second device within a minute: it rejoins the same call.
+    the first device says "Voice moved to another device." — in voice mode
+    where the call was on screen, on the footer otherwise; the second works.
+    Reload the second device within a minute: it rejoins the same call.
 12. Background the app (switch tabs on the phone, switch apps on Android).
     Expect: capture and playback stop and the footer closes. Navigate between
     Bots and pages in the app: the footer stays.
