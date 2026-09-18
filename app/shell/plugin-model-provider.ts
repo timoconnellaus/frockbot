@@ -385,11 +385,12 @@ function clockAbortV1(clock: AttemptClockV1): Error {
   );
 }
 
-/** The caller's own reason for a stop, as an Error whatever it handed over. */
-function stoppedBeforeStartV1(signal: AbortSignal): Error {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : new Error("the model call was stopped before it began");
+/** The caller's own reason for a stop, as the text a failure carries. */
+function stoppedBeforeStartV1(signal: AbortSignal): string {
+  const reason = signal.reason;
+  return reason instanceof Error && reason.message.trim()
+    ? reason.message
+    : "the model call was stopped before it began";
 }
 
 /** The Plugin's events, with heartbeats folded into the clock. */
@@ -517,7 +518,23 @@ export function pluginModelProviderV1(
       // no dispatch to end, no worker call to orphan. Checked here because the
       // worker call below is *created* before the clock can look at it, and a
       // promise nobody awaits is a stream the Plugin keeps producing.
-      if (signal.aborted) throw stoppedBeforeStartV1(signal);
+      //
+      // What it is worth is the question the request refusal below answers:
+      // nothing was sent, so this attempt is a call that did not happen — a
+      // definitive result the kernel settles without an estimate, never the
+      // ordinary error it would write one for. The exception is an effect the
+      // log shows was dispatched once already and never accounted for: its
+      // earlier call may have billed, and the one estimate that stands for it
+      // is what this outcome preserves.
+      if (signal.aborted) {
+        if (options.priorOutcomeUnknownFor(request.requestId)) {
+          throw new ModelOutcomeUncertainErrorV1();
+        }
+        throw new ModelProviderFailureError({
+          classification: "permanent",
+          reason: stoppedBeforeStartV1(signal),
+        });
+      }
       // The Plugin serves one provider, one model and one Connection, and all
       // three were resolved by the kernel before this provider was mounted. A
       // request that names anything else is authority this adapter does not

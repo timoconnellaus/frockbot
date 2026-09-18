@@ -20,7 +20,12 @@ import {
   type NormalizedModelRequest,
   type PluginModelInvocationV1,
   type PluginWorkerModelResultV1,
+  type SessionEvent,
 } from "@frockbot/core/contracts";
+import { createAgentLoop } from "@frockbot/core/agent-loop";
+import type { AgentHandle } from "@frockbot/core/agent-loop/agent";
+import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
+import { priorOutcomeUnknownV1 } from "@frockbot/app/isolates/model-transport";
 import {
   pluginModelProviderV1,
   type PluginModelProviderOptionsV1,
@@ -977,7 +982,7 @@ describe("the bounds the host holds one answer to", () => {
 });
 
 describe("a caller that stopped before the attempt began", () => {
-  test("opens no worker stream and no dispatch", async () => {
+  test("opens no worker stream and no dispatch, and is a call that did not happen", async () => {
     let opened = 0;
     let began = 0;
     const fake = provider({
@@ -997,8 +1002,235 @@ describe("a caller that stopped before the attempt began", () => {
     const controller = new AbortController();
     controller.abort(new Error("stopped before the call"));
     const outcome = await drain(fake.stream(request(), controller.signal));
-    expect((outcome.error as Error).message).toBe("stopped before the call");
+    // The kernel settles a classified failure without an estimate, which is
+    // what makes a Stop before anything opened a call that did not happen.
+    const error = outcome.error as ModelProviderFailureError;
+    expect(error).toBeInstanceOf(ModelProviderFailureError);
+    expect(error).not.toBeInstanceOf(ModelOutcomeUncertainErrorV1);
+    expect(error.classification).toBe("permanent");
+    expect(error.message).toBe("stopped before the call");
     expect(opened).toBe(0);
     expect(began).toBe(0);
+  });
+
+  test("keeps an earlier call's possible cost when the log shows one was never accounted for", async () => {
+    // A replay whose effect the log shows was dispatched once already and never
+    // accounted for: the earlier call may have been accepted and billed, so the
+    // one estimate that stands for it is what this outcome preserves.
+    let opened = 0;
+    let began = 0;
+    const fake = provider({
+      priorOutcomeUnknownFor: (requestId) => requestId === request().requestId,
+      streamModel: async () => {
+        opened += 1;
+        return { schemaVersion: 1, status: "refused", reason: "no fake" };
+      },
+      begin: () => {
+        began += 1;
+        return dispatch({});
+      },
+    });
+    const controller = new AbortController();
+    controller.abort(new Error("stopped before the call"));
+    const outcome = await drain(fake.stream(request(), controller.signal));
+    expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
+    expect(outcome.error).not.toBeInstanceOf(ModelProviderFailureError);
+    expect(opened).toBe(0);
+    expect(began).toBe(0);
+  });
+});
+
+/**
+ * The accounting, read where it is decided: the kernel's own durable journal,
+ * with the adapter mounted as the provider its loop reaches by name. A Stop
+ * between the durable `model/request` admission and the provider's first byte
+ * is the window this suite is about — nothing was dispatched, so nothing may
+ * be billed for it, and only an effect whose earlier dispatch the log never
+ * accounted for keeps the one estimate that stands for it.
+ */
+describe("the accounting a Stop before the provider start leaves behind", () => {
+  const KERNEL_SESSION_ID = "user-1:bot-1";
+  const REPLAY_REQUEST_ID = "request-replay";
+
+  /**
+   * An open Turn whose log already carries a `model/request` with no answer:
+   * the step was interrupted mid-call, so a resume re-issues it under the same
+   * id. `accounted` adds the `model/usage` a completed dispatch wrote, which is
+   * the effect whose cost the log already carries.
+   */
+  function openTurnWithRequest(accounted: boolean): SessionEvent[] {
+    const timestamp = "2026-09-18T00:00:00.000Z";
+    return [
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+      {
+        type: "model/request",
+        turn: 1,
+        step: 1,
+        request: {
+          requestId: REPLAY_REQUEST_ID,
+          provider: BINDING.provider,
+          model: BINDING.model,
+          system: "",
+          messages: [],
+          tools: [],
+          modelBinding: {
+            connectionId: BINDING.connectionId,
+            connectionGeneration: BINDING.connectionGeneration,
+          },
+        },
+      },
+      ...(accounted
+        ? [
+            {
+              type: "model/usage" as const,
+              turn: 1,
+              step: 1,
+              requestId: REPLAY_REQUEST_ID,
+              provider: BINDING.provider,
+              model: BINDING.model,
+              inputTokens: 12,
+              outputTokens: 3,
+              latencyMs: 50,
+              estimated: true,
+            },
+          ]
+        : []),
+    ].map((event, seq) => ({ ...event, seq, timestamp })) as SessionEvent[];
+  }
+
+  /**
+   * Runs the real loop with the real adapter, and stops the Turn from
+   * `admitEffect`: the `model/request` is durably admitted and flushed, and the
+   * provider has not been reached — exactly where a person's Stop can land.
+   * `priorOutcomeUnknownFor` reads the same journal production reads.
+   */
+  async function stoppedBeforeProviderStart(initial?: SessionEvent[]) {
+    const root = createAgentRuntimeHarness(
+      initial
+        ? { sessions: { initialSessions: { [KERNEL_SESSION_ID]: initial } } }
+        : {},
+    );
+    let opened = 0;
+    let began = 0;
+    root.llm.register(
+      pluginModelProviderV1({
+        pluginId: "deepseek",
+        binding: BINDING,
+        deadlines: { firstByteMs: 5_000, idleMs: 5_000 },
+        streamModel: async () => {
+          opened += 1;
+          return { schemaVersion: 1, status: "refused", reason: "no fake" };
+        },
+        begin: () => {
+          began += 1;
+          return dispatch({});
+        },
+        priorOutcomeUnknownFor: (requestId) => {
+          const session = root.sessions.get(KERNEL_SESSION_ID);
+          return (
+            session !== undefined && priorOutcomeUnknownV1(session, requestId)
+          );
+        },
+        scope: {
+          botId: "bot-1",
+          runId: "run-1",
+          sessionId: KERNEL_SESSION_ID,
+          turnId: "run-1",
+          generationId: "generation-1",
+        },
+      }),
+    );
+    const loop = createAgentLoop(root, {
+      maxSteps: 4,
+      composition: {
+        generationId: "1970-01-01T00:00:00.000000Z:0123456789abcdef",
+        artifactSetHash: "a".repeat(64),
+      },
+    });
+    let handle: AgentHandle | undefined;
+    handle = await loop.create({
+      botId: "bot-1",
+      sessionId: KERNEL_SESSION_ID,
+      provider: BINDING.provider,
+      model: BINDING.model,
+      modelBinding: {
+        connectionId: BINDING.connectionId,
+        connectionGeneration: BINDING.connectionGeneration,
+      },
+      admitEffect: async (effect) => {
+        if (effect.kind === "model") {
+          handle!.agent.cancel("user", "Stopped by the user.");
+        }
+        return true;
+      },
+    });
+    try {
+      if (initial) handle.agent.resume();
+      else handle.agent.send("hello");
+      await handle.agent.whenIdle();
+      return {
+        events: [...handle.agent.session.events],
+        opened,
+        began,
+      };
+    } finally {
+      await loop.dispose();
+      await root.dispose();
+    }
+  }
+
+  test("a first dispatch stopped before the provider start writes no usage", async () => {
+    const run = await stoppedBeforeProviderStart();
+    // The durable intent is on the log, and no ticket, worker call or estimate
+    // followed it: nothing was dispatched, so nothing can have billed.
+    expect(
+      run.events.filter((event) => event.type === "model/request"),
+    ).toHaveLength(1);
+    expect(run.events.filter((event) => event.type === "model/usage")).toEqual(
+      [],
+    );
+    expect(run.opened).toBe(0);
+    expect(run.began).toBe(0);
+    expect(run.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "cancelled",
+      reason: "Stopped by the user.",
+    });
+  });
+
+  test("a replay of an effect whose cost is already on the log writes no second usage", async () => {
+    // The dispatch before this one was accounted: its `model/usage` is the one
+    // estimate for the effect, and a Stop on the replay adds nothing to it.
+    const run = await stoppedBeforeProviderStart(openTurnWithRequest(true));
+    expect(
+      run.events.filter((event) => event.type === "model/usage"),
+    ).toHaveLength(1);
+    expect(run.opened).toBe(0);
+    expect(run.began).toBe(0);
+    expect(run.events.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "cancelled",
+      reason: "Stopped by the user.",
+    });
+  });
+
+  test("a replay of an effect nothing accounted for keeps exactly one estimate", async () => {
+    // The earlier dispatch may have billed and the log cannot say: the one
+    // estimate written here stands for it, and no retry follows.
+    const run = await stoppedBeforeProviderStart(openTurnWithRequest(false));
+    const usage = run.events.filter((event) => event.type === "model/usage");
+    expect(usage).toHaveLength(1);
+    expect(usage[0]).toMatchObject({
+      requestId: REPLAY_REQUEST_ID,
+      provider: BINDING.provider,
+      model: BINDING.model,
+      estimated: true,
+    });
+    expect(run.opened).toBe(0);
+    expect(run.began).toBe(0);
+    expect(
+      run.events.filter((event) => event.type === "model/retry"),
+    ).toHaveLength(0);
   });
 });
