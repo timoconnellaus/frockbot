@@ -23,6 +23,17 @@ import {
   GIT_ENV,
 } from "./validate";
 
+/** Git fixtures and a nested `bun test` need more than 5s when the full unit suite is on the machine. */
+const FIXTURE_TIMEOUT_MS = 30_000;
+
+function fixtureTest(
+  name: string,
+  fn: (() => void) | (() => Promise<void>),
+  timeout = FIXTURE_TIMEOUT_MS,
+) {
+  return test(name, fn, timeout);
+}
+
 const roots: string[] = [];
 function git(root: string, ...args: string[]) {
   const result = Bun.spawnSync(["git", ...args], { cwd: root, env: GIT_ENV });
@@ -56,68 +67,84 @@ afterEach(() => {
   delete categories.sleeper;
 });
 
-test("documentation exceptions do not ignore nested prompts or new code", () => {
-  expect(ignoredWorkingPath("docs/plan.md")).toBe(true);
-  expect(ignoredWorkingPath("README.md")).toBe(true);
-  expect(ignoredWorkingPath("app/prompt.md")).toBe(false);
-  const root = fixture();
-  writeFileSync(join(root, "README.md"), "notes");
-  expect(() => snapshot(root)).not.toThrow();
-  writeFileSync(join(root, "new.ts"), "export {};");
-  expect(() => snapshot(root)).toThrow("new.ts");
-});
+fixtureTest(
+  "documentation exceptions do not ignore nested prompts or new code",
+  () => {
+    expect(ignoredWorkingPath("docs/plan.md")).toBe(true);
+    expect(ignoredWorkingPath("README.md")).toBe(true);
+    expect(ignoredWorkingPath("app/prompt.md")).toBe(false);
+    const root = fixture();
+    writeFileSync(join(root, "README.md"), "notes");
+    expect(() => snapshot(root)).not.toThrow();
+    writeFileSync(join(root, "new.ts"), "export {};");
+    expect(() => snapshot(root)).toThrow("new.ts");
+  },
+);
 
-test("a test run under a git hook leaves the hooked repository untouched", () => {
-  // Git exports GIT_DIR and friends to hooks; a `git init` under a fixture
-  // then re-initialised the repository being committed to, marking it bare
-  // and pointing its hooks at /dev/null. Bun hands a child the environment
-  // it started with, so mutating process.env here never reaches a spawned
-  // git: the variables must reach `bun test` the way git delivers them, from
-  // outside.
-  const hooked = fixture();
-  git(hooked, "config", "core.hooksPath", "hooks-of-hooked");
-  const child = Bun.spawnSync(
-    [process.execPath, "test", import.meta.path, "-t", "^documentation"],
-    {
-      cwd: resolve(import.meta.dirname, ".."),
-      env: {
-        ...GIT_ENV,
-        GIT_DIR: join(hooked, ".git"),
-        GIT_WORK_TREE: hooked,
-        GIT_INDEX_FILE: join(hooked, ".git", "index"),
-        GIT_PREFIX: "",
+fixtureTest(
+  "a test run under a git hook leaves the hooked repository untouched",
+  () => {
+    // Git exports GIT_DIR and friends to hooks; a `git init` under a fixture
+    // then re-initialised the repository being committed to, marking it bare
+    // and pointing its hooks at /dev/null. Bun hands a child the environment
+    // it started with, so mutating process.env here never reaches a spawned
+    // git: the variables must reach `bun test` the way git delivers them, from
+    // outside.
+    const hooked = fixture();
+    git(hooked, "config", "core.hooksPath", "hooks-of-hooked");
+    const child = Bun.spawnSync(
+      [
+        process.execPath,
+        "test",
+        import.meta.path,
+        "-t",
+        "^documentation",
+        `--timeout=${FIXTURE_TIMEOUT_MS}`,
+      ],
+      {
+        cwd: resolve(import.meta.dirname, ".."),
+        env: {
+          ...GIT_ENV,
+          GIT_DIR: join(hooked, ".git"),
+          GIT_WORK_TREE: hooked,
+          GIT_INDEX_FILE: join(hooked, ".git", "index"),
+          GIT_PREFIX: "",
+        },
       },
-    },
-  );
-  expect(child.stderr.toString()).toContain(" 1 pass");
-  expect(child.exitCode).toBe(0);
-  expect(git(hooked, "config", "--bool", "core.bare")).toBe("false");
-  expect(git(hooked, "config", "core.hooksPath")).toBe("hooks-of-hooked");
-  expect(git(hooked, "rev-list", "--count", "HEAD")).toBe("1");
-  expect(git(hooked, "status", "--porcelain")).toBe("");
-});
+    );
+    expect(child.stderr.toString()).toContain(" 1 pass");
+    expect(child.exitCode).toBe(0);
+    expect(git(hooked, "config", "--bool", "core.bare")).toBe("false");
+    expect(git(hooked, "config", "core.hooksPath")).toBe("hooks-of-hooked");
+    expect(git(hooked, "rev-list", "--count", "HEAD")).toBe("1");
+    expect(git(hooked, "status", "--porcelain")).toBe("");
+  },
+);
 
-test("a category runs under the shell's environment, not git's hook environment", async () => {
-  const root = fixture();
-  categories.probe = [
-    [
-      process.execPath,
-      "-e",
-      'await Bun.write(".local-validation/gitdir", process.env.GIT_DIR ?? "unset")',
-    ],
-  ];
-  const previous = process.env.GIT_DIR;
-  process.env.GIT_DIR = "/nowhere/.git";
-  try {
-    await validate(root, ["probe"]);
-  } finally {
-    if (previous === undefined) delete process.env.GIT_DIR;
-    else process.env.GIT_DIR = previous;
-  }
-  expect(readFileSync(join(root, ".local-validation/gitdir"), "utf8")).toBe(
-    "unset",
-  );
-});
+fixtureTest(
+  "a category runs under the shell's environment, not git's hook environment",
+  async () => {
+    const root = fixture();
+    categories.probe = [
+      [
+        process.execPath,
+        "-e",
+        'await Bun.write(".local-validation/gitdir", process.env.GIT_DIR ?? "unset")',
+      ],
+    ];
+    const previous = process.env.GIT_DIR;
+    process.env.GIT_DIR = "/nowhere/.git";
+    try {
+      await validate(root, ["probe"]);
+    } finally {
+      if (previous === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = previous;
+    }
+    expect(readFileSync(join(root, ".local-validation/gitdir"), "utf8")).toBe(
+      "unset",
+    );
+  },
+);
 
 /** How many times the counting probe has actually run in `root`. */
 function probeRuns(root: string): string {
@@ -129,155 +156,179 @@ const countingProbe = [
   'const p=".local-validation/count"; await Bun.write(p,String(Number(await Bun.file(p).exists()?await Bun.file(p).text():0)+1))',
 ];
 
-test("success is reused while a category's inputs are unchanged, and a forced failure removes it", async () => {
-  const root = fixture();
-  categories.probe = [countingProbe];
-  await validate(root, ["probe"]);
-  await validate(root, ["probe"]);
-  expect(probeRuns(root)).toBe("1");
-  // A new commit that changes nothing the category reads is not a reason to
-  // re-run it: the receipt is keyed on content, not on the commit carrying it.
-  git(root, "commit", "--allow-empty", "-qm", "new commit");
-  await validate(root, ["probe"]);
-  expect(probeRuns(root)).toBe("1");
-  // Changed source is.
-  writeFileSync(join(root, "source.ts"), "export const changed = 1;\n");
-  git(root, "add", ".");
-  git(root, "commit", "-qm", "change source");
-  await validate(root, ["probe"]);
-  expect(probeRuns(root)).toBe("2");
-  // `--force` disregards a receipt that still stands.
-  await validate(root, ["probe"], true);
-  expect(probeRuns(root)).toBe("3");
-  // A failure is never recorded, so a second run re-earns it rather than
-  // reading a receipt the first run had no right to write.
-  categories.probe = [[process.execPath, "-e", "process.exit(1)"]];
-  await expect(validate(root, ["probe"])).rejects.toThrow("failed");
-  await expect(validate(root, ["probe"])).rejects.toThrow("failed");
-});
+fixtureTest(
+  "success is reused while a category's inputs are unchanged, and a forced failure removes it",
+  async () => {
+    const root = fixture();
+    categories.probe = [countingProbe];
+    await validate(root, ["probe"]);
+    await validate(root, ["probe"]);
+    expect(probeRuns(root)).toBe("1");
+    // A new commit that changes nothing the category reads is not a reason to
+    // re-run it: the receipt is keyed on content, not on the commit carrying it.
+    git(root, "commit", "--allow-empty", "-qm", "new commit");
+    await validate(root, ["probe"]);
+    expect(probeRuns(root)).toBe("1");
+    // Changed source is.
+    writeFileSync(join(root, "source.ts"), "export const changed = 1;\n");
+    git(root, "add", ".");
+    git(root, "commit", "-qm", "change source");
+    await validate(root, ["probe"]);
+    expect(probeRuns(root)).toBe("2");
+    // `--force` disregards a receipt that still stands.
+    await validate(root, ["probe"], true);
+    expect(probeRuns(root)).toBe("3");
+    // A failure is never recorded, so a second run re-earns it rather than
+    // reading a receipt the first run had no right to write.
+    categories.probe = [[process.execPath, "-e", "process.exit(1)"]];
+    await expect(validate(root, ["probe"])).rejects.toThrow("failed");
+    await expect(validate(root, ["probe"])).rejects.toThrow("failed");
+  },
+);
 
 // Not named for what it is about: the hook test above selects by
 // `-t "^documentation"` and counts the tests that match.
-test("prose is not an input to a category that reads only code", async () => {
-  const root = fixture();
-  categories.probe = [countingProbe];
-  await validate(root, ["probe"]);
-  expect(probeRuns(root)).toBe("1");
-  writeFileSync(join(root, "README.md"), "# changed\n");
-  writeFileSync(join(root, "docs", "plan.md"), "changed\n");
-  git(root, "add", ".");
-  git(root, "commit", "-qm", "documentation only");
-  await validate(root, ["probe"]);
-  expect(probeRuns(root)).toBe("1");
-});
+fixtureTest(
+  "prose is not an input to a category that reads only code",
+  async () => {
+    const root = fixture();
+    categories.probe = [countingProbe];
+    await validate(root, ["probe"]);
+    expect(probeRuns(root)).toBe("1");
+    writeFileSync(join(root, "README.md"), "# changed\n");
+    writeFileSync(join(root, "docs", "plan.md"), "changed\n");
+    git(root, "add", ".");
+    git(root, "commit", "-qm", "documentation only");
+    await validate(root, ["probe"]);
+    expect(probeRuns(root)).toBe("1");
+  },
+);
 
-test("a reused receipt leaves the run holding one command, echoed live", async () => {
-  const root = fixture();
-  categories.probe = [[process.execPath, "-e", ""]];
-  categories.sleeper = [
-    [process.execPath, "-e", 'process.stdout.write("live-marker\\n")'],
-  ];
-  // Earn `probe`'s receipt, so the second run spawns `sleeper` alone however
-  // many categories it was asked for.
-  await validate(root, ["probe"]);
-  const written: string[] = [];
-  const write = process.stdout.write;
-  process.stdout.write = ((chunk: unknown) => {
-    written.push(String(chunk));
-    return true;
-  }) as typeof process.stdout.write;
-  try {
-    await validate(root, ["probe", "sleeper"]);
-  } finally {
-    process.stdout.write = write;
-  }
-  const output = written.join("");
-  expect(output).toContain("live-marker");
-  expect(output).not.toContain("--- sleeper:");
-});
+fixtureTest(
+  "a reused receipt leaves the run holding one command, echoed live",
+  async () => {
+    const root = fixture();
+    categories.probe = [[process.execPath, "-e", ""]];
+    categories.sleeper = [
+      [process.execPath, "-e", 'process.stdout.write("live-marker\\n")'],
+    ];
+    // Earn `probe`'s receipt, so the second run spawns `sleeper` alone however
+    // many categories it was asked for.
+    await validate(root, ["probe"]);
+    const written: string[] = [];
+    const write = process.stdout.write;
+    process.stdout.write = ((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await validate(root, ["probe", "sleeper"]);
+    } finally {
+      process.stdout.write = write;
+    }
+    const output = written.join("");
+    expect(output).toContain("live-marker");
+    expect(output).not.toContain("--- sleeper:");
+  },
+);
 
-test("a category that runs alone is echoed live beside a busy phase", async () => {
-  const root = fixture();
-  // `build` writes tracked files, so it runs by itself after everything else
-  // has finished: nothing can interleave with it however many commands the
-  // concurrent phase held, and its progress belongs on the terminal as it
-  // arrives rather than in a block once it is over.
-  const realBuild = categories.build!;
-  categories.build = [
-    [process.execPath, "-e", 'process.stdout.write("build-marker\\n")'],
-  ];
-  categories.probe = [[process.execPath, "-e", ""]];
-  categories.sleeper = [[process.execPath, "-e", ""]];
-  const written: string[] = [];
-  const write = process.stdout.write;
-  process.stdout.write = ((chunk: unknown) => {
-    written.push(String(chunk));
-    return true;
-  }) as typeof process.stdout.write;
-  try {
-    await validate(root, ["probe", "sleeper", "build"]);
-  } finally {
-    process.stdout.write = write;
-    categories.build = realBuild;
-  }
-  const output = written.join("");
-  expect(output).toContain("build-marker");
-  expect(output).not.toContain("--- build:");
-});
+fixtureTest(
+  "a category that runs alone is echoed live beside a busy phase",
+  async () => {
+    const root = fixture();
+    // `build` writes tracked files, so it runs by itself after everything else
+    // has finished: nothing can interleave with it however many commands the
+    // concurrent phase held, and its progress belongs on the terminal as it
+    // arrives rather than in a block once it is over.
+    const realBuild = categories.build!;
+    categories.build = [
+      [process.execPath, "-e", 'process.stdout.write("build-marker\\n")'],
+    ];
+    categories.probe = [[process.execPath, "-e", ""]];
+    categories.sleeper = [[process.execPath, "-e", ""]];
+    const written: string[] = [];
+    const write = process.stdout.write;
+    process.stdout.write = ((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await validate(root, ["probe", "sleeper", "build"]);
+    } finally {
+      process.stdout.write = write;
+      categories.build = realBuild;
+    }
+    const output = written.join("");
+    expect(output).toContain("build-marker");
+    expect(output).not.toContain("--- build:");
+  },
+);
 
-test("the first failure in a category kills its siblings at once", async () => {
-  const root = fixture();
-  // One category, two commands: the first fails immediately and the second
-  // would run for ten seconds. The run is doomed the moment the first exits,
-  // so the second must be killed then rather than waited out — while the
-  // failure still only surfaces once every command has settled.
-  categories.probe = [
-    [process.execPath, "-e", "process.exit(1)"],
-    [process.execPath, "-e", "await Bun.sleep(10_000)"],
-  ];
-  const started = Date.now();
-  await expect(validate(root, ["probe"])).rejects.toThrow("probe failed");
-  expect(Date.now() - started).toBeLessThan(6_000);
-  expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual([]);
-});
+fixtureTest(
+  "the first failure in a category kills its siblings at once",
+  async () => {
+    const root = fixture();
+    // One category, two commands: the first fails immediately and the second
+    // would run for ten seconds. The run is doomed the moment the first exits,
+    // so the second must be killed then rather than waited out — while the
+    // failure still only surfaces once every command has settled.
+    categories.probe = [
+      [process.execPath, "-e", "process.exit(1)"],
+      [process.execPath, "-e", "await Bun.sleep(10_000)"],
+    ];
+    const started = Date.now();
+    await expect(validate(root, ["probe"])).rejects.toThrow("probe failed");
+    expect(Date.now() - started).toBeLessThan(6_000);
+    expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual(
+      [],
+    );
+  },
+);
 
-test("a killed category's surviving descendants cannot wedge the run", async () => {
-  const root = fixture();
-  // `sleeper` leaks a grandchild into a process group of its own — what
-  // `wrangler dev` deliberately does — so the kill that `probe`'s failure
-  // provokes cannot reach it, and it holds the inherited pipe open long after
-  // the command it was spawned from is gone. Exit, not end-of-pipe, is what
-  // says a command is done.
-  categories.probe = [[process.execPath, "-e", "process.exit(1)"]];
-  categories.sleeper = [
-    [
-      process.execPath,
-      "-e",
-      'Bun.spawn(["sleep", "10"], { stdout: "inherit", stderr: "inherit", detached: true }); await Bun.sleep(10_000);',
-    ],
-  ];
-  const started = Date.now();
-  await expect(validate(root, ["probe", "sleeper"])).rejects.toThrow(
-    "probe failed",
-  );
-  expect(Date.now() - started).toBeLessThan(6_000);
-  expect(existsSync(join(root, ".local-validation", "running"))).toBe(false);
-  expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual([]);
-});
+fixtureTest(
+  "a killed category's surviving descendants cannot wedge the run",
+  async () => {
+    const root = fixture();
+    // `sleeper` leaks a grandchild into a process group of its own — what
+    // `wrangler dev` deliberately does — so the kill that `probe`'s failure
+    // provokes cannot reach it, and it holds the inherited pipe open long after
+    // the command it was spawned from is gone. Exit, not end-of-pipe, is what
+    // says a command is done.
+    categories.probe = [[process.execPath, "-e", "process.exit(1)"]];
+    categories.sleeper = [
+      [
+        process.execPath,
+        "-e",
+        'Bun.spawn(["sleep", "10"], { stdout: "inherit", stderr: "inherit", detached: true }); await Bun.sleep(10_000);',
+      ],
+    ];
+    const started = Date.now();
+    await expect(validate(root, ["probe", "sleeper"])).rejects.toThrow(
+      "probe failed",
+    );
+    expect(Date.now() - started).toBeLessThan(6_000);
+    expect(existsSync(join(root, ".local-validation", "running"))).toBe(false);
+    expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual(
+      [],
+    );
+  },
+);
 
-test("an interrupt reaches the children it took out of the foreground", async () => {
-  const root = fixture();
-  const scratch = mkdtempSync(join(tmpdir(), "validation-interrupt-"));
-  roots.push(scratch);
-  const marker = join(scratch, "child.pid");
-  // A real interrupt, delivered to a real validator process, because that is
-  // the whole claim: the children sit in process groups of their own and no
-  // longer receive the terminal's signal. The first records its pid and then
-  // sleeps far longer than the test allows.
-  const driver = join(scratch, "driver.ts");
-  writeFileSync(
-    driver,
-    `import { categories, validate } from ${JSON.stringify(resolve(import.meta.dirname, "validate.ts"))};
+fixtureTest(
+  "an interrupt reaches the children it took out of the foreground",
+  async () => {
+    const root = fixture();
+    const scratch = mkdtempSync(join(tmpdir(), "validation-interrupt-"));
+    roots.push(scratch);
+    const marker = join(scratch, "child.pid");
+    // A real interrupt, delivered to a real validator process, because that is
+    // the whole claim: the children sit in process groups of their own and no
+    // longer receive the terminal's signal. The first records its pid and then
+    // sleeps far longer than the test allows.
+    const driver = join(scratch, "driver.ts");
+    writeFileSync(
+      driver,
+      `import { categories, validate } from ${JSON.stringify(resolve(import.meta.dirname, "validate.ts"))};
 categories.probe = [
   [process.execPath, "-e", ${JSON.stringify(`await Bun.write(${JSON.stringify(marker)}, String(process.pid)); await Bun.sleep(60_000);`)}],
   [process.execPath, "-e", "await Bun.sleep(60_000)"],
@@ -289,41 +340,45 @@ try {
   process.exit(1);
 }
 `,
-  );
-  const validator = Bun.spawn([process.execPath, driver], {
-    env: GIT_ENV,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  // `Bun.write` creates the file and then fills it, so existence alone is not
-  // a value: read until the content parses, and give up loudly rather than
-  // hanging if the child never gets that far.
-  const deadline = Date.now() + 15_000;
-  let child = 0;
-  while (!child) {
-    if (Date.now() > deadline) {
-      throw new Error("the validator's child never recorded its pid");
+    );
+    const validator = Bun.spawn([process.execPath, driver], {
+      env: GIT_ENV,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    // `Bun.write` creates the file and then fills it, so existence alone is not
+    // a value: read until the content parses, and give up loudly rather than
+    // hanging if the child never gets that far.
+    const deadline = Date.now() + 15_000;
+    let child = 0;
+    while (!child) {
+      if (Date.now() > deadline) {
+        throw new Error("the validator's child never recorded its pid");
+      }
+      const recorded = existsSync(marker) ? readFileSync(marker, "utf8") : "";
+      child = Number.parseInt(recorded, 10) || 0;
+      if (!child) await Bun.sleep(25);
     }
-    const recorded = existsSync(marker) ? readFileSync(marker, "utf8") : "";
-    child = Number.parseInt(recorded, 10) || 0;
-    if (!child) await Bun.sleep(25);
-  }
-  validator.kill("SIGINT");
-  expect(await validator.exited).not.toBe(0);
-  expect(await new Response(validator.stderr).text()).toContain(
-    "interrupted by SIGINT",
-  );
-  // The child, and the process group it leads, are gone rather than still
-  // holding ports and scratch after the developer got their prompt back. The
-  // group is the claim: that is what the capture path put the child into and
-  // what the interrupt has to reach.
-  expect(() => process.kill(child, 0)).toThrow();
-  expect(() => process.kill(-child, 0)).toThrow();
-  // And the run cleaned up after itself, which only happens if it unwound
-  // rather than being cut down where it stood.
-  expect(existsSync(join(root, ".local-validation", "running"))).toBe(false);
-  expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual([]);
-}, 30_000);
+    validator.kill("SIGINT");
+    expect(await validator.exited).not.toBe(0);
+    expect(await new Response(validator.stderr).text()).toContain(
+      "interrupted by SIGINT",
+    );
+    // The child, and the process group it leads, are gone rather than still
+    // holding ports and scratch after the developer got their prompt back. The
+    // group is the claim: that is what the capture path put the child into and
+    // what the interrupt has to reach.
+    expect(() => process.kill(child, 0)).toThrow();
+    expect(() => process.kill(-child, 0)).toThrow();
+    // And the run cleaned up after itself, which only happens if it unwound
+    // rather than being cut down where it stood.
+    expect(existsSync(join(root, ".local-validation", "running"))).toBe(false);
+    expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual(
+      [],
+    );
+  },
+  30_000,
+);
 
 test("the input rules exclude prose without excluding nested code", () => {
   expect(isCategoryInput("unit", "docs/plan.md")).toBe(false);
@@ -338,37 +393,43 @@ test("the input rules exclude prose without excluding nested code", () => {
   expect(isCategoryInput("format", "apps/native/lib/main.dart")).toBe(true);
 });
 
-test("the formatter re-runs on the prose the other categories skip", () => {
-  const root = fixture();
-  const before = {
-    format: inputFingerprint(root, "format"),
-    unit: inputFingerprint(root, "unit"),
-  };
-  writeFileSync(join(root, "README.md"), "# changed\n");
-  writeFileSync(join(root, "docs", "plan.md"), "changed\n");
-  git(root, "add", ".");
-  git(root, "commit", "-qm", "prose only");
-  expect(inputFingerprint(root, "format")).not.toBe(before.format);
-  expect(inputFingerprint(root, "unit")).toBe(before.unit);
-});
+fixtureTest(
+  "the formatter re-runs on the prose the other categories skip",
+  () => {
+    const root = fixture();
+    const before = {
+      format: inputFingerprint(root, "format"),
+      unit: inputFingerprint(root, "unit"),
+    };
+    writeFileSync(join(root, "README.md"), "# changed\n");
+    writeFileSync(join(root, "docs", "plan.md"), "changed\n");
+    git(root, "add", ".");
+    git(root, "commit", "-qm", "prose only");
+    expect(inputFingerprint(root, "format")).not.toBe(before.format);
+    expect(inputFingerprint(root, "unit")).toBe(before.unit);
+  },
+);
 
-test("the workerd suite does not read the Flutter client, and the rest do", () => {
-  const root = fixture();
-  const before = {
-    runtime: inputFingerprint(root, "runtime"),
-    unit: inputFingerprint(root, "unit"),
-  };
-  writeFileSync(
-    join(root, "apps", "native", "main.dart"),
-    "void main() { print('changed'); }\n",
-  );
-  git(root, "add", ".");
-  git(root, "commit", "-qm", "client only");
-  expect(inputFingerprint(root, "runtime")).toBe(before.runtime);
-  expect(inputFingerprint(root, "unit")).not.toBe(before.unit);
-});
+fixtureTest(
+  "the workerd suite does not read the Flutter client, and the rest do",
+  () => {
+    const root = fixture();
+    const before = {
+      runtime: inputFingerprint(root, "runtime"),
+      unit: inputFingerprint(root, "unit"),
+    };
+    writeFileSync(
+      join(root, "apps", "native", "main.dart"),
+      "void main() { print('changed'); }\n",
+    );
+    git(root, "add", ".");
+    git(root, "commit", "-qm", "client only");
+    expect(inputFingerprint(root, "runtime")).toBe(before.runtime);
+    expect(inputFingerprint(root, "unit")).not.toBe(before.unit);
+  },
+);
 
-test("commands that dirty source never earn a receipt", async () => {
+fixtureTest("commands that dirty source never earn a receipt", async () => {
   const root = fixture();
   categories.probe = [
     [process.execPath, "-e", 'await Bun.write("source.ts","changed")'],
@@ -396,46 +457,52 @@ test("pre-push owes the fast tier only, and every category it names exists", () 
     expect(Object.hasOwn(categories, name)).toBe(true);
 });
 
-test("a branch behind main may push, but a merge commit on it may not", () => {
-  const remote = fixture();
-  git(remote, "branch", "-M", "main");
-  const local = mkdtempSync(join(tmpdir(), "validation-clone-"));
-  roots.push(local);
-  git(local, "clone", "-q", remote, ".");
-  git(local, "config", "user.email", "test@example.com");
-  git(local, "config", "user.name", "Test");
-  git(local, "config", "core.hooksPath", "/dev/null");
-  git(local, "checkout", "-qb", "feature");
-  git(local, "commit", "--allow-empty", "-qm", "feature");
-  expect(() => requireLinearBranch(local, "origin")).not.toThrow();
-  git(remote, "commit", "--allow-empty", "-qm", "advance main");
-  expect(() => requireLinearBranch(local, "origin")).not.toThrow();
-  git(local, "fetch", "-q", "origin");
-  git(local, "merge", "-q", "--no-edit", "origin/main");
-  expect(() => requireLinearBranch(local, "origin")).toThrow("merge commits");
-  git(local, "reset", "-q", "--hard", "HEAD~1");
-  git(local, "rebase", "-q", "origin/main");
-  expect(() => requireLinearBranch(local, "origin")).not.toThrow();
-  expect(() => requireLinearBranch(local, join(remote, "missing"))).toThrow();
-});
+fixtureTest(
+  "a branch behind main may push, but a merge commit on it may not",
+  () => {
+    const remote = fixture();
+    git(remote, "branch", "-M", "main");
+    const local = mkdtempSync(join(tmpdir(), "validation-clone-"));
+    roots.push(local);
+    git(local, "clone", "-q", remote, ".");
+    git(local, "config", "user.email", "test@example.com");
+    git(local, "config", "user.name", "Test");
+    git(local, "config", "core.hooksPath", "/dev/null");
+    git(local, "checkout", "-qb", "feature");
+    git(local, "commit", "--allow-empty", "-qm", "feature");
+    expect(() => requireLinearBranch(local, "origin")).not.toThrow();
+    git(remote, "commit", "--allow-empty", "-qm", "advance main");
+    expect(() => requireLinearBranch(local, "origin")).not.toThrow();
+    git(local, "fetch", "-q", "origin");
+    git(local, "merge", "-q", "--no-edit", "origin/main");
+    expect(() => requireLinearBranch(local, "origin")).toThrow("merge commits");
+    git(local, "reset", "-q", "--hard", "HEAD~1");
+    git(local, "rebase", "-q", "origin/main");
+    expect(() => requireLinearBranch(local, "origin")).not.toThrow();
+    expect(() => requireLinearBranch(local, join(remote, "missing"))).toThrow();
+  },
+);
 
-test("validation gives each run its own local service registry", async () => {
-  const root = fixture();
-  categories.probe = [
-    [
-      process.execPath,
-      "-e",
-      'await Bun.write(".local-validation/registry-path", process.env.WRANGLER_REGISTRY_PATH!)',
-    ],
-  ];
-  await validate(root, ["probe"]);
-  const first = readFileSync(
-    join(root, ".local-validation/registry-path"),
-    "utf8",
-  );
-  expect(first.startsWith(join(root, ".local-validation"))).toBe(true);
-  await validate(root, ["probe"], true);
-  expect(
-    readFileSync(join(root, ".local-validation/registry-path"), "utf8"),
-  ).not.toBe(first);
-});
+fixtureTest(
+  "validation gives each run its own local service registry",
+  async () => {
+    const root = fixture();
+    categories.probe = [
+      [
+        process.execPath,
+        "-e",
+        'await Bun.write(".local-validation/registry-path", process.env.WRANGLER_REGISTRY_PATH!)',
+      ],
+    ];
+    await validate(root, ["probe"]);
+    const first = readFileSync(
+      join(root, ".local-validation/registry-path"),
+      "utf8",
+    );
+    expect(first.startsWith(join(root, ".local-validation"))).toBe(true);
+    await validate(root, ["probe"], true);
+    expect(
+      readFileSync(join(root, ".local-validation/registry-path"), "utf8"),
+    ).not.toBe(first);
+  },
+);
