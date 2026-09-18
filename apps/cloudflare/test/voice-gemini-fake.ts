@@ -156,7 +156,7 @@ export class GeminiFakeV1 {
   private send(frame: Record<string, unknown>): void {
     if (!this.open) return;
     try {
-      this.socket.send(JSON.stringify(frame));
+      this.socket.send(new TextEncoder().encode(JSON.stringify(frame)));
     } catch {
       // The object's end has gone; its own close handling covers it.
     }

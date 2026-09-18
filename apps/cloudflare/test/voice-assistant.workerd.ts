@@ -372,7 +372,7 @@ describe("the session the call talks through", () => {
     expect(setup.instruction).toContain(identity.botId);
   });
 
-  test("bridges audio both ways and meters what crossed", async () => {
+  test("bridges binary Live messages both ways and meters what crossed", async () => {
     const userId = `voice-audio-${crypto.randomUUID()}`;
     const stub = assistant(userId);
     const opened = await open(userId);
