@@ -21,11 +21,11 @@ import type {
   ArtifactRefV1,
   CompositionMemberV1,
 } from "@frockbot/core/durable";
+import { PLUGIN_SERVED_PROVIDERS_V1 } from "@frockbot/providers/catalog/definition";
 import {
   CAPABILITY_DESCRIPTIONS,
   PROVIDER_PLUGIN_DESCRIPTIONS_V1,
 } from "@frockbot/app/settings/catalog-copy";
-import { PLUGIN_SERVED_PROVIDERS_V1 } from "@frockbot/providers/catalog/definition";
 import type { PluginEnablementV1 } from "./enablement.js";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./seeded/artifacts.generated.js";
 

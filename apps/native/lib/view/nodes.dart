@@ -547,27 +547,18 @@ class _CapabilityCard extends StatelessWidget {
 class _EqualHeightCards extends MultiChildRenderObjectWidget {
   final int columns;
 
-  /// Whether each row takes the height of its own tallest card, rather than
-  /// every card taking the height of the tallest in the grid.
-  final bool perRow;
-  const _EqualHeightCards({
-    required this.columns,
-    this.perRow = false,
-    required super.children,
-  });
+  const _EqualHeightCards({required this.columns, required super.children});
 
   @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _CardGrid(columns, perRow);
+  RenderObject createRenderObject(BuildContext context) => _CardGrid(columns);
 
   @override
   void updateRenderObject(
     BuildContext context,
     covariant _CardGrid renderObject,
   ) {
-    if (renderObject.columns != columns || renderObject.perRow != perRow) {
+    if (renderObject.columns != columns) {
       renderObject.columns = columns;
-      renderObject.perRow = perRow;
       renderObject.markNeedsLayout();
     }
   }
@@ -586,8 +577,7 @@ class _CardGrid extends RenderBox
           ContainerBoxParentData<RenderBox>
         > {
   int columns;
-  bool perRow;
-  _CardGrid(this.columns, this.perRow);
+  _CardGrid(this.columns);
 
   @override
   void setupParentData(RenderBox child) {
@@ -598,8 +588,7 @@ class _CardGrid extends RenderBox
   void performLayout() {
     final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
     final rows = (childCount / columns).ceil();
-    // Measure first: a row's height is its tallest card's, or the grid's
-    // tallest card's when every card shares one height.
+    // Measure first so every card shares the height of the tallest card.
     final heights = List<double>.filled(rows, 0);
     var tallest = 0.0;
     var index = 0;
@@ -612,7 +601,7 @@ class _CardGrid extends RenderBox
       index++;
       child = childAfter(child);
     }
-    if (!perRow) heights.fillRange(0, rows, tallest);
+    heights.fillRange(0, rows, tallest);
     var top = 0.0;
     index = 0;
     child = firstChild;
