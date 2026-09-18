@@ -4,6 +4,7 @@ import {
   type LlmUsageV1,
   type ModelProviderFailureClassV1,
   type NormalizedModelRequest,
+  ModelOutcomeUncertainErrorV1,
   ModelProviderFailureError,
   StructuredOutputValidationError,
   type ToolCall,
@@ -171,6 +172,11 @@ export async function requestModelV1(
       // for it, even though the next one carries the same id.
       await runtime.notifyModelOutcome(request.requestId);
       if (error instanceof StructuredOutputValidationError) throw error;
+      // An outcome the provider never confirmed is settled here: the estimate
+      // has been recorded by the dispatch that made it, and sending it again
+      // would be a second paid call for one effect. It settles before the
+      // retry policy and before the hook that could ask for a fallback.
+      if (error instanceof ModelOutcomeUncertainErrorV1) throw error;
       signal.throwIfAborted();
       const classification = failureClassificationV1(error);
       const retry = nextModelRetryV1({

@@ -1274,6 +1274,128 @@ function requireStructuredOutputFailureV1(value: unknown, label: string): void {
 }
 
 /**
+ * The exact v1 decoder for one normalized stream event.
+ *
+ * Exported because the event crosses a seam inbound: a model provider Plugin
+ * answers with the same normalized vocabulary the kernel would have decoded
+ * from a Package, and every inbound value is decoded where it crosses.
+ */
+export function decodeLlmStreamEventV1(
+  value: unknown,
+  label = "llm stream event",
+): LlmStreamEvent {
+  const event = eventRecord(value, label);
+  const type = eventString(event.type, `${label}.type`);
+  switch (type) {
+    case "provider-state":
+      requireEventKeys(event, ["type", "state"], label);
+      requireModelReplayStateV1(event.state, `${label}.state`);
+      break;
+    case "text-delta":
+      requireEventKeys(event, ["type", "text"], label);
+      // A delta may be empty: a provider that streams a tool call only still
+      // opens with a delta event carrying no text.
+      eventString(event.text, `${label}.text`, true);
+      break;
+    case "tool-call":
+      requireEventKeys(event, ["type", "call"], label);
+      requireToolCall(event.call, `${label}.call`);
+      break;
+    case "usage": {
+      requireEventKeys(event, ["type", "usage"], label);
+      const usage = eventRecord(event.usage, `${label}.usage`);
+      requireEventKeys(
+        usage,
+        [
+          "inputTokens",
+          "outputTokens",
+          ...(Object.hasOwn(usage, "cachedInputTokens")
+            ? ["cachedInputTokens"]
+            : []),
+          ...(Object.hasOwn(usage, "reasoningTokens")
+            ? ["reasoningTokens"]
+            : []),
+        ],
+        `${label}.usage`,
+      );
+      const inputTokens = eventInteger(
+        usage.inputTokens,
+        `${label}.usage.inputTokens`,
+        0,
+      );
+      const outputTokens = eventInteger(
+        usage.outputTokens,
+        `${label}.usage.outputTokens`,
+        0,
+      );
+      if (usage.cachedInputTokens !== undefined) {
+        const cached = eventInteger(
+          usage.cachedInputTokens,
+          `${label}.usage.cachedInputTokens`,
+          0,
+        );
+        if (cached > inputTokens) {
+          throw new Error(
+            `${label}.usage.cachedInputTokens exceeds inputTokens`,
+          );
+        }
+      }
+      if (usage.reasoningTokens !== undefined) {
+        const reasoning = eventInteger(
+          usage.reasoningTokens,
+          `${label}.usage.reasoningTokens`,
+          0,
+        );
+        if (reasoning > outputTokens) {
+          throw new Error(
+            `${label}.usage.reasoningTokens exceeds outputTokens`,
+          );
+        }
+      }
+      break;
+    }
+    case "response-format-note": {
+      requireEventKeys(event, ["type", "note"], label);
+      const note = eventRecord(event.note, `${label}.note`);
+      requireEventKeys(
+        note,
+        ["code", "requested", "effective", "message"],
+        `${label}.note`,
+      );
+      if (note.code !== "structured-output-downgraded") {
+        throw new Error(`${label}.note.code is invalid`);
+      }
+      if (note.requested !== "json_schema" && note.requested !== "json") {
+        throw new Error(`${label}.note.requested is invalid`);
+      }
+      if (note.effective !== "json" && note.effective !== "prompt") {
+        throw new Error(`${label}.note.effective is invalid`);
+      }
+      eventString(note.message, `${label}.note.message`);
+      break;
+    }
+    case "structured-output-failure":
+      requireEventKeys(event, ["type", "failure"], label);
+      requireStructuredOutputFailureV1(event.failure, `${label}.failure`);
+      break;
+    case "finish":
+      requireEventKeys(event, ["type", "reason"], label);
+      if (
+        event.reason !== "completed" &&
+        event.reason !== "tool-calls" &&
+        event.reason !== "max-tokens"
+      ) {
+        throw new Error(`${label}.reason is invalid`);
+      }
+      break;
+    default:
+      throw new Error(`${label}.type is invalid`);
+  }
+  // SAFETY: the switch validated every variant's fields exactly.
+  return event as unknown as LlmStreamEvent;
+}
+
+/**
  * The exact v1 decoder for a normalized model request. Exported because the
  * request crosses the Bot isolate boundary inbound — a Bot-authored model
  * adapter composes it — and every inbound value is decoded at its seam.

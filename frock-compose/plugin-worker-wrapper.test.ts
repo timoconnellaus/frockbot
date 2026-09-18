@@ -11,6 +11,7 @@ import {
   BOT_ISOLATE_CARD_SOURCE,
   BOT_ISOLATE_DECLARATION_SOURCE,
   BOT_ISOLATE_INVOCATION_SOURCE,
+  BOT_ISOLATE_MODEL_PROVIDER_SOURCE,
   BOT_ISOLATE_MODEL_SOURCE,
   BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1,
   BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1,
@@ -53,6 +54,7 @@ type NarrowContext = (
   invocation: Record<string, unknown>,
   plugin: Record<string, unknown>,
   deadlineMs: number,
+  transportId?: string,
 ) => Record<string, unknown>;
 
 const narrowContext = new Function(
@@ -60,7 +62,7 @@ const narrowContext = new Function(
 )() as NarrowContext;
 
 const declarations = new Function(
-  `${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_DECLARATION_SOURCE}\nreturn { declaredTools, declaredHooks, declaredServices, declaredTriggers, declaredViews, declaredCards };`,
+  `${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_DECLARATION_SOURCE}\nreturn { declaredTools, declaredHooks, declaredServices, declaredTriggers, declaredViews, declaredCards, declaredModelProviders };`,
 )() as {
   declaredTools: (module: unknown, pluginId: string) => unknown[];
   declaredHooks: (module: unknown, pluginId: string) => string[];
@@ -71,6 +73,7 @@ const declarations = new Function(
     module: unknown,
     pluginId: string,
   ) => { id: string; actions: string[] }[];
+  declaredModelProviders: (module: unknown, pluginId: string) => string[];
 };
 
 function invocation(overrides: Record<string, unknown> = {}) {
@@ -418,9 +421,12 @@ describe("the generated wrapper's invocation decoders", () => {
 
 describe("the generated index module map", () => {
   test("the wrapper context keys equal the generated contract catalog", () => {
-    expect(BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1).toEqual([
-      ...BOT_ISOLATE_CONTEXT_KEYS_V1,
-    ]);
+    // The catalog is sorted by the field names in `isolate.ts`; the wrapper's
+    // list is grouped by where each member comes from, so the two are compared
+    // as sets.
+    expect([...BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1].toSorted()).toEqual(
+      [...BOT_ISOLATE_CONTEXT_KEYS_V1].toSorted(),
+    );
   });
 
   test("is the index plus one module per plugin, imported in mount order", () => {
@@ -555,6 +561,9 @@ describe("the generated wrapper's narrowed context", () => {
         services: {},
       },
       1_000,
+      // The credentialed transport is present while a model call is being
+      // served, which is the one invocation that carries a ticket.
+      "ticket-1",
     );
     expect(Object.keys(context).toSorted()).toEqual(
       [...BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1].toSorted(),
@@ -1441,5 +1450,151 @@ describe("the generated wrapper's card handlers", () => {
     expect(() =>
       decodeRenderCardInvocation(renderInvocation({ extra: 1 })),
     ).toThrow(/invalid fields/);
+  });
+});
+
+/**
+ * The model provider half of the wrapper (ADR 0032): what a Plugin's answer
+ * becomes on the wire, and what happens to a provider that stops producing
+ * one.
+ */
+type ModelStream = {
+  runModelStream: (
+    invocation: Record<string, unknown>,
+    resolve: (pluginId: string) => unknown,
+    contextFor: (
+      invocation: Record<string, unknown>,
+      plugin: unknown,
+      deadlineMs: number,
+      transportId: string,
+    ) => unknown,
+  ) => Promise<{
+    status: string;
+    events?: ReadableStream<Uint8Array>;
+    reason?: string;
+  }>;
+};
+
+const modelProvider = new Function(
+  `${BOT_ISOLATE_ERROR_TEXT_SOURCE}\n${BOT_ISOLATE_MODEL_SOURCE}\n${BOT_ISOLATE_MODEL_PROVIDER_SOURCE}\nreturn { runModelStream };`,
+)() as ModelStream;
+
+const modelInvocation = {
+  schemaVersion: 1,
+  pluginId: "deepseek",
+  provider: "deepseek",
+  protocolVersion: 1,
+  request: { provider: "deepseek" },
+  transportId: "ticket-1",
+  botId: "bot-1",
+  sessionId: "session-1",
+  runId: "run-1",
+  turnId: "run-1",
+  generationId: "gen-1",
+  deadlineMs: 30,
+  firstEventDeadlineMs: 30,
+};
+
+function modelPlugin(stream: () => AsyncIterable<unknown>) {
+  return () => ({
+    modelProviders: ["deepseek"],
+    module: { modelProviders: { deepseek: { stream } } },
+  });
+}
+
+async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) return text;
+    text += decoder.decode(chunk.value);
+  }
+}
+
+describe("the wrapper's model provider stream", () => {
+  test("declares the providers a module serves", () => {
+    expect(
+      declarations.declaredModelProviders(
+        { modelProviders: { deepseek: { stream: () => [] } } },
+        "deepseek",
+      ),
+    ).toEqual(["deepseek"]);
+    expect(() =>
+      declarations.declaredModelProviders(
+        { modelProviders: { deepseek: {} } },
+        "deepseek",
+      ),
+    ).toThrow(/stream function/);
+  });
+
+  test("encodes each event as one NDJSON line", async () => {
+    const result = await modelProvider.runModelStream(
+      modelInvocation,
+      modelPlugin(async function* () {
+        yield { type: "text-delta", text: "hi" };
+        yield { type: "finish", reason: "completed" };
+      }),
+      () => ({}),
+    );
+    expect(result.status).toBe("streaming");
+    expect(await readStream(result.events!)).toBe(
+      '{"type":"text-delta","text":"hi"}\n{"type":"finish","reason":"completed"}\n',
+    );
+  });
+
+  test("refuses a provider that says nothing at all", async () => {
+    const result = await modelProvider.runModelStream(
+      modelInvocation,
+      modelPlugin(async function* () {
+        await new Promise(() => {});
+        yield { type: "finish", reason: "completed" };
+      }),
+      () => ({}),
+    );
+    expect(result.status).toBe("streaming");
+    await expect(readStream(result.events!)).rejects.toThrow(
+      "the model provider produced no event for 30ms",
+    );
+  });
+
+  test("returns the generator when the stream is cancelled", async () => {
+    let returned = false;
+    const result = await modelProvider.runModelStream(
+      modelInvocation,
+      modelPlugin(async function* () {
+        try {
+          for (;;) {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+            yield { type: "text-delta", text: "tick" };
+          }
+        } finally {
+          returned = true;
+        }
+      }),
+      () => ({}),
+    );
+    const reader = result.events!.getReader();
+    await reader.read();
+    await reader.cancel();
+    expect(returned).toBe(true);
+  });
+
+  test("refuses a Plugin that does not serve the provider", async () => {
+    const result = await modelProvider.runModelStream(
+      modelInvocation,
+      () => ({
+        modelProviders: ["openai"],
+        module: {
+          modelProviders: { openai: { stream: async function* () {} } },
+        },
+      }),
+      () => ({}),
+    );
+    expect(result).toMatchObject({
+      status: "refused",
+      reason: 'plugin "deepseek" does not serve provider "deepseek"',
+    });
   });
 });

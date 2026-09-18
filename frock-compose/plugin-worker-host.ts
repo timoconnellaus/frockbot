@@ -60,13 +60,18 @@ import {
 } from "@frockbot/core/contracts";
 import {
   cardSurfacePrefixV1,
+  decodePluginWorkerModelResultV1,
   pluginCardToolNameV1,
+  pluginModelProviderV1,
   validateAgainstJsonSchemaV1,
+  PLUGIN_MODEL_PROTOCOL_VERSIONS_V1,
   type PluginCardDecisionV1,
   type PluginCardV1,
   type PluginDescriptorV1,
   type PluginGrantV1,
+  type PluginModelInvocationV1,
   type PluginSlotV1,
+  type PluginWorkerModelResultV1,
 } from "@frockbot/core/contracts";
 import { createConcurrencyLimiterV1 } from "@frockbot/core/concurrency";
 import {
@@ -273,6 +278,38 @@ export interface PluginWorkerHostOptions {
    * no tools here and is left out of every hook's enabled list.
    */
   enabled?: readonly string[];
+  /**
+   * The model provider contribution this mount offers (ADR 0032): the
+   * provider the Bot's model selection names, and the deployment's own entry
+   * for it — which Plugin may serve it, and the artifact that Plugin is.
+   *
+   * Only that Plugin, at that artifact, serves it. A member declaring the
+   * provider whose id or artifact differs — a Plugin a Bot wrote, above all —
+   * is refused here, and so is a second claimant. Absent leaves every model
+   * contribution unmounted.
+   *
+   * Selection is what runs a provider contribution, not the Bot's plugin
+   * switch: a Bot whose model is this provider is served by it whatever the
+   * switch says, and the switch's own tools and hooks stay off until it is
+   * on.
+   */
+  modelProviders?: {
+    provider: string;
+    trusted: {
+      pluginId: string;
+      /** The content hash of the catalog's own artifact for that Plugin. */
+      contentHash: string;
+    };
+    /** Every provider id this deployment opens to Plugins at all. */
+    open: readonly string[];
+  };
+}
+
+/** One model provider contribution this worker mounted and this Bot selected. */
+export interface MountedModelProviderV1 {
+  pluginId: string;
+  providerId: string;
+  protocolVersion: number;
 }
 
 /** One card draw a Plugin could not answer, charged to its health. */
@@ -375,6 +412,22 @@ export interface PreparedPluginWorker {
 }
 
 export interface ActivePluginWorker {
+  /**
+   * The model provider contributions this Bot's selection runs, each served
+   * by a Plugin this worker verified and mounted (ADR 0032). Empty when the
+   * selection names no provider a mounted Plugin serves.
+   */
+  readonly modelProviders: readonly MountedModelProviderV1[];
+  /**
+   * One model call, served by the Plugin that declared the provider. The
+   * answer carries its events as an NDJSON byte stream, bounded by the
+   * invocation's silence allowance. A Plugin this worker did not verify, or
+   * that does not serve the provider, is refused before the worker is
+   * reached.
+   */
+  streamModel(
+    invocation: PluginModelInvocationV1,
+  ): Promise<PluginWorkerModelResultV1>;
   /**
    * Delivers an app-owned trigger to one Plugin. Only a Plugin this worker
    * verified and enabled runs: the index knows nothing of the host's verified
@@ -611,8 +664,38 @@ export class PluginWorkerHost {
   ): Promise<PreparedPluginWorker> {
     const failures: PluginMountFailureV1[] = [];
     const refused = new Set<string>();
+    // One provider, one contribution, and it is the deployment's own. The
+    // generation lists its members in package-id order, so the first claimant
+    // that is the trusted Plugin at the trusted artifact serves it; every
+    // other claimant — a Bot-written Plugin above all — fails alone with the
+    // reason, and a Plugin that fails reserves nothing.
+    const claimed = new Set<string>();
+    const trusted = this.options.modelProviders?.trusted;
     for (const member of members) {
-      const refusal = this.refusal(member);
+      const providers = member.descriptor.modelProviders ?? [];
+      const untrusted = providers.find(
+        (provider) =>
+          provider.id === this.options.modelProviders?.provider &&
+          trusted !== undefined &&
+          (member.packageId !== trusted.pluginId ||
+            member.artifact.contentHash !== trusted.contentHash),
+      );
+      const claimedAlready =
+        untrusted === undefined
+          ? providers.find((provider) => claimed.has(provider.id))
+          : undefined;
+      const refusal =
+        untrusted !== undefined
+          ? `plugin "${member.packageId}" claims model provider "${untrusted.id}", which this deployment serves only through the Plugin "${trusted!.pluginId}" at its own artifact`
+          : claimedAlready === undefined
+            ? this.refusal(member)
+            : `plugin "${member.packageId}" serves model provider "${claimedAlready.id}", which an earlier plugin in this generation already serves`;
+      // Only a Plugin that mounts reserves its provider: a refused claimant —
+      // a Bot's own code above all — must not be able to take the provider
+      // away from the deployment's own Plugin by claiming it first.
+      if (refusal === undefined) {
+        for (const provider of providers) claimed.add(provider.id);
+      }
       if (!refusal) continue;
       failures.push({
         pluginId: member.packageId,
@@ -666,6 +749,13 @@ export class PluginWorkerHost {
         failures,
         commit: () =>
           Promise.resolve({
+            modelProviders: [],
+            streamModel: (invocation: PluginModelInvocationV1) =>
+              Promise.resolve<PluginWorkerModelResultV1>({
+                schemaVersion: 1,
+                status: "refused",
+                reason: `plugin "${invocation.pluginId}" did not mount in this generation`,
+              }),
             deliverTrigger: (invocation: PluginWorkerTriggerInvocationV1) =>
               Promise.resolve(droppedTrigger(invocation.pluginId)),
             renderView: (invocation: PluginWorkerViewInvocationV1) =>
@@ -800,6 +890,29 @@ export class PluginWorkerHost {
     let disposed = false;
     const registered: (() => void)[] = [];
     const mounted = surviving.map(({ member }) => member.packageId);
+    // The model provider contributions this Bot's selection runs. They are
+    // chosen from what mounted and survived — never from the Bot's switch,
+    // because selecting a provider is the decision that runs it — and only
+    // for the one provider the selection named.
+    const selectedProvider = this.options.modelProviders?.provider;
+    const modelProviders: MountedModelProviderV1[] =
+      selectedProvider === undefined
+        ? []
+        : surviving.flatMap(({ member }) => {
+            const provider = pluginModelProviderV1(
+              member.descriptor,
+              selectedProvider,
+            );
+            return provider === undefined
+              ? []
+              : [
+                  {
+                    pluginId: member.packageId,
+                    providerId: provider.id,
+                    protocolVersion: provider.protocolVersion,
+                  },
+                ];
+          });
     // Of the Plugins that mounted and survived, this Bot runs the ones its
     // own enable map allows. The others stay in the worker — it is per User
     // — but register no tools here and are left out of every hook's list.
@@ -858,6 +971,49 @@ export class PluginWorkerHost {
           );
         }
         return Promise.resolve({
+          modelProviders,
+          streamModel: async (
+            invocation: PluginModelInvocationV1,
+          ): Promise<PluginWorkerModelResultV1> => {
+            const refuse = (reason: string): PluginWorkerModelResultV1 => ({
+              schemaVersion: 1,
+              status: "refused",
+              reason: reason.slice(0, MAX_FAILURE_REASON_V1),
+            });
+            if (disposed) {
+              return refuse(
+                "the plugin worker for this generation is no longer mounted",
+              );
+            }
+            const serving = modelProviders.find(
+              (provider) => provider.pluginId === invocation.pluginId,
+            );
+            if (!serving || !live.has(invocation.pluginId)) {
+              return refuse(
+                `plugin "${invocation.pluginId}" did not mount in this generation`,
+              );
+            }
+            if (invocation.provider !== serving.providerId) {
+              return refuse(
+                `plugin "${invocation.pluginId}" serves "${serving.providerId}", not "${invocation.provider}"`,
+              );
+            }
+            const deadlineMs = Math.min(
+              invocation.deadlineMs,
+              ISOLATE_MAX_DEADLINE_MS - PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+            );
+            try {
+              return decodePluginWorkerModelResultV1(
+                await raceDeadline(
+                  () => entrypoint.streamModel({ ...invocation, deadlineMs }),
+                  deadlineMs + PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+                ),
+                `plugin "${invocation.pluginId}" model result`,
+              );
+            } catch (error) {
+              return refuse(errorMessage(error));
+            }
+          },
           deliverTrigger: async (
             invocation: PluginWorkerTriggerInvocationV1,
           ): Promise<PluginWorkerTriggerResultV1> => {
@@ -1081,6 +1237,22 @@ export class PluginWorkerHost {
     if (closedSlots.length > 0) {
       return `plugin "${pluginId}" declares slots this deployment has not opened: ${[...new Set(closedSlots)].join(", ")}`;
     }
+    const open = this.options.modelProviders?.open ?? [];
+    const closedProviders = (descriptor.modelProviders ?? []).filter(
+      (provider) => !open.includes(provider.id),
+    );
+    if (closedProviders.length > 0) {
+      return `plugin "${pluginId}" serves model providers this deployment does not open to plugins: ${closedProviders
+        .map((provider) => provider.id)
+        .join(", ")}`;
+    }
+    const unserved = (descriptor.modelProviders ?? []).find(
+      (provider) =>
+        !PLUGIN_MODEL_PROTOCOL_VERSIONS_V1.includes(provider.protocolVersion),
+    );
+    if (unserved) {
+      return `plugin "${pluginId}" serves model provider "${unserved.id}" over protocol ${unserved.protocolVersion}, which this deployment does not serve`;
+    }
     return undefined;
   }
 
@@ -1160,6 +1332,19 @@ export class PluginWorkerHost {
       declaredViews.some((name, index) => name !== reportedViews[index])
     ) {
       return `plugin "${pluginId}" views do not match its declared views (declared:${declaredViews.join(",")} reported:${reportedViews.join(",")})`;
+    }
+    // A provider the descriptor declares and the module does not serve would
+    // mount a contribution whose one method is missing; the reverse would run
+    // provider code the descriptor, the card and the User never saw.
+    const declaredProviders = (descriptor.modelProviders ?? [])
+      .map((provider) => provider.id)
+      .toSorted();
+    const reportedProviders = [...reported.modelProviders].toSorted();
+    if (
+      declaredProviders.length !== reportedProviders.length ||
+      declaredProviders.some((name, index) => name !== reportedProviders[index])
+    ) {
+      return `plugin "${pluginId}" model providers do not match its declared model providers (declared:${declaredProviders.join(",")} reported:${reportedProviders.join(",")})`;
     }
     return undefined;
   }

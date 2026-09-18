@@ -80,6 +80,7 @@ import {
 } from "@frockbot/app/applets-host/bot";
 import {
   isolateConnection,
+  isolateModelTransport,
   isolateAuthority,
   isolateInvokeModel,
   isolateSettings,
@@ -1481,6 +1482,15 @@ export class BotState extends DurableObject<BotStateEnv> {
         }
         return value;
       }) as never,
+    );
+  }
+
+  async isolateModelTransport(input: unknown) {
+    return isolateModelTransport(
+      (await this.contribution()).state,
+      // The transport request is decoded where the ticket is spent, so a
+      // malformed call is refused without costing the dispatch its attempt.
+      decodeIsolateCallRpcV1(input, (value) => value) as never,
     );
   }
 

@@ -212,6 +212,14 @@ render on the Plugin's card through the existing settings `ViewDocument`. The
 Bot edits them in conversation through the same action. Secrets never enter
 Plugin settings; a secret is a Connection.
 
+> Amended 2026-09-18, by [ADR 0032](0032-plugin-model-providers.md). A Plugin
+> may now serve a model provider: `modelProviders` in the descriptor, a
+> normalized-request/stream-events protocol, and a host transport that is the
+> only thing holding the Connection's credential. It is a sixth capability in
+> the same sense the hooks are — the descriptor declares it, the deployment's
+> provider catalog decides whether it may be served, and the Bot Durable
+> Object admits each upstream call against the Turn's own durable effect.
+
 ### Applets
 
 Applets keep their own loader and facet for now. Both Applets and Plugins use

@@ -130,6 +130,8 @@ async function mountPluginWorkerV1(
   return {
     status: "mounted",
     active: {
+      modelProviders: active.modelProviders,
+      streamModel: (invocation) => active.streamModel(invocation),
       deliverTrigger: (invocation) => active.deliverTrigger(invocation),
       renderView: (invocation) => active.renderView(invocation),
       cardAction: (invocation) => active.cardAction(invocation),

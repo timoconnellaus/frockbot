@@ -345,6 +345,10 @@ export async function executeTurn(
           ),
         remainingEffectAdmissions: () =>
           remainingRunEffectAdmissions(state, input.command.runId),
+        // A model provider Plugin this Bot's selection runs (ADR 0032): the
+        // provider contribution registers here, and the credential lease it
+        // takes is settled where the loop settles the outcome.
+        ...(runtime.pluginModel ? { pluginModel: runtime.pluginModel } : {}),
         ...(isolate ? { isolate } : {}),
         ...(appletRouting ? { applets: appletRouting } : {}),
       }).mount(mounting, signal);

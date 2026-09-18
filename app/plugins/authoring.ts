@@ -279,6 +279,12 @@ export function pluginManifestDisagreementV1(
   if (!sameNames(cards, manifest.cards ?? [])) {
     return `plugin.json declares cards [${cards.join(", ")}] but plugin.ts exports cards [${(manifest.cards ?? []).join(", ")}]`;
   }
+  const modelProviders = (descriptor.modelProviders ?? []).map(
+    (provider) => provider.id,
+  );
+  if (!sameNames(modelProviders, manifest.modelProviders ?? [])) {
+    return `plugin.json declares model providers [${modelProviders.join(", ")}] but plugin.ts exports model providers [${(manifest.modelProviders ?? []).join(", ")}]`;
+  }
   return undefined;
 }
 

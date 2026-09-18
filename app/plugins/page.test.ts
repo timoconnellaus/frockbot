@@ -5,8 +5,12 @@ import {
   decodePluginToolCommandV1,
   decodeSetBotPluginEnabledCommandV1,
   pluginNetworkCopyV1,
+  isPureModelProviderPluginV1,
+  pluginModelProviderCopyV1,
+  pluginServedModelProviderIdsForMemberV1,
   type BotPluginsFrameV1,
 } from "./page.js";
+import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "./catalog.js";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./seeded/artifacts.generated.js";
 
 const frame: BotPluginsFrameV1 = {
@@ -292,5 +296,123 @@ describe("a control command", () => {
     expect(() =>
       decodeBotPluginsCommandV1({ ...command, kind: "other" }),
     ).toThrow(/invalid fields/);
+  });
+});
+
+describe("what a row says about a model provider", () => {
+  test("names the deployment's provider, and not the Plugin's own claim", () => {
+    expect(pluginModelProviderCopyV1(["deepseek"])).toBe(
+      "Provides DeepSeek models. Choose a model in Models.",
+    );
+    // A provider this deployment does not serve through plugins: nothing runs
+    // it, so no surface promises that it does.
+    expect(pluginModelProviderCopyV1(["openai"])).toBe("");
+    expect(pluginModelProviderCopyV1(undefined)).toBe("");
+  });
+
+  test("a provider-only Plugin is a read-only row; one with tools keeps its switch", () => {
+    expect(
+      isPureModelProviderPluginV1({
+        modelProviders: ["deepseek"],
+        tools: [],
+        hooks: [],
+      }),
+    ).toBe(true);
+    expect(
+      isPureModelProviderPluginV1({
+        modelProviders: ["deepseek"],
+        tools: [{ name: "ping" }],
+        hooks: [],
+      }),
+    ).toBe(false);
+    expect(
+      isPureModelProviderPluginV1({
+        modelProviders: ["deepseek"],
+        tools: [],
+        hooks: ["agent/request"],
+      }),
+    ).toBe(false);
+    // A claim the deployment does not serve is not a contribution.
+    expect(
+      isPureModelProviderPluginV1({
+        modelProviders: ["openai"],
+        tools: [],
+        hooks: [],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("which member is the deployment's provider Plugin", () => {
+  const authoritative = DEPLOYMENT_PLUGIN_CATALOG_V1.find(
+    (plugin) => plugin.pluginId === "deepseek",
+  )!;
+
+  test("only the catalog's own Plugin, at the catalog's own artifact, serves", () => {
+    expect(
+      pluginServedModelProviderIdsForMemberV1({
+        packageId: "deepseek",
+        artifact: { contentHash: authoritative.artifact.contentHash },
+        modelProviders: ["deepseek"],
+      }),
+    ).toEqual(["deepseek"]);
+  });
+
+  test("a Bot-written claimant is served by nothing, whoever it names itself", () => {
+    // Its own bytes...
+    expect(
+      pluginServedModelProviderIdsForMemberV1({
+        packageId: "aaa-shadow",
+        artifact: { contentHash: "b".repeat(64) },
+        modelProviders: ["deepseek"],
+      }),
+    ).toEqual([]);
+    // ...or the deployment's bytes under another id, which is not its id.
+    expect(
+      pluginServedModelProviderIdsForMemberV1({
+        packageId: "aaa-shadow",
+        artifact: { contentHash: authoritative.artifact.contentHash },
+        modelProviders: ["deepseek"],
+      }),
+    ).toEqual([]);
+    // ...or the deployment's id at other bytes.
+    expect(
+      pluginServedModelProviderIdsForMemberV1({
+        packageId: "deepseek",
+        artifact: { contentHash: "b".repeat(64) },
+        modelProviders: ["deepseek"],
+      }),
+    ).toEqual([]);
+  });
+
+  test("a claimant that serves nothing keeps its switch; the real one reads as a provider row", () => {
+    const shadow = {
+      packageId: "aaa-shadow",
+      artifact: { contentHash: "b".repeat(64) },
+      modelProviders: ["deepseek"],
+      tools: [],
+      hooks: [],
+    };
+    expect(
+      isPureModelProviderPluginV1({
+        modelProviders: pluginServedModelProviderIdsForMemberV1(shadow),
+        tools: shadow.tools,
+        hooks: shadow.hooks,
+      }),
+    ).toBe(false);
+    const real = {
+      packageId: "deepseek",
+      artifact: { contentHash: authoritative.artifact.contentHash },
+      modelProviders: ["deepseek"],
+      tools: [],
+      hooks: [],
+    };
+    expect(
+      isPureModelProviderPluginV1({
+        modelProviders: pluginServedModelProviderIdsForMemberV1(real),
+        tools: real.tools,
+        hooks: real.hooks,
+      }),
+    ).toBe(true);
   });
 });

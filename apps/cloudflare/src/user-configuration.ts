@@ -96,6 +96,7 @@ import {
 } from "@frockbot/core/durable";
 import {
   readUserCompositionV1,
+  reconcileInstalledProviderPluginsV1,
   userCompositionFailuresV1,
   userCompositionStoreV1,
 } from "@frockbot/app/composition/user";
@@ -748,6 +749,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       (await this.ctx.storage.get<unknown>(USER_FEATURES_KEY)) ??
         defaultUserFeaturesV1(),
     );
+    const settings = await (await this.settingsContribution()).read(userId);
     return readUserCompositionV1(
       { ctx: this.ctx },
       {
@@ -759,6 +761,9 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
           ? DEPLOYMENT_PLUGIN_CATALOG_V1
           : ([] as typeof DEPLOYMENT_PLUGIN_CATALOG_V1),
         adminOpened: features.plugins,
+        installedPackageIds: settings.packages
+          .filter((pkg) => pkg.state === "installed")
+          .map((pkg) => pkg.packageId),
       },
     );
   }
@@ -995,7 +1000,42 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     if (receipt.status === "applied" && before !== undefined) {
       await this.propagateRoutineTimezone(request.userId, before);
     }
+    if (
+      receipt.status === "applied" &&
+      (request.command.type === "user/install-package" ||
+        request.command.type === "user/uninstall-package" ||
+        request.command.type === "user/set-package-enabled")
+    ) {
+      // A Package an account installs or uninstalls can be one this
+      // deployment serves through a Plugin (ADR 0032): the artifact follows
+      // the Package into this User's Composition, by the account's own
+      // command and by no default. A failed reconciliation is not a failed
+      // command — the settings write already landed — so it is swallowed
+      // here and repaired by the next install, uninstall or read.
+      await this.reconcileInstalledPlugins(request.userId).catch(
+        () => undefined,
+      );
+    }
     return receipt;
+  }
+
+  /**
+   * The provider Plugins this account's installed Packages carry, reconciled
+   * into its Composition. Idempotent: a generation is proposed only when the
+   * set of `installed` members differs from what the Packages say.
+   */
+  private async reconcileInstalledPlugins(userId: string): Promise<void> {
+    const settings = await (await this.settingsContribution()).read(userId);
+    await reconcileInstalledProviderPluginsV1({
+      store: userCompositionStoreV1({ ctx: this.ctx }),
+      userId,
+      // A deployment with no Worker Loader mounts no Plugin, so it installs
+      // none: a member nothing can mount would fail every Turn of every Bot.
+      catalog: this.env.BOT_PACKAGES ? DEPLOYMENT_PLUGIN_CATALOG_V1 : [],
+      installedPackageIds: settings.packages
+        .filter((pkg) => pkg.state === "installed")
+        .map((pkg) => pkg.packageId),
+    });
   }
 
   async executeConnection(input: unknown) {

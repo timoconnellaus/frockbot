@@ -15,6 +15,7 @@ import {
   type SubagentDurableBindingV1,
 } from "@frockbot/app/subagents/durable-binding";
 import type { AppletInstanceNamespaceV1 } from "@frockbot/app/applets-host/records";
+import { PluginModelDispatchRegistryV1 } from "@frockbot/app/isolates/model-dispatch";
 import type { ShellMountedComposition } from "./backend-composition.js";
 import { storedRunCodecV1 } from "./backend-contracts.js";
 import type { NativeAiBindingV1 } from "./backend-image.js";
@@ -264,6 +265,13 @@ export class ShellBotStateV1 {
   readonly application: ShellApplicationV1;
   /** The Turn currently executing on this object. */
   readonly turn = new ActiveTurnSlotV1();
+  /**
+   * The model dispatches this object is serving for its Plugins (ADR 0032):
+   * the one-shot tickets a model provider Plugin's transport call presents.
+   * Memory, never storage — a dispatch lives inside one attempt at one model
+   * call, and the loop re-dispatches with a fresh ticket after an eviction.
+   */
+  readonly modelTransports = new PluginModelDispatchRegistryV1();
   /**
    * The Routines authority for this Bot. One store per object, over the same
    * Durable Object storage every other durable record lives in.

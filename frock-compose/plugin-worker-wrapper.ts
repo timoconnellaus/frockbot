@@ -44,6 +44,7 @@ export const BOT_ISOLATE_DEADLINE_SOURCE = `function withIsolateDeadline(work, d
  */
 export const BOT_ISOLATE_INVOCATION_SOURCE = `var TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 var PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
+var PROVIDER_ID = /^[a-z][a-z0-9-]{0,63}$/;
 var TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 var SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 var CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
@@ -127,6 +128,58 @@ function decodeHookInvocation(value) {
     throw new Error("plugin worker hook invocation enabled is invalid");
   }
   identityFields(value, "plugin worker hook invocation");
+  return value;
+}
+var MODEL_INVOCATION_KEYS = [
+  "schemaVersion",
+  "pluginId",
+  "provider",
+  "protocolVersion",
+  "request",
+  "transportId",
+  "botId",
+  "sessionId",
+  "runId",
+  "turnId",
+  "generationId",
+  "deadlineMs",
+  "firstEventDeadlineMs",
+];
+function decodeModelInvocation(value) {
+  exactKeys(value, MODEL_INVOCATION_KEYS, "plugin model invocation");
+  if (value.schemaVersion !== 1) {
+    throw new Error("plugin model invocation schemaVersion is unsupported");
+  }
+  if (typeof value.pluginId !== "string" || !PLUGIN_ID.test(value.pluginId)) {
+    throw new Error("plugin model invocation pluginId is invalid");
+  }
+  if (typeof value.provider !== "string" || !PROVIDER_ID.test(value.provider)) {
+    throw new Error("plugin model invocation provider is invalid");
+  }
+  if (!isRecord(value.request) || value.request.provider !== value.provider) {
+    throw new Error("plugin model invocation request is invalid");
+  }
+  if (value.request.modelBinding !== undefined) {
+    throw new Error("plugin model invocation request must not carry a Connection binding");
+  }
+  if (typeof value.transportId !== "string" || value.transportId.length === 0) {
+    throw new Error("plugin model invocation transportId is invalid");
+  }
+  identityFields(value, "plugin model invocation");
+  if (
+    !Number.isSafeInteger(value.deadlineMs) ||
+    value.deadlineMs <= 0 ||
+    value.deadlineMs > 60000
+  ) {
+    throw new Error("plugin model invocation deadlineMs is out of range");
+  }
+  if (
+    !Number.isSafeInteger(value.firstEventDeadlineMs) ||
+    value.firstEventDeadlineMs < value.deadlineMs ||
+    value.firstEventDeadlineMs > 120000
+  ) {
+    throw new Error("plugin model invocation firstEventDeadlineMs is out of range");
+  }
   return value;
 }
 var TRIGGER_INVOCATION_KEYS = [
@@ -429,15 +482,130 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
   ],
 } satisfies Record<string, [keyof BotPackageContextV1, string][]>;
 
-/** The keys the generated wrapper places on `ctx` when every grant is held. */
+/**
+ * The keys the generated wrapper can place on `ctx`. Every grant member is
+ * there when its grant is held; `modelTransport` is there only while a model
+ * call is being served, which is why the SDK declares it optional like a
+ * grant member rather than always-present like `ctx.bot`.
+ */
 export const BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1 = [
   ...Object.keys(BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1),
   ...Object.values(BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1).flatMap((members) =>
     members.map(([key]) => key),
   ),
+  "modelTransport",
 ] as Array<keyof BotPackageContextV1>;
 
-export const BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1 = `function narrowContext(env, invocation, plugin, deadlineMs) {
+/**
+ * One model provider's answer (ADR 0032), shared verbatim between the
+ * generated wrapper and the Bun test that proves it.
+ *
+ * The Plugin's `stream` is an async iterable of normalized events; the
+ * boundary carries bytes, so the wrapper encodes each event as one NDJSON
+ * line. The deadline is the model protocol's silence allowance rather than a
+ * bound on the whole answer: a reply may stream for minutes, and the timer is
+ * reset by every event, so a provider that stops producing them is stopped
+ * and one that keeps producing them is not. Cancelling the stream — a stop,
+ * the host's idle deadline, the Turn ending — returns the generator, which is
+ * what lets a Plugin release the upstream body it is reading.
+ */
+export const BOT_ISOLATE_MODEL_PROVIDER_SOURCE = `function modelEventStream(iterable, deadlineMs, firstEventDeadlineMs) {
+  const encoder = new TextEncoder();
+  const iterator = iterable[Symbol.asyncIterator]();
+  let timer;
+  let controller;
+  let done = false;
+  function stop() {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  }
+  function abort(error) {
+    if (done) return;
+    done = true;
+    stop();
+    // The generator is released and the stream fails. A generator parked on a
+    // promise of its own is settled by the host aborting the call it is
+    // waiting on, which is why the host owns the upstream call.
+    void Promise.resolve(iterator.return?.(undefined)).catch(function () {});
+    if (controller) controller.error(error);
+  }
+  function arm(allowedMs) {
+    stop();
+    timer = setTimeout(function () {
+      abort(new Error("the model provider produced no event for " + allowedMs + "ms"));
+    }, allowedMs);
+  }
+  const stream = new ReadableStream({
+    start(value) {
+      controller = value;
+      // Waiting for the first event is the model protocol's first-byte
+      // allowance — a provider that has accepted a request and not answered
+      // yet is slow, not dead; after that, a minute of silence is a dead
+      // socket.
+      arm(firstEventDeadlineMs);
+    },
+    async pull(value) {
+      if (done) return;
+      try {
+        const next = await iterator.next();
+        if (done) return;
+        if (next.done) {
+          done = true;
+          stop();
+          value.close();
+          return;
+        }
+        arm(deadlineMs);
+        value.enqueue(encoder.encode(JSON.stringify(next.value) + "\\n"));
+      } catch (error) {
+        abort(error);
+      }
+    },
+    cancel() {
+      done = true;
+      stop();
+      // Not awaited: a generator parked inside its transport call returns
+      // only when the host aborts that call, and the host is waiting on this
+      // cancel to do it. The return is queued instead, so cancellation is
+      // never what a hung provider is waiting behind.
+      void Promise.resolve(iterator.return?.(undefined)).catch(function () {});
+      return;
+    },
+  });
+  return stream;
+}
+
+async function runModelStream(invocation, resolve, contextFor) {
+  try {
+    const plugin = resolve(invocation.pluginId);
+    if (!plugin.modelProviders.includes(invocation.provider)) {
+      throw new Error('plugin "' + invocation.pluginId + '" does not serve provider "' + invocation.provider + '"');
+    }
+    const context = contextFor(invocation, plugin, invocation.deadlineMs, invocation.transportId);
+    const iterable = plugin.module.modelProviders[invocation.provider].stream(
+      invocation.request,
+      context,
+    );
+    if (!iterable || typeof iterable[Symbol.asyncIterator] !== "function") {
+      throw new Error('plugin "' + invocation.pluginId + '" provider "' + invocation.provider + '" returned no event stream');
+    }
+    return {
+      schemaVersion: 1,
+      status: "streaming",
+      events: modelEventStream(
+        iterable,
+        invocation.deadlineMs,
+        invocation.firstEventDeadlineMs,
+      ),
+    };
+  } catch (error) {
+    return { schemaVersion: 1, status: "refused", reason: errorText(error) };
+  }
+}`;
+
+export const BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1 = `function narrowContext(env, invocation, plugin, deadlineMs, transportId) {
   const capabilities = env.CAPABILITIES;
   const grants = plugin.grants || [];
   // Every loopback call names the Turn, the Bot and the Plugin it is for: the
@@ -463,6 +631,20 @@ ${Object.entries(BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1)
     ),
   )
   .join("\n")}
+  // One model call's one credentialed transport, and only while the host is
+  // serving that call: the ticket is the host's own and is spent by the call
+  // it is spent on, and the destination is the host's to choose. A tool
+  // call's context has no member to call.
+  if (transportId) {
+    context.modelTransport = function (request) {
+      const call = request && typeof request === "object" ? request : {};
+      return capabilities.modelTransport(scope, {
+        schemaVersion: 1,
+        transportId: transportId,
+        body: call.body,
+      });
+    };
+  }
   return context;
 }`;
 
@@ -700,6 +882,23 @@ function declaredCards(module, pluginId) {
     return { id: cardId, actions: actions };
   });
 }
+function declaredModelProviders(module, pluginId) {
+  if (module.modelProviders === undefined) return [];
+  if (!isRecord(module.modelProviders)) {
+    throw new Error('plugin "' + pluginId + '" "modelProviders" must be an object');
+  }
+  return Object.keys(module.modelProviders).map(function (providerId) {
+    if (!PROVIDER_ID.test(providerId)) {
+      throw new Error('plugin "' + pluginId + '" declared a model provider with an invalid id');
+    }
+    const provider = module.modelProviders[providerId];
+    if (!isRecord(provider) || typeof provider.stream !== "function") {
+      throw new Error('plugin "' + pluginId + '" model provider "' + providerId + '" must export a stream function');
+    }
+    return providerId;
+  });
+}
+
 function declaredViews(module, pluginId) {
   if (module.views === undefined) return [];
   if (!isRecord(module.views)) {
@@ -908,6 +1107,8 @@ ${BOT_ISOLATE_VIEW_SOURCE}
 
 ${BOT_ISOLATE_CARD_SOURCE}
 
+${BOT_ISOLATE_MODEL_PROVIDER_SOURCE}
+
 /**
  * Every Plugin the identity names, mounted once in identity order. A Plugin
  * whose module does not declare itself correctly is carried as not ok and
@@ -933,6 +1134,7 @@ function mountAll(env) {
       hooks: [],
       provides: [],
       triggers: [],
+      modelProviders: [],
       views: [],
       cards: [],
       services: {},
@@ -944,6 +1146,7 @@ function mountAll(env) {
       plugin.triggers = declaredTriggers(module, pluginId);
       plugin.views = declaredViews(module, pluginId);
       plugin.cards = declaredCards(module, pluginId);
+      plugin.modelProviders = declaredModelProviders(module, pluginId);
       const services = declaredServices(module, pluginId);
       plugin.provides = Object.keys(services);
       for (const name of plugin.consumes) {
@@ -990,6 +1193,7 @@ export default class extends WorkerEntrypoint {
               return { name: name, version: 1 };
             }),
             triggers: plugin.triggers,
+            modelProviders: plugin.modelProviders,
             views: plugin.views,
             cards: plugin.cards,
           },
@@ -1020,6 +1224,30 @@ export default class extends WorkerEntrypoint {
     } catch (error) {
       return { schemaVersion: 1, content: errorText(error), isError: true };
     }
+  }
+
+  /**
+   * One model call, served by the Plugin that declared the provider
+   * (ADR 0032). The answer's events are an NDJSON byte stream; a provider
+   * that refuses before reaching upstream answers with its reason.
+   */
+  async streamModel(rawInvocation) {
+    let invocation;
+    try {
+      invocation = decodeModelInvocation(rawInvocation);
+    } catch (error) {
+      return { schemaVersion: 1, status: "refused", reason: errorText(error) };
+    }
+    const env = this.env;
+    return runModelStream(
+      invocation,
+      function (pluginId) {
+        return findPlugin(env, pluginId);
+      },
+      function (identity, plugin, deadlineMs, transportId) {
+        return narrowContext(env, identity, plugin, deadlineMs, transportId);
+      },
+    );
   }
 
   /**
@@ -1120,7 +1348,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v8";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v9";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(

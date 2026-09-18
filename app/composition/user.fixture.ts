@@ -25,6 +25,8 @@ import {
 export function memoryUserCompositionV1(
   storage: MemoryStorage = new MemoryStorage(),
   catalog: readonly SeededPluginV1[] = [],
+  /** The account's installed Packages, for a test about installing one. */
+  installedPackageIds?: () => readonly string[],
 ): UserCompositionRpcV1 & { storage: MemoryStorage } {
   const state = { ctx: { storage } as unknown as DurableObjectState };
   const store = () => userCompositionStoreV1(state);
@@ -37,6 +39,9 @@ export function memoryUserCompositionV1(
         userId: request.userId,
         catalog,
         adminOpened: [],
+        ...(installedPackageIds
+          ? { installedPackageIds: installedPackageIds() }
+          : {}),
       }),
     readCompositionGeneration: (request) => store().read(request.generationId),
     proposeComposition: (request) =>

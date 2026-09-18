@@ -162,6 +162,7 @@ function buildsCleanly(
           triggers: [],
           views: [],
           cards: [],
+          modelProviders: [],
           hashes: { module: await sha256Hex(MODULE) },
         },
         module: MODULE,
@@ -407,6 +408,7 @@ describe("checking and publishing", () => {
           triggers: [],
           views: [],
           cards: [],
+          modelProviders: [],
           hashes: { module: "f".repeat(64) },
         },
         module: MODULE,
@@ -494,6 +496,7 @@ describe("the manifest against the descriptor", () => {
     triggers: ["alert"],
     views: [],
     cards: [],
+    modelProviders: [],
     hashes: { module: "a".repeat(64) },
   };
 

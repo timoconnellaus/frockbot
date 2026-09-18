@@ -1,4 +1,7 @@
-import { catalogProvidersV1 } from "@frockbot/providers/catalog/definition";
+import {
+  catalogProvidersV1,
+  PLUGIN_SERVED_PROVIDER_IDS_V1,
+} from "@frockbot/providers/catalog/definition";
 import { createCatalogProviderFeatureV1 } from "@frockbot/providers/catalog/runtime";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import { createConfiguredConnectRuntimeContribution } from "@frockbot/app/connect/agent";
@@ -353,8 +356,12 @@ const modelRuntimeContributionFactories = new Map<
       },
     },
   ],
-  ...catalogProvidersV1.map(
-    (provider): [string, ModelRuntimeContributionFactory] => [
+  // A provider this deployment serves only through a Plugin gets no compiled
+  // adapter (ADR 0032): the Plugin's artifact is the model protocol, and the
+  // Composition mount registers its contribution when the Bot selected it.
+  ...catalogProvidersV1
+    .filter((provider) => !PLUGIN_SERVED_PROVIDER_IDS_V1.includes(provider.id))
+    .map((provider): [string, ModelRuntimeContributionFactory] => [
       `provider-${provider.id}`,
       {
         providerType: provider.id,
@@ -371,8 +378,7 @@ const modelRuntimeContributionFactories = new Map<
           });
         },
       },
-    ],
-  ),
+    ]),
 ]);
 
 /**

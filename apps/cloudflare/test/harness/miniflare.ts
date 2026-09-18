@@ -538,7 +538,198 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
   );
 }
 
+/**
+ * The DeepSeek provider, as the Bot Durable Object's model transport reaches
+ * it (ADR 0032). The key is what a workerd test creates its Connection with;
+ * anything else is refused as the real service would.
+ *
+ * One request body's marker decides what the answer is, so a suite drives the
+ * provider the way it drives the model: an ordinary reply otherwise, a tool
+ * call for `TOOL_CALL_TRIGGER`, and a stream that dies mid-answer for
+ * `DEEPSEEK_CUT_TRIGGER`. Every call is counted, which is how a test proves a
+ * second upstream call did *not* happen.
+ */
+export const DEEPSEEK_STUB_ORIGIN = "https://api.deepseek.com";
+export const DEEPSEEK_TEST_API_KEY = "workerd-deepseek-key";
+export const DEEPSEEK_CUT_TRIGGER = "frockbot-test-cut-stream:";
+const deepseekCalls: {
+  idempotencyKey: string | null;
+  path: string;
+  authorization: string | null;
+  model: string | null;
+}[] = [];
+
+function deepseekFrame(payload: unknown, finish: string | null = null): string {
+  return `data: ${JSON.stringify({
+    choices: [{ delta: payload, finish_reason: finish }],
+  })}\n\n`;
+}
+
+/** The scripted tool calls one request asks for, in the DeepSeek dialect. */
+function deepseekToolCalls(
+  body: unknown,
+): Array<{ name: string; input: unknown }> {
+  if (!body || typeof body !== "object") return [];
+  const messages = (body as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return [];
+  const userIndex = (messages as WireMessage[]).findLastIndex(
+    (message) => message.role === "user",
+  );
+  if (userIndex < 0) return [];
+  // A Turn that already called its tools asks for prose, so the answer can
+  // finish the way a real model's second step would.
+  if (
+    (messages as WireMessage[])
+      .slice(userIndex + 1)
+      .some((message) => message.role === "tool")
+  ) {
+    return [];
+  }
+  const content = String((messages[userIndex] as WireMessage).content ?? "");
+  const calls: Array<{ name: string; input: unknown }> = [];
+  for (const line of content.split("\n")) {
+    if (!line.startsWith(TOOL_CALL_TRIGGER)) continue;
+    const request = line.slice(TOOL_CALL_TRIGGER.length);
+    const separator = request.indexOf(":");
+    if (separator < 1) continue;
+    calls.push({
+      name: request.slice(0, separator),
+      input: JSON.parse(request.slice(separator + 1)) as unknown,
+    });
+  }
+  return calls;
+}
+
+/** The last user message of one request, as the stub reads it. */
+function deepseekUserText(body: unknown): string {
+  if (!body || typeof body !== "object") return "";
+  const messages = (body as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return "";
+  const user = (messages as WireMessage[]).findLast(
+    (message) => message.role === "user",
+  );
+  return String(user?.content ?? "");
+}
+
+async function deepseekStub(request: Request, url: URL): Promise<Response> {
+  const authorization = request.headers.get("authorization");
+  let body: unknown;
+  try {
+    body = await request.clone().json();
+  } catch {
+    body = undefined;
+  }
+  deepseekCalls.push({
+    idempotencyKey: request.headers.get("idempotency-key"),
+    path: url.pathname,
+    authorization,
+    model:
+      body && typeof body === "object"
+        ? String((body as { model?: unknown }).model ?? "")
+        : null,
+  });
+  if (url.pathname !== "/chat/completions") {
+    return Response.json({ error: "not found" }, { status: 404 });
+  }
+  if (authorization !== `Bearer ${DEEPSEEK_TEST_API_KEY}`) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userText = deepseekUserText(body);
+  const headers = { "content-type": "text/event-stream" };
+  const messages =
+    body &&
+    typeof body === "object" &&
+    Array.isArray((body as { messages?: unknown }).messages)
+      ? (body as { messages: WireMessage[] }).messages
+      : [];
+  const system = messages.find((message) => message.role === "system");
+  if (
+    typeof system?.content === "string" &&
+    system.content.startsWith("You are compressing the earlier part")
+  ) {
+    const content = JSON.stringify({
+      summary: "DeepSeek durable summary",
+      decisions: [],
+      openItems: [],
+      identifiers: [],
+    });
+    return new Response(
+      deepseekFrame({ content }) +
+        deepseekFrame({}, "stop") +
+        "data: [DONE]\n\n",
+      { status: 200, headers },
+    );
+  }
+  if (userText.includes(DEEPSEEK_CUT_TRIGGER)) {
+    // An answer that stops mid-sentence: no stop reason and no end marker, the
+    // shape of a provider whose connection died while it was talking.
+    return new Response(deepseekFrame({ content: "DeepSeek says hel" }), {
+      status: 200,
+      headers,
+    });
+  }
+  const calls = deepseekToolCalls(body);
+  if (calls.length > 0) {
+    return new Response(
+      calls
+        .map((call, index) =>
+          deepseekFrame({
+            tool_calls: [
+              {
+                index,
+                id: `deepseek-call-${index + 1}`,
+                type: "function",
+                function: {
+                  name: call.name,
+                  arguments: JSON.stringify(call.input ?? {}),
+                },
+              },
+            ],
+          }),
+        )
+        .join("") +
+        deepseekFrame({}, "tool_calls") +
+        `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 21, completion_tokens: 5 } })}\n\n` +
+        "data: [DONE]\n\n",
+      { status: 200, headers },
+    );
+  }
+  return new Response(
+    deepseekFrame({ content: "DeepSeek says " }) +
+      deepseekFrame({ content: "hello." }) +
+      deepseekFrame(
+        {
+          tool_calls: [
+            {
+              index: 0,
+              id: "deepseek-send",
+              type: "function",
+              function: {
+                name: "send_to_user",
+                arguments: JSON.stringify({
+                  disposition: "finish",
+                  payload: { type: "text", text: "DeepSeek says hello." },
+                }),
+              },
+            },
+          ],
+        },
+        "tool_calls",
+      ) +
+      `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 12, completion_tokens: 3 } })}\n\n` +
+      "data: [DONE]\n\n",
+    { status: 200, headers },
+  );
+}
+
 function webStub(url: URL): Response {
+  if (url.pathname === "/deepseek-calls") {
+    return Response.json({ calls: deepseekCalls });
+  }
+  if (url.pathname === "/forget-deepseek-calls") {
+    deepseekCalls.length = 0;
+    return Response.json({ calls: [] });
+  }
   if (url.pathname === "/voice-upstream-upgrades") {
     return Response.json({ upgrades: voiceUpstreamUpgrades });
   }
@@ -597,6 +788,7 @@ async function webSearchStub(request: Request, key: string): Promise<Response> {
 export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
   if (url.origin === WEB_STUB_ORIGIN) return webStub(url);
+  if (url.origin === DEEPSEEK_STUB_ORIGIN) return deepseekStub(request, url);
   if (url.origin === COMPOSIO_STUB_ORIGIN) return composioStub(request, url);
   if (
     url.origin === "https://auth.x.ai" &&

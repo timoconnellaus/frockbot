@@ -8,7 +8,11 @@ import {
   decodeSeededPluginV1,
   type SeededPluginV1,
 } from "@frockbot/app/plugins/catalog";
-import { reconcileSeededCompositionV1 } from "./user.js";
+import {
+  readUserCompositionV1,
+  reconcileInstalledProviderPluginsV1,
+  reconcileSeededCompositionV1,
+} from "./user.js";
 
 function store(storage = new MemoryStorage()) {
   return new DurableCompositionStore({
@@ -21,12 +25,13 @@ function store(storage = new MemoryStorage()) {
 function seeded(
   pluginId: string,
   contentHash = "a".repeat(64),
+  seed: "default-on" | "installable" = "default-on",
 ): SeededPluginV1 {
   return decodeSeededPluginV1({
     pluginId,
     displayName: pluginId,
     description: `The ${pluginId} plugin`,
-    seed: "default-on",
+    seed,
     artifact: {
       contentHash,
       size: 12,
@@ -150,6 +155,191 @@ describe("reconciling the deployment's catalog into a User's Composition", () =>
       "authored",
       "weather",
     ]);
+  });
+});
+
+describe("installing a provider Plugin from the account's own command", () => {
+  /** The catalog entry an install of `provider-deepseek` would carry. */
+  function providerPlugin(contentHash = "b".repeat(64)): SeededPluginV1 {
+    return decodeSeededPluginV1({
+      pluginId: "deepseek",
+      displayName: "DeepSeek",
+      description: "Runs replies on DeepSeek models.",
+      seed: "installable",
+      artifact: {
+        contentHash,
+        size: 12,
+        mediaType: "application/javascript",
+        bundlerVersion: "seed",
+      },
+      descriptor: {
+        id: "deepseek",
+        displayName: "DeepSeek",
+        version: "1.0.0",
+        contractVersion: 6,
+        tools: [],
+        hooks: [],
+        grants: [],
+        modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
+        contextKeys: ["user", "bot", "session"],
+      },
+    });
+  }
+
+  async function read(
+    storage: MemoryStorage,
+    catalog: readonly SeededPluginV1[],
+    installedPackageIds: readonly string[],
+  ) {
+    return readUserCompositionV1(
+      { ctx: { storage } as unknown as DurableObjectState },
+      { userId: "user-1", catalog, adminOpened: [], installedPackageIds },
+    );
+  }
+
+  test("an install puts the artifact in the account's Composition, and an uninstall takes it out", async () => {
+    const storage = new MemoryStorage();
+    const catalog = [providerPlugin()];
+    const before = await read(storage, catalog, []);
+    expect(
+      before.current.members.map((member) => member.packageId),
+    ).not.toContain("deepseek");
+
+    const installed = await read(storage, catalog, ["provider-deepseek"]);
+    const member = installed.current.members.find(
+      (candidate) => candidate.packageId === "deepseek",
+    );
+    expect(member).toBeDefined();
+    expect(member!.provenance.kind).toBe("installed");
+    expect(member!.artifact.contentHash).toBe("b".repeat(64));
+
+    const removed = await read(storage, catalog, []);
+    expect(
+      removed.current.members.map((candidate) => candidate.packageId),
+    ).not.toContain("deepseek");
+  });
+
+  test("an account that installed nothing carries nothing, and a re-read holds still", async () => {
+    const storage = new MemoryStorage();
+    const catalog = [providerPlugin()];
+    await read(storage, catalog, []);
+    const first = await read(storage, catalog, ["provider-deepseek"]);
+    const second = await read(storage, catalog, ["provider-deepseek"]);
+    expect(second.current.generationId).toBe(first.current.generationId);
+  });
+
+  test("a deployment that updated the artifact reaches the next read", async () => {
+    const storage = new MemoryStorage();
+    const before = await read(
+      storage,
+      [providerPlugin()],
+      ["provider-deepseek"],
+    );
+    const after = await read(
+      storage,
+      [providerPlugin("c".repeat(64))],
+      ["provider-deepseek"],
+    );
+    expect(after.current.generationId).not.toBe(before.current.generationId);
+    expect(
+      after.current.members.find((member) => member.packageId === "deepseek")!
+        .artifact.contentHash,
+    ).toBe("c".repeat(64));
+  });
+
+  test("installation leaves the seeded set alone", async () => {
+    const storage = new MemoryStorage();
+    const catalog = [seeded("email"), providerPlugin()];
+    const snapshot = await read(storage, catalog, ["provider-deepseek"]);
+    expect(
+      snapshot.current.members.map((member) => member.packageId).toSorted(),
+    ).toEqual(["deepseek", "email"]);
+    expect(
+      snapshot.current.members.find((member) => member.packageId === "email")!
+        .provenance.kind,
+    ).toBe("user");
+  });
+
+  test("a read follows each desired set through install, uninstall and reinstall", async () => {
+    const storage = new MemoryStorage();
+    const catalog = [providerPlugin()];
+    const install = await read(storage, catalog, ["provider-deepseek"]);
+    const uninstall = await read(storage, catalog, []);
+    const reinstall = await read(storage, catalog, ["provider-deepseek"]);
+    expect(install.current.members.map((member) => member.packageId)).toEqual([
+      "deepseek",
+    ]);
+    expect(uninstall.current.members).toEqual([]);
+    expect(reinstall.current.members.map((member) => member.packageId)).toEqual(
+      ["deepseek"],
+    );
+    // Each desired set reached the pin — none of the three collapsed into a
+    // generation the store already held.
+    const pins = [
+      install.current.generationId,
+      uninstall.current.generationId,
+      reinstall.current.generationId,
+    ];
+    expect(new Set(pins).size).toBe(3);
+  });
+
+  test("install, uninstall and reinstall under one clock reading each reach their own pin", async () => {
+    // The clock is the account's own read: a fixed `now` is what a test
+    // supplies, and what two proposals in one millisecond would look like.
+    const subject = store();
+    const at = new Date("2026-09-18T00:00:00.000Z");
+    const reconcile = (installedPackageIds: readonly string[]) =>
+      reconcileInstalledProviderPluginsV1({
+        store: subject,
+        userId: "user-1",
+        catalog: [providerPlugin()],
+        installedPackageIds,
+        now: at,
+      });
+    const installed = await reconcile(["provider-deepseek"]);
+    const uninstalled = await reconcile([]);
+    const reinstalled = await reconcile(["provider-deepseek"]);
+    expect(installed?.members.map((member) => member.packageId)).toEqual([
+      "deepseek",
+    ]);
+    expect(uninstalled?.members).toEqual([]);
+    expect(reinstalled?.members.map((member) => member.packageId)).toEqual([
+      "deepseek",
+    ]);
+    // Each proposal is stamped later than the generation it derives from, so
+    // the store's "never rewrite a generation" rule never sees a repeated id.
+    const stamps = [installed, uninstalled, reinstalled].map((generation) =>
+      Date.parse(generation!.createdAt),
+    );
+    expect(stamps[1]!).toBeGreaterThan(stamps[0]!);
+    expect(stamps[2]!).toBeGreaterThan(stamps[1]!);
+    const current = await subject.current();
+    expect(current.generationId).toBe(reinstalled!.generationId);
+    expect(current.members.map((member) => member.packageId)).toEqual([
+      "deepseek",
+    ]);
+  });
+
+  test("reconciliation is idempotent and only touches what it installs", async () => {
+    const subject = store();
+    const proposed = await reconcileInstalledProviderPluginsV1({
+      store: subject,
+      userId: "user-1",
+      catalog: [providerPlugin()],
+      installedPackageIds: ["provider-deepseek"],
+      now: new Date("2026-09-18T00:00:00.000Z"),
+    });
+    expect(proposed?.members.map((member) => member.packageId)).toEqual([
+      "deepseek",
+    ]);
+    const again = await reconcileInstalledProviderPluginsV1({
+      store: subject,
+      userId: "user-1",
+      catalog: [providerPlugin()],
+      installedPackageIds: ["provider-deepseek"],
+      now: new Date("2026-09-18T00:01:00.000Z"),
+    });
+    expect(again).toBeUndefined();
   });
 });
 

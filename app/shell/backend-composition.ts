@@ -37,6 +37,9 @@ import {
   type SessionEvent,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+import { pluginModelProviderV1 } from "./plugin-model-provider.js";
+import { PLUGIN_SERVED_PROVIDER_IDS_V1 } from "@frockbot/providers/catalog/definition";
+import type { ShellPluginModelHostV1 } from "@frockbot/app/isolates/model-transport";
 import { recordSendToUserV1 } from "./agent.js";
 import {
   bindCardApprovalsV1,
@@ -183,6 +186,15 @@ export interface ShellCompositionMountOptions {
   isolate?: ShellIsolateMountOptions;
   /** Absent when the host cannot reach Applet instances. */
   applets?: ShellAppletMountOptions;
+  /**
+   * The model provider Plugin host for this mount (ADR 0032). Present exactly
+   * when this Bot's model selection names a provider this deployment opens to
+   * Plugins, and the generation being mounted holds one that serves it —
+   * absent, and a Provider Package keeps its own path. The provider is
+   * registered into this mount's `llm` registry and the Connection's lease is
+   * settled through the same host when the loop settles the call's outcome.
+   */
+  pluginModel?: ShellPluginModelHostV1;
 }
 
 export interface ShellCompositionHost extends CompositionHost {
@@ -235,6 +247,7 @@ export function createShellCompositionHost(
         ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),
       });
       const active: ActivePluginWorker[] = [];
+      const registeredModelProviders: (() => void)[] = [];
       const failures: MemberVerificationFailure[] = [];
       const pluginFailures: PluginMountFailureV1[] = [];
       if (generation.members.length > 0) {
@@ -546,6 +559,19 @@ export function createShellCompositionHost(
               ...(isolate.egress === undefined
                 ? {}
                 : { egress: isolate.egress }),
+              // The provider this Bot selected, and the ids this deployment
+              // opens to plugins. A generation with no provider Plugin for
+              // the selection simply mounts none, and the model call then
+              // fails as unavailable rather than reaching anything.
+              ...(options.pluginModel
+                ? {
+                    modelProviders: {
+                      provider: options.pluginModel.provider,
+                      trusted: options.pluginModel.trusted,
+                      open: PLUGIN_SERVED_PROVIDER_IDS_V1,
+                    },
+                  }
+                : {}),
             });
             // Mount and health-check are one guarded phase (Worker Loader spike).
             const prepared = await host.mount(generation.members);
@@ -596,6 +622,68 @@ export function createShellCompositionHost(
                         },
                   ),
             };
+            // The provider contributions this generation mounted, registered
+            // on the same `llm` registry a Package registers into. The loop
+            // reaches whichever provider serves its request by name, and this
+            // is what puts the Plugin's in that map.
+            if (options.pluginModel) {
+              const modelHost = options.pluginModel;
+              const selection = options.modelSelection;
+              if (!selection?.connectionId || !selection.connectionGeneration) {
+                throw new CompositionMountFailureError(
+                  "resolve",
+                  "a Plugin model provider mount has no admitted Connection",
+                );
+              }
+              for (const provider of worker.modelProviders) {
+                registeredModelProviders.push(
+                  runtime.services.llm.register(
+                    pluginModelProviderV1({
+                      pluginId: provider.pluginId,
+                      binding: {
+                        provider: provider.providerId,
+                        model: selection.model,
+                        connectionId: selection.connectionId,
+                        connectionGeneration: selection.connectionGeneration,
+                      },
+                      streamModel: (invocation) =>
+                        worker.streamModel(invocation),
+                      // The host's own session reference travels with every
+                      // dispatch: the Plugin never names one, and a call that
+                      // outlives its Turn — a summariser — is still checked
+                      // against the log it belongs to.
+                      begin: (input) => {
+                        const session = runtime.services.sessions.get(
+                          options.sessionId,
+                        );
+                        if (!session) {
+                          throw new Error(
+                            "the session this model call belongs to is unavailable",
+                          );
+                        }
+                        return modelHost.begin({ ...input, session });
+                      },
+                      scope: {
+                        botId: options.botId,
+                        runId: isolate.runId,
+                        sessionId: options.sessionId,
+                        turnId: isolate.turnId,
+                        generationId: generation.generationId,
+                      },
+                    }),
+                  ),
+                );
+              }
+              // The lease is released where the loop settles the outcome:
+              // the same hook a Provider Package registers, so a call that
+              // failed after dispatch releases what it held.
+              registeredModelProviders.push(
+                runtime.services.hooks.add({
+                  modelOutcomeCommitted: async (_agent, requestId) =>
+                    modelHost.settle(requestId),
+                }),
+              );
+            }
           } catch (error) {
             failures.push(memberFailure(error));
           }
@@ -653,6 +741,9 @@ export function createShellCompositionHost(
 
       const dispose = async () => {
         for (const unregister of unregisterApplets.toReversed()) unregister();
+        for (const unregister of registeredModelProviders.toReversed()) {
+          unregister();
+        }
         for (const contribution of active.toReversed()) {
           await contribution.dispose();
         }

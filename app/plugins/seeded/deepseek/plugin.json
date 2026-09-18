@@ -1,0 +1,16 @@
+{
+  "id": "deepseek",
+  "displayName": "DeepSeek",
+  "version": "1",
+  "contractVersion": 6,
+  "tools": [],
+  "hooks": [],
+  "grants": [],
+  "modelProviders": [
+    {
+      "id": "deepseek",
+      "protocolVersion": 1
+    }
+  ],
+  "contextKeys": ["user", "bot", "session"]
+}

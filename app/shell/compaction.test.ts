@@ -458,7 +458,11 @@ describe("running a compaction", () => {
 
   function runner(
     session: Awaited<ReturnType<typeof sessionFrom>>,
-    summarise: () => Promise<string>,
+    summarise: (request: {
+      effectId: string;
+      provider: string;
+      model: string;
+    }) => Promise<string>,
     currentTurn = 10,
   ) {
     return {
@@ -497,6 +501,26 @@ describe("running a compaction", () => {
     for (const event of session.events) {
       expect(() => decodeSessionEvent(event)).not.toThrow();
     }
+  });
+
+  test("hands the summariser the effect id its intent was recorded under", async () => {
+    const session = await sessionFrom([MODEL_REQUEST, ...wordy(10, 400)]);
+    const seen: string[] = [];
+    await runCompactionV1(
+      runner(session, async (request) => {
+        seen.push(request.effectId);
+        return SUMMARY;
+      }),
+    );
+    const intent = session.events.find(
+      (event) => event.type === "conversation/compaction-intent",
+    );
+    expect(
+      intent?.type === "conversation/compaction-intent" && intent.effectId,
+    ).toBe("effect-1");
+    // The call is dispatched under the id the intent was written under, and
+    // the outcome is written under it too: one effect, one identity.
+    expect(seen).toEqual(["effect-1"]);
   });
 
   test("is keyed by the range, so a second run compacts nothing", async () => {

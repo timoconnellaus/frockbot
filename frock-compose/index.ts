@@ -8,3 +8,11 @@
 // a Plugin author writes against, and the tool and hook registrations its
 // health report declares.
 export * from "./plugin-worker-host.ts";
+
+export {
+  PLUGIN_WORKER_INDEX_VERSION,
+  PLUGIN_WORKER_MAIN_MODULE,
+  pluginWorkerIndexSourceV1,
+  pluginWorkerModuleMap,
+  pluginWorkerModulePathV1,
+} from "./plugin-worker-wrapper.ts";
