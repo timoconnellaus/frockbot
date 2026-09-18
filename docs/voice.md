@@ -993,14 +993,16 @@ that is open and delivering nothing but zeros — what the macOS voice
 processing unit does when asked for echo cancellation with nothing rendering
 through the same engine (`voiceCaptureProcessingV1` in
 `apps/native/lib/voice/capture.dart`) — leaves the call live with a flat
-meter. Ten seconds of a live call that has never carried a single frame above
-the speech gate's floor says so once, as a notice on whichever surface is
-drawing the call: `FrockBot isn’t hearing anything. Check the microphone in
-your device settings.` It is a notice and not an error — the call is fine and
-the microphone is the problem — it fires only when the call has never carried
-signal at all rather than after speech stops, it is not said while the call is
-paused or muted, where the silence is the person's own choice, and it never
-ends the call.
+meter. Ten seconds of a live call that has never carried a single frame at or
+above the room's own level — `voiceRoomToneLevelV1` in
+`apps/native/lib/voice/speech_gate.dart`, far below the gate's floor, which is
+where words start — says so once, as a notice on whichever surface is drawing
+the call: `FrockBot isn’t hearing anything. Check the microphone in your
+device settings.` It is a notice and not an error — the call is fine and the
+microphone is the problem — it fires only when the call has never carried
+signal at all rather than after speech stops, a quiet room being signal and so
+never an occasion for it, it is not said while the call is paused or muted,
+where the silence is the person's own choice, and it never ends the call.
 
 **The call's audio session (Android).** A realtime call is a call to the
 operating system — communication mode is where Android attaches its echo
@@ -1142,7 +1144,14 @@ outgoing visual mounted only through its exit. Bottom system insets
 transfer back to the conversation without a final layout jump. While that
 teardown finishes the Bot's composer is back with its voice control held —
 drawn as held, and refusing the press, until the session has finished ending.
-Nothing is queued: the control says so, and the person presses again.
+One call has one teardown, whichever path reaches it — End, a failure, the
+server closing first, the shell disposing the session that is over — so a
+superseded session can never close the capture or the audio session a second
+time, and a session disposed before it started has no claim to release at all.
+The capture and the Android audio session are the shell's, lent to one call at
+a time: the next call's press waits on `AssistantSessionController.released`
+before it opens them. Nothing is queued: the control says so, and the person
+presses again.
 
 Both meters are the same five pills (`apps/native/lib/voice/waveform.dart`):
 one object whose motion source changes with the call, the way the shipped

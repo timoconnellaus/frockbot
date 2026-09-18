@@ -479,7 +479,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     if (voiceSession?.active == true) return;
     final borrowed = microphone.acquireForAssistant();
-    voiceSession?.dispose();
+    final previous = voiceSession;
+    previous?.dispose();
     final session = AssistantSessionController(
       openSocket: assistantSocketOpenerV1(widget.api),
       botId: botId,
@@ -517,9 +518,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       footerExiting = false;
     });
     // A dictation in progress is stopped and its draft flushed before the
-    // call takes the device; that is the one thing the press waits for.
+    // call takes the device, and the call before this one is closed before
+    // this one opens it: the capture and the audio session are the shell's,
+    // lent to one call at a time.
     await borrowed;
     if (!mounted || !identical(voiceSession, session)) return;
+    await previous?.released;
     await session.start();
   }
 

@@ -186,6 +186,9 @@ void main() {
 
     stop.complete();
     await tester.runAsync(() => settle());
+    // The last of the teardown lands in the microtasks the frame flushes, and
+    // the frame after that is the one carrying the released control.
+    await tester.pump();
     await tester.pump();
     expect(tester.widget<IconButton>(voice).onPressed, isNotNull);
     // The footer's exit finishes on its own; the composer is talkable under
@@ -361,22 +364,23 @@ void main() {
     await tester.pump();
     await mountSurface(tester, controller, width: 390);
 
-    // The microphone is open and every frame is the room at rest: the call is
-    // live and has carried no signal at all. The frames are the clock, so the
-    // window is run out in frames rather than in waited-for seconds.
+    // The microphone is open and every frame is zeros: the call is live and
+    // the device has carried nothing at all — not even a room. The frames are
+    // the clock, so the window is run out in frames rather than in
+    // waited-for seconds.
     var at = 0;
-    void silence(int ms) {
+    void nothing(int ms) {
       for (var elapsed = 0; elapsed < ms; elapsed += 40) {
         capture.emit(AudioFrame(pcmFrame(0), 0, at));
         at += 40;
       }
     }
 
-    silence(voiceAssistantDeafNoticeAfterV1.inMilliseconds ~/ 2);
+    nothing(voiceAssistantDeafNoticeAfterV1.inMilliseconds ~/ 2);
     await tester.runAsync(() => settle());
     await tester.pump();
     expect(controller.notice, isNull);
-    silence(voiceAssistantDeafNoticeAfterV1.inMilliseconds ~/ 2 + 40);
+    nothing(voiceAssistantDeafNoticeAfterV1.inMilliseconds ~/ 2 + 40);
     await tester.runAsync(() => settle());
     await tester.pump();
     await tester.pump();
@@ -397,11 +401,11 @@ void main() {
     expect(find.text('Listening'), findsOneWidget);
 
     // Once: when the notice's four seconds are up, another window of the same
-    // silence says nothing more.
+    // nothing says nothing more.
     await tester.pump(AssistantSessionController.noticeDuration);
     await tester.pump();
     expect(byIdentifier(VoiceIds.modeNotice), findsNothing);
-    silence(voiceAssistantDeafNoticeAfterV1.inMilliseconds + 40);
+    nothing(voiceAssistantDeafNoticeAfterV1.inMilliseconds + 40);
     await tester.runAsync(() => settle());
     await tester.pump();
     await tester.pump();

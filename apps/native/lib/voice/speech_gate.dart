@@ -30,6 +30,15 @@ import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+/// What a room at rest sounds like to a working microphone, and so the line
+/// between a device that is hearing and one handing over nothing.
+///
+/// A microphone picks up a room — a fan, the building, the device's own noise
+/// — so this is far below anything the gate would call speech: it is not
+/// [SpeechGateConfig.floor], which is a threshold for words. Only a device
+/// delivering zeros sits under it.
+const voiceRoomToneLevelV1 = 0.0005;
+
 /// The RMS of one PCM16 little-endian frame, 0..1.
 ///
 /// An odd trailing byte is ignored rather than read as half a sample.
