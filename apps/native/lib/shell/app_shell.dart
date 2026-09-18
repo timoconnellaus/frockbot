@@ -1513,10 +1513,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// thing in it, and closing empties the stack — reopening the panel is
   /// opening the Bot page, never whatever was last read three Bots ago.
   Widget _panelHeader(wire.BotRegistration bot, String? key) {
-    final theme = Theme.of(context);
-    final botId = bot.botId.value;
-    final phase = key == 'computer' ? computer?.said : null;
-    return SizedBox(
+    return Builder(
+      builder: (context) {
+        final theme = Theme.of(context);
+        final botId = bot.botId.value;
+        final phase = key == 'computer' ? computer?.said : null;
+        return SizedBox(
       height: 52,
       child: Padding(
         padding: EdgeInsets.fromLTRB(key == null ? 16 : 8, 0, 8, 0),
@@ -1599,6 +1601,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ],
         ),
       ),
+        );
+      },
     );
   }
 

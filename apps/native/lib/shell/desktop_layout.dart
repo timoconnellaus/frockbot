@@ -311,7 +311,10 @@ class ShellLayout extends StatelessWidget {
     return Theme(
       key: const ValueKey('panel-theme'),
       data: theme,
-      child: child,
+      child: ColoredBox(
+        color: theme.scaffoldBackgroundColor,
+        child: child,
+      ),
     );
   }
 
