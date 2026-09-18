@@ -425,6 +425,11 @@ describe("a Bot whose model runs through a provider Plugin", () => {
     const calls = await deepseekCalls();
     expect(calls).toHaveLength(1);
     expect(calls[0]!.authorization).toBe("Bearer workerd-wrong-key");
+    // The provider refused before doing any work, so this is a call that did
+    // not bill: nothing is recorded for it and nothing is estimated.
+    expect(result.events.some((event) => event.type === "model/usage")).toBe(
+      false,
+    );
   });
 
   test("a Plugin a Bot wrote cannot claim the provider", async () => {
