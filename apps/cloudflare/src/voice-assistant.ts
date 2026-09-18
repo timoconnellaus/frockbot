@@ -606,19 +606,22 @@ class GeminiSessionV1 {
  */
 function timed<T>(
   timing:
-    | ((event: string, fields?: Record<string, unknown>) => void)
-    | undefined,
+    ((event: string, fields?: Record<string, unknown>) => void) | undefined,
   event: string,
   work: Promise<T>,
 ): Promise<T> {
   if (!timing) return work;
+  const started = performance.now();
+  const fields = () => ({
+    durationMs: Math.max(0, Math.round(performance.now() - started)),
+  });
   return work.then(
     (value) => {
-      timing(event);
+      timing(event, fields());
       return value;
     },
     (error: unknown) => {
-      timing(event, { failed: true });
+      timing(event, { ...fields(), failed: true });
       throw error;
     },
   );
@@ -1660,7 +1663,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       : [];
     const instruction = renderVoiceSystemPromptV1({
       ...context,
-      session: await this.sessionMemoryContext(),
+      session: await timed(
+        this.timingSink(connection),
+        "session-voice-memory",
+        this.sessionMemoryContext(),
+      ),
       now: this.now(),
       ...(handover.length > 0 ? { handover } : {}),
     });
@@ -3427,8 +3434,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     if (!botId) return undefined;
     let bot: { botId: string; name: string; description?: string };
     try {
-      bot = await this.ownedBot(userId, botId);
-      timing?.("prompt-bot-identity");
+      bot = await timed(
+        timing,
+        "prompt-bot-identity",
+        this.ownedBot(userId, botId),
+      );
     } catch {
       // The Bot was deleted, or never belonged to this User. The call keeps
       // going as the account-wide assistant rather than failing.

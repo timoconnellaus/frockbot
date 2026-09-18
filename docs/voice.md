@@ -661,9 +661,10 @@ never subtract one side's elapsed from another's.
   `prompt-context-start`, one line per constituent read
   (`prompt-directory`, `prompt-user-memory`, `prompt-timezone`,
   `prompt-voice-memory`, `prompt-bot-identity`, `prompt-bot-memory`,
-  `prompt-bot-history`, each with `failed` when that read gave up),
+  `prompt-bot-history`, each with its `durationMs`),
   `prompt-context-ready`, and `prompt-context-awaited` where the session
-  actually waited on it — then `upstream-open-start`, `upstream-socket-open`,
+  actually waited on it, followed by the fresh `session-voice-memory` read
+  with its own duration — then `upstream-open-start`, `upstream-socket-open`,
   `upstream-setup-sent`, `upstream-setup-ack`, `listening`,
   `client-audio-first`, `upstream-audio-held`/`upstream-audio-sent` (with
   `buffered`: audio that waited for the setup), `upstream-audio-first` and

@@ -105,6 +105,7 @@ export interface VoiceTimingLine {
   side: string;
   event: string;
   elapsedMs: number;
+  durationMs?: number;
   at: string;
   device?: string;
   code?: number;

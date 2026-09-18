@@ -1324,8 +1324,12 @@ describe("timing a call that asked to be timed", () => {
       "prompt-bot-identity",
       "prompt-bot-memory",
       "prompt-bot-history",
+      "session-voice-memory",
     ]) {
       expect(events).toContain(read);
+      expect(
+        timings.find((line) => line.event === read)!.durationMs,
+      ).toBeGreaterThanOrEqual(0);
     }
     for (const line of timings) {
       expect(line.trace).toBe(trace);
@@ -1360,6 +1364,9 @@ describe("timing a call that asked to be timed", () => {
     // call is slow to answer.
     const reading = at("prompt-directory") - at("prompt-context-start");
     expect(reading).toBeGreaterThan(200);
+    expect(
+      timings.find((line) => line.event === "prompt-directory")!.durationMs,
+    ).toBeGreaterThan(200);
     expect(at("prompt-context-ready")).toBeGreaterThanOrEqual(
       at("prompt-directory"),
     );
@@ -1449,6 +1456,7 @@ describe("timing a call that asked to be timed", () => {
       "side",
       "event",
       "elapsedMs",
+      "durationMs",
       "at",
       "device",
       "code",

@@ -48,7 +48,10 @@ import {
   VOICE_DICTATION_PATH_V1,
   type VoiceCapabilitiesV1,
 } from "@frockbot/app/voice/shared";
-import { voiceAssistantEdgeTimingV1 } from "@frockbot/app/voice/diagnostics";
+import {
+  voiceAssistantEdgeTimingV1,
+  type VoiceTimingV1,
+} from "@frockbot/app/voice/diagnostics";
 import { createDebugRoute } from "./debug.js";
 import { INSIGHTS_REPORT_ORIGIN, INSIGHTS_SCRIPT_ORIGIN } from "./insights.js";
 import {
@@ -582,7 +585,10 @@ export function deploymentAnsweredV1(
   return named;
 }
 
-export function createGateway(dependencies: GatewayDependencies) {
+export function createGateway(
+  dependencies: GatewayDependencies,
+  entryTiming?: VoiceTimingV1,
+) {
   const compatibilityDate = dependencies.compatibilityDate ?? "2026-08-27";
   const debugRoute = createDebugRoute(
     dependencies.debug,
@@ -658,7 +664,7 @@ export function createGateway(dependencies: GatewayDependencies) {
     // Opt-in voice diagnostics, and only for the assistant upgrade: the
     // object's own first line is written after everything here has already
     // happened, so authentication is invisible from inside it.
-    const timing = voiceAssistantEdgeTimingV1(url);
+    const timing = entryTiming ?? voiceAssistantEdgeTimingV1(url);
     timing?.mark("edge-auth-start");
     let development = dependencies.allowDevelopmentIdentity
       ? developmentIdentity(request)

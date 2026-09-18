@@ -961,10 +961,7 @@ class AssistantSessionController extends ChangeNotifier {
   Future<void> _teardown({int code = voiceCloseNormalV1, String reason = ''}) =>
       _teardownDone ??= _teardownNow(code: code, reason: reason);
 
-  Future<void> _teardownNow({
-    required int code,
-    required String reason,
-  }) async {
+  Future<void> _teardownNow({required int code, required String reason}) async {
     _reportedPlaying = false;
     _startTimer?.cancel();
     _startTimer = null;
