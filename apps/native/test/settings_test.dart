@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/settings/controller.dart';
 import 'package:frockbot_native/settings/document.dart';
 import 'package:frockbot_native/settings/model_picker.dart';
@@ -300,10 +299,9 @@ void main() {
     );
   }
 
-  group('the Mac window’s title strip', () {
+  group('the Mac window header', () {
     Widget app(LocalStore store, NativeApi api) => MaterialApp(
       theme: FrockTheme.theme(Brightness.dark),
-      builder: (context, child) => DesktopTitleBarPadding(child: child!),
       home: Builder(
         builder: (context) => TextButton(
           onPressed: () => Navigator.of(context).push(
@@ -317,7 +315,7 @@ void main() {
       ),
     );
 
-    testWidgets('keeps the Settings header out from under the traffic lights', (
+    testWidgets('does not add a title-bar row above the Settings header', (
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -326,17 +324,12 @@ void main() {
       await tester.pumpWidget(app(store, api));
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
-      // The lights sit inside the strip. Nothing of the header — the way
-      // back, the title, the refresh — may be drawn in it.
       for (final control in [
         find.byType(BackButton),
         find.text('Personal details'),
         find.byTooltip('Refresh settings'),
       ]) {
-        expect(
-          tester.getTopLeft(control).dy,
-          greaterThanOrEqualTo(desktopTitleBarInset),
-        );
+        expect(tester.getTopLeft(control).dy, lessThan(kToolbarHeight));
       }
       debugDefaultTargetPlatformOverride = null;
     });
@@ -350,7 +343,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.getTopLeft(find.byType(BackButton)).dy,
-        lessThan(desktopTitleBarInset),
+        lessThan(kToolbarHeight),
       );
       debugDefaultTargetPlatformOverride = null;
     });

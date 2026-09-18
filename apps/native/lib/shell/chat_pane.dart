@@ -25,8 +25,10 @@ import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
 import '../flock/avatar.dart';
+import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
+import '../voice/motion.dart';
 import 'approvals.dart';
 import 'composer.dart';
 import 'lifecycle.dart';
@@ -67,6 +69,9 @@ class ChatPane extends StatefulWidget {
   /// switching Bots must flush into the Bot the capture started on.
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
+
+  /// Throws a capture away, its words with it.
+  final VoidCallback? onDiscardDictation;
 
   /// Starts a voice call with this Bot, or moves the open one to it
   /// (ADR 0029). It never ends one: while the call is with this Bot, voice
@@ -110,6 +115,7 @@ class ChatPane extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
+    this.onDiscardDictation,
     this.onVoice,
     this.voiceClosing = false,
     this.dictationState = DictationState.idle,
@@ -144,6 +150,15 @@ class _ChatPaneState extends State<ChatPane> {
   Timer? _holdTimer;
   final _companionKey = GlobalKey();
 
+  /// The person has text in the composer they put there. Dictation writing
+  /// the same field is not typing, and tucking then would slide the dock.
+  bool _drafting = false;
+
+  /// The dictation dock keeps the composer's rest seat until VoiceReveal
+  /// has finished hiding it.
+  bool _dictationHeld = false;
+  Timer? _dictationHoldTimer;
+
   void _pointerDown() {
     hold.value = true;
     _holdTimer?.cancel();
@@ -176,7 +191,24 @@ class _ChatPaneState extends State<ChatPane> {
   void initState() {
     super.initState();
     editor.text = controller.draft;
+    _drafting = editor.text.isNotEmpty;
+    _dictationHeld = widget.dictationState.active;
     controller.addListener(_update);
+  }
+
+  @override
+  void didUpdateWidget(ChatPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.dictationState.active) {
+      _dictationHoldTimer?.cancel();
+      _dictationHeld = true;
+    } else if (oldWidget.dictationState.active) {
+      _dictationHoldTimer?.cancel();
+      _dictationHoldTimer = Timer(voiceExitDuration, () {
+        if (!mounted) return;
+        setState(() => _dictationHeld = false);
+      });
+    }
   }
 
   /// Mirrors the controller's draft into the composer. A live composing range
@@ -192,6 +224,7 @@ class _ChatPaneState extends State<ChatPane> {
         (editor.text.isEmpty || !editor.value.composing.isValid)) {
       editor.text = controller.draft;
     }
+    if (editor.text.isEmpty) _drafting = false;
     setState(() {});
     widget.onWorkingChanged?.call(controller.activeRunId);
     if (controller.ready) AcceptanceMetrics.instance.editableShown();
@@ -218,6 +251,7 @@ class _ChatPaneState extends State<ChatPane> {
     // Starting the send and clearing before the first await leaves no rebuild
     // in between.
     final sending = controller.send(text);
+    _drafting = false;
     editor.clear();
     await sending;
     if (mounted) focus.requestFocus();
@@ -226,12 +260,14 @@ class _ChatPaneState extends State<ChatPane> {
   /// Writes a suggestion into the composer and stops there. The draft is the
   /// person's to edit and send; nothing here admits a Turn.
   void _prefill(StarterSuggestionV1 starter) {
+    _drafting = starter.draft.isNotEmpty;
     editor.value = TextEditingValue(
       text: starter.draft,
       selection: starterSelectionV1(starter.draft),
     );
     unawaited(controller.saveDraft(starter.draft));
     focus.requestFocus();
+    setState(() {});
   }
 
   Future<void> _retry(TranscriptLine line) => controller.retryRun(line.runId);
@@ -397,68 +433,109 @@ class _ChatPaneState extends State<ChatPane> {
         // of every Turn and the thread above jumped ten points. The composer
         // alone sets the height now; the transcript's reserved Stop space
         // keeps the thread still, as it did before the companion arrived.
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Padding(
-              padding: EdgeInsets.only(left: avatarSize + 12),
-              child: _composer(c),
-            ),
-            // The field sits above the system's bottom inset (the composer
-            // keeps it in a SafeArea); the companion sits above the same
-            // inset, or on a phone it hung a gesture bar's height below the
-            // field's baseline.
-            Positioned(
-              key: _companionKey,
-              left: 10,
-              bottom: 10 + MediaQuery.paddingOf(context).bottom,
-              // The companion is the working indicator: while a Turn runs it
-              // takes the working pose and wears the typing badge, paced by
-              // the Turn's own stream. Nothing in the thread says "thinking"
-              // any more; the character does.
-              child: working
-                  ? identified(
-                      ShellIds.workingIndicator,
-                      Semantics(
-                        container: true,
-                        liveRegion: true,
-                        label: 'Working',
-                        child: WorkingPace(
-                          line: runningLine,
-                          builder: (context, tempo) => CharacterAvatar(
-                            size: avatarSize,
-                            characterId: widget.background,
-                            primary: widget.primary,
-                            gaze: gaze,
-                            hold: hold,
-                            motion: CharacterMotion.active,
-                            activity: CharacterActivity.working,
-                            working: true,
-                            tempo: tempo,
-                          ),
-                        ),
+        //
+        // A phone cannot keep that column and a usable field at once. The
+        // first character slides the composer into his seat and he leaves;
+        // an empty draft — send, or clearing — gives him back. A desk has
+        // the room, so he stays. Dictation writing the field is not typing:
+        // the capture has to keep the seat the composer had at rest.
+        Builder(
+          builder: (context) {
+            final dictating = widget.dictationState.active || _dictationHeld;
+            final tuck =
+                MediaQuery.sizeOf(context).width <= 640 &&
+                _drafting &&
+                !dictating;
+            // Dictation occupies the composer in place; sliding the field
+            // under a capture would move the strip. Dropping in is instant
+            // so a capture that starts on a tucked row still lands where
+            // the composer sat at rest.
+            final motion = dictating
+                ? Duration.zero
+                : FrockTheme.motion(context, FrockTheme.enter);
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                AnimatedPadding(
+                  duration: motion,
+                  curve: Curves.easeOutCubic,
+                  padding: EdgeInsets.only(left: tuck ? 0 : avatarSize),
+                  child: _composer(c),
+                ),
+                // The field sits above the system's bottom inset (the
+                // composer keeps it in a SafeArea); the companion sits
+                // above the same inset, or on a phone it hung a gesture
+                // bar's height below the field's baseline.
+                AnimatedPositioned(
+                  duration: motion,
+                  curve: Curves.easeOutCubic,
+                  key: _companionKey,
+                  left: tuck ? -avatarSize : 6,
+                  bottom: 10 + MediaQuery.paddingOf(context).bottom,
+                  child: IgnorePointer(
+                    ignoring: tuck,
+                    child: AnimatedOpacity(
+                      duration: motion,
+                      curve: Curves.easeOutCubic,
+                      opacity: tuck ? 0 : 1,
+                      child: ExcludeSemantics(
+                        excluding: tuck,
+                        // The companion is the working indicator: while a
+                        // Turn runs it takes the working pose and wears
+                        // the typing badge, paced by the Turn's own
+                        // stream. Nothing in the thread says "thinking"
+                        // any more; the character does.
+                        child: working
+                            ? identified(
+                                ShellIds.workingIndicator,
+                                Semantics(
+                                  container: true,
+                                  liveRegion: true,
+                                  label: 'Working',
+                                  child: WorkingPace(
+                                    line: runningLine,
+                                    builder: (context, tempo) =>
+                                        CharacterAvatar(
+                                          size: avatarSize,
+                                          characterId: widget.background,
+                                          primary: widget.primary,
+                                          gaze: gaze,
+                                          hold: hold,
+                                          motion: CharacterMotion.active,
+                                          activity: CharacterActivity.working,
+                                          working: true,
+                                          tempo: tempo,
+                                        ),
+                                  ),
+                                ),
+                              )
+                            : CharacterAvatar(
+                                size: avatarSize,
+                                characterId: widget.background,
+                                primary: widget.primary,
+                                gaze: gaze,
+                                hold: hold,
+                                // A live artboard at rest, so the eyes can
+                                // follow the pointer and the character can
+                                // twitch between Turns. Quiet, not active:
+                                // the ticker runs only for a moment after
+                                // a change and stops again, which is what
+                                // keeps an open chat from redrawing the
+                                // window sixty times a second. The
+                                // artboard takes no pointer and no focus,
+                                // so the field beside it keeps its
+                                // keystrokes (errors.e2e, skill-menu.e2e).
+                                motion: CharacterMotion.quiet,
+                                activity: CharacterActivity.idle,
+                                semanticsLabel: 'Bot is ready',
+                              ),
                       ),
-                    )
-                  : CharacterAvatar(
-                      size: avatarSize,
-                      characterId: widget.background,
-                      primary: widget.primary,
-                      gaze: gaze,
-                      hold: hold,
-                      // A live artboard at rest, so the eyes can follow the
-                      // pointer and the character can twitch between Turns.
-                      // Quiet, not active: the ticker runs only for a moment
-                      // after a change and stops again, which is what keeps
-                      // an open chat from redrawing the window sixty times
-                      // a second. The artboard takes no pointer and no
-                      // focus, so the field beside it keeps its keystrokes
-                      // (errors.e2e, skill-menu.e2e).
-                      motion: CharacterMotion.quiet,
-                      activity: CharacterActivity.idle,
-                      semanticsLabel: 'Bot is ready',
                     ),
-            ),
-          ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );
@@ -474,10 +551,15 @@ class _ChatPaneState extends State<ChatPane> {
     stopping: c.stopping,
     onSend: _send,
     onStop: c.stop,
-    onChanged: (value) => unawaited(c.saveDraft(value)),
+    onChanged: (value) {
+      unawaited(c.saveDraft(value));
+      final drafting = value.isNotEmpty;
+      if (drafting != _drafting) setState(() => _drafting = drafting);
+    },
     skills: skills,
     onDictate: widget.onDictate,
     onStopDictation: widget.onStopDictation,
+    onDiscardDictation: widget.onDiscardDictation,
     onVoice: widget.onVoice,
     voiceClosing: widget.voiceClosing,
     dictationState: widget.dictationState,
@@ -493,6 +575,7 @@ class _ChatPaneState extends State<ChatPane> {
     focus.dispose();
     gaze.dispose();
     _holdTimer?.cancel();
+    _dictationHoldTimer?.cancel();
     hold.dispose();
     super.dispose();
   }
@@ -519,6 +602,9 @@ class ConversationView extends StatefulWidget {
   final VoidCallback? onOpenBilling;
   final VoidCallback? onDictate;
   final VoidCallback? onStopDictation;
+
+  /// Throws a capture away, its words with it.
+  final VoidCallback? onDiscardDictation;
 
   /// Starts a voice call with this Bot, or moves the open one to it
   /// (ADR 0029). It never ends one: while the call is with this Bot, voice
@@ -564,6 +650,7 @@ class ConversationView extends StatefulWidget {
     this.onOpenBilling,
     this.onDictate,
     this.onStopDictation,
+    this.onDiscardDictation,
     this.onVoice,
     this.voiceClosing = false,
     this.dictationState = DictationState.idle,
@@ -692,6 +779,7 @@ class _ConversationViewState extends State<ConversationView>
           onVoice: widget.onVoice,
           voiceClosing: widget.voiceClosing,
           onStopDictation: widget.onStopDictation,
+          onDiscardDictation: widget.onDiscardDictation,
           dictationState: widget.dictationState,
           canRevertDictation: widget.canRevertDictation,
           onRevertDictation: widget.onRevertDictation,

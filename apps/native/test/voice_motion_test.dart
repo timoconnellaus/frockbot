@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/dictation.dart';
@@ -86,33 +85,29 @@ class FailingClosePlayer extends FakeVoicePlayer {
 void main() {
   for (final width in [390.0, 1280.0]) {
     for (final brightness in Brightness.values) {
-      testWidgets('dictation dock in the real shell: $width $brightness', (
+      testWidgets('dictation in the composer: $width $brightness', (
         tester,
       ) async {
         final semantics = tester.ensureSemantics();
         final harness = VoiceShellHarness();
         await harness.mount(tester, width: width, brightness: brightness);
-        final safeBottom = width == 390 ? 34.0 : 0.0;
-        final conversation = find.byWidgetPredicate(
-          (widget) =>
-              widget is Semantics &&
-              widget.properties.identifier == ShellIds.conversation,
-        );
-        final chat = tester.getRect(conversation);
-        final composer = tester.getRect(find.byType(Composer));
-        final dock = find.byKey(const ValueKey('dictation-dock'));
+        var composer = tester.getRect(find.byType(Composer));
+        final strip = find.byKey(const ValueKey('dictation-strip'));
         final stop = find.byKey(const ValueKey('dictation-stop'));
+        final discard = find.byKey(const ValueKey('dictation-discard'));
         void checkFrame() {
-          final rect = tester.getRect(dock);
-          // The persistent Bot companion owns the strip between the chat edge
-          // and its composer; dictation replaces the composer itself.
-          expect(rect.left, composer.left);
-          expect(rect.right, chat.right);
-          expect(rect.bottom, greaterThanOrEqualTo(800));
+          // The capture happens inside the field's own frame: the composer
+          // keeps the room it had, so nothing in the thread above it moves.
+          expect(tester.getRect(find.byType(Composer)), composer);
+          final meter = tester.getRect(strip);
           final button = tester.getRect(stop);
-          expect(button.right, lessThanOrEqualTo(chat.right - 16));
-          expect(button.bottom, lessThanOrEqualTo(800 - safeBottom - 16));
-          expect(button.top - rect.top, greaterThanOrEqualTo(16));
+          final bin = tester.getRect(discard);
+          // Throw it away at one end, keep it at the other, and the sound
+          // fills everything between them.
+          expect(meter.right, lessThanOrEqualTo(button.left));
+          expect(bin.right, lessThanOrEqualTo(meter.left));
+          expect(meter.width, greaterThan(button.left - bin.right - 4));
+          expect(button.bottom, lessThanOrEqualTo(composer.bottom));
           expectUnclippedControl(tester, stop);
           expect(tester.takeException(), isNull);
         }
@@ -123,11 +118,9 @@ void main() {
         for (var frame = 0; frame < 24; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
           checkFrame();
-          expect(find.byType(TextField), findsNothing);
-          expect(
-            find.descendant(of: dock, matching: find.byType(Text)),
-            findsNothing,
-          );
+          // There is nothing to type into while the words are arriving: the
+          // field keeps its room in the layout and takes no touch.
+          expect(find.byType(TextField).hitTestable(), findsNothing);
         }
         final starting = tester.getSemantics(
           find.bySemanticsLabel('Starting dictation'),
@@ -154,14 +147,15 @@ void main() {
         harness.dictationSocket.deliver('{"schemaVersion":1,"type":"final"}');
         await tester.runAsync(() => settle());
         await tester.pump();
+        // The words have landed in the draft, which is what the composer is
+        // sized by from here: it must not move again as the capture leaves.
+        composer = tester.getRect(find.byType(Composer));
         for (var frame = 0; frame < 14; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
-          checkFrame();
+          expect(tester.getRect(find.byType(Composer)), composer);
         }
-        final before = tester.getBottomLeft(find.byType(Composer)).dy;
-        await tester.pump(const Duration(milliseconds: 32));
-        expect(tester.getBottomLeft(find.byType(Composer)).dy, before);
-        expect(dock, findsNothing);
+        expect(strip, findsNothing);
+        expect(tester.takeException(), isNull);
         final field = find.byType(TextField);
         expect(
           tester.widget<TextField>(field).controller!.text,
@@ -178,25 +172,34 @@ void main() {
           isEmpty,
         );
 
-        // Stop during entry, then enable reduced motion during the exit.
+        // Discard: the capture goes, and its words go with it — what the
+        // person typed around them stays exactly where they typed it.
+        composer = tester.getRect(find.byType(Composer));
         await harness.dictation.start('voice-bot');
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 64));
+        harness.dictationSocket.deliver('{"schemaVersion":1,"type":"ready"}');
+        await tester.pump();
         checkFrame();
-        unawaited(harness.dictation.stop());
-        harness.dictationSocket.deliver('{"schemaVersion":1,"type":"final"}');
+        harness.dictationSocket.deliver(
+          '{"schemaVersion":1,"type":"segment","text":"and a thought"}',
+        );
+        await tester.pump();
+        await tester.tap(discard);
         await tester.runAsync(() => settle());
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 32));
-        checkFrame();
-        // Reduced motion changed during exit completes in this one frame.
+        expect(harness.dictation.active, isFalse);
+        expect(strip, findsNothing);
+        expect(
+          harness.sessions.open('voice-user', 'voice-bot').controller.draft,
+          'Keep this editable, with a correction',
+        );
+
+        // Reduced motion draws the same strip and runs no ticker for it.
         harness.reducedMotion.value = true;
-        await tester.pump();
-        expect(dock, findsNothing);
+        composer = tester.getRect(find.byType(Composer));
         await harness.dictation.start('voice-bot');
         await tester.pump();
         checkFrame();
-        expect(tester.getRect(dock).height, 96 + safeBottom);
         await tester.pump(const Duration(milliseconds: 300));
         final restingTickers = tester.binding.transientCallbackCount;
         harness.dictation.level.value = 0.8;
@@ -530,8 +533,9 @@ void main() {
           const Size(48, 48),
         );
         expect(find.bySemanticsLabel('Starting dictation'), findsOneWidget);
-        expect(find.byType(TextField), findsNothing);
-        expect(find.byType(Text), findsNothing);
+        expect(find.byType(TextField).hitTestable(), findsNothing);
+        expect(find.byType(Text).hitTestable(), findsNothing);
+        expect(find.byKey(const ValueKey('dictation-discard')), findsOneWidget);
         // Stop is usable even before microphone permission completes.
         await tester.tap(find.byTooltip('Stop dictation'));
         await tester.pump(const Duration(milliseconds: 200));
@@ -582,29 +586,25 @@ void main() {
     expect(controller.active, isFalse);
   });
 
-  test(
-    'a failing recorder or socket still ends the call and frees the '
-    'microphone',
-    () async {
-      final capture = FakeVoiceCapture()..stopFailure = StateError('recorder');
-      final socket = FailingCloseSocket();
-      final controller = AssistantSessionController(
-        openSocket: () async => socket,
-        capture: capture,
-        player: FakeVoicePlayer(),
-      );
-      await controller.start();
-      await settle();
+  test('a failing recorder or socket still ends the call and frees the '
+      'microphone', () async {
+    final capture = FakeVoiceCapture()..stopFailure = StateError('recorder');
+    final socket = FailingCloseSocket();
+    final controller = AssistantSessionController(
+      openSocket: () async => socket,
+      capture: capture,
+      player: FakeVoicePlayer(),
+    );
+    await controller.start();
+    await settle();
 
-      await controller.end(reason: 'end-button');
-      expect(controller.phase, VoiceSessionPhase.ended);
-      expect(controller.active, isFalse);
-      expect(socket.closeReason, 'end-button');
-      controller.dispose();
-      await settle();
-    },
-    timeout: const Timeout(Duration(seconds: 10)),
-  );
+    await controller.end(reason: 'end-button');
+    expect(controller.phase, VoiceSessionPhase.ended);
+    expect(controller.active, isFalse);
+    expect(socket.closeReason, 'end-button');
+    controller.dispose();
+    await settle();
+  }, timeout: const Timeout(Duration(seconds: 10)));
 
   test('a goodbye frame that cannot be sent still ends the call and frees the '
       'microphone', () async {
@@ -629,31 +629,34 @@ void main() {
     await settle();
   }, timeout: const Timeout(Duration(seconds: 10)));
 
-  test('an end whose every device step fails still frees the microphone',
-      () async {
-    final capture = HostileCapture()..stopFailure = StateError('recorder');
-    final socket = HostileSocket();
-    final player = FailingClosePlayer();
-    final controller = AssistantSessionController(
-      openSocket: () async => socket,
-      capture: capture,
-      player: player,
-    );
-    await controller.start();
-    await settle();
-    expect(capture.starts, 1);
+  test(
+    'an end whose every device step fails still frees the microphone',
+    () async {
+      final capture = HostileCapture()..stopFailure = StateError('recorder');
+      final socket = HostileSocket();
+      final player = FailingClosePlayer();
+      final controller = AssistantSessionController(
+        openSocket: () async => socket,
+        capture: capture,
+        player: player,
+      );
+      await controller.start();
+      await settle();
+      expect(capture.starts, 1);
 
-    await controller.end(reason: 'end-button');
+      await controller.end(reason: 'end-button');
 
-    expect(controller.phase, VoiceSessionPhase.ended);
-    expect(controller.active, isFalse);
-    expect(capture.stopAttempts, greaterThan(0));
-    expect(player.closed, isTrue);
-    expect(socket.closed, isTrue);
-    expect(socket.closeReason, 'end-button');
-    controller.dispose();
-    await settle();
-  }, timeout: const Timeout(Duration(seconds: 10)));
+      expect(controller.phase, VoiceSessionPhase.ended);
+      expect(controller.active, isFalse);
+      expect(capture.stopAttempts, greaterThan(0));
+      expect(player.closed, isTrue);
+      expect(socket.closed, isTrue);
+      expect(socket.closeReason, 'end-button');
+      controller.dispose();
+      await settle();
+    },
+    timeout: const Timeout(Duration(seconds: 10)),
+  );
 
   testWidgets(
     'a draft that arrived since the last frame still sends on Cmd+Enter',

@@ -25,6 +25,7 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/frock_theme.dart';
 import '../update/desktop_update.dart';
 import 'chat_icons.dart';
+import 'desktop_layout.dart';
 import 'focus.dart';
 import 'semantics.dart';
 import 'sidebar_order.dart';
@@ -1615,82 +1616,89 @@ class _Header extends StatelessWidget {
         scheme.primary.withValues(alpha: 0.14),
       ),
     );
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 10, 6),
-      child: Row(
-        children: [
-          identified(
-            ShellIds.sidebarProfile,
-            IconButton(
-              tooltip: 'You',
-              onPressed: onProfile,
-              style: quiet,
-              icon: Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: scheme.onSurface.withValues(alpha: 0.08),
-                  shape: BoxShape.circle,
-                  border: Border.all(
+    return DesktopWindowDragRegion(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          12,
+          desktopTitleBarless ? desktopSidebarTrafficLightClearance : 10,
+          10,
+          desktopTitleBarless ? 10 : 6,
+        ),
+        child: Row(
+          children: [
+            identified(
+              ShellIds.sidebarProfile,
+              IconButton(
+                tooltip: 'You',
+                onPressed: onProfile,
+                style: quiet,
+                icon: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
                     color: scheme.onSurface.withValues(alpha: 0.08),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: scheme.onSurface.withValues(alpha: 0.08),
+                    ),
                   ),
-                ),
-                child: Icon(
-                  Icons.person_rounded,
-                  size: 20,
-                  color: scheme.onSurfaceVariant,
+                  child: Icon(
+                    Icons.person_rounded,
+                    size: 20,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ),
-          ),
-          if (onMarketplace case final VoidCallback open) ...[
+            if (onMarketplace case final VoidCallback open) ...[
+              const SizedBox(width: 2),
+              identified(
+                ShellIds.sidebarMarketplace,
+                IconButton(
+                  tooltip: 'Marketplace',
+                  onPressed: open,
+                  style: quiet,
+                  icon: const Icon(Icons.storefront_outlined),
+                ),
+              ),
+            ],
+            // A desktop app replaces itself to update, and says so beside the
+            // account; the row's slack is where it speaks, and it draws nothing
+            // while there is nothing to do.
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: desktopUpdates == null
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(left: 6, right: 4),
+                        child: DesktopUpdateButton(controller: desktopUpdates),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 2),
+            if (onSearch != null)
+              identified(
+                ShellIds.sidebarSearch,
+                IconButton(
+                  tooltip: 'Search',
+                  onPressed: onSearch,
+                  style: quiet,
+                  icon: const Icon(Icons.search_rounded),
+                ),
+              ),
             const SizedBox(width: 2),
             identified(
-              ShellIds.sidebarMarketplace,
+              ShellIds.sidebarCreateBot,
               IconButton(
-                tooltip: 'Marketplace',
-                onPressed: open,
-                style: quiet,
-                icon: const Icon(Icons.storefront_outlined),
+                tooltip: 'Add a Bot',
+                onPressed: onCreateBot,
+                style: active,
+                icon: const Icon(Icons.add_rounded),
               ),
             ),
           ],
-          // A desktop app replaces itself to update, and says so beside the
-          // account; the row's slack is where it speaks, and it draws nothing
-          // while there is nothing to do.
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: desktopUpdates == null
-                  ? const SizedBox.shrink()
-                  : Padding(
-                      padding: const EdgeInsets.only(left: 6, right: 4),
-                      child: DesktopUpdateButton(controller: desktopUpdates),
-                    ),
-            ),
-          ),
-          const SizedBox(width: 2),
-          if (onSearch != null)
-            identified(
-              ShellIds.sidebarSearch,
-              IconButton(
-                tooltip: 'Search',
-                onPressed: onSearch,
-                style: quiet,
-                icon: const Icon(Icons.search_rounded),
-              ),
-            ),
-          const SizedBox(width: 2),
-          identified(
-            ShellIds.sidebarCreateBot,
-            IconButton(
-              tooltip: 'Add a Bot',
-              onPressed: onCreateBot,
-              style: active,
-              icon: const Icon(Icons.add_rounded),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

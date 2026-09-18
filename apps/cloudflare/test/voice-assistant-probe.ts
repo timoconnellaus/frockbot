@@ -129,6 +129,8 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     // The production seam accepts the socket before handing it back; a socket
     // nobody accepted throws on its first send.
     client.accept();
+    // Outbound Worker sockets deliver Google's binary JSON as Blobs by default.
+    client.binaryType = "blob";
     const fake = new GeminiFakeV1(url, server);
     this.#fakes.push(fake);
     const closeWith = this.#script.closeUpstreamWith;

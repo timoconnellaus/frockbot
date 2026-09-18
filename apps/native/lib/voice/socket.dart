@@ -19,6 +19,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../client/transport.dart';
 import '../client/transport_io.dart'
     if (dart.library.js_interop) '../client/transport_web.dart';
+import 'protocol.dart';
 
 abstract interface class VoiceSocket {
   /// Text frames arrive as [String], audio as [List<int>].
@@ -89,7 +90,7 @@ Future<VoiceSocket> openVoiceSocketV1(
   NativeApi api,
   String path, {
   Map<String, String> query = const {},
-  Duration timeout = const Duration(seconds: 10),
+  Duration timeout = voiceAssistantConnectTimeoutV1,
 }) async {
   final origin = Uri.parse(hostedOrigin);
   final uri = origin.replace(
@@ -106,7 +107,11 @@ Future<VoiceSocket> openVoiceSocketV1(
 }
 
 VoiceSocketOpener dictationSocketOpenerV1(NativeApi api) =>
-    () => openVoiceSocketV1(api, '/api/voice/dictation');
+    () => openVoiceSocketV1(
+      api,
+      '/api/voice/dictation',
+      timeout: voiceDictationConnectTimeoutV1,
+    );
 
 VoiceSocketOpener assistantSocketOpenerV1(NativeApi api) =>
     () =>

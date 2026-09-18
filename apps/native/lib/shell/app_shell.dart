@@ -591,6 +591,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  Future<void> _discardDictation() async {
+    final controller = dictation;
+    if (controller == null || !controller.active) return;
+    await controller.discard();
+    if (mounted) setState(() {});
+  }
+
   /// The draft of the Bot a capture is bound to, so the words land beside
   /// anything the person typed rather than over it.
   String _readDictatedDraft(Object context) =>
@@ -1224,10 +1231,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }) => Theme(
     key: ValueKey(key),
     data: theme,
-    child: ColoredBox(
-      color: theme.scaffoldBackgroundColor,
-      child: child,
-    ),
+    child: ColoredBox(color: theme.scaffoldBackgroundColor, child: child),
   );
 
   Widget _maybeBotLookScope({
@@ -1519,88 +1523,90 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         final botId = bot.botId.value;
         final phase = key == 'computer' ? computer?.said : null;
         return SizedBox(
-      height: 52,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(key == null ? 16 : 8, 0, 8, 0),
-        child: Row(
-          children: [
-            if (key == null) ...[
-              CharacterAvatar(
-                size: 28,
-                characterId: _background(botId),
-                primary: _primary(botId),
-                motion: CharacterMotion.quiet,
-              ),
-              const SizedBox(width: 10),
-            ] else
-              identified(
-                ShellIds.rightPanelBack,
-                IconButton(
-                  tooltip: 'Back',
-                  onPressed: () => setState(panelStack.removeLast),
-                  style: _panelControl(theme),
-                  icon: const Icon(Icons.chevron_left_rounded),
-                ),
-              ),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // A heading of its own, rather than a leaf the engine merges
-                  // into the row beside it: what the panel is showing is the
-                  // one thing a reader needs read out first.
-                  Semantics(
-                    header: true,
-                    child: Text(
-                      key == null ? _name(bot) : _panelTitle(key) ?? _name(bot),
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+          height: 52,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(key == null ? 16 : 8, 0, 8, 0),
+            child: Row(
+              children: [
+                if (key == null) ...[
+                  CharacterAvatar(
+                    size: 28,
+                    characterId: _background(botId),
+                    primary: _primary(botId),
+                    motion: CharacterMotion.quiet,
+                  ),
+                  const SizedBox(width: 10),
+                ] else
+                  identified(
+                    ShellIds.rightPanelBack,
+                    IconButton(
+                      tooltip: 'Back',
+                      onPressed: () => setState(panelStack.removeLast),
+                      style: _panelControl(theme),
+                      icon: const Icon(Icons.chevron_left_rounded),
                     ),
                   ),
-                  if (phase != null && phase.isNotEmpty)
-                    Text(
-                      phase,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // A heading of its own, rather than a leaf the engine merges
+                      // into the row beside it: what the panel is showing is the
+                      // one thing a reader needs read out first.
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          key == null
+                              ? _name(bot)
+                              : _panelTitle(key) ?? _name(bot),
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ],
-              ),
-            ),
-            if (key == null)
-              identified(
-                SettingsIds.botPageSettings,
-                IconButton(
-                  tooltip: 'Bot settings',
-                  onPressed: () => _openPanel('bot-settings', push: true),
-                  style: _panelControl(theme),
-                  icon: const Icon(Icons.settings_outlined),
+                      if (phase != null && phase.isNotEmpty)
+                        Text(
+                          phase,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            identified(
-              ShellIds.rightPanelClose,
-              IconButton(
-                tooltip: 'Close the panel',
-                onPressed: () => setState(() {
-                  panelOpen = false;
-                  panelCollapsed = true;
-                  panelStack.clear();
-                  panelPackage = null;
-                }),
-                style: _panelControl(theme),
-                icon: const Icon(Icons.close_rounded),
-              ),
+                if (key == null)
+                  identified(
+                    SettingsIds.botPageSettings,
+                    IconButton(
+                      tooltip: 'Bot settings',
+                      onPressed: () => _openPanel('bot-settings', push: true),
+                      style: _panelControl(theme),
+                      icon: const Icon(Icons.settings_outlined),
+                    ),
+                  ),
+                identified(
+                  ShellIds.rightPanelClose,
+                  IconButton(
+                    tooltip: 'Close the panel',
+                    onPressed: () => setState(() {
+                      panelOpen = false;
+                      panelCollapsed = true;
+                      panelStack.clear();
+                      panelPackage = null;
+                    }),
+                    style: _panelControl(theme),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
         );
       },
     );
@@ -2480,99 +2486,100 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       key: 'thread-theme-${bot?.botId.value ?? 'none'}',
                       theme: botTheme,
                       child: voiceHere
-                            ? VoiceMode(
-                                key: ValueKey('voice-${bot.botId.value}'),
-                                session: session,
-                                botName: _name(bot),
-                                characterId: bot.avatar.characterId,
-                                primary: bot.avatar.primary,
-                                onEnd: () =>
-                                    unawaited(_endVoice(reason: 'end-button')),
-                                onOpenWork: _openVoiceWork,
-                              )
-                            : bot == null
-                            ? NoConversation(
-                                empty: bots.isEmpty,
-                                failure: bots.isEmpty ? error : null,
-                                action: 'Refresh Bots',
-                                onAction: () => unawaited(load()),
-                              )
-                            : ConversationView(
-                                key: ValueKey(
-                                  '${widget.userId}:${bot.botId.value}',
-                                ),
-                                sessions: widget.sessions,
-                                api: widget.api,
-                                store: widget.store,
-                                userId: widget.userId,
-                                botId: bot.botId.value,
-                                general: bot.botId.value == generalBotId,
-                                featuresRevision: featuresRevision,
-                                onOpenRun: _openRun,
-                                onOpenExchange: _openExchange,
-                                backgroundOf: _background,
-                                primaryOf: _primary,
-                                nameOf: _botNameOf,
-                                outOfCredit: credit?.canSpend == false,
-                                onOpenBilling: () => unawaited(_openBilling()),
-                                onMessageActions: (line, {position}) =>
-                                    unawaited(
-                                      _messageActions(line, position: position),
-                                    ),
-                                onReadLatest: (messageId) =>
-                                    _readLatest(bot.botId.value, messageId),
-                                unreadFromMessageId: activity
-                                    .unread[bot.botId.value]
-                                    ?.unreadFromMessageId,
-                                background: _background(bot.botId.value),
-                                primary: _primary(bot.botId.value),
-                                onDictate: () => unawaited(_dictate()),
-                                onStopDictation: () =>
-                                    unawaited(_stopDictation()),
-                                // Voice, on the Bot whose page this is (ADR 0029).
-                                onVoice: () => unawaited(
-                                  _startOrSwitchVoice(botId: bot.botId.value),
-                                ),
-                                voiceClosing: voiceClosing,
-                                dictationState:
-                                    dictation?.context == bot.botId.value
-                                    ? dictation!.state
-                                    : DictationState.idle,
-                                // The offer belongs to the composer the capture
-                                // was dictated into, exactly as the words do.
-                                canRevertDictation: () =>
-                                    dictation?.context == bot.botId.value &&
-                                    dictation!.cleaned,
-                                onRevertDictation:
-                                    dictation?.context == bot.botId.value
-                                    ? dictation!.revertCleanup
-                                    : null,
-                                dictationLevel: dictation?.level,
-                                onWorkingChanged: (runId) {
-                                  if (runId == workingRunId || !mounted) return;
-                                  final settled =
-                                      workingRunId != null && runId == null;
-                                  setState(() => workingRunId = runId);
-                                  // A Turn is how an Applet comes into existence, and the
-                                  // Bot's page names the Applets the Bot holds — so the
-                                  // directory is re-read when the Turn that may have changed
-                                  // it ends. Read on adoption alone, a Bot that had just made
-                                  // its first Applet had no way to it until the page was
-                                  // reloaded.
-                                  final canvas = appletCanvas;
-                                  if (settled && canvas != null) {
-                                    unawaited(canvas.load());
-                                  }
-                                },
-                                onConnectionChanged: (botId, state) {
-                                  if (!mounted ||
-                                      selected?.botId.value != botId ||
-                                      selectedConnection == state) {
-                                    return;
-                                  }
-                                  setState(() => selectedConnection = state);
-                                },
+                          ? VoiceMode(
+                              key: ValueKey('voice-${bot.botId.value}'),
+                              session: session,
+                              botName: _name(bot),
+                              characterId: bot.avatar.characterId,
+                              primary: bot.avatar.primary,
+                              onEnd: () =>
+                                  unawaited(_endVoice(reason: 'end-button')),
+                              onOpenWork: _openVoiceWork,
+                            )
+                          : bot == null
+                          ? NoConversation(
+                              empty: bots.isEmpty,
+                              failure: bots.isEmpty ? error : null,
+                              action: 'Refresh Bots',
+                              onAction: () => unawaited(load()),
+                            )
+                          : ConversationView(
+                              key: ValueKey(
+                                '${widget.userId}:${bot.botId.value}',
                               ),
+                              sessions: widget.sessions,
+                              api: widget.api,
+                              store: widget.store,
+                              userId: widget.userId,
+                              botId: bot.botId.value,
+                              general: bot.botId.value == generalBotId,
+                              featuresRevision: featuresRevision,
+                              onOpenRun: _openRun,
+                              onOpenExchange: _openExchange,
+                              backgroundOf: _background,
+                              primaryOf: _primary,
+                              nameOf: _botNameOf,
+                              outOfCredit: credit?.canSpend == false,
+                              onOpenBilling: () => unawaited(_openBilling()),
+                              onMessageActions: (line, {position}) => unawaited(
+                                _messageActions(line, position: position),
+                              ),
+                              onReadLatest: (messageId) =>
+                                  _readLatest(bot.botId.value, messageId),
+                              unreadFromMessageId: activity
+                                  .unread[bot.botId.value]
+                                  ?.unreadFromMessageId,
+                              background: _background(bot.botId.value),
+                              primary: _primary(bot.botId.value),
+                              onDictate: () => unawaited(_dictate()),
+                              onStopDictation: () =>
+                                  unawaited(_stopDictation()),
+                              onDiscardDictation: () =>
+                                  unawaited(_discardDictation()),
+                              // Voice, on the Bot whose page this is (ADR 0029).
+                              onVoice: () => unawaited(
+                                _startOrSwitchVoice(botId: bot.botId.value),
+                              ),
+                              voiceClosing: voiceClosing,
+                              dictationState:
+                                  dictation?.context == bot.botId.value
+                                  ? dictation!.state
+                                  : DictationState.idle,
+                              // The offer belongs to the composer the capture
+                              // was dictated into, exactly as the words do.
+                              canRevertDictation: () =>
+                                  dictation?.context == bot.botId.value &&
+                                  dictation!.cleaned,
+                              onRevertDictation:
+                                  dictation?.context == bot.botId.value
+                                  ? dictation!.revertCleanup
+                                  : null,
+                              dictationLevel: dictation?.level,
+                              onWorkingChanged: (runId) {
+                                if (runId == workingRunId || !mounted) return;
+                                final settled =
+                                    workingRunId != null && runId == null;
+                                setState(() => workingRunId = runId);
+                                // A Turn is how an Applet comes into existence, and the
+                                // Bot's page names the Applets the Bot holds — so the
+                                // directory is re-read when the Turn that may have changed
+                                // it ends. Read on adoption alone, a Bot that had just made
+                                // its first Applet had no way to it until the page was
+                                // reloaded.
+                                final canvas = appletCanvas;
+                                if (settled && canvas != null) {
+                                  unawaited(canvas.load());
+                                }
+                              },
+                              onConnectionChanged: (botId, state) {
+                                if (!mounted ||
+                                    selected?.botId.value != botId ||
+                                    selectedConnection == state) {
+                                  return;
+                                }
+                                setState(() => selectedConnection = state);
+                              },
+                            ),
                     ),
                   ),
                   ?_appletFrameHolder(context),

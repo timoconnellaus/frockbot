@@ -27,9 +27,9 @@
 /// nothing, so the footer may stay open silently for hours; what the server
 /// meters is what it spends, and it says so itself.
 ///
-/// There is no reconnect loop. One retry of the initial connect, then an
-/// error the person can act on — a client that reconnects forever is a client
-/// that spends money forever.
+/// There is no reconnect loop. A refused initial connect is retried once;
+/// a timeout is not. Then an error the person can act on — a client that
+/// reconnects forever is a client that spends money forever.
 library;
 
 import 'dart:async';
@@ -83,7 +83,7 @@ class AssistantSessionController extends ChangeNotifier {
   final SpeechGateConfig gateConfig;
   final Duration startTimeout;
   final Duration sleepAfter;
-  final Duration connectRetryWindow;
+  final Duration connectTimeout;
 
   /// The Bot this call opens on (ADR 0029). Null talks to General.
   final String? botId;
@@ -97,7 +97,7 @@ class AssistantSessionController extends ChangeNotifier {
     this.gateConfig = const SpeechGateConfig(),
     this.startTimeout = voiceAssistantStartTimeoutV1,
     this.sleepAfter = voiceAssistantSleepAfterV1,
-    this.connectRetryWindow = voiceAssistantConnectRetryWindowV1,
+    this.connectTimeout = voiceAssistantConnectTimeoutV1,
   }) : route = route ?? NoVoiceAudioRoute();
 
   VoiceSessionPhase _phase = VoiceSessionPhase.idle;
@@ -345,8 +345,6 @@ class AssistantSessionController extends ChangeNotifier {
     );
   }
 
-  /// One retry, inside the retry window. Then it is an error, not a loop.
-  ///
   /// The socket is attached the moment it arrives — the `welcome` may land
   /// while the microphone is still opening — and [start] finishes the rest.
   Future<VoiceSocket?> _connect(int generation) async {
@@ -417,13 +415,15 @@ class AssistantSessionController extends ChangeNotifier {
     );
   }
 
-  /// One retry, inside the retry window. Then it is an error, not a loop.
+  /// One attempt gets the full connect timeout. A timeout is the object
+  /// still starting, so it is not retried — a second upgrade would only
+  /// race the first. A refused socket is retried once, then it is an
+  /// error, not a loop.
   Future<VoiceSocket?> _connectOnce(int generation) async {
-    final began = DateTime.now();
-    for (var attempt = 0; attempt < 2; attempt++) {
+    Future<VoiceSocket> attempt() async {
       final pending = openSocket();
       try {
-        return await pending.timeout(connectRetryWindow);
+        return await pending.timeout(connectTimeout);
       } on Object {
         unawaited(
           pending
@@ -435,14 +435,28 @@ class AssistantSessionController extends ChangeNotifier {
               )
               .catchError((Object _) {}),
         );
-        if (generation != _generation || _disposed) return null;
-        final elapsed = DateTime.now().difference(began);
-        if (attempt == 1 || elapsed >= connectRetryWindow) break;
+        rethrow;
       }
     }
-    if (generation != _generation || _disposed) return null;
-    await _fail('Couldn’t reach voice. Check your connection and try again.');
-    return null;
+
+    try {
+      return await attempt();
+    } on TimeoutException {
+      if (generation != _generation || _disposed) return null;
+      await _fail('Couldn’t reach voice. Check your connection and try again.');
+      return null;
+    } on Object {
+      if (generation != _generation || _disposed) return null;
+      try {
+        return await attempt();
+      } on Object {
+        if (generation != _generation || _disposed) return null;
+        await _fail(
+          'Couldn’t reach voice. Check your connection and try again.',
+        );
+        return null;
+      }
+    }
   }
 
   /// Opens the microphone behind the start fence.

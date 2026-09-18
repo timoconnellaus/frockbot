@@ -12,7 +12,7 @@
 /// drawer beside the conversation was a second door to the same room.
 library;
 
-import 'dart:math' show max, min;
+import 'dart:math' show min;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
@@ -21,20 +21,17 @@ import 'package:flutter/services.dart';
 import '../theme/frock_theme.dart';
 import 'semantics.dart';
 
-/// Whether this is the Mac app, whose window has no title bar: the app keeps
-/// a strip across the top of the window clear for the traffic lights, and
-/// every page starts below it.
+/// Whether this is the Mac app, whose window content extends into the title
+/// bar behind its traffic lights.
 bool get desktopTitleBarless =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
 
-/// How tall that strip is. The traffic lights sit 12 points from the top of
-/// a title-less window and are 12 points tall; the strip is what a
-/// title bar would have been, so the eye finds them where it expects to.
-const double desktopTitleBarInset = 28;
+/// The Mac traffic lights occupy the sidebar's top-left corner. Only that
+/// column reserves space for them; 40 points leaves the avatar circle below
+/// the controls while the conversation chrome stays at the top.
+const double desktopSidebarTrafficLightClearance = 40;
 
-/// The window's own gestures, which Flutter cannot perform itself: dragging
-/// the window by the strip where its title bar was, and zooming on a
-/// double-click there.
+/// The window's own drag gesture, which Flutter cannot perform itself.
 abstract final class DesktopWindow {
   static const _channel = MethodChannel('com.frockbot/window');
   static Future<void> startDrag() async {
@@ -44,79 +41,24 @@ abstract final class DesktopWindow {
       // A host without the channel — a test, the web — has no window to move.
     }
   }
-
-  static Future<void> zoom() async {
-    try {
-      await _channel.invokeMethod<void>('zoom');
-    } on MissingPluginException {
-      // As above.
-    }
-  }
 }
 
-/// The title bar's height, told to every page as a top inset.
-///
-/// A title-less window has no status bar to report, so nothing under the
-/// app knew the traffic lights were there: a page pushed over the shell put
-/// its back arrow and its title in the top-left corner, under them. This
-/// says the strip is not the page's, the way a phone's status bar is not,
-/// and every `AppBar` and `SafeArea` below it moves down by itself. On any
-/// other platform it is the child, untouched — a phone keeps its own insets
-/// and gains none.
-///
-/// The strip itself is drawn here too, over the whole width of the window
-/// and nothing else: because every page keeps out of the inset, the strip
-/// covers no control, and the window follows a drag that starts anywhere
-/// along its top and zooms on a double-click there, the way a Mac window
-/// with a title bar does — on the shell and on any page over it alike.
-class DesktopTitleBarPadding extends StatelessWidget {
+/// Makes an existing Mac header act as a title bar without reserving a second
+/// row above it. Taps remain available to controls in the header; a drag gives
+/// the native window the gesture.
+class DesktopWindowDragRegion extends StatelessWidget {
   final Widget child;
-  const DesktopTitleBarPadding({super.key, required this.child});
+  const DesktopWindowDragRegion({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
     if (!desktopTitleBarless) return child;
-    final media = MediaQuery.of(context);
-    return MediaQuery(
-      data: media.copyWith(
-        padding: media.padding.copyWith(
-          top: max(media.padding.top, desktopTitleBarInset),
-        ),
-        viewPadding: media.viewPadding.copyWith(
-          top: max(media.viewPadding.top, desktopTitleBarInset),
-        ),
-      ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          child,
-          const Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: desktopTitleBarInset,
-            child: DesktopTitleStrip(),
-          ),
-        ],
-      ),
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onPanStart: (_) => DesktopWindow.startDrag(),
+      child: child,
     );
   }
-}
-
-/// The strip across the top of the window where the title bar was. Empty, so
-/// the traffic lights have the room they need; the window follows a drag that
-/// starts on it and zooms on a double-click, over the channel the Mac window
-/// answers. Drawn once, by [DesktopTitleBarPadding], above every page.
-class DesktopTitleStrip extends StatelessWidget {
-  const DesktopTitleStrip({super.key});
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    behavior: HitTestBehavior.opaque,
-    onPanStart: (_) => DesktopWindow.startDrag(),
-    onDoubleTap: DesktopWindow.zoom,
-    child: const SizedBox(height: desktopTitleBarInset, width: double.infinity),
-  );
 }
 
 /// The width at or below which the right panel is a drawer rather than a
@@ -249,9 +191,6 @@ class ShellLayout extends StatelessWidget {
                           border: voiceMode
                               ? null
                               : Border(right: BorderSide(color: divider)),
-                          // The Mac's title strip is the app's inset now
-                          // ([DesktopTitleBarPadding]), read by the safe area
-                          // above; the column draws nothing for it.
                           child: SafeArea(
                             top: false,
                             child: identified(ShellIds.sidebar, sidebar),

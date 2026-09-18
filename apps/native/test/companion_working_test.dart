@@ -166,6 +166,14 @@ void main() {
         find.descendant(of: indicator, matching: find.byType(ThinkingBadge)),
         findsOneWidget,
       );
+      // Over the shoulder, not under the feet.
+      final avatar = tester.getRect(
+        find.descendant(of: indicator, matching: find.byType(CharacterAvatar)),
+      );
+      final badge = tester.getRect(find.byType(ThinkingBadge));
+      expect(badge.top, lessThan(avatar.top + 2));
+      expect(badge.right, greaterThan(avatar.right - 8));
+      expect(badge.bottom, lessThan(avatar.center.dy));
       // The thread draws no working row and no badge of its own.
       final transcript = find.byType(TranscriptView);
       expect(

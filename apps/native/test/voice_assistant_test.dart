@@ -739,6 +739,29 @@ void main() {
     });
   });
 
+  test('a slow connect that still opens is kept', () async {
+    final opening = Completer<VoiceSocket>();
+    var attempts = 0;
+    final socket = FakeVoiceSocket();
+    final controller = AssistantSessionController(
+      openSocket: () {
+        attempts++;
+        return opening.future;
+      },
+      capture: FakeVoiceCapture(),
+      player: FakeVoicePlayer(),
+      connectTimeout: const Duration(milliseconds: 200),
+    );
+    unawaited(controller.start());
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(attempts, 1, reason: 'still waiting on the first upgrade');
+    opening.complete(socket);
+    await settle();
+    expect(socket.closed, isFalse);
+    expect(controller.phase, isNot(VoiceSessionPhase.error));
+    controller.dispose();
+  });
+
   test('a socket that arrives after the connect window is abandoned', () async {
     final pending = <Completer<VoiceSocket>>[];
     final socket = FakeVoiceSocket();
@@ -750,10 +773,11 @@ void main() {
       },
       capture: FakeVoiceCapture(),
       player: FakeVoicePlayer(),
-      connectRetryWindow: const Duration(milliseconds: 20),
+      connectTimeout: const Duration(milliseconds: 20),
     );
     await controller.start();
     await settle();
+    expect(pending, hasLength(1), reason: 'a timeout is not retried');
     expect(controller.phase, VoiceSessionPhase.error);
 
     pending.first.complete(socket);
@@ -776,7 +800,7 @@ void main() {
     );
     await controller.start();
     await settle();
-    expect(attempts, 2, reason: 'one retry, then it stops');
+    expect(attempts, 2, reason: 'a refused socket is retried once');
     expect(controller.phase, VoiceSessionPhase.error);
     expect(controller.error, contains('connection'));
     controller.dispose();
