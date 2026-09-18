@@ -182,7 +182,7 @@ describe("the Plugins document", () => {
       walk(rows[0]!).some(
         (node) =>
           node.type === "text" &&
-          node.text?.startsWith("Run this Bot's replies on DeepSeek models."),
+          node.text?.startsWith("Run replies on DeepSeek models."),
       ),
     ).toBe(true);
     const controls = walk(rows[0]!).filter((node) => node.type === "action");
