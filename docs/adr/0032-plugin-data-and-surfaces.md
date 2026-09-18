@@ -241,7 +241,9 @@ called done.
 Every extension point is one of five kinds, and naming them now is what keeps
 the client work from inventing a sixth shape per platform:
 
-- **Slot** — the host asks the plugin what to draw and draws it.
+- **Slot** — a place in the app's UI. The host asks the plugin what to draw
+  there and draws it. A notification is not a slot: posting one is an action
+  and tapping one is an entry.
 - **Entry** — a person starts a Turn from outside the app.
 - **Trigger** — an event starts a run with nobody watching.
 - **Handler** — the system asks a question and waits for the verdict on its own
