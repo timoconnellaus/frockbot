@@ -320,7 +320,7 @@ bun scripts/ci-watch.ts release v0.2.0   # polls until production deployed
 bun scripts/ci-watch.ts pr 128 --once    # report now and exit, for a caller that paces itself
 ```
 
-It names the quiet failures rather than waiting them out: a release whose packages published while `Deploy FrockBot app` failed, or one that completed without ever running the deploy jobs. A release parked for an approval — which only happens if the `production` environment is given a required reviewer — is reported as waiting, not failed.
+It names the quiet failures rather than waiting them out: a release whose packages published while `Deploy marketing site and admin portal` failed, or one that completed without ever running the deploy jobs. A release parked for an approval — which only happens if the `production` environment is given a required reviewer — is reported as waiting, not failed.
 
 #### Android patches
 
