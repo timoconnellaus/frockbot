@@ -263,8 +263,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool footerExiting = false;
 
   /// The Bot the open call is with (ADR 0029), so the composer control on
-  /// that Bot's page reads as pressed and every other Bot's does not. Null
-  /// while the call is with the account's General.
+  /// that Bot's page reads as pressed and every other Bot's does not.
   String? voiceBotId;
   bool showHidden = false;
   TranscriptLine? openRun;
