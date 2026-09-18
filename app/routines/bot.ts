@@ -640,13 +640,19 @@ export async function settleScheduledWork(
  *
  * One Turn covers every waiting hand-off, because the drain takes the whole
  * queue.
+ *
+ * A subagent's hand-off is delivered the same way and for the same reason: it
+ * rides the same queue, it waited on the same absent Turn, and the Turn that
+ * dispatched it has already told the person it would come back to them.
  */
 async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
   const identity = await state.authority.readDurableIdentity();
   if (!identity) return;
   const pending = await state.routineInbox.pending();
-  const owed = pending.filter(
-    ({ input }) => input.kind === "wake" && input.deliveredAt === undefined,
+  const owed = pending.flatMap(({ key, input }) =>
+    input.kind === "wake" && input.deliveredAt === undefined
+      ? [{ key, wake: input }]
+      : [],
   );
   if (owed.length === 0) return;
   // A run already occupies the object — the person is talking to the Bot, or a
@@ -655,11 +661,7 @@ async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
   // alarm opens the Turn, and a conversation the person started in the
   // meantime drains the queue itself, which is the better delivery anyway.
   if (await state.authority.readActiveRunId()) return;
-  const newest = owed.at(-1)!;
-  const wake = newest.input as Extract<
-    (typeof newest)["input"],
-    { kind: "wake" }
-  >;
+  const { wake } = owed.at(-1)!;
   // Marked before the Turn is admitted, and for every hand-off this Turn will
   // drain rather than only the newest: a delivery that throws must not leave
   // the alarm opening a fresh Turn for the same hand-offs for ever.
