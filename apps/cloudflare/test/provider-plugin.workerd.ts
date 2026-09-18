@@ -63,6 +63,9 @@ interface UserRpc {
 
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
+  listNotifications(
+    input: unknown,
+  ): Promise<Array<{ notificationId: string; title: string; body: string }>>;
 }
 
 function user(userId: string): UserRpc {
@@ -98,11 +101,17 @@ async function forgetDeepseekCalls(): Promise<void> {
  * own install command, and `choose` is the Models surface's "Connect
  * provider", which chooses the provider rather than installing it by hand —
  * both have to leave the Plugin in the Composition. `false` reproduces an
- * account that never installed it.
+ * account that never installed it. `select: false` stops after the install,
+ * leaving the Bot on the built-in model — the state an account is in between
+ * installing a provider and choosing one of its models.
  */
 async function provisionDeepseekBot(
   identity: { userId: string; botId: string },
-  options: { install?: "package" | "choose" | false; apiKey?: string } = {},
+  options: {
+    install?: "package" | "choose" | false;
+    apiKey?: string;
+    select?: boolean;
+  } = {},
 ): Promise<void> {
   const configuration = user(identity.userId);
   const revision = async (): Promise<number> =>
@@ -148,34 +157,36 @@ async function provisionDeepseekBot(
     });
     expect(receipt.status).toBe("applied");
   }
-  const connection = await configuration.executeConnection({
-    schemaVersion: 1,
-    userId: identity.userId,
-    command: {
+  if (options.select !== false) {
+    const connection = await configuration.executeConnection({
       schemaVersion: 1,
-      type: "connection/create-api-key",
-      commandId: `connect-deepseek-${identity.botId}`,
-      packageId: PROVIDER.packageId,
-      connectionTypeId: `${PROVIDER.provider}-account`,
-      label: "Workerd DeepSeek",
-      apiKey: options.apiKey ?? DEEPSEEK_TEST_API_KEY,
-    },
-  });
-  expect(connection.status).toBe("applied");
-  await configuration.executeConfiguration({
-    schemaVersion: 1,
-    userId: identity.userId,
-    command: {
-      schemaVersion: 1,
-      type: "user/set-account-model",
-      commandId: `model-deepseek-${identity.botId}`,
-      expectedRevision: await revision(),
-      model: {
-        connectionId: connection.connectionId,
-        providerModelId: MODEL,
+      userId: identity.userId,
+      command: {
+        schemaVersion: 1,
+        type: "connection/create-api-key",
+        commandId: `connect-deepseek-${identity.botId}`,
+        packageId: PROVIDER.packageId,
+        connectionTypeId: `${PROVIDER.provider}-account`,
+        label: "Workerd DeepSeek",
+        apiKey: options.apiKey ?? DEEPSEEK_TEST_API_KEY,
       },
-    },
-  });
+    });
+    expect(connection.status).toBe("applied");
+    await configuration.executeConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+      command: {
+        schemaVersion: 1,
+        type: "user/set-account-model",
+        commandId: `model-deepseek-${identity.botId}`,
+        expectedRevision: await revision(),
+        model: {
+          connectionId: connection.connectionId,
+          providerModelId: MODEL,
+        },
+      },
+    });
+  }
   await configuration.createBot({
     schemaVersion: 1,
     userId: identity.userId,
@@ -398,6 +409,31 @@ describe("a Bot whose model runs through a provider Plugin", () => {
     expect(result.failure).toBeUndefined();
     expect(sentText(result.events)).toBe("DeepSeek says hello.");
     expect(await deepseekCalls()).toHaveLength(1);
+  });
+
+  test("an installed provider Plugin still mounts while the Bot's model is the built-in one", async () => {
+    // The install puts the Plugin in the account's Composition before any Bot
+    // chooses a model (ADR 0032), so an ordinary Turn on Frock AI runs with
+    // it in the member set. It mounts there — its tools and hooks under this
+    // Bot's own switch, its contribution unserved until a model names it —
+    // rather than being refused as a Plugin that failed to be admitted.
+    const identity = freshIdentity();
+    await provisionDeepseekBot(identity, {
+      install: "package",
+      select: false,
+    });
+    await forgetDeepseekCalls();
+    const result = await turn(identity, "run-built-in", "hello");
+    expect(result.failure).toBeUndefined();
+    expect(sentText(result.events)).toBe("Frock AI reply");
+    expect(await deepseekCalls()).toHaveLength(0);
+    const notices = await bot(identity).listNotifications({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(
+      notices.filter((notice) => notice.title === "A plugin was skipped"),
+    ).toEqual([]);
   });
 
   test("an account that never installed the provider has no artifact", async () => {
