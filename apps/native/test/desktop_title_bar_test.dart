@@ -112,11 +112,11 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets(
-    'on a Mac a pushed page header sits past the traffic lights',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+  testWidgets('on a Mac a pushed page header sits past the traffic lights', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
       await tester.pumpWidget(
         MaterialApp(
           home: Builder(
@@ -146,6 +146,8 @@ void main() {
         tester.getTopLeft(find.text('Voice')).dx,
         greaterThan(desktopTrafficLightLeading),
       );
-    },
-  );
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }

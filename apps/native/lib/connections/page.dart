@@ -388,28 +388,28 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     return Scaffold(
       appBar: DesktopHeader(
         child: AppBar(
-        title: Text(title),
-        automaticallyImplyLeading: widget.onClose == null,
-        leading: widget.onClose == null
-            ? null
-            : identified(
-                ShellIds.rightPanelClose,
-                IconButton(
-                  tooltip: 'Close ${title.toLowerCase()}',
-                  onPressed: widget.onClose,
-                  icon: const Icon(Icons.close),
+          title: Text(title),
+          automaticallyImplyLeading: widget.onClose == null,
+          leading: widget.onClose == null
+              ? null
+              : identified(
+                  ShellIds.rightPanelClose,
+                  IconButton(
+                    tooltip: 'Close ${title.toLowerCase()}',
+                    onPressed: widget.onClose,
+                    icon: const Icon(Icons.close),
+                  ),
                 ),
+          actions: [
+            identified(
+              ConnectorIds.refresh,
+              IconButton(
+                tooltip: 'Refresh ${title.toLowerCase()}',
+                onPressed: loading ? null : load,
+                icon: const Icon(Icons.refresh_rounded),
               ),
-        actions: [
-          identified(
-            ConnectorIds.refresh,
-            IconButton(
-              tooltip: 'Refresh ${title.toLowerCase()}',
-              onPressed: loading ? null : load,
-              icon: const Icon(Icons.refresh_rounded),
             ),
-          ),
-        ],
+          ],
         ),
       ),
       body: identified(

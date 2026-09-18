@@ -151,27 +151,30 @@ void main() {
     'on a Mac the full-window call header sits past the traffic lights',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      final harness = VoiceShellHarness();
-      await harness.mount(tester, width: 1280, brightness: Brightness.dark);
-      await harness.call.start();
-      harness.showCall(botId: 'voice-bot');
-      await tester.pump();
+      try {
+        final harness = VoiceShellHarness();
+        await harness.mount(tester, width: 1280, brightness: Brightness.dark);
+        await harness.call.start();
+        harness.showCall(botId: 'voice-bot');
+        await tester.pump();
 
-      expect(tester.getSize(byIdentifier(ShellIds.sidebar)).width, 0);
-      final name = find.descendant(
-        of: find.byType(AppBar),
-        matching: find.text('Rosemary'),
-      );
-      expect(
-        tester.getTopLeft(name).dx,
-        greaterThanOrEqualTo(desktopTrafficLightLeading),
-      );
-      expect(
-        tester.getTopLeft(byIdentifier(VoiceIds.headerPill)).dx,
-        greaterThan(desktopTrafficLightLeading),
-      );
-      await harness.dispose(tester);
+        expect(tester.getSize(byIdentifier(ShellIds.sidebar)).width, 0);
+        final name = find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('Rosemary'),
+        );
+        expect(
+          tester.getTopLeft(name).dx,
+          greaterThanOrEqualTo(desktopTrafficLightLeading),
+        );
+        expect(
+          tester.getTopLeft(byIdentifier(VoiceIds.headerPill)).dx,
+          greaterThan(desktopTrafficLightLeading),
+        );
+        await harness.dispose(tester);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     },
   );
 

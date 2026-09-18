@@ -341,16 +341,16 @@ class _BotRecoveryDetailState extends State<BotRecoveryDetail> {
       child: Scaffold(
         appBar: DesktopHeader(
           child: AppBar(
-          title: Text(widget.bot.initialName),
-          bottom: const TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [
-              Tab(text: 'Overview'),
-              Tab(text: 'Activity'),
-              Tab(text: 'Setup'),
-            ],
-          ),
+            title: Text(widget.bot.initialName),
+            bottom: const TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              tabs: [
+                Tab(text: 'Overview'),
+                Tab(text: 'Activity'),
+                Tab(text: 'Setup'),
+              ],
+            ),
           ),
         ),
         body: SafeArea(

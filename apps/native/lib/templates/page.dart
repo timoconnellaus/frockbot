@@ -207,13 +207,13 @@ class TemplatesPage extends StatelessWidget {
     child: Scaffold(
       appBar: DesktopHeader(
         child: AppBar(
-        title: const Text('Bot templates'),
-        bottom: const TabBar(
-          tabs: [
-            Tab(text: 'Share a Bot'),
-            Tab(text: 'Use a template'),
-          ],
-        ),
+          title: const Text('Bot templates'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Share a Bot'),
+              Tab(text: 'Use a template'),
+            ],
+          ),
         ),
       ),
       body: TabBarView(

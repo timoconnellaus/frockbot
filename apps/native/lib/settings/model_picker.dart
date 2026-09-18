@@ -79,9 +79,7 @@ class _ModelPickerState extends State<ModelPicker> {
   Widget build(BuildContext context) => identified(
     SettingsIds.modelPicker,
     Scaffold(
-      appBar: const DesktopHeader(
-        child: AppBar(title: Text('Choose a model')),
-      ),
+      appBar: DesktopHeader(child: AppBar(title: const Text('Choose a model'))),
       body: SafeArea(
         top: false,
         child: Center(

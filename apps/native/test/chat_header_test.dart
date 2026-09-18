@@ -249,51 +249,64 @@ void main() {
     'on a Mac a full-window call header sits past the traffic lights',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: const Scaffold(appBar: ChatHeader(name: 'Bob', voiceMode: true)),
-        ),
-      );
-      await tester.pump();
-      expect(
-        tester.getTopLeft(find.text('Bob')).dx,
-        greaterThanOrEqualTo(desktopTrafficLightLeading),
-      );
-      expect(
-        tester.getTopLeft(byIdentifier(VoiceIds.headerPill)).dx,
-        greaterThan(desktopTrafficLightLeading),
-      );
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: const Scaffold(
+              appBar: ChatHeader(name: 'Bob', voiceMode: true),
+            ),
+          ),
+        );
+        await tester.pump();
+        expect(
+          tester.getTopLeft(find.text('Bob')).dx,
+          greaterThanOrEqualTo(desktopTrafficLightLeading),
+        );
+        expect(
+          tester.getTopLeft(byIdentifier(VoiceIds.headerPill)).dx,
+          greaterThan(desktopTrafficLightLeading),
+        );
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     },
   );
 
   testWidgets('a call header on a phone stays at the left', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: const Scaffold(appBar: ChatHeader(name: 'Bob', voiceMode: true)),
-      ),
-    );
-    await tester.pump();
-    expect(tester.getTopLeft(find.text('Bob')).dx, 14);
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: const Scaffold(
+            appBar: ChatHeader(name: 'Bob', voiceMode: true),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.getTopLeft(find.text('Bob')).dx, 14);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets(
     'a Mac conversation next to the list does not grow a traffic-light inset',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: const Scaffold(appBar: ChatHeader(name: 'Bob')),
-        ),
-      );
-      await tester.pump();
-      expect(tester.getTopLeft(find.text('Bob')).dx, 14);
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: const Scaffold(appBar: ChatHeader(name: 'Bob')),
+          ),
+        );
+        await tester.pump();
+        expect(tester.getTopLeft(find.text('Bob')).dx, 14);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     },
   );
 

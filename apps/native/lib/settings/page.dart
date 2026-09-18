@@ -213,20 +213,20 @@ class _SettingsPageState extends State<SettingsPage>
     return Scaffold(
       appBar: DesktopHeader(
         child: AppBar(
-        title: Text(
-          widget.title ??
-              (widget.home == 'models' ? 'Models' : 'Personal details'),
-        ),
-        actions: [
-          identified(
-            SettingsIds.refresh,
-            IconButton(
-              tooltip: 'Refresh settings',
-              onPressed: state.busy ? null : state.load,
-              icon: const Icon(Icons.refresh_rounded),
-            ),
+          title: Text(
+            widget.title ??
+                (widget.home == 'models' ? 'Models' : 'Personal details'),
           ),
-        ],
+          actions: [
+            identified(
+              SettingsIds.refresh,
+              IconButton(
+                tooltip: 'Refresh settings',
+                onPressed: state.busy ? null : state.load,
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+            ),
+          ],
         ),
       ),
       body: SafeArea(

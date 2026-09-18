@@ -148,7 +148,7 @@ class _ViewSamplePageState extends State<ViewSamplePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: const DesktopHeader(child: AppBar(title: Text('View sample'))),
+    appBar: DesktopHeader(child: AppBar(title: const Text('View sample'))),
     body: SafeArea(
       top: false,
       child: ListView(

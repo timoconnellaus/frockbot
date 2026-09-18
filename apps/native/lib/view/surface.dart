@@ -237,28 +237,28 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     return Scaffold(
       appBar: DesktopHeader(
         child: AppBar(
-        title: Text(widget.title),
-        automaticallyImplyLeading: widget.onClose == null,
-        leading: widget.onClose == null
-            ? null
-            : identified(
-                ShellIds.rightPanelClose,
-                IconButton(
-                  tooltip: 'Close ${widget.title.toLowerCase()}',
-                  onPressed: widget.onClose,
-                  icon: const Icon(Icons.close),
+          title: Text(widget.title),
+          automaticallyImplyLeading: widget.onClose == null,
+          leading: widget.onClose == null
+              ? null
+              : identified(
+                  ShellIds.rightPanelClose,
+                  IconButton(
+                    tooltip: 'Close ${widget.title.toLowerCase()}',
+                    onPressed: widget.onClose,
+                    icon: const Icon(Icons.close),
+                  ),
                 ),
+          actions: [
+            identified(
+              widget.refreshId,
+              IconButton(
+                tooltip: 'Refresh ${widget.title.toLowerCase()}',
+                onPressed: controller.busy ? null : controller.load,
+                icon: const Icon(Icons.refresh_rounded),
               ),
-        actions: [
-          identified(
-            widget.refreshId,
-            IconButton(
-              tooltip: 'Refresh ${widget.title.toLowerCase()}',
-              onPressed: controller.busy ? null : controller.load,
-              icon: const Icon(Icons.refresh_rounded),
             ),
-          ),
-        ],
+          ],
         ),
       ),
       body: body,

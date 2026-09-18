@@ -809,7 +809,7 @@ class RunPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: const DesktopHeader(child: AppBar(title: Text('Work'))),
+    appBar: DesktopHeader(child: AppBar(title: const Text('Work'))),
     body: SafeArea(child: RunView(line: line, header: false)),
   );
 }

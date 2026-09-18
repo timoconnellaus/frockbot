@@ -112,14 +112,14 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     return Scaffold(
       appBar: DesktopHeader(
         child: AppBar(
-        title: const Text('Billing & usage'),
-        actions: [
-          IconButton(
-            onPressed: _load,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh balance',
-          ),
-        ],
+          title: const Text('Billing & usage'),
+          actions: [
+            IconButton(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh balance',
+            ),
+          ],
         ),
       ),
       body: RefreshIndicator(

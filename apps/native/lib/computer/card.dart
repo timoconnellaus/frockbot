@@ -601,34 +601,34 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
           ? null
           : DesktopHeader(
               child: AppBar(
-              // What the Computer is doing, said once: as the subtitle of the
-              // one title, rather than as a strip under the chrome that
-              // repeated whatever the centre of the window already said.
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    widget.botName == null
-                        ? 'Computer'
-                        : 'Computer · ${widget.botName}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  identified(
-                    ComputerIds.phase,
+                // What the Computer is doing, said once: as the subtitle of the
+                // one title, rather than as a strip under the chrome that
+                // repeated whatever the centre of the window already said.
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     Text(
-                      said,
+                      widget.botName == null
+                          ? 'Computer'
+                          : 'Computer · ${widget.botName}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    identified(
+                      ComputerIds.phase,
+                      Text(
+                        said,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              actions: actions,
+                  ],
+                ),
+                actions: actions,
               ),
             ),
       body: Stack(

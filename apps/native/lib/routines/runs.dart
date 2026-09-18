@@ -171,14 +171,14 @@ class _RoutineRunsPageState extends State<RoutineRunsPage> {
   Widget build(BuildContext context) => Scaffold(
     appBar: DesktopHeader(
       child: AppBar(
-      title: const Text('Run log'),
-      actions: [
-        IconButton(
-          tooltip: 'Refresh the run log',
-          onPressed: loading ? null : load,
-          icon: const Icon(Icons.refresh_rounded),
-        ),
-      ],
+        title: const Text('Run log'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh the run log',
+            onPressed: loading ? null : load,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
       ),
     ),
     body: SafeArea(
