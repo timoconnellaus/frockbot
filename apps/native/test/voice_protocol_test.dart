@@ -282,6 +282,7 @@ void main() {
     expect(voiceAssistantSleepAfterV1, const Duration(seconds: 20));
     expect(voiceAssistantPreRollV1, const Duration(milliseconds: 500));
     expect(voiceAssistantStartTimeoutV1, const Duration(seconds: 15));
+    expect(voiceAssistantConnectTimeoutV1, const Duration(seconds: 10));
     expect(voiceDictationOpeningBufferBytesV1, 30 * 24000 * 2);
     expect(voiceAssistantOpeningBufferBytesV1, 10 * 16000 * 2);
   });

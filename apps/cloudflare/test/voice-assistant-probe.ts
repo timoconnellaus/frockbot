@@ -134,6 +134,8 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #releaseCompose: (() => void) | undefined;
   #ttsHeld: Promise<void> | undefined;
   #releaseTts: (() => void) | undefined;
+  #sttHeld: Promise<void> | undefined;
+  #releaseStt: (() => void) | undefined;
   #playbackAckTimeoutMs: number | undefined;
   #memoryRequests: VoiceMemoryRequest[] = [];
 
@@ -235,7 +237,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
           feed: (chunk) => {
             session.fed.push(new Uint8Array(chunk)[0] ?? -1);
           },
-          waitUntilReady: () => Promise.resolve(),
+          waitUntilReady: () => this.#sttHeld ?? Promise.resolve(),
           close: () => {
             session.closed = true;
           },
@@ -514,6 +516,20 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     const release = this.#releaseTts;
     this.#ttsHeld = undefined;
     this.#releaseTts = undefined;
+    release?.();
+  }
+
+  /** Holds Scribe's ready until [probeReleaseStt], as a slow upstream does. */
+  async probeHoldStt(): Promise<void> {
+    this.#sttHeld = new Promise<void>((resolve) => {
+      this.#releaseStt = resolve;
+    });
+  }
+
+  async probeReleaseStt(): Promise<void> {
+    const release = this.#releaseStt;
+    this.#sttHeld = undefined;
+    this.#releaseStt = undefined;
     release?.();
   }
 

@@ -99,6 +99,26 @@ describe("the sleeping transcriber", () => {
     expect(states).toEqual(["starting", "awake"]);
   });
 
+  test("wake holds frames until the upstream is ready", async () => {
+    const inner = fakeTranscriber();
+    const time = clock();
+    const session = createSleepingTranscriberV1(inner, {
+      idleSleepMs: 30_000,
+      maxPendingBytes: 1_000,
+      ...time,
+    }).createSession({});
+    session.wake();
+    session.feed(frame(1));
+    session.feed(frame(2));
+    expect(session.state).toBe("starting");
+    expect(inner.sessions[0]!.fed).toEqual([]);
+    inner.sessions[0]!.ready();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(session.state).toBe("awake");
+    expect(inner.sessions[0]!.fed).toEqual([1, 2]);
+  });
+
   test("sleep closes the upstream; the next frame opens a fresh one", async () => {
     const inner = fakeTranscriber();
     const time = clock();

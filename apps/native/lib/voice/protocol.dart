@@ -54,8 +54,10 @@ const voiceAssistantPreRollV1 = Duration(milliseconds: 500);
 /// How long the handshake has to reach `listening` before it is a failure.
 const voiceAssistantStartTimeoutV1 = Duration(seconds: 15);
 
-/// The one retry of the initial connect happens inside this window.
-const voiceAssistantConnectRetryWindowV1 = Duration(seconds: 5);
+/// How long one upgrade may take. A cold voice object can spend most of
+/// this starting; a shorter cut-off abandons a socket that would have
+/// opened. A refused socket is retried once; a timeout is not.
+const voiceAssistantConnectTimeoutV1 = Duration(seconds: 10);
 
 /// What a control says when the deployment has no voice keys. The controls
 /// are always shown; this is what pressing one answers.

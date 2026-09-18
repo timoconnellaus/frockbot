@@ -462,6 +462,26 @@ describe("the voice session object", () => {
     expect(closed.code).toBe(4403);
   });
 
+  test("audio that arrives while the upstream is still opening is fed in order once it is ready", async () => {
+    const userId = `voice-stt-hold-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    await stub.probeHoldStt();
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("starting"), "starting");
+
+    opened.socket.send(pcm(1));
+    opened.socket.send(pcm(2));
+    await settle();
+    expect((await stub.probeSessions())[0]!.fed).toEqual([]);
+
+    await stub.probeReleaseStt();
+    await opened.waitFor(state("awake"), "awake");
+    await settle();
+    expect((await stub.probeSessions())[0]!.fed).toEqual([1, 2]);
+    opened.socket.close();
+  });
+
   test("starts a call, feeds audio in order, sleeps and wakes without losing a frame", async () => {
     const userId = `voice-flow-${crypto.randomUUID()}`;
     const stub = assistant(userId);

@@ -157,8 +157,9 @@ client), so both speak the same frames.
    `{type:"status",status:"idle"}`.
 2. Client sends `{type:"hello",protocol_version:1}` then
    `{type:"start_call",preferred_format:"pcm16"}`.
-3. Server answers `{type:"audio_config",format:"pcm16",sampleRate:24000}` then,
-   once speech recognition is ready, `{type:"status",status:"listening"}`.
+3. Server answers `{type:"audio_config",format:"pcm16",sampleRate:24000}` then
+   `{type:"status",status:"listening"}` once the call is admitted. Scribe may
+   still be opening; frames are held until it is ready.
    Or `{type:"error",message,code?,retryable?}` followed by `status: idle` when
    the call was refused or failed to start.
 
@@ -178,7 +179,9 @@ the server ends the older call (that client sees `status: idle` and a
 Binary frames: PCM16 little-endian, mono, **16 kHz**. Frame size is the
 client's choice; 40 ms (1280 bytes) is what both clients send. Audio sent
 between `start_call` and `listening` is buffered by the SDK (bounded, 960 KB)
-and fed to the transcriber in order. The server resamples every frame to the
+and fed to the transcriber in order. The transcriber holds those frames —
+and any that arrive after `listening` — until Scribe has accepted the
+session, then drains them in order. The server resamples every frame to the
 24 kHz the upstream insists on (`app/voice/pcm-resample.ts`); the clients never
 change rate.
 
@@ -445,7 +448,9 @@ kept for tests.
 
 ## Durable ledger
 
-`VoiceAssistant` is one Durable Object per User (`getAgentByName(env.VOICE_ASSISTANTS, userId)`),
+`VoiceAssistant` is one Durable Object per User (`get(idFromName(userId))` on
+the upgrade; `getAgentByName` is reserved for RPC such as the dictation
+lease, because it waits for `onStart` before returning a stub),
 `new_sqlite_classes` migration `v7`. It records, before any external call:
 
 - `session:<callId>` — call start, device, caps consumed.
@@ -862,9 +867,16 @@ the footer's entrance. Measured on a Pixel 9a: the
 capability probe is read once at sign-in rather than on the press, the
 controller is created and shown before anything is awaited, and the socket
 upgrade runs concurrently with the audio session and the microphone (the
-permission prompt is the slow part). `hello`/`start_call` — which wake a
+permission prompt is the slow part). The upgrade is forwarded to the voice
+object without waiting for its Agent `onStart` RPC; recovery still runs as
+that fetch starts the object. One connect attempt is given ten seconds — a
+cold object can spend most of that starting — and a timeout is not retried,
+because a second upgrade would only race the first. A refused socket is
+retried once. `hello`/`start_call` — which wake a
 metered upstream — wait for both the server's `welcome` and an open
 microphone, so a person still answering the permission prompt is not billed.
+Audio that arrives after `start_call` while Scribe is still opening is held
+and forwarded in order once the upstream is ready.
 
 ### Voice controls and motion
 
