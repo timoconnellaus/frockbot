@@ -1,0 +1,3 @@
+# Git-fixture tests need more than 5s when the full unit suite is on the machine.
+[test]
+timeout = 30000
