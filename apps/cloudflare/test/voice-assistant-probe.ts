@@ -43,6 +43,10 @@ export interface VoiceProbeScript {
    * 1008 is the real server's answer to a resumption handle it has forgotten.
    */
   closeUpstreamWith?: number;
+  /** The upstream takes this long to answer the upgrade. */
+  slowUpstreamMs?: number;
+  /** The Bot directory takes this long to answer. */
+  slowDirectoryMs?: number;
 }
 
 function sse(events: unknown[]): ReadableStream<Uint8Array> {
@@ -92,12 +96,35 @@ export interface VoiceTraceLine {
   answerChars?: number;
 }
 
+/**
+ * One emitted diagnostic line. Declared field by field for the same reason
+ * [VoiceTraceLine] is: an index signature collapses across the RPC stub.
+ */
+export interface VoiceTimingLine {
+  trace: string;
+  side: string;
+  event: string;
+  elapsedMs: number;
+  at: string;
+  device?: string;
+  code?: number;
+  wasClean?: boolean;
+  admission?: string;
+  displaced?: boolean;
+  bytes?: number;
+  buffered?: boolean;
+  failed?: boolean;
+  run?: string;
+  asTurn?: boolean;
+}
+
 export class WorkerdVoiceAssistant extends VoiceAssistant {
   #fakes: GeminiFakeV1[] = [];
   #script: VoiceProbeScript = {};
   #dropDispatches = 0;
   #dispatched: string[] = [];
   #traces: VoiceTraceLine[] = [];
+  #timings: VoiceTimingLine[] = [];
   #now: string | undefined;
   #memoryRequests: VoiceMemoryRequest[] = [];
   #silenceTimeoutMs: number | undefined;
@@ -124,6 +151,8 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     if (this.#script.refuseUpstream) {
       throw new Error("upstream refused the upgrade (503)");
     }
+    const slow = this.#script.slowUpstreamMs;
+    if (slow) await new Promise((resolve) => setTimeout(resolve, slow));
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     // The production seam accepts the socket before handing it back; a socket
@@ -185,6 +214,38 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
       console.info = info;
       console.warn = warn;
     }
+  }
+
+  /**
+   * The diagnostic lines, captured the same way: the JSON the object handed
+   * the console, so a test reads the telemetry rather than a second telling
+   * of it. A call that asked for none produces nothing here.
+   */
+  protected override timing(
+    connection: Connection,
+    event: string,
+    fields: Record<string, unknown> = {},
+    once = false,
+  ): void {
+    const { info } = console;
+    console.info = (...args: unknown[]) => {
+      const payload = args[1];
+      if (typeof payload === "string") {
+        this.#timings.push(JSON.parse(payload) as VoiceTimingLine);
+      }
+    };
+    try {
+      super.timing(connection, event, fields, once);
+    } finally {
+      console.info = info;
+    }
+  }
+
+  /** The directory, as slow as a test asked for. */
+  protected override async listBots(userId: string) {
+    const slow = this.#script.slowDirectoryMs;
+    if (slow) await new Promise((resolve) => setTimeout(resolve, slow));
+    return super.listBots(userId);
   }
 
   /** Records the memory lines too, so a test reads what an operator would. */
@@ -330,6 +391,10 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   async probeTraces(): Promise<VoiceTraceLine[]> {
     return [...this.#traces];
+  }
+
+  async probeTimings(): Promise<VoiceTimingLine[]> {
+    return [...this.#timings];
   }
 
   async probeSetScript(script: VoiceProbeScript): Promise<void> {

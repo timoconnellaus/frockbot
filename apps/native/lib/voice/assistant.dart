@@ -38,6 +38,7 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 
 import 'capture.dart';
+import 'diagnostics.dart';
 import 'player.dart';
 import 'protocol.dart';
 import 'route.dart';
@@ -88,11 +89,57 @@ class AssistantSessionController extends ChangeNotifier {
   /// The Bot this call opens on (ADR 0029). Null talks to General.
   final String? botId;
 
+  /// This call's latency diagnostics, or null — which is every shipped build
+  /// ([voiceDiagnosticsEnabledV1]). The same object gave the socket opener the
+  /// `trace` this call's query carries, so the two sides' lines correlate.
+  ///
+  /// What each milestone means, in the order a healthy call passes them:
+  ///
+  /// * `controller.start` — [start] entered; the person has pressed voice.
+  /// * `route.begin` / `route.ready` — around the platform audio session
+  ///   ([VoiceAudioRoute.begin]). On macOS and the web this is a no-op and the
+  ///   two are adjacent; on Android the gap is the platform applying mode,
+  ///   focus and route.
+  /// * `capture.open` / `capture.ready` — around opening the microphone. The
+  ///   gap includes the permission prompt the first time, so a large one is
+  ///   usually a person reading a dialog. Repeated on an unmute, which reopens
+  ///   the device.
+  /// * `socket.open` / `socket.ready` — around one connect attempt, each
+  ///   carrying `attempt`. The gap is DNS, TLS and the upgrade round trip.
+  /// * `socket.welcome` — the server's `welcome` frame arrived.
+  /// * `call.start-sent` — `start_call` went out, with `openingFrames`: how
+  ///   much audio was captured before the handshake and is about to be
+  ///   drained behind it.
+  /// * `microphone.first-frame` — the first frame the device handed over, with
+  ///   `silent` when it is under [voiceRoomToneLevelV1]. A device returning
+  ///   zeros still produces this one, which is how a deaf capture is told from
+  ///   one that never opened.
+  /// * `microphone.first-signal` — the first frame carrying the room at all.
+  /// * `microphone.first-speech` — the first frame the energy gate called
+  ///   speech. Not a transcript and not a word: an amplitude decision.
+  /// * `upstream.starting` / `upstream.awake` — the first `voice/state` frame
+  ///   saying each; `awake` means the server's Live session acknowledged its
+  ///   setup.
+  /// * `call.listening` — the first `status: listening`: the call is live.
+  /// * `audio.first-down` — the first audio frame this client received, with
+  ///   its `bytes`. The reply exists at this point; nobody has heard it.
+  /// * `player.first-feed` / `player.first-played` — the speaker seam, whose
+  ///   exact meanings are in `player.dart`. Neither is the audible start.
+  /// * `call.end` (with `reason`, the path that ended it), `call.ended` (the
+  ///   server's end of the socket finished first) or `call.failed` — the
+  ///   failure's sentence is shown to the person, never logged.
+  ///
+  /// Every `elapsedMs` here is this process's monotonic clock from
+  /// `controller.start`. The server's own lines are elapsed on the server's
+  /// clock from its own start, and the two are never subtracted.
+  final VoiceDiagnostics? diagnostics;
+
   AssistantSessionController({
     required this.openSocket,
     required this.capture,
     required this.player,
     this.botId,
+    this.diagnostics,
     VoiceAudioRoute? route,
     this.gateConfig = const SpeechGateConfig(),
     this.startTimeout = voiceAssistantStartTimeoutV1,
@@ -306,13 +353,22 @@ class AssistantSessionController extends ChangeNotifier {
     _clearNotice();
     _clearDelegation();
     _set(VoiceSessionPhase.connecting);
+    final diagnostics = this.diagnostics;
+    diagnostics?.mark('controller.start');
+    // The speaker reports its own two seams through a plain callback, which
+    // this call holds for as long as it holds the player.
+    player.onDiagnostic = diagnostics == null
+        ? null
+        : (event) => diagnostics.markOnce(event);
     player.addListener(_onPlayback);
     final connecting = _connect(generation);
     // The session before the devices: the mode decides how the microphone
     // and the speaker are opened, so it is set before either is — and this
     // call now holds it until its teardown gives it back.
     _routeBegun = true;
+    diagnostics?.mark('route.begin');
     await _settled(route.begin);
+    diagnostics?.mark('route.ready');
     if (generation != _generation || _disposed) {
       unawaited(connecting.then(_abandon));
       return;
@@ -420,10 +476,15 @@ class AssistantSessionController extends ChangeNotifier {
   /// race the first. A refused socket is retried once, then it is an
   /// error, not a loop.
   Future<VoiceSocket?> _connectOnce(int generation) async {
+    var attempts = 0;
     Future<VoiceSocket> attempt() async {
+      final at = ++attempts;
+      diagnostics?.mark('socket.open', {'attempt': at});
       final pending = openSocket();
       try {
-        return await pending.timeout(connectTimeout);
+        final socket = await pending.timeout(connectTimeout);
+        diagnostics?.mark('socket.ready', {'attempt': at});
+        return socket;
       } on Object {
         unawaited(
           pending
@@ -466,11 +527,13 @@ class AssistantSessionController extends ChangeNotifier {
   /// belongs to a call that is over is stopped rather than listened to.
   Future<bool> _openCapture(int generation) async {
     try {
+      diagnostics?.mark('capture.open');
       final frames = await capture.start(
         sampleRate: voiceAssistantInputSampleRateV1,
         frame: voiceAssistantFrame,
         profile: VoiceCaptureProfile.call,
       );
+      diagnostics?.mark('capture.ready');
       if (generation != _generation || _disposed) {
         await capture.stop();
         return false;
@@ -502,6 +565,18 @@ class AssistantSessionController extends ChangeNotifier {
   void _onFrame(AudioFrame frame) {
     if (_disposed) return;
     _micLevel = frame.level;
+    final diagnostics = this.diagnostics;
+    if (diagnostics != null) {
+      // Three separate questions, and a call can fail any one of them: did the
+      // device hand anything over at all, was any of it above the nothing a
+      // deaf capture returns, and did the gate ever hear words.
+      diagnostics.markOnce('microphone.first-frame', {
+        'silent': frame.level < voiceRoomToneLevelV1,
+      });
+      if (frame.level >= voiceRoomToneLevelV1) {
+        diagnostics.markOnce('microphone.first-signal');
+      }
+    }
     // The one thing a deaf call never has: the room the microphone is
     // listening to. Room tone is a working device, not speech — the gate's
     // floor is where words start — so only a device handing over zeros
@@ -511,6 +586,7 @@ class AssistantSessionController extends ChangeNotifier {
     }
     _watchForDeafness(frame.atMs);
     final decision = _gate.offer(frame.bytes, frame.level, frame.atMs);
+    if (decision.open) diagnostics?.markOnce('microphone.first-speech');
     // Barge-in is judged before mute and before sleep: it is the one thing
     // that must reach the server while it is talking.
     if (decision.bargeIn && _playing && !muted && !_barged) {
@@ -598,6 +674,7 @@ class AssistantSessionController extends ChangeNotifier {
     // because the app has already built the next session's player.
     if (_disposed || !active || _phase == VoiceSessionPhase.ending) return;
     if (message is List<int>) {
+      diagnostics?.markOnce('audio.first-down', {'bytes': message.length});
       player.write(
         message is Uint8List ? message : Uint8List.fromList(message),
       );
@@ -608,6 +685,7 @@ class AssistantSessionController extends ChangeNotifier {
     if (frame == null) return;
     switch (frame) {
       case AssistantWelcomeV1():
+        diagnostics?.markOnce('socket.welcome');
         _welcomed = true;
         _beginCall();
       case AssistantStatusV1(:final status):
@@ -617,6 +695,7 @@ class AssistantSessionController extends ChangeNotifier {
           _held.clear();
         }
         if (status == VoiceStatusV1.listening) {
+          diagnostics?.markOnce('call.listening');
           _startTimer?.cancel();
           _startTimer = null;
           if (!_asleep) _upstream = VoiceUpstreamStateV1.awake;
@@ -639,6 +718,7 @@ class AssistantSessionController extends ChangeNotifier {
       case AssistantVoiceStateV1(:final upstream):
         // The server reports its own view of the mute; the two inputs that
         // produced it are this client's and are not overwritten by it.
+        diagnostics?.markOnce('upstream.${upstream.name}');
         _upstream = upstream;
         _notify();
       case AssistantDelegationV1(
@@ -716,6 +796,9 @@ class AssistantSessionController extends ChangeNotifier {
       socket.sendText(encodeVoiceTargetV1(target));
     }
     socket.sendText(encodeAssistantStartCallV1());
+    diagnostics?.markOnce('call.start-sent', {
+      'openingFrames': _opening.length,
+    });
     _started = true;
     while (_opening.isNotEmpty) {
       socket.sendBinary(_opening.removeFirst());
@@ -819,6 +902,9 @@ class AssistantSessionController extends ChangeNotifier {
       return;
     }
     _generation++;
+    // The path that ended it, which is a token this app names — never
+    // anything the person said or the server sent.
+    diagnostics?.mark('call.end', {'reason': reason});
     _set(VoiceSessionPhase.ending);
     final socket = _socket;
     await _settled(() async => socket?.sendText(encodeAssistantEndCallV1()));
@@ -843,6 +929,7 @@ class AssistantSessionController extends ChangeNotifier {
       return;
     }
     _generation++;
+    diagnostics?.mark('call.ended');
     _endedLine = 'The call ended.';
     _notify();
     await _teardown(reason: 'server-closed');
@@ -853,6 +940,9 @@ class AssistantSessionController extends ChangeNotifier {
   Future<void> _fail(String message) async {
     if (_phase == VoiceSessionPhase.error) return;
     _generation++;
+    // The sentence is for the person, not the log: a failure is a milestone
+    // here and nothing more.
+    diagnostics?.mark('call.failed', {'phase': _phase.name});
     _error = message;
     // Say so now, before the teardown's awaits: the call's surface shows the
     // failure the moment it is known, not after the socket has finished
@@ -889,6 +979,7 @@ class AssistantSessionController extends ChangeNotifier {
     _socket = null;
     await _settled(player.close);
     player.removeListener(_onPlayback);
+    player.onDiagnostic = null;
     final focus = _focus;
     _focus = null;
     await _settled(() async => focus?.cancel());

@@ -186,6 +186,7 @@ import {
   gatewayModelForFrockRequestV1,
 } from "@frockbot/providers/frock-ai/catalog";
 import { voiceDictationConfiguredV1 } from "@frockbot/app/voice/dictation-upstream";
+import { voiceAssistantEdgeTimingOfV1 } from "@frockbot/app/voice/diagnostics";
 import type { VoiceGatewayDependencies } from "./contracts.js";
 import {
   decodeRpcEnvelopeV1,
@@ -2625,11 +2626,17 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     let mountedBackend:
       Awaited<ReturnType<typeof createGatewayBackendContributions>> | undefined;
+    // Opt-in voice diagnostics for the assistant upgrade and nothing else.
+    // The entry is the first thing that happens to this request in this
+    // Worker; everything the voice object can see starts long after it.
+    const timing = voiceAssistantEdgeTimingOfV1(request.url);
+    timing?.mark("edge-fetch");
     try {
       // SAFETY: exported WorkerEntrypoints are materialized on ctx.exports;
       // workers-types cannot infer the generated local RPC stubs.
       const runtimeExports = ctx.exports as unknown as RuntimeExports;
       mountedBackend = await createGatewayBackendContributions(env);
+      timing?.mark("edge-backend-ready");
       // Which `env` secret the native door signs with belongs to the auth
       // Package: the hosted build keeps signing with the live
       // `BETTER_AUTH_SECRET`, and a build without better-auth has its own key.
@@ -2749,7 +2756,9 @@ export default {
         allowedClientOrigins: allowedClientOrigins(env),
         allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
       });
-      return await gateway(request);
+      const answer = await gateway(request);
+      timing?.mark("edge-answered", { status: answer.status });
+      return answer;
     } catch (error) {
       // The outermost boundary. Building the gateway can fail before any route
       // runs — an unavailable binding, a Contribution that will not mount — and

@@ -48,6 +48,7 @@ import {
   VOICE_DICTATION_PATH_V1,
   type VoiceCapabilitiesV1,
 } from "@frockbot/app/voice/shared";
+import { voiceAssistantEdgeTimingV1 } from "@frockbot/app/voice/diagnostics";
 import { createDebugRoute } from "./debug.js";
 import { INSIGHTS_REPORT_ORIGIN, INSIGHTS_SCRIPT_ORIGIN } from "./insights.js";
 import {
@@ -654,6 +655,11 @@ export function createGateway(dependencies: GatewayDependencies) {
       if (response) return response;
     }
 
+    // Opt-in voice diagnostics, and only for the assistant upgrade: the
+    // object's own first line is written after everything here has already
+    // happened, so authentication is invisible from inside it.
+    const timing = voiceAssistantEdgeTimingV1(url);
+    timing?.mark("edge-auth-start");
     let development = dependencies.allowDevelopmentIdentity
       ? developmentIdentity(request)
       : { persist: false };
@@ -724,6 +730,9 @@ export function createGateway(dependencies: GatewayDependencies) {
         );
       }
     }
+    // Authenticated and admitted: everything above is what a socket waits
+    // through before a route is even chosen.
+    timing?.mark("edge-auth-ready");
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId, isAdmin });
     }
@@ -771,12 +780,15 @@ export function createGateway(dependencies: GatewayDependencies) {
           return await dependencies.voice.openDictation(userId, request);
         }
         const deviceKey = (url.searchParams.get("device") ?? "").slice(0, 64);
-        return await dependencies.voice.openAssistant(
+        timing?.mark("edge-assistant-forward");
+        const upgraded = await dependencies.voice.openAssistant(
           userId,
           /^[A-Za-z0-9._-]{1,64}$/.test(deviceKey) ? deviceKey : "unknown",
           request,
           { isAdmin, authMode },
         );
+        timing?.mark("edge-assistant-upgraded", { status: upgraded.status });
+        return upgraded;
       } catch (error) {
         return jsonError(
           500,

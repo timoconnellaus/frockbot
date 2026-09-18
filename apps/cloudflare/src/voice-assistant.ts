@@ -35,6 +35,10 @@ import {
   type VoiceCurrentBotV1,
 } from "@frockbot/app/voice/assistant";
 import {
+  voiceTimingForV1,
+  type VoiceTimingV1,
+} from "@frockbot/app/voice/diagnostics";
+import {
   buildGeminiLiveSetupV1,
   decodeGeminiServerFrameV1,
   encodeGeminiAudioFrameV1,
@@ -440,6 +444,9 @@ class GeminiSessionV1 {
   private closedByUs = false;
   private pending: Uint8Array[] = [];
   private pendingBytes = 0;
+  /** Whether each of the two audio milestones has been said for this session. */
+  private saidHeld = false;
+  private saidSent = false;
   /**
    * Events are handled one at a time, in arrival order.
    *
@@ -458,11 +465,18 @@ class GeminiSessionV1 {
       onEvent: (event: GeminiServerEventV1) => void | Promise<void>;
       onClosed: (code: number, reason: string) => void;
       open: (url: string) => Promise<WebSocket>;
+      /**
+       * Lifecycle milestones for an opt-in diagnostic trace, or absent —
+       * which is every ordinary call. Never the url, which carries the key.
+       */
+      timing?: (event: string, fields?: Record<string, unknown>) => void;
     },
   ) {}
 
   async start(): Promise<void> {
+    this.options.timing?.("upstream-open-start");
     const socket = await this.options.open(this.options.url);
+    this.options.timing?.("upstream-socket-open");
     if (this.closedByUs) {
       try {
         socket.close();
@@ -483,6 +497,7 @@ class GeminiSessionV1 {
         if (decoded.kind === "setup-complete") {
           this.ready = true;
           this.state = "awake";
+          this.options.timing?.("upstream-setup-ack");
           this.drain();
         }
         const event = decoded;
@@ -504,6 +519,7 @@ class GeminiSessionV1 {
       this.options.onClosed(1006, "the voice service connection failed");
     });
     this.send(this.options.setup);
+    this.options.timing?.("upstream-setup-sent");
   }
 
   send(frame: Record<string, unknown>): void {
@@ -522,6 +538,13 @@ class GeminiSessionV1 {
    */
   sendAudio(pcm: Uint8Array): void {
     if (!this.ready) {
+      // Held, not sent: the first frame the session actually puts on the wire
+      // is reported below, and the gap between the two is the setup this
+      // audio was waiting on. Said once per session, not once per frame.
+      if (!this.saidHeld) {
+        this.saidHeld = true;
+        this.options.timing?.("upstream-audio-held");
+      }
       this.pending.push(pcm);
       this.pendingBytes += pcm.byteLength;
       while (
@@ -532,13 +555,22 @@ class GeminiSessionV1 {
       }
       return;
     }
+    this.sent(false);
     this.send(encodeGeminiAudioFrameV1(pcm));
+  }
+
+  /** The first frame this session put on the wire, and whether it waited. */
+  private sent(buffered: boolean): void {
+    if (this.saidSent) return;
+    this.saidSent = true;
+    this.options.timing?.("upstream-audio-sent", { buffered });
   }
 
   private drain(): void {
     const held = this.pending;
     this.pending = [];
     this.pendingBytes = 0;
+    if (held.length > 0) this.sent(true);
     for (const chunk of held) this.send(encodeGeminiAudioFrameV1(chunk));
   }
 
@@ -560,6 +592,36 @@ class GeminiSessionV1 {
       // Already gone.
     }
   }
+}
+
+/**
+ * Says when one read of the prompt context finished, for a call that asked
+ * for diagnostics.
+ *
+ * The promise is returned as it was given when nothing is listening, so an
+ * ordinary call adds not even a `then`. When something is listening the extra
+ * link is a microtask on a promise that was already being awaited in a
+ * `Promise.all`: nothing is serialised, nothing is reordered, and a read that
+ * fails still fails to exactly the same place.
+ */
+function timed<T>(
+  timing:
+    | ((event: string, fields?: Record<string, unknown>) => void)
+    | undefined,
+  event: string,
+  work: Promise<T>,
+): Promise<T> {
+  if (!timing) return work;
+  return work.then(
+    (value) => {
+      timing(event);
+      return value;
+    },
+    (error: unknown) => {
+      timing(event, { failed: true });
+      throw error;
+    },
+  );
 }
 
 /** What a client may say, beside the custom `voice/*` messages. */
@@ -633,6 +695,18 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       turns: number;
     }
   >();
+
+  /**
+   * Latency diagnostics for the sockets that asked for them, by connection id.
+   *
+   * Ephemeral and separate from `#calls` on purpose: the correlation has to
+   * exist from `onConnect`, which is long before a call record does, and every
+   * milestone before `start_call` is admitted is exactly the part of a slow
+   * call nothing else can see. Dropped in `onClose` with the connection, so a
+   * reconnect is a new entry under whatever id that socket carried and an id
+   * is never reused or persisted. Empty for every ordinary call.
+   */
+  #timings = new Map<string, VoiceTimingV1>();
 
   // -- seams a test subclass overrides ---------------------------------------
 
@@ -1081,6 +1155,44 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   /**
+   * One milestone of a call that asked for diagnostics, and nothing at all
+   * for one that did not.
+   *
+   * Separate from `trace`, which is the ordinary operational record every call
+   * writes. These lines are opt-in, correlated with the client's own by the
+   * `trace` the socket carried, and exist to say which step of a slow start
+   * took the time. The same rule holds as for `trace`: ids, counts and enums,
+   * never a word spoken and never a credential.
+   *
+   * Every elapsed millisecond here is the server's own clock from the moment
+   * the socket connected. A client's are its own from the person's press; the
+   * two sequences are read beside each other, never subtracted.
+   */
+  protected timing(
+    connection: Connection,
+    event: string,
+    fields: Record<string, unknown> = {},
+    once = false,
+  ): void {
+    const timing = this.#timings.get(connection.id);
+    if (!timing) return;
+    if (once) timing.markOnce(event, fields);
+    else timing.mark(event, fields);
+  }
+
+  /**
+   * The timing sink for one connection as a plain callback, or undefined —
+   * what the prompt context and the upstream session take, so neither has to
+   * know about connections or about diagnostics being off.
+   */
+  private timingSink(
+    connection: Connection,
+  ): ((event: string, fields?: Record<string, unknown>) => void) | undefined {
+    if (!this.#timings.has(connection.id)) return undefined;
+    return (event, fields) => this.timing(connection, event, fields ?? {});
+  }
+
+  /**
    * A line about the session's memory. Separate from `trace` because this
    * work outlives the socket: the scheduler runs it with no connection, and
    * a call that ended is exactly when it happens. Never the words remembered:
@@ -1113,7 +1225,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     connection.setState({ userId, deviceKey } satisfies ConnectionIdentity);
+    // The socket's own id, if it brought one this object recognises as a
+    // UUID. Read only once identity has been accepted: a socket that is not
+    // this account's is closed above and gets no diagnostics.
+    const timing = voiceTimingForV1(new URL(context.request.url));
+    if (timing) this.#timings.set(connection.id, timing);
     this.trace(connection, "connected");
+    this.timing(connection, "connected", { device: deviceKey });
     // Protocol v1's opening: the client waits for both of these before it
     // says `hello`, and nothing about them depends on a call existing.
     this.sendRaw(connection, { type: "welcome", protocol_version: 1 });
@@ -1135,6 +1253,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       reason: reason.slice(0, 200),
       wasClean,
     });
+    this.timing(connection, "closed", { code, wasClean });
     // A socket going is not the person hanging up. The session is closed and
     // its meter settled at once, but the call record stays: a client that
     // comes straight back from a network change continues this conversation
@@ -1147,6 +1266,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     }
     this.#traced.delete(connection.id);
     this.#targets.delete(connection.id);
+    // The id goes with the socket: nothing about this call outlives it, and a
+    // reconnect brings its own or none.
+    this.#timings.delete(connection.id);
   }
 
   override async onMessage(
@@ -1304,6 +1426,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     message: string,
   ) {
     this.trace(connection, "refused", { code, message });
+    // The code, never the sentence: the sentence is for the person.
+    this.timing(connection, "refused", { code });
     this.send(connection, {
       schemaVersion: 1,
       type: "voice/refusal",
@@ -1360,6 +1484,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    */
   private async startCall(connection: Connection): Promise<void> {
     if (this.#calls.has(connection.id)) return;
+    // Before the first awaited read, so the gap to `cap-checked` below is
+    // storage and not this method being entered late.
+    this.timing(connection, "start-call");
     const identity = this.identity(connection);
     if (!identity) {
       this.refuse(
@@ -1387,6 +1514,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       );
       return;
     }
+    this.timing(connection, "cap-checked");
     // A call about to be displaced has its memory work recorded *before* the
     // record naming it is replaced. Written the other way round, an eviction
     // in between would leave a call nothing remembers it has to finish. The
@@ -1395,6 +1523,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     if (displaced && !(await ledger.rejoins(identity.deviceKey, now))) {
       await this.beginMemoryFinalization(displaced);
     }
+    this.timing(connection, "ledger-checked", {
+      displaced: Boolean(displaced),
+    });
     // ADR 0029: a call addresses one Bot. The client says which before it
     // says `start_call`, and that is what the call opens on whether it is a
     // new call or a rejoin — the person pressed voice on a Bot just now, and
@@ -1410,10 +1541,12 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       at: now,
       ...(requested ? { botId: requested } : {}),
     });
+    this.timing(connection, "call-admitted", { admission: admission.status });
     const target = await this.resolveCallTarget(
       identity.userId,
       admission.call.botId ?? requested,
     );
+    this.timing(connection, "target-resolved");
     // Whatever this admission displaced — another device's call, or this
     // device's own earlier socket rejoining the same call — is ended now, so
     // one account never holds two live sessions.
@@ -1440,7 +1573,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       voice: target.voice,
       startedAt: Date.now(),
       sequence: Date.parse(admission.call.startedAt),
-      promptContext: this.buildPromptContext(identity.userId, target.botId),
+      promptContext: this.buildPromptContext(
+        identity.userId,
+        target.botId,
+        this.timingSink(connection),
+      ),
       muted: false,
       exhausted: false,
       quotaSaid: false,
@@ -1514,6 +1651,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     const url = this.geminiUrl();
     if (!url) return;
     const context = await call.promptContext;
+    // The prompt context as this session sees it: `prompt-context-ready` said
+    // when the reads finished, which for the first session of a call is
+    // usually before this line was reached at all.
+    this.timing(connection, "prompt-context-awaited");
     const handover = options.handover
       ? await this.callHistory(call.callId)
       : [];
@@ -1536,6 +1677,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       googleSearch: true,
       ...(options.handle ? { resumptionHandle: options.handle } : {}),
     });
+    const timing = this.timingSink(connection);
     const session = new GeminiSessionV1({
       url,
       setup,
@@ -1545,6 +1687,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         void this.onSessionClosed(connection.id, call.callId, code, reason);
       },
       open: (target) => this.openGeminiSocket(target),
+      ...(timing ? { timing } : {}),
     });
     call.session = session;
     this.trace(connection, "upstream", {
@@ -1559,6 +1702,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       this.trace(connection, "upstream-failed", {
         message: error instanceof Error ? error.message : String(error),
       });
+      // The milestone, never the upstream's message: that text comes from
+      // outside and the url it was raised for carries the key.
+      this.timing(connection, "upstream-failed");
       call.session = undefined;
       this.sendState(connection, call);
       this.sendError(
@@ -1588,6 +1734,14 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
             (message as ArrayBufferView).byteLength,
           );
     if (bytes.byteLength === 0) return;
+    // The first frame of the person's microphone to reach this object, and
+    // nothing about the frames after it: this is a milestone, not a meter.
+    this.timing(
+      connection,
+      "client-audio-first",
+      { bytes: bytes.byteLength },
+      true,
+    );
     session.sendAudio(bytes);
     this.armIdleSleep(connection, call);
     await this.meterAudio(connection, call, "in", bytes.byteLength);
@@ -1774,10 +1928,20 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       case "setup-complete":
         this.trace(connection, "upstream", { state: "awake" });
         this.trace(connection, "listening");
+        this.timing(connection, "listening", {}, true);
         this.setStatus(connection, call, "listening");
         this.sendState(connection, call);
         return;
       case "audio": {
+        // The model's first sound, before the turn it belongs to is admitted:
+        // the await below is durable work, and a line written after it would
+        // charge that work to Google.
+        this.timing(
+          connection,
+          "upstream-audio-first",
+          { bytes: event.pcm.byteLength },
+          true,
+        );
         if (!(await this.ensureTurn(connection, call))) return;
         if (call.dropping) return;
         this.clearSilenceGuard(call);
@@ -1789,6 +1953,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           traced.audioBytes += event.pcm.byteLength;
         }
         this.sendBinary(connection, event.pcm);
+        // Handed to the client's socket. What the gap to the line above holds
+        // is this object's own work — admitting the turn — and nothing else.
+        this.timing(connection, "client-audio-out-first", {}, true);
         await this.meterAudio(connection, call, "out", event.pcm.byteLength);
         return;
       }
@@ -2564,7 +2731,19 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     delegation: VoiceDelegationRecordV1,
   ): void {
     const door = this.botDoor(userId, delegation.botId);
+    // The hand-off's own two ends, for a call that asked: when the Turn was
+    // sent, and — in `announceDelegation` — when its answer reached the
+    // session. Carried by the connection this call is on rather than by the
+    // request, so the Bot's own RPC shape is untouched: a Turn's payload is
+    // durable and a diagnostic id has no business in it.
     void this.ledger().noteDelegationDispatch(delegation.runId, this.now());
+    const live = this.liveCallFor(delegation.callId);
+    const dispatched = live && this.connectionFor(live.connectionId);
+    if (dispatched) {
+      this.timing(dispatched, "delegation-dispatched", {
+        run: delegation.runId,
+      });
+    }
     const run = door
       .runVoice({
         runId: delegation.runId,
@@ -2816,6 +2995,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       this.trace(connection, "answer-told", {
         run: runId,
         ...(asked ? { call: asked.id } : { asTurn: true }),
+      });
+      this.timing(connection, "delegation-answered", {
+        run: runId,
+        asTurn: !asked,
       });
       this.sendDelegationState(
         delegation.botId,
@@ -3171,7 +3354,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   private async buildPromptContext(
     userId: string,
     botId?: string,
+    timing?: (event: string, fields?: Record<string, unknown>) => void,
   ): Promise<Omit<VoiceAssistantPromptInputV1, "now">> {
+    // The start is marked where the reads are actually issued, which is here
+    // — not where `openSession` later awaits the answer. The two are far
+    // apart, and a line that said otherwise would put the fan-out's time in
+    // the wrong place.
+    timing?.("prompt-context-start");
     // One directory read serves both the prompt's `<bots>` list and the
     // current Bot's activity; asked twice it would double the per-Bot RPC
     // fan-out on exactly this path.
@@ -3179,28 +3368,36 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       () => [] as VoiceBotSummaryV1[],
     );
     const [bots, memory, timezone, session, bot] = await Promise.all([
-      directory,
-      (async () => {
-        const store = this.memoryStore(userId);
-        if (!store) return undefined;
-        try {
-          return await store.read(userMemoryRootV1({ userId, botId: "voice" }));
-        } catch (error) {
-          return {
-            root: userMemoryRootV1({ userId, botId: "voice" }),
-            profile: [],
-            recent: [],
-            sources: [],
-            documents: [],
-            logTotal: 0,
-            unavailable: error instanceof Error ? error.message : String(error),
-          };
-        }
-      })(),
-      this.userTimezone(userId),
-      this.sessionMemoryContext(),
-      this.buildCurrentBotContext(userId, botId, directory),
+      timed(timing, "prompt-directory", directory),
+      timed(
+        timing,
+        "prompt-user-memory",
+        (async () => {
+          const store = this.memoryStore(userId);
+          if (!store) return undefined;
+          try {
+            return await store.read(
+              userMemoryRootV1({ userId, botId: "voice" }),
+            );
+          } catch (error) {
+            return {
+              root: userMemoryRootV1({ userId, botId: "voice" }),
+              profile: [],
+              recent: [],
+              sources: [],
+              documents: [],
+              logTotal: 0,
+              unavailable:
+                error instanceof Error ? error.message : String(error),
+            };
+          }
+        })(),
+      ),
+      timed(timing, "prompt-timezone", this.userTimezone(userId)),
+      timed(timing, "prompt-voice-memory", this.sessionMemoryContext()),
+      this.buildCurrentBotContext(userId, botId, directory, timing),
     ]);
+    timing?.("prompt-context-ready");
     return {
       bots,
       timezone,
@@ -3225,40 +3422,50 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     userId: string,
     botId: string | undefined,
     directory: Promise<VoiceBotSummaryV1[]>,
+    timing?: (event: string, fields?: Record<string, unknown>) => void,
   ): Promise<VoiceCurrentBotV1 | undefined> {
     if (!botId) return undefined;
     let bot: { botId: string; name: string; description?: string };
     try {
       bot = await this.ownedBot(userId, botId);
+      timing?.("prompt-bot-identity");
     } catch {
       // The Bot was deleted, or never belonged to this User. The call keeps
       // going as the account-wide assistant rather than failing.
       return undefined;
     }
     const [memory, thread, bots] = await Promise.all([
-      (async () => {
-        const store = this.memoryStore(userId);
-        if (!store) return undefined;
-        try {
-          return await store.read(botMemoryRootV1({ userId, botId }));
-        } catch {
-          return undefined;
-        }
-      })(),
-      (async () => {
-        try {
-          const page = await this.botDoor(userId, botId).listRuns();
-          const runs = page.runs.slice(-VOICE_HISTORY_DEFAULT_LIMIT_V1);
-          return {
-            botId,
-            botName: bot.name,
-            runs,
-            hasMore: page.page.truncated || page.runs.length > runs.length,
-          };
-        } catch {
-          return undefined;
-        }
-      })(),
+      timed(
+        timing,
+        "prompt-bot-memory",
+        (async () => {
+          const store = this.memoryStore(userId);
+          if (!store) return undefined;
+          try {
+            return await store.read(botMemoryRootV1({ userId, botId }));
+          } catch {
+            return undefined;
+          }
+        })(),
+      ),
+      timed(
+        timing,
+        "prompt-bot-history",
+        (async () => {
+          try {
+            const page = await this.botDoor(userId, botId).listRuns();
+            const runs = page.runs.slice(-VOICE_HISTORY_DEFAULT_LIMIT_V1);
+            return {
+              botId,
+              botName: bot.name,
+              runs,
+              hasMore: page.page.truncated || page.runs.length > runs.length,
+            };
+          } catch {
+            return undefined;
+          }
+        })(),
+      ),
       // The directory is already being read for the prompt's `<bots>` list;
       // this takes the live activity for the current Bot out of the same
       // answer rather than asking its object again.

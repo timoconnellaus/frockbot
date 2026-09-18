@@ -19,6 +19,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../client/transport.dart';
 import '../client/transport_io.dart'
     if (dart.library.js_interop) '../client/transport_web.dart';
+import 'diagnostics.dart';
 import 'protocol.dart';
 
 abstract interface class VoiceSocket {
@@ -113,6 +114,26 @@ VoiceSocketOpener dictationSocketOpenerV1(NativeApi api) =>
       timeout: voiceDictationConnectTimeoutV1,
     );
 
-VoiceSocketOpener assistantSocketOpenerV1(NativeApi api) =>
-    () =>
-        openVoiceSocketV1(api, '/api/voice/assistant', query: {'version': '1'});
+/// The assistant socket, with this call's diagnostic id on it when the build
+/// opted in ([VoiceDiagnostics]).
+///
+/// `trace` is a random v4 UUID and nothing else. It is not a credential and
+/// carries no identity: the bearer header is still the only thing that
+/// authenticates the upgrade, and a server that does not recognise the value
+/// as a UUID simply logs nothing extra. A build that did not opt in passes
+/// null and the query is exactly what it was.
+Map<String, String> assistantSocketQueryV1({VoiceDiagnostics? diagnostics}) {
+  final trace = diagnostics?.trace;
+  return {
+    'version': '1',
+    if (trace != null && isVoiceTraceIdV1(trace)) 'trace': trace,
+  };
+}
+
+VoiceSocketOpener assistantSocketOpenerV1(
+  NativeApi api, {
+  VoiceDiagnostics? diagnostics,
+}) {
+  final query = assistantSocketQueryV1(diagnostics: diagnostics);
+  return () => openVoiceSocketV1(api, '/api/voice/assistant', query: query);
+}
