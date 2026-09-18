@@ -29,11 +29,12 @@
 // locked Plugin that cannot mount is an outage the ADR's own decision accepts
 // — "a Plugin that is always on for this Bot failed" is already a thing the
 // kernel has words for.
-import type {
-  FirstPartyCardDrawV1,
-  FirstPartyCardDrawsV1,
-  SendToUserPayloadV1,
-  ToolExecutionContext,
+import {
+  FIRST_PARTY_CARD_OCCURRENCE_SUFFIX_V1,
+  type FirstPartyCardDrawV1,
+  type FirstPartyCardDrawsV1,
+  type SendToUserPayloadV1,
+  type ToolExecutionContext,
 } from "@frockbot/core/contracts";
 
 /** The locked Plugin, and the card of it, each old member is drawn by. */
@@ -152,7 +153,7 @@ export async function drawFirstPartyCardV1(
       // would be silently dropped. Derived rather than minted, so a replayed
       // call recomputes the same occurrence, the same surface id and — for a
       // Plugin that mints them — the same Approval ids.
-      effectId: `${context.effectId}:card`,
+      effectId: `${context.effectId}${FIRST_PARTY_CARD_OCCURRENCE_SUFFIX_V1}`,
     });
     return outcome.status === "drawn" ? { surfaceId: outcome.surfaceId } : {};
   } catch {

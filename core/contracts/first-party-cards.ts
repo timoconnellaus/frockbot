@@ -49,3 +49,40 @@ export interface FirstPartyCardDrawsV1 {
     context: ToolExecutionContext,
   ): Promise<FirstPartyCardDrawOutcomeV1>;
 }
+
+/**
+ * What a Card drawn as an existing send's face is called on the log.
+ *
+ * The draw is its own occurrence — sharing the send's would make the Card the
+ * same send and drop one of the two — and it is derived rather than minted so
+ * a replayed call recomputes it.
+ */
+export const FIRST_PARTY_CARD_OCCURRENCE_SUFFIX_V1 = ":card";
+
+/**
+ * Whether one send is the face of another send on the same log.
+ *
+ * A locked first-party Card is drawn beside the send it draws, so the log
+ * carries both: the payload, which is the message, and the Card, which is
+ * what the person looks at. Only the payload is addressed to the person, so
+ * only the payload mints a message, raises a badge and wakes a device — a
+ * face that counted again would badge one approval twice. A Plugin's own
+ * card carries no such suffix and is a message like any other send.
+ */
+export function isFirstPartyCardFaceV1(
+  send: { occurrenceId?: string },
+  sends: readonly { occurrenceId?: string }[],
+): boolean {
+  const occurrenceId = send.occurrenceId;
+  if (
+    occurrenceId === undefined ||
+    !occurrenceId.endsWith(FIRST_PARTY_CARD_OCCURRENCE_SUFFIX_V1)
+  ) {
+    return false;
+  }
+  const drawn = occurrenceId.slice(
+    0,
+    -FIRST_PARTY_CARD_OCCURRENCE_SUFFIX_V1.length,
+  );
+  return sends.some((candidate) => candidate.occurrenceId === drawn);
+}
