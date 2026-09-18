@@ -18,10 +18,12 @@ no hooks — selecting a DeepSeek model is the only thing that runs it.
 
 ## What it can reach
 
-Nothing by itself. The key never reaches this plugin: its one upstream call
-per reply goes through the host, which checks the destination against the
-Connection's endpoint, attaches the key server-side and streams the response
-back. The plugin names a path — `/chat/completions` — and nothing else.
+Nothing by itself. The key never reaches this plugin: every model request it
+is asked for becomes one upstream call, made by the host to the single
+destination and route this deployment allows — `/chat/completions` — with the
+key attached server-side and the response streamed back. The plugin composes a
+request body and names nothing else: it neither picks the destination nor
+writes the path.
 
 ## When a reply fails
 

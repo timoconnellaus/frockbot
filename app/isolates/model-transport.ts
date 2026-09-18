@@ -149,6 +149,11 @@ export function createPluginModelHostV1(
       state.modelTransports.begin({
         requestId: scope.requestId,
         session,
+        // Read from the log as the attempt is admitted, before the Plugin is
+        // called: an attempt can fail without ever reaching this transport —
+        // a worker that throws, a clock that runs out — and a failure that
+        // early must not erase the possible cost of the call before it.
+        priorOutcomeUnknown: priorOutcomeUnknownV1(session, scope.requestId),
         pluginId: binding.provider.pluginId,
         provider: binding.provider.provider,
         model: binding.model,
@@ -176,6 +181,53 @@ function refused(
   httpStatus = 0,
 ): PluginModelTransportOutcomeV1 {
   return { status: "refused", httpStatus, reason };
+}
+
+/**
+ * Whether this attempt answers for an effect the Turn's log shows was already
+ * dispatched once and never accounted for.
+ *
+ * It is read from the log — the host's own durable record — rather than from
+ * anything the Plugin says, and it is read when the attempt is admitted as
+ * well as when a replay is refused, because an attempt can fail before this
+ * transport is ever called: a worker that throws, or a clock that runs out,
+ * must not erase the possible cost of the call before it.
+ *
+ * Not every second `model/request` is a lost outcome. The kernel journals
+ * `model/retry` only after a failure it classified, and a classified failure
+ * is by contract one the host watched the provider refuse before it did any
+ * work — or one nothing was sent for — so an effect whose retry the log
+ * carries is known to have cost nothing, and only an effect whose previous
+ * dispatch ended in silence is uncertain.
+ */
+export function priorOutcomeUnknownV1(
+  session: Session,
+  requestId: string,
+): boolean {
+  const dispatches = session.events.filter(
+    (
+      event,
+    ): event is Extract<
+      (typeof session.events)[number],
+      { type: "model/request" }
+    > =>
+      event.type === "model/request" && event.request.requestId === requestId,
+  );
+  if (dispatches.length < 2) return false;
+  if (
+    session.events.some(
+      (event) => event.type === "model/usage" && event.requestId === requestId,
+    )
+  ) {
+    return false;
+  }
+  const previous = dispatches.at(-2)!;
+  return !session.events.some(
+    (event) =>
+      event.type === "model/retry" &&
+      event.turn === previous.turn &&
+      event.step === previous.step,
+  );
 }
 
 /**
@@ -449,36 +501,39 @@ export async function isolateModelTransport(
   }
   if (attempts.length > 1) {
     // The effect was dispatched once already and the kernel chose to send it
-    // again, which it only does after an outcome it could not confirm. One
-    // request id is one upstream call: sending again would be a second paid
-    // call for one effect, so this dispatch is refused before the fetch
-    // (ADR 0032, the conservative first slice), and the person's next message
-    // is a new request id and a clean attempt.
-    if (
+    // again. One request id is one upstream call: sending again would be a
+    // second paid call for one effect, so this dispatch is refused before the
+    // fetch (ADR 0032, the conservative first slice), and the person's next
+    // message is a new request id and a clean attempt. What that refusal means
+    // is the log's to say — read here as well as at admission, so the answer
+    // is the same however this dispatch was opened.
+    dispatch.priorOutcomeUnknown = priorOutcomeUnknownV1(
+      session,
+      dispatch.requestId,
+    );
+    if (dispatch.priorOutcomeUnknown) {
+      // The earlier dispatch left no outcome: it may have reached the provider
+      // and billed, so this is not a call that did not happen. The adapter
+      // settles the attempt with the estimate.
+      return {
+        status: "unavailable",
+        reason:
+          "this model request was already dispatched once and its outcome is uncertain; it is not sent twice",
+      };
+    }
+    // The log accounts for the effect — its usage, or the kernel's own retry
+    // after a failure that was definitively no-effect — so refusing to send
+    // again costs nothing and adds nothing.
+    return refusedBeforeFetch(
+      dispatch,
       session.events.some(
         (event) =>
           event.type === "model/usage" &&
           event.requestId === dispatch.requestId,
       )
-    ) {
-      // The earlier dispatch settled and its usage is on the log: this effect
-      // is accounted for, so refusing to send again costs nothing and adds no
-      // second estimate.
-      return refusedBeforeFetch(
-        dispatch,
-        "this model request already has a durable usage record and is not sent twice",
-      );
-    }
-    // Whether that first attempt reached the provider and billed is exactly
-    // what the log does not say, so this is not a call that did not happen:
-    // the dispatch records that, and the adapter reads it to settle the
-    // attempt with the estimate rather than as a free failure.
-    dispatch.priorOutcomeUnknown = true;
-    return {
-      status: "unavailable",
-      reason:
-        "this model request was already dispatched once and its outcome is uncertain; it is not sent twice",
-    };
+        ? "this model request already has a durable usage record and is not sent twice"
+        : "this model request's earlier dispatch was already settled as a call that did not happen and is not sent twice",
+    );
   }
   const user = await userConfigurationV1(state, identity).readConfiguration({
     schemaVersion: 1,

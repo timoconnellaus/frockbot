@@ -12,6 +12,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   encodePluginModelEventLineV1,
+  MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   MODEL_OUTCOME_UNCERTAIN_REASON_V1,
   ModelOutcomeUncertainErrorV1,
   ModelProviderFailureError,
@@ -132,6 +133,8 @@ function provider(options: Partial<PluginModelProviderOptionsV1> = {}): {
         : { schemaVersion: 1, status: "refused", reason: "no fake" };
     },
     begin: options.begin ?? (() => dispatch({})),
+    // The host reads this from the Turn's journal; here a suite states it.
+    priorOutcomeUnknownFor: options.priorOutcomeUnknownFor ?? (() => false),
     scope: SCOPE,
   });
   return {
@@ -181,6 +184,26 @@ describe("what the adapter will serve", () => {
         "permanent",
       );
     }
+    expect(fake.invocations).toHaveLength(0);
+  });
+
+  test("keeps an earlier call's possible cost when the request no longer matches", async () => {
+    // The model changed while the run was interrupted, so the request the loop
+    // re-dispatches names a binding this mount does not hold. The log shows the
+    // effect was dispatched once already and never accounted for: its earlier
+    // call may have reached the provider and billed, so refusing this request
+    // is an uncertain outcome rather than a definitive no-effect result.
+    const fake = provider({
+      priorOutcomeUnknownFor: (requestId) => requestId === request().requestId,
+    });
+    const outcome = await drain(
+      fake.stream(
+        request({ model: "deepseek-v4-flash" }),
+        new AbortController().signal,
+      ),
+    );
+    expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
+    expect(outcome.error).not.toBeInstanceOf(ModelProviderFailureError);
     expect(fake.invocations).toHaveLength(0);
   });
 
@@ -477,6 +500,34 @@ describe("what the adapter believes of a failure", () => {
     expect(error.classification).toBe("permanent");
   });
 
+  test("a refusal this attempt never sent cannot erase an earlier call's cost", async () => {
+    // The effect was dispatched once already with nothing recorded for it, and
+    // this attempt was refused before it sent anything. The refusal is true of
+    // this attempt and says nothing about the earlier call, which may have
+    // reached the provider and billed: the effect's own history outranks it,
+    // so the estimate stands for that earlier call.
+    const fake = provider({
+      streamModel: worker([
+        {
+          type: "provider-failure",
+          classification: "permanent",
+          reason: "nothing was sent this time",
+        },
+      ]),
+      begin: () =>
+        dispatch({
+          sent: false,
+          priorOutcomeUnknown: true,
+          refusal: { httpStatus: 0, classification: "permanent" },
+        }),
+    });
+    const outcome = await drain(
+      fake.stream(request(), new AbortController().signal),
+    );
+    expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
+    expect(outcome.error).not.toBeInstanceOf(ModelProviderFailureError);
+  });
+
   test("a deadline the host already has a refusal for is still a call that did not happen", async () => {
     // The refusal and the attempt's clock raced: the host read the provider's
     // refusal of a call it never sent, and the attempt ended waiting. What the
@@ -612,6 +663,40 @@ describe("an attempt that hangs", () => {
     );
     expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
     expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  test("a worker that hung before anything was dispatched is the timeout, not uncertainty", async () => {
+    // The Plugin never reached the transport, so no call left the host and
+    // nothing can have billed. The deadline's own sentence is what the person
+    // reads, and the failure is definitive: an estimate here would record a
+    // cost for a call nobody made.
+    const fake = provider({
+      deadlines: { firstByteMs: 40, idleMs: 30 },
+      streamModel: () => new Promise(() => {}),
+      begin: () => dispatch({ sent: false }),
+    });
+    const outcome = await drain(
+      fake.stream(request(), new AbortController().signal),
+    );
+    const error = outcome.error as ModelProviderFailureError;
+    expect(error).toBeInstanceOf(ModelProviderFailureError);
+    expect(error).not.toBeInstanceOf(ModelOutcomeUncertainErrorV1);
+    expect(error.classification).toBe("permanent");
+    expect(error.message).toBe(MODEL_FIRST_BYTE_DEADLINE_REASON_V1);
+  });
+
+  test("a deadline for a replay of an unaccounted effect is still uncertainty", async () => {
+    // Nothing was dispatched here either, but the effect's earlier call may
+    // have billed, so the estimate belongs to it.
+    const fake = provider({
+      deadlines: { firstByteMs: 40, idleMs: 30 },
+      streamModel: () => new Promise(() => {}),
+      begin: () => dispatch({ sent: false, priorOutcomeUnknown: true }),
+    });
+    const outcome = await drain(
+      fake.stream(request(), new AbortController().signal),
+    );
+    expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
   });
 
   test("a read that never delivers settles when the idle allowance passes", async () => {

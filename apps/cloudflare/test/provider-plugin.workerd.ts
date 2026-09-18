@@ -15,10 +15,15 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import {
   DEEPSEEK_CUT_TRIGGER,
+  DEEPSEEK_RATE_LIMIT_TRIGGER,
   DEEPSEEK_TEST_API_KEY,
   TOOL_CALL_TRIGGER,
   WEB_STUB_ORIGIN,
 } from "./harness/miniflare.ts";
+import {
+  RUN_FAILURE_COPY_V1,
+  runFailureCopyV1,
+} from "@frockbot/app/shell/run-failure-copy";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
 import { flockRevision } from "./provision-bot.ts";
 import { MODEL_OUTCOME_UNCERTAIN_REASON_V1 } from "@frockbot/core/contracts";
@@ -411,6 +416,43 @@ describe("a Bot whose model runs through a provider Plugin", () => {
     // product's sentence, with the host's own account of what it saw after it
     // for the debug surface.
     expect(result.failure).toContain(MODEL_OUTCOME_UNCERTAIN_REASON_V1);
+  });
+
+  test("a rate limit is refused once, with no estimate and no second request", async () => {
+    // The provider refused this call before doing any work, which is the one
+    // classification the kernel may plan a retry for. One request id is one
+    // upstream call, so the retry is refused before the fetch: the effect is
+    // known to have cost nothing, no estimate is written for it, and the Turn
+    // settles with a failure the person can act on.
+    const identity = freshIdentity();
+    await provisionDeepseekBot(identity);
+    await forgetDeepseekCalls();
+    const result = await turn(
+      identity,
+      "run-rate-limited",
+      `${DEEPSEEK_RATE_LIMIT_TRIGGER} please reply`,
+    );
+    expect(await deepseekCalls()).toHaveLength(1);
+    expect(
+      result.events.filter((event) => event.type === "model/usage"),
+    ).toHaveLength(0);
+    // The kernel planned the retry (the log carries a second dispatch) and the
+    // transport refused it before the fetch, so no second call was made.
+    expect(
+      result.events.filter((event) => event.type === "model/request"),
+    ).toHaveLength(2);
+    const outcome = result.events.findLast(
+      (event) => event.type === "turn/end",
+    ) as { outcome?: string } | undefined;
+    expect(outcome?.outcome).toBe("model-error");
+    expect(result.failure).toBeDefined();
+    // What the person reads is the product's sentence for a model failure.
+    expect(
+      runFailureCopyV1({
+        failure: result.failure,
+        events: result.events as never,
+      }),
+    ).toBe(RUN_FAILURE_COPY_V1["model-error"]);
   });
 
   test("a refused key is reported as a provider failure, once", async () => {

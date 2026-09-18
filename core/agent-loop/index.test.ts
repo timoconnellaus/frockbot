@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   decodeSessionEvent,
   LlmEffectNotStartedError,
+  MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
   ModelOutcomeUncertainErrorV1,
   ModelProviderFailureError,
   type LlmProvider,
@@ -325,6 +326,48 @@ describe("AgentLoop", () => {
         (event) => event.type === "turn/end",
       ),
     ).toMatchObject({ type: "turn/end", outcome: "model-error" });
+  });
+
+  test("a deadline that dispatched nothing writes no usage and says what happened", async () => {
+    // What a provider Plugin's adapter produces when the worker hung before it
+    // reached the transport: nothing left the host, so no estimate is written,
+    // and the deadline's own sentence is what the run records and a person
+    // reads.
+    const provider: LlmProvider = {
+      id: "deadline-before-dispatch",
+      async *stream() {
+        throw new ModelProviderFailureError({
+          classification: "permanent",
+          reason: MODEL_FIRST_BYTE_DEADLINE_REASON_V1,
+        });
+      },
+    };
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-usage",
+      sessionId: "deadline-usage",
+      provider: provider.id,
+      model: "silent-model",
+    });
+
+    handle.agent.send("try once");
+    await handle.agent.whenIdle();
+
+    expect(
+      handle.agent.session.events.filter(
+        (event) => event.type === "model/usage",
+      ),
+    ).toHaveLength(0);
+    expect(
+      handle.agent.session.events.findLast(
+        (event) => event.type === "turn/end",
+      ),
+    ).toMatchObject({
+      type: "turn/end",
+      outcome: "model-error",
+      reason: expect.stringContaining(MODEL_FIRST_BYTE_DEADLINE_REASON_V1),
+    });
   });
 
   test("journals a structured-output downgrade and typed validation failure", async () => {

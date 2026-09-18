@@ -186,6 +186,7 @@ async function run(
     },
     streamModel: (invocation) => worker.streamModel(invocation),
     begin: () => dispatch(options),
+    priorOutcomeUnknownFor: () => false,
     scope: SCOPE,
   });
   const events: Record<string, unknown>[] = [];

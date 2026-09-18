@@ -545,13 +545,15 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
  *
  * One request body's marker decides what the answer is, so a suite drives the
  * provider the way it drives the model: an ordinary reply otherwise, a tool
- * call for `TOOL_CALL_TRIGGER`, and a stream that dies mid-answer for
- * `DEEPSEEK_CUT_TRIGGER`. Every call is counted, which is how a test proves a
- * second upstream call did *not* happen.
+ * call for `TOOL_CALL_TRIGGER`, a stream that dies mid-answer for
+ * `DEEPSEEK_CUT_TRIGGER`, and a rate limit for `DEEPSEEK_RATE_LIMIT_TRIGGER`.
+ * Every call is counted, which is how a test proves a second upstream call did
+ * *not* happen.
  */
 export const DEEPSEEK_STUB_ORIGIN = "https://api.deepseek.com";
 export const DEEPSEEK_TEST_API_KEY = "workerd-deepseek-key";
 export const DEEPSEEK_CUT_TRIGGER = "frockbot-test-cut-stream:";
+export const DEEPSEEK_RATE_LIMIT_TRIGGER = "frockbot-test-rate-limit:";
 const deepseekCalls: {
   idempotencyKey: string | null;
   path: string;
@@ -642,6 +644,11 @@ async function deepseekStub(request: Request, url: URL): Promise<Response> {
     Array.isArray((body as { messages?: unknown }).messages)
       ? (body as { messages: WireMessage[] }).messages
       : [];
+  if (userText.includes(DEEPSEEK_RATE_LIMIT_TRIGGER)) {
+    // The provider stating, before doing any work, that it will not take this
+    // call: the one refusal the kernel may plan a retry for.
+    return Response.json({ error: "rate limited" }, { status: 429 });
+  }
   const system = messages.find((message) => message.role === "system");
   if (
     typeof system?.content === "string" &&

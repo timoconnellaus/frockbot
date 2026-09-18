@@ -127,12 +127,7 @@ export interface ModelDispatchHandleV1 {
 export class PluginModelDispatchRegistryV1 {
   readonly #dispatches = new Map<string, ModelDispatchV1>();
 
-  begin(
-    input: Omit<
-      ModelDispatchV1,
-      "transportId" | "sent" | "priorOutcomeUnknown" | "abort"
-    >,
-  ): {
+  begin(input: Omit<ModelDispatchV1, "transportId" | "sent" | "abort">): {
     handle: ModelDispatchHandleV1;
     dispatch: ModelDispatchV1;
   } {
@@ -141,7 +136,6 @@ export class PluginModelDispatchRegistryV1 {
       ...input,
       transportId,
       sent: false,
-      priorOutcomeUnknown: false,
       abort: new AbortController(),
     };
     this.#dispatches.set(transportId, dispatch);

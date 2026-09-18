@@ -280,3 +280,105 @@ test("eviction after upstream acceptance cannot dispatch the durable model reque
   expect(nextIntent.request.requestId).not.toBe(requestId);
   expect(await callCount()).toBe(2);
 });
+
+test("a replay the mount can no longer serve keeps the lost call's possible cost", async () => {
+  // The same lost outcome as the test above, with the account's model switched
+  // while the Bot was evicted: the request recovery re-dispatches names a
+  // binding this mount no longer serves, so the Plugin is never called and
+  // nothing is fetched. The earlier call may still have been accepted and
+  // billed, so the effect settles with exactly one estimate — an early refusal
+  // is not allowed to report it as a call that never happened.
+  const suffix = crypto.randomUUID();
+  const identity = {
+    userId: `provider-early-replay-${suffix}`,
+    botId: `provider-early-replay-bot-${suffix}`,
+  };
+  await provision(identity);
+  await fetch(`${WEB_STUB_ORIGIN}/forget-deepseek-calls`);
+  const runId = `early-${suffix}`;
+  const first = await turn(identity, runId, "please reply");
+  expect(await callCount()).toBe(1);
+  const firstIntent = first.events.find(
+    (event) => event.type === "model/request",
+  );
+  if (firstIntent?.type !== "model/request") {
+    throw new Error("the first upstream call has no durable model intent");
+  }
+  const requestId = firstIntent.request.requestId;
+
+  await runInDurableObject(bot(identity), async (_instance, state) => {
+    const key = `run:${runId}`;
+    const raw = await state.storage.get<StoredRunProbe>(key);
+    if (!raw) throw new Error("the accepted run is missing");
+    const hydrated = await hydrateStoredRunEventsV1(state.storage, raw);
+    const index = hydrated.events.findIndex(
+      (event) =>
+        event.type === "model/request" && event.request.requestId === requestId,
+    );
+    if (index < 0) throw new Error("the durable request is missing");
+    await rewindStoredRunEventsV1(
+      state.storage,
+      key,
+      raw,
+      hydrated.events.slice(0, index + 1),
+      { status: "running", phase: "executing" },
+    );
+    await state.storage.put("active-run", runId);
+  });
+
+  // The credential is rotated between the interruption and the recovery, so
+  // the mount that serves the resumed run is bound to a Connection generation
+  // the journaled request does not name.
+  interface RotatingUserRpc {
+    readConfiguration(input: unknown): Promise<{
+      revision: number;
+      connections: Array<{ connectionId: string; packageId: string }>;
+    }>;
+    executeConnection(
+      input: unknown,
+    ): Promise<{ status: string; connectionId: string }>;
+  }
+  const configuration = env.USER_CONFIGURATIONS.getByName(
+    identity.userId,
+  ) as unknown as RotatingUserRpc;
+  const current = await configuration.readConfiguration({
+    schemaVersion: 1,
+    userId: identity.userId,
+  });
+  const deepseek = current.connections.find(
+    (connection) => connection.packageId === "provider-deepseek",
+  );
+  if (!deepseek) throw new Error("the DeepSeek connection is missing");
+  const rotated = await configuration.executeConnection({
+    schemaVersion: 1,
+    userId: identity.userId,
+    command: {
+      schemaVersion: 1,
+      type: "connection/rotate-api-key",
+      commandId: `rotate-${suffix}`,
+      connectionId: deepseek.connectionId,
+      apiKey: DEEPSEEK_TEST_API_KEY,
+    },
+  });
+  expect(rotated.status).toBe("applied");
+  await evictDurableObject(bot(identity));
+  await fireRecoveryAlarm(identity);
+
+  const recovered = await storedRun(identity, runId);
+  expect(recovered.status).toBe("failed");
+  const usage = recovered.events.filter(
+    (event) => event.type === "model/usage" && event.requestId === requestId,
+  );
+  expect(usage).toHaveLength(1);
+  expect(usage[0]).toMatchObject({
+    type: "model/usage",
+    requestId,
+    estimated: true,
+  });
+  if (usage[0]?.type !== "model/usage") {
+    throw new Error("the lost model outcome has no durable usage estimate");
+  }
+  expect(usage[0].inputTokens).toBeGreaterThan(0);
+  // Nothing was fetched for the replay: the refusal came before any dispatch.
+  expect(await callCount()).toBe(1);
+});

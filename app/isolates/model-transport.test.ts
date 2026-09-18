@@ -18,11 +18,13 @@ import {
 } from "@frockbot/providers/catalog/definition";
 import { pluginModelTransportUrlV1 } from "@frockbot/core/contracts";
 import {
+  createPluginModelHostV1,
   isolateModelTransport,
   PLUGIN_MODEL_MAX_OUTPUT_TOKENS_V1,
   pluginModelBodyRefusalV1,
   pluginModelOutputBoundV1,
   pluginModelStatusV1,
+  priorOutcomeUnknownV1,
 } from "./model-transport.ts";
 import { PluginModelDispatchRegistryV1 } from "./model-dispatch.ts";
 import { compactionWorkV1 } from "../shell/compaction-scheduler.js";
@@ -86,11 +88,14 @@ function begin(
     requestId?: string;
     session?: unknown;
     deadlineAt?: number;
+    /** The host admits this from the log; here a suite may state it directly. */
+    priorOutcomeUnknown?: boolean;
   } = {},
 ) {
   return registry.begin({
     requestId: overrides.requestId ?? SCOPE.requestId,
     session: (overrides.session ?? session()) as never,
+    priorOutcomeUnknown: overrides.priorOutcomeUnknown === true,
     pluginId: "deepseek",
     provider: "deepseek",
     model: "deepseek-v4-pro",
@@ -476,6 +481,40 @@ describe("the transport handler, before anything is sent", () => {
     expect(handle.priorOutcomeUnknown()).toBe(true);
   });
 
+  test("a replay of an effect the kernel retried after a refusal is a definitive refusal", async () => {
+    // The kernel journals `model/retry` only after a failure it classified,
+    // and a classified failure is one that did not bill. So this replay is not
+    // uncertain: the effect is accounted for, and refusing to send it again is
+    // a call that did not happen — no estimate belongs to it.
+    const state = botState({
+      events: [
+        modelRequest(SCOPE.requestId),
+        {
+          type: "model/retry",
+          turn: 1,
+          step: 1,
+          attempt: 2,
+          classification: "transient",
+          delayMs: 500,
+        },
+        modelRequest(SCOPE.requestId),
+      ],
+    });
+    const { handle } = begin((state as never as BotStateStub).modelTransports, {
+      session: state.session,
+    });
+    const outcome = await isolateModelTransport(
+      state as never,
+      transportCall(handle.transportId),
+    );
+    expect(outcome).toMatchObject({ status: "refused" });
+    expect(String((outcome as { reason: string }).reason)).toMatch(
+      /not sent twice/,
+    );
+    expect(handle.priorOutcomeUnknown()).toBe(false);
+    expect(handle.refusal()).toMatchObject({ classification: "permanent" });
+  });
+
   test("a second dispatch of an effect the log already accounted for adds nothing", async () => {
     // The first dispatch settled and its usage is durable, so the effect is
     // paid for already: refusing to send again is a definitive result, and no
@@ -558,6 +597,102 @@ describe("the transport handler, before anything is sent", () => {
  * be recorded as one: the adapter reads the host's own answer to decide
  * whether the effect may be settled without an estimate (ADR 0032).
  */
+/**
+ * The one question that decides whether an attempt answers for a possible
+ * cost: does the log show an earlier dispatch of this effect that nothing
+ * ever accounted for? It is read from the durable journal alone, and it is
+ * read when the attempt is admitted — before the Plugin is called — so a
+ * failure that never reaches the transport cannot erase that cost.
+ */
+describe("what the log says of the effect behind an attempt", () => {
+  const retried = () => ({
+    type: "model/retry",
+    turn: 1,
+    step: 1,
+    attempt: 2,
+    classification: "transient",
+    delayMs: 500,
+  });
+  const usage = () => ({
+    type: "model/usage",
+    requestId: SCOPE.requestId,
+    estimated: true,
+  });
+
+  test("a first dispatch is not a replay of anything", () => {
+    expect(
+      priorOutcomeUnknownV1(
+        session([modelRequest(SCOPE.requestId)]) as never,
+        SCOPE.requestId,
+      ),
+    ).toBe(false);
+  });
+
+  test("an interrupted dispatch with nothing recorded is uncertain", () => {
+    expect(
+      priorOutcomeUnknownV1(
+        session([
+          modelRequest(SCOPE.requestId),
+          modelRequest(SCOPE.requestId),
+        ]) as never,
+        SCOPE.requestId,
+      ),
+    ).toBe(true);
+  });
+
+  test("an effect whose usage is on the log is accounted for", () => {
+    expect(
+      priorOutcomeUnknownV1(
+        session([
+          modelRequest(SCOPE.requestId),
+          usage(),
+          modelRequest(SCOPE.requestId),
+        ]) as never,
+        SCOPE.requestId,
+      ),
+    ).toBe(false);
+  });
+
+  test("a retry the kernel planned after a classified failure is accounted for", () => {
+    expect(
+      priorOutcomeUnknownV1(
+        session([
+          modelRequest(SCOPE.requestId),
+          retried(),
+          modelRequest(SCOPE.requestId),
+        ]) as never,
+        SCOPE.requestId,
+      ),
+    ).toBe(false);
+  });
+
+  test("the admission reads it before the Plugin is called", () => {
+    const state = botState({
+      events: [modelRequest(SCOPE.requestId), modelRequest(SCOPE.requestId)],
+    });
+    const host = createPluginModelHostV1(
+      state as never,
+      { userId: "user-1", botId: SCOPE.botId },
+      {
+        provider: pluginServedProviderV1("deepseek")!,
+        connectionId: "connection-1",
+        connectionGeneration: "generation-1",
+        model: "deepseek-v4-pro",
+        maxOutputTokens: 8_192,
+      },
+    );
+    const handle = host.begin({
+      scope: SCOPE,
+      session: state.session as never,
+      deadlineAt: Date.now() + 60_000,
+    });
+    // Nothing has called the transport, and the ticket was never presented:
+    // the flag is the log's own answer, taken at admission.
+    expect(handle.priorOutcomeUnknown()).toBe(true);
+    handle.finish();
+  });
+});
+
 describe("a refusal the host makes before the fetch", () => {
   /** The upstream requests the host issues: a refusal here means none. */
   function upstream() {

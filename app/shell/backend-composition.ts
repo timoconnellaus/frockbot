@@ -39,7 +39,10 @@ import {
 } from "@frockbot/core/contracts";
 import { pluginModelProviderV1 } from "./plugin-model-provider.js";
 import { PLUGIN_SERVED_PROVIDER_IDS_V1 } from "@frockbot/providers/catalog/definition";
-import type { ShellPluginModelHostV1 } from "@frockbot/app/isolates/model-transport";
+import {
+  priorOutcomeUnknownV1,
+  type ShellPluginModelHostV1,
+} from "@frockbot/app/isolates/model-transport";
 import { recordSendToUserV1 } from "./agent.js";
 import {
   bindCardApprovalsV1,
@@ -662,6 +665,20 @@ export function createShellCompositionHost(
                           );
                         }
                         return modelHost.begin({ ...input, session });
+                      },
+                      // The same reading, for a request refused before any
+                      // dispatch is opened: an effect the log shows was
+                      // dispatched and never accounted for is not a call that
+                      // did not happen, whichever way this mount fails to
+                      // serve it.
+                      priorOutcomeUnknownFor: (requestId) => {
+                        const session = runtime.services.sessions.get(
+                          options.sessionId,
+                        );
+                        return (
+                          session !== undefined &&
+                          priorOutcomeUnknownV1(session, requestId)
+                        );
                       },
                       scope: {
                         botId: options.botId,

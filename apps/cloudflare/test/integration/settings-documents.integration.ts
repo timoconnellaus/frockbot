@@ -146,7 +146,7 @@ describe("the Plugins document", () => {
 
   it("lists an installed provider Plugin, and removes it with its Package", async () => {
     const userId = freshUserId("plugins-provider-doc");
-    const enabled = await enableCustomModels(userId, "custom-models");
+    await enableCustomModels(userId, "custom-models");
     const read = async () =>
       (await expectOkJson(
         await asUser(userId, "/api/settings/plugins?as=document"),
@@ -154,7 +154,8 @@ describe("the Plugins document", () => {
 
     // Installing the provider Package is what installs the Plugin, and until
     // that happens there is nothing here to see: adding a provider is Models'
-    // decision, and a not-installed built-in is not a Plugin this account has.
+    // decision, and the disabled row every account starts with is not an
+    // installation of anything.
     expect(pluginRows(await read())).toHaveLength(0);
 
     await expectOkJson(
@@ -162,7 +163,10 @@ describe("the Plugins document", () => {
         schemaVersion: 1,
         type: "user/install-package",
         commandId: "install-deepseek",
-        expectedRevision: enabled,
+        // The reads above run the account's own read bootstraps, which may
+        // write settings of their own, so the revision this command fences
+        // itself against is the one read here and not one carried forward.
+        expectedRevision: await revision(userId),
         packageId: "provider-deepseek",
         version: "0.0.1",
       }),

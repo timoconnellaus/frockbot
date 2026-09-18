@@ -84,11 +84,28 @@ journaled `model/request` for that id, and only when its provider, model and
 Connection binding match the dispatch. A second occurrence — a retry after an
 outcome the kernel could not confirm, or a re-dispatch after an eviction — is
 refused before the fetch. How that refusal is accounted for is the log's to
-say: with no outcome recorded for the first dispatch, it is reported as
-uncertainty, because that attempt may have reached the provider and billed and
-a definitive result would erase its possible cost; with the effect's own
-`model/usage` already on the log, the refusal is definitive and no second
-estimate is written.
+say, and the log is read twice: once when the attempt is **admitted**, before
+the Plugin is called, and again at the refusal. The second reading matters
+because an attempt can fail without ever reaching the transport — a worker
+that throws, a clock that runs out — and a failure that early must not report
+a definitive no-effect result for an effect whose earlier call may have been
+accepted and billed.
+
+An effect is **accounted for** when its own `model/usage` is on the log, or
+when the kernel journaled a `model/retry` after the earlier dispatch: the loop
+writes a retry only after a failure it classified, and a classified failure is
+by contract one the host watched the provider refuse before it did any work —
+or one nothing was sent for — so that effect is known to have cost nothing and
+the refusal is definitive, with no estimate written. Only an earlier dispatch
+that ended in silence is uncertain: it may have reached the provider and
+billed, so the attempt is settled with the estimate rather than reported as a
+call that never happened.
+
+The same reading answers a refusal made before any dispatch is opened at all:
+a request the mount can no longer serve — the credential was rotated while the
+run was interrupted, so the journaled binding is not the one in force — is
+still a result for the _effect_, not for this attempt, and it keeps the earlier
+call's possible cost instead of reporting a definitive no-effect result.
 
 The consequence is deliberate and conservative for this slice: **one request
 id is one upstream call**, even where the first attempt may have failed before
@@ -143,6 +160,14 @@ reported as `ModelOutcomeUncertainErrorV1` — deliberately not a
 no-effect result. The kernel records the estimate and settles the Turn rather
 than dispatching again, because whether the provider billed is exactly what is
 unknown.
+
+The clock is the one failure that is read both ways, and it is read by what the
+host dispatched rather than by what the clock says. A deadline that arrives
+while the answer was still being waited on is uncertainty, because the request
+left and may have been accepted. A worker that hung before it ever reached the
+transport — or before the transport issued anything — dispatched nothing, so
+the deadline's own sentence is a definitive failure and no estimate is written
+for a call nobody made.
 
 ### Credentials never cross into the Plugin
 

@@ -99,6 +99,15 @@ export interface PluginModelProviderOptionsV1 {
     scope: PluginModelDispatchScopeV1;
     deadlineAt: number;
   }): ModelDispatchHandleV1;
+  /**
+   * Whether the Turn's own log shows an earlier dispatch of this effect that
+   * nothing accounted for. The host answers it from its journal
+   * (`priorOutcomeUnknownV1`), and it is asked before the worker is called so
+   * that a request this mount cannot serve — the model changed while the run
+   * was interrupted — does not report a definitive no-effect result for an
+   * effect whose earlier call may have been accepted and billed.
+   */
+  priorOutcomeUnknownFor(requestId: string): boolean;
   /** The Turn this plugin serves; the request id is the attempt's own. */
   scope: Omit<PluginModelDispatchScopeV1, "requestId">;
 }
@@ -522,6 +531,14 @@ export function pluginModelProviderV1(
         binding.connectionId !== options.binding.connectionId ||
         binding.connectionGeneration !== options.binding.connectionGeneration
       ) {
+        // A refusal this early is still a result for the effect, not for this
+        // attempt: if the log shows the effect was dispatched before and never
+        // accounted for — a request re-dispatched after an interruption whose
+        // model has since changed — the earlier call may have billed, and this
+        // is the uncertain outcome that keeps its possible cost.
+        if (options.priorOutcomeUnknownFor(request.requestId)) {
+          throw new ModelOutcomeUncertainErrorV1();
+        }
         throw new ModelProviderFailureError({
           classification: "permanent",
           reason: "Model Connection authority is invalid",
@@ -605,17 +622,20 @@ export function pluginModelProviderV1(
  * What a failure is allowed to mean, decided by the host rather than claimed
  * by the Plugin.
  *
- * The host's own record is what decides. A refusal it made or read before the
- * provider did any work is a definitive no-effect result. A deadline is the
- * host waiting on a call the Plugin may have made, so it stays uncertain —
- * unless the host also recorded a refusal, which says what the provider
- * answered with. An effect whose earlier dispatch the log never accounted for
- * is uncertain too, even though this attempt sent nothing: what is unknown is
- * the earlier call, and only the estimate can stand for it. A failure with
- * nothing sent at all is otherwise the Plugin's to explain, and the host
- * believes it about why because it has no answer of its own. Anything else
- * means the call went out and nothing definitive came back, which is an
- * uncertain outcome the kernel settles rather than retries; a
+ * The host's own record is what decides, and the effect's own history comes
+ * before this attempt's: an effect whose earlier dispatch the log never
+ * accounted for is uncertain whatever happens here, because what is unknown is
+ * the earlier call and only the estimate can stand for it — a refusal this
+ * attempt never sent is not a result that can erase that cost. Past that, a
+ * refusal the host made or read before the provider did any work is a
+ * definitive no-effect result. A deadline is the host waiting on a call the
+ * Plugin may have made: it stays uncertain when a call did leave, and is
+ * otherwise the failure the deadline's own sentence describes, because a
+ * worker that never reached the transport dispatched nothing to bill. A
+ * failure with nothing sent at all is otherwise the Plugin's to explain, and
+ * the host believes it about why because it has no answer of its own.
+ * Anything else means the call went out and nothing definitive came back,
+ * which is an uncertain outcome the kernel settles rather than retries; a
  * `ModelProviderFailureError` would tell the kernel and Billing that nothing
  * had happened.
  */
@@ -628,6 +648,15 @@ function classifyFailureV1(
     error instanceof Error && error.message
       ? error.message
       : "the model provider did not complete this request";
+  if (dispatch.priorOutcomeUnknown()) {
+    // The effect this attempt answers for was dispatched once already and the
+    // log never accounted for it. Whether the earlier call reached the
+    // provider and billed is exactly what is unknown, and that outranks
+    // whatever this attempt did: a refusal made before this fetch — or a
+    // worker that never reached the transport — would otherwise report a
+    // definitive no-effect result and erase the earlier call's possible cost.
+    return uncertainOutcomeV1(reason);
+  }
   const refusal = dispatch.refusal();
   if (refusal) {
     // The host itself saw the provider's answer, or made the decision not to
@@ -641,18 +670,19 @@ function classifyFailureV1(
     });
   }
   if (error instanceof ModelRequestDeadlineError) {
-    // The provider accepted the request and said nothing — or stopped saying
-    // anything — so the outcome is the uncertain one, with the kernel's own
-    // sentence for the person and no second dispatch.
-    return new ModelOutcomeUncertainErrorV1(error.message);
-  }
-  if (dispatch.priorOutcomeUnknown()) {
-    // The host refused to send this attempt because the effect it answers for
-    // was already dispatched once and the log says nothing of how that ended.
-    // Nothing was sent here, but the earlier call may have reached the
-    // provider and billed: the attempt is the uncertain outcome the kernel
-    // settles with the estimate, never a clean failure whose cost vanished.
-    return uncertainOutcomeV1(reason);
+    // A clock ran out. Whether that is uncertainty depends on whether there is
+    // anything to be uncertain about: a call the host sent may have been
+    // accepted and billed, so it is settled with the estimate; an attempt with
+    // nothing dispatched — and nothing before it that was unaccounted for,
+    // which the check above would have caught — is a call that did not happen,
+    // and the kernel's own sentence for the deadline is the answer, with no
+    // estimate written for a call nobody made.
+    return dispatch.sent()
+      ? new ModelOutcomeUncertainErrorV1(error.message)
+      : new ModelProviderFailureError({
+          classification: "permanent",
+          reason: error.message,
+        });
   }
   if (!dispatch.sent()) {
     // Nothing left the host: there is nothing that could have billed, and the

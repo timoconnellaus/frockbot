@@ -1,4 +1,7 @@
-import { FOUNDATION_PACKAGES_V1 } from "@frockbot/app/packages";
+import {
+  FOUNDATION_PACKAGES_V1,
+  foundationPackageV1,
+} from "@frockbot/app/packages";
 import { PLUGIN_SERVED_PROVIDERS_V1 } from "@frockbot/providers/catalog/definition";
 
 export const BUILT_IN_PACKAGE_IDS = new Set(
@@ -38,10 +41,14 @@ export function providerPluginPackageV1(packageId: string): boolean {
  * Every first-party Package has a surface of its own — Models for a provider,
  * Account features for a capability — and listing it here as well is how the
  * same switch ends up in two places. A provider Plugin is the exception: its
- * code is an installed artifact that runs a Turn, so once an account has it,
- * it is one of the Plugins and is listed where the Plugins are. Before it is
- * installed there is nothing to list: installing belongs to Models until a
- * marketplace exists.
+ * code is an installed artifact that runs a Turn, so once the account has it,
+ * it is one of the Plugins and is listed where the Plugins are.
+ *
+ * The state that counts is `installed`, not merely a row's existence: every
+ * account starts holding a disabled row for each Package the deployment turns
+ * on by default, which is not an installation of anything. Before the account
+ * installs a provider Plugin there is nothing here to list — installing one
+ * belongs to Models until a marketplace exists.
  */
 export function pluginsPageRowV1(plugin: {
   packageId: string;
@@ -49,8 +56,7 @@ export function pluginsPageRowV1(plugin: {
 }): boolean {
   if (!BUILT_IN_PACKAGE_IDS.has(plugin.packageId)) return true;
   return (
-    providerPluginPackageV1(plugin.packageId) &&
-    plugin.state !== "not-installed"
+    providerPluginPackageV1(plugin.packageId) && plugin.state === "installed"
   );
 }
 
@@ -67,6 +73,21 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
 };
 
 /**
+ * Whether this Package answers model calls, as the compiled catalog states it:
+ * a provider is the thing that contributes a model capability.
+ *
+ * The distinction matters because a Package whose configuration lives in
+ * Models is not necessarily one: Custom models also routes there — it is the
+ * model-role setting a Bot's own choice is stored in — and it is a capability
+ * this surface offers like any other.
+ */
+function providerPackageV1(packageId: string): boolean {
+  return (foundationPackageV1(packageId)?.capabilities ?? []).some(
+    (capability) => capability.kind === "model",
+  );
+}
+
+/**
  * Which built-in Packages the Account features surface offers.
  *
  * The described capabilities are the offer. A built-in a User turned off while
@@ -78,9 +99,8 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
 export function capabilityIsOfferedV1(plugin: {
   packageId: string;
   state: string;
-  home: string;
 }): boolean {
-  if (plugin.home === "models") return false;
+  if (providerPackageV1(plugin.packageId)) return false;
   return (
     Object.hasOwn(CAPABILITY_DESCRIPTIONS, plugin.packageId) ||
     plugin.state === "disabled"
