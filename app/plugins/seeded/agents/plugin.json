@@ -1,0 +1,28 @@
+{
+  "id": "agents",
+  "displayName": "Agent cards",
+  "version": "1",
+  "contractVersion": 5,
+  "tools": [],
+  "hooks": [],
+  "grants": [],
+  "cards": [
+    {
+      "id": "note",
+      "displayName": "Agent card",
+      "description": "Show something one Bot is telling the person about itself or another Bot.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "body": { "type": "string", "maxLength": 8000 }
+        },
+        "required": ["agentId", "title"],
+        "additionalProperties": false
+      },
+      "actions": []
+    }
+  ],
+  "contextKeys": ["user", "bot", "session"]
+}

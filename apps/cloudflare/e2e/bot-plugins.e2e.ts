@@ -55,11 +55,12 @@ function cardSwitch(page: Page, title: string): Locator {
 // `provisionThroughUi` does: a Flutter list publishes semantics only for the
 // rows at or near the viewport, and the engine drops a row back out as the list
 // moves without reliably putting it back, so scrolling a long list is not
-// something to rest assertions on. The height is what this page holds: six
-// cards — the five first-party features and the deployment's seeded Plugin —
-// under the page's header, all of them in the tree at 1600px. A seventh card is
-// a taller window here, not a scroll.
-test.use({ viewport: { width: 1280, height: 1600 } });
+// something to rest assertions on. The height is what this page holds: eleven
+// cards — the five first-party features, the five locked card Plugins (ADR
+// 0030 step 7) and the deployment's seeded Plugin — under the page's header,
+// all of them in the tree at 3000px. A twelfth card is a taller window here,
+// not a scroll.
+test.use({ viewport: { width: 1280, height: 3000 } });
 
 async function openBotPlugins(page: Page): Promise<void> {
   // The Bot's own door: the Plugins row in its Settings, which is one level
@@ -117,6 +118,25 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   }
   // Choosing a model is a Settings decision, so it is never a card here.
   await expect(sem(page, "view-group-custom-models")).toHaveCount(0);
+
+  // And the five locked card Plugins, which draw what the conversation says
+  // (ADR 0030 step 7). They are listed as first-party and Always on, and the
+  // User is offered no switch: the card that asks for a decision, hands over
+  // a file or says a credential is missing is the Bot's voice, not a feature.
+  for (const title of [
+    "Approval cards",
+    "Question cards",
+    "Attachment cards",
+    "Credential cards",
+    "Agent cards",
+  ]) {
+    await expect(says(page, title).first()).toBeVisible();
+    await expect(cardSwitch(page, title)).toHaveCount(0);
+  }
+  await testInfo.attach("bot-plugins-locked-cards.png", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
   await testInfo.attach("bot-plugins-page.png", {
     body: await page.screenshot(),
     contentType: "image/png",

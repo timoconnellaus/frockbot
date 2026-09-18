@@ -186,21 +186,24 @@ describe("turn admission through the gateway and the Bot", () => {
       "admission-widget-1",
     );
 
-    expect(
-      turn.events.filter((event) => event.type === "send/to-user"),
-    ).toEqual([
-      {
-        type: "send/to-user",
-        // The send's durable ordinal, which is how the client names the
-        // message this Turn produced (`<runId>:send:<ordinal>`) and how a read
-        // it sends back names the same one.
-        ordinal: 0,
-        payload: {
-          type: "widget",
-          widget: { prompt: "Which day?", options: ["Tuesday", "Thursday"] },
-        },
+    const sends = turn.events.filter((event) => event.type === "send/to-user");
+    expect(sends[0]).toEqual({
+      type: "send/to-user",
+      // The send's durable ordinal, which is how the client names the
+      // message this Turn produced (`<runId>:send:<ordinal>`) and how a read
+      // it sends back names the same one.
+      ordinal: 0,
+      payload: {
+        type: "widget",
+        widget: { prompt: "Which day?", options: ["Tuesday", "Thursday"] },
       },
-    ]);
+    });
+    // Beside it, the Card a locked first-party Plugin drew as that send's face
+    // (ADR 0030 step 7). It is what the person looks at; the send above is
+    // still what they are told by, and the only one of the two that is a
+    // message.
+    expect(sends).toHaveLength(2);
+    expect(sends[1]).toMatchObject({ ordinal: 1, payload: { type: "card" } });
     // A widget-ended Turn writes no assistant message, so the derived text is
     // empty and the payload reaches the client through the event alone.
     expect(turn.text).toBe("");
@@ -213,9 +216,10 @@ describe("turn admission through the gateway and the Bot", () => {
       status: "completed",
       canRetry: false,
     });
+    // The widget send and the Card drawn as its face (ADR 0030 step 7).
     expect(
       run?.events.filter((event) => event.type === "send/to-user"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
 
     // Exactly one model request: the widget closed the Turn, so the loop never
     // asked the model again.
@@ -329,7 +333,9 @@ describe("turn admission through the gateway and the Bot", () => {
       turn.events
         .filter((event) => event.type === "send/to-user")
         .map((event) => event.payload?.type),
-    ).toEqual(["text", "widget"]);
+      // The widget's Card is drawn beside it, as the face of that send (ADR
+      // 0030 step 7); the text send speaks for itself and draws nothing.
+    ).toEqual(["text", "widget", "card"]);
     expect(turn.text).toBe("Booked.");
   });
 

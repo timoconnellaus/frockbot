@@ -989,69 +989,54 @@ void main() {
     Widget send(Map<String, Object?> payload) =>
         host(SendPayloadView(send: SendPayloadLine(payload)));
 
-    testWidgets('a widget shows the question and answers none of it', (
+    // The five members a locked Plugin draws as a Card (ADR 0030 step 7). The
+    // send is still on the Turn's log — it is where the Approval record is
+    // minted and where a notification finds its words — but its face is the
+    // Card beside it, so this client draws nothing at all for it. Drawing the
+    // old bubble *and* the card is the duplicate step 7 exists to remove, and
+    // drawing "this client cannot display that message" over a card that is
+    // right there would be worse than either.
+    testWidgets('the members a Card draws leave nothing in the thread', (
       tester,
     ) async {
-      await tester.pumpWidget(
-        send({
+      for (final payload in <Map<String, Object?>>[
+        {
           'type': 'widget',
           'widget': {
             'prompt': 'Which one?',
             'options': ['A', 'B'],
             'allowCustom': true,
           },
-        }),
-      );
-      await tester.pumpAndSettle();
+        },
+        {
+          'type': 'approval',
+          'approvalId': 'ap-1',
+          'action': 'Delete the production bucket',
+          'risk': 'high',
+        },
+        {
+          'type': 'secret-request',
+          'prompt': 'I need the Stripe key.',
+          'secretName': 'STRIPE_KEY',
+        },
+        {'type': 'attachment', 'url': 'https://example.com/a.pdf'},
+        {'type': 'agent-card', 'agentId': 'bot-1', 'title': 'Staged'},
+      ]) {
+        await tester.pumpWidget(send(payload));
+        await tester.pumpAndSettle();
 
-      expect(find.text('Which one?'), findsOneWidget);
-      expect(find.text('A'), findsOneWidget);
-      expect(find.text('Any other answer is accepted too.'), findsOneWidget);
-      expect(find.byType(FilledButton), findsNothing);
-    });
-
-    testWidgets('an approval offers both answers and names its risk', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        host(
-          SendPayloadView(
-            send: const SendPayloadLine({
-              'type': 'approval',
-              'approvalId': 'ap-1',
-              'action': 'Delete the production bucket',
-              'risk': 'high',
-            }),
-            approvals: null,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('HIGH'), findsOneWidget);
-      expect(find.text('Delete the production bucket'), findsOneWidget);
-    });
-
-    testWidgets('a secret request sends the person to Settings', (
-      tester,
-    ) async {
-      var opened = 0;
-      await tester.pumpWidget(
-        host(
-          SendPayloadView(
-            send: const SendPayloadLine({
-              'type': 'secret-request',
-              'prompt': 'I need the Stripe key.',
-              'secretName': 'STRIPE_KEY',
-            }),
-            onOpenSettings: () => opened++,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Open Settings'));
-      expect(opened, 1);
+        expect(tester.takeException(), isNull);
+        expect(
+          find.text('This client cannot display that message.'),
+          findsNothing,
+          reason: 'payload $payload',
+        );
+        expect(
+          find.byType(Text),
+          findsNothing,
+          reason: 'payload $payload draws nothing at all',
+        );
+      }
     });
 
     // An Applet send that lost its id must degrade like any other payload the

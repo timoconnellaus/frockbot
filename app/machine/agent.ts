@@ -52,8 +52,10 @@ import {
   type ToolExecutionResult,
   type TurnTypeV1,
   type AgentRuntimeV1,
+  type FirstPartyCardDrawsV1,
   type RuntimeFeatureV1,
 } from "@frockbot/core/contracts";
+import { drawFirstPartyCardV1 } from "@frockbot/app/shell/first-party-cards";
 import { userMachineDefinitionV1 } from "./definition.js";
 import {
   machineApprovalActionV1,
@@ -263,8 +265,11 @@ export function createMachineApprovalToolV1(config: {
   refuse?(target: MachineTargetViewV1, op: MachineOpV1): string | undefined;
   host: MachineRuntimeHostV1 & { writer: MachineWriterIdentityV1 };
   sessions: { get(sessionId: string): Session | undefined };
+  /** The locked first-party cards, read at call time (ADR 0030 step 7). */
+  cards?: () => FirstPartyCardDrawsV1 | undefined;
 }): ToolDefinition {
   const { name, host, sessions } = config;
+  const cards = config.cards ?? (() => undefined);
   return {
     name,
     namespace: "frockbot",
@@ -347,19 +352,23 @@ export function createMachineApprovalToolV1(config: {
       // could answer against nothing is the one ordering this slice forbids.
       await host.storage.put(machineIntentKeyV1(approvalId), intent);
 
+      const payload = {
+        type: "approval" as const,
+        approvalId,
+        action: machineApprovalActionV1(op, entry.label),
+        rationale: machineApprovalRationaleV1(op, entry.label),
+        risk: "high" as const,
+      };
       session.append({
         type: "send/to-user",
         ...position,
         occurrenceId: context.effectId,
-        payload: {
-          type: "approval",
-          approvalId,
-          action: machineApprovalActionV1(op, entry.label),
-          rationale: machineApprovalRationaleV1(op, entry.label),
-          risk: "high",
-        },
+        payload,
       });
       await session.flush();
+      // The decision's face is a locked Plugin's Card now (ADR 0030 step 7);
+      // the decision itself is still the record the line above asked for.
+      await drawFirstPartyCardV1(cards(), payload, context);
 
       return {
         content: [
@@ -605,6 +614,7 @@ function optionalInteger(value: unknown, fallback: number): number {
 export function createMachineControlTools(
   host: MachineRuntimeHostV1 & { writer: MachineWriterIdentityV1 },
   sessions: { get(sessionId: string): Session | undefined },
+  cards: () => FirstPartyCardDrawsV1 | undefined = () => undefined,
 ): ToolDefinition[] {
   return [
     createMachineApprovalToolV1({
@@ -621,6 +631,7 @@ export function createMachineControlTools(
       }),
       host,
       sessions,
+      cards,
     }),
     createMachineApprovalToolV1({
       name: MACHINE_READ_TOOL_V1,
@@ -634,6 +645,7 @@ export function createMachineControlTools(
       }),
       host,
       sessions,
+      cards,
     }),
     createMachineApprovalToolV1({
       name: MACHINE_COPY_TO_COMPUTER_TOOL_V1,
@@ -650,6 +662,7 @@ export function createMachineControlTools(
       }),
       host,
       sessions,
+      cards,
     }),
     createMachineApprovalToolV1({
       name: MACHINE_COPY_FROM_COMPUTER_TOOL_V1,
@@ -666,6 +679,7 @@ export function createMachineControlTools(
       }),
       host,
       sessions,
+      cards,
     }),
   ];
 }
@@ -701,6 +715,7 @@ export function createMachineRuntimeFeature(
         ? createMachineControlTools(
             { ...host, writer: host.writer },
             runtime.sessions,
+            () => runtime.firstPartyCards,
           ).map((tool) =>
             runtime.tools.register(
               tool,

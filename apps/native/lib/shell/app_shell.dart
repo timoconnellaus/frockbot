@@ -2356,7 +2356,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             backgroundOf: _background,
                             primaryOf: _primary,
                             nameOf: _botNameOf,
-                            onOpenSettings: _openSettings,
                             outOfCredit: credit?.canSpend == false,
                             onOpenBilling: () => unawaited(_openBilling()),
                             onMessageActions: (line, {position}) => unawaited(

@@ -5,6 +5,7 @@ import {
   decodeSendToUserPayloadV1,
   SEND_TO_USER_PAYLOAD_TYPES_V1,
   decodeTurnTypeV1,
+  type FirstPartyCardDrawsV1,
   type SendToUserPayloadV1,
   type Session,
   type ToolDefinition,
@@ -30,6 +31,7 @@ import {
 import { compactionWorkV1 } from "./compaction-scheduler.js";
 import { conversationDeliveryHooksV1 } from "./delivery.js";
 import { shellDefinitionV1 } from "./definition.js";
+import { drawFirstPartyCardV1 } from "./first-party-cards.js";
 
 export const SEND_TO_USER_TOOL_V1 = "send_to_user";
 export const WAKE_PARENT_TOOL_V1 = "wake_parent";
@@ -91,7 +93,23 @@ export function openStepPositionV1(
 export async function recordSendToUserV1(
   sessions: { get(sessionId: string): Session | undefined },
   payload: SendToUserPayloadV1,
-  where: { sessionId: string; occurrenceId: string; tool: string },
+  where: {
+    sessionId: string;
+    occurrenceId: string;
+    tool: string;
+    /**
+     * The locked first-party cards, and the call drawing one of them (ADR
+     * 0030 step 7).
+     *
+     * Passed by the four places that record one of the five old members —
+     * `send_to_user`, the Plugin-authoring ask, the Machine command ask and
+     * the Bot-template card — and by nothing else. A Plugin's card already
+     * draws its own decision, so the approval the card seam records beside it
+     * must not be mapped a second time.
+     */
+    cards?: FirstPartyCardDrawsV1;
+    context?: ToolExecutionContext;
+  },
 ): Promise<{ status: "sent" } | { status: "refused"; reason: string }> {
   const session = sessions.get(where.sessionId);
   if (!session) {
@@ -123,6 +141,12 @@ export async function recordSendToUserV1(
       payload,
     });
     await session.flush();
+  }
+  // The send is durable; the card is its face. Drawing it is the same call a
+  // Plugin's own card tool makes, deduped by the same effect id, and a draw
+  // that could not happen changes nothing about the send.
+  if (where.context) {
+    await drawFirstPartyCardV1(where.cards, payload, where.context);
   }
   return { status: "sent" };
 }
@@ -432,6 +456,7 @@ const SEND_TO_USER_INPUT_SCHEMA = {
 function createSendToUserTool(
   name: string,
   sessions: { get(sessionId: string): Session | undefined },
+  runtime: { firstPartyCards?: FirstPartyCardDrawsV1 },
 ): ToolDefinition {
   return {
     name,
@@ -471,6 +496,12 @@ function createSendToUserTool(
         sessionId: context.sessionId,
         occurrenceId: context.effectId,
         tool: name,
+        // Read now rather than closed over: the Plugin host sets it when it
+        // mounts, which is after the Shell's own feature did.
+        ...(runtime.firstPartyCards === undefined
+          ? {}
+          : { cards: runtime.firstPartyCards }),
+        context,
       });
       if (recorded.status !== "sent") {
         return refusal(`${name} was refused: ${recorded.reason}`);
@@ -605,7 +636,7 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
         }),
     }),
     runtime.tools.register(
-      createSendToUserTool(SEND_TO_USER_TOOL_V1, runtime.sessions),
+      createSendToUserTool(SEND_TO_USER_TOOL_V1, runtime.sessions, runtime),
       userVoice ? { admissionCeiling: userVoice } : undefined,
     ),
     runtime.tools.register(

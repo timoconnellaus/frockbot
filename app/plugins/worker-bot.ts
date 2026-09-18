@@ -133,6 +133,8 @@ async function mountPluginWorkerV1(
       deliverTrigger: (invocation) => active.deliverTrigger(invocation),
       renderView: (invocation) => active.renderView(invocation),
       cardAction: (invocation) => active.cardAction(invocation),
+      drawCard: (pluginId, cardId, request, context) =>
+        active.drawCard(pluginId, cardId, request, context),
       executeTool: (invocation) => active.executeTool(invocation),
       dispose: async () => {
         release();

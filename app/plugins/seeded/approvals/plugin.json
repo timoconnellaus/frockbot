@@ -1,0 +1,28 @@
+{
+  "id": "approvals",
+  "displayName": "Approval cards",
+  "version": "1",
+  "contractVersion": 5,
+  "tools": [],
+  "hooks": [],
+  "grants": [],
+  "cards": [
+    {
+      "id": "decision",
+      "displayName": "Approval",
+      "description": "Ask the person to allow or refuse one action, and show what they decided.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+          "rationale": { "type": "string", "maxLength": 8000 }
+        },
+        "required": ["action", "risk"],
+        "additionalProperties": false
+      },
+      "actions": []
+    }
+  ],
+  "contextKeys": ["user", "bot", "session"]
+}

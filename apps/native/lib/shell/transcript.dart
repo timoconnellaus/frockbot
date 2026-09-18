@@ -30,7 +30,6 @@ class TranscriptView extends StatefulWidget {
 
   /// Whether there is an older page to fetch.
   final bool hasEarlier;
-  final ApprovalsController? approvals;
   final Future<void> Function({bool older}) onRefresh;
   final void Function(TranscriptLine line) onOpenRun;
 
@@ -51,7 +50,6 @@ class TranscriptView extends StatefulWidget {
   /// Where a failure whose remedy is Billing sends the person.
   final VoidCallback? onOpenBilling;
   final void Function(String url)? onOpenLink;
-  final VoidCallback? onOpenSettings;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
@@ -81,7 +79,6 @@ class TranscriptView extends StatefulWidget {
     required this.storageKey,
     this.bottomSpace,
     this.pendingText,
-    this.approvals,
     this.onOpenExchange,
     this.backgroundOf,
     this.primaryOf,
@@ -89,7 +86,6 @@ class TranscriptView extends StatefulWidget {
     this.onRetryTurn,
     this.onOpenBilling,
     this.onOpenLink,
-    this.onOpenSettings,
     this.onMessageActions,
     this.unreadFromMessageId,
     this.onReadLatest,
@@ -227,13 +223,11 @@ class _TranscriptViewState extends State<TranscriptView> {
   String? get pendingText => widget.pendingText;
   bool get loading => widget.loading;
   bool get hasEarlier => widget.hasEarlier;
-  ApprovalsController? get approvals => widget.approvals;
   Future<void> Function({bool older}) get onRefresh => widget.onRefresh;
   void Function(TranscriptLine line) get onOpenRun => widget.onOpenRun;
   void Function(TranscriptLine line)? get onRetryTurn => widget.onRetryTurn;
   VoidCallback? get onOpenBilling => widget.onOpenBilling;
   void Function(String url)? get onOpenLink => widget.onOpenLink;
-  VoidCallback? get onOpenSettings => widget.onOpenSettings;
   String get storageKey => widget.storageKey;
 
   @override
@@ -460,13 +454,15 @@ class _TranscriptViewState extends State<TranscriptView> {
       );
     }
     final children = <Widget>[
+      // A send a locked Plugin drew as a Card has no face here (ADR 0030 step
+      // 7), and it is skipped rather than drawn as nothing: a bubble with
+      // nothing in it is worse than either the card or the silence.
       for (final send in line.sends)
-        SendPayloadView(
-          send: send,
-          approvals: approvals,
-          onOpenLink: onOpenLink,
-          onOpenSettings: onOpenSettings,
-        ),
+        if (!sendDrawnAsCardV1(send))
+          SendPayloadView(
+            send: send,
+            onOpenLink: onOpenLink,
+          ),
       if (line.text.isNotEmpty)
         ShellMarkdown(text: line.text, onOpenLink: onOpenLink),
     ];

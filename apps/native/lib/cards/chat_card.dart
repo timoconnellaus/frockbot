@@ -48,6 +48,7 @@ import '../view/embed.dart';
 import 'catalog.dart';
 import 'client.dart';
 import 'json.dart';
+import 'approvals.dart';
 import 'press.dart';
 import 'surface.dart';
 
@@ -340,6 +341,12 @@ class _CardChatCardState extends State<CardChatCard>
       adopt(receipt.card);
       if (receipt.failure != null) {
         setState(() => failure = receipt.failure);
+      }
+      // A decision is recorded outside the Card: the surface does not move,
+      // so `ApprovalActions` would keep drawing live buttons over an answer
+      // that is already durable unless the projection it reads is re-read.
+      if (receipt.routed == 'approval') {
+        await CardApprovalsScope.of(context)?.refreshApprovalsV1();
       }
     } catch (error) {
       if (!mounted) return;

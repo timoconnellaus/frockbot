@@ -1,4 +1,7 @@
-import type { SessionEvent } from "@frockbot/core/contracts";
+import {
+  isFirstPartyCardFaceV1,
+  type SessionEvent,
+} from "@frockbot/core/contracts";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import type { StoredRunV1 } from "@frockbot/core/durable";
 import { BOT_CONFIGURATION_KEY } from "../settings/bot.js";
@@ -177,14 +180,21 @@ export async function messageRecords(input: {
   // caller asked for is `reply/to-caller`, and it reaches that caller by its
   // own route: it mints no message, raises no badge and wakes no device, which
   // is why it is a different event rather than a send wearing a flag.
-  const sends = input.events.filter((event) => event.type === "send/to-user");
+  const allSendsOnRun = input.run.events.filter(
+    (event) => event.type === "send/to-user",
+  );
+  // A locked first-party Card is drawn beside the send it is the face of (ADR
+  // 0030 step 7), so the log carries two records of one thing the person is
+  // told. Only the send they are told *by* mints a message: the face raises no
+  // second badge and wakes no device a second time.
+  const sends = input.events
+    .filter((event) => event.type === "send/to-user")
+    .filter((event) => !isFirstPartyCardFaceV1(event, allSendsOnRun));
   if (!sends.length) return {};
   const settings =
     (await input.read<BotSettingsViewV1>(BOT_CONFIGURATION_KEY)) ??
     input.run.configurationSnapshot;
-  const allSends = input.run.events.filter(
-    (event) => event.type === "send/to-user",
-  );
+  const allSends = allSendsOnRun;
   const automation = input.run.admission?.turnType === "automation";
   const voice = input.run.admission?.origin?.kind === "voice";
   return visibleMessageRecordsV1({

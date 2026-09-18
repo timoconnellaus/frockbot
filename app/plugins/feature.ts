@@ -8,12 +8,14 @@
 // the intent record is written first, the card second, and what the User
 // approves is applied when the decision commits.
 import type {
+  FirstPartyCardDrawsV1,
   RuntimeFeatureV1,
   Session,
   ToolDefinition,
   ToolExecutionContext,
   ToolRegistration,
 } from "@frockbot/core/contracts";
+import { drawFirstPartyCardV1 } from "@frockbot/app/shell/first-party-cards";
 import type {
   PluginApprovalAskV1,
   PluginAuthoringHostV1,
@@ -89,6 +91,7 @@ async function sendApprovalCard(
   context: ToolExecutionContext,
   tool: string,
   ask: PluginApprovalAskV1,
+  cards?: FirstPartyCardDrawsV1,
 ): Promise<void> {
   if (ask.replayed) return;
   const session = sessions.get(context.sessionId);
@@ -98,19 +101,23 @@ async function sendApprovalCard(
     );
   }
   const position = openStepPosition(session, tool);
+  const payload = {
+    type: "approval" as const,
+    approvalId: ask.approvalId,
+    action: ask.action,
+    ...(ask.rationale === undefined ? {} : { rationale: ask.rationale }),
+    risk: ask.risk,
+  };
   session.append({
     type: "send/to-user",
     ...position,
     occurrenceId: context.effectId,
-    payload: {
-      type: "approval",
-      approvalId: ask.approvalId,
-      action: ask.action,
-      rationale: ask.rationale,
-      risk: ask.risk,
-    },
+    payload,
   });
   await session.flush();
+  // The card is the face of the decision the line above recorded (ADR 0030
+  // step 7); the decision itself is still this record, under this id.
+  await drawFirstPartyCardV1(cards, payload, context);
 }
 
 function tool(
@@ -141,6 +148,7 @@ const PLUGIN_ID_PROPERTY = {
 export function pluginTools(
   host: PluginAuthoringRuntimeHostV1,
   sessions: { get(sessionId: string): Session | undefined },
+  cards: () => FirstPartyCardDrawsV1 | undefined = () => undefined,
 ): ToolDefinition[] {
   return [
     tool({
@@ -325,7 +333,13 @@ export function pluginTools(
             "Nothing changed: no card was sent and the Plugin is not in the Composition.",
           ].join("\n");
         }
-        await sendApprovalCard(sessions, context, "plugin_publish", result.ask);
+        await sendApprovalCard(
+          sessions,
+          context,
+          "plugin_publish",
+          result.ask,
+          cards(),
+        );
         return [
           `Built ${pluginId} and asked the User to approve it (approval ${result.ask.approvalId}).`,
           "Tell the User in your own words what it does and why you built it, then end your Turn.",
@@ -358,7 +372,13 @@ export function pluginTools(
         if (result.status === "already-on") {
           return `${pluginId} is already on for this Bot.`;
         }
-        await sendApprovalCard(sessions, context, "plugin_enable", result.ask);
+        await sendApprovalCard(
+          sessions,
+          context,
+          "plugin_enable",
+          result.ask,
+          cards(),
+        );
         return `Asked the User to turn ${pluginId} on for this Bot (approval ${result.ask.approvalId}). Say why you want it, then end your Turn; the decision arrives on a later Turn.`;
       },
     }),
@@ -429,9 +449,15 @@ export function createPluginsFeature(
 ): RuntimeFeatureV1<{
   tools: ToolRegistration;
   sessions: { get(sessionId: string): Session | undefined };
+  firstPartyCards?: FirstPartyCardDrawsV1;
 }> {
   return (runtime) => {
-    const disposers = pluginTools(host, runtime.sessions).map((definition) =>
+    const disposers = pluginTools(
+      host,
+      runtime.sessions,
+      // Read at call time, not now: the Plugin host sets it when it mounts.
+      () => runtime.firstPartyCards,
+    ).map((definition) =>
       runtime.tools.register({ ...definition, namespace: "frockbot" }),
     );
     return () => {

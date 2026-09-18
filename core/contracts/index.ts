@@ -4,6 +4,7 @@ export * from "./auth-package.js";
 export * from "./batch.js";
 export * from "./canonical-json.js";
 export * from "./contributions.js";
+export * from "./first-party-cards.js";
 export * from "./iframe-ui.js";
 export * from "./isolate.js";
 export * from "./isolate-context-catalog.generated.js";

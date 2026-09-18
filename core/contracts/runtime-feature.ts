@@ -1,6 +1,7 @@
 // How first-party code joins a runtime: a function the app calls with the
 // registries it may register into, in an order the app writes down. What it
 // registers is undone, in reverse, when the runtime is disposed.
+import type { FirstPartyCardDrawsV1 } from "./first-party-cards.js";
 import type { LoopHookListV1 } from "./loop-hooks.js";
 import type {
   ModelInvocation,
@@ -59,4 +60,11 @@ export interface AgentRuntimeV1 {
   readonly llm: ModelInvocation & ModelProviderRegistration;
   readonly tools: ToolExecution & ToolRegistration;
   readonly hooks: LoopHookListV1;
+  /**
+   * How the Shell's send seam draws one of the locked first-party Cards (ADR
+   * 0030 step 7). Set by the Plugin host when it mounts, read by every
+   * feature mounted after it, and absent on a host that cannot run a Plugin
+   * at all — which is the one case the seam falls back to a plain line.
+   */
+  firstPartyCards?: FirstPartyCardDrawsV1;
 }

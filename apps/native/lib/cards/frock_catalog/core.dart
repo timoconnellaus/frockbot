@@ -18,6 +18,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 
+import '../../shell/semantics.dart';
+import '../approvals.dart';
 import '../press.dart';
 import 'common.dart';
 import 'tone.dart';
@@ -215,6 +217,14 @@ class _FrockCollapsibleTextViewState extends State<FrockCollapsibleTextView> {
   }
 }
 
+/// What a settled decision says, in the kernel's words for it.
+String? _decidedLineV1(String decision) => switch (decision) {
+  'approved' => 'You approved this.',
+  'denied' => 'You denied this.',
+  'expired' => 'This expired before anyone answered.',
+  _ => null,
+};
+
 /// The approve and decline controls for one Approval the kernel issued.
 ///
 /// The action names are `approval/<approvalId>`, built here from the id in the
@@ -222,20 +232,40 @@ class _FrockCollapsibleTextViewState extends State<FrockCollapsibleTextView> {
 /// the kernel refuses an id it never recorded. The decision is the kernel's own
 /// word for it — `approved` or `denied`, the two answers `ApprovalUserDecisionV1`
 /// records — and not the button's label.
+///
+/// A decision that has already been made draws no controls at all. It is read
+/// from the Bot's own approvals projection rather than from the Card, because
+/// an Approval settles without its surface moving — somebody answered on
+/// another device, or the alarm expired it — and a live-looking button over a
+/// decision that is already recorded is the one thing trust chrome may not do.
 final frockApprovalActions = CatalogItem(
   name: 'ApprovalActions',
   dataSchema: frockSchemaOf('ApprovalActions'),
   widgetBuilder: (itemContext) {
     final data = (itemContext.data as Map).cast<String, Object?>();
+    final theme = Theme.of(itemContext.buildContext);
     final approvalId = frockString(data['approvalId']) ?? '';
     final name = 'approval/$approvalId';
     final pending = CardPressScope.pendingOf(itemContext.buildContext);
     final frozen = pending != null;
+    final recorded = CardApprovalsScope.of(
+      itemContext.buildContext,
+    )?.approvalStateV1(approvalId);
+    final decided = _decidedLineV1(recorded?.decision ?? 'pending');
+    if (decided != null) {
+      return Text(
+        decided,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
     bool busyWith(String decision) =>
-        pending != null &&
-        pending.name == name &&
-        pending.componentId == itemContext.id &&
-        pending.context?['decision'] == decision;
+        (pending != null &&
+            pending.name == name &&
+            pending.componentId == itemContext.id &&
+            pending.context?['decision'] == decision) ||
+        (recorded?.deciding ?? false);
     void decide(String decision) => itemContext.dispatchEvent(
       UserActionEvent(
         name: name,
@@ -250,24 +280,30 @@ final frockApprovalActions = CatalogItem(
       spacing: 8,
       runSpacing: 8,
       children: [
-        FilledButton(
-          onPressed: approvalId.isEmpty || frozen
-              ? null
-              : () => decide('approved'),
-          child: Text(
-            busyWith('approved')
-                ? 'Working…'
-                : frockString(data['approveLabel']) ?? 'Approve',
+        identified(
+          ShellIds.approve(approvalId),
+          FilledButton(
+            onPressed: approvalId.isEmpty || frozen
+                ? null
+                : () => decide('approved'),
+            child: Text(
+              busyWith('approved')
+                  ? 'Working…'
+                  : frockString(data['approveLabel']) ?? 'Approve',
+            ),
           ),
         ),
-        TextButton(
-          onPressed: approvalId.isEmpty || frozen
-              ? null
-              : () => decide('denied'),
-          child: Text(
-            busyWith('denied')
-                ? 'Working…'
-                : frockString(data['declineLabel']) ?? 'Decline',
+        identified(
+          ShellIds.deny(approvalId),
+          TextButton(
+            onPressed: approvalId.isEmpty || frozen
+                ? null
+                : () => decide('denied'),
+            child: Text(
+              busyWith('denied')
+                  ? 'Working…'
+                  : frockString(data['declineLabel']) ?? 'Decline',
+            ),
           ),
         ),
       ],

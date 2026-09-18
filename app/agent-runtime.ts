@@ -7,6 +7,7 @@ import {
   type CompositionPinV1,
   LoopHookListV1,
   mountRuntimeFeaturesV1,
+  type FirstPartyCardDrawsV1,
   type PersistSessionEvents,
   type RuntimeFeatureV1,
   type SessionEvent,
@@ -60,6 +61,12 @@ export interface FoundationRuntimeServices {
   readonly hooks: LoopHookListV1;
   /** Set by the credentials feature; read by every feature mounted after it. */
   credentials?: CredentialLeaseRuntime;
+  /**
+   * How the Shell's send seam draws one of the locked first-party Cards (ADR
+   * 0030 step 7). Set by the Plugin host when it mounts a generation, the way
+   * `credentials` is set by the feature that owns it.
+   */
+  firstPartyCards?: FirstPartyCardDrawsV1;
 }
 
 export type FoundationFeature = RuntimeFeatureV1<FoundationRuntimeServices>;

@@ -1,0 +1,34 @@
+{
+  "id": "questions",
+  "displayName": "Question cards",
+  "version": "1",
+  "contractVersion": 5,
+  "tools": [],
+  "hooks": [],
+  "grants": [],
+  "cards": [
+    {
+      "id": "ask",
+      "displayName": "Question",
+      "description": "Ask the person a question with up to six answers, and let them pick one.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "helpText": { "type": "string", "maxLength": 2000 },
+          "options": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "minItems": 1,
+            "maxItems": 6
+          },
+          "allowCustom": { "type": "boolean" }
+        },
+        "required": ["prompt", "options"],
+        "additionalProperties": false
+      },
+      "actions": []
+    }
+  ],
+  "contextKeys": ["user", "bot", "session"]
+}

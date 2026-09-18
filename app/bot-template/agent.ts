@@ -23,6 +23,7 @@ import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   decodeTurnTypeV1,
   type AgentRuntimeV1,
+  type FirstPartyCardDrawsV1,
   type RuntimeFeatureV1,
   type Session,
   type ToolDefinition,
@@ -30,6 +31,7 @@ import {
   type ToolExecutionResult,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+import { drawFirstPartyCardV1 } from "@frockbot/app/shell/first-party-cards";
 import { botTemplateDefinitionV1 } from "./definition.js";
 import { describeTemplateSummaryV1 } from "./scrub.js";
 import type { TemplateShareReceiptV1 } from "./shared.js";
@@ -112,6 +114,7 @@ const DESCRIPTION = [
 export function createBotExportTemplateTool(
   host: BotTemplateRuntimeHostV1,
   sessions: { get(sessionId: string): Session | undefined },
+  cards: () => FirstPartyCardDrawsV1 | undefined = () => undefined,
 ): ToolDefinition {
   return {
     name: BOT_EXPORT_TEMPLATE_TOOL_V1,
@@ -161,18 +164,25 @@ export function createBotExportTemplateTool(
       const session = sessions.get(context.sessionId);
       if (session) {
         try {
+          const position = openStepPositionV1(
+            session,
+            BOT_EXPORT_TEMPLATE_TOOL_V1,
+          );
+          const payload = {
+            type: "agent-card" as const,
+            agentId: host.owner.botId,
+            title: "Bot template staged",
+            body,
+          };
           session.append({
             type: "send/to-user",
-            ...openStepPositionV1(session, BOT_EXPORT_TEMPLATE_TOOL_V1),
+            ...position,
             occurrenceId: context.effectId,
-            payload: {
-              type: "agent-card",
-              agentId: host.owner.botId,
-              title: "Bot template staged",
-              body,
-            },
+            payload,
           });
           await session.flush();
+          // The card is a locked Plugin's now (ADR 0030 step 7).
+          await drawFirstPartyCardV1(cards(), payload, context);
         } catch {
           // The share is already durable. A card that could not be recorded is
           // a missing card, never a reason to look as if the export failed.
@@ -199,7 +209,11 @@ export function createBotTemplateFeature(
       BOT_TEMPLATE_EXPORT_CAPABILITY_V1,
     );
     return runtime.tools.register(
-      createBotExportTemplateTool(host, runtime.sessions),
+      createBotExportTemplateTool(
+        host,
+        runtime.sessions,
+        () => runtime.firstPartyCards,
+      ),
       ceiling ? { admissionCeiling: ceiling } : undefined,
     );
   };
