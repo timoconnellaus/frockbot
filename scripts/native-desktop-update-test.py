@@ -65,6 +65,15 @@ class DesktopUpdateTest(unittest.TestCase):
         # would rename every framework target too.
         self.assertFalse(any(str(arg).startswith(("PRODUCT_", "FROCKBOT_UPDATE")) for arg in xcodebuild))
 
+    def test_voice_diagnostics_are_opt_in_for_the_dev_build(self):
+        normal, _ = desktop.build_commands("1.4.0", "2")
+        diagnostic, xcodebuild = desktop.build_commands("1.4.0", "2", voice_diagnostics=True)
+        flag = "--dart-define=FROCKBOT_VOICE_DIAGNOSTICS=true"
+        self.assertNotIn(flag, normal)
+        self.assertIn(flag, diagnostic)
+        self.assertIn("--dart-define=FROCKBOT_DESKTOP_DEV=true", diagnostic)
+        self.assertIn("FROCKBOT_DESKTOP_DEV=YES", xcodebuild)
+
     def test_xcode_defaults_are_the_released_identity(self):
         config = (ROOT / "apps/native/macos/Runner/Configs/AppInfo.xcconfig").read_text()
         settings = dict(re.findall(r"^(\w+) = (.*)$", config, re.M))
