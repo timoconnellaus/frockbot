@@ -609,11 +609,14 @@ switched. The Flutter host draws both from one `PluginsController`
 account's list, and the neighbouring account-wide switchboard is titled
 "Account features".
 
-**Connectors is host chrome over the frame.** `apps/native/lib/connections/page.dart`
+**Marketplace is host chrome over two frames.** `apps/native/lib/connections/page.dart`
 draws `ConnectionsFrame` (`/api/settings/connections`) itself. Its connector
-half is the Marketplace: a page from the storefront icon on a phone's Bot list,
-a dialog (`MarketplaceDialog`) from the foot of the sidebar on a desktop, the
-same page laid out three rows across. Either way it is a card per
+half is the default Marketplace tab: a page from the storefront icon on a
+phone's Bot list, a dialog (`MarketplaceDialog`) from the foot of the sidebar
+on a desktop, the same page laid out three cards across. A second Plugins tab
+reads the server-owned `PluginsFrame` projection from
+`/api/settings/marketplace/plugins?as=document` and carries only installable
+catalog entries. Either way it is a card per
 provider — its bundled icon (`assets/connectors/<icon>.png`, named by the
 Connection Type's `icon`), what connecting it gives a Bot, the accounts held
 against it with a state line and a menu, and the one way to add another. The

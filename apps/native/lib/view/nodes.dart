@@ -98,10 +98,9 @@ class ViewCardGroups extends StatelessWidget {
 /// is the group drawn by the shared renderer, title and all, so the document,
 /// its identifiers and its action targets are the ones the list draws.
 ///
-/// This is the Marketplace on a desktop. The columns follow the width, and a
-/// row is as tall as its tallest card rather than the whole grid being as tall
-/// as the tallest of all of them: opening one provider's connect form should
-/// not stretch every other row on the page.
+/// This is the Marketplace on a desktop. The columns follow the width, and
+/// each card keeps its natural height so opening one card cannot clip its
+/// controls or stretch every other card around it.
 class ViewGridGroups extends StatelessWidget {
   final Map<String, Object?> node;
   const ViewGridGroups({super.key, required this.node});
@@ -124,17 +123,23 @@ class ViewGridGroups extends StatelessWidget {
                 : constraints.maxWidth < 860
                 ? 2
                 : 3;
-            return _EqualHeightCards(
-              columns: columns,
-              perRow: true,
+            const gap = 12.0;
+            final width =
+                (constraints.maxWidth - gap * (columns - 1)) / columns;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
               children: [
                 for (final card in batch)
-                  Card(
-                    key: ValueKey(card['title']),
-                    margin: EdgeInsets.zero,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                      child: ViewNodeView(node: card),
+                  SizedBox(
+                    width: width,
+                    child: Card(
+                      key: ValueKey(card['title']),
+                      margin: EdgeInsets.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                        child: ViewNodeView(node: card),
+                      ),
                     ),
                   ),
               ],
@@ -542,27 +547,18 @@ class _CapabilityCard extends StatelessWidget {
 class _EqualHeightCards extends MultiChildRenderObjectWidget {
   final int columns;
 
-  /// Whether each row takes the height of its own tallest card, rather than
-  /// every card taking the height of the tallest in the grid.
-  final bool perRow;
-  const _EqualHeightCards({
-    required this.columns,
-    this.perRow = false,
-    required super.children,
-  });
+  const _EqualHeightCards({required this.columns, required super.children});
 
   @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _CardGrid(columns, perRow);
+  RenderObject createRenderObject(BuildContext context) => _CardGrid(columns);
 
   @override
   void updateRenderObject(
     BuildContext context,
     covariant _CardGrid renderObject,
   ) {
-    if (renderObject.columns != columns || renderObject.perRow != perRow) {
+    if (renderObject.columns != columns) {
       renderObject.columns = columns;
-      renderObject.perRow = perRow;
       renderObject.markNeedsLayout();
     }
   }
@@ -581,8 +577,7 @@ class _CardGrid extends RenderBox
           ContainerBoxParentData<RenderBox>
         > {
   int columns;
-  bool perRow;
-  _CardGrid(this.columns, this.perRow);
+  _CardGrid(this.columns);
 
   @override
   void setupParentData(RenderBox child) {
@@ -593,8 +588,7 @@ class _CardGrid extends RenderBox
   void performLayout() {
     final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
     final rows = (childCount / columns).ceil();
-    // Measure first: a row's height is its tallest card's, or the grid's
-    // tallest card's when every card shares one height.
+    // Measure first so every card shares the height of the tallest card.
     final heights = List<double>.filled(rows, 0);
     var tallest = 0.0;
     var index = 0;
@@ -607,7 +601,7 @@ class _CardGrid extends RenderBox
       index++;
       child = childAfter(child);
     }
-    if (!perRow) heights.fillRange(0, rows, tallest);
+    heights.fillRange(0, rows, tallest);
     var top = 0.0;
     index = 0;
     child = firstChild;
@@ -677,9 +671,9 @@ class ViewTextNode extends StatelessWidget {
 /// the record and replaces its contents with a notice saying so, and inventing
 /// that notice here would be inventing what the authority said.
 ///
-/// Uninstalling a provider Plugin is the same shape: the Plugins row only
-/// lists what the account has installed, so removing the installation takes
-/// the row with it rather than leaving it to redraw as "not installed".
+/// Uninstalling a provider Plugin is the same optimistic shape: its current
+/// card disappears while the authoritative reread decides whether the surface
+/// omits it or redraws it as an installable Marketplace offer.
 const _removesGroupIds = {'delete-routine', 'uninstall-package'};
 
 /// Whether pressing this action removes the group around it.

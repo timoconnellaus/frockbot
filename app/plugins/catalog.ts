@@ -38,8 +38,8 @@ export const PLUGIN_SEED_STATES_V1 = [
   /**
    * Shipped in the catalog and seeded on no account: an `installable` Plugin
    * joins a User's Composition when the account installs the Package it
-   * belongs to, with its own command (ADR 0032). It is the state a provider
-   * Plugin has until there is a marketplace to browse.
+   * belongs to, with its own command (ADR 0032). The Marketplace is the
+   * account-owned surface that exposes this state to a person.
    */
   "installable",
 ] as const;
@@ -246,8 +246,7 @@ const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
    * The first provider Plugin (ADR 0032). It is `installable`: shipped in the
    * catalog, seeded on no account, and installed by the account's own
    * `user/install-package` command for the provider Package it belongs to —
-   * which is the closest thing this deployment has to a marketplace until one
-   * exists.
+   * which the account Marketplace exposes as an installable offer.
    */
   deepseek: {
     displayName: "DeepSeek",
@@ -306,6 +305,28 @@ export const DEPLOYMENT_PLUGIN_CATALOG_V1: readonly SeededPluginV1[] =
       descriptor: artifact.descriptor,
     }),
   );
+
+/**
+ * Package ids an account can install from the Marketplace.
+ *
+ * Installable Plugins are catalog artifacts, while the account command still
+ * names the first-party Package that owns their Connections and model list.
+ * Keeping this mapping here means the Marketplace cannot turn a seeded or
+ * Bot-authored Plugin into an install command by guessing from display text.
+ */
+export function marketplacePluginPackageIdsV1(
+  catalog: readonly SeededPluginV1[] = DEPLOYMENT_PLUGIN_CATALOG_V1,
+): readonly string[] {
+  const packageIds = new Set<string>();
+  for (const plugin of catalog) {
+    if (plugin.seed !== "installable") continue;
+    for (const provider of PLUGIN_SERVED_PROVIDERS_V1) {
+      if (provider.pluginId === plugin.pluginId)
+        packageIds.add(provider.packageId);
+    }
+  }
+  return [...packageIds];
+}
 
 /**
  * The content hash of the deployment's own artifact for one Plugin, when the

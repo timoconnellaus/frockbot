@@ -103,7 +103,7 @@ A named event a Plugin may wrap — the loop events `system-prompt/assemble`, `a
 _Avoid_: Middleware, interceptor, action
 
 **Seed state**:
-How the deployment ships a Plugin: `locked` (on for every Bot, no switch), `default-on` (on unless a Bot switches it off), `default-off` (off until a Bot switches it on), `admin-gated` (absent from the account until an admin opens it, then on unless a Bot switches it off) or `installable` (in the catalog and seeded on no account: the account's own Package command installs and removes it, which is what a provider Plugin is until there is a marketplace — ADR 0032).
+How the deployment ships a Plugin: `locked` (on for every Bot, no switch), `default-on` (on unless a Bot switches it off), `default-off` (off until a Bot switches it on), `admin-gated` (absent from the account until an admin opens it, then on unless a Bot switches it off) or `installable` (in the Marketplace catalog and seeded on no account: the account's own Package command installs and removes it — ADR 0032).
 _Avoid_: Tier, preinstall flag
 
 **Plugin trigger**:

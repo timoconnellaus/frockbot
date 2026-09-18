@@ -256,6 +256,9 @@ abstract final class SettingsIds {
 abstract final class ConnectorIds {
   static const document = 'connections-document';
   static const refresh = 'connections-refresh';
+  static const marketplaceConnectorsTab = 'marketplace-connectors-tab';
+  static const marketplacePluginsTab = 'marketplace-plugins-tab';
+  static const marketplaceRefresh = 'marketplace-refresh';
 
   /// The Marketplace dialog a desktop opens from the foot of the sidebar; a
   /// phone pushes the same page, and the page's own id is the marker on both.
@@ -289,6 +292,7 @@ String viewGroupIdentifierV1(String title) =>
 /// names exist so a spec can say so.
 abstract final class PluginIds {
   static const document = 'plugins-document';
+  static const marketplaceDocument = 'marketplace-plugins-document';
   static const refresh = 'plugins-refresh';
 
   /// The Profile's entry: the account's list, what is installed.

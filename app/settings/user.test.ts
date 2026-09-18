@@ -787,6 +787,47 @@ describe("User settings backend Contribution", () => {
     ]);
   });
 
+  test("the Marketplace's retry command clears a failed Package through enablement", async () => {
+    const storage = new MemoryStorage();
+    const settings = contribution(storage);
+    await storage.put("user-id", "user-1");
+    await storage.put("user-configuration", {
+      schemaVersion: 1,
+      revision: 0,
+      profile: { name: "User" },
+      packages: [
+        {
+          packageId: "provider-ollama-cloud",
+          version: "0.0.1",
+          state: "failed",
+          failure: "activation failed",
+        },
+      ],
+      connections: [],
+    } satisfies UserSettingsViewV1);
+
+    await expect(
+      settings.executeConfiguration({
+        schemaVersion: 1,
+        userId: "user-1",
+        command: {
+          schemaVersion: 1,
+          type: "user/set-package-enabled",
+          commandId: "retry-failed-package",
+          expectedRevision: 0,
+          packageId: "provider-ollama-cloud",
+          enabled: true,
+        },
+      }),
+    ).resolves.toMatchObject({ status: "applied", revision: 1 });
+    expect((await settings.read("user-1")).packages).toMatchObject([
+      { packageId: "provider-ollama-cloud", state: "installed" },
+    ]);
+    expect(
+      (await settings.read("user-1")).packages[0]?.failure,
+    ).toBeUndefined();
+  });
+
   test("refuses enabling until every declared dependency is enabled", async () => {
     const settings = createUserSettingsBackendContribution({
       storage: new MemoryStorage(),

@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../client/desktop_build.dart';
 import '../client/transport.dart';
+import '../plugins/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../settings/page.dart';
 import '../shell/desktop_layout.dart';
@@ -37,13 +38,16 @@ class ConnectionsPage extends StatefulWidget {
   final Future<bool> Function(Uri)? openBrowser;
   final VoidCallback? onFeaturesChanged;
 
-  /// Whether the rows are laid out three across: the Marketplace as a desktop
+  /// Whether the cards are laid out three across: the Marketplace as a desktop
   /// dialog draws it. A phone is always one column, a tablet two.
   final bool grid;
 
   /// Set where the page is drawn inside a dialog, which has no back gesture:
   /// the way out is then a control the page draws.
   final VoidCallback? onClose;
+
+  /// Off when Marketplace owns the title and the Connectors tab.
+  final bool chrome;
 
   const ConnectionsPage({
     super.key,
@@ -56,6 +60,7 @@ class ConnectionsPage extends StatefulWidget {
     this.packageId,
     this.grid = false,
     this.onClose,
+    this.chrome = true,
   });
 
   /// What the connector half is called wherever it is drawn.
@@ -66,7 +71,9 @@ class ConnectionsPage extends StatefulWidget {
 }
 
 class _ConnectionsPageState extends State<ConnectionsPage>
-    with WidgetsBindingObserver {
+    with
+        WidgetsBindingObserver,
+        AutomaticKeepAliveClientMixin<ConnectionsPage> {
   wire.ConnectionsFrame? frame;
   bool loading = false;
 
@@ -97,6 +104,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   String get title =>
       widget.models ? 'Provider accounts' : ConnectionsPage.marketplaceTitle;
   String get kind => widget.models ? 'model' : 'connector';
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -285,6 +295,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final theme = Theme.of(context);
     final frame = this.frame;
     final banner = notice ?? loadFailure;
@@ -385,6 +396,11 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         ),
       );
     }
+    final content = identified(
+      ConnectorIds.document,
+      SafeArea(top: false, child: body),
+    );
+    if (!widget.chrome) return content;
     return Scaffold(
       appBar: DesktopHeader(
         child: AppBar(
@@ -412,10 +428,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           ],
         ),
       ),
-      body: identified(
-        ConnectorIds.document,
-        SafeArea(top: false, child: body),
-      ),
+      body: content,
     );
   }
 }
@@ -1239,11 +1252,11 @@ class _ApiKeyFormState extends State<_ApiKeyForm> {
   }
 }
 
-/// How wide the Marketplace dialog gets, which is room for three rows across.
+/// How wide the Marketplace dialog gets, which is room for three cards across.
 const marketplaceDialogWidth = 960.0;
 
 /// The Marketplace as a desktop draws it: a dialog over the shell, holding the
-/// same page a phone pushes, laid out three rows across.
+/// same page a phone pushes, laid out three cards across.
 ///
 /// A dialog rather than a page because on a desktop the list of Bots and the
 /// conversation stay where they are; connecting a service is a visit, not a
@@ -1275,16 +1288,149 @@ class MarketplaceDialog extends StatelessWidget {
           maxWidth: marketplaceDialogWidth + 40,
           maxHeight: 760,
         ),
-        child: ConnectionsPage(
+        child: MarketplacePage(
           onFeaturesChanged: onFeaturesChanged,
           api: api,
           store: store,
           userId: userId,
           openBrowser: openBrowser,
-          grid: true,
           onClose: () => Navigator.of(context).pop(),
         ),
       ),
+    ),
+  );
+}
+
+/// The account Marketplace: Connections and installable Plugins share one
+/// destination, but each tab keeps its own authority and document contract.
+/// Connections remain the default tab so existing deep links and the familiar
+/// Marketplace entry continue to open on the services people authorize.
+class MarketplacePage extends StatefulWidget {
+  final NativeApi api;
+  final LocalStore store;
+  final String userId;
+  final Future<bool> Function(Uri)? openBrowser;
+  final VoidCallback? onFeaturesChanged;
+  final VoidCallback? onClose;
+
+  const MarketplacePage({
+    super.key,
+    required this.api,
+    required this.store,
+    required this.userId,
+    this.openBrowser,
+    this.onFeaturesChanged,
+    this.onClose,
+  });
+
+  @override
+  State<MarketplacePage> createState() => _MarketplacePageState();
+}
+
+class _MarketplacePageState extends State<MarketplacePage>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+  final connectorsKey = GlobalKey<_ConnectionsPageState>();
+  final pluginsKey = GlobalKey<PluginsPageState>();
+  int selectedTab = 0;
+  bool refreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 2, vsync: this)..addListener(_tabChanged);
+  }
+
+  void _tabChanged() {
+    if (_tabs.indexIsChanging || selectedTab == _tabs.index) return;
+    setState(() => selectedTab = _tabs.index);
+  }
+
+  @override
+  void dispose() {
+    _tabs
+      ..removeListener(_tabChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    if (refreshing) return;
+    setState(() => refreshing = true);
+    try {
+      if (selectedTab == 0) {
+        await connectorsKey.currentState?.load();
+      } else {
+        await pluginsKey.currentState?.controller.load();
+      }
+    } finally {
+      if (mounted) setState(() => refreshing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text(ConnectionsPage.marketplaceTitle),
+      automaticallyImplyLeading: widget.onClose == null,
+      leading: widget.onClose == null
+          ? null
+          : identified(
+              ShellIds.rightPanelClose,
+              IconButton(
+                tooltip: 'Close marketplace',
+                onPressed: widget.onClose,
+                icon: const Icon(Icons.close),
+              ),
+            ),
+      actions: [
+        identified(
+          ConnectorIds.marketplaceRefresh,
+          IconButton(
+            tooltip: 'Refresh marketplace',
+            onPressed: refreshing ? null : _refresh,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ),
+      ],
+      bottom: TabBar(
+        controller: _tabs,
+        onTap: (index) => setState(() => selectedTab = index),
+        tabs: [
+          identified(
+            ConnectorIds.marketplaceConnectorsTab,
+            const Tab(text: 'Connectors'),
+          ),
+          identified(
+            ConnectorIds.marketplacePluginsTab,
+            const Tab(text: 'Plugins'),
+          ),
+        ],
+      ),
+    ),
+    body: TabBarView(
+      controller: _tabs,
+      children: [
+        ConnectionsPage(
+          key: connectorsKey,
+          api: widget.api,
+          store: widget.store,
+          userId: widget.userId,
+          openBrowser: widget.openBrowser,
+          onFeaturesChanged: widget.onFeaturesChanged,
+          grid: widget.onClose != null,
+          chrome: false,
+        ),
+        PluginsPage(
+          key: pluginsKey,
+          api: widget.api,
+          store: widget.store,
+          userId: widget.userId,
+          marketplace: true,
+          onFeaturesChanged: widget.onFeaturesChanged,
+          chrome: false,
+        ),
+      ],
     ),
   );
 }

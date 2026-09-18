@@ -6,6 +6,7 @@ import {
   FIRST_PARTY_TOGGLEABLE_PLUGINS_V1,
   firstPartyFeatureOnForBotV1,
   isFirstPartyToggleableV1,
+  marketplacePluginPackageIdsV1,
   maskPlanForBotV1,
   pluginRunsForBotV1,
   pluginSwitchableV1,
@@ -125,6 +126,19 @@ describe("which seeded plugins an account carries", () => {
     expect(
       seededPluginsForAccountV1(catalog, []).map((plugin) => plugin.pluginId),
     ).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("which catalog Plugins the account Marketplace may install", () => {
+  test("joins only installable catalog artifacts to trusted provider Packages", () => {
+    expect(marketplacePluginPackageIdsV1()).toEqual(["provider-deepseek"]);
+    expect(
+      marketplacePluginPackageIdsV1([
+        decodeSeededPluginV1(seeded("weather", "default-off")),
+        decodeSeededPluginV1(seeded("deepseek", "installable")),
+        decodeSeededPluginV1(seeded("internal", "locked")),
+      ]),
+    ).toEqual(["provider-deepseek"]);
   });
 });
 

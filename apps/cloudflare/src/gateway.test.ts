@@ -503,6 +503,9 @@ class MemoryConfiguration
   async readPluginsFrame(): Promise<PluginsFrame> {
     throw new Error("Plugins frame not configured in this fixture");
   }
+  async readMarketplacePluginsFrame(): Promise<PluginsFrame> {
+    throw new Error("Marketplace Plugins frame not configured in this fixture");
+  }
   async readBotPluginsFrame(): Promise<never> {
     throw new Error("Bot plugins frame not configured in this fixture");
   }
@@ -3102,6 +3105,78 @@ test("a provider Package the account has not installed is not one of its Plugins
     await gateway(request("/api/settings/plugins", "alice"))
   ).json()) as PluginsFrame;
   expect(listed.plugins).toEqual([]);
+});
+
+test("the Marketplace offers the real installable catalog and projects account state", async () => {
+  const { gateway, configurations } = createTestGateway();
+  const owner = new MemoryConfiguration();
+  owner.readMarketplacePluginsFrame = async () => ({
+    schemaVersion: 1,
+    ownerId: "alice",
+    revision: 8,
+    plugins: [
+      {
+        packageId: "provider-deepseek",
+        displayName: "DeepSeek",
+        state: "not-installed" as const,
+        home: "models" as const,
+      },
+    ].map((item) => ({ ...item, version: "0.0.1", summary: "Models" })),
+  });
+  configurations.set("alice", owner);
+
+  const response = await gateway(
+    request("/api/settings/marketplace/plugins", "alice"),
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toMatchObject({
+    revision: 8,
+    plugins: [
+      {
+        packageId: "provider-deepseek",
+        state: "not-installed",
+      },
+    ],
+  });
+
+  const documentResponse = await gateway(
+    request("/api/settings/marketplace/plugins?as=document", "alice"),
+  );
+  expect(documentResponse.status).toBe(200);
+  const document = (await documentResponse.json()) as {
+    surfaceId: string;
+    root: {
+      children: Array<{ type?: string; text?: string; children?: unknown[] }>;
+    };
+  };
+  expect(document.surfaceId).toBe("marketplace-plugins");
+  const text = JSON.stringify(document.root);
+  expect(text).toContain("Add Plugin");
+
+  const rejected = await gateway(
+    request("/api/settings/marketplace/plugins", "alice", { method: "POST" }),
+  );
+  expect(rejected.status).toBe(405);
+});
+
+test("the Marketplace does not promise Plugins when the deployment cannot mount them", async () => {
+  const { gateway, configurations } = createTestGateway();
+  const owner = new MemoryConfiguration();
+  owner.readMarketplacePluginsFrame = async () => ({
+    schemaVersion: 1,
+    ownerId: "alice",
+    revision: 1,
+    plugins: [],
+  });
+  configurations.set("alice", owner);
+  const response = await gateway(
+    request("/api/settings/marketplace/plugins", "alice"),
+  );
+  expect(response.status).toBe(200);
+  expect((await response.json()) as PluginsFrame).toMatchObject({
+    plugins: [],
+  });
 });
 
 test("Custom models is offered as a capability while providers stay in Models", async () => {

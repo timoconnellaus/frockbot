@@ -16,13 +16,15 @@ account page inside the app. API keys remain write-only. Custom server
 addresses and provider-specific settings are collapsed under Advanced.
 Image generation is a separate Models destination with readable model names.
 
-The Marketplace is the services a Bot can be given and the accounts already on
-them — every connector, and never a model provider. It is not a Profile entry:
-its door is on the Bot list itself, beside the avatar on a phone and a named
-row at the foot of the sidebar on a desktop. A phone opens it as a page and a
-list; a desktop opens it as a dialog over the shell, the same providers laid
-out as a grid of cards, three across at full width. It links to Messages on
-your Mac. What Plugins calls "Set up in Marketplace" lands here.
+The Marketplace is the services a Bot can be given and the account-wide
+Plugins available to install. It is not a Profile entry: its door is on the
+Bot list itself, beside the avatar on a phone and a named row at the foot of
+the sidebar on a desktop. A phone opens it as a page and list; a desktop opens
+it as a dialog over the shell. Connectors is the default tab and keeps the
+existing account and Messages flows. Plugins is account-shaped: Add Plugin or
+Remove changes the User's installation, while a provider's setup and model
+selection remain in Models. Installation never silently chooses a model or
+creates a credential.
 
 A Bot's Plugins are Bot settings, so their door is the Plugins row in that
 Bot's Settings — one level under its page, behind the gear, at every width —
@@ -46,12 +48,12 @@ and collapsed version/configuration/enablement controls; a new account lists
 nothing there until it installs a provider Plugin
 ([ADR 0032](adr/0032-plugin-model-providers.md)), so the list is empty and
 says so rather than presenting deployment infrastructure as installable
-plugins. This page does not introduce an extension marketplace or remove
-Bot-authored composition controls. Account features is the account-wide
-switchboard for optional built-in features, including per-Bot model
-overrides, web, routines, image generation, Mac Messages, and helper agents;
-an account-wide switch off there is the precondition a Bot's switch cannot
-override. Its cards use
+plugins. The account Marketplace lists the deployment's installable catalog
+separately. This page does not remove Bot-authored composition controls.
+Account features is the account-wide switchboard for optional built-in
+features, including per-Bot model overrides, web, routines, image generation,
+Mac Messages, and helper agents; an account-wide switch off there is the
+precondition a Bot's switch cannot override. Its cards use
 visible controls, two columns on wide screens and one column on phones or
 with large text. Core identity, history, search, memory, computer
 infrastructure and site administration are not plugin switches.
