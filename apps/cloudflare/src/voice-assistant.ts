@@ -471,6 +471,8 @@ class GeminiSessionV1 {
       }
       return;
     }
+    // Google sends binary JSON; Worker sockets otherwise deliver it as Blobs.
+    socket.binaryType = "arraybuffer";
     this.socket = socket;
     socket.addEventListener("message", (event: MessageEvent) => {
       const raw =
