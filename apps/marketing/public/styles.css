@@ -1435,6 +1435,22 @@
     font-size: 0.76rem;
     font-weight: 500;
   }
+  .reach-grid th[scope="row"] small code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--pink-dark);
+  }
+  /* A sub-group inside a kind: one quiet uppercase line. */
+  .reach-grid .reach-sub th {
+    padding: 18px 0 6px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
   .reach-grid .reach-group-row th {
     padding: 26px 0 10px;
     border-bottom: 1px solid var(--ink);
@@ -1448,8 +1464,11 @@
     vertical-align: 1px;
   }
   .reach-grid td {
-    width: 12%;
-    min-width: 84px;
+    width: 8%;
+    min-width: 72px;
+  }
+  .reach-grid thead th {
+    line-height: 1.2;
   }
   .reach-grid td svg {
     width: 18px;
@@ -1702,7 +1721,8 @@
       box-shadow: 8px 0 8px -8px rgba(30, 29, 39, 0.18);
     }
     .reach-grid thead th:first-child,
-    .reach-grid .reach-group-row th {
+    .reach-grid .reach-group-row th,
+    .reach-grid .reach-sub th {
       position: sticky;
       left: 0;
       z-index: 2;
