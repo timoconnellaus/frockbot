@@ -396,7 +396,12 @@ class _ViewSwitchRow extends StatelessWidget {
 
 /// The actions a capability card draws itself — a switch beside the title and
 /// a settings press at the foot — rather than as body content.
-const _cardControlIds = {'set-package-enabled', 'install-package', 'open-home'};
+const _cardControlIds = {
+  'set-package-enabled',
+  'install-package',
+  'uninstall-package',
+  'open-home',
+};
 
 /// Whether a card child is the group holding the card's own controls. Any
 /// other group child (a Plugin's settings section, say) is body content and is
@@ -435,6 +440,9 @@ class _CapabilityCard extends StatelessWidget {
         .firstOrNull;
     final settings = actions
         .where((action) => action['actionId'] == 'open-home')
+        .firstOrNull;
+    final remove = actions
+        .where((action) => action['actionId'] == 'uninstall-package')
         .firstOrNull;
     final scope = ViewScope.of(context);
     final schema = scope.actions[toggle?['actionId']];
@@ -518,6 +526,10 @@ class _CapabilityCard extends StatelessWidget {
           if (settings != null) ...[
             const SizedBox(height: 8),
             ViewActionNode(node: settings),
+          ],
+          if (remove != null) ...[
+            const SizedBox(height: 8),
+            ViewActionNode(node: remove),
           ],
         ],
       ),
@@ -664,7 +676,11 @@ class ViewTextNode extends StatelessWidget {
 /// so the card that drew it is gone. A revoke is not one — the authority keeps
 /// the record and replaces its contents with a notice saying so, and inventing
 /// that notice here would be inventing what the authority said.
-const _removesGroupIds = {'delete-routine'};
+///
+/// Uninstalling a provider Plugin is the same shape: the Plugins row only
+/// lists what the account has installed, so removing the installation takes
+/// the row with it rather than leaving it to redraw as "not installed".
+const _removesGroupIds = {'delete-routine', 'uninstall-package'};
 
 /// Whether pressing this action removes the group around it.
 bool viewRemovesGroupV1(Map<String, Object?> node) =>

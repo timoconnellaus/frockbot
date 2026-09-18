@@ -152,21 +152,23 @@ function request(): NormalizedModelRequest {
 
 function dispatch(
   options: {
-    spent?: boolean;
+    sent?: boolean;
+    priorOutcomeUnknown?: boolean;
     refusal?: ModelDispatchRefusalV1;
   } = {},
 ): ModelDispatchHandleV1 {
   return {
     transportId: "ticket-1",
     finish: () => {},
-    spent: () => options.spent === true,
+    sent: () => options.sent === true,
+    priorOutcomeUnknown: () => options.priorOutcomeUnknown === true,
     refusal: () => options.refusal,
   };
 }
 
 async function run(
   answer: string,
-  options: { spent?: boolean; refusal?: ModelDispatchRefusalV1 } = {},
+  options: { sent?: boolean; refusal?: ModelDispatchRefusalV1 } = {},
 ): Promise<{
   events: Record<string, unknown>[];
   error?: Error;
@@ -239,7 +241,7 @@ describe("the artifact behind the wrapper, answering a Wave's request", () => {
 
   test("a truncated answer fails the call rather than completing it", async () => {
     const outcome = await run(frame({ content: "half a sen" }), {
-      spent: true,
+      sent: true,
     });
     expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
     expect(outcome.events.some((event) => event.type === "finish")).toBe(false);
@@ -252,7 +254,7 @@ describe("the artifact behind the wrapper, answering a Wave's request", () => {
   });
 
   test("a provider that refuses is the provider's failure to state", async () => {
-    const outcome = await run("", { spent: true });
+    const outcome = await run("", { sent: true });
     expect(outcome.error).toBeDefined();
     expect(outcome.events.some((event) => event.type === "finish")).toBe(false);
   });

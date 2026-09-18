@@ -43,6 +43,24 @@ export interface ModelDispatchRefusalV1 {
 /** One admitted model dispatch, as the host registered it. */
 export interface ModelDispatchV1 {
   transportId: string;
+  /**
+   * Set by the host when it issued the upstream call for this dispatch. It is
+   * the host's own observation that the request left, and the only thing that
+   * says the provider may have accepted — and billed — a call this attempt is
+   * answerable for: presenting the ticket is not sending, and a refusal the
+   * host made before the fetch is a call that was never made.
+   */
+  sent: boolean;
+  /**
+   * Set by the host when this dispatch answers for an effect the Turn's log
+   * shows was already dispatched once and says nothing of how that ended. No
+   * call is sent for this ticket — the one-request-id-one-call rule refuses
+   * the replay — and the attempt is not a call that did not happen either:
+   * whether the earlier call reached the provider and was billed is exactly
+   * what is unknown, so the failure it reports is settled with the estimate
+   * rather than read as a free refusal.
+   */
+  priorOutcomeUnknown: boolean;
   requestId: string;
   pluginId: string;
   provider: string;
@@ -74,7 +92,6 @@ export interface ModelDispatchV1 {
   deadlineAt: number;
   /** Set by the host when it made the call and the provider refused it. */
   refusal?: ModelDispatchRefusalV1;
-  spent: boolean;
   abort: AbortController;
 }
 
@@ -87,8 +104,14 @@ export interface ModelDispatchHandleV1 {
    * stream being abandoned — so nothing outlives the attempt it belongs to.
    */
   finish(): void;
-  /** Whether the Plugin presented the ticket and the call was made. */
-  spent(): boolean;
+  /** Whether the host issued the upstream call this ticket is for. */
+  sent(): boolean;
+  /**
+   * Whether the effect this attempt answers for had an earlier dispatch the
+   * log never accounted for, which is what makes a failure here uncertain
+   * rather than a refusal that cost nothing.
+   */
+  priorOutcomeUnknown(): boolean;
   /** What the host saw of that call, when the provider refused it. */
   refusal(): ModelDispatchRefusalV1 | undefined;
 }
@@ -104,7 +127,12 @@ export interface ModelDispatchHandleV1 {
 export class PluginModelDispatchRegistryV1 {
   readonly #dispatches = new Map<string, ModelDispatchV1>();
 
-  begin(input: Omit<ModelDispatchV1, "transportId" | "spent" | "abort">): {
+  begin(
+    input: Omit<
+      ModelDispatchV1,
+      "transportId" | "sent" | "priorOutcomeUnknown" | "abort"
+    >,
+  ): {
     handle: ModelDispatchHandleV1;
     dispatch: ModelDispatchV1;
   } {
@@ -112,7 +140,8 @@ export class PluginModelDispatchRegistryV1 {
     const dispatch: ModelDispatchV1 = {
       ...input,
       transportId,
-      spent: false,
+      sent: false,
+      priorOutcomeUnknown: false,
       abort: new AbortController(),
     };
     this.#dispatches.set(transportId, dispatch);
@@ -126,18 +155,21 @@ export class PluginModelDispatchRegistryV1 {
             dispatch.abort.abort(new Error("the model dispatch ended"));
           }
         },
-        spent: () => dispatch.spent,
+        sent: () => dispatch.sent,
+        priorOutcomeUnknown: () => dispatch.priorOutcomeUnknown,
         refusal: () => dispatch.refusal,
       },
     };
   }
 
-  /** Spends one ticket, exactly once. */
+  /**
+   * Spends one ticket, exactly once. A dispatch it returns is the one attempt
+   * the ticket is worth, whether or not the host goes on to send anything.
+   */
   take(transportId: string): ModelDispatchV1 | undefined {
     const dispatch = this.#dispatches.get(transportId);
     if (!dispatch) return undefined;
     this.#dispatches.delete(transportId);
-    dispatch.spent = true;
     return dispatch;
   }
 

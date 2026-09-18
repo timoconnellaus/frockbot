@@ -83,7 +83,12 @@ before every dispatch; the transport sends upstream only for the **first**
 journaled `model/request` for that id, and only when its provider, model and
 Connection binding match the dispatch. A second occurrence — a retry after an
 outcome the kernel could not confirm, or a re-dispatch after an eviction — is
-refused before the fetch.
+refused before the fetch. How that refusal is accounted for is the log's to
+say: with no outcome recorded for the first dispatch, it is reported as
+uncertainty, because that attempt may have reached the provider and billed and
+a definitive result would erase its possible cost; with the effect's own
+`model/usage` already on the log, the refusal is definitive and no second
+estimate is written.
 
 The consequence is deliberate and conservative for this slice: **one request
 id is one upstream call**, even where the first attempt may have failed before
@@ -120,9 +125,9 @@ better answer: a Plugin that made the call does not get to declare it free.
 The host's own observations are what decide. A **refusal** is a call the host
 watched the provider reject _before it did any work_ — a 4xx it read itself,
 a redirect, or a decision it made before sending at all (no credential, no
-ticket, an effect already dispatched). That is the only kind that may be
-treated as a call that did not bill, because it is the only kind the provider
-stated about a call it had not taken.
+ticket, a body or destination it will not send, a clock that ran out). That is
+the only kind that may be treated as a call that did not bill, because it is
+the only kind the provider stated about a call it had not taken.
 
 A 5xx is not one of those. The request reached the provider and the provider
 failed, which may mean it accepted and processed the call first; whether it
@@ -151,12 +156,22 @@ attempt's lease is settled where the loop settles the outcome.
 
 A provider Plugin ships in the deployment catalog with the seed state
 `installable`: in the catalog, seeded on no account. Installing the Package it
-belongs to — the account's own `user/install-package` command — installs the
-artifact into that account's Composition, with `installed` provenance and the
-artifact's content hash; uninstalling removes it. Reconciliation runs on the
-composition read a Bot makes before admitting a Turn, so a lost race or a
-transient failure is repaired, and a deployment that updates the artifact
-reaches the next Turn.
+belongs to installs the artifact into that account's Composition, with
+`installed` provenance and the artifact's content hash; uninstalling removes
+it. The account's own command does both — `user/install-package`, or the
+Models surface's `user/choose-model-provider`, which is what "Connect
+provider" sends — and either leaves the Plugin in place before the model that
+needs it can be chosen. Reconciliation runs on the composition read a Bot
+makes before admitting a Turn, so a lost race or a transient failure is
+repaired, and a deployment that updates the artifact reaches the next Turn.
+
+An installed provider Plugin is listed on the account's Plugins surface beside
+the seeded ones, described as the Plugin it is rather than as the compiled
+Package's capability, and a row there can uninstall the Package — which takes
+the Plugin out of the Composition and returns a Bot whose model went with it to
+the platform default. Installing one is still the Models surface's business:
+until there is a marketplace, a provider an account does not have is not
+listed as something to add.
 
 ### The trust choice, stated plainly
 

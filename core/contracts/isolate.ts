@@ -588,6 +588,21 @@ export interface BotPackageHookContextV1 extends BotPackageContextV1 {
 }
 
 /**
+ * The `ctx` members that are present only while the host is serving the
+ * contribution's own model call: the one credentialed transport a provider
+ * Plugin composes its upstream call through (ADR 0032).
+ *
+ * Every other member of `BotPackageContextV1` is either common to both
+ * contexts or opened by a grant the Plugin declared, so these are the keys a
+ * tool or hook context never holds. The generated self-inspection catalog
+ * names them apart from the rest for exactly that reason: the wrapper's own
+ * key list is the union of every member, and a call that is not being served
+ * must not look like it carries a transport.
+ */
+export const BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1: readonly (keyof BotPackageContextV1)[] =
+  ["modelTransport"];
+
+/**
  * Everything Bot code can see. Nothing else is in scope: `globalOutbound` is
  * null, so `Object.keys(env)` inside the isolate is exactly
  * `["CAPABILITIES", "IDENTITY"]`.

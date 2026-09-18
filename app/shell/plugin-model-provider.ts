@@ -604,46 +604,64 @@ export function pluginModelProviderV1(
  * What a failure is allowed to mean, decided by the host rather than claimed
  * by the Plugin.
  *
- * A Plugin that never spent its ticket refused before anything was sent, and
- * its own words stand. One that made the call does not get to decide it was
- * free: where the host saw the provider refuse, the host's classification is
- * used; where the host saw a successful response, an error afterwards is an
- * uncertain outcome, which the kernel settles rather than retries.
+ * The host's own record is what decides. A refusal it made or read before the
+ * provider did any work is a definitive no-effect result. A deadline is the
+ * host waiting on a call the Plugin may have made, so it stays uncertain —
+ * unless the host also recorded a refusal, which says what the provider
+ * answered with. An effect whose earlier dispatch the log never accounted for
+ * is uncertain too, even though this attempt sent nothing: what is unknown is
+ * the earlier call, and only the estimate can stand for it. A failure with
+ * nothing sent at all is otherwise the Plugin's to explain, and the host
+ * believes it about why because it has no answer of its own. Anything else
+ * means the call went out and nothing definitive came back, which is an
+ * uncertain outcome the kernel settles rather than retries; a
+ * `ModelProviderFailureError` would tell the kernel and Billing that nothing
+ * had happened.
  */
 function classifyFailureV1(
   error: unknown,
   dispatch: ModelDispatchHandleV1,
 ): Error {
-  if (error instanceof ModelRequestDeadlineError) {
-    // The provider accepted the request and said nothing — or stopped saying
-    // anything — so the outcome is the uncertain one, with the kernel's own
-    // sentence for the person and no second dispatch.
-    return new ModelOutcomeUncertainErrorV1(error.message);
-  }
   const claimed = error instanceof ClassificationCarrierV1 ? error : undefined;
   const reason =
     error instanceof Error && error.message
       ? error.message
       : "the model provider did not complete this request";
-  if (!dispatch.spent()) {
-    return new ModelProviderFailureError({
-      classification: claimed?.claimed ?? "unknown",
-      reason,
-      ...(claimed?.retryAfterMs === undefined
-        ? {}
-        : { retryAfterMs: claimed.retryAfterMs }),
-    });
-  }
   const refusal = dispatch.refusal();
   if (refusal) {
-    // The host itself saw the provider's answer, so this is a definitive
-    // result: no billable call happened, and its classification stands.
+    // The host itself saw the provider's answer, or made the decision not to
+    // send: nothing was taken, and the classification is the host's.
     return new ModelProviderFailureError({
       classification: refusal.classification,
       reason,
       ...(refusal.retryAfterMs === undefined
         ? {}
         : { retryAfterMs: refusal.retryAfterMs }),
+    });
+  }
+  if (error instanceof ModelRequestDeadlineError) {
+    // The provider accepted the request and said nothing — or stopped saying
+    // anything — so the outcome is the uncertain one, with the kernel's own
+    // sentence for the person and no second dispatch.
+    return new ModelOutcomeUncertainErrorV1(error.message);
+  }
+  if (dispatch.priorOutcomeUnknown()) {
+    // The host refused to send this attempt because the effect it answers for
+    // was already dispatched once and the log says nothing of how that ended.
+    // Nothing was sent here, but the earlier call may have reached the
+    // provider and billed: the attempt is the uncertain outcome the kernel
+    // settles with the estimate, never a clean failure whose cost vanished.
+    return new ModelOutcomeUncertainErrorV1(reason);
+  }
+  if (!dispatch.sent()) {
+    // Nothing left the host: there is nothing that could have billed, and the
+    // Plugin's own words stand because the host has no reading of its own.
+    return new ModelProviderFailureError({
+      classification: claimed?.claimed ?? "unknown",
+      reason,
+      ...(claimed?.retryAfterMs === undefined
+        ? {}
+        : { retryAfterMs: claimed.retryAfterMs }),
     });
   }
   // The call went out and nothing definitive came back. That is not a

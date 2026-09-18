@@ -7,7 +7,11 @@
 // off and points at the surface that configures it. Nothing a Package declares
 // is edited here.
 
-import { CAPABILITY_DESCRIPTIONS } from "./catalog-copy.js";
+import {
+  CAPABILITY_DESCRIPTIONS,
+  PROVIDER_PLUGIN_DESCRIPTIONS_V1,
+  providerPluginPackageV1,
+} from "./catalog-copy.js";
 
 import {
   decodeProtocol,
@@ -19,6 +23,7 @@ import {
 
 export const PLUGIN_ACTION_KINDS_V1 = [
   "install-package",
+  "uninstall-package",
   "set-package-enabled",
   "open-home",
 ] as const;
@@ -105,6 +110,19 @@ function pluginNode(plugin: Plugin, capabilities: boolean): ViewNode {
         enabled: !on,
       }),
     );
+    // A provider Plugin's Package is removable here: uninstalling it is what
+    // takes the Plugin out of this account, and the deployment's own model
+    // answers for a Bot whose chosen one goes with it.
+    if (providerPluginPackageV1(plugin.packageId)) {
+      controls.push(
+        press(
+          "uninstall-package",
+          "Remove",
+          { kind: "uninstall-package", packageId: plugin.packageId },
+          "danger",
+        ),
+      );
+    }
   }
   return {
     type: "group",
@@ -116,7 +134,9 @@ function pluginNode(plugin: Plugin, capabilities: boolean): ViewNode {
       {
         type: "text",
         text: (
-          CAPABILITY_DESCRIPTIONS[plugin.packageId] ?? plugin.summary
+          CAPABILITY_DESCRIPTIONS[plugin.packageId] ??
+          PROVIDER_PLUGIN_DESCRIPTIONS_V1[plugin.packageId] ??
+          plugin.summary
         ).slice(0, 4000),
         style: capabilities ? "body" : "status",
       },
@@ -211,6 +231,18 @@ export function pluginsDocumentV1(
             version: { type: "string", maxLength: 64 },
           },
           required: ["kind", "packageId", "version"],
+          additionalProperties: false,
+        },
+      },
+      {
+        id: "uninstall-package",
+        schema: {
+          type: "object",
+          properties: {
+            kind: KIND,
+            packageId: IDENTIFIER,
+          },
+          required: ["kind", "packageId"],
           additionalProperties: false,
         },
       },

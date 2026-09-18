@@ -210,13 +210,13 @@ async function* deepseekStream(
 ): AsyncIterable<PluginModelStreamEvent> {
   const response = await ctx.modelTransport({ body: wireBody(request) });
   if (response.status !== "streaming") {
+    // Only the provider's own refusals reach here with a status: a failure
+    // after the request arrived is the host's uncertainty to report, never a
+    // status this plugin reads. A rate limit is the one refusal the kernel
+    // may plan a retry for; it will still never be sent twice.
     const status = response.status === "refused" ? response.httpStatus : 0;
     yield failure(
-      status === 429 || status >= 500
-        ? "transient"
-        : status >= 400
-          ? "permanent"
-          : "unknown",
+      status === 429 ? "transient" : status >= 400 ? "permanent" : "unknown",
       response.reason,
     );
     return;

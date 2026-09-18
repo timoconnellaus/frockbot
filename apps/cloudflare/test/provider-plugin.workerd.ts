@@ -86,12 +86,15 @@ async function forgetDeepseekCalls(): Promise<void> {
  * models, install the DeepSeek Package (which installs its Plugin), connect a
  * key, choose the model, create the Bot.
  *
- * `install` is what a suite turns off to reproduce an account that never
- * installed the Package.
+ * `install` names how the account gets the Package: `package` is the account's
+ * own install command, and `choose` is the Models surface's "Connect
+ * provider", which chooses the provider rather than installing it by hand —
+ * both have to leave the Plugin in the Composition. `false` reproduces an
+ * account that never installed it.
  */
 async function provisionDeepseekBot(
   identity: { userId: string; botId: string },
-  options: { install?: boolean; apiKey?: string } = {},
+  options: { install?: "package" | "choose" | false; apiKey?: string } = {},
 ): Promise<void> {
   const configuration = user(identity.userId);
   const revision = async (): Promise<number> =>
@@ -117,14 +120,23 @@ async function provisionDeepseekBot(
     const receipt = await configuration.executeConfiguration({
       schemaVersion: 1,
       userId: identity.userId,
-      command: {
-        schemaVersion: 1,
-        type: "user/install-package",
-        commandId: `install-deepseek-${identity.botId}`,
-        expectedRevision: await revision(),
-        packageId: PROVIDER.packageId,
-        version: "0.0.1",
-      },
+      command:
+        options.install === "choose"
+          ? {
+              schemaVersion: 1,
+              type: "user/choose-model-provider",
+              commandId: `choose-deepseek-${identity.botId}`,
+              expectedRevision: await revision(),
+              packageId: PROVIDER.packageId,
+            }
+          : {
+              schemaVersion: 1,
+              type: "user/install-package",
+              commandId: `install-deepseek-${identity.botId}`,
+              expectedRevision: await revision(),
+              packageId: PROVIDER.packageId,
+              version: "0.0.1",
+            },
     });
     expect(receipt.status).toBe("applied");
   }
@@ -246,6 +258,31 @@ describe("a Bot whose model runs through a provider Plugin", () => {
       CATALOG_PLUGIN.artifact.contentHash,
     );
     expect(member!.provenance.kind).toBe("installed");
+  });
+
+  test("connecting the provider in Models installs the artifact before a Turn uses it", async () => {
+    // The Models surface's own path: a person presses "Connect provider",
+    // which chooses the Package rather than running the install command by
+    // hand. The Plugin must be in the Composition before the model that needs
+    // it is selected and a Turn runs on it.
+    const identity = freshIdentity();
+    await provisionDeepseekBot(identity, { install: "choose" });
+    const composition = await user(identity.userId).readComposition({
+      schemaVersion: 1,
+      userId: identity.userId,
+    });
+    const member = composition.current.members.find(
+      (candidate) => candidate.packageId === PROVIDER.pluginId,
+    );
+    expect(member, "choosing the provider installed its Plugin").toBeDefined();
+    expect(member!.artifact.contentHash).toBe(
+      CATALOG_PLUGIN.artifact.contentHash,
+    );
+    await forgetDeepseekCalls();
+    const result = await turn(identity, "run-chosen", "hello");
+    expect(result.failure).toBeUndefined();
+    expect(sentText(result.events)).toBe("DeepSeek says hello.");
+    expect(await deepseekCalls()).toHaveLength(1);
   });
 
   test("an account that never installed the provider has no artifact", async () => {

@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
-import { BOT_ISOLATE_CONTEXT_KEYS_V1 } from "@frockbot/core/contracts";
+import {
+  BOT_ISOLATE_CONTEXT_KEYS_V1,
+  BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1,
+} from "@frockbot/core/contracts";
 import {
   PROBE_BROKEN_SOURCE,
   PROBE_CONSUMER_SOURCE,
@@ -309,8 +312,14 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
       tool: "context_keys",
     });
 
+    // This call is an ordinary tool call, so it holds every catalogued key
+    // the probe's grants open and none of the serving-only ones: the model
+    // transport exists only while the host is serving a provider
+    // contribution's own call, which this isolate is not.
     expect(JSON.parse(result.content)).toEqual(
-      [...BOT_ISOLATE_CONTEXT_KEYS_V1].sort(),
+      BOT_ISOLATE_CONTEXT_KEYS_V1.filter(
+        (key) => !BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1.includes(key),
+      ).sort(),
     );
   });
 

@@ -6,6 +6,7 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/plugins/document.dart';
 import 'package:frockbot_native/plugins/page.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_native/view/nodes.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
@@ -160,6 +161,29 @@ void main() {
         }),
         containsPair('type', 'user/install-package'),
       );
+    });
+
+    test('a removal is the uninstall command, and takes its card with it', () {
+      final command = {
+        'commandId': 'c4',
+        'revision': 7,
+        'actionId': 'uninstall-package',
+        'input': {
+          'kind': 'uninstall-package',
+          'packageId': 'provider-deepseek',
+        },
+      };
+      expect(pluginActionKindV1(command), 'uninstall-package');
+      expect(pluginCommandV1(command), {
+        'schemaVersion': 1,
+        'commandId': 'c4',
+        'expectedRevision': 7,
+        'packageId': 'provider-deepseek',
+        'type': 'user/uninstall-package',
+      });
+      // The row only lists what is installed, so the card goes as the
+      // installation does rather than redrawing as "not installed".
+      expect(viewRemovesGroupV1(command), isTrue);
     });
 
     test('navigation is a kind, and no command', () {

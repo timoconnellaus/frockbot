@@ -77,14 +77,16 @@ function request(
 
 /** One attempt's dispatch, with the spend and refusal the host recorded. */
 function dispatch(options: {
-  spent?: boolean;
+  sent?: boolean;
+  priorOutcomeUnknown?: boolean;
   refusal?: ModelDispatchRefusalV1;
   onFinish?: () => void;
 }): ModelDispatchHandleV1 {
   return {
     transportId: "ticket-1",
     finish: options.onFinish ?? (() => {}),
-    spent: () => options.spent === true,
+    sent: () => options.sent === true,
+    priorOutcomeUnknown: () => options.priorOutcomeUnknown === true,
     refusal: () => options.refusal,
   };
 }
@@ -362,7 +364,7 @@ describe("what the adapter believes of a failure", () => {
       streamModel: worker([failureEvent]),
       begin: () =>
         dispatch({
-          spent: true,
+          sent: true,
           refusal: { httpStatus: 429, classification: "transient" },
         }),
     });
@@ -380,13 +382,117 @@ describe("what the adapter believes of a failure", () => {
     // nothing had happened.
     const fake = provider({
       streamModel: worker([failureEvent]),
-      begin: () => dispatch({ spent: true }),
+      begin: () => dispatch({ sent: true }),
     });
     const outcome = await drain(
       fake.stream(request(), new AbortController().signal),
     );
     expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
     expect(outcome.error).not.toBeInstanceOf(ModelProviderFailureError);
+  });
+
+  test("keeps a refusal the host made before the fetch, whatever the Plugin states", async () => {
+    // A body the host would not send never reached the provider, so nothing
+    // can have billed: the host's own decision is the answer, even when the
+    // Plugin's own words about the failure say otherwise.
+    const fake = provider({
+      streamModel: worker([
+        {
+          type: "provider-failure",
+          classification: "transient",
+          reason: "a busy provider",
+        },
+      ]),
+      begin: () =>
+        dispatch({
+          sent: false,
+          refusal: { httpStatus: 0, classification: "permanent" },
+        }),
+    });
+    const outcome = await drain(
+      fake.stream(request(), new AbortController().signal),
+    );
+    const error = outcome.error as ModelProviderFailureError;
+    expect(error).toBeInstanceOf(ModelProviderFailureError);
+    expect(error.classification).toBe("permanent");
+  });
+
+  test("a replay of an unaccounted effect is uncertain even though nothing was sent", async () => {
+    // The host refused to send this attempt because the log shows the effect
+    // was dispatched once already and says nothing of how that ended. The
+    // ticket was never spent, but the earlier call may have reached the
+    // provider and billed, so the Plugin's own words cannot make this look
+    // like a failure that cost nothing.
+    const fake = provider({
+      streamModel: worker([
+        {
+          type: "provider-failure",
+          classification: "unknown",
+          reason: "not sent twice",
+        },
+      ]),
+      begin: () => dispatch({ sent: false, priorOutcomeUnknown: true }),
+    });
+    const outcome = await drain(
+      fake.stream(request(), new AbortController().signal),
+    );
+    expect(outcome.error).toBeInstanceOf(ModelOutcomeUncertainErrorV1);
+    expect(outcome.error).not.toBeInstanceOf(ModelProviderFailureError);
+  });
+
+  test("an accounted effect's replay stays the host's definitive refusal", async () => {
+    // The other half of the same decision: when the effect's own usage is
+    // already on the log, refusing to send again adds nothing and the refusal
+    // is definitive, so no second estimate is ever written for one effect.
+    const fake = provider({
+      streamModel: worker([
+        {
+          type: "provider-failure",
+          classification: "unknown",
+          reason: "not sent twice",
+        },
+      ]),
+      begin: () =>
+        dispatch({
+          sent: false,
+          refusal: { httpStatus: 0, classification: "permanent" },
+        }),
+    });
+    const outcome = await drain(
+      fake.stream(request(), new AbortController().signal),
+    );
+    const error = outcome.error as ModelProviderFailureError;
+    expect(error).toBeInstanceOf(ModelProviderFailureError);
+    expect(error.classification).toBe("permanent");
+  });
+
+  test("a deadline the host already has a refusal for is still a call that did not happen", async () => {
+    // The refusal and the attempt's clock raced: the host read the provider's
+    // refusal of a call it never sent, and the attempt ended waiting. What the
+    // host saw is the answer, so this is not settled with an estimate.
+    const fake = provider({
+      deadlines: { firstByteMs: 30, idleMs: 20 },
+      streamModel: async () => ({
+        schemaVersion: 1,
+        status: "streaming",
+        events: new ReadableStream<Uint8Array>({
+          start() {
+            // Nothing ever arrives.
+          },
+        }),
+      }),
+      begin: () =>
+        dispatch({
+          sent: false,
+          refusal: { httpStatus: 401, classification: "permanent" },
+        }),
+    });
+    const outcome = await drain(
+      fake.stream(request(), new AbortController().signal),
+    );
+    const error = outcome.error as ModelProviderFailureError;
+    expect(error).toBeInstanceOf(ModelProviderFailureError);
+    expect(error.classification).toBe("permanent");
   });
 });
 
@@ -446,7 +552,7 @@ describe("the model protocol's allowances", () => {
           },
         }),
       }),
-      begin: () => dispatch({ spent: true, onFinish: () => (finished += 1) }),
+      begin: () => dispatch({ sent: true, onFinish: () => (finished += 1) }),
     });
     const outcome = await drain(
       fake.stream(request(), new AbortController().signal),
@@ -472,7 +578,7 @@ describe("the model protocol's allowances", () => {
           },
         }),
       }),
-      begin: () => dispatch({ spent: true }),
+      begin: () => dispatch({ sent: true }),
     });
     const outcome = await drain(
       fake.stream(request(), new AbortController().signal),
@@ -487,7 +593,7 @@ describe("an attempt that hangs", () => {
     const fake = provider({
       deadlines: { firstByteMs: 40, idleMs: 30 },
       streamModel: () => new Promise(() => {}),
-      begin: () => dispatch({ spent: true }),
+      begin: () => dispatch({ sent: true }),
     });
     const startedAt = Date.now();
     const outcome = await drain(
@@ -515,7 +621,7 @@ describe("an attempt that hangs", () => {
           },
         }),
       }),
-      begin: () => dispatch({ spent: true }),
+      begin: () => dispatch({ sent: true }),
     });
     const startedAt = Date.now();
     const outcome = await drain(
@@ -649,7 +755,7 @@ describe("the bounds the host holds one answer to", () => {
           ),
         ),
       }),
-      begin: () => dispatch({ spent: true }),
+      begin: () => dispatch({ sent: true }),
     });
     const outcome = await drain(
       fake.stream(request(), new AbortController().signal),
@@ -668,7 +774,7 @@ describe("the bounds the host holds one answer to", () => {
         status: "streaming",
         events: streamOf([line({ type: "text-delta", text: "x".repeat(200) })]),
       }),
-      begin: () => dispatch({ spent: true }),
+      begin: () => dispatch({ sent: true }),
     });
     const outcome = await drain(
       fake.stream(request(), new AbortController().signal),
@@ -696,7 +802,7 @@ describe("the bounds the host holds one answer to", () => {
           line({ type: "finish", reason: "tool-calls" }),
         ]),
       }),
-      begin: () => dispatch({ spent: true }),
+      begin: () => dispatch({ sent: true }),
     });
     const outcome = await drain(
       fake.stream(request(), new AbortController().signal),
@@ -730,7 +836,7 @@ describe("the bounds the host holds one answer to", () => {
             60,
           ),
         ),
-      begin: () => dispatch({ spent: true }),
+      begin: () => dispatch({ sent: true }),
     });
     const outcome = await drain(
       fake.stream(request(), new AbortController().signal),
@@ -761,7 +867,7 @@ describe("the bounds the host holds one answer to", () => {
             30,
           ),
         ),
-      begin: () => dispatch({ spent: true }),
+      begin: () => dispatch({ sent: true }),
     });
     const controller = new AbortController();
     const stream = fake.stream(request(), controller.signal);

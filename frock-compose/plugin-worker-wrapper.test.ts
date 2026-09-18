@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   BOT_ISOLATE_CONTEXT_KEYS_V1,
+  BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1,
   decodePluginWorkerHookResultV1,
 } from "@frockbot/core/contracts";
 import {
@@ -567,6 +568,28 @@ describe("the generated wrapper's narrowed context", () => {
     );
     expect(Object.keys(context).toSorted()).toEqual(
       [...BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1].toSorted(),
+    );
+  });
+
+  test("holds no serving-only key when no model call is being served", () => {
+    const subject = env();
+    const context = narrowContext(
+      subject.env,
+      invocation,
+      {
+        pluginId: "weather",
+        grants: ["ai", "memory", "workspace", "http", "schedule", "storage"],
+        services: {},
+      },
+      1_000,
+    );
+    // An ordinary tool or hook call carries no transport to call, so the
+    // context is the catalog the contract publishes minus the members it names
+    // as present only while the host serves a call.
+    expect(Object.keys(context).toSorted()).toEqual(
+      BOT_ISOLATE_CONTEXT_KEYS_V1.filter(
+        (key) => !BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1.includes(key),
+      ).toSorted(),
     );
   });
 });

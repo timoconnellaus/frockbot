@@ -26,6 +26,11 @@ back. The plugin names a path — `/chat/completions` — and nothing else.
 ## When a reply fails
 
 A refused key or an unknown model is reported to the kernel as a permanent
-provider failure: it is not retried. A busy provider (HTTP 429) or a failed
-upstream (5xx) is transient and the kernel retries it. If the plugin itself
-fails, the reply fails with it — a model call is never silently skipped.
+provider failure: it is not retried. A failed upstream (HTTP 5xx) is not a
+refusal — the request reached the provider, which may have accepted and
+billed it — so it is reported as an uncertain outcome: the host records an
+estimate and settles the reply rather than sending the request again. A rate
+limit (HTTP 429) is refused as transient, but one request id is one upstream
+call, so the retry the kernel may plan for it is never sent either. If the
+plugin itself fails, the reply fails with it — a model call is never silently
+skipped.

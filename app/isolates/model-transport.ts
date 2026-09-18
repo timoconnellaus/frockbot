@@ -38,6 +38,7 @@ import { compactionInFlightV1 } from "../shell/compaction-scheduler.js";
 import { activeIsolateTurn } from "./authority.js";
 import type {
   ModelDispatchHandleV1,
+  ModelDispatchV1,
   PluginModelDispatchScopeV1,
 } from "./model-dispatch.js";
 
@@ -174,6 +175,23 @@ function refused(
   httpStatus = 0,
 ): PluginModelTransportOutcomeV1 {
   return { status: "refused", httpStatus, reason };
+}
+
+/**
+ * A refusal the host itself made before the fetch — a ticket it will not
+ * honour, a clock that ran out, a Connection that is not ready, a body or
+ * destination it will not send. Nothing reached the provider, so this attempt
+ * is a call that did not happen: it is recorded on the dispatch as a
+ * definitive refusal, and the adapter reads the host's own answer rather than
+ * the Plugin's, which is what keeps a call that was never made from being
+ * settled with an estimate.
+ */
+function refusedBeforeFetch(
+  dispatch: ModelDispatchV1,
+  reason: string,
+): PluginModelTransportOutcomeV1 {
+  dispatch.refusal = { httpStatus: 0, classification: "permanent" };
+  return refused(reason);
 }
 
 /**
@@ -323,7 +341,10 @@ export async function isolateModelTransport(
     dispatch.scope.botId !== input.botId ||
     dispatch.pluginId !== input.packageId
   ) {
-    return refused("the model transport ticket belongs to another call");
+    return refusedBeforeFetch(
+      dispatch,
+      "the model transport ticket belongs to another call",
+    );
   }
   // The Turn itself, not just a mounted worker: an ordinary model call is
   // dispatched by the loop of the Turn that asked for it. A summariser is the
@@ -332,7 +353,10 @@ export async function isolateModelTransport(
   // running and nothing else is.
   const active = activeIsolateTurn(state, input);
   if (Date.now() >= dispatch.deadlineAt) {
-    return refused("the model call's time ran out before this transport began");
+    return refusedBeforeFetch(
+      dispatch,
+      "the model call's time ran out before this transport began",
+    );
   }
   // The host's own reference to the session, captured when the composition
   // mounted: never one the Plugin named.
@@ -425,15 +449,35 @@ export async function isolateModelTransport(
   if (attempts.length > 1) {
     // The effect was dispatched once already and the kernel chose to send it
     // again, which it only does after an outcome it could not confirm. One
-    // request id is one upstream call: whether the lost attempt reached the
-    // provider and billed is exactly what is unknown, so sending again would
-    // be a second paid call for one effect. The Turn settles on that instead
+    // request id is one upstream call: sending again would be a second paid
+    // call for one effect, so this dispatch is refused before the fetch
     // (ADR 0032, the conservative first slice), and the person's next message
     // is a new request id and a clean attempt.
-    dispatch.refusal = { httpStatus: 0, classification: "permanent" };
-    return refused(
-      "this model request was already dispatched once and its outcome is uncertain; it is not sent twice",
-    );
+    if (
+      session.events.some(
+        (event) =>
+          event.type === "model/usage" &&
+          event.requestId === dispatch.requestId,
+      )
+    ) {
+      // The earlier dispatch settled and its usage is on the log: this effect
+      // is accounted for, so refusing to send again costs nothing and adds no
+      // second estimate.
+      return refusedBeforeFetch(
+        dispatch,
+        "this model request already has a durable usage record and is not sent twice",
+      );
+    }
+    // Whether that first attempt reached the provider and billed is exactly
+    // what the log does not say, so this is not a call that did not happen:
+    // the dispatch records that, and the adapter reads it to settle the
+    // attempt with the estimate rather than as a free failure.
+    dispatch.priorOutcomeUnknown = true;
+    return {
+      status: "unavailable",
+      reason:
+        "this model request was already dispatched once and its outcome is uncertain; it is not sent twice",
+    };
   }
   const user = await userConfigurationV1(state, identity).readConfiguration({
     schemaVersion: 1,
@@ -449,7 +493,8 @@ export async function isolateModelTransport(
     connection.generation !== dispatch.connectionGeneration ||
     connection.packageId !== dispatch.packageId
   ) {
-    return refused(
+    return refusedBeforeFetch(
+      dispatch,
       "the Connection this model call runs on is unavailable, so nothing was sent",
     );
   }
@@ -459,10 +504,11 @@ export async function isolateModelTransport(
       : dispatch.endpoint;
   const destination = pluginModelTransportUrlV1(endpoint, dispatch.route);
   if (destination.status !== "ok") {
-    return refused(destination.reason);
+    return refusedBeforeFetch(dispatch, destination.reason);
   }
   const bodyRefusal = pluginModelBodyRefusalV1(request.body, dispatch);
-  if (bodyRefusal !== undefined) return refused(bodyRefusal);
+  if (bodyRefusal !== undefined)
+    return refusedBeforeFetch(dispatch, bodyRefusal);
   let secret: string;
   try {
     const lease: CredentialLeaseV1 = await userConfigurationV1(
@@ -501,7 +547,11 @@ export async function isolateModelTransport(
     };
   }
   // The upstream call is owned by the dispatch: the attempt ending for any
-  // reason aborts it, and so does the first-byte allowance passing.
+  // reason aborts it, and so does the first-byte allowance passing. The
+  // dispatch is marked as sent here and nowhere else: from this point the
+  // request may have reached the provider, and only a refusal the host reads
+  // from the answer can say that it did not.
+  dispatch.sent = true;
   const timer = setTimeout(
     () => dispatch.abort.abort(new Error("the model dispatch deadline passed")),
     Math.max(0, dispatch.deadlineAt - Date.now()),

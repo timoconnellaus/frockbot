@@ -42,6 +42,47 @@ test("an installed plugin offers the way off and the surface that sets it up", (
   expect(document.surfaceId).toBe("plugins");
 });
 
+test("an installed provider Plugin is described and offers its removal", () => {
+  const document = pluginsDocumentV1(
+    frame([
+      {
+        packageId: "provider-deepseek",
+        version: "0.0.1",
+        displayName: "DeepSeek",
+        summary: "Models",
+        state: "installed",
+        home: "models",
+      },
+    ]),
+  );
+  const actions = walk(document.root).filter((node) => node.type === "action");
+  // The row is the installed Plugin, so it says what the Plugin does rather
+  // than repeating the capability noun the frame carries.
+  expect(
+    walk(document.root).some(
+      (node) =>
+        node.type === "text" &&
+        node.text.startsWith("Run this Bot's replies on DeepSeek models."),
+    ),
+  ).toBe(true);
+  expect(actions.map((node) => node.input?.kind)).toEqual([
+    "open-home",
+    "set-package-enabled",
+    "uninstall-package",
+  ]);
+  const remove = actions.find(
+    (node) => node.input?.kind === "uninstall-package",
+  );
+  expect(remove?.type === "action" && remove.label).toBe("Remove");
+  expect(remove?.type === "action" && remove.style).toBe("danger");
+  expect(remove?.type === "action" && remove.input?.packageId).toBe(
+    "provider-deepseek",
+  );
+  expect(
+    document.actions.some((action) => action.id === "uninstall-package"),
+  ).toBe(true);
+});
+
 test("a plugin that is not installed is added rather than turned on", () => {
   const document = pluginsDocumentV1(
     frame([{ ...ollama, state: "not-installed" }]),

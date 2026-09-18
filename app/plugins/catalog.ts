@@ -21,7 +21,10 @@ import type {
   ArtifactRefV1,
   CompositionMemberV1,
 } from "@frockbot/core/durable";
-import { CAPABILITY_DESCRIPTIONS } from "@frockbot/app/settings/catalog-copy";
+import {
+  CAPABILITY_DESCRIPTIONS,
+  PROVIDER_PLUGIN_DESCRIPTIONS_V1,
+} from "@frockbot/app/settings/catalog-copy";
 import type { PluginEnablementV1 } from "./enablement.js";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./seeded/artifacts.generated.js";
 
@@ -246,8 +249,9 @@ const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
    */
   deepseek: {
     displayName: "DeepSeek",
-    description:
-      "Run this Bot's replies on DeepSeek models. Installing the DeepSeek Package puts it in this account's plugins; add a DeepSeek API key on Connections, then choose a DeepSeek model. The key is held by the deployment and never reaches the Plugin.",
+    // The account Plugins row describes the same Plugin when the account
+    // installs its Package, so the words come from one place (catalog-copy).
+    description: PROVIDER_PLUGIN_DESCRIPTIONS_V1["provider-deepseek"],
     seed: "installable",
   },
   email: {

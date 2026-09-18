@@ -2976,6 +2976,46 @@ test("Profile settings separate personal details, optional capabilities, and gen
   });
 });
 
+test("an installed provider Plugin is listed as a Plugin, and offered in Models until then", async () => {
+  const { gateway, configurations } = createTestGateway();
+  const owner = new MemoryConfiguration();
+  owner.readPluginsFrame = async () => ({
+    schemaVersion: 1,
+    ownerId: "alice",
+    revision: 1,
+    plugins: [
+      {
+        packageId: "provider-deepseek",
+        displayName: "DeepSeek",
+        state: "installed" as const,
+        home: "models" as const,
+      },
+      {
+        packageId: "provider-anthropic",
+        displayName: "Anthropic",
+        state: "not-installed" as const,
+        home: "models" as const,
+      },
+      {
+        packageId: "shell",
+        displayName: "The shell",
+        state: "installed" as const,
+        home: "none" as const,
+      },
+    ].map((item) => ({ ...item, version: "0.0.1", summary: "Models" })),
+  });
+  configurations.set("alice", owner);
+  // The built-in Package a provider Plugin rides on is invisible while it is
+  // not installed, and every other built-in stays off this surface; once the
+  // account has it, the Plugin is one of the Plugins it lists.
+  const listed = (await (
+    await gateway(request("/api/settings/plugins", "alice"))
+  ).json()) as PluginsFrame;
+  expect(listed.plugins.map((plugin) => plugin.packageId)).toEqual([
+    "provider-deepseek",
+  ]);
+});
+
 test("a built-in turned off before Plugins stopped listing it can still be turned back on", async () => {
   const { gateway, configurations } = createTestGateway();
   const owner = new MemoryConfiguration();

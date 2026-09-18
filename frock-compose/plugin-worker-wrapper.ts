@@ -13,6 +13,7 @@
 // loaded Worker's module map, not a source file this repository compiles.
 import {
   BOT_ISOLATE_HOOK_EVENTS_V1,
+  BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1,
   ISOLATE_CONTRACT_VERSION,
   MAX_FAILURE_REASON_V1,
   type BotPackageContextV1,
@@ -483,17 +484,18 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
 } satisfies Record<string, [keyof BotPackageContextV1, string][]>;
 
 /**
- * The keys the generated wrapper can place on `ctx`. Every grant member is
- * there when its grant is held; `modelTransport` is there only while a model
- * call is being served, which is why the SDK declares it optional like a
- * grant member rather than always-present like `ctx.bot`.
+ * The keys the generated wrapper can place on `ctx`. Every member of the
+ * context type is here: the common ones always, a grant member when its grant
+ * is held, and the serving-only ones — `modelTransport` above all — only while
+ * the host is serving a model call, which the contract names separately in
+ * `BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1`.
  */
 export const BOT_ISOLATE_NARROW_CONTEXT_KEYS_V1 = [
   ...Object.keys(BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1),
   ...Object.values(BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1).flatMap((members) =>
     members.map(([key]) => key),
   ),
-  "modelTransport",
+  ...BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1,
 ] as Array<keyof BotPackageContextV1>;
 
 /**

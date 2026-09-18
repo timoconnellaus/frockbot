@@ -3,12 +3,13 @@
 /// The server projects a `PluginsFrame` as a `ViewDocument`
 /// (`pluginsDocumentV1`), and this is the other end of that projection: every
 /// action's declared input names a `kind`, because an action id is opaque to
-/// the renderer. Two of the three kinds are commands the settings route
-/// already takes; the third is navigation, which no route owns.
+/// the renderer. Three of the four kinds are commands the settings route
+/// already takes; the fourth is navigation, which no route owns.
 library;
 
 const pluginActionKindsV1 = <String>{
   'install-package',
+  'uninstall-package',
   'set-package-enabled',
   'open-home',
 };
@@ -43,6 +44,9 @@ Map<String, Object?> pluginCommandV1(Map<String, Object?> command) {
       throw const FormatException('This action names no version.');
     }
     return {...meta, 'type': 'user/install-package', 'version': version};
+  }
+  if (pluginActionKindV1(command) == 'uninstall-package') {
+    return {...meta, 'type': 'user/uninstall-package'};
   }
   return {
     ...meta,

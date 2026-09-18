@@ -9,6 +9,10 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+  parseCredentialKeyringV1,
+  sealCredentialV1,
+} from "@frockbot/core/connection";
+import {
   pluginServedProviderV1,
   PLUGIN_SERVED_PROVIDERS_V1,
 } from "@frockbot/providers/catalog/definition";
@@ -32,6 +36,35 @@ const SCOPE = {
   requestId: "request-1",
 };
 
+/**
+ * A real keyring and a real sealed secret, so the tests that need to reach the
+ * fetch pass the same credential gate the Durable Object runs.
+ */
+const SERIALIZED_KEYRING =
+  '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}';
+
+async function sealedLease(effectId: string) {
+  const envelope = await sealCredentialV1({
+    keyring: parseCredentialKeyringV1(SERIALIZED_KEYRING),
+    context: {
+      accountId: "user-1",
+      connectionId: "connection-1",
+      packageId: "provider-deepseek",
+      credentialGeneration: "generation-1",
+    },
+    plaintext: "test-key",
+  });
+  return {
+    schemaVersion: 1 as const,
+    leaseId: "lease-1",
+    effectId,
+    connectionId: "connection-1",
+    credentialGeneration: "generation-1",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    envelope,
+  };
+}
+
 /** What the stand-in Bot object offers the handler. */
 interface BotStateStub {
   modelTransports: PluginModelDispatchRegistryV1;
@@ -49,7 +82,11 @@ function session(
 
 function begin(
   registry: PluginModelDispatchRegistryV1,
-  overrides: { requestId?: string; session?: unknown } = {},
+  overrides: {
+    requestId?: string;
+    session?: unknown;
+    deadlineAt?: number;
+  } = {},
 ) {
   return registry.begin({
     requestId: overrides.requestId ?? SCOPE.requestId,
@@ -64,7 +101,7 @@ function begin(
     route: "/chat/completions",
     maxOutputTokens: 8_192,
     scope: SCOPE,
-    deadlineAt: Date.now() + 60_000,
+    deadlineAt: overrides.deadlineAt ?? Date.now() + 60_000,
   });
 }
 
@@ -80,9 +117,15 @@ describe("the dispatch registry", () => {
   test("carries what the host admitted, and what it later saw", () => {
     const registry = new PluginModelDispatchRegistryV1();
     const { handle } = begin(registry);
-    expect(handle.spent()).toBe(false);
+    expect(handle.sent()).toBe(false);
     const dispatch = registry.take(handle.transportId)!;
-    expect(handle.spent()).toBe(true);
+    // Spending the ticket is not sending: only the fetch says a call left.
+    expect(handle.sent()).toBe(false);
+    dispatch.sent = true;
+    expect(handle.sent()).toBe(true);
+    expect(handle.priorOutcomeUnknown()).toBe(false);
+    dispatch.priorOutcomeUnknown = true;
+    expect(handle.priorOutcomeUnknown()).toBe(true);
     expect(handle.refusal()).toBeUndefined();
     dispatch.refusal = { httpStatus: 429, classification: "transient" };
     expect(handle.refusal()).toEqual({
@@ -230,6 +273,10 @@ function botState(options: {
   connectionState?: "ready" | "revoked";
   connectionGeneration?: string;
   connectionPackageId?: string;
+  /** Makes the transport's credential gate pass, so the fetch is reached. */
+  credentials?: boolean;
+  /** The upstream answer, or a fetcher that fails before answering. */
+  fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }) {
   const requestId = options.requestId ?? SCOPE.requestId;
   const session = { id: SCOPE.sessionId, events: options.events };
@@ -255,7 +302,11 @@ function botState(options: {
         },
       },
     },
+    outboundFetch: options.fetch,
     env: {
+      ...(options.credentials === true
+        ? { CREDENTIAL_KEYRING: SERIALIZED_KEYRING }
+        : {}),
       USER_CONFIGURATIONS: {
         idFromName: (name: string) => name,
         get: () => ({
@@ -270,6 +321,9 @@ function botState(options: {
               },
             ],
           }),
+          ...(options.credentials === true
+            ? { leaseModelCredential: async () => sealedLease(requestId) }
+            : {}),
         }),
       },
     },
@@ -294,7 +348,14 @@ const modelRequest = (requestId: string) => ({
   },
 });
 
-function transportCall(transportId: string) {
+function transportCall(
+  transportId: string,
+  body: Record<string, unknown> = {
+    model: "deepseek-v4-pro",
+    stream: true,
+    max_tokens: 1_024,
+  },
+) {
   return {
     userId: "user-1",
     botId: SCOPE.botId,
@@ -306,11 +367,7 @@ function transportCall(transportId: string) {
     request: {
       schemaVersion: 1,
       transportId,
-      body: JSON.stringify({
-        model: "deepseek-v4-pro",
-        stream: true,
-        max_tokens: 1_024,
-      }),
+      body: JSON.stringify(body),
     },
   };
 }
@@ -391,9 +448,38 @@ describe("the transport handler, before anything is sent", () => {
     );
   });
 
-  test("sends nothing for an effect the kernel dispatched a second time", async () => {
+  test("sends nothing for an effect the kernel dispatched a second time, and keeps its possible cost", async () => {
     // The conservative first-slice rule: one request id is one upstream call,
-    // even when the first attempt's outcome is unknown.
+    // even when the first attempt's outcome is unknown. Unknown is the point:
+    // the log carries no outcome for it, so whether the provider accepted and
+    // billed the first call is exactly what is not known, and erasing it with
+    // a definitive no-effect result would be the wrong way round.
+    const state = botState({
+      events: [modelRequest(SCOPE.requestId), modelRequest(SCOPE.requestId)],
+    });
+    const { handle } = begin((state as never as BotStateStub).modelTransports, {
+      session: state.session,
+    });
+    const outcome = await isolateModelTransport(
+      state as never,
+      transportCall(handle.transportId),
+    );
+    expect(outcome).toMatchObject({ status: "unavailable" });
+    expect(String((outcome as { reason: string }).reason)).toMatch(
+      /not sent twice/,
+    );
+    expect(handle.sent()).toBe(false);
+    // No refusal: the adapter settles this as uncertainty and records the
+    // estimate, rather than a call that never happened. The dispatch says so
+    // itself, because this ticket is not the call whose cost is in question.
+    expect(handle.refusal()).toBeUndefined();
+    expect(handle.priorOutcomeUnknown()).toBe(true);
+  });
+
+  test("a second dispatch of an effect the log already accounted for adds nothing", async () => {
+    // The first dispatch settled and its usage is durable, so the effect is
+    // paid for already: refusing to send again is a definitive result, and no
+    // second estimate is recorded.
     const state = botState({
       events: [
         modelRequest(SCOPE.requestId),
@@ -412,6 +498,11 @@ describe("the transport handler, before anything is sent", () => {
     expect(String((outcome as { reason: string }).reason)).toMatch(
       /not sent twice/,
     );
+    expect(handle.sent()).toBe(false);
+    expect(handle.refusal()).toMatchObject({ classification: "permanent" });
+    // The effect is accounted for, so nothing about it is uncertain: this
+    // refusal must not become a second estimate.
+    expect(handle.priorOutcomeUnknown()).toBe(false);
   });
 
   test("sends nothing when the Connection was revoked or replaced", async () => {
@@ -459,6 +550,215 @@ describe("the transport handler, before anything is sent", () => {
         transportCall(handle.transportId),
       ),
     ).toMatchObject({ status: "refused" });
+  });
+});
+
+/**
+ * A refusal the host itself makes is a call that did not happen, and it has to
+ * be recorded as one: the adapter reads the host's own answer to decide
+ * whether the effect may be settled without an estimate (ADR 0032).
+ */
+describe("a refusal the host makes before the fetch", () => {
+  /** The upstream requests the host issues: a refusal here means none. */
+  function upstream() {
+    const made: string[] = [];
+    return {
+      made,
+      fetch: async (url: string): Promise<Response> => {
+        made.push(url);
+        return new Response("not reached", { status: 200 });
+      },
+    };
+  }
+
+  test("a body the host will not send is recorded as a definitive refusal", async () => {
+    const requests = upstream();
+    const state = botState({
+      events: [modelRequest(SCOPE.requestId)],
+      credentials: true,
+      fetch: requests.fetch,
+    });
+    const { handle } = begin((state as never as BotStateStub).modelTransports, {
+      session: state.session,
+    });
+    const outcome = await isolateModelTransport(
+      state as never,
+      transportCall(handle.transportId, {
+        model: "deepseek-v4-flash",
+        stream: true,
+        max_tokens: 1_024,
+      }),
+    );
+    expect(outcome).toMatchObject({ status: "refused" });
+    expect(String((outcome as { reason: string }).reason)).toMatch(
+      /not admitted/,
+    );
+    expect(handle.sent()).toBe(false);
+    expect(handle.refusal()).toMatchObject({
+      httpStatus: 0,
+      classification: "permanent",
+    });
+    expect(requests.made).toEqual([]);
+  });
+
+  test("a clock that ran out before the transport began is recorded too", async () => {
+    const requests = upstream();
+    const state = botState({
+      events: [modelRequest(SCOPE.requestId)],
+      credentials: true,
+      fetch: requests.fetch,
+    });
+    const { handle } = begin((state as never as BotStateStub).modelTransports, {
+      session: state.session,
+      deadlineAt: Date.now() - 1,
+    });
+    const outcome = await isolateModelTransport(
+      state as never,
+      transportCall(handle.transportId),
+    );
+    expect(outcome).toMatchObject({ status: "refused" });
+    expect(String((outcome as { reason: string }).reason)).toMatch(
+      /time ran out/,
+    );
+    expect(handle.sent()).toBe(false);
+    expect(handle.refusal()).toMatchObject({ classification: "permanent" });
+    expect(requests.made).toEqual([]);
+  });
+
+  test("a Connection that is not ready is a refusal, not an unknown outcome", async () => {
+    const requests = upstream();
+    const state = botState({
+      events: [modelRequest(SCOPE.requestId)],
+      credentials: true,
+      connectionState: "revoked",
+      fetch: requests.fetch,
+    });
+    const { handle } = begin((state as never as BotStateStub).modelTransports, {
+      session: state.session,
+    });
+    const outcome = await isolateModelTransport(
+      state as never,
+      transportCall(handle.transportId),
+    );
+    expect(outcome).toMatchObject({ status: "refused" });
+    expect(handle.sent()).toBe(false);
+    expect(handle.refusal()).toMatchObject({ classification: "permanent" });
+    expect(requests.made).toEqual([]);
+  });
+
+  test("a credential the host cannot open refuses too, with nothing sent", async () => {
+    const requests = upstream();
+    const state = botState({
+      events: [modelRequest(SCOPE.requestId)],
+      fetch: requests.fetch,
+    });
+    const { handle } = begin((state as never as BotStateStub).modelTransports, {
+      session: state.session,
+    });
+    const outcome = await isolateModelTransport(
+      state as never,
+      transportCall(handle.transportId),
+    );
+    expect(outcome).toMatchObject({ status: "unavailable" });
+    expect(String((outcome as { reason: string }).reason)).toMatch(
+      /credential is unavailable/,
+    );
+    // No credential is not an unknown outcome: the host made the call and
+    // refused it before the fetch, so the failure is definitive and costs
+    // nothing — but the classification is unknown because nothing here says
+    // whether a retry would find the key.
+    expect(handle.sent()).toBe(false);
+    expect(handle.priorOutcomeUnknown()).toBe(false);
+    expect(handle.refusal()).toMatchObject({
+      httpStatus: 0,
+      classification: "unknown",
+    });
+    expect(requests.made).toEqual([]);
+  });
+});
+
+/**
+ * Once the fetch is issued the dispatch is a call the provider may have billed,
+ * and only a status the host reads itself can say otherwise. Nothing here is
+ * the Plugin's account of the call: it is what the host observed of it.
+ */
+describe("what the host records of a call it sent", () => {
+  async function call(
+    fetch: (url: string, init: RequestInit) => Promise<Response>,
+  ) {
+    const state = botState({
+      events: [modelRequest(SCOPE.requestId)],
+      credentials: true,
+      fetch,
+    });
+    const { handle } = begin((state as never as BotStateStub).modelTransports, {
+      session: state.session,
+    });
+    const outcome = await isolateModelTransport(
+      state as never,
+      transportCall(handle.transportId),
+    );
+    return { handle, outcome };
+  }
+
+  test("the provider's refusal keeps the ticket a call with no bill", async () => {
+    const { handle, outcome } = await call(
+      async () =>
+        new Response("", { status: 429, headers: { "retry-after": "2" } }),
+    );
+    expect(outcome).toMatchObject({ status: "refused", httpStatus: 429 });
+    expect(handle.sent()).toBe(true);
+    expect(handle.refusal()).toEqual({
+      httpStatus: 429,
+      classification: "transient",
+      retryAfterMs: 2_000,
+    });
+  });
+
+  test("a 5xx is uncertainty: the call left, and no refusal is recorded", async () => {
+    const { handle, outcome } = await call(
+      async () => new Response("", { status: 500 }),
+    );
+    expect(outcome).toMatchObject({ status: "unavailable" });
+    expect(String((outcome as { reason: string }).reason)).toMatch(
+      /outcome of the model request is unknown/,
+    );
+    expect(handle.sent()).toBe(true);
+    expect(handle.refusal()).toBeUndefined();
+  });
+
+  test("a call that never answered is uncertainty too", async () => {
+    const { handle, outcome } = await call(async () => {
+      throw new Error("network down");
+    });
+    expect(outcome).toMatchObject({ status: "unavailable" });
+    expect(String((outcome as { reason: string }).reason)).toMatch(
+      /could not be reached/,
+    );
+    expect(handle.sent()).toBe(true);
+    expect(handle.refusal()).toBeUndefined();
+  });
+
+  test("the call the host makes carries its own headers and the durable key", async () => {
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    const { handle, outcome } = await call(async (url, init) => {
+      seen.push({ url, init });
+      return new Response("data: [DONE]\n\n", { status: 200 });
+    });
+    expect(outcome).toMatchObject({ status: "streaming", httpStatus: 200 });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toBe("https://api.deepseek.com/chat/completions");
+    expect(seen[0]!.init).toMatchObject({
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        authorization: "Bearer test-key",
+        "idempotency-key": SCOPE.requestId,
+      },
+    });
+    if (outcome.status !== "streaming") throw new Error("no stream");
+    await outcome.body.cancel();
+    handle.finish();
   });
 });
 

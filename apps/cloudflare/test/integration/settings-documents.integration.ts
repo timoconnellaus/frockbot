@@ -24,6 +24,7 @@ interface Node {
   type: string;
   text?: string;
   title?: string;
+  label?: string;
   children?: Node[];
   field?: { id: string; kind: string; value: unknown };
   actionId?: string;
@@ -125,5 +126,92 @@ describe("the Capabilities document", () => {
     )) as { schemaVersion: number; plugins: { packageId: string }[] };
     expect(frame.schemaVersion).toBe(1);
     expect(frame.plugins.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the Plugins document", () => {
+  /** The account's revision, for the next command to fence itself against. */
+  async function revision(userId: string): Promise<number> {
+    const settings = (await expectOkJson(
+      await asUser(userId, "/api/settings?view=2"),
+    )) as { revision: number };
+    return settings.revision;
+  }
+
+  function pluginRows(document: Document): Node[] {
+    return walk(document.root).filter(
+      (node) => node.type === "group" && node.title?.startsWith("DeepSeek"),
+    );
+  }
+
+  it("lists an installed provider Plugin, and removes it with its Package", async () => {
+    const userId = freshUserId("plugins-provider-doc");
+    const enabled = await enableCustomModels(userId, "custom-models");
+    const read = async () =>
+      (await expectOkJson(
+        await asUser(userId, "/api/settings/plugins?as=document"),
+      )) as Document;
+
+    // Installing the provider Package is what installs the Plugin, and until
+    // that happens there is nothing here to see: adding a provider is Models'
+    // decision, and a not-installed built-in is not a Plugin this account has.
+    expect(pluginRows(await read())).toHaveLength(0);
+
+    await expectOkJson(
+      await postAsUser(userId, "/api/settings", {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "install-deepseek",
+        expectedRevision: enabled,
+        packageId: "provider-deepseek",
+        version: "0.0.1",
+      }),
+    );
+
+    const document = await read();
+    const rows = pluginRows(document);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.title).toBe("DeepSeek · On");
+    // The row describes the Plugin that runs the Turn, not the compiled
+    // Package's capability list.
+    expect(
+      walk(rows[0]!).some(
+        (node) =>
+          node.type === "text" &&
+          node.text?.startsWith("Run this Bot's replies on DeepSeek models."),
+      ),
+    ).toBe(true);
+    const controls = walk(rows[0]!).filter((node) => node.type === "action");
+    expect(controls.map((node) => node.input?.kind)).toEqual([
+      "open-home",
+      "set-package-enabled",
+      "uninstall-package",
+    ]);
+    expect(controls.at(-1)!.label).toBe("Remove");
+    expect(
+      document.actions.some((action) => action.id === "uninstall-package"),
+    ).toBe(true);
+
+    // The same row reaches a client that reads the frame itself.
+    const frame = (await expectOkJson(
+      await asUser(userId, "/api/settings/plugins"),
+    )) as { plugins: { packageId: string; state: string }[] };
+    expect(frame.plugins.map((plugin) => plugin.packageId)).toEqual([
+      "provider-deepseek",
+    ]);
+    expect(frame.plugins[0]!.state).toBe("installed");
+
+    // Uninstalling the Package is what takes the Plugin out of the account,
+    // so the row goes with it rather than redrawing as something to add.
+    await expectOkJson(
+      await postAsUser(userId, "/api/settings", {
+        schemaVersion: 1,
+        type: "user/uninstall-package",
+        commandId: "uninstall-deepseek",
+        expectedRevision: await revision(userId),
+        packageId: "provider-deepseek",
+      }),
+    );
+    expect(pluginRows(await read())).toHaveLength(0);
   });
 });
