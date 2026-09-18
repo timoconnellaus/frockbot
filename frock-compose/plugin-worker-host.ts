@@ -217,6 +217,21 @@ export interface PluginMountFailureV1 {
   message: string;
 }
 
+/**
+ * One model provider this deployment serves through a Plugin, and the bytes
+ * that serve it (ADR 0032): the Plugin the deployment's provider catalog names
+ * for the provider, at its own artifact. It is the deployment's answer and
+ * never a member's claim, which is what keeps "this Plugin serves this
+ * provider" a fact about content and not about a descriptor.
+ */
+export interface PluginServedProviderClaimV1 {
+  provider: string;
+  /** The Plugin the catalog names for the provider. */
+  pluginId: string;
+  /** The content hash of that Plugin's own artifact. */
+  contentHash: string;
+}
+
 export interface PluginWorkerHostOptions {
   loader: BotIsolateLoader;
   artifacts: BotIsolateArtifactStore;
@@ -279,30 +294,29 @@ export interface PluginWorkerHostOptions {
    */
   enabled?: readonly string[];
   /**
-   * The model provider contribution this mount offers (ADR 0032): the
-   * provider the Bot's model selection names, and the deployment's own entry
-   * for it — which Plugin may serve it, and the artifact that Plugin is.
+   * Every model provider this deployment serves through a Plugin, and the
+   * Plugin and artifact that may serve each (ADR 0032). It is a property of
+   * the deployment, not of a Bot's selection, so every mount supplies it: an
+   * account that installed a provider's Plugin still carries it in its
+   * Composition while its Bot's model is something else, and only this makes
+   * such a member mountable.
    *
-   * Only that Plugin, at that artifact, serves it. A member declaring the
-   * provider whose id or artifact differs — a Plugin a Bot wrote, above all —
-   * is refused here, and so is a second claimant. Absent leaves every model
-   * contribution unmounted.
-   *
-   * Selection is what runs a provider contribution, not the Bot's plugin
-   * switch: a Bot whose model is this provider is served by it whatever the
-   * switch says, and the switch's own tools and hooks stay off until it is
-   * on.
+   * A member declaring one of these providers is served by it only as that
+   * Plugin at that artifact: a claimant whose id or artifact differs — a
+   * Plugin a Bot wrote, above all — is refused here, and so is a second
+   * claimant, whatever order the generation lists them in. A member declaring
+   * a provider this lists none of is refused with the reason. Absent means
+   * this deployment opens none to Plugins.
    */
-  modelProviders?: {
-    provider: string;
-    trusted: {
-      pluginId: string;
-      /** The content hash of the catalog's own artifact for that Plugin. */
-      contentHash: string;
-    };
-    /** Every provider id this deployment opens to Plugins at all. */
-    open: readonly string[];
-  };
+  openModelProviders?: readonly PluginServedProviderClaimV1[];
+  /**
+   * The one provider this Bot's model selection runs, when it names one the
+   * entries above serve. Selection is what runs a provider contribution, not
+   * the Bot's plugin switch: a Bot whose model is this provider is served by
+   * it whatever the switch says, and the switch's own tools and hooks stay
+   * off until it is on. Absent leaves every model contribution unserved.
+   */
+  selectedModelProvider?: string;
 }
 
 /** One model provider contribution this worker mounted and this Bot selected. */
@@ -664,29 +678,39 @@ export class PluginWorkerHost {
   ): Promise<PreparedPluginWorker> {
     const failures: PluginMountFailureV1[] = [];
     const refused = new Set<string>();
-    // One provider, one contribution, and it is the deployment's own. The
-    // generation lists its members in package-id order, so the first claimant
-    // that is the trusted Plugin at the trusted artifact serves it; every
-    // other claimant — a Bot-written Plugin above all — fails alone with the
-    // reason, and a Plugin that fails reserves nothing.
+    // One provider, one contribution, and it is the deployment's own. What
+    // may serve a provider is the deployment's compiled claim, judged by the
+    // member's own id and artifact bytes — never by who claimed it first, so
+    // the generation's package-id order cannot hand a provider to a
+    // Bot-written claimant. A Plugin that fails reserves nothing.
+    const open = new Map(
+      (this.options.openModelProviders ?? []).map((claim) => [
+        claim.provider,
+        claim,
+      ]),
+    );
     const claimed = new Set<string>();
-    const trusted = this.options.modelProviders?.trusted;
     for (const member of members) {
       const providers = member.descriptor.modelProviders ?? [];
-      const untrusted = providers.find(
-        (provider) =>
-          provider.id === this.options.modelProviders?.provider &&
-          trusted !== undefined &&
-          (member.packageId !== trusted.pluginId ||
-            member.artifact.contentHash !== trusted.contentHash),
-      );
+      let untrusted: { id: string; servedBy: string } | undefined;
+      for (const provider of providers) {
+        const claim = open.get(provider.id);
+        if (
+          claim !== undefined &&
+          (member.packageId !== claim.pluginId ||
+            member.artifact.contentHash !== claim.contentHash)
+        ) {
+          untrusted = { id: provider.id, servedBy: claim.pluginId };
+          break;
+        }
+      }
       const claimedAlready =
         untrusted === undefined
           ? providers.find((provider) => claimed.has(provider.id))
           : undefined;
       const refusal =
         untrusted !== undefined
-          ? `plugin "${member.packageId}" claims model provider "${untrusted.id}", which this deployment serves only through the Plugin "${trusted!.pluginId}" at its own artifact`
+          ? `plugin "${member.packageId}" claims model provider "${untrusted.id}", which this deployment serves only through the Plugin "${untrusted.servedBy}" at its own artifact`
           : claimedAlready === undefined
             ? this.refusal(member)
             : `plugin "${member.packageId}" serves model provider "${claimedAlready.id}", which an earlier plugin in this generation already serves`;
@@ -894,7 +918,7 @@ export class PluginWorkerHost {
     // chosen from what mounted and survived — never from the Bot's switch,
     // because selecting a provider is the decision that runs it — and only
     // for the one provider the selection named.
-    const selectedProvider = this.options.modelProviders?.provider;
+    const selectedProvider = this.options.selectedModelProvider;
     const modelProviders: MountedModelProviderV1[] =
       selectedProvider === undefined
         ? []
@@ -1237,9 +1261,11 @@ export class PluginWorkerHost {
     if (closedSlots.length > 0) {
       return `plugin "${pluginId}" declares slots this deployment has not opened: ${[...new Set(closedSlots)].join(", ")}`;
     }
-    const open = this.options.modelProviders?.open ?? [];
+    const open = new Set(
+      (this.options.openModelProviders ?? []).map((claim) => claim.provider),
+    );
     const closedProviders = (descriptor.modelProviders ?? []).filter(
-      (provider) => !open.includes(provider.id),
+      (provider) => !open.has(provider.id),
     );
     if (closedProviders.length > 0) {
       return `plugin "${pluginId}" serves model providers this deployment does not open to plugins: ${closedProviders

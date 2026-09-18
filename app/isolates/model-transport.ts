@@ -29,7 +29,6 @@ import { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
 import { retryAfterMillisecondsV1 } from "@frockbot/providers/openai-compatible";
 import { decodeOAuthTokenV1 } from "@frockbot/providers/catalog/oauth-protocol";
 import type { PluginServedProviderV1 } from "@frockbot/providers/catalog/definition";
-import { deploymentPluginArtifactHashV1 } from "@frockbot/app/plugins/catalog";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { userConfigurationV1 } from "@frockbot/app/settings/bot";
@@ -82,12 +81,6 @@ export interface ShellPluginModelHostV1 {
   /** The provider the Bot's model selection names. */
   readonly provider: string;
   /**
-   * The catalog Plugin that serves it, and the artifact it must be: a member
-   * whose id or content hash differs is not this provider's Plugin, whatever
-   * its descriptor claims.
-   */
-  readonly trusted: { pluginId: string; contentHash: string };
-  /**
    * Opens one dispatch for one attempt at one model call. The ticket it
    * returns is what the Plugin's transport call must present, and ending the
    * attempt aborts any upstream call the ticket started.
@@ -100,24 +93,6 @@ export interface ShellPluginModelHostV1 {
   }): ModelDispatchHandleV1;
   /** Releases the Connection's lease once the loop has settled the outcome. */
   settle(effectId: string): Promise<void>;
-}
-
-/**
- * The artifact the deployment's catalog installs for one Plugin, refused when
- * the catalog ships none. The hash is what makes "this Plugin serves this
- * provider" a fact about bytes rather than about a descriptor a member
- * carries, and it is the catalog's own answer — the same one the approval card
- * and the Bot Plugins page read — so no second reading of the artifact set can
- * drift from it.
- */
-function deploymentArtifactHashV1(pluginId: string): string {
-  const contentHash = deploymentPluginArtifactHashV1(pluginId);
-  if (contentHash === undefined) {
-    throw new Error(
-      `the deployment ships no Plugin "${pluginId}" for a provider it serves`,
-    );
-  }
-  return contentHash;
 }
 
 /**
@@ -141,10 +116,6 @@ export function createPluginModelHostV1(
 ): ShellPluginModelHostV1 {
   return {
     provider: binding.provider.provider,
-    trusted: {
-      pluginId: binding.provider.pluginId,
-      contentHash: deploymentArtifactHashV1(binding.provider.pluginId),
-    },
     begin: ({ scope, session, deadlineAt }) =>
       state.modelTransports.begin({
         requestId: scope.requestId,

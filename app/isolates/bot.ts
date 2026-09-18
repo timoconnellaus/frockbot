@@ -57,6 +57,7 @@ import { modelCharge, modelCost } from "@frockbot/app/billing/model";
 import { FROCK_AI_PROVIDER_TYPE } from "@frockbot/providers/frock-ai/catalog";
 import { memoryScopeRootV1 } from "@frockbot/app/memory/roots";
 import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
+import { PLUGIN_SERVED_PROVIDER_CLAIMS_V1 } from "@frockbot/app/plugins/catalog";
 import { pluginServedProviderV1 } from "@frockbot/providers/catalog/definition";
 import {
   readBotSettingsV1,
@@ -178,6 +179,10 @@ export async function isolateMountOptions(
     }),
     compatibilityDate: BOT_ISOLATE_COMPATIBILITY_DATE,
     enabled: turn.enabled,
+    // A property of the deployment, so every mount carries it: the members
+    // this Bot runs include any provider Plugin its account installed, whether
+    // or not this Bot's model names the provider.
+    openModelProviders: PLUGIN_SERVED_PROVIDER_CLAIMS_V1,
     onPluginFailure: (failure) =>
       notePluginFailureV1(
         state,
