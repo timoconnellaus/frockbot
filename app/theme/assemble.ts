@@ -15,7 +15,11 @@ import {
 } from "@frockbot/core/theme";
 import type { LoopEventPayloadMapV1 } from "@frockbot/core/contracts";
 import type { FlockBotBackendContribution } from "@frockbot/app/flock/bot";
-import type { BotLookV1, BotRegistrationV1, LookIdentityViewV1 } from "@frockbot/app/flock/shared";
+import type {
+  BotLookV1,
+  BotRegistrationV1,
+  LookIdentityViewV1,
+} from "@frockbot/app/flock/shared";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import {
   readBotPluginRosterV1,
@@ -39,11 +43,9 @@ export function rosterDeclaresThemeAssembleV1(
   );
 }
 
-export async function themeAssembleDeadlineV1(
-  storage: {
-    get<T>(key: string): Promise<T | undefined>;
-  },
-): Promise<number[]> {
+export async function themeAssembleDeadlineV1(storage: {
+  get<T>(key: string): Promise<T | undefined>;
+}): Promise<number[]> {
   const due = await storage.get<unknown>(THEME_ASSEMBLE_DUE_KEY_V1);
   return typeof due === "number" && Number.isFinite(due) ? [due] : [];
 }

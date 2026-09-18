@@ -23,7 +23,11 @@ import {
   type LookIdentityViewV1,
   type UpdateLookCommandV1,
 } from "./shared.js";
-import { defaultBotLookV1, type BotLookV1, type ThemeDocumentV1 } from "@frockbot/core/theme";
+import {
+  defaultBotLookV1,
+  type BotLookV1,
+  type ThemeDocumentV1,
+} from "@frockbot/core/theme";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 
 const IDENTITY_KEY = "flock:avatar:v1";

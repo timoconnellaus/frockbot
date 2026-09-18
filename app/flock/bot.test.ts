@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { createFlockBotBackendContribution } from "./bot.js";
-import { FlockConflictError, FlockDecodeError, randomAvatarAppearanceV1 } from "./shared.js";
+import {
+  FlockConflictError,
+  FlockDecodeError,
+  randomAvatarAppearanceV1,
+} from "./shared.js";
 import { STUDIO_DOCUMENT_V1 } from "@frockbot/core/theme";
 
 class MemoryStorage {
@@ -177,7 +181,9 @@ describe("Flock Bot contribution", () => {
     expect(await create().readLook(registration, "user-1")).toMatchObject({
       look: "studio",
     });
-    expect((await create().readLook(registration, "user-1")).document).toBeUndefined();
+    expect(
+      (await create().readLook(registration, "user-1")).document,
+    ).toBeUndefined();
   });
 
   test("archives idempotently, fences mutations, rejects active work, and restores data", async () => {

@@ -17,7 +17,9 @@ import type { BotPluginRosterV1 } from "@frockbot/app/plugins/worker-bot";
 class MemoryStorage {
   values = new Map<string, unknown>();
   get<T>(key: string): Promise<T | undefined> {
-    return Promise.resolve(structuredClone(this.values.get(key)) as T | undefined);
+    return Promise.resolve(
+      structuredClone(this.values.get(key)) as T | undefined,
+    );
   }
   put<T>(key: string | Record<string, unknown>, value?: T): Promise<void> {
     if (typeof key === "string") this.values.set(key, structuredClone(value));
@@ -35,9 +37,9 @@ class MemoryStorage {
   list<T>({ prefix }: { prefix: string }): Promise<Map<string, T>> {
     return Promise.resolve(
       new Map(
-        [...this.values.entries()].filter(([key]) => key.startsWith(prefix)) as Array<
-          [string, T]
-        >,
+        [...this.values.entries()].filter(([key]) =>
+          key.startsWith(prefix),
+        ) as Array<[string, T]>,
       ),
     );
   }
@@ -72,7 +74,8 @@ function roster(hooks: string[] = []): BotPluginRosterV1 {
                 version: "1",
                 contractVersion: 7,
                 tools: [],
-                hooks: hooks as BotPluginRosterV1["members"][number]["descriptor"]["hooks"],
+                hooks:
+                  hooks as BotPluginRosterV1["members"][number]["descriptor"]["hooks"],
                 grants: [],
                 contextKeys: [],
               },

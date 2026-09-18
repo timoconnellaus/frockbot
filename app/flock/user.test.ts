@@ -212,7 +212,11 @@ describe("Flock User contribution", () => {
     expect(
       (await contribution.mirrorLook("alpha", "studio", document)).revision,
     ).toBe(2);
-    const dropped = await contribution.mirrorLook("alpha", "inherit", undefined);
+    const dropped = await contribution.mirrorLook(
+      "alpha",
+      "inherit",
+      undefined,
+    );
     expect(dropped.bots[0]).toMatchObject({ look: "inherit" });
     expect(dropped.bots[0]).not.toHaveProperty("document");
   });

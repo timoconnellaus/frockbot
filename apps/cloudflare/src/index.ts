@@ -540,7 +540,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     updateVoice: (request) => rpc.updateVoice(request),
     readLook: (request) => rpc.readLook(request),
     updateLook: (request) => rpc.updateLook(request),
-    persistAssembledDocument: (request) => rpc.persistAssembledDocument(request),
+    persistAssembledDocument: (request) =>
+      rpc.persistAssembledDocument(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     readBotPluginsFrame: (request) => rpc.readBotPluginsFrame(request),

@@ -755,9 +755,7 @@ class MemoryConfiguration
       ...(request.document === undefined ? {} : { document: request.document }),
     });
   }
-  readBotLook(
-    request: Parameters<UserConfigurationBinding["readBotLook"]>[0],
-  ) {
+  readBotLook(request: Parameters<UserConfigurationBinding["readBotLook"]>[0]) {
     return this.readLook(request);
   }
   updateBotLook(

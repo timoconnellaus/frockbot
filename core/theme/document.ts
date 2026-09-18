@@ -256,9 +256,7 @@ function assertNoForbiddenKeys(value: unknown, label: string): void {
   }
   for (const key of Object.keys(value as Record<string, unknown>)) {
     if ((THEME_FORBIDDEN_KEYS_V1 as readonly string[]).includes(key)) {
-      throw new ThemeDocumentDecodeError(
-        `${label} must not carry "${key}"`,
-      );
+      throw new ThemeDocumentDecodeError(`${label} must not carry "${key}"`);
     }
     assertNoForbiddenKeys(
       (value as Record<string, unknown>)[key],
@@ -337,7 +335,10 @@ export function relativeLuminanceV1(color: string): number {
   return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
 }
 
-export function contrastRatioV1(foreground: string, background: string): number {
+export function contrastRatioV1(
+  foreground: string,
+  background: string,
+): number {
   const left = relativeLuminanceV1(foreground);
   const right = relativeLuminanceV1(background);
   const lighter = Math.max(left, right);
@@ -364,7 +365,12 @@ function assertContrast(tokens: ThemeTokensV1, label: string): void {
 export function decodeThemeDocumentV1(input: unknown): ThemeDocumentV1 {
   assertNoForbiddenKeys(input, "theme document");
   const value = record(input, "theme document");
-  exact(value, ["schemaVersion", "look", "tokens"], ["phases"], "theme document");
+  exact(
+    value,
+    ["schemaVersion", "look", "tokens"],
+    ["phases"],
+    "theme document",
+  );
   if (value.schemaVersion !== 1) {
     throw new ThemeDocumentDecodeError("unsupported theme document");
   }
@@ -374,7 +380,10 @@ export function decodeThemeDocumentV1(input: unknown): ThemeDocumentV1 {
     value.phases === undefined
       ? undefined
       : (() => {
-          if (!Array.isArray(value.phases) || value.phases.length > MAX_PHASES_V1) {
+          if (
+            !Array.isArray(value.phases) ||
+            value.phases.length > MAX_PHASES_V1
+          ) {
             throw new ThemeDocumentDecodeError(
               "theme document.phases must be a bounded array",
             );
@@ -402,7 +411,9 @@ export function decodeThemeDocumentV1(input: unknown): ThemeDocumentV1 {
 export function decodeAccountAppearanceV1(input: unknown): AccountAppearanceV1 {
   const value = record(input, "account appearance");
   exact(value, ["look"], [], "account appearance");
-  return { look: oneOf(value.look, ACCOUNT_LOOKS_V1, "account appearance.look") };
+  return {
+    look: oneOf(value.look, ACCOUNT_LOOKS_V1, "account appearance.look"),
+  };
 }
 
 export function decodeBotLookV1(input: unknown): BotLookV1 {

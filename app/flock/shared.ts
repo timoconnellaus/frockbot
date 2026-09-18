@@ -491,9 +491,7 @@ export function decodeUpdateVoiceCommandV1(
   };
 }
 
-export function decodeUpdateLookCommandV1(
-  input: unknown,
-): UpdateLookCommandV1 {
+export function decodeUpdateLookCommandV1(input: unknown): UpdateLookCommandV1 {
   const value = record(input, "update look command");
   exact(value, [
     "schemaVersion",
@@ -517,11 +515,7 @@ export function decodeUpdateLookCommandV1(
 
 export function decodeLookIdentityViewV1(input: unknown): LookIdentityViewV1 {
   const value = record(input, "look identity");
-  exact(
-    value,
-    ["schemaVersion", "botId", "revision", "look"],
-    ["document"],
-  );
+  exact(value, ["schemaVersion", "botId", "revision", "look"], ["document"]);
   if (value.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported look identity");
   return {

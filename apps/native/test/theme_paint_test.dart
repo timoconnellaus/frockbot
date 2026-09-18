@@ -44,7 +44,7 @@ Color threadWindow(WidgetTester tester, String botId) => tester
         matching: find.byType(ColoredBox),
       ),
     )
-    .color!;
+    .color;
 
 Theme panelTheme(WidgetTester tester) =>
     tester.widget<Theme>(find.byKey(const ValueKey('panel-theme')));
