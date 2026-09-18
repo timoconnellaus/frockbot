@@ -11,11 +11,9 @@ import { expect, field, openApplication, sem, test } from "./fixtures.ts";
 import type { Page } from "@playwright/test";
 
 /**
- * The one colour the product is named after: `FrockTheme.accent`, the pixel
- * this spec samples (`#db4b6d` since the rose accent landed in #533). The
- * marketing site and the admin portal spell the same value `--pink`.
+ * The default Ink look's accessible pink accent, sampled at full opacity.
  */
-const FROCKBOT_PINK: [number, number, number] = [219, 75, 109];
+const INK_ACCENT: [number, number, number] = [208, 63, 100];
 
 type Colour = [number, number, number];
 
@@ -124,5 +122,5 @@ test("uses dark product surfaces with the FrockBot pink action", async ({
       y: Math.round(submit.y + submit.height / 2),
     },
   });
-  expect(action.action).toEqual(FROCKBOT_PINK);
+  expect(action.action).toEqual(INK_ACCENT);
 });
