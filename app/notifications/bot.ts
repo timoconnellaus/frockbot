@@ -15,6 +15,10 @@ import {
   shellTerminalRecordsV1,
   supersededTurnRecordsV1,
 } from "@frockbot/app/shell/terminal-records";
+import {
+  pendingInputSettlementWritesV1,
+  requeueDrainedInputsV1,
+} from "@frockbot/app/routines/inbox-store";
 
 export async function listNotifications(
   state: ShellBotStateV1,
@@ -63,7 +67,7 @@ export async function failedTurnRecordsV1(input: {
     (event) => event.type === "turn/admission" && event.turnType !== "chat",
   );
   if (automation) return {};
-  return visibleMessageRecordsV1({
+  const records = await visibleMessageRecordsV1({
     settings: input.settings,
     read: input.read,
     messages: [
@@ -78,6 +82,17 @@ export async function failedTurnRecordsV1(input: {
       },
     ],
   });
+  // A chat Turn drains the pending queue before the model runs, so a Turn that
+  // then failed consumed hand-offs it never delivered. The person used to be
+  // there to ask again; a delivery Turn the alarm opened has nobody, and the
+  // failure notice would stand alone over a morning's triage nothing carried.
+  // The drained inputs go back on the queue in the transaction that settles
+  // the failure, so the Bot's next conversational Turn carries them.
+  await requeueDrainedInputsV1(
+    pendingInputSettlementWritesV1(records, input.read),
+    input.failed.runId,
+  );
+  return records;
 }
 
 /**

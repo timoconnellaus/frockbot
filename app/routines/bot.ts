@@ -639,28 +639,33 @@ export async function settleScheduledWork(
  * One Turn covers every waiting hand-off, for the same reason.
  */
 async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
-  const identity = await state.authority.readDurableIdentity();
-  if (!identity) return;
-  const pending = await state.routineInbox.pending();
-  const owed = pending.flatMap(({ key, input }) =>
-    input.kind === "wake" && input.deliveredAt === undefined
-      ? [{ key, wake: input }]
-      : [],
-  );
-  const routineOwed = owed.filter(({ wake }) => wake.source !== "subagent");
-  if (routineOwed.length === 0) return;
-  // A run already occupies the object — the person is talking to the Bot, or a
-  // firing is still going. Delivering into that would either be refused or
-  // supersede what is running, and the hand-off is owed, not urgent: the next
-  // alarm opens the Turn, and a conversation the person started in the
-  // meantime drains the queue itself, which is the better delivery anyway.
-  if (await state.authority.readActiveRunId()) return;
-  const { wake } = routineOwed.at(-1)!;
-  // Marked before the Turn is admitted, and for every hand-off this Turn will
-  // drain rather than only the newest: a delivery that throws must not leave
-  // the alarm opening a fresh Turn for the same hand-offs for ever.
-  for (const { key } of owed) await state.routineInbox.markDelivered(key);
   try {
+    const identity = await state.authority.readDurableIdentity();
+    if (!identity) return;
+    const pending = await state.routineInbox.pending();
+    const routineOwed = pending.flatMap(({ key, input }) =>
+      input.kind === "wake" &&
+      input.deliveredAt === undefined &&
+      input.source !== "subagent"
+        ? [{ key, wake: input }]
+        : [],
+    );
+    if (routineOwed.length === 0) return;
+    // A run already occupies the object — the person is talking to the Bot, or
+    // a firing is still going. Delivering into that would either be refused or
+    // supersede what is running, and the hand-off is owed, not urgent: the next
+    // alarm opens the Turn, and a conversation the person started in the
+    // meantime drains the queue itself, which is the better delivery anyway.
+    if (await state.authority.readActiveRunId()) return;
+    const { wake } = routineOwed.at(-1)!;
+    // Marked before the Turn is admitted, and for every hand-off this Turn is
+    // being opened for rather than only the newest: a delivery that throws must
+    // not leave the alarm opening a fresh Turn for the same hand-offs for ever.
+    // Only those, because `deliveredAt` says a delivery Turn was opened for
+    // this wake, and none is ever opened for a subagent's.
+    for (const { key } of routineOwed) {
+      await state.routineInbox.markDelivered(key);
+    }
     await admitTurnV1(state, {
       userId: identity.userId,
       botId: identity.botId,
@@ -679,7 +684,9 @@ async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
   } catch {
     // The hand-off is still queued and still drains into the Bot's next
     // conversational Turn. A failed delivery costs this hand-off its proactive
-    // Turn, never the hand-off itself, and never the rest of the alarm.
+    // Turn, never the hand-off itself, and never the rest of the alarm: an
+    // undecodable pending input throws on every pass, and it used to cost this
+    // Bot its approval expiry and its owed subagent Turns for good.
   }
 }
 

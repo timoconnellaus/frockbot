@@ -43,6 +43,7 @@ import { createAppletInstanceBindingV1 } from "@frockbot/app/applets-host/record
 import { isolateMountOptions } from "@frockbot/app/isolates/bot";
 import { settlePluginHealthV1 } from "@frockbot/app/plugins/health";
 import { pendingBotInputPreambleV1 } from "@frockbot/app/routines/inbox";
+import { requeueDrainedInputsV1 } from "@frockbot/app/routines/inbox-store";
 import { resolveExecutionContextV1 } from "@frockbot/app/settings/bot";
 import {
   createShellCompositionHost,
@@ -176,6 +177,14 @@ export async function stopRun(
         stopRequestedAt,
       } satisfies StoredStopReceipt,
     });
+    // A chat Turn drains the pending queue before the model runs, and a Turn
+    // carrying a durable Stop intent never completes — it settles `cancelled`.
+    // So the hand-offs it drained were consumed by a Turn that delivered them
+    // to nobody, which for a delivery Turn the alarm opened means a morning's
+    // triage lost to one press. They go back on the queue here, in the same
+    // transaction as the intent that decided it, and the Bot's next
+    // conversational Turn carries them as it did before.
+    await requeueDrainedInputsV1(transaction, command.runId);
     await state.authority.refreshRecoveryAlarm(transaction);
     return stopped;
   });
