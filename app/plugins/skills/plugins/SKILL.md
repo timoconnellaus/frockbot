@@ -132,7 +132,7 @@ export const hooks: PluginHooks = {
   "id": "notes",
   "displayName": "Notes",
   "version": "1",
-  "contractVersion": 5,
+  "contractVersion": 7,
   "tools": [
     {
       "name": "note_add",

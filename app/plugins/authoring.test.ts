@@ -5,6 +5,7 @@ import type {
 } from "@frockbot/applets/build-contract";
 import {
   decodePluginDescriptorV1,
+  servedPluginContractVersionsV1,
   type WorkspaceFilesV1,
   type WorkspacePathV1,
 } from "@frockbot/core/contracts";
@@ -251,6 +252,9 @@ describe("creating a Plugin", () => {
     });
     // The scaffold is a real descriptor, not a placeholder.
     expect(() => decodePluginDescriptorV1(descriptor)).not.toThrow();
+    expect(servedPluginContractVersionsV1()).toContain(
+      decodePluginDescriptorV1(descriptor).contractVersion,
+    );
   });
 
   test("refuses a built-in feature's name, a shipped Plugin's, and a taken one", async () => {
