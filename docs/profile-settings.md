@@ -41,15 +41,16 @@ control runs that Plugin's tool and the page is read again. A section that
 cannot be shown says so on the card in words, and the switch stays. The
 profile entry names the Bot it will open. With no Bot selected it falls back
 to the account's list of extensions, with visible purpose and status, search,
- and collapsed version/configuration/enablement controls; the current
- deployment catalog seeds nothing, so that list is empty and says so rather
- than presenting deployment infrastructure as installable plugins; the account
- Marketplace lists the deployment's installable catalog separately. This page
- does not remove Bot-authored composition controls. Account features is the
- account-wide switchboard for optional built-in features, including per-Bot
- model overrides, web, routines, image generation, Mac Messages, and helper
- agents; an account-wide switch off there is the precondition a Bot's switch
- cannot override. Its cards use
+and collapsed version/configuration/enablement controls; a new account lists
+nothing there until it installs a provider Plugin
+([ADR 0032](adr/0032-plugin-model-providers.md)), so the list is empty and
+says so rather than presenting deployment infrastructure as installable
+plugins. The account Marketplace lists the deployment's installable catalog
+separately. This page does not remove Bot-authored composition controls.
+Account features is the account-wide switchboard for optional built-in
+features, including per-Bot model overrides, web, routines, image generation,
+Mac Messages, and helper agents; an account-wide switch off there is the
+precondition a Bot's switch cannot override. Its cards use
 visible controls, two columns on wide screens and one column on phones or
 with large text. Core identity, history, search, memory, computer
 infrastructure and site administration are not plugin switches.
