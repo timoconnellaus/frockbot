@@ -50,6 +50,7 @@ import 'client.dart';
 import 'json.dart';
 import 'approvals.dart';
 import 'press.dart';
+import 'schema_fetch.dart';
 import 'surface.dart';
 
 /// The transport, the Bot whose transcript the cards are in, and the signal
@@ -205,10 +206,15 @@ class _CardChatCardState extends State<CardChatCard>
     String? said;
     try {
       admitCardV1(answer);
-      next = SurfaceController(catalogs: [cardCatalogV1]);
-      for (final message in cardMessagesV1(answer, dataModel: kept)) {
-        next.handleMessage(core.A2uiMessage.fromJson(message));
-      }
+      final built = SurfaceController(catalogs: [cardCatalogV1]);
+      next = built;
+      // The renderer validates as it takes each message, and an unheld schema
+      // is one it would fetch. See `withoutSchemaFetchesV1`.
+      withoutSchemaFetchesV1(() {
+        for (final message in cardMessagesV1(answer, dataModel: kept)) {
+          built.handleMessage(core.A2uiMessage.fromJson(message));
+        }
+      });
     } on CardRefusal catch (refused) {
       said = refused.message;
       next?.dispose();
