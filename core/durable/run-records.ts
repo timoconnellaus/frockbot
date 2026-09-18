@@ -139,7 +139,6 @@ export interface StoredRunVoiceOriginV1 {
  */
 export interface StoredRunRoutineDeliveryOriginV1 {
   kind: "routine-delivery";
-  routineId: string;
   wakeRunId: string;
 }
 
@@ -576,20 +575,12 @@ function decodeStoredRunOrigin(
     };
   }
   if (candidate.kind === "routine-delivery") {
-    requireExactOriginFields(
-      candidate,
-      ["kind", "routineId", "wakeRunId"],
-      runId,
-    );
-    if (
-      !boundedString(candidate.routineId, 128) ||
-      !boundedString(candidate.wakeRunId, 256)
-    ) {
+    requireExactOriginFields(candidate, ["kind", "wakeRunId"], runId);
+    if (!boundedString(candidate.wakeRunId, 256)) {
       throw new Error(`run "${runId}" has an invalid admission origin id`);
     }
     return {
       kind: "routine-delivery",
-      routineId: candidate.routineId,
       wakeRunId: candidate.wakeRunId,
     };
   }

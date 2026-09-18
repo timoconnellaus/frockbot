@@ -25,6 +25,7 @@ import {
   type CompositionGenerationV1,
   type CompositionMountHost,
   type OwnedBotTurnCommand,
+  type StoredRunOriginV1,
 } from "@frockbot/core/durable";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { resolveAppletComposition } from "@frockbot/app/applets-host/bot";
@@ -412,6 +413,9 @@ export async function executeTurn(
       });
     }
     const ordinaryInput = await turnInputTextV1(state, input.command);
+    if (ordinaryInput === undefined) {
+      return { runId: input.command.runId, text: "", events: [] };
+    }
     const durableInput =
       activation.status === "failed-closed"
         ? compositionFailureTurnTextV1(ordinaryInput, {
@@ -446,7 +450,8 @@ export async function executeTurn(
 }
 
 /**
- * The text one admitted Turn actually runs on.
+ * The text one admitted Turn actually runs on, or `undefined` when it has
+ * nothing to run on at all.
  *
  * A chat Turn drains the pending-input queue first — "its outcome is
  * delivered to the Bot's next conversational Turn as durable input" — and
@@ -457,19 +462,33 @@ export async function executeTurn(
  *
  * An automation Turn drains nothing: a firing is not the conversation, and a
  * hand-off addressed to the parent must not be consumed by another firing.
+ *
+ * A delivery Turn is the one Turn whose *only* input is the drain: its own
+ * text is a cue saying nobody spoke. The alarm decides to open one by reading
+ * the queue, and the person's own Turn can drain it in the window between that
+ * read and this one — so the drain coming back empty is reachable, and it
+ * leaves the cue standing alone over nothing. This is where that is known, so
+ * this is where it ends: the caller returns without a model call and without a
+ * send rather than letting the Bot speak from an empty hand-off.
  */
-async function turnInputTextV1(
+export async function turnInputTextV1(
   state: ShellBotStateV1,
   command: {
     runId: string;
     text: string;
     turnType?: TurnTypeV1;
+    origin?: StoredRunOriginV1;
   },
-): Promise<string> {
+): Promise<string | undefined> {
   if ((command.turnType ?? "chat") !== "chat") return command.text;
   const drained = await state.routineInbox.drainInto(command.runId);
   const preamble = pendingBotInputPreambleV1(drained);
-  return preamble.length === 0 ? command.text : `${preamble}\n${command.text}`;
+  if (preamble.length === 0) {
+    return command.origin?.kind === "routine-delivery"
+      ? undefined
+      : command.text;
+  }
+  return `${preamble}\n${command.text}`;
 }
 
 /** The visible half of failing closed, through the Bot's notifications. */

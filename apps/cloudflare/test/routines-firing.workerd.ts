@@ -26,6 +26,7 @@ import {
 } from "./session-log-probe.ts";
 
 const HANDOFF = "Two overnight emails need you.";
+const SUBAGENT_HANDOFF = "The subagent found nothing that needs you.";
 
 function bot(userId: string, botId: string) {
   return env.BOT_STATES.getByName(`${userId}:${botId}`);
@@ -298,5 +299,77 @@ describe("a firing's durable consequences in Workerd", () => {
         (run) => run.admission?.origin?.kind === "routine-delivery",
       ),
     ).toHaveLength(1);
+  });
+
+  test("a subagent hand-off alone opens no delivery Turn", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `firing-subagent-${suffix}`,
+      botId: `firing-subagent-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    // One ordinary Turn first: the durable identity the alarm delivers under is
+    // written by an admitted Turn, and this Bot has no Routine to write it.
+    await rpc(identity).run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: `hello-${suffix}`,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: new Date().toISOString(),
+        text: "hello",
+      },
+    });
+
+    // The pending queue is shared, and a background subagent settles on a path
+    // that arms no alarm — so a delivery Turn for one is a Turn nothing would
+    // ever open. This is the wake `recordTaskCompletion` enqueues.
+    await runInDurableObject(
+      bot(identity.userId, identity.botId),
+      (_instance, state) =>
+        state.storage.put("routine-wake:0000000001", {
+          schemaVersion: 1,
+          kind: "wake",
+          wakeId: `tw-${suffix}`,
+          runId: `task-${suffix}`,
+          routineId: `task-${suffix}`,
+          title: "Subagent: dig through the inbox",
+          text: SUBAGENT_HANDOFF,
+          createdAt: new Date().toISOString(),
+          quiet: { automation: true },
+          source: "subagent",
+        }),
+    );
+
+    // The alarm runs its whole settle pass, hand-off delivery included.
+    await runInDurableObject(bot(identity.userId, identity.botId), (instance) =>
+      (instance as unknown as { alarm(): Promise<void> }).alarm(),
+    );
+
+    expect(
+      (await storedRuns(identity)).filter(
+        (run) => run.admission?.origin?.kind === "routine-delivery",
+      ),
+    ).toEqual([]);
+
+    // It still reaches the Bot the way it always did: the person's next Turn.
+    const turn = await rpc(identity).run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: `chat-${suffix}`,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: new Date().toISOString(),
+        text: "anything new?",
+      },
+    });
+    const chat = (await storedRuns(identity)).find(
+      (run) => run.runId === turn.runId,
+    )!;
+    expect(
+      chat.events
+        .filter((event) => event.type === "user/message")
+        .some((event) => (event.text ?? "").includes(SUBAGENT_HANDOFF)),
+    ).toBe(true);
   });
 });

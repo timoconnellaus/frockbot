@@ -628,12 +628,15 @@ export async function settleScheduledWork(
  * firing wrote its hand-off in a Session that is deliberately blind to the
  * conversation, so it cannot know what the person already dealt with here.
  *
- * One Turn covers every waiting hand-off, because the drain takes the whole
+ * Only a Routine hand-off opens one. A firing is settled by this same alarm
+ * pass, so the Turn it is owed lands on the same pass; a subagent settles on
+ * its own completion path, which arms no alarm, so nothing here would ever run
+ * for it. A subagent hand-off therefore keeps today's behaviour — it waits for
+ * the Bot's next conversational Turn — except when a Routine hand-off opens a
+ * delivery Turn first, which carries it, because the drain takes the whole
  * queue.
  *
- * A subagent's hand-off is delivered the same way and for the same reason: it
- * rides the same queue, it waited on the same absent Turn, and the Turn that
- * dispatched it has already told the person it would come back to them.
+ * One Turn covers every waiting hand-off, for the same reason.
  */
 async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
   const identity = await state.authority.readDurableIdentity();
@@ -644,14 +647,15 @@ async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
       ? [{ key, wake: input }]
       : [],
   );
-  if (owed.length === 0) return;
+  const routineOwed = owed.filter(({ wake }) => wake.source !== "subagent");
+  if (routineOwed.length === 0) return;
   // A run already occupies the object — the person is talking to the Bot, or a
   // firing is still going. Delivering into that would either be refused or
   // supersede what is running, and the hand-off is owed, not urgent: the next
   // alarm opens the Turn, and a conversation the person started in the
   // meantime drains the queue itself, which is the better delivery anyway.
   if (await state.authority.readActiveRunId()) return;
-  const { wake } = owed.at(-1)!;
+  const { wake } = routineOwed.at(-1)!;
   // Marked before the Turn is admitted, and for every hand-off this Turn will
   // drain rather than only the newest: a delivery that throws must not leave
   // the alarm opening a fresh Turn for the same hand-offs for ever.
@@ -669,7 +673,6 @@ async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
       turnType: "chat" as const,
       origin: {
         kind: "routine-delivery" as const,
-        routineId: wake.routineId,
         wakeRunId: wake.runId,
       },
     });
