@@ -147,12 +147,23 @@ export interface AuthPackageNativeSecretV1<
  */
 export type AuthPackageAdmissionV1 = "authority" | "package";
 
-/** Which implementation of sign-in a deployment built. */
+/**
+ * Which implementation of sign-in a FrockBot deployment profile built.
+ *
+ * Closed on purpose: hosted is better-auth, simple is Access. A consumer
+ * product's chooser lives outside this enum — it still exports
+ * `AUTH_PACKAGE_V1` as `AuthPackageBuildV1`, and names itself with an `id`
+ * that is not one of these two (ADR 0028).
+ */
 export type AuthPackageIdV1 = "better-auth" | "access";
 
 /** One implementation of sign-in, as a deployment's choosing file names it. */
 export interface AuthPackageBuildV1<EnvironmentV1> {
-  readonly id: AuthPackageIdV1;
+  /**
+   * FrockBot profiles use `AuthPackageIdV1`. A consumer chooser uses any
+   * other stable name; do not add that name to the profile enum.
+   */
+  readonly id: AuthPackageIdV1 | (string & {});
   /**
    * Every `env` string a deployment that built this Package must be given.
    * Mostly what sign-in itself cannot work without; also the native door's

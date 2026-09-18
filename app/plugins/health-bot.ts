@@ -3,7 +3,7 @@
 // quarantine, and — for a locked Plugin — fails the Turn instead.
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
-import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "./catalog.js";
+import { deploymentPluginCatalogV1 } from "./catalog.js";
 import { switchPluginForBotV1 } from "./authoring.js";
 import {
   PLUGIN_QUARANTINE_THRESHOLD_V1,
@@ -32,7 +32,7 @@ export interface PluginFailureNoticeV1 {
 export type PluginFailureVerdictV1 = { fatal: false } | { fatal: true };
 
 function locked(pluginId: string): boolean {
-  return DEPLOYMENT_PLUGIN_CATALOG_V1.some(
+  return deploymentPluginCatalogV1().some(
     (plugin) => plugin.pluginId === pluginId && plugin.seed === "locked",
   );
 }

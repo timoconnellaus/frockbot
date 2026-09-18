@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_client/client/transport.dart';
 
 class MemoryStore implements LocalStore {
   @override

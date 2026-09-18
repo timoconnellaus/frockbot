@@ -94,17 +94,14 @@ interface StoredConfigurationReceipt {
   receipt: OperationReceiptV1;
 }
 
-export interface UserSettingsTransaction {
-  get<T>(key: string): Promise<T | undefined>;
-  put<T>(key: string, value: T): Promise<void>;
-  put(entries: Record<string, unknown>): Promise<void>;
-}
-
-export interface UserSettingsStorage extends UserSettingsTransaction {
-  transaction<T>(
-    callback: (storage: UserSettingsTransaction) => Promise<T>,
-  ): Promise<T>;
-}
+export type {
+  UserSettingsStorage,
+  UserSettingsTransaction,
+} from "@frockbot/core/contracts";
+import type {
+  UserSettingsStorage,
+  UserSettingsTransaction,
+} from "@frockbot/core/contracts";
 
 /**
  * A provider Package registers one Connection command owner per Package so the

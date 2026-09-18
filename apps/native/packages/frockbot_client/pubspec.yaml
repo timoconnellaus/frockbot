@@ -1,0 +1,40 @@
+name: frockbot_client
+description: The FrockBot conversation client — shell, cards, transport, character engine, theme machinery — behind one ProductConfig.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ">=3.13.0 <3.14.0"
+  flutter: "3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  webview_flutter: 4.14.1
+  webview_flutter_android: 4.14.1
+  webview_flutter_wkwebview: 3.26.1
+  flutter_secure_storage: 11.0.0
+  app_links: 7.2.1
+  path_provider: 2.1.6
+  url_launcher: 6.3.2
+  crypto: 3.0.7
+  http: 1.6.0
+  restart_app: 1.9.1
+  shorebird_code_push: 2.0.7
+  web: 1.1.1
+  web_socket_channel: 3.0.3
+  record: 7.1.1
+  flutter_slidable: 4.0.3
+  rive: 0.14.11
+  genui: 0.10.3
+  a2ui_core: 0.1.1
+  json_schema_builder: 0.1.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: 6.0.0
+
+dependency_overrides:
+  webview_flutter_wkwebview:
+    path: ../../vendor/webview_flutter_wkwebview

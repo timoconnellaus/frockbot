@@ -30,6 +30,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { PUBLISHABLE_WORKSPACE_DIRECTORIES_V1 } from "./publishable-workspaces.ts";
 
 export const REPOSITORY = "timoconnellaus/frockbot";
 export const WORKFLOW_FILE = "release.yml";
@@ -44,14 +45,11 @@ export type WorkspacePackage = {
 };
 
 /**
- * Every publishable workspace, in a stable order.
- *
- * The Applets SDK sits beside the module it authors for, and is the only
- * workspace a release publishes: nothing else in this repository has a
- * consumer off it.
+ * Every publishable workspace, in a stable order. A release still publishes
+ * only those that declare `frockbot.npm`.
  */
 export function readWorkspacePackages(root: string): WorkspacePackage[] {
-  const directories = [join("applets", "sdk")];
+  const directories = [...PUBLISHABLE_WORKSPACE_DIRECTORIES_V1];
 
   const packages: WorkspacePackage[] = [];
   for (const directory of directories) {

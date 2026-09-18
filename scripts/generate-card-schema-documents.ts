@@ -12,7 +12,7 @@
 // So they are lifted from ajv — the deployment's JSON Schema 2020-12
 // implementation, a root dependency, whose delivered `refs/json-schema-2020-12`
 // is the published set — keyed by each document's canonical `$id`, and written
-// as Dart source `apps/native/lib/cards/schema_documents.g.dart`. The client
+// as Dart source `apps/native/packages/frockbot_client/lib/cards/schema_documents.g.dart`. The client
 // answers those URIs from this build and refuses every other URI, so a card
 // never leaves the app to be validated, and the two implementations of the
 // draft here (ajv in a Worker, this client) read the same words.
@@ -27,7 +27,8 @@ const root = new URL("../", import.meta.url);
 const at = (path: string): URL => new URL(path, root);
 
 const AJV_REFS = "node_modules/ajv/dist/refs/json-schema-2020-12";
-const OUTPUT = "apps/native/lib/cards/schema_documents.g.dart";
+const OUTPUT =
+  "apps/native/packages/frockbot_client/lib/cards/schema_documents.g.dart";
 
 /** One document: its canonical `$id`, and its exact text. */
 interface Document {

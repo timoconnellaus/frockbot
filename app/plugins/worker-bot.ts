@@ -17,7 +17,7 @@ import { currentUserCompositionV1 } from "@frockbot/app/composition/bot";
 import { isolateMountOptions } from "@frockbot/app/isolates/bot";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import {
-  DEPLOYMENT_PLUGIN_CATALOG_V1,
+  deploymentPluginCatalogV1,
   enabledSeededPluginIdsV1,
 } from "./catalog.js";
 import { readPluginEnablementV1 } from "./enablement.js";
@@ -42,7 +42,7 @@ export async function readBotPluginRosterV1(
     enabled: enabledSeededPluginIdsV1(
       current.members,
       enablement,
-      DEPLOYMENT_PLUGIN_CATALOG_V1,
+      deploymentPluginCatalogV1(),
     ),
   };
 }

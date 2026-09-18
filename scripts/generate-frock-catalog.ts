@@ -5,7 +5,7 @@
 // That only holds if the schema the model is taught and the schema the
 // renderer draws against are the same schema. So there is exactly one place a
 // Frock component's data schema is written — one raw JSON string per family
-// under `apps/native/lib/cards/frock_catalog/schemas/`, beside the Dart that
+// under `apps/native/packages/frockbot_client/lib/cards/frock_catalog/schemas/`, beside the Dart that
 // builds the `CatalogItem` from it — and this wraps those schemas in the
 // catalog definition A2UI describes and writes
 // `core/protocol-schemas/schema/frock-catalog.json`.
@@ -31,11 +31,11 @@ import { format } from "prettier";
 const root = resolve(import.meta.dirname, "..");
 const sourcePath = resolve(
   root,
-  "apps/native/lib/cards/frock_catalog/schemas.dart",
+  "apps/native/packages/frockbot_client/lib/cards/frock_catalog/schemas.dart",
 );
 const familiesDir = resolve(
   root,
-  "apps/native/lib/cards/frock_catalog/schemas",
+  "apps/native/packages/frockbot_client/lib/cards/frock_catalog/schemas",
 );
 const outputPath = resolve(
   root,

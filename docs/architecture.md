@@ -61,6 +61,19 @@ Identity lives in `deployments/<name>.json`, validated against `deployments/prof
 
 **The artifact-origin rule.** A profile that gives the app Worker a hostname must also name `artifactHostname`, and the schema requires the form `ui.<the app's hostname>`. The pairing between the two origins is derived from that prefix rather than configured — `packageUiGatewayOriginV1` and `isPackageUiArtifactOriginFor` in `apps/cloudflare/src/gateway.ts`, `appletUiArtifactOriginV1` in `applets/preview.ts` — so a page served from any other host is given a `connect-src` naming a host that does not exist, and the gateway refuses its viewer socket. A `workers.dev` hostname cannot contain a dot, so no second Worker there can be the artifact origin: it is a second custom domain on the app Worker, which is why the simple profile needs a zone. Making that pairing explicit configuration is a change to the Applet path and has not been made.
 
+### Consumer deployments
+
+A second product is an empty repository that depends on the published `@frockbot/*` modules, not a fork and not a copied tree ([ADR 0028](adr/0028-open-deployment.md)). It owns:
+
+- a thin Worker entry that calls `configureWorkerAppV1` / `createGateway` and exports the Durable Object classes
+- wrangler bindings, a greenfield migration chain, and a deployment profile
+- an `#auth-package` chooser outside FrockBot's `"better-auth" | "access"` enum (Privy, or anything else that implements `AuthPackageV1`)
+- a computer-host chooser
+- an optional Plugin catalog; omission keeps FrockBot's seeded catalog
+- a Flutter app that supplies a `ProductConfig` (name, theme tokens, character catalog, strings, `SignIn`, deep links) to `frockbot_client`
+
+It does not copy `apps/cloudflare/src` or `apps/native/lib`. The in-repo fixture at `examples/consumer/` is that shape against workspace packages.
+
 ---
 
 ## 2. Durable Objects
@@ -1230,7 +1243,7 @@ nothing approves a production deploy.
 Trigger: push of a tag matching `v*.*.*`.
 
 - `verify` — validates strict SemVer, then `typecheck`, `bun test`, and `bun run build` behind the pinned Flutter SDK, because the build compiles the web client.
-- `publish-npm` (after `deploy-backend`) — `applets/sdk` is the only workspace it considers, and it publishes only because its manifest declares `frockbot.npm`. It rewrites that manifest to the tag version and sets `private: false`, resolves `workspace:` ranges to literals, requires npm ≥ 11.5.1, then `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success.
+- `publish-npm` (after `deploy-backend`) — every workspace whose manifest declares `frockbot.npm`. That is `@frockbot/applet-sdk` and the current runtime modules a second product installs (`core`, `app`, `providers`, `computer`, `frock-compose`, `applets`, and the Worker factory surface). It rewrites those manifests to the tag version and sets `private: false`, resolves `workspace:` ranges to literals, requires npm ≥ 11.5.1, then `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success. A name npm has never seen is bootstrapped once with `bun run bootstrap:npm-trust`. The pre-collapse plugin-* graph stays on the registry and is not published again.
 - `github-release` — creates the Release for the tag with `--generate-notes --verify-tag`, attaching the web client archive and the application artifact an installer needs. The notarized disk image is attached only when `macos-release` produced one: notarization depends on Apple answering and used to take the whole Release with it when it did not.
 - `deploy-marketing`.
 - `deploy-backend` (environment `production`) — runs `bun run deployment:config hosted` and then `scripts/deployment-config.test.ts` as a gate, writes the artifact's own sha256 over the generated config's `DEFAULT_APPLICATION_HASH` placeholder, applies D1 migrations remotely, uploads the artifact, deploys the computer host and then the Applet build service, each with its own secrets file, runs `scripts/check-production-secrets.ts check --live` and `write-secrets-file`, then `wrangler deploy --secrets-file`. It rewrites no tracked `wrangler.jsonc`: the D1 identifier is in `deployments/hosted.json`, and the only in-place edit is to the generated config under `.deployment/`.

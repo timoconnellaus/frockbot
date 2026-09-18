@@ -290,7 +290,7 @@ jobs:
           path: |
             apps/cloudflare/dist/web
             apps/cloudflare/dist/flutter-web.json
-          key: flutter-web-${{ runner.os }}-3.47.0-${{ hashFiles('apps/native/lib/**', 'apps/native/web/**', 'apps/native/assets/**', 'apps/native/vendor/**', 'apps/native/pubspec.yaml', 'apps/native/pubspec.lock', 'apps/cloudflare/build-flutter-web.ts') }}
+          key: flutter-web-${{ runner.os }}-3.47.0-${{ hashFiles('apps/native/lib/**', 'apps/native/packages/frockbot_client/**', 'apps/native/web/**', 'apps/native/assets/**', 'apps/native/vendor/**', 'apps/native/pubspec.yaml', 'apps/native/pubspec.lock', 'apps/cloudflare/build-flutter-web.ts') }}
 
       - name: Test Cloudflare integration
         # `SELF.fetch` through the real gateway, the real built artifact and the
@@ -370,7 +370,7 @@ jobs:
           path: |
             apps/cloudflare/dist/web
             apps/cloudflare/dist/flutter-web.json
-          key: flutter-web-${{ runner.os }}-3.47.0-${{ hashFiles('apps/native/lib/**', 'apps/native/web/**', 'apps/native/assets/**', 'apps/native/vendor/**', 'apps/native/pubspec.yaml', 'apps/native/pubspec.lock', 'apps/cloudflare/build-flutter-web.ts') }}
+          key: flutter-web-${{ runner.os }}-3.47.0-${{ hashFiles('apps/native/lib/**', 'apps/native/packages/frockbot_client/**', 'apps/native/web/**', 'apps/native/assets/**', 'apps/native/vendor/**', 'apps/native/pubspec.yaml', 'apps/native/pubspec.lock', 'apps/cloudflare/build-flutter-web.ts') }}
 
       - name: Test browser end to end
         # A browser against `wrangler dev` running `src/index.ts` and the real

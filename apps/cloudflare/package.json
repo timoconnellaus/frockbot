@@ -6,6 +6,25 @@
   "imports": {
     "#auth-package": "./src/auth-package.ts"
   },
+  "exports": {
+    ".": "./src/worker-app.ts",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "apps/cloudflare"
+  },
+  "frockbot": {
+    "npm": true
+  },
   "scripts": {
     "client:build": "bun run build-flutter-web.ts",
     "artifact:build": "bun run client:build && bun run build-artifact.ts",

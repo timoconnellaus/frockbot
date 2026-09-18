@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/auth/sign_in_page.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/auth/sign_in_page.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 void main() {
   for (final brightness in Brightness.values) {

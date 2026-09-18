@@ -6,7 +6,7 @@ import type {
 import type {
   CredentialTransaction,
   PreparedApiKeyCredential,
-} from "@frockbot/app/credentials/user";
+} from "@frockbot/core/contracts";
 import type { OllamaUserBackendHost } from "../ollama-cloud/user.js";
 import {
   startOAuthV1,

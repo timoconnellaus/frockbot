@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/activity/controller.dart';
-import 'package:frockbot_native/activity/push.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/activity/controller.dart';
+import 'package:frockbot_client/activity/push.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;

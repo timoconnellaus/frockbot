@@ -1,0 +1,14 @@
+name: consumer_fixture
+description: Empty-repo Flutter shell that supplies a ProductConfig to frockbot_client.
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ">=3.13.0 <3.14.0"
+  flutter: "3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  frockbot_client:
+    path: ../../../apps/native/packages/frockbot_client

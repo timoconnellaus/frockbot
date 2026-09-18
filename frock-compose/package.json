@@ -16,6 +16,23 @@
   "dependencies": {
     "@frockbot/core": "workspace:*"
   },
+  "files": [
+    "**/*.ts",
+    "**/*.json",
+    "**/*.md",
+    "!**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "frock-compose"
+  },
+  "frockbot": {
+    "npm": true
+  },
   "devDependencies": {
     "@types/bun": "1.4.1",
     "typescript": "^7.0.2"

@@ -2,12 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/bot_sessions.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/app_shell.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/update/app_version.dart';
+import 'package:frockbot_client/client/bot_sessions.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/app_shell.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/update/app_version.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'widget_test.dart' show MemoryStore;

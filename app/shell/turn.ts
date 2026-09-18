@@ -36,7 +36,7 @@ import {
   compositionFailureLogV1,
 } from "@frockbot/app/composition/bot";
 import {
-  DEPLOYMENT_PLUGIN_CATALOG_V1,
+  deploymentPluginCatalogV1,
   enabledSeededPluginIdsV1,
 } from "@frockbot/app/plugins/catalog";
 import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
@@ -299,7 +299,7 @@ export async function executeTurn(
       const enabled = enabledSeededPluginIdsV1(
         mounting.members,
         enablement,
-        DEPLOYMENT_PLUGIN_CATALOG_V1,
+        deploymentPluginCatalogV1(),
       );
       const isolate = await isolateMountOptions(state, input.identity, {
         runId: input.command.runId,

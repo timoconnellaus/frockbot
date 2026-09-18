@@ -2,18 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/applets/canvas.dart';
-import 'package:frockbot_native/applets/list.dart';
-import 'package:frockbot_native/applets/client.dart';
-import 'package:frockbot_native/applets/failure.dart';
-import 'package:frockbot_native/applets/progress.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/shell/transcript_model.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/view/host_frame_io.dart'
-    if (dart.library.js_interop) 'package:frockbot_native/view/host_frame_web.dart';
-import 'package:frockbot_native/view/host_frame_messages.dart';
+import 'package:frockbot_client/applets/canvas.dart';
+import 'package:frockbot_client/applets/list.dart';
+import 'package:frockbot_client/applets/client.dart';
+import 'package:frockbot_client/applets/failure.dart';
+import 'package:frockbot_client/applets/progress.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/shell/transcript_model.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/view/host_frame_io.dart'
+    if (dart.library.js_interop) 'package:frockbot_client/view/host_frame_web.dart';
+import 'package:frockbot_client/view/host_frame_messages.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;

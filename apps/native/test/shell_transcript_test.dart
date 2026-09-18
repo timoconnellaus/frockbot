@@ -4,8 +4,8 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
-import 'package:frockbot_native/shell/transcript.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/shell/transcript.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 /// How the thread reads, one line per row, in the order it is drawn.
 List<String> thread(List<TranscriptLine> lines) => [

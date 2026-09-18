@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/activity/controller.dart';
-import 'package:frockbot_native/client/transport.dart' show hostedOrigin;
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/shell/focus.dart' show sidebarUnreadFor;
+import 'package:frockbot_client/activity/controller.dart';
+import 'package:frockbot_client/client/transport.dart' show hostedOrigin;
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/shell/focus.dart' show sidebarUnreadFor;
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;

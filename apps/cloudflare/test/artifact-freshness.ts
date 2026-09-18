@@ -16,7 +16,7 @@
 // dependency touches thousands of files that a build does not have to follow.
 // The client is built separately, by `flutter build web`, and reaches the
 // artifact only as a build hash, so no Dart file appears in that map:
-// `apps/native/lib` is walked as well.
+// `apps/native/lib` and the Flutter kit are walked as well.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
@@ -74,11 +74,11 @@ function bundledSources(artifactPath: string): string[] {
  * built.
  *
  * @param artifactPath `dist/artifacts/foundation-v1.mjs`.
- * @param clientRoot the Flutter client's source directory, built separately.
+ * @param clientRoots the Flutter client source directories, built separately.
  */
 export function readBuiltArtifact(
   artifactPath: string,
-  clientRoot: string,
+  ...clientRoots: string[]
 ): string {
   let builtAt: number;
   try {
@@ -93,7 +93,10 @@ export function readBuiltArtifact(
     );
   }
 
-  const candidates = [...bundledSources(artifactPath), ...walk(clientRoot)];
+  const candidates = [
+    ...bundledSources(artifactPath),
+    ...clientRoots.flatMap((root) => [...walk(root)]),
+  ];
   const stale = [...newestMtime(candidates)]
     .filter(([, mtime]) => mtime > builtAt)
     .sort(([, left], [, right]) => right - left)

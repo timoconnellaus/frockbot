@@ -9,7 +9,7 @@ library;
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/voice/socket.dart';
+import 'package:frockbot_client/voice/socket.dart';
 
 void main() {
   group('voiceCloseReasonV1', () {

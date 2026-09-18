@@ -6,14 +6,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/client/plain_store.dart';
-import 'package:frockbot_native/settings/page.dart';
-import 'package:frockbot_native/connections/page.dart';
-import 'package:frockbot_native/recovery/controller.dart';
-import 'package:frockbot_native/recovery/page.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/client/plain_store.dart';
+import 'package:frockbot_client/settings/page.dart';
+import 'package:frockbot_client/connections/page.dart';
+import 'package:frockbot_client/recovery/controller.dart';
+import 'package:frockbot_client/recovery/page.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 class LocalSettingsApi extends NativeApi {
   final Uri origin;

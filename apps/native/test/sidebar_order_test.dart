@@ -2,8 +2,8 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
-import 'package:frockbot_native/shell/sidebar_order.dart';
+import 'package:frockbot_client/shell/sidebar.dart';
+import 'package:frockbot_client/shell/sidebar_order.dart';
 
 void main() {
   group('planSidebarDropV1', () {

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/services.dart';
 
+import 'tokens.dart';
+
 /// The reviewed web theme's semantic colors, radii, typefaces and motion.
 /// Native text/touch sizes follow platform accessibility instead of CSS pixels.
 ///
@@ -109,20 +111,25 @@ abstract final class FrockTheme {
   static Color hairline(ColorScheme scheme) =>
       scheme.outlineVariant.withValues(alpha: 0.72);
 
-  static ThemeData theme(Brightness brightness) {
+  static ThemeData theme(
+    Brightness brightness, {
+    ProductThemeTokens tokens = ProductThemeTokens.frockbot,
+  }) {
     final dark = brightness == Brightness.dark;
     final scheme =
         ColorScheme.fromSeed(
-          seedColor: accent,
+          seedColor: tokens.accent,
           brightness: brightness,
         ).copyWith(
-          primary: dark ? accent : const Color(0xffc23359),
+          primary: dark ? tokens.accent : tokens.lightPrimary,
           onPrimary: Colors.white,
-          surface: dark ? surface : cream,
-          onSurface: dark ? text : ink,
-          onSurfaceVariant: dark ? muted : inkMuted,
-          surfaceContainerHighest: dark ? raised : const Color(0xfff2ece4),
-          outlineVariant: dark ? border : line,
+          surface: dark ? tokens.surface : tokens.cream,
+          onSurface: dark ? tokens.text : tokens.ink,
+          onSurfaceVariant: dark ? tokens.muted : tokens.inkMuted,
+          surfaceContainerHighest: dark
+              ? tokens.raised
+              : const Color(0xfff2ece4),
+          outlineVariant: dark ? tokens.border : tokens.line,
         );
     final base = ThemeData(
       useMaterial3: true,

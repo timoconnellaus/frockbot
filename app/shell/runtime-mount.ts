@@ -21,7 +21,7 @@ import {
   type ShellPluginModelHostV1,
 } from "@frockbot/app/isolates/model-transport";
 import { readPinnedCompositionGenerationV1 } from "@frockbot/app/composition/bot";
-import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "@frockbot/app/plugins/catalog";
+import { deploymentPluginCatalogV1 } from "@frockbot/app/plugins/catalog";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import {
@@ -123,7 +123,7 @@ async function pluginModelHostV1(
   // Installed means the account's own installation of the deployment's Plugin
   // at the deployment's artifact: the id and the content hash both have to be
   // the catalog's, so a Plugin a Bot wrote cannot stand in for it.
-  const catalog = DEPLOYMENT_PLUGIN_CATALOG_V1.find(
+  const catalog = deploymentPluginCatalogV1().find(
     (plugin) => plugin.pluginId === served.pluginId,
   );
   const installed = (generation?.members ?? []).some(

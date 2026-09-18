@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  configureWorkerAppV1,
   decodePluginCatalogV1,
   decodeSeededPluginV1,
+  DEPLOYMENT_PLUGIN_CATALOG_V1,
+  deploymentPluginCatalogV1,
   enabledSeededPluginIdsV1,
   FIRST_PARTY_TOGGLEABLE_PLUGINS_V1,
   firstPartyFeatureOnForBotV1,
@@ -9,6 +12,7 @@ import {
   maskPlanForBotV1,
   pluginRunsForBotV1,
   pluginSwitchableV1,
+  resetWorkerAppV1,
   seededMemberV1,
   seededPluginsForAccountV1,
   type SeededPluginV1,
@@ -242,5 +246,21 @@ describe("first-party features a Bot may switch", () => {
     ).toEqual(["image", "provider-ollama-cloud"]);
     expect(masked.revision).toBe(3);
     expect(maskPlanForBotV1(plan, enablement({}))).toEqual(plan);
+  });
+});
+
+describe("the Worker catalog option", () => {
+  test("omission keeps FrockBot's seeded set, and a consumer catalog replaces it", () => {
+    expect(deploymentPluginCatalogV1()).toBe(DEPLOYMENT_PLUGIN_CATALOG_V1);
+    const consumer = decodePluginCatalogV1([seeded("weather", "locked")]);
+    configureWorkerAppV1({ pluginCatalog: consumer });
+    try {
+      expect(
+        deploymentPluginCatalogV1().map((plugin) => plugin.pluginId),
+      ).toEqual(["weather"]);
+    } finally {
+      resetWorkerAppV1();
+    }
+    expect(deploymentPluginCatalogV1()).toBe(DEPLOYMENT_PLUGIN_CATALOG_V1);
   });
 });

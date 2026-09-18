@@ -2,12 +2,12 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/voice/assistant.dart';
-import 'package:frockbot_native/voice/capture.dart';
-import 'package:frockbot_native/voice/dictation.dart';
-import 'package:frockbot_native/voice/mic_ownership.dart';
-import 'package:frockbot_native/voice/protocol.dart';
+import 'package:frockbot_client/shell/composer.dart';
+import 'package:frockbot_client/voice/assistant.dart';
+import 'package:frockbot_client/voice/capture.dart';
+import 'package:frockbot_client/voice/dictation.dart';
+import 'package:frockbot_client/voice/mic_ownership.dart';
+import 'package:frockbot_client/voice/protocol.dart';
 
 import 'voice_fakes.dart';
 

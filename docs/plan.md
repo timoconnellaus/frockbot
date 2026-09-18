@@ -134,9 +134,21 @@ The flip served the Flutter web build at `/` and took the Vue client out in the 
 
 A second deployment profile anyone installs into their own Cloudflare account with `bun run setup`: Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. The hosted deployment is unchanged. The decisions and the staged plan are [ADR 0028](adr/0028-open-deployment.md).
 
+## Published packages for a second product
+
+ADR 0028 reserved customised deployments for published packages, not a fork or a copied tree. The public npm channel already exists — OIDC, `publish-npm`, `bootstrap-npm-trust` — and already holds the pre-collapse `@frockbot/*` graph plus `@frockbot/applet-sdk`. A second product (DexFi is the first consumer) installs today's modules from that channel and writes only what must be its own: an auth chooser, a wrangler/profile, theme, avatars, and platform identity.
+
+The extract is three seams, each leaving `main` shippable:
+
+1. **The current modules ship on the existing job.** `@frockbot/core`, `app`, `providers`, `computer`, `frock-compose`, `applets`, and the Worker factory surface. Opt-in remains `frockbot.npm`. Bootstrap only names npm does not have. The frozen plugin-* / cordis / Vue packages stay unpublished going forward; a consumer must not install them.
+2. **The Worker is a factory.** `createGateway`, the Durable Object classes, and the native-auth door are importable. A consumer writes a thin entry, wrangler, and a chooser that exports `AUTH_PACKAGE_V1` — outside FrockBot's `"better-auth" | "access"` enum. Privy is that consumer's Package. The seeded Plugin catalog is an option on the Worker entry, defaulting to FrockBot's catalog.
+3. **The Flutter client is a kit plus an app shell.** `frockbot_client` is the Bot client (shell, cards, transport, character engine, theme machinery) behind one `ProductConfig`. FrockBot's `main.dart` is the first consumer of that config. Palette, character cast, package id, Shorebird, and marketing strings stay per product.
+
+Hosted and simple FrockBot behaviour does not change.
+
 ## Not now
 
-Billing, package publishing, a Plugin marketplace, avatar wearables, and Applet sharing between Users. Each is an addition to the target, not a change to it. Voice exists, scoped to one Bot ([ADR 0029](adr/0029-voice-per-bot.md)) and, since [ADR 0031](adr/0031-voice-gemini-live.md), one Gemini Live session that is the Bot's other mode rather than a layer over its chat model.
+Billing, a Plugin marketplace, avatar wearables, and Applet sharing between Users. Each is an addition to the target, not a change to it. Voice exists, scoped to one Bot ([ADR 0029](adr/0029-voice-per-bot.md)) and, since [ADR 0031](adr/0031-voice-gemini-live.md), one Gemini Live session that is the Bot's other mode rather than a layer over its chat model. Package publishing is no longer parked: the channel is live; what remains is shipping today's modules on it.
 
 ## Billing implementation awaiting launch
 

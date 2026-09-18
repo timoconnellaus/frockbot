@@ -3,6 +3,7 @@ analyzer:
   exclude:
     - vendor/**
     - lib/protocol/*.generated.dart
+    - packages/frockbot_client/lib/protocol/*.generated.dart
     - test/protocol_fixtures.dart
     - build/**
     - android/**

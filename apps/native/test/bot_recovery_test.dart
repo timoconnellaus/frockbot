@@ -2,13 +2,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/recovery/page.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/recovery/page.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
 
 import 'bot_switch_test.dart' show registration;
 
-import 'package:frockbot_native/recovery/controller.dart';
+import 'package:frockbot_client/recovery/controller.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;

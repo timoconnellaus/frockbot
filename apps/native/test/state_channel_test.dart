@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/client/state_channel.dart';
-import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/client/state_channel.dart';
+import 'package:frockbot_client/client/transport.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'widget_test.dart' show MemoryStore;

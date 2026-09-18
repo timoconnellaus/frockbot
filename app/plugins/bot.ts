@@ -9,7 +9,7 @@ import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { currentUserCompositionV1 } from "@frockbot/app/composition/bot";
 import { userConfigurationV1 } from "@frockbot/app/settings/bot";
 import {
-  DEPLOYMENT_PLUGIN_CATALOG_V1,
+  deploymentPluginCatalogV1,
   FIRST_PARTY_TOGGLEABLE_PLUGINS_V1,
   firstPartyFeatureOnForBotV1,
   pluginRunsForBotV1,
@@ -49,7 +49,7 @@ export type SetBotPluginEnabledReceiptV1 =
 export async function readBotPluginsFrameV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
-  catalog: readonly SeededPluginV1[] = DEPLOYMENT_PLUGIN_CATALOG_V1,
+  catalog: readonly SeededPluginV1[] = deploymentPluginCatalogV1(),
   options: { sections?: boolean } = {},
 ): Promise<BotPluginsFrameV1> {
   const enablement = await readPluginEnablementV1(state.ctx.storage);
@@ -154,7 +154,7 @@ export async function setBotPluginEnabledV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
   command: SetBotPluginEnabledCommandV1,
-  catalog: readonly SeededPluginV1[] = DEPLOYMENT_PLUGIN_CATALOG_V1,
+  catalog: readonly SeededPluginV1[] = deploymentPluginCatalogV1(),
 ): Promise<SetBotPluginEnabledReceiptV1> {
   const frame = await readBotPluginsFrameV1(state, identity, catalog);
   const row = frame.plugins.find(

@@ -12,9 +12,9 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/voice/dictation.dart';
+import 'package:frockbot_client/shell/composer.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/voice/dictation.dart';
 
 import 'voice_fakes.dart';
 

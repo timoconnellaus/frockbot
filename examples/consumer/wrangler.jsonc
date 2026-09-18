@@ -1,0 +1,17 @@
+{
+  "name": "consumer-fixture",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "BotState",
+        "UserConfiguration",
+        "AppletState",
+        "DeploymentPolicy",
+        "VoiceAssistant",
+      ],
+    },
+  ],
+}

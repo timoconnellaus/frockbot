@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/credential_io.dart';
-import 'package:frockbot_native/client/credential_web.dart';
-import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_client/client/credential_io.dart';
+import 'package:frockbot_client/client/credential_web.dart';
+import 'package:frockbot_client/client/transport.dart';
 
 import 'widget_test.dart' show MemoryStore;
 

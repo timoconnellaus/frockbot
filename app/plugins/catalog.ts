@@ -310,10 +310,45 @@ export const DEPLOYMENT_PLUGIN_CATALOG_V1: readonly SeededPluginV1[] =
  * deployment ships it. It is what makes "this Plugin serves this provider" a
  * fact about bytes rather than about a descriptor a member carries.
  */
+/**
+ * What a Worker entry may set before the first request. The catalog is the
+ * one option a second product has to keep the five locked card Plugins and
+ * add its own without forking a Durable Object (ADR 0028).
+ */
+export interface WorkerAppOptionsV1 {
+  pluginCatalog?: readonly SeededPluginV1[];
+}
+
+let configuredPluginCatalogV1: readonly SeededPluginV1[] | undefined;
+
+/**
+ * The Worker factory's options object. Omitted catalog keeps FrockBot's
+ * seeded set. A consumer calls this from its thin entry, once, at load.
+ */
+export function configureWorkerAppV1(options: WorkerAppOptionsV1 = {}): void {
+  if (options.pluginCatalog === undefined) return;
+  configuredPluginCatalogV1 = Object.freeze(
+    decodePluginCatalogV1(options.pluginCatalog),
+  );
+}
+
+/** Test-only: drop a catalog a previous case configured. */
+export function resetWorkerAppV1(): void {
+  configuredPluginCatalogV1 = undefined;
+}
+
+/**
+ * The catalog this Worker is running. A consumer override wins; otherwise
+ * this is FrockBot's seeded set.
+ */
+export function deploymentPluginCatalogV1(): readonly SeededPluginV1[] {
+  return configuredPluginCatalogV1 ?? DEPLOYMENT_PLUGIN_CATALOG_V1;
+}
+
 export function deploymentPluginArtifactHashV1(
   pluginId: string,
 ): string | undefined {
-  return DEPLOYMENT_PLUGIN_CATALOG_V1.find(
+  return deploymentPluginCatalogV1().find(
     (plugin) => plugin.pluginId === pluginId,
   )?.artifact.contentHash;
 }

@@ -58,6 +58,10 @@ _Avoid_: Plugin, extension
 Who one deployment is, in a checked-in file the deployable configs are generated from: its Cloudflare account, Worker names, hostnames, resources, auth Package and identity vars. Two exist — `hosted`, which is frockbot.com, and `simple`, which an installer writes into a deployer's own account — and a profile is which auth Package is built in, which secrets exist and which workflows run, never a fork or a gated feature.
 _Avoid_: Environment, tier, edition, tenant
 
+**Consumer deployment**:
+A second product that installs published `@frockbot/*` packages and writes only its choosers, wrangler, catalog option, and `ProductConfig`. Not a fork, not a copied tree, not a third profile in this repository. The in-repo fixture is `examples/consumer/`.
+_Avoid_: White-label, fork, edition
+
 **Auth Package**:
 The sign-in Package, behind `AuthPackageV1`: resolve an identity from a request, serve the sign-in and sign-out routes, and hand the native authorize page its identity step. Two builds, better-auth with Google and Cloudflare Access, each named by one chooser file the profile selects; a build carries only its own.
 _Avoid_: Auth provider, identity provider, login backend

@@ -7,14 +7,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/bot_sessions.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/app_shell.dart';
-import 'package:frockbot_native/shell/chat_pane.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/shell/starters.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/bot_sessions.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/app_shell.dart';
+import 'package:frockbot_client/shell/chat_pane.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/shell/starters.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'navigation_test.dart' show identifiedBy, registration;

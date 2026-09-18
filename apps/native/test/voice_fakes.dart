@@ -9,10 +9,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import 'package:frockbot_native/voice/capture.dart';
-import 'package:frockbot_native/voice/player.dart';
-import 'package:frockbot_native/voice/route.dart';
-import 'package:frockbot_native/voice/socket.dart';
+import 'package:frockbot_client/voice/capture.dart';
+import 'package:frockbot_client/voice/player.dart';
+import 'package:frockbot_client/voice/route.dart';
+import 'package:frockbot_client/voice/socket.dart';
 
 /// Lets the pending microtasks run, which is how a fake stream delivers.
 Future<void> settle([int rounds = 3]) async {

@@ -10,11 +10,11 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/bot_sessions.dart';
-import 'package:frockbot_native/shell/app_shell.dart';
-import 'package:frockbot_native/shell/chat_header.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/bot_sessions.dart';
+import 'package:frockbot_client/shell/app_shell.dart';
+import 'package:frockbot_client/shell/chat_header.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'applet_premount_test.dart' show PremountApi;
 import 'navigation_test.dart' show identifiedBy, registration;

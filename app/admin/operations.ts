@@ -31,7 +31,7 @@ import {
   type UserFeaturesV1,
 } from "./shared.js";
 import {
-  DEPLOYMENT_PLUGIN_CATALOG_V1,
+  deploymentPluginCatalogV1,
   type SeededPluginV1,
 } from "@frockbot/app/plugins/catalog";
 import { isRpcIdentifier } from "@frockbot/core/configuration";
@@ -136,7 +136,7 @@ async function write<T>(
 
 /** The admin-gated seeded Plugins an admin may open for one account. */
 export function adminGatedPluginsV1(
-  catalog: readonly SeededPluginV1[] = DEPLOYMENT_PLUGIN_CATALOG_V1,
+  catalog: readonly SeededPluginV1[] = deploymentPluginCatalogV1(),
 ): AdminGatedPluginV1[] {
   return catalog
     .filter((plugin) => plugin.seed === "admin-gated")
@@ -148,7 +148,7 @@ export function adminGatedPluginsV1(
 
 export function createAdminOperationsV1(
   host: AdminOperationsHostV1,
-  catalog: readonly SeededPluginV1[] = DEPLOYMENT_PLUGIN_CATALOG_V1,
+  catalog: readonly SeededPluginV1[] = deploymentPluginCatalogV1(),
 ): AdminOperationsV1 {
   return {
     readPolicy: () => host.readDeploymentPolicy(),

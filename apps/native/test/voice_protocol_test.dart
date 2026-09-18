@@ -9,7 +9,7 @@ library;
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/voice/protocol.dart';
+import 'package:frockbot_client/voice/protocol.dart';
 
 Object? decoded(String raw) => jsonDecode(raw);
 

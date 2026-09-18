@@ -5,9 +5,9 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/cards/chat_card.dart';
-import 'package:frockbot_native/shell/send_payload.dart';
-import 'package:frockbot_native/shell/transcript_model.dart';
+import 'package:frockbot_client/cards/chat_card.dart';
+import 'package:frockbot_client/shell/send_payload.dart';
+import 'package:frockbot_client/shell/transcript_model.dart';
 
 Widget drawn(Map<String, Object?>? payload) => MaterialApp(
   home: Scaffold(body: SendPayloadView(send: SendPayloadLine(payload))),

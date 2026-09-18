@@ -14,13 +14,11 @@ import type { ConnectionView } from "@frockbot/core/configuration";
 import type {
   CredentialStorage,
   CredentialTransaction,
-  CredentialUserBackendContribution,
-} from "@frockbot/app/credentials/user";
-import type {
-  UserSettingsBackendContribution,
+  CredentialUserBackendV1,
+  UserSettingsBackendV1,
   UserSettingsStorage,
   UserSettingsTransaction,
-} from "@frockbot/app/settings/user";
+} from "@frockbot/core/contracts";
 import {
   decodeOllamaApiBaseUrl,
   OllamaCloudClient,
@@ -46,7 +44,7 @@ export interface ModelConnectionLifecycleConfigV1 {
 }
 
 type OllamaCredentialContribution = Omit<
-  CredentialUserBackendContribution,
+  CredentialUserBackendV1,
   "discardPending" | "lease" | "replayLease" | "settle"
 > & {
   discardPending(
@@ -86,7 +84,7 @@ export interface OllamaUserBackendHost {
       getAlarm?(): Promise<number | null>;
       setAlarm(scheduledTime: number | Date): Promise<void>;
     };
-  settings: UserSettingsBackendContribution;
+  settings: UserSettingsBackendV1;
   credentials: OllamaCredentialContribution;
   /** A client the host supplies for every Connection; wins when given. */
   client?: ModelConnectionClientV1;

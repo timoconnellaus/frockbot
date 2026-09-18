@@ -3,11 +3,11 @@ import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/bot_sessions.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/app_shell.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/bot_sessions.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/app_shell.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'navigation_test.dart' show registration;

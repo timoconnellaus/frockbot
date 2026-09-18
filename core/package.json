@@ -16,6 +16,8 @@
     "./configuration": "./configuration/index.ts",
     "./configuration/bot-id": "./configuration/bot-id.ts",
     "./connection": "./connection/index.ts",
+    "./credentials": "./credentials.ts",
+    "./contracts/web-search": "./contracts/web-search.ts",
     "./workspace-store": "./workspace-store/index.ts",
     "./workspace-store/bucket": "./workspace-store/bucket.ts",
     "./workspace-store/keys": "./workspace-store/keys.ts",
@@ -40,6 +42,23 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "files": [
+    "**/*.ts",
+    "**/*.json",
+    "**/*.md",
+    "!**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "core"
+  },
+  "frockbot": {
+    "npm": true
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260907.1",

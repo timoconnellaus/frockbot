@@ -32,25 +32,11 @@ const modules: Module[] = [
   },
   {
     dir: "computer",
-    allowed: [
-      ...coreAllowed,
-      "@frockbot/computer/",
-      // Temporary: the backend contribution reaches the shell's own shared
-      // module, and `app/subagents/shared` only through it, for one view type.
-      "@frockbot/app/shell/",
-      "@frockbot/app/subagents/shared",
-    ],
+    allowed: [...coreAllowed, "@frockbot/computer/"],
   },
   {
     dir: "providers",
-    allowed: [
-      ...coreAllowed,
-      "@frockbot/providers/",
-      // Temporary: the app cut's follow-up moves these three seams into core.
-      "@frockbot/app/credentials/user",
-      "@frockbot/app/settings/user",
-      "@frockbot/app/web/contract",
-    ],
+    allowed: [...coreAllowed, "@frockbot/providers/", "@frockbot/core/"],
   },
   {
     dir: "app",

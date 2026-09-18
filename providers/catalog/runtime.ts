@@ -10,7 +10,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
-import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
+import type { CredentialLeaseRuntime } from "@frockbot/core/credentials";
 import {
   type AgentRuntimeV1,
   type LlmProvider,

@@ -167,6 +167,10 @@ import type {
   ClientWorkspaceFileV1,
 } from "./contracts.js";
 import { createGateway } from "./gateway.js";
+import {
+  configureWorkerAppV1,
+  type WorkerAppOptionsV1,
+} from "@frockbot/app/plugins/catalog";
 import { getAgentByName } from "agents";
 import {
   VOICE_ASSISTANT_DEVICE_HEADER,
@@ -2581,7 +2585,19 @@ try {
   // A runtime without the event still runs; it just reports less.
 }
 
-export default {
+/**
+ * The Worker a consumer product calls. FrockBot's own entry is
+ * `createWorkerApp()` with no options — same gateway, same Durable Objects,
+ * FrockBot's seeded catalog. A second product passes `pluginCatalog` and
+ * points `#auth-package` at its own chooser; it does not add a name to
+ * `AuthPackageIdV1`.
+ */
+export function createWorkerApp(options: WorkerAppOptionsV1 = {}) {
+  configureWorkerAppV1(options);
+  return workerAppV1;
+}
+
+const workerAppV1 = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     let mountedBackend:
       Awaited<ReturnType<typeof createGatewayBackendContributions>> | undefined;
@@ -2728,3 +2744,5 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+export default createWorkerApp();

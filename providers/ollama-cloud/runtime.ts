@@ -6,7 +6,7 @@ import {
   type NormalizedModelRequest,
   type RuntimeFeatureV1,
 } from "@frockbot/core/contracts";
-import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
+import type { CredentialLeaseRuntime } from "@frockbot/core/credentials";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import {
   type ModelRequestDeadlineOptionsV1,

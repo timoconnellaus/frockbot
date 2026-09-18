@@ -28,8 +28,24 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@frockbot/app": "workspace:*",
     "@frockbot/core": "workspace:*"
+  },
+  "files": [
+    "**/*.ts",
+    "**/*.json",
+    "**/*.md",
+    "!**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "computer"
+  },
+  "frockbot": {
+    "npm": true
   },
   "devDependencies": {
     "@frockbot/app": "workspace:*",

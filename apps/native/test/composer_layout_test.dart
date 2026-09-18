@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/shell/composer.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 void main() {
   for (final scale in [0.85, 1.0, 2.0, 3.0]) {

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
 
 /// `a.b.c` ordering, the same comparison the deployment gates on.
 bool atLeast(String version, String minimum) {

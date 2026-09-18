@@ -43,6 +43,7 @@ import {
 const foundationArtifact = readBuiltArtifact(
   resolve(import.meta.dirname, "dist/artifacts/foundation-v1.mjs"),
   resolve(import.meta.dirname, "../native/lib"),
+  resolve(import.meta.dirname, "../native/packages/frockbot_client/lib"),
 );
 
 // better-auth's D1 schema. Placeholder provider credentials enable browser

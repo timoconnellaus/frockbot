@@ -5,7 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_client/client/transport.dart';
 import 'package:frockbot_native/main.dart';
 
 import 'widget_test.dart' show MemoryStore;

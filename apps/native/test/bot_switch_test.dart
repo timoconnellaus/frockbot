@@ -4,11 +4,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/bot_sessions.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/client/page_cache.dart';
-import 'package:frockbot_native/client/plain_store.dart';
-import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_client/client/bot_sessions.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/client/page_cache.dart';
+import 'package:frockbot_client/client/plain_store.dart';
+import 'package:frockbot_client/client/transport.dart';
 import 'package:frockbot_native/main.dart';
 
 /// A store whose values are resident, and whose writes only complete when the

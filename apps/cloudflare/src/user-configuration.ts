@@ -100,7 +100,7 @@ import {
   userCompositionFailuresV1,
   userCompositionStoreV1,
 } from "@frockbot/app/composition/user";
-import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "@frockbot/app/plugins/catalog";
+import { deploymentPluginCatalogV1 } from "@frockbot/app/plugins/catalog";
 import {
   decodeAppletProvenanceV1,
   decodeAppletToolDeclarationV1,
@@ -758,8 +758,8 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
         // it seeds none: a member nothing can mount would fail every Turn of
         // every Bot on the account rather than the one Plugin.
         catalog: this.env.BOT_PACKAGES
-          ? DEPLOYMENT_PLUGIN_CATALOG_V1
-          : ([] as typeof DEPLOYMENT_PLUGIN_CATALOG_V1),
+          ? deploymentPluginCatalogV1()
+          : ([] as ReturnType<typeof deploymentPluginCatalogV1>),
         adminOpened: features.plugins,
         installedPackageIds: settings.packages
           .filter((pkg) => pkg.state === "installed")
@@ -1031,7 +1031,7 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
       userId,
       // A deployment with no Worker Loader mounts no Plugin, so it installs
       // none: a member nothing can mount would fail every Turn of every Bot.
-      catalog: this.env.BOT_PACKAGES ? DEPLOYMENT_PLUGIN_CATALOG_V1 : [],
+      catalog: this.env.BOT_PACKAGES ? deploymentPluginCatalogV1() : [],
       installedPackageIds: settings.packages
         .filter((pkg) => pkg.state === "installed")
         .map((pkg) => pkg.packageId),

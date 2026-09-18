@@ -42,9 +42,13 @@ describe("npm trusted publishing bootstrap", () => {
     const packages = readWorkspacePackages(root);
     expect(packages.length).toBeGreaterThan(0);
     // Each entry is a real scoped package rooted at its own directory.
+    const directories = new Set(packages.map((entry) => entry.directory));
+    expect(directories.has("applets/sdk")).toBe(true);
+    expect(directories.has("core")).toBe(true);
+    expect(directories.has("app")).toBe(true);
+    expect(directories.has("apps/cloudflare")).toBe(true);
     for (const entry of packages) {
       expect(entry.name.startsWith("@frockbot/")).toBe(true);
-      expect(entry.directory).toBe("applets/sdk");
     }
     const names = packages.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);

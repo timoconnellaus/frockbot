@@ -1,0 +1,23 @@
+{
+  "name": "@frockbot/consumer-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#auth-package": "./src/auth-package.ts"
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/app": "file:../../app",
+    "@frockbot/cloudflare": "file:../../apps/cloudflare",
+    "@frockbot/core": "file:../../core"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260907.1",
+    "@types/bun": "1.4.1",
+    "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2"
+  }
+}

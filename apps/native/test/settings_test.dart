@@ -4,14 +4,14 @@ import 'package:flutter/foundation.dart'
     show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/desktop_layout.dart';
-import 'package:frockbot_native/settings/controller.dart';
-import 'package:frockbot_native/settings/document.dart';
-import 'package:frockbot_native/settings/model_picker.dart';
-import 'package:frockbot_native/settings/page.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/desktop_layout.dart';
+import 'package:frockbot_client/settings/controller.dart';
+import 'package:frockbot_client/settings/document.dart';
+import 'package:frockbot_client/settings/model_picker.dart';
+import 'package:frockbot_client/settings/page.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'widget_test.dart' show MemoryStore;
 

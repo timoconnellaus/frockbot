@@ -10,13 +10,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:integration_test/integration_test.dart';
-import 'package:frockbot_native/client/auth_io.dart';
-import 'package:frockbot_native/client/bot_sessions.dart';
-import 'package:frockbot_native/client/plain_store_io.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/app_shell.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/auth_io.dart';
+import 'package:frockbot_client/client/bot_sessions.dart';
+import 'package:frockbot_client/client/plain_store_io.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/app_shell.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 class DelayedDirectoryApi extends NativeApi {
   Completer<void>? releaseDirectory;

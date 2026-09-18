@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/applets/canvas.dart';
-import 'package:frockbot_native/applets/chat_card.dart';
-import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_client/applets/canvas.dart';
+import 'package:frockbot_client/applets/chat_card.dart';
+import 'package:frockbot_client/client/transport.dart';
 
-import 'package:frockbot_native/shell/transcript.dart';
+import 'package:frockbot_client/shell/transcript.dart';
 
 import 'applets_test.dart' show applet;
 import 'settings_test.dart' show SettingsApi;

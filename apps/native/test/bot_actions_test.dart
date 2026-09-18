@@ -1,12 +1,12 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart' show RequestFailure;
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/settings/bot_quick_writes.dart';
-import 'package:frockbot_native/shell/bot_actions.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
+import 'package:frockbot_client/client/transport.dart' show RequestFailure;
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/settings/bot_quick_writes.dart';
+import 'package:frockbot_client/shell/bot_actions.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/shell/sidebar.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'shell_layout_test.dart' show bot, byIdentifier, host, unread;

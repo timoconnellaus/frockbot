@@ -464,9 +464,12 @@ jobs:
           const fs = require('node:fs');
           const path = require('node:path');
 
-          // The Applets SDK is the only published workspace: `packages/` is
-          // gone, and nothing else in this repository has a consumer off it.
-          const directories = [path.join('applets', 'sdk')];
+          const directories = JSON.parse(
+            fs.readFileSync(
+              path.join("scripts", "publishable-workspaces.json"),
+              "utf8",
+            ),
+          );
 
           for (const directory of directories) {
             const file = path.join(directory, 'package.json');
@@ -564,7 +567,10 @@ jobs:
           # npm had no trusted publisher for one, while the deploy that
           # actually matters had already succeeded.
           published=()
-          for package_dir in applets/sdk/; do
+          mapfile -t package_dirs < <(
+            node -e 'JSON.parse(require("fs").readFileSync("scripts/publishable-workspaces.json","utf8")).forEach((d) => console.log(d.endsWith("/") ? d : d + "/"))'
+          )
+          for package_dir in "${package_dirs[@]}"; do
             if node -e "process.exit(require('./${package_dir}package.json').frockbot?.npm === true ? 0 : 1)" 2>/dev/null; then
               published+=("$package_dir")
             fi

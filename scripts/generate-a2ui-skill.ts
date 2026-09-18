@@ -9,7 +9,7 @@
 // and a Bot taught a property the renderer does not have writes cards that are
 // refused. So the per-component tables and their minimal examples are
 // *derived* from `core/protocol-schemas/schema/a2ui-basic-catalog.json` and
-// `frock-catalog.json` — the same two files `apps/native/lib/cards/catalog.dart`
+// `frock-catalog.json` — the same two files `apps/native/packages/frockbot_client/lib/cards/catalog.dart`
 // registers as one catalog — and the prose around them lives in
 // `app/cards/skills/a2ui/templates/`, which this stitches.
 //

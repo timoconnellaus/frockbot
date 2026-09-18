@@ -22,20 +22,16 @@ const LEASE_TOMBSTONE_INDEX_PREFIX = "credential-lease-expired-index:";
 const MAX_GENERATION_LEASE_RECORDS = 64;
 const MAX_LEASE_RECOVERIES_PER_ALARM = 64;
 
-export interface CredentialTransaction {
-  get<T>(key: string): Promise<T | undefined>;
-  put<T>(key: string, value: T): Promise<void>;
-  put(entries: Record<string, unknown>): Promise<void>;
-  delete(key: string): Promise<boolean>;
-  getAlarm?(): Promise<number | null>;
-  setAlarm?(scheduledTime: number | Date): Promise<void>;
-}
-
-export interface CredentialStorage extends CredentialTransaction {
-  transaction<T>(
-    callback: (storage: CredentialTransaction) => Promise<T>,
-  ): Promise<T>;
-}
+export type {
+  CredentialStorage,
+  CredentialTransaction,
+  PreparedApiKeyCredential,
+} from "@frockbot/core/contracts";
+import type {
+  CredentialStorage,
+  CredentialTransaction,
+  PreparedApiKeyCredential,
+} from "@frockbot/core/contracts";
 
 export interface CredentialUserBackendHost {
   storage: CredentialStorage & {
@@ -44,14 +40,6 @@ export interface CredentialUserBackendHost {
   };
   keyring: string;
   now?: () => number;
-}
-
-export interface PreparedApiKeyCredential {
-  accountId: string;
-  connectionId: string;
-  packageId: string;
-  generation: string;
-  envelope: CredentialEnvelopeV1;
 }
 
 interface StoredCredentialGeneration {

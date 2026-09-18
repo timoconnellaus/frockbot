@@ -10,13 +10,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/applets/canvas.dart';
-import 'package:frockbot_native/client/bot_sessions.dart';
-import 'package:frockbot_native/shell/app_shell.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/view/host_frame_io.dart'
-    if (dart.library.js_interop) 'package:frockbot_native/view/host_frame_web.dart';
+import 'package:frockbot_client/applets/canvas.dart';
+import 'package:frockbot_client/client/bot_sessions.dart';
+import 'package:frockbot_client/shell/app_shell.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/view/host_frame_io.dart'
+    if (dart.library.js_interop) 'package:frockbot_client/view/host_frame_web.dart';
 
 import 'applet_premount_test.dart' show PremountApi;
 import 'navigation_test.dart' show identifiedBy, registration;

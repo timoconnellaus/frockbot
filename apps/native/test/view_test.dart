@@ -3,14 +3,14 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/theme/rows.dart';
-import 'package:frockbot_native/view/action.dart';
-import 'package:frockbot_native/view/budgets.dart';
-import 'package:frockbot_native/view/document.dart';
-import 'package:frockbot_native/view/embed.dart';
-import 'package:frockbot_native/view/sample_page.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/theme/rows.dart';
+import 'package:frockbot_client/view/action.dart';
+import 'package:frockbot_client/view/budgets.dart';
+import 'package:frockbot_client/view/document.dart';
+import 'package:frockbot_client/view/embed.dart';
+import 'package:frockbot_client/view/sample_page.dart';
 
 import 'widget_test.dart' show MemoryStore;
 

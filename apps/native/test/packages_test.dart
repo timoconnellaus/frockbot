@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/packages/catalog.dart';
+import 'package:frockbot_client/packages/catalog.dart';
 
 /// The shape `/api/bots/:botId/package-ui` answers with, written by hand so
 /// the Flutter side is pinned to `PackageIframeCatalogV1` rather than to a

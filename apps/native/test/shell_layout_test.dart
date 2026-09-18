@@ -8,19 +8,19 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/flock/avatar.dart';
-import 'package:frockbot_native/shell/desktop_layout.dart';
-import 'package:frockbot_native/shell/focus.dart';
-import 'package:frockbot_native/shell/markdown.dart';
-import 'package:frockbot_native/shell/run_view.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/shell/send_payload.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
-import 'package:frockbot_native/shell/sidebar_order.dart';
-import 'package:frockbot_native/shell/slots.dart';
-import 'package:frockbot_native/shell/transcript.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/flock/avatar.dart';
+import 'package:frockbot_client/shell/desktop_layout.dart';
+import 'package:frockbot_client/shell/focus.dart';
+import 'package:frockbot_client/shell/markdown.dart';
+import 'package:frockbot_client/shell/run_view.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/shell/send_payload.dart';
+import 'package:frockbot_client/shell/sidebar.dart';
+import 'package:frockbot_client/shell/sidebar_order.dart';
+import 'package:frockbot_client/shell/slots.dart';
+import 'package:frockbot_client/shell/transcript.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 wire.BotRegistration bot(String botId, String name) =>
     wire.BotRegistration.fromJson({

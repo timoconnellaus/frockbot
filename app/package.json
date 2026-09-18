@@ -263,6 +263,23 @@
     "better-auth": "1.7.3",
     "croner": "10.0.1"
   },
+  "files": [
+    "**/*.ts",
+    "**/*.json",
+    "**/*.md",
+    "!**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "app"
+  },
+  "frockbot": {
+    "npm": true
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260907.1",
     "@types/bun": "1.4.1",

@@ -12,12 +12,12 @@ library;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/shell/chat_header.dart';
-import 'package:frockbot_native/shell/chat_icons.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/shell/chat_header.dart';
+import 'package:frockbot_client/shell/chat_icons.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/shell/sidebar.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'shell_layout_test.dart' show bot, byIdentifier;
 

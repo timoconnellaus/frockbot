@@ -8,7 +8,7 @@ library;
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/lifecycle.dart';
+import 'package:frockbot_client/shell/lifecycle.dart';
 
 void main() {
   test('a visible app keeps working, focused or not', () {

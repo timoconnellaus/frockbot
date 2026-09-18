@@ -19,6 +19,23 @@
   "dependencies": {
     "@frockbot/core": "workspace:*"
   },
+  "files": [
+    "**/*.ts",
+    "**/*.json",
+    "**/*.md",
+    "!**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "applets"
+  },
+  "frockbot": {
+    "npm": true
+  },
   "devDependencies": {
     "@types/bun": "1.4.1",
     "@types/node": "26.4.1",

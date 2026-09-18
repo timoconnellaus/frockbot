@@ -1,0 +1,10 @@
+[
+  "core",
+  "app",
+  "providers",
+  "computer",
+  "frock-compose",
+  "applets",
+  "applets/sdk",
+  "apps/cloudflare"
+]

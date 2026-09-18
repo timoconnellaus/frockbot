@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/search/controller.dart';
-import 'package:frockbot_native/routines/page.dart';
-import 'package:frockbot_native/search/overlay.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/search/controller.dart';
+import 'package:frockbot_client/routines/page.dart';
+import 'package:frockbot_client/search/overlay.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'routines_test.dart' show routinesDocument;

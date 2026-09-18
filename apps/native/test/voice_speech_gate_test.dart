@@ -8,7 +8,7 @@ library;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/voice/speech_gate.dart';
+import 'package:frockbot_client/voice/speech_gate.dart';
 
 import 'voice_fakes.dart';
 

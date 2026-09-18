@@ -32,7 +32,7 @@ import {
   type PluginAuthoringTurnV1,
   switchPluginForBotV1,
 } from "./authoring.js";
-import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "./catalog.js";
+import { deploymentPluginCatalogV1 } from "./catalog.js";
 import type { PluginAuthoringRuntimeHostV1 } from "./feature.js";
 
 /** How many times a proposal re-reads and retries after losing the pin race. */
@@ -95,7 +95,7 @@ export async function pluginAuthoringRuntimeHost(
       write: (pluginId, values) =>
         state.ctx.storage.put(pluginSettingsKeyV1(pluginId), values),
     },
-    catalog: DEPLOYMENT_PLUGIN_CATALOG_V1,
+    catalog: deploymentPluginCatalogV1(),
   });
   return { plugins, turn };
 }

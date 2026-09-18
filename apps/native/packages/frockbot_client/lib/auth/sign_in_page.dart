@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../client/auth.dart';
 import '../flock/avatar.dart';
+import '../product_config.dart';
 import '../shell/semantics.dart';
 
 import '../theme/frock_theme.dart';
@@ -22,6 +23,12 @@ class SignInPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final product = ProductConfig.maybeOf(context);
+    final name = product?.name ?? 'FrockBot';
+    final tagline = product?.strings.tagline ?? 'Your Bots, with you.';
+    final pitch =
+        product?.strings.pitch ??
+        'A little help. A lot of possibility.\nPick up right where you left off.';
     return Scaffold(
       body: identified(
         SignInIds.page,
@@ -56,19 +63,19 @@ class SignInPage extends StatelessWidget {
                             const Center(child: CharacterAvatar(size: 112)),
                             const SizedBox(height: 24),
                             Text(
-                              'FrockBot',
+                              name,
                               textAlign: TextAlign.center,
                               style: theme.textTheme.displaySmall,
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              'Your Bots, with you.',
+                              tagline,
                               textAlign: TextAlign.center,
                               style: theme.textTheme.titleLarge,
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              'A little help. A lot of possibility.\nPick up right where you left off.',
+                              pitch,
                               textAlign: TextAlign.center,
                               style: theme.textTheme.bodyLarge?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,

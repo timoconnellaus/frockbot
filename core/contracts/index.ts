@@ -27,4 +27,7 @@ export * from "./tool-execution.js";
 export * from "./turn-deadline.js";
 export * from "./turn-history.js";
 export * from "./types.js";
+export * from "./web-search.js";
 export * from "./workspace.js";
+export * from "./credential-store.js";
+export * from "./user-settings-store.js";

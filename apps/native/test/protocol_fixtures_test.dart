@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart';
 
 void main() {
   for (final validity in ['valid', 'invalid']) {

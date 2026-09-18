@@ -9,8 +9,8 @@ library;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/markdown.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/shell/markdown.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 const desktops = {
   TargetPlatform.macOS,
