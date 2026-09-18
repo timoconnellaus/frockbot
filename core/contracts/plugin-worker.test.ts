@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ISOLATE_CONTRACT_VERSION } from "./isolate.js";
 import {
   decodePluginWorkerHealthV1,
   decodePluginWorkerHookInvocationV1,
@@ -34,13 +35,13 @@ const MEMBER_B = {
 describe("the plugin worker's identity", () => {
   test("hashes the same module set differently when the mount order differs", async () => {
     const forward = await pluginWorkerModuleSetHashV1({
-      contractVersion: 5,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       indexVersion: "index-v1",
       members: [MEMBER_A, MEMBER_B],
       bindingDigest: DIGEST,
     });
     const reversed = await pluginWorkerModuleSetHashV1({
-      contractVersion: 5,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       indexVersion: "index-v1",
       members: [MEMBER_B, MEMBER_A],
       bindingDigest: DIGEST,
@@ -52,7 +53,7 @@ describe("the plugin worker's identity", () => {
 
   test("changes with the contract, the index, an artifact or the bindings", async () => {
     const base = {
-      contractVersion: 5 as const,
+      contractVersion: ISOLATE_CONTRACT_VERSION as const,
       indexVersion: "index-v1",
       members: [MEMBER_A],
       bindingDigest: DIGEST,
@@ -74,7 +75,7 @@ describe("the plugin worker's identity", () => {
   test("refuses duplicate members and non-hex hashes", async () => {
     await expect(
       pluginWorkerModuleSetHashV1({
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         indexVersion: "index-v1",
         members: [MEMBER_A, { ...MEMBER_A, contentHash: HASH_B }],
         bindingDigest: DIGEST,
@@ -82,7 +83,7 @@ describe("the plugin worker's identity", () => {
     ).rejects.toThrow(/duplicate/);
     await expect(
       pluginWorkerModuleSetHashV1({
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         indexVersion: "index-v1",
         members: [{ ...MEMBER_A, contentHash: "not hex" }],
         bindingDigest: DIGEST,
@@ -127,7 +128,7 @@ describe("plugin worker health", () => {
   test("decodes every plugin the index mounted", () => {
     const health = decodePluginWorkerHealthV1({
       schemaVersion: 1,
-      contractVersion: 5,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       plugins: [
         healthyPlugin,
         {
@@ -145,7 +146,7 @@ describe("plugin worker health", () => {
         },
       ],
     });
-    expect(health.contractVersion).toBe(5);
+    expect(health.contractVersion).toBe(ISOLATE_CONTRACT_VERSION);
     expect(health.plugins.map((plugin) => plugin.pluginId)).toEqual([
       "weather",
       "greeter",
@@ -161,10 +162,14 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         plugins: [],
       }),
-    ).toEqual({ schemaVersion: 1, contractVersion: 5, plugins: [] });
+    ).toEqual({
+      schemaVersion: 1,
+      contractVersion: ISOLATE_CONTRACT_VERSION,
+      plugins: [],
+    });
     expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
@@ -189,7 +194,7 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         plugins: [hooklessPlugin],
       }).plugins[0],
     ).toMatchObject({
@@ -202,21 +207,21 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         plugins: [{ ...healthyPlugin, reason: "fine" }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         plugins: [{ ...healthyPlugin, ok: false }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/reason/) });
     expect(() =>
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         plugins: [healthyPlugin, healthyPlugin],
       }),
     ).toThrow(/duplicate/);
@@ -226,21 +231,21 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         plugins: [{ ...healthyPlugin, hooks: ["agent/request-error"] }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/hooks/) });
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         plugins: [{ ...healthyPlugin, triggers: ["Forecast Ready"] }],
       }).plugins[0],
     ).toMatchObject({ ok: false, reason: expect.stringMatching(/triggers/) });
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         plugins: [{ ...healthyPlugin, extra: true }],
       }).plugins[0],
     ).toMatchObject({
@@ -250,7 +255,7 @@ describe("plugin worker health", () => {
     expect(
       decodePluginWorkerHealthV1({
         schemaVersion: 1,
-        contractVersion: 5,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
         plugins: [{ ...healthyPlugin, pluginId: "Not An Id" }, healthyPlugin],
       }).plugins.map((plugin) => plugin.pluginId),
     ).toEqual(["weather"]);
