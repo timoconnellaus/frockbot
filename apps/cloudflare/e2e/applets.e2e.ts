@@ -194,6 +194,10 @@ function fileState(page: Page, path: string): Locator {
  * Bot's Applets in the sidebar (a pushed page on a phone), and a row opens one.
  */
 async function openCanvas(page: Page): Promise<Locator> {
+  const appletId = await appletIdFromDirectory(page);
+  await expect(sem(page, `bot-page-applet-${appletId}`)).toBeVisible({
+    timeout: 60_000,
+  });
   await press(sem(page, "bot-page-applets-all").first());
   await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await press(

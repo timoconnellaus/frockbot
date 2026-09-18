@@ -10,10 +10,12 @@ import '../shell/semantics.dart';
 import '../shell/sidebar.dart' show SidebarProfile;
 import '../theme/caret.dart';
 import '../theme/dialogs.dart';
+import '../theme/document.dart';
 import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../theme/states.dart';
 import '../voice/appearance.dart';
+import 'look_settings.dart';
 import 'model_picker.dart';
 import 'voice_settings.dart';
 
@@ -29,6 +31,7 @@ class BotSettingsController extends ChangeNotifier {
   bool busy = false;
   bool saving = false;
   Future<bool> _voiceWrites = Future.value(false);
+  Future<bool> _lookWrites = Future.value(false);
 
   /// Whether a read has landed. A Bot that has never been edited is at
   /// revision 0, so the revision cannot double as this.
@@ -42,6 +45,9 @@ class BotSettingsController extends ChangeNotifier {
   /// profile (`/api/bots/:id/voice`), so a profile save never moves it and a
   /// voice save never moves [revision].
   int voiceRevision = 0;
+
+  /// The look record's own revision, fenced like voice.
+  int lookRevision = 0;
 
   /// How many reads have replaced what the fields show. A field is keyed on
   /// this rather than on the revision: a save moves the revision on every
@@ -66,6 +72,12 @@ class BotSettingsController extends ChangeNotifier {
   /// How this Bot sounds (ADR 0031), or null when it has chosen nothing and
   /// speaks in its character's default voice.
   BotVoiceAppearanceV1? voice;
+
+  /// Inherit the account look, Studio, or Custom (this Bot's own tokens).
+  BotLook look = BotLook.inherit;
+
+  /// The last stored document, when Custom has one.
+  ThemeDocument? lookDocument;
 
   /// The Bot's model override, as the `custom-models` Package stores it, and
   /// null when this Bot follows the account model.
@@ -115,6 +127,10 @@ class BotSettingsController extends ChangeNotifier {
       final voiceAnswer = (await api.request('/api/bots/$botId/voice'))! as Map;
       voiceRevision = (voiceAnswer['revision'] as num?)?.toInt() ?? 0;
       voice = BotVoiceAppearanceV1.fromJson(voiceAnswer['voice']);
+      final lookAnswer = (await api.request('/api/bots/$botId/look'))! as Map;
+      lookRevision = (lookAnswer['revision'] as num?)?.toInt() ?? 0;
+      look = parseBotLook(lookAnswer['look'] as String?);
+      lookDocument = decodeThemeDocument(lookAnswer['document']);
       model =
           ((answer['packageValues'] as Map?)?['custom-models']
               as Map?)?['model'];
@@ -387,6 +403,55 @@ class BotSettingsController extends ChangeNotifier {
     }
   }
 
+  /// This Bot's look, saved as the person changes it. Fenced on its own
+  /// revision like the voice, so a profile save never races it. Custom sends
+  /// the document when the person is writing one.
+  Future<bool> saveLook(BotLook next, {ThemeDocument? document}) {
+    final write = _lookWrites.then((_) => _writeLook(next, document: document));
+    _lookWrites = write;
+    return write;
+  }
+
+  Future<bool> _writeLook(BotLook next, {ThemeDocument? document}) async {
+    saving = true;
+    message = null;
+    final previous = look;
+    final previousDocument = lookDocument;
+    look = next;
+    if (next != BotLook.custom) {
+      lookDocument = null;
+    } else if (document != null) {
+      lookDocument = document;
+    }
+    _changed();
+    try {
+      await _lookCommand({
+        'schemaVersion': 1,
+        'type': 'bot/update-look',
+        'commandId': randomId(),
+        'botId': botId,
+        'look': next.name,
+        if (next == BotLook.custom && document != null)
+          'document': encodeThemeDocument(document),
+      });
+      message = 'Saved.';
+      return true;
+    } on RequestFailure catch (failure) {
+      look = previous;
+      lookDocument = previousDocument;
+      message = failure.message;
+      return false;
+    } catch (_) {
+      look = previous;
+      lookDocument = previousDocument;
+      message = 'Couldn’t save this Bot’s look. Try again.';
+      return false;
+    } finally {
+      saving = false;
+      _changed();
+    }
+  }
+
   /// One fenced command, and the revision it left behind.
   ///
   /// A conflict is re-fenced once against the revision the authority now
@@ -433,6 +498,34 @@ class BotSettingsController extends ChangeNotifier {
       failure is String
           ? failure
           : 'Couldn’t save this Bot’s voice. Try again.',
+    );
+  }
+
+  /// The look's own fenced write, to `/api/bots/:id/look`.
+  Future<void> _lookCommand(Map<String, Object?> command) async {
+    Future<Map<String, Object?>> send() async {
+      final answer = await api.request(
+        '/api/bots/$botId/look',
+        body: {...command, 'expectedRevision': lookRevision},
+      );
+      return (answer! as Map).cast<String, Object?>();
+    }
+
+    Map<String, Object?> receipt;
+    try {
+      receipt = await send();
+    } on RequestFailure catch (failure) {
+      if (failure.status != 409) rethrow;
+      final current = (await api.request('/api/bots/$botId/look'))! as Map;
+      lookRevision = (current['revision'] as num?)?.toInt() ?? lookRevision;
+      receipt = await send();
+    }
+    final settled = receipt['revision'];
+    if (settled is int) lookRevision = settled;
+    if (receipt['status'] != 'rejected') return;
+    final failure = receipt['failure'];
+    throw RequestFailure(
+      failure is String ? failure : 'Couldn’t save this Bot’s look. Try again.',
     );
   }
 
@@ -527,6 +620,11 @@ class BotSettingsView extends StatefulWidget {
   /// what is on and the way in, and the switches live there.
   final VoidCallback? onOpenPlugins;
 
+  /// Opens this Bot's Voice settings. On a desk that is the panel beside the
+  /// conversation; on a phone it is a page. Absent, the row pushes the page
+  /// itself — tests, and any host that has not wired a slot.
+  final VoidCallback? onOpenVoice;
+
   /// Archiving, restoring and deleting belong to the Flock, whose directory
   /// they change, so the card is handed in rather than rebuilt here. It is
   /// built in `lib/flock/lifecycle.dart`, which owns that seam.
@@ -540,6 +638,7 @@ class BotSettingsView extends StatefulWidget {
     this.primary,
     this.onEditAvatar,
     this.onOpenPlugins,
+    this.onOpenVoice,
     this.dangerZone,
     this.sections = const [],
   });
@@ -863,6 +962,14 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     controller: state,
                     characterId: widget.background,
                     primary: widget.primary,
+                    onOpen: widget.onOpenVoice,
+                  ),
+                  botLookRow(
+                    context,
+                    controller: state,
+                    characterId: widget.background,
+                    primary: widget.primary,
+                    onSaved: widget.onSaved,
                   ),
                   if (state.modelAvailable) _model(context),
                 ],

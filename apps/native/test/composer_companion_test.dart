@@ -1,13 +1,19 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
+import 'package:frockbot_native/shell/chat_pane.dart';
+import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_native/voice/dictation.dart';
 
 import 'voice_shell_harness.dart';
+import 'widget_test.dart' show FakeTransport, MemoryStore;
 
 /// Optional review artifact, kept outside the repository:
 /// `--dart-define=COMPANION_VISUAL_OUTPUT=<dir>`.
@@ -30,6 +36,19 @@ Future<void> capture(WidgetTester tester, String name) async {
 }
 
 void main() {
+  const visual = String.fromEnvironment('COMPANION_VISUAL_OUTPUT');
+  if (visual.isNotEmpty) {
+    setUpAll(() async {
+      final inter = FontLoader('Inter');
+      for (final weight in [400, 500, 600, 700]) {
+        inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+      }
+      await inter.load();
+      await (FontLoader(
+        'MaterialIcons',
+      )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+    });
+  }
   for (final width in [390.0, 1280.0]) {
     testWidgets('the companion sits on the composer field at $width', (
       tester,
@@ -60,6 +79,152 @@ void main() {
       );
       await capture(tester, 'composer-companion-${width.toInt()}');
       await harness.dispose(tester);
+    });
+  }
+
+  for (final width in [390.0, 1280.0]) {
+    testWidgets('typing tucks the companion only on a phone at $width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.view.padding = FakeViewPadding(bottom: width == 390 ? 34 : 0);
+      addTearDown(tester.view.reset);
+      final store = MemoryStore();
+      final c = ChatController(
+        transport: FakeTransport(store),
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-1',
+      );
+      await c.initialize();
+      c.connection = ConnectionState.connected;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: RepaintBoundary(
+            child: Scaffold(
+              body: ChatPane(
+                controller: c,
+                onReconnect: () async {},
+                background: 'fox',
+                onDictate: () {},
+                onStopDictation: () {},
+                onVoice: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final companion = find.bySemanticsLabel('Bot is ready');
+      final field = find.byKey(const ValueKey('composer'));
+      expect(companion, findsOneWidget);
+      final restLeft = tester.getTopLeft(field).dx;
+      await capture(tester, 'companion-tuck-rest-${width.toInt()}');
+
+      await tester.enterText(field, 'hello');
+      await tester.pump();
+      await tester.pump(FrockTheme.enter);
+
+      final seat = tester.widget<AnimatedPositioned>(
+        find.byType(AnimatedPositioned),
+      );
+      final fade = tester.widget<AnimatedOpacity>(
+        find.descendant(
+          of: find.byType(AnimatedPositioned),
+          matching: find.byType(AnimatedOpacity),
+        ),
+      );
+      if (width == 390) {
+        expect(seat.left, -50);
+        expect(fade.opacity, 0);
+        expect(companion.hitTestable(), findsNothing);
+        expect(tester.getTopLeft(field).dx, lessThan(restLeft - 24));
+      } else {
+        expect(seat.left, 6);
+        expect(fade.opacity, 1);
+        expect(companion, findsOneWidget);
+        expect(tester.getTopLeft(field).dx, restLeft);
+      }
+      await capture(tester, 'companion-tuck-typing-${width.toInt()}');
+
+      await tester.enterText(field, '');
+      await tester.pump();
+      await tester.pump(FrockTheme.enter);
+      expect(companion, findsOneWidget);
+      expect(
+        tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned)).left,
+        6,
+      );
+      expect(tester.getTopLeft(field).dx, restLeft);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    });
+  }
+
+  for (final width in [390.0, 1280.0]) {
+    testWidgets('dictation fills the field in place at $width', (tester) async {
+      tester.view.physicalSize = Size(width, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.view.padding = FakeViewPadding(bottom: width == 390 ? 34 : 0);
+      addTearDown(tester.view.reset);
+      final store = MemoryStore();
+      final c = ChatController(
+        transport: FakeTransport(store),
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-1',
+      );
+      await c.initialize();
+      c.connection = ConnectionState.connected;
+      final level = ValueNotifier(0.65);
+      addTearDown(level.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: RepaintBoundary(
+            child: Scaffold(
+              body: ChatPane(
+                controller: c,
+                onReconnect: () async {},
+                background: 'pixel',
+                onDictate: () {},
+                onStopDictation: () {},
+                onDiscardDictation: () {},
+                onVoice: () {},
+                dictationState: DictationState.capturing,
+                dictationLevel: level,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final pill = find.byKey(const ValueKey('dictation-pill'));
+      final voice = find.byKey(const ValueKey('composer-voice'));
+      expect(pill, findsOneWidget);
+      expect(find.byKey(const ValueKey('dictation-discard')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dictation-stop')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dictation-strip')), findsOneWidget);
+      expect(find.byType(TextField).hitTestable(), findsNothing);
+      expect(
+        tester.getTopLeft(voice).dx,
+        greaterThanOrEqualTo(tester.getTopRight(pill).dx - 1),
+      );
+      expect(
+        tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned)).left,
+        6,
+      );
+      await capture(tester, 'composer-dictation-${width.toInt()}');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
     });
   }
 }

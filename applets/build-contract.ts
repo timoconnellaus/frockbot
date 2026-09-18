@@ -70,7 +70,7 @@ export const APPLET_BUILD_LIMITS = {
   /** A Plugin's built module. One file, bundled, no imports. */
   moduleBytes: 2 * 1_024 * 1_024,
   /** Hooks, services, triggers and views one Plugin module may export. */
-  hooks: 6,
+  hooks: 7,
   services: 32,
   triggers: 16,
   views: 16,
@@ -105,6 +105,7 @@ export const PLUGIN_BUILD_HOOK_EVENTS_V1 = [
   "tools/pre-execute",
   "tools/post-execute",
   "agent/turn-stopping",
+  "theme/assemble",
 ] as const;
 export type PluginBuildHookEventV1 =
   (typeof PLUGIN_BUILD_HOOK_EVENTS_V1)[number];

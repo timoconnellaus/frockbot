@@ -372,7 +372,10 @@ void main() {
           )
           .first,
     );
-    expect(material.color, FrockTheme.accent);
+    expect(
+      material.color,
+      FrockTheme.theme(Brightness.dark).colorScheme.primary,
+    );
     expect(
       material.borderRadius,
       const BorderRadius.vertical(top: Radius.circular(24)),

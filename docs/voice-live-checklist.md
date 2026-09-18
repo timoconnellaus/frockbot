@@ -11,9 +11,15 @@ call can hear and one it cannot were driven too — in the repo's own browser
 harness (`bun e2e/serve.ts` in `apps/cloudflare`), the real client and Worker,
 with the Live upstream and the capture device substituted (a fake upstream,
 and a WAV of zeros where a microphone would be). The steps below marked driven
-are that drive's record. No call has yet been made against the real provider
-or through a real microphone, so the real devices behind all of it, and
-anything the drive did not reach, remain untested end to end. The
+are that drive's record. The Worker's own upstream socket — the `fetch` upgrade
+in `fetchVoiceUpstreamSocketV1` the object opens a session with, not the
+hand-run probe — was driven against the real Live API the same day: setup
+completed and the model's audio came back, and what that path must do about the
+API's binary frames is in
+[`voice-gemini-probe.md`](voice-gemini-probe.md#framing). No call has yet been
+made against the real provider or through a real microphone, so the real
+devices behind all of it, and anything the drive did not reach, remain
+untested end to end. The
 deterministic checks that _have_ run are in [`voice.md`](voice.md) under
 "Verification".
 

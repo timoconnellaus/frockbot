@@ -22,7 +22,11 @@ function check(value: unknown, path = "/api/bots/default/turns") {
   return clientCompatibilityResponse(request, new URL(request.url));
 }
 test("compatible clients continue and catalogs do not confer authority", () => {
-  for (const version of ["1.4.0", "2.0.0", "1.10.0"])
+  for (const version of [
+    CLIENT_COMPATIBILITY.minimumNativeVersion,
+    "2.0.0",
+    "1.10.0",
+  ])
     expect(check({ ...hello, nativeVersion: version })).toBeUndefined();
   expect(
     check({ ...hello, catalogs: [{ id: "unknown", digest: "a".repeat(64) }] }),
@@ -30,6 +34,8 @@ test("compatible clients continue and catalogs do not confer authority", () => {
 });
 test("unsupported or malformed clients get plain update copy before routing", async () => {
   for (const value of [
+    { ...hello, nativeVersion: "1.5.0" },
+    { ...hello, nativeVersion: "1.4.0" },
     { ...hello, nativeVersion: "1.3.0" },
     { ...hello, nativeVersion: "1.2.0" },
     { ...hello, nativeVersion: "1.1.0" },

@@ -616,7 +616,9 @@ anyone speaking. Not used by the footer; kept for tests.
 
 ## Durable ledger
 
-`VoiceAssistant` is one Durable Object per User (`getAgentByName(env.VOICE_ASSISTANTS, userId)`),
+`VoiceAssistant` is one Durable Object per User (`get(idFromName(userId))` on
+the upgrade; `getAgentByName` is reserved for RPC such as the dictation
+lease, because it waits for `onStart` before returning a stub),
 `new_sqlite_classes` migration `v7`. It records, before any external call:
 
 - `session:<callId>` — call start, device, caps consumed.
@@ -1123,7 +1125,12 @@ the footer's entrance. Measured on a Pixel 9a: the
 capability probe is read once at sign-in rather than on the press, the
 controller is created and shown before anything is awaited, and the socket
 upgrade runs concurrently with the audio session and the microphone (the
-permission prompt is the slow part). `hello`/`start_call` — which wake a
+permission prompt is the slow part). The upgrade is forwarded to the voice
+object without waiting for its Agent `onStart` RPC; recovery still runs as
+that fetch starts the object. One connect attempt is given ten seconds — a
+cold object can spend most of that starting — and a timeout is not retried,
+because a second upgrade would only race the first. A refused socket is
+retried once. `hello`/`start_call` — which wake a
 metered upstream — wait for both the server's `welcome` and an open
 microphone, so a person still answering the permission prompt is not billed.
 

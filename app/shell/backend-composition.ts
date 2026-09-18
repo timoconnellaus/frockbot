@@ -28,6 +28,7 @@ import {
   type BotIsolateArtifactStore,
   type BotIsolateLimits,
   type BotIsolateLoader,
+  type PluginServedProviderClaimV1,
 } from "@frockbot/frock-compose";
 import {
   decodeSendToUserPayloadV1,
@@ -38,7 +39,6 @@ import {
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
 import { pluginModelProviderV1 } from "./plugin-model-provider.js";
-import { PLUGIN_SERVED_PROVIDER_IDS_V1 } from "@frockbot/providers/catalog/definition";
 import {
   priorOutcomeUnknownV1,
   type ShellPluginModelHostV1,
@@ -96,6 +96,14 @@ export interface ShellIsolateMountOptions {
    */
   bindingDigest: string;
   compatibilityDate: string;
+  /**
+   * Every model provider this deployment serves through a Plugin, and the
+   * Plugin and artifact that may serve each (ADR 0032). The deployment's own
+   * answer, so it travels with every mount — an account's installed provider
+   * Plugin is in this Bot's member set whether or not this Bot's model names
+   * the provider, and the host judges the member's claim by these bytes.
+   */
+  openModelProviders?: readonly PluginServedProviderClaimV1[];
   limits?: BotIsolateLimits;
   deadlineMs?: number;
   /** The Plugins this Bot runs; absent means every installed one. */
@@ -562,18 +570,16 @@ export function createShellCompositionHost(
               ...(isolate.egress === undefined
                 ? {}
                 : { egress: isolate.egress }),
-              // The provider this Bot selected, and the ids this deployment
-              // opens to plugins. A generation with no provider Plugin for
-              // the selection simply mounts none, and the model call then
-              // fails as unavailable rather than reaching anything.
+              // Which providers this deployment serves through a Plugin, and
+              // which one this Bot's model selection runs. A generation with
+              // no provider Plugin for the selection simply mounts none, and
+              // the model call then fails as unavailable rather than reaching
+              // anything; a provider Plugin it does carry mounts either way.
+              ...(isolate.openModelProviders
+                ? { openModelProviders: isolate.openModelProviders }
+                : {}),
               ...(options.pluginModel
-                ? {
-                    modelProviders: {
-                      provider: options.pluginModel.provider,
-                      trusted: options.pluginModel.trusted,
-                      open: PLUGIN_SERVED_PROVIDER_IDS_V1,
-                    },
-                  }
+                ? { selectedModelProvider: options.pluginModel.provider }
                 : {}),
             });
             // Mount and health-check are one guarded phase (Worker Loader spike).

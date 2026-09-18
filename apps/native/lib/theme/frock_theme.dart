@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/services.dart';
 
+import 'document.dart';
+
 /// The reviewed web theme's semantic colors, radii, typefaces and motion.
 /// Native text/touch sizes follow platform accessibility instead of CSS pixels.
 ///
@@ -109,36 +111,58 @@ abstract final class FrockTheme {
   static Color hairline(ColorScheme scheme) =>
       scheme.outlineVariant.withValues(alpha: 0.72);
 
-  static ThemeData theme(Brightness brightness) {
-    final dark = brightness == Brightness.dark;
-    final scheme =
-        ColorScheme.fromSeed(
-          seedColor: accent,
-          brightness: brightness,
-        ).copyWith(
-          primary: dark ? accent : const Color(0xffc23359),
-          onPrimary: Colors.white,
-          surface: dark ? surface : cream,
-          onSurface: dark ? text : ink,
-          onSurfaceVariant: dark ? muted : inkMuted,
-          surfaceContainerHighest: dark ? raised : const Color(0xfff2ece4),
-          outlineVariant: dark ? border : line,
-        );
+  static ThemeData theme(Brightness brightness) => fromDocument(
+    brightness == Brightness.dark ? ThemeDocument.ink : ThemeDocument.paper,
+  );
+
+  static ThemeData fromDocument(
+    ThemeDocument document, {
+    DateTime? now,
+    String timezone = 'UTC',
+  }) {
+    final tokens = resolveThemeTokens(
+      document,
+      now: now ?? DateTime.now(),
+      timezone: timezone,
+    );
+    return fromTokens(tokens);
+  }
+
+  static ThemeData fromTokens(ThemeTokens tokens) {
+    final surfaces = tokens.surfaces;
+    final dark = surfaces.window.computeLuminance() < 0.5;
+    final brightness = dark ? Brightness.dark : Brightness.light;
+    final fontFamily = tokens.type == ThemeTypeface.manrope
+        ? 'Manrope'
+        : 'Inter';
+    final scheme = ColorScheme(
+      brightness: brightness,
+      primary: surfaces.accent,
+      onPrimary: surfaces.onAccent,
+      secondary: surfaces.accent,
+      onSecondary: surfaces.onAccent,
+      error: const Color(0xffe05a5a),
+      onError: Colors.white,
+      surface: surfaces.surface,
+      onSurface: surfaces.text,
+    ).copyWith(
+      onSurfaceVariant: surfaces.muted,
+      surfaceContainerHighest: surfaces.raised,
+      outlineVariant: surfaces.line,
+    );
     final base = ThemeData(
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
-      fontFamily: 'Inter',
+      fontFamily: fontFamily,
+      extensions: [FrockLook.fromTokens(tokens)],
     );
-    // Inter, at the weights a desktop tool uses: regular for reading, medium
-    // for a name, semibold for a title. Nothing heavier — the accent colour
-    // is what carries emphasis here, not the ink.
-    final type = base.textTheme.apply(fontFamily: 'Inter');
+    final type = base.textTheme.apply(fontFamily: fontFamily);
     final control = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(radiusControl),
     );
     final hair = hairline(scheme);
-    final cardColor = dark ? raised : paper;
+    final cardColor = dark ? surfaces.raised : surfaces.surface;
     final selectionFill = dark ? blushDark : blush;
     final selectionInk = dark ? blushDarkInk : blushInk;
     final textTheme = type.copyWith(
@@ -219,8 +243,8 @@ abstract final class FrockTheme {
     );
     return base.copyWith(
       textTheme: textTheme,
-      scaffoldBackgroundColor: dark ? window : cream,
-      canvasColor: dark ? window : cream,
+      scaffoldBackgroundColor: surfaces.window,
+      canvasColor: surfaces.window,
       dividerColor: hair,
       splashFactory: InkSparkle.splashFactory,
       splashColor: scheme.onSurface.withValues(alpha: 0.05),
@@ -306,8 +330,11 @@ abstract final class FrockTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: dark
-            ? Color.alphaBlend(Colors.white.withValues(alpha: 0.025), surface)
-            : Colors.white,
+            ? Color.alphaBlend(
+                Colors.white.withValues(alpha: 0.025),
+                surfaces.surface,
+              )
+            : surfaces.surface,
         isDense: true,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusControl),
@@ -420,8 +447,8 @@ abstract final class FrockTheme {
       badgeTheme: BadgeThemeData(
         backgroundColor: scheme.primary,
         textColor: scheme.onPrimary,
-        textStyle: const TextStyle(
-          fontFamily: 'Inter',
+        textStyle: TextStyle(
+          fontFamily: fontFamily,
           fontSize: 10.5,
           fontWeight: FontWeight.w600,
           height: 1,
@@ -464,8 +491,8 @@ abstract final class FrockTheme {
         actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       ),
       bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: dark ? raised : Colors.white,
-        modalBackgroundColor: dark ? raised : Colors.white,
+        backgroundColor: dark ? surfaces.raised : surfaces.surface,
+        modalBackgroundColor: dark ? surfaces.raised : surfaces.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         modalElevation: 0,
@@ -480,7 +507,7 @@ abstract final class FrockTheme {
         clipBehavior: Clip.antiAlias,
       ),
       popupMenuTheme: PopupMenuThemeData(
-        color: dark ? raised : Colors.white,
+        color: dark ? surfaces.raised : surfaces.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -491,7 +518,9 @@ abstract final class FrockTheme {
       ),
       dropdownMenuTheme: DropdownMenuThemeData(
         menuStyle: MenuStyle(
-          backgroundColor: WidgetStatePropertyAll(dark ? raised : Colors.white),
+          backgroundColor: WidgetStatePropertyAll(
+            dark ? surfaces.raised : surfaces.surface,
+          ),
           surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
           elevation: const WidgetStatePropertyAll(0),
           shape: WidgetStatePropertyAll(
@@ -504,7 +533,9 @@ abstract final class FrockTheme {
       ),
       menuTheme: MenuThemeData(
         style: MenuStyle(
-          backgroundColor: WidgetStatePropertyAll(dark ? raised : Colors.white),
+          backgroundColor: WidgetStatePropertyAll(
+            dark ? surfaces.raised : surfaces.surface,
+          ),
           surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
           elevation: const WidgetStatePropertyAll(0),
           shape: WidgetStatePropertyAll(
@@ -542,7 +573,7 @@ abstract final class FrockTheme {
         selectionHandleColor: scheme.primary,
       ),
       bannerTheme: MaterialBannerThemeData(
-        backgroundColor: dark ? raised : const Color(0xfff2ece4),
+        backgroundColor: surfaces.raised,
         surfaceTintColor: Colors.transparent,
         dividerColor: hair,
         contentTextStyle: textTheme.bodyMedium?.copyWith(
@@ -563,6 +594,43 @@ abstract final class FrockTheme {
         },
       ),
     );
+  }
+}
+
+/// Token treatments the Material scheme has no slot for: bubble fill, typeface.
+class FrockLook extends ThemeExtension<FrockLook> {
+  final ThemeTokens tokens;
+  const FrockLook(this.tokens);
+
+  factory FrockLook.fromTokens(ThemeTokens tokens) => FrockLook(tokens);
+
+  ThemeSurfaces get surfaces => tokens.surfaces;
+
+  Color bubbleFill({required bool mine}) {
+    if (mine) {
+      return tokens.meBubble == MeBubble.accent
+          ? tokens.surfaces.accent
+          : Color.alphaBlend(
+              tokens.surfaces.accent.withValues(alpha: 0.2),
+              tokens.surfaces.raised,
+            );
+    }
+    return tokens.botBubble == BotBubble.raised
+        ? tokens.surfaces.raised
+        : tokens.surfaces.surface;
+  }
+
+  Color bubbleInk({required bool mine}) => mine && tokens.meBubble == MeBubble.accent
+      ? tokens.surfaces.onAccent
+      : tokens.surfaces.text;
+
+  @override
+  FrockLook copyWith({ThemeTokens? tokens}) => FrockLook(tokens ?? this.tokens);
+
+  @override
+  FrockLook lerp(ThemeExtension<FrockLook>? other, double t) {
+    if (other is! FrockLook) return this;
+    return t < 0.5 ? this : other;
   }
 }
 

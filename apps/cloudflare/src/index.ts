@@ -28,6 +28,7 @@ import {
   decodeFlockReceiptV1,
   decodeAvatarIdentityViewV1,
   decodeVoiceIdentityViewV1,
+  decodeLookIdentityViewV1,
   BotNotFoundError,
   decodeBotIdentityDirectoryViewV1,
   FLOCK_DIRECTORY_LIMIT,
@@ -537,6 +538,10 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     updateAvatar: (request) => rpc.updateAvatar(request),
     readVoice: (request) => rpc.readVoice(request),
     updateVoice: (request) => rpc.updateVoice(request),
+    readLook: (request) => rpc.readLook(request),
+    updateLook: (request) => rpc.updateLook(request),
+    persistAssembledDocument: (request) =>
+      rpc.persistAssembledDocument(request),
     readConfiguration: (request) => rpc.readConfiguration(request),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     readBotPluginsFrame: (request) => rpc.readBotPluginsFrame(request),
@@ -669,6 +674,9 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     updateBotAvatar: (request) => rpc.updateBotAvatar(request),
     readBotVoice: (request) => rpc.readBotVoice(request),
     updateBotVoice: (request) => rpc.updateBotVoice(request),
+    readBotLook: (request) => rpc.readBotLook(request),
+    updateBotLook: (request) => rpc.updateBotLook(request),
+    mirrorBotLook: (request) => rpc.mirrorBotLook(request),
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
     readConnectionsFrame: (request) => rpc.readConnectionsFrame(request),
@@ -1882,6 +1890,10 @@ async function ownedComputerBotState(
   return botStateStub(env, userId, botId);
 }
 
+function voiceAssistantStub(env: Env, userId: string) {
+  return env.VOICE_ASSISTANTS.get(env.VOICE_ASSISTANTS.idFromName(userId));
+}
+
 /**
  * The tidy-up the dictation relay offers a finished capture.
  *
@@ -1960,7 +1972,8 @@ function voiceGatewayDependencies(env: Env): VoiceGatewayDependencies {
     openDictation: async (userId, request) => {
       // The account's voice object holds the dictation lease: one capture
       // at a time and a booked window of seconds, decided before the provider
-      // is opened.
+      // is opened. RPC goes through the Agent lifecycle; the assistant
+      // socket below does not, so a cold start is paid once on the 101.
       const stub = await getAgentByName(env.VOICE_ASSISTANTS, userId);
       const leaseId = crypto.randomUUID();
       const call = (input: Record<string, unknown>) =>
@@ -2005,8 +2018,12 @@ function voiceGatewayDependencies(env: Env): VoiceGatewayDependencies {
       headers.set("x-frockbot-is-admin-v1", String(context.isAdmin));
       // Named for the User and reached only through this door: there is no
       // `/agents/*` route, so an object nobody signed in as is never opened.
-      const stub = await getAgentByName(env.VOICE_ASSISTANTS, userId);
-      return stub.fetch(new Request(internal, { method: "GET", headers }));
+      // `getAgentByName` waits for `onStart` before returning the stub, which
+      // would hold the 101 until ledger recovery finished. The fetch itself
+      // starts the Agent; recovery runs in that same invocation.
+      return voiceAssistantStub(env, userId).fetch(
+        new Request(internal, { method: "GET", headers }),
+      );
     },
   };
 }
@@ -2268,6 +2285,16 @@ const createGatewayBackendContributions = (env: Env) =>
       decodeVoiceIdentityViewV1(
         rpcJsonSnapshot(
           await botStateStub(env, userId, botId).readVoice({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        ),
+      ),
+    readLook: async (userId, botId) =>
+      decodeLookIdentityViewV1(
+        rpcJsonSnapshot(
+          await botStateStub(env, userId, botId).readLook({
             schemaVersion: 1,
             userId,
             botId,
@@ -2538,6 +2565,17 @@ const createGatewayBackendContributions = (env: Env) =>
       decodeFlockReceiptV1(
         rpcJsonSnapshot(
           await userConfigurationStub(env, userId).updateBotVoice({
+            schemaVersion: 1,
+            userId,
+            botId,
+            command,
+          }),
+        ),
+      ),
+    updateLook: async (userId, botId, command) =>
+      decodeFlockReceiptV1(
+        rpcJsonSnapshot(
+          await userConfigurationStub(env, userId).updateBotLook({
             schemaVersion: 1,
             userId,
             botId,

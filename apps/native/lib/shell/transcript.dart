@@ -549,15 +549,15 @@ class _Bubble extends StatelessWidget {
                   vertical: 9,
                 ),
                 decoration: BoxDecoration(
-                  // Both sides sit on the raised surface. The person's words
-                  // take a tint of it — pink enough to be theirs, never a
-                  // poster — and the Bot's keep it neutral.
-                  color: mine
-                      ? Color.alphaBlend(
-                          theme.colorScheme.primary.withValues(alpha: 0.2),
-                          theme.colorScheme.surfaceContainerHighest,
-                        )
-                      : theme.colorScheme.surfaceContainerHighest,
+                  color: Theme.of(context).extension<FrockLook>()?.bubbleFill(
+                    mine: mine,
+                  ) ??
+                      (mine
+                          ? Color.alphaBlend(
+                              theme.colorScheme.primary.withValues(alpha: 0.2),
+                              theme.colorScheme.surfaceContainerHighest,
+                            )
+                          : theme.colorScheme.surfaceContainerHighest),
                   border: failed
                       ? Border.all(color: theme.colorScheme.error)
                       : null,
@@ -569,7 +569,11 @@ class _Bubble extends StatelessWidget {
                   ),
                 ),
                 child: DefaultTextStyle.merge(
-                  style: FrockTheme.message(theme),
+                  style: FrockTheme.message(theme).copyWith(
+                    color: Theme.of(
+                      context,
+                    ).extension<FrockLook>()?.bubbleInk(mine: mine),
+                  ),
                   child: Semantics(label: mine ? 'You' : 'Bot', child: child),
                 ),
               ),

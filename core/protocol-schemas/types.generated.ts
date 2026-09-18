@@ -94,6 +94,27 @@ export type AvatarAppearance = {
   characterId: string;
   primary: string;
 };
+export type ThemeHex = string;
+export type ThemeTokens = {
+  surfaces: {
+    window: ThemeHex;
+    surface: ThemeHex;
+    raised: ThemeHex;
+    text: ThemeHex;
+    muted: ThemeHex;
+    line: ThemeHex;
+    accent: ThemeHex;
+    onAccent: ThemeHex;
+  };
+  type: "manrope" | "inter";
+  bubbles: { bot: "plain" | "raised"; me: "accent" | "tint" };
+};
+export type ThemeDocument = {
+  schemaVersion: 1;
+  look: "ink" | "paper" | "studio";
+  tokens: ThemeTokens;
+  phases?: Array<{ after: string; tokens: ThemeTokens }>;
+};
 export type BotRegistration = {
   schemaVersion: 1;
   botId: BotId;
@@ -103,6 +124,8 @@ export type BotRegistration = {
   avatar: AvatarAppearance;
   createdBy?: BotWriter;
   voice?: BotVoiceAppearance;
+  look?: "inherit" | "studio" | "custom";
+  document?: ThemeDocument;
 };
 export type BotDirectory = {
   schemaVersion: 1;
@@ -180,6 +203,22 @@ export type BotVoiceCommand = {
   expectedRevision: number;
   botId: BotId;
   voice: BotVoiceAppearance;
+};
+export type LookIdentity = {
+  schemaVersion: 1;
+  botId: BotId;
+  revision: number;
+  look: "inherit" | "studio" | "custom";
+  document?: ThemeDocument;
+};
+export type BotLookCommand = {
+  schemaVersion: 1;
+  type: "bot/update-look";
+  commandId: Identifier;
+  expectedRevision: number;
+  botId: BotId;
+  look: "inherit" | "studio" | "custom";
+  document?: ThemeDocument;
 };
 export type FlockReceipt = {
   schemaVersion: 1;
@@ -937,6 +976,9 @@ export interface ProtocolTypes {
   SessionRevokeCommand: SessionRevokeCommand;
   BotVoiceAppearance: BotVoiceAppearance;
   AvatarAppearance: AvatarAppearance;
+  ThemeHex: ThemeHex;
+  ThemeTokens: ThemeTokens;
+  ThemeDocument: ThemeDocument;
   BotRegistration: BotRegistration;
   BotDirectory: BotDirectory;
   BotLifecycle: BotLifecycle;
@@ -949,6 +991,8 @@ export interface ProtocolTypes {
   BotAvatarCommand: BotAvatarCommand;
   VoiceIdentity: VoiceIdentity;
   BotVoiceCommand: BotVoiceCommand;
+  LookIdentity: LookIdentity;
+  BotLookCommand: BotLookCommand;
   FlockReceipt: FlockReceipt;
   SkillRef: SkillRef;
   TurnCommand: TurnCommand;

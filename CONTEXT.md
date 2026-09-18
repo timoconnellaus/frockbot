@@ -99,7 +99,7 @@ The one Dynamic Worker per User that holds every installed Plugin as a module ma
 _Avoid_: Isolate per plugin, runtime bundle
 
 **Hook**:
-One of the six loop events a Plugin may wrap — `system-prompt/assemble`, `agent/tool-exposure`, `tools/pre-execute`, `tools/post-execute`, `agent/turn-stopping`, `agent/request` — each answering with a plain patch, chained in Plugin order.
+A named event a Plugin may wrap — the loop events `system-prompt/assemble`, `agent/tool-exposure`, `tools/pre-execute`, `tools/post-execute`, `agent/turn-stopping`, `agent/request`, and `theme/assemble` outside a Turn — each answering with a plain patch, chained in Plugin order.
 _Avoid_: Middleware, interceptor, action
 
 **Seed state**:
@@ -239,7 +239,7 @@ The checklist of GrokBot capabilities FrockBot must match, kept in `docs/grokbot
 _Avoid_: Feature list, roadmap
 
 **Provenance**:
-The recorded origin of a Package or change: first-party, User, or Bot, and for a Bot the Session and Turn that produced it.
+The recorded origin of a Package or change: first-party, User, or Bot, and for a Bot the Session and Turn that produced it. A provider Plugin's Composition member carries `installed`: the deployment ships it, the account's own Package command installs it, and reconciliation leaves it where the User put it ([ADR 0032](docs/adr/0032-plugin-model-providers.md)).
 _Avoid_: Author, source
 
 **Routine**:
