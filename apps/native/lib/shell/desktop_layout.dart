@@ -26,10 +26,37 @@ import 'semantics.dart';
 bool get desktopTitleBarless =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
 
-/// The Mac traffic lights occupy the sidebar's top-left corner. Only that
-/// column reserves space for them; 40 points leaves the avatar circle below
+/// The Mac traffic lights occupy the window's top-left corner. The Bot list
+/// is that corner in ordinary use: 40 points leaves the avatar circle below
 /// the controls while the conversation chrome stays at the top.
 const double desktopSidebarTrafficLightClearance = 40;
+
+/// When a call fills the window the header is the top-left row and sits past
+/// the lights. 78 points is the cluster plus a gap after the zoom button.
+const double desktopTrafficLightLeading = 78;
+
+/// Extra height a full-window Mac header takes so its controls sit below the
+/// traffic lights. Same surface as the bar; no divider, no second row.
+const double desktopTitleBarBand = 28;
+
+/// How a Mac header clears the traffic lights.
+enum DesktopChrome {
+  /// Conversation beside the Bot list, or a header already inside the panel.
+  overlay,
+
+  /// A call: the list is gone, so the header sits past the lights.
+  leading,
+
+  /// A full-window page: extra top space, same surface, no divider.
+  titleBand,
+}
+
+/// Extra height [chrome] adds on a Mac. Overlay and leading keep the bar's
+/// own height; a title band grows it.
+double desktopChromeHeight(DesktopChrome chrome) =>
+    desktopTitleBarless && chrome == DesktopChrome.titleBand
+    ? desktopTitleBarBand
+    : 0;
 
 /// The window's own drag gesture, which Flutter cannot perform itself.
 abstract final class DesktopWindow {
@@ -57,6 +84,57 @@ class DesktopWindowDragRegion extends StatelessWidget {
       behavior: HitTestBehavior.translucent,
       onPanStart: (_) => DesktopWindow.startDrag(),
       child: child,
+    );
+  }
+}
+
+/// A full-window [AppBar] on Mac: it drags the window, and it clears the
+/// traffic lights the way [chrome] says.
+///
+/// The Bot list is the top-left corner in ordinary use, so a conversation
+/// beside it passes [DesktopChrome.overlay]. A call passes
+/// [DesktopChrome.leading]. Everything else that fills the window — Settings,
+/// Profile, a pushed page — uses [DesktopChrome.titleBand], the default: a
+/// little more space above the bar, same surface, no line.
+class DesktopHeader extends StatelessWidget implements PreferredSizeWidget {
+  final PreferredSizeWidget child;
+  final DesktopChrome chrome;
+  const DesktopHeader({
+    super.key,
+    required this.child,
+    this.chrome = DesktopChrome.titleBand,
+  });
+
+  @override
+  Size get preferredSize {
+    final size = child.preferredSize;
+    return Size(size.width, size.height + desktopChromeHeight(chrome));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!desktopTitleBarless || chrome == DesktopChrome.overlay) {
+      return DesktopWindowDragRegion(child: child);
+    }
+    if (chrome == DesktopChrome.leading) {
+      return DesktopWindowDragRegion(
+        child: Padding(
+          padding: const EdgeInsets.only(left: desktopTrafficLightLeading),
+          child: child,
+        ),
+      );
+    }
+    final scheme = Theme.of(context).colorScheme;
+    final color =
+        Theme.of(context).appBarTheme.backgroundColor ?? scheme.surface;
+    return DesktopWindowDragRegion(
+      child: ColoredBox(
+        color: color,
+        child: Padding(
+          padding: const EdgeInsets.only(top: desktopTitleBarBand),
+          child: child,
+        ),
+      ),
     );
   }
 }

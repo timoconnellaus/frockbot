@@ -45,6 +45,7 @@ import '../settings/credit.dart';
 import '../settings/bot_quick_writes.dart';
 import '../settings/bot_settings.dart';
 import '../settings/page.dart';
+import '../settings/voice_settings.dart';
 import '../templates/page.dart';
 import '../theme/rows.dart';
 import '../update/app_version.dart';
@@ -970,6 +971,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
       label: 'Plugins',
     );
+    slots.register(
+      ShellSlot.rightPanel,
+      'voice',
+      (context) => ListenableBuilder(
+        listenable: avatarRevision,
+        builder: (context, _) => BotVoicePage(
+          controller: controller,
+          characterId: _background(botId),
+          primary: _primary(botId),
+          chrome: false,
+        ),
+      ),
+      label: 'Voice',
+    );
     appletCanvas?.dispose();
     computer?.dispose();
     appletCanvas = null;
@@ -1060,7 +1075,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ShellTier.single) {
       _push(
         Scaffold(
-          appBar: AppBar(title: Text(entry.entry.label)),
+          appBar: DesktopHeader(child: AppBar(title: Text(entry.entry.label))),
           body: SafeArea(
             top: false,
             child: Padding(
@@ -1575,6 +1590,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   primary: _primary(botId),
                   onEditAvatar: () => unawaited(_editAvatar(botId, name)),
                   onOpenPlugins: () => _openPanel('plugins', push: true),
+                  onOpenVoice: () => _openPanel('voice', push: true),
                   dangerZone: _dangerZone(botId, name),
                   sections: _packageSettings(botId),
                 ),
@@ -1865,7 +1881,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ShellTier.single) {
       _push(
         Scaffold(
-          appBar: AppBar(),
+          appBar: DesktopHeader(child: AppBar()),
           body: SafeArea(
             top: false,
             child: AppletList(
@@ -1946,10 +1962,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     if (controller == null) return;
+    if (key == 'voice') {
+      _push(
+        BotVoicePage(
+          controller: controller,
+          characterId: _background(bot.botId.value),
+          primary: _primary(bot.botId.value),
+        ),
+      );
+      return;
+    }
     if (key == 'bot-settings') {
       _push(
         Scaffold(
-          appBar: AppBar(title: const Text('Settings')),
+          appBar: DesktopHeader(child: AppBar(title: const Text('Settings'))),
           body: SafeArea(
             top: false,
             child: _botSettings(bot.botId.value, controller),
@@ -1967,21 +1993,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       AnimatedBuilder(
         animation: machine,
         builder: (context, _) => Scaffold(
-          appBar: AppBar(
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Computer'),
-                Text(
-                  machine.said,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+          appBar: DesktopHeader(
+            child: AppBar(
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Computer'),
+                  Text(
+                    machine.said,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           body: SafeArea(
@@ -1996,40 +2024,42 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget _botPage(wire.BotRegistration bot) {
     final botId = bot.botId.value;
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        title: ListenableBuilder(
-          listenable: avatarRevision,
-          builder: (context, _) => Row(
-            children: [
-              CharacterAvatar(
-                size: 28,
-                characterId: _background(botId),
-                primary: _primary(botId),
-                motion: CharacterMotion.quiet,
-              ),
-              const SizedBox(width: 10),
-              Flexible(
-                child: Text(
-                  _name(bot),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+      appBar: DesktopHeader(
+        child: AppBar(
+          titleSpacing: 0,
+          title: ListenableBuilder(
+            listenable: avatarRevision,
+            builder: (context, _) => Row(
+              children: [
+                CharacterAvatar(
+                  size: 28,
+                  characterId: _background(botId),
+                  primary: _primary(botId),
+                  motion: CharacterMotion.quiet,
                 ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          identified(
-            SettingsIds.botPageSettings,
-            IconButton(
-              tooltip: 'Bot settings',
-              onPressed: () => _pushPanel('bot-settings'),
-              icon: const Icon(Icons.settings_outlined),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    _name(bot),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 4),
-        ],
+          actions: [
+            identified(
+              SettingsIds.botPageSettings,
+              IconButton(
+                tooltip: 'Bot settings',
+                onPressed: () => _pushPanel('bot-settings'),
+                icon: const Icon(Icons.settings_outlined),
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
       ),
       body: SafeArea(top: false, child: _botPageView(bot)),
     );
@@ -2670,7 +2700,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _openProfile() {
     _push(
       Scaffold(
-        appBar: AppBar(title: const Text('You')),
+        appBar: DesktopHeader(child: AppBar(title: const Text('You'))),
         body: identified(
           SettingsIds.profileMenu,
           SafeArea(
@@ -3054,13 +3084,15 @@ class _ExchangeScreenState extends State<_ExchangeScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      titleSpacing: 0,
-      title: ExchangeTitle(
-        self: widget.self,
-        counterpart: widget.controller.counterpart,
-        counterpartBackground: widget.counterpartBackground,
-        counterpartPrimary: widget.counterpartPrimary,
+    appBar: DesktopHeader(
+      child: AppBar(
+        titleSpacing: 0,
+        title: ExchangeTitle(
+          self: widget.self,
+          counterpart: widget.controller.counterpart,
+          counterpartBackground: widget.counterpartBackground,
+          counterpartPrimary: widget.counterpartPrimary,
+        ),
       ),
     ),
     body: SafeArea(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../client/transport.dart';
+import '../shell/desktop_layout.dart';
 
 class BillingPage extends StatefulWidget {
   final NativeApi api;
@@ -109,15 +110,17 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     final rates = data?['modelRates'] as Map? ?? const {};
     final computerRate = data?['computerRate'] as Map? ?? const {};
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Billing & usage'),
-        actions: [
-          IconButton(
-            onPressed: _load,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh balance',
-          ),
-        ],
+      appBar: DesktopHeader(
+        child: AppBar(
+          title: const Text('Billing & usage'),
+          actions: [
+            IconButton(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh balance',
+            ),
+          ],
+        ),
       ),
       body: RefreshIndicator(
         onRefresh: _load,

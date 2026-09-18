@@ -65,8 +65,18 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   });
 
   double get _toolbarHeight => 52 * textScale.clamp(1, 3);
+
+  /// A call sits past the lights. A phone page drops a band of the same
+  /// surface under them. A conversation beside the list does neither.
+  DesktopChrome get _chrome => voiceMode
+      ? DesktopChrome.leading
+      : phone
+      ? DesktopChrome.titleBand
+      : DesktopChrome.overlay;
+
   @override
-  Size get preferredSize => Size.fromHeight(_toolbarHeight);
+  Size get preferredSize =>
+      Size.fromHeight(_toolbarHeight + desktopChromeHeight(_chrome));
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +113,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
         ],
       ],
     );
-    return DesktopWindowDragRegion(
+    return DesktopHeader(
+      chrome: _chrome,
       child: AppBar(
         toolbarHeight: _toolbarHeight,
         leadingWidth: 48,

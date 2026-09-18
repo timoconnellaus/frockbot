@@ -31,6 +31,7 @@ import '../voice/dictation.dart';
 import '../voice/motion.dart';
 import 'approvals.dart';
 import 'composer.dart';
+import 'desktop_layout.dart';
 import 'lifecycle.dart';
 import 'run_view.dart';
 import 'semantics.dart';
@@ -808,7 +809,7 @@ class RunPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Work')),
+    appBar: DesktopHeader(child: AppBar(title: const Text('Work'))),
     body: SafeArea(child: RunView(line: line, header: false)),
   );
 }

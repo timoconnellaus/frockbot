@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
+import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
 import '../theme/states.dart';
@@ -78,7 +79,7 @@ class _ModelPickerState extends State<ModelPicker> {
   Widget build(BuildContext context) => identified(
     SettingsIds.modelPicker,
     Scaffold(
-      appBar: AppBar(title: const Text('Choose a model')),
+      appBar: DesktopHeader(child: AppBar(title: const Text('Choose a model'))),
       body: SafeArea(
         top: false,
         child: Center(
