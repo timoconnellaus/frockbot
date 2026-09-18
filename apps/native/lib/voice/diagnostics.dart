@@ -12,9 +12,9 @@
 /// * **Opt-in at compile time.** [voiceDiagnosticsEnabledV1] is a
 ///   `bool.fromEnvironment` const, so a build that did not ask for it compiles
 ///   [voiceDiagnosticsV1] down to `null` and nothing here runs.
-/// * **Nothing durable, nothing shared.** The id belongs to one call, is never
-///   stored, and a second call generates its own. It correlates two log
-///   streams and that is all it is for.
+/// * **No durable call state, nothing shared.** The id belongs to one call,
+///   never enters the call ledger, and a second call generates its own. It
+///   correlates diagnostic log streams and that is all it is for.
 /// * **Metadata only.** A line carries the id, the side, the milestone, the
 ///   elapsed milliseconds, a wall clock stamp and a few numbers or enums named
 ///   here. Never a word anyone said, never a prompt, never a header, never a
@@ -29,6 +29,9 @@ library;
 
 import 'dart:convert';
 import 'dart:math';
+
+import 'diagnostics_sink_stub.dart'
+    if (dart.library.io) 'diagnostics_sink_io.dart';
 
 /// Whether this build asked for diagnostics: `--dart-define
 /// FROCKBOT_VOICE_DIAGNOSTICS=true`, which only the development desktop build
@@ -80,15 +83,13 @@ class VoiceDiagnostics {
   /// said, so [markOnce] says each exactly once.
   final Set<String> _said = <String>{};
 
-  /// Where a line goes. [print] by default, which is what the development
-  /// desktop build's captured stdout reads.
+  /// Where a line goes. Native diagnostics also use a temporary file because
+  /// launching the app normally does not preserve its stdout for capture.
   final void Function(String line) sink;
 
   VoiceDiagnostics({String? trace, void Function(String line)? sink})
     : trace = trace ?? _randomTraceId(),
-      // ignore: avoid_print -- opt-in development build; stdout is where the
-      // desktop update script captures it, and nothing personal is written.
-      sink = sink ?? print;
+      sink = sink ?? createVoiceTimingSinkV1();
 
   int get elapsedMs => _since.elapsedMilliseconds;
 
