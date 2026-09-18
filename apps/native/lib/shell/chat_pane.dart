@@ -28,6 +28,7 @@ import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
+import '../voice/motion.dart';
 import 'approvals.dart';
 import 'composer.dart';
 import 'lifecycle.dart';
@@ -145,6 +146,15 @@ class _ChatPaneState extends State<ChatPane> {
   Timer? _holdTimer;
   final _companionKey = GlobalKey();
 
+  /// The person has text in the composer they put there. Dictation writing
+  /// the same field is not typing, and tucking then would slide the dock.
+  bool _drafting = false;
+
+  /// The dictation dock keeps the composer's rest seat until VoiceReveal
+  /// has finished hiding it.
+  bool _dictationHeld = false;
+  Timer? _dictationHoldTimer;
+
   void _pointerDown() {
     hold.value = true;
     _holdTimer?.cancel();
@@ -177,7 +187,24 @@ class _ChatPaneState extends State<ChatPane> {
   void initState() {
     super.initState();
     editor.text = controller.draft;
+    _drafting = editor.text.isNotEmpty;
+    _dictationHeld = widget.dictationState.active;
     controller.addListener(_update);
+  }
+
+  @override
+  void didUpdateWidget(ChatPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.dictationState.active) {
+      _dictationHoldTimer?.cancel();
+      _dictationHeld = true;
+    } else if (oldWidget.dictationState.active) {
+      _dictationHoldTimer?.cancel();
+      _dictationHoldTimer = Timer(voiceExitDuration, () {
+        if (!mounted) return;
+        setState(() => _dictationHeld = false);
+      });
+    }
   }
 
   /// Mirrors the controller's draft into the composer. A live composing range
@@ -193,6 +220,7 @@ class _ChatPaneState extends State<ChatPane> {
         (editor.text.isEmpty || !editor.value.composing.isValid)) {
       editor.text = controller.draft;
     }
+    if (editor.text.isEmpty) _drafting = false;
     setState(() {});
     widget.onWorkingChanged?.call(controller.activeRunId);
     if (controller.ready) AcceptanceMetrics.instance.editableShown();
@@ -219,6 +247,7 @@ class _ChatPaneState extends State<ChatPane> {
     // Starting the send and clearing before the first await leaves no rebuild
     // in between.
     final sending = controller.send(text);
+    _drafting = false;
     editor.clear();
     await sending;
     if (mounted) focus.requestFocus();
@@ -227,12 +256,14 @@ class _ChatPaneState extends State<ChatPane> {
   /// Writes a suggestion into the composer and stops there. The draft is the
   /// person's to edit and send; nothing here admits a Turn.
   void _prefill(StarterSuggestionV1 starter) {
+    _drafting = starter.draft.isNotEmpty;
     editor.value = TextEditingValue(
       text: starter.draft,
       selection: starterSelectionV1(starter.draft),
     );
     unawaited(controller.saveDraft(starter.draft));
     focus.requestFocus();
+    setState(() {});
   }
 
   Future<void> _retry(TranscriptLine line) => controller.retryRun(line.runId);
@@ -402,14 +433,22 @@ class _ChatPaneState extends State<ChatPane> {
         // A phone cannot keep that column and a usable field at once. The
         // first character slides the composer into his seat and he leaves;
         // an empty draft — send, or clearing — gives him back. A desk has
-        // the room, so he stays.
-        ListenableBuilder(
-          listenable: editor,
-          builder: (context, _) {
+        // the room, so he stays. Dictation writing the field is not typing:
+        // the dock has to keep the seat the composer had at rest.
+        Builder(
+          builder: (context) {
+            final dictating = widget.dictationState.active || _dictationHeld;
             final tuck =
                 MediaQuery.sizeOf(context).width <= 640 &&
-                editor.text.isNotEmpty;
-            final motion = FrockTheme.motion(context, FrockTheme.enter);
+                _drafting &&
+                !dictating;
+            // Dictation occupies the composer in place; sliding the field
+            // under a capture would move the dock. Dropping in is instant
+            // so a capture that starts on a tucked row still lands where
+            // the composer sat at rest.
+            final motion = dictating
+                ? Duration.zero
+                : FrockTheme.motion(context, FrockTheme.enter);
             return Stack(
               clipBehavior: Clip.none,
               children: [
@@ -508,7 +547,11 @@ class _ChatPaneState extends State<ChatPane> {
     stopping: c.stopping,
     onSend: _send,
     onStop: c.stop,
-    onChanged: (value) => unawaited(c.saveDraft(value)),
+    onChanged: (value) {
+      unawaited(c.saveDraft(value));
+      final drafting = value.isNotEmpty;
+      if (drafting != _drafting) setState(() => _drafting = drafting);
+    },
     skills: skills,
     onDictate: widget.onDictate,
     onStopDictation: widget.onStopDictation,
@@ -527,6 +570,7 @@ class _ChatPaneState extends State<ChatPane> {
     focus.dispose();
     gaze.dispose();
     _holdTimer?.cancel();
+    _dictationHoldTimer?.cancel();
     hold.dispose();
     super.dispose();
   }
