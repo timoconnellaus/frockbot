@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   decodePluginCatalogV1,
+  DEPLOYMENT_PLUGIN_CATALOG_V1,
   decodeSeededPluginV1,
   enabledSeededPluginIdsV1,
   FIRST_PARTY_TOGGLEABLE_PLUGINS_V1,
@@ -16,6 +17,16 @@ import {
 } from "./catalog.js";
 import { emptyPluginEnablementV1 } from "./enablement.js";
 import { CAPABILITY_DESCRIPTIONS } from "@frockbot/app/settings/catalog-copy";
+import { servedPluginContractVersionsV1 } from "@frockbot/core/contracts";
+
+test("every deployment Plugin can resolve under a served contract", () => {
+  const served = servedPluginContractVersionsV1();
+  for (const plugin of DEPLOYMENT_PLUGIN_CATALOG_V1) {
+    expect(served, plugin.pluginId).toContain(
+      plugin.descriptor.contractVersion,
+    );
+  }
+});
 
 function seeded(
   pluginId: string,

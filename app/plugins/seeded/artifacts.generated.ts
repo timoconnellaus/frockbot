@@ -33,12 +33,12 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 1170,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "44fdc029c0d7300715733927ed3830d5db516776934f68b7a65e0478a80f666a",
+      "8f3c1bcfad7365e04319e87c03db4d55a7bbb4ec599434a35238ef34c912617d",
     descriptor: {
       id: "agents",
       displayName: "Agent cards",
       version: "1",
-      contractVersion: 5,
+      contractVersion: 7,
       tools: [],
       hooks: [],
       grants: [],
@@ -74,12 +74,12 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 1954,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "285aad246a7a194df6f72504103292d8a01d3ccb92484f6493490424b3de596e",
+      "edad243151698bd1e1d7fe45bed82118fc662bf4ae5cfd375165f69215371468",
     descriptor: {
       id: "approvals",
       displayName: "Approval cards",
       version: "1",
-      contractVersion: 5,
+      contractVersion: 7,
       tools: [],
       hooks: [],
       grants: [],
@@ -115,12 +115,12 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 2161,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "e47989621d2ce8e1a62a4a6dde10c87deee66706c500d74df76af4399e4e79ba",
+      "f957c5809d90a9d0bd2d9d1e58499522fd4010bb3a9c6cf55843f3b5a8509d5c",
     descriptor: {
       id: "attachments",
       displayName: "Attachment cards",
       version: "1",
-      contractVersion: 5,
+      contractVersion: 7,
       tools: [],
       hooks: [],
       grants: [],
@@ -156,12 +156,12 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 1643,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "72c78271c5f929dca672f85305d0e45e5f7d80eb519a14fa5434c97273c0f4d3",
+      "f128e1fcc6a451ef8aaa3e16a868a9b8d325ef9d08eff13a8f044bbf7bcbaf4a",
     descriptor: {
       id: "credentials",
       displayName: "Credential cards",
       version: "1",
-      contractVersion: 5,
+      contractVersion: 7,
       tools: [],
       hooks: [],
       grants: [],
@@ -196,12 +196,12 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 10779,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "d6baae1d8ac59873cf4e7e56c46cbb3d1018825955a1070528f5a2ae4887a955",
+      "b8b985b419de24b5cde18cf65b7bbe91cd52408ce139e0071da1c481926cf70b",
     descriptor: {
       id: "deepseek",
       displayName: "DeepSeek",
       version: "1",
-      contractVersion: 6,
+      contractVersion: 7,
       tools: [],
       hooks: [],
       grants: [],
@@ -225,12 +225,12 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 8168,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "ebb943e3fd5fc14aff094d7f050eb16eb0158515cfad15277e79aa12b7e686b6",
+      "d98ba5328da2915fff2403a7fc82b62c4f282c6e36254e8f5c18d34734f22e54",
     descriptor: {
       id: "email",
       displayName: "Email",
       version: "1",
-      contractVersion: 5,
+      contractVersion: 7,
       tools: [
         {
           name: "email_send",
@@ -308,12 +308,12 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 2680,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "8981e71c051e441adeb510f6042bb4c15776ec40d2c7ef3739ce1fee900415a2",
+      "14bcddabf08e5307b48f7d509fe5b0c9f89a1647cdd285e28f048379a6137b69",
     descriptor: {
       id: "questions",
       displayName: "Question cards",
       version: "1",
-      contractVersion: 5,
+      contractVersion: 7,
       tools: [],
       hooks: [],
       grants: [],

@@ -2,7 +2,7 @@
   "id": "deepseek",
   "displayName": "DeepSeek",
   "version": "1",
-  "contractVersion": 6,
+  "contractVersion": 7,
   "tools": [],
   "hooks": [],
   "grants": [],
