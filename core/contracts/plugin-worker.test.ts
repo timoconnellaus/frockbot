@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { ISOLATE_CONTRACT_VERSION } from "./isolate.js";
+import {
+  ISOLATE_CONTRACT_VERSION,
+  type IsolateContractVersion,
+} from "./isolate.js";
 import {
   decodePluginWorkerHealthV1,
   decodePluginWorkerHookInvocationV1,
@@ -52,8 +55,13 @@ describe("the plugin worker's identity", () => {
   });
 
   test("changes with the contract, the index, an artifact or the bindings", async () => {
-    const base = {
-      contractVersion: ISOLATE_CONTRACT_VERSION as const,
+    const base: {
+      contractVersion: IsolateContractVersion;
+      indexVersion: string;
+      members: (typeof MEMBER_A)[];
+      bindingDigest: string;
+    } = {
+      contractVersion: ISOLATE_CONTRACT_VERSION,
       indexVersion: "index-v1",
       members: [MEMBER_A],
       bindingDigest: DIGEST,
