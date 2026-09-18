@@ -694,7 +694,6 @@ void main() {
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       Widget layout() => MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),
         home: ShellLayout(
@@ -727,6 +726,7 @@ void main() {
       await tester.pumpWidget(layout());
       await tester.pumpAndSettle();
       expect(tester.getTopLeft(find.text('thread')).dy, 0);
+      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets('an archived row stays put, and a pinned tile is not a row', (

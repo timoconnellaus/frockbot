@@ -58,7 +58,6 @@ void main() {
     'on a Mac the existing header begins at the window top and moves it on drag',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final calls = listen(tester);
       var refreshed = 0;
       await tester.pumpWidget(page(() => refreshed++));
@@ -89,12 +88,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(refreshed, 1);
       expect(calls, ['startDrag']);
+      debugDefaultTargetPlatformOverride = null;
     },
   );
 
   testWidgets('a phone leaves its header untouched', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final calls = listen(tester);
     var refreshed = 0;
     await tester.pumpWidget(page(() => refreshed++));
@@ -113,5 +112,6 @@ void main() {
     await tester.tap(find.byTooltip('Refresh settings'));
     await tester.pump();
     expect(refreshed, 1);
+    debugDefaultTargetPlatformOverride = null;
   });
 }

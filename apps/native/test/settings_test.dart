@@ -319,7 +319,6 @@ void main() {
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final store = MemoryStore();
       final api = SettingsApi(store, (path, body) async => document());
       await tester.pumpWidget(app(store, api));
@@ -332,11 +331,11 @@ void main() {
       ]) {
         expect(tester.getTopLeft(control).dy, lessThan(kToolbarHeight));
       }
+      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets('adds nothing on a phone', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final store = MemoryStore();
       final api = SettingsApi(store, (path, body) async => document());
       await tester.pumpWidget(app(store, api));
@@ -346,6 +345,7 @@ void main() {
         tester.getTopLeft(find.byType(BackButton)).dy,
         lessThan(kToolbarHeight),
       );
+      debugDefaultTargetPlatformOverride = null;
     });
   });
 
