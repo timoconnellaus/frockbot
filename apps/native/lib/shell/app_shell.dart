@@ -156,7 +156,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   wire.BotRegistration? selected;
 
   /// Account look: Ink, Paper, or System. Paints the shell in the same
-  /// frame as a Bot switch; the thread may overlay Studio.
+  /// frame as a Bot switch. A Bot with its own look (Studio or a stored
+  /// document) overlays the thread and right panel; Inherit does not.
   AccountLook accountLook = AccountLook.ink;
   String accountTimezone = 'UTC';
 
@@ -1209,6 +1210,51 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         timezone: accountTimezone,
       );
 
+  bool _botHasOwnLook(wire.BotRegistration? bot) =>
+      bot != null &&
+      botHasOwnLook(
+        look: parseBotLook(bot.look),
+        document: bot.document?.toJson(),
+      );
+
+  Widget _botLookScope({
+    required String key,
+    required ThemeData theme,
+    required Widget child,
+  }) => Theme(
+    key: ValueKey(key),
+    data: theme,
+    child: ColoredBox(
+      color: theme.scaffoldBackgroundColor,
+      child: child,
+    ),
+  );
+
+  Widget _maybeBotLookScope({
+    required bool wrap,
+    required String key,
+    required ThemeData theme,
+    required Widget child,
+  }) => wrap ? _botLookScope(key: key, theme: theme, child: child) : child;
+
+  PreferredSizeWidget _maybeThemedPreferred({
+    required ThemeData theme,
+    required bool wrap,
+    required PreferredSizeWidget child,
+  }) => wrap ? _ThemedPreferred(theme: theme, child: child) : child;
+
+  /// Phone pages that stand in for the right panel pick up this Bot's look
+  /// when it has one; otherwise they stay on the account Theme `_push` wraps.
+  Widget _panelPage(Widget page) {
+    final bot = selected;
+    if (!_botHasOwnLook(bot)) return page;
+    return _botLookScope(
+      key: 'panel-theme-${bot!.botId.value}',
+      theme: _botThemeOf(context, bot),
+      child: page,
+    );
+  }
+
   Widget _withAccountTheme(BuildContext context, Widget child) =>
       Theme(data: _accountThemeOf(context), child: child);
 
@@ -1988,27 +2034,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (bot == null) return;
     if (key == 'plugins') {
       _push(
-        PluginsPage(
-          onFeaturesChanged: () => _featuresChanged(bot.botId.value),
-          api: widget.api,
-          store: widget.store,
-          userId: widget.userId,
-          botId: bot.botId.value,
-          botName: _name(bot),
+        _panelPage(
+          PluginsPage(
+            onFeaturesChanged: () => _featuresChanged(bot.botId.value),
+            api: widget.api,
+            store: widget.store,
+            userId: widget.userId,
+            botId: bot.botId.value,
+            botName: _name(bot),
+          ),
         ),
       );
       return;
     }
     if (key == 'routines') {
       _push(
-        RoutinesView(
-          api: widget.api,
-          store: widget.store,
-          userId: widget.userId,
-          botId: bot.botId.value,
-          botName: _name(bot),
-          onOpenRun: _openRun,
-          onInbox: routineInbox?.adopt,
+        _panelPage(
+          RoutinesView(
+            api: widget.api,
+            store: widget.store,
+            userId: widget.userId,
+            botId: bot.botId.value,
+            botName: _name(bot),
+            onOpenRun: _openRun,
+            onInbox: routineInbox?.adopt,
+          ),
         ),
       );
       return;
@@ -2018,23 +2068,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     if (key == 'computer' && computer != null) {
-      _push(_computerPage(bot, computer!));
+      _push(_panelPage(_computerPage(bot, computer!)));
       return;
     }
     if (controller == null) return;
     if (key == 'bot-settings') {
       _push(
-        Scaffold(
-          appBar: AppBar(title: const Text('Settings')),
-          body: SafeArea(
-            top: false,
-            child: _botSettings(bot.botId.value, controller),
+        _panelPage(
+          Scaffold(
+            appBar: AppBar(title: const Text('Settings')),
+            body: SafeArea(
+              top: false,
+              child: _botSettings(bot.botId.value, controller),
+            ),
           ),
         ),
       );
       return;
     }
-    _push(_botPage(bot));
+    _push(_panelPage(_botPage(bot)));
   }
 
   /// The Computer as a phone's page: the frame, the controls, and the phase
@@ -2271,7 +2323,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final single = tier == ShellTier.single;
     final bot = selected;
     final accountTheme = _accountThemeOf(context);
-    final threadTheme = bot == null ? accountTheme : _botThemeOf(context, bot);
+    final ownLook = _botHasOwnLook(bot);
+    final botTheme = ownLook ? _botThemeOf(context, bot!) : accountTheme;
     final session = voiceSession;
     // Voice mode is this Bot being the one on the call: its thread and its
     // composer give way to the call itself (ADR 0031). A call with another
@@ -2316,8 +2369,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ShellLayout(
                     header: bot == null
                         ? null
-                        : _ThemedPreferred(
-                            theme: threadTheme,
+                        : _maybeThemedPreferred(
+                            theme: botTheme,
+                            wrap: ownLook,
                             child: ChatHeader(
                               name: _name(bot),
                               connection: selectedConnection,
@@ -2361,6 +2415,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
                     rightPanel: rightPanel,
+                    panelTheme: ownLook ? botTheme : null,
                     sidebar:
                         appletsMode &&
                             !single &&
@@ -2416,18 +2471,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onSwipeHide: (botId) =>
                                 unawaited(_runBotAction(botId, BotAction.hide)),
                           ),
-                    conversation: Theme(
-                      key: ValueKey(
-                        'thread-theme-${bot?.botId.value ?? 'none'}',
-                      ),
-                      data: threadTheme,
-                      // The layout Scaffold around this column still
-                      // belongs to the account look. Paint the thread
-                      // window here so Studio paper does not sit as
-                      // dark type on the app's ink.
-                      child: ColoredBox(
-                        color: threadTheme.scaffoldBackgroundColor,
-                        child: voiceHere
+                    conversation: _maybeBotLookScope(
+                      wrap: ownLook,
+                      key: 'thread-theme-${bot?.botId.value ?? 'none'}',
+                      theme: botTheme,
+                      child: voiceHere
                             ? VoiceMode(
                                 key: ValueKey('voice-${bot.botId.value}'),
                                 session: session,
@@ -2521,7 +2569,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                   setState(() => selectedConnection = state);
                                 },
                               ),
-                      ),
                     ),
                   ),
                   ?_appletFrameHolder(context),

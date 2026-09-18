@@ -132,7 +132,7 @@ void main() {
     state.dispose();
   });
 
-  testWidgets('Look is Inherit or Studio and writes bot/update-look', (
+  testWidgets('Look opens a page of built-ins plus Custom and writes bot/update-look', (
     tester,
   ) async {
     final store = MemoryStore();
@@ -141,12 +141,80 @@ void main() {
     await open(tester, state);
     expect(byIdentifier(SettingsIds.botLook), findsOneWidget);
     expect(find.text('Inherit'), findsWidgets);
-    await tester.tap(find.text('Studio'));
+    expect(find.text('LOOKS'), findsNothing);
+    await tester.tap(byIdentifier(SettingsIds.botLook));
+    await tester.pumpAndSettle();
+    expect(byIdentifier(LookIds.settings), findsOneWidget);
+    expect(byIdentifier(LookIds.option('inherit')), findsOneWidget);
+    expect(byIdentifier(LookIds.option('studio')), findsOneWidget);
+    expect(byIdentifier(LookIds.option('custom')), findsOneWidget);
+    expect(find.text('Custom'), findsOneWidget);
+    expect(find.text('A Plugin that changes this Bot’s look appears here'), findsOneWidget);
+    await tester.tap(byIdentifier(LookIds.option('studio')));
     await tester.pumpAndSettle();
     expect(commands, isNotEmpty);
     expect(commands.last['type'], 'bot/update-look');
     expect(commands.last['look'], 'studio');
     expect(state.look, BotLook.studio);
+    state.dispose();
+  });
+
+  testWidgets('Custom shows the document a Plugin assembled', (tester) async {
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    final document = {
+      'schemaVersion': 1,
+      'look': 'studio',
+      'tokens': {
+        'surfaces': {
+          'window': '#faf7f2',
+          'surface': '#ffffff',
+          'raised': '#f2ece4',
+          'text': '#1e1d27',
+          'muted': '#6d6974',
+          'line': '#e7e0d9',
+          'accent': '#9c1a44',
+          'onAccent': '#ffffff',
+        },
+        'type': 'manrope',
+        'bubbles': {'bot': 'plain', 'me': 'accent'},
+      },
+    };
+    final state = BotSettingsController(
+      SettingsApi(store, (path, body) async {
+        if (body != null) {
+          commands.add(Map<String, Object?>.from(body as Map));
+          return {
+            'schemaVersion': 1,
+            'commandId': body['commandId'],
+            'status': 'applied',
+          };
+        }
+        if (path.startsWith('/api/settings')) return account();
+        if (path.endsWith('/look')) {
+          return {
+            'schemaVersion': 1,
+            'botId': 'alpha',
+            'revision': 1,
+            'look': 'custom',
+            'document': document,
+          };
+        }
+        return botSettings();
+      }),
+      'alpha',
+    );
+    await open(tester, state);
+    expect(state.look, BotLook.custom);
+    expect(state.lookDocument, isNotNull);
+    await tester.tap(byIdentifier(SettingsIds.botLook));
+    await tester.pumpAndSettle();
+    expect(byIdentifier(LookIds.preview), findsOneWidget);
+    expect(find.text('What a Plugin assembled for this Bot'), findsWidgets);
+    await tester.tap(byIdentifier(LookIds.option('inherit')));
+    await tester.pumpAndSettle();
+    expect(commands.last['look'], 'inherit');
+    expect(state.look, BotLook.inherit);
     state.dispose();
   });
 

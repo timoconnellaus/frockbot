@@ -124,7 +124,7 @@ export type BotRegistration = {
   avatar: AvatarAppearance;
   createdBy?: BotWriter;
   voice?: BotVoiceAppearance;
-  look?: "inherit" | "studio";
+  look?: "inherit" | "studio" | "custom";
   document?: ThemeDocument;
 };
 export type BotDirectory = {
@@ -208,7 +208,7 @@ export type LookIdentity = {
   schemaVersion: 1;
   botId: BotId;
   revision: number;
-  look: "inherit" | "studio";
+  look: "inherit" | "studio" | "custom";
   document?: ThemeDocument;
 };
 export type BotLookCommand = {
@@ -217,7 +217,7 @@ export type BotLookCommand = {
   commandId: Identifier;
   expectedRevision: number;
   botId: BotId;
-  look: "inherit" | "studio";
+  look: "inherit" | "studio" | "custom";
 };
 export type FlockReceipt = {
   schemaVersion: 1;

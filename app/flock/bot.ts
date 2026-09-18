@@ -23,7 +23,7 @@ import {
   type LookIdentityViewV1,
   type UpdateLookCommandV1,
 } from "./shared.js";
-import { defaultBotLookV1, type ThemeDocumentV1 } from "@frockbot/core/theme";
+import { defaultBotLookV1, type BotLookV1, type ThemeDocumentV1 } from "@frockbot/core/theme";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 
 const IDENTITY_KEY = "flock:avatar:v1";
@@ -355,11 +355,17 @@ export class FlockBotBackendContribution {
       const current = decodeLookIdentityViewV1(currentValue);
       if (current.revision !== command.expectedRevision)
         throw new FlockConflictError(current.revision);
+      if (command.look === "custom" && current.document === undefined) {
+        throw new FlockDecodeError("custom look needs an assembled document");
+      }
       const next = {
         schemaVersion: 1 as const,
         botId: current.botId,
         revision: current.revision + 1,
         look: command.look,
+        ...(command.look === "custom" && current.document !== undefined
+          ? { document: structuredClone(current.document) }
+          : {}),
       } satisfies LookIdentityViewV1;
       const receipt = {
         schemaVersion: 1,
@@ -377,12 +383,14 @@ export class FlockBotBackendContribution {
 
   /**
    * Persist an assembled document onto the look record, or drop it. Bumps the
-   * revision. `undefined` is Inherit compiling locally again.
+   * revision. `undefined` is a named look compiling locally again. `look`
+   * is the pick after assemble: Custom when a Plugin changed the tokens.
    */
   async persistAssembledDocument(
     registration: BotRegistrationV1,
     userId: string,
     document: ThemeDocumentV1 | undefined,
+    look?: BotLookV1,
   ): Promise<LookIdentityViewV1> {
     await this.materializeLook(registration, userId);
     return this.host.storage.transaction(async (storage) => {
@@ -395,7 +403,7 @@ export class FlockBotBackendContribution {
         schemaVersion: 1 as const,
         botId: current.botId,
         revision: current.revision + 1,
-        look: current.look,
+        look: look ?? current.look,
         ...(document === undefined
           ? {}
           : { document: structuredClone(document) }),

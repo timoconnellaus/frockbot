@@ -15,6 +15,7 @@ import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../theme/states.dart';
 import '../voice/appearance.dart';
+import 'look_settings.dart';
 import 'model_picker.dart';
 import 'voice_settings.dart';
 
@@ -72,8 +73,11 @@ class BotSettingsController extends ChangeNotifier {
   /// speaks in its character's default voice.
   BotVoiceAppearanceV1? voice;
 
-  /// Inherit the account look, or Studio for this thread.
+  /// Inherit the account look, Studio, or Custom (a Plugin-assembled document).
   BotLook look = BotLook.inherit;
+
+  /// The last assembled document, when Custom (or a Plugin) has one.
+  ThemeDocument? lookDocument;
 
   /// The Bot's model override, as the `custom-models` Package stores it, and
   /// null when this Bot follows the account model.
@@ -126,6 +130,7 @@ class BotSettingsController extends ChangeNotifier {
       final lookAnswer = (await api.request('/api/bots/$botId/look'))! as Map;
       lookRevision = (lookAnswer['revision'] as num?)?.toInt() ?? 0;
       look = parseBotLook(lookAnswer['look'] as String?);
+      lookDocument = decodeThemeDocument(lookAnswer['document']);
       model =
           ((answer['packageValues'] as Map?)?['custom-models']
               as Map?)?['model'];
@@ -410,7 +415,9 @@ class BotSettingsController extends ChangeNotifier {
     saving = true;
     message = null;
     final previous = look;
+    final previousDocument = lookDocument;
     look = next;
+    if (next != BotLook.custom) lookDocument = null;
     _changed();
     try {
       await _lookCommand({
@@ -418,16 +425,18 @@ class BotSettingsController extends ChangeNotifier {
         'type': 'bot/update-look',
         'commandId': randomId(),
         'botId': botId,
-        'look': next == BotLook.studio ? 'studio' : 'inherit',
+        'look': next.name,
       });
       message = 'Saved.';
       return true;
     } on RequestFailure catch (failure) {
       look = previous;
+      lookDocument = previousDocument;
       message = failure.message;
       return false;
     } catch (_) {
       look = previous;
+      lookDocument = previousDocument;
       message = 'Couldn’t save this Bot’s look. Try again.';
       return false;
     } finally {
@@ -815,11 +824,6 @@ class _BotSettingsViewState extends State<BotSettingsView> {
         false;
   }
 
-  Future<void> _saveLook(BotLook next) async {
-    final saved = await state.saveLook(next);
-    if (saved) await widget.onSaved?.call();
-  }
-
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: state,
@@ -948,35 +952,12 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     characterId: widget.background,
                     primary: widget.primary,
                   ),
-                  identified(
-                    SettingsIds.botLook,
-                    FrockRow(
-                      icon: Icons.palette_outlined,
-                      title: 'Look',
-                      chevron: false,
-                      trailing: FittedBox(
-                        child: SegmentedButton<BotLook>(
-                          showSelectedIcon: false,
-                          style: const ButtonStyle(
-                            visualDensity: VisualDensity.compact,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          segments: const [
-                            ButtonSegment(
-                              value: BotLook.inherit,
-                              label: Text('Inherit'),
-                            ),
-                            ButtonSegment(
-                              value: BotLook.studio,
-                              label: Text('Studio'),
-                            ),
-                          ],
-                          selected: {state.look},
-                          onSelectionChanged: (next) =>
-                              unawaited(_saveLook(next.single)),
-                        ),
-                      ),
-                    ),
+                  botLookRow(
+                    context,
+                    controller: state,
+                    characterId: widget.background,
+                    primary: widget.primary,
+                    onSaved: widget.onSaved,
                   ),
                   if (state.modelAvailable) _model(context),
                 ],

@@ -46,9 +46,12 @@ Color threadWindow(WidgetTester tester, String botId) => tester
     )
     .color!;
 
+Theme panelTheme(WidgetTester tester) =>
+    tester.widget<Theme>(find.byKey(const ValueKey('panel-theme')));
+
 void main() {
   testWidgets(
-    'switching to a Studio directory row paints those colours on the first pump',
+    'Inherit uses the account Theme as-is; Studio overlays the thread and panel',
     (tester) async {
       final store = LatchedStore();
       store.values['session'] = session('user-1');
@@ -68,13 +71,12 @@ void main() {
       await tester.pumpWidget(FrockBotApp(store: store));
       await tester.pump();
       await tester.pump();
+      final ink = FrockTheme.fromDocument(ThemeDocument.ink);
+      expect(find.byKey(const ValueKey('thread-theme-bot-one')), findsNothing);
+      expect(find.byKey(const ValueKey('panel-theme')), findsNothing);
       expect(
-        threadTheme(tester, 'bot-one').data.scaffoldBackgroundColor,
-        FrockTheme.fromDocument(ThemeDocument.ink).scaffoldBackgroundColor,
-      );
-      expect(
-        threadWindow(tester, 'bot-one'),
-        FrockTheme.fromDocument(ThemeDocument.ink).scaffoldBackgroundColor,
+        shellTheme(tester).data.scaffoldBackgroundColor,
+        ink.scaffoldBackgroundColor,
       );
       await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
       await tester.pump();
@@ -86,11 +88,19 @@ void main() {
         threadWindow(tester, 'bot-two'),
         FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
       );
+      expect(
+        panelTheme(tester).data.scaffoldBackgroundColor,
+        FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
+      );
+      expect(
+        shellTheme(tester).data.scaffoldBackgroundColor,
+        ink.scaffoldBackgroundColor,
+      );
     },
   );
 
   testWidgets(
-    'Inherit plus Paper paints the thread Paper and a Studio sibling does not leak',
+    'Inherit plus Paper paints the shell Paper and a Studio sibling does not leak',
     (tester) async {
       final store = LatchedStore();
       store.values['session'] = session('user-1');
@@ -115,11 +125,7 @@ void main() {
       await tester.pump();
       await tester.pump();
       final paper = FrockTheme.fromDocument(ThemeDocument.paper);
-      expect(
-        threadTheme(tester, 'bot-one').data.scaffoldBackgroundColor,
-        paper.scaffoldBackgroundColor,
-      );
-      expect(threadWindow(tester, 'bot-one'), paper.scaffoldBackgroundColor);
+      expect(find.byKey(const ValueKey('thread-theme-bot-one')), findsNothing);
       expect(
         shellTheme(tester).data.colorScheme.surface,
         paper.colorScheme.surface,
@@ -133,6 +139,10 @@ void main() {
       expect(
         threadWindow(tester, 'bot-two'),
         FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
+      );
+      expect(
+        panelTheme(tester).data.colorScheme.surface,
+        FrockTheme.fromDocument(ThemeDocument.studio).colorScheme.surface,
       );
       expect(
         shellTheme(tester).data.colorScheme.surface,
@@ -179,12 +189,9 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(botsGate.isCompleted, isFalse);
+      expect(find.byKey(const ValueKey('thread-theme-bot-one')), findsNothing);
       expect(
-        threadTheme(tester, 'bot-one').data.scaffoldBackgroundColor,
-        FrockTheme.fromDocument(ThemeDocument.ink).scaffoldBackgroundColor,
-      );
-      expect(
-        threadWindow(tester, 'bot-one'),
+        shellTheme(tester).data.scaffoldBackgroundColor,
         FrockTheme.fromDocument(ThemeDocument.ink).scaffoldBackgroundColor,
       );
       await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
@@ -201,4 +208,48 @@ void main() {
       botsGate.complete();
     },
   );
+
+  testWidgets(
+    'a Custom directory document overlays the thread the same frame as the switch',
+    (tester) async {
+      final store = LatchedStore();
+      final custom = {
+        ...studioDocument(),
+        'tokens': {
+          ...(studioDocument()['tokens']! as Map),
+          'surfaces': {
+            ...(studioDocument()['tokens']! as Map)['surfaces'] as Map,
+            'accent': '#9c1a44',
+          },
+        },
+      };
+      store.values['session'] = session('user-1');
+      store.values['directory/user-1'] = jsonEncode({
+        'schemaVersion': 1,
+        'revision': 1,
+        'bots': [
+          registration('bot-one', 'Rosemary'),
+          {
+            ...registration('bot-two', 'Clementine'),
+            'look': 'custom',
+            'document': custom,
+          },
+        ],
+      });
+      store.values['selection.user-1'] = 'bot-one';
+      await tester.pumpWidget(FrockBotApp(store: store));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('thread-theme-bot-one')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('thread-theme-bot-two')), findsOneWidget);
+      expect(find.byKey(const ValueKey('panel-theme')), findsOneWidget);
+      expect(
+        threadTheme(tester, 'bot-two').data.colorScheme.primary,
+        const Color(0xff9c1a44),
+      );
+    },
+  );
 }
+

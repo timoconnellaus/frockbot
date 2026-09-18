@@ -7,14 +7,17 @@
 export type HexColorV1 = string;
 
 export type AccountLookV1 = "ink" | "paper" | "system";
-export type BotLookV1 = "inherit" | "studio";
+/** Named Bot picks. More built-ins join this list; Custom is the Plugin result. */
+export type BuiltInBotLookV1 = "inherit" | "studio";
+export type BotLookV1 = BuiltInBotLookV1 | "custom";
 export type NamedLookV1 = "ink" | "paper" | "studio";
 export type ThemeTypefaceV1 = "manrope" | "inter";
 export type BotBubbleV1 = "plain" | "raised";
 export type MeBubbleV1 = "accent" | "tint";
 
 export const ACCOUNT_LOOKS_V1 = ["ink", "paper", "system"] as const;
-export const BOT_LOOKS_V1 = ["inherit", "studio"] as const;
+export const BUILT_IN_BOT_LOOKS_V1 = ["inherit", "studio"] as const;
+export const BOT_LOOKS_V1 = ["inherit", "studio", "custom"] as const;
 export const NAMED_LOOKS_V1 = ["ink", "paper", "studio"] as const;
 export const THEME_TYPEFACES_V1 = ["manrope", "inter"] as const;
 export const BOT_BUBBLES_V1 = ["plain", "raised"] as const;
@@ -177,6 +180,28 @@ export function compileBotLookV1(
 ): ThemeDocumentV1 {
   if (look === "studio") return namedLookDocumentV1("studio");
   return namedLookDocumentV1(resolveAccountLookV1(account, osDark));
+}
+
+/** Tokens and phases, not the seed name — a Plugin patch keeps the seed look. */
+export function themeDocumentsMatchV1(
+  left: ThemeDocumentV1 | undefined,
+  right: ThemeDocumentV1 | undefined,
+): boolean {
+  return (
+    JSON.stringify(left?.tokens) === JSON.stringify(right?.tokens) &&
+    JSON.stringify(left?.phases ?? []) === JSON.stringify(right?.phases ?? [])
+  );
+}
+
+/**
+ * Studio, or any stored document (Custom, or a Plugin patch), is this Bot's
+ * own look. Inherit with no document is the account Theme as-is.
+ */
+export function botHasOwnLookV1(
+  look: BotLookV1,
+  document?: ThemeDocumentV1,
+): boolean {
+  return look === "studio" || document !== undefined;
 }
 
 export function defaultAccountAppearanceV1(): AccountAppearanceV1 {

@@ -11,6 +11,8 @@ import {
   resolveAccountLookV1,
   resolveThemeTokensV1,
   tokensMeetContrastFloorV1,
+  botHasOwnLookV1,
+  themeDocumentsMatchV1,
 } from "./document.js";
 
 describe("named looks", () => {
@@ -134,5 +136,28 @@ describe("contrast", () => {
         INK_DOCUMENT_V1.tokens.surfaces.window,
       ),
     ).toBeGreaterThan(4.5);
+  });
+});
+
+describe("bot look", () => {
+  test("Studio or a stored document is this Bot's own look", () => {
+    expect(botHasOwnLookV1("studio")).toBe(true);
+    expect(botHasOwnLookV1("inherit")).toBe(false);
+    expect(botHasOwnLookV1("inherit", STUDIO_DOCUMENT_V1)).toBe(true);
+    expect(botHasOwnLookV1("custom", STUDIO_DOCUMENT_V1)).toBe(true);
+    expect(botHasOwnLookV1("custom")).toBe(false);
+  });
+
+  test("matching tokens are the same look even when the seed name differs", () => {
+    expect(themeDocumentsMatchV1(INK_DOCUMENT_V1, INK_DOCUMENT_V1)).toBe(true);
+    expect(
+      themeDocumentsMatchV1(INK_DOCUMENT_V1, {
+        ...INK_DOCUMENT_V1,
+        look: "studio",
+      }),
+    ).toBe(true);
+    expect(themeDocumentsMatchV1(INK_DOCUMENT_V1, PAPER_DOCUMENT_V1)).toBe(
+      false,
+    );
   });
 });

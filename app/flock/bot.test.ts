@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createFlockBotBackendContribution } from "./bot.js";
-import { FlockConflictError, randomAvatarAppearanceV1 } from "./shared.js";
+import { FlockConflictError, FlockDecodeError, randomAvatarAppearanceV1 } from "./shared.js";
+import { STUDIO_DOCUMENT_V1 } from "@frockbot/core/theme";
 
 class MemoryStorage {
   values = new Map<string, unknown>();
@@ -125,6 +126,58 @@ describe("Flock Bot contribution", () => {
         expectedRevision: 0,
       }),
     ).rejects.toBeInstanceOf(FlockConflictError);
+  });
+
+  test("custom look keeps an assembled document and refuses without one", async () => {
+    const storage = new MemoryStorage();
+    const create = () =>
+      createFlockBotBackendContribution({
+        storage,
+        materializeSettings: () => Promise.resolve(),
+        archiveEligible: () => Promise.resolve(true),
+        tearDown: () => Promise.resolve("complete"),
+      });
+    await expect(
+      create().updateLook(registration, "user-1", {
+        schemaVersion: 1,
+        type: "bot/update-look",
+        commandId: "custom-empty",
+        expectedRevision: 0,
+        botId: "alpha",
+        look: "custom",
+      }),
+    ).rejects.toBeInstanceOf(FlockDecodeError);
+    await create().persistAssembledDocument(
+      registration,
+      "user-1",
+      STUDIO_DOCUMENT_V1,
+      "custom",
+    );
+    const applied = await create().updateLook(registration, "user-1", {
+      schemaVersion: 1,
+      type: "bot/update-look",
+      commandId: "custom-keep",
+      expectedRevision: 1,
+      botId: "alpha",
+      look: "custom",
+    });
+    expect(applied).toMatchObject({ status: "applied", revision: 2 });
+    expect(await create().readLook(registration, "user-1")).toMatchObject({
+      look: "custom",
+      document: STUDIO_DOCUMENT_V1,
+    });
+    await create().updateLook(registration, "user-1", {
+      schemaVersion: 1,
+      type: "bot/update-look",
+      commandId: "studio-drops",
+      expectedRevision: 2,
+      botId: "alpha",
+      look: "studio",
+    });
+    expect(await create().readLook(registration, "user-1")).toMatchObject({
+      look: "studio",
+    });
+    expect((await create().readLook(registration, "user-1")).document).toBeUndefined();
   });
 
   test("archives idempotently, fences mutations, rejects active work, and restores data", async () => {

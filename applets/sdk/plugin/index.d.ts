@@ -482,7 +482,7 @@ export interface PluginHookPayloads {
   "agent/turn-stopping": { agent: { [key: string]: unknown }; turn: number };
   "theme/assemble": {
     document: { [key: string]: unknown };
-    look: "inherit" | "studio";
+    look: "inherit" | "studio" | "custom";
     now: string;
     timezone: string;
   };

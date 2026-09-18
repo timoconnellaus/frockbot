@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 
 enum AccountLook { ink, paper, system }
 
-enum BotLook { inherit, studio }
+enum BotLook { inherit, studio, custom }
 
 enum NamedLook { ink, paper, studio }
 
@@ -138,8 +138,47 @@ AccountLook parseAccountLook(String? value) => switch (value) {
   _ => AccountLook.ink,
 };
 
-BotLook parseBotLook(String? value) =>
-    value == 'studio' ? BotLook.studio : BotLook.inherit;
+BotLook parseBotLook(String? value) => switch (value) {
+  'studio' => BotLook.studio,
+  'custom' => BotLook.custom,
+  _ => BotLook.inherit,
+};
+
+/// Studio, or any stored document, is this Bot's own look. Inherit with no
+/// document is the account Theme as-is.
+bool botHasOwnLook({required BotLook look, required Object? document}) =>
+    look == BotLook.studio || document != null;
+
+String botLookSummary(BotLook look) => switch (look) {
+  BotLook.inherit => 'Inherit',
+  BotLook.studio => 'Studio',
+  BotLook.custom => 'Custom',
+};
+
+class BotLookOption {
+  final BotLook look;
+  final String title;
+  final String subtitle;
+  const BotLookOption({
+    required this.look,
+    required this.title,
+    required this.subtitle,
+  });
+}
+
+/// Built-in Bot looks. More named looks join this list; Custom is separate.
+const builtInBotLooks = [
+  BotLookOption(
+    look: BotLook.inherit,
+    title: 'Inherit',
+    subtitle: 'The app look',
+  ),
+  BotLookOption(
+    look: BotLook.studio,
+    title: 'Studio',
+    subtitle: 'Paper sitting in the app’s ink',
+  ),
+];
 
 NamedLook resolveAccountNamedLook(AccountLook look, Brightness platform) =>
     switch (look) {

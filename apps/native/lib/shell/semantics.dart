@@ -164,6 +164,12 @@ abstract final class VoiceIds {
   static const composerDictationLevel = 'composer-dictation-level';
 }
 
+abstract final class LookIds {
+  static const settings = 'bot-look-settings';
+  static const preview = 'bot-look-preview';
+  static String option(String look) => 'bot-look-$look';
+}
+
 /// Settings: the account surfaces, and the Bot's own panel.
 ///
 /// The names follow the specs' selectors where those specs name a thing —

@@ -61,6 +61,22 @@ void main() {
     expect(painted.tokens.botBubble, BotBubble.plain);
   });
 
+  test('Studio or a stored document is this Bot’s own look', () {
+    expect(botHasOwnLook(look: BotLook.studio, document: null), isTrue);
+    expect(botHasOwnLook(look: BotLook.inherit, document: null), isFalse);
+    expect(
+      botHasOwnLook(look: BotLook.inherit, document: {'schemaVersion': 1}),
+      isTrue,
+    );
+    expect(
+      botHasOwnLook(look: BotLook.custom, document: {'schemaVersion': 1}),
+      isTrue,
+    );
+    expect(botHasOwnLook(look: BotLook.custom, document: null), isFalse);
+    expect(parseBotLook('custom'), BotLook.custom);
+    expect(botLookSummary(BotLook.custom), 'Custom');
+  });
+
   test('forbidden keys and a contrast failure skip the document', () {
     expect(
       decodeThemeDocument({

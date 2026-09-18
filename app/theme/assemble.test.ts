@@ -153,6 +153,7 @@ describe("assembleBotThemeV1", () => {
       },
     );
     expect(first.document?.tokens.surfaces.accent).toBe("#9c1a44");
+    expect(first.look).toBe("custom");
     const kept = await assembleBotThemeV1(
       stateOf(storage),
       { userId: "user-1", botId: "alpha" },
@@ -170,6 +171,72 @@ describe("assembleBotThemeV1", () => {
     expect(storage.values.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBeGreaterThan(
       Date.now(),
     );
+  });
+
+  test("a Plugin patch promotes the pick to Custom so the assembled document is what you see", async () => {
+    const storage = new MemoryStorage();
+    const flock = createFlockBotBackendContribution({
+      storage,
+      materializeSettings: () => Promise.resolve(),
+      archiveEligible: () => Promise.resolve(true),
+      tearDown: () => Promise.resolve("complete"),
+    });
+    await flock.readLook(registration, "user-1");
+    const patched = {
+      ...INK_DOCUMENT_V1,
+      tokens: {
+        ...INK_DOCUMENT_V1.tokens,
+        surfaces: {
+          ...INK_DOCUMENT_V1.tokens.surfaces,
+          accent: "#9c1a44",
+        },
+      },
+    };
+    const next = await assembleBotThemeV1(
+      stateOf(storage),
+      { userId: "user-1", botId: "alpha" },
+      {
+        flock,
+        registration,
+        appearance: "ink",
+        timezone: "UTC",
+        roster: roster(["theme/assemble"]),
+        assemble: () => Promise.resolve(patched),
+        mirror: () => Promise.resolve(),
+      },
+    );
+    expect(next.look).toBe("custom");
+    expect(next.document?.tokens.surfaces.accent).toBe("#9c1a44");
+  });
+
+  test("Custom with no Plugin keeps the assembled document", async () => {
+    const storage = new MemoryStorage();
+    const flock = createFlockBotBackendContribution({
+      storage,
+      materializeSettings: () => Promise.resolve(),
+      archiveEligible: () => Promise.resolve(true),
+      tearDown: () => Promise.resolve("complete"),
+    });
+    await flock.persistAssembledDocument(
+      registration,
+      "user-1",
+      STUDIO_DOCUMENT_V1,
+      "custom",
+    );
+    const kept = await assembleBotThemeV1(
+      stateOf(storage),
+      { userId: "user-1", botId: "alpha" },
+      {
+        flock,
+        registration,
+        appearance: "ink",
+        timezone: "UTC",
+        roster: roster(),
+        mirror: () => Promise.resolve(),
+      },
+    );
+    expect(kept.look).toBe("custom");
+    expect(kept.document).toEqual(STUDIO_DOCUMENT_V1);
   });
 
   test("the named presets are what Inherit and Studio compile to", () => {

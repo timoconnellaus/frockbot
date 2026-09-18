@@ -9,6 +9,7 @@ import {
   compileBotLookV1,
   decodeThemeDocumentV1,
   nextHourBoundaryV1,
+  themeDocumentsMatchV1,
   type AccountLookV1,
   type ThemeDocumentV1,
 } from "@frockbot/core/theme";
@@ -69,9 +70,9 @@ export interface AssembleBotThemeHostV1 {
  * Compiles this Bot's look, optionally wraps it, persists, and mirrors.
  *
  * A Plugin that throws or answers with a document the kernel refuses is
- * skipped; the last good document stays. No Plugin declaring the hook means
- * the stored document is dropped so the client compiles `look` locally —
- * Inherit + System can still follow the OS.
+ * skipped; the last good document stays. No Plugin declaring the hook drops
+ * a named look's stored document so Inherit + System still follows the OS.
+ * Custom keeps its document: that is the Plugin result the person can inspect.
  */
 export async function assembleBotThemeV1(
   state: ShellBotStateV1,
@@ -81,7 +82,8 @@ export async function assembleBotThemeV1(
   const now = host.now ?? new Date();
   const timezone = host.timezone;
   const look = await host.flock.readLook(host.registration, identity.userId);
-  const compiled = compileBotLookV1(look.look, host.appearance, true);
+  const seed = look.look;
+  const compiled = compileBotLookV1(seed, host.appearance, true);
   const original = look.document ?? compiled;
   const roster = host.roster ?? (await readBotPluginRosterV1(state, identity));
   const declares = rosterDeclaresThemeAssembleV1(roster);
@@ -89,7 +91,7 @@ export async function assembleBotThemeV1(
   if (declares) {
     const payload: LoopEventPayloadMapV1["theme/assemble"] = {
       document: original,
-      look: look.look,
+      look: seed,
       now: now.toISOString(),
       timezone,
     };
@@ -121,15 +123,30 @@ export async function assembleBotThemeV1(
       }
     }
   }
-  const document = declares ? assembled : undefined;
-  const sameDocument =
+  const document = declares
+    ? seed !== "custom" && themeDocumentsMatchV1(assembled, compiled)
+      ? undefined
+      : assembled
+    : seed === "custom"
+      ? look.document
+      : undefined;
+  const nextLook: BotLookV1 =
+    document !== undefined &&
+    (seed === "custom" || !themeDocumentsMatchV1(assembled, compiled))
+      ? "custom"
+      : seed === "custom"
+        ? "inherit"
+        : seed;
+  const same =
+    look.look === nextLook &&
     JSON.stringify(look.document) === JSON.stringify(document);
-  const next = sameDocument
+  const next = same
     ? look
     : await host.flock.persistAssembledDocument(
         host.registration,
         identity.userId,
         document,
+        nextLook,
       );
   await host.mirror(next.look, next.document);
   if (declares) {

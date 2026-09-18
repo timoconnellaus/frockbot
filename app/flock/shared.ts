@@ -90,8 +90,8 @@ export interface BotRegistrationV1 {
    */
   voice?: BotVoiceAppearanceV1;
   /**
-   * The named look this Bot paints: Inherit (the account look) or Studio.
-   * Absent means Inherit, which is what every Bot was before this field.
+   * The named look this Bot paints: Inherit (the account look), Studio, or
+   * Custom (a Plugin-assembled document). Absent means Inherit.
    */
   look?: BotLookV1;
   /**
