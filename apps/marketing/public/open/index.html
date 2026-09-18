@@ -74,12 +74,12 @@
     </header>
 
     <main>
-      <section class="legal-hero" aria-labelledby="open-title">
-        <div class="container legal-hero-shell">
-          <div>
+      <section class="open-hero" aria-labelledby="open-title">
+        <div class="container open-hero-shell">
+          <div class="open-hero-copy">
             <p class="eyebrow">For the tinkerers</p>
             <h1 id="open-title">Open,<br /><em>all the way down.</em></h1>
-            <p class="legal-intro">
+            <p class="open-hero-summary">
               An always-on agent with its own cloud computer, the kind that
               usually costs US$200 a month, except this one is MIT licensed,
               runs on the model you choose, treats every capability as a plugin,
@@ -95,13 +95,273 @@
                 >Or use the hosted one for US$20</a
               >
             </p>
+            <p class="open-hero-facts">
+              <b>MIT</b><b>40 model providers</b><b>Everything is a plugin</b
+              ><b>One command to self-host</b>
+            </p>
           </div>
-          <img
-            src="/assets/characters/guardian.png"
-            alt="Guardian, the black sheep of the FrockBot flock"
-            width="180"
-            height="180"
-          />
+          <div class="open-hero-figure" aria-hidden="false">
+            <img
+              class="open-hero-sheep"
+              src="/assets/characters/guardian.png"
+              alt="Guardian, the black sheep of the FrockBot flock, sitting on the stack"
+              width="150"
+              height="150"
+            />
+            <svg
+              class="open-stack"
+              viewBox="0 0 520 440"
+              role="img"
+              aria-label="Five open layers: your Bots, plugins, the harness, models and your Cloudflare account"
+              font-family="Manrope, system-ui, sans-serif"
+            >
+              <g transform="translate(80 96)">
+                <rect
+                  x="6"
+                  y="8"
+                  width="360"
+                  height="58"
+                  rx="14"
+                  fill="#c93a5f"
+                  opacity="0.35"
+                />
+                <rect x="0" y="0" width="360" height="58" rx="14" fill="#fff" />
+                <text
+                  x="22"
+                  y="26"
+                  font-size="14"
+                  font-weight="800"
+                  fill="#1e1d27"
+                >
+                  Your Bots
+                </text>
+                <text
+                  x="22"
+                  y="45"
+                  font-size="10.5"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  memory, routines, approvals, a computer each
+                </text>
+                <rect
+                  x="298"
+                  y="18"
+                  width="44"
+                  height="20"
+                  rx="10"
+                  fill="#fce2ea"
+                />
+                <text
+                  x="320"
+                  y="32"
+                  text-anchor="middle"
+                  font-size="9.5"
+                  font-weight="800"
+                  letter-spacing="0.6"
+                  fill="#b33257"
+                >
+                  OPEN
+                </text>
+              </g>
+              <g transform="translate(70 162)">
+                <rect
+                  x="6"
+                  y="8"
+                  width="380"
+                  height="58"
+                  rx="14"
+                  fill="#c93a5f"
+                  opacity="0.45"
+                />
+                <rect x="0" y="0" width="380" height="58" rx="14" fill="#fff" />
+                <text
+                  x="22"
+                  y="26"
+                  font-size="14"
+                  font-weight="800"
+                  fill="#1e1d27"
+                >
+                  Plugins
+                </text>
+                <text
+                  x="22"
+                  y="45"
+                  font-size="10.5"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  hooks on the loop, tools, slots · Bots can write them
+                </text>
+                <rect
+                  x="318"
+                  y="18"
+                  width="44"
+                  height="20"
+                  rx="10"
+                  fill="#fce2ea"
+                />
+                <text
+                  x="340"
+                  y="32"
+                  text-anchor="middle"
+                  font-size="9.5"
+                  font-weight="800"
+                  letter-spacing="0.6"
+                  fill="#b33257"
+                >
+                  OPEN
+                </text>
+              </g>
+              <g transform="translate(60 228)">
+                <rect
+                  x="6"
+                  y="8"
+                  width="400"
+                  height="58"
+                  rx="14"
+                  fill="#c93a5f"
+                  opacity="0.55"
+                />
+                <rect x="0" y="0" width="400" height="58" rx="14" fill="#fff" />
+                <text
+                  x="22"
+                  y="26"
+                  font-size="14"
+                  font-weight="800"
+                  fill="#1e1d27"
+                >
+                  The harness
+                </text>
+                <text
+                  x="22"
+                  y="45"
+                  font-size="10.5"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  one Worker gateway, a Durable Object per Bot
+                </text>
+                <rect
+                  x="338"
+                  y="18"
+                  width="44"
+                  height="20"
+                  rx="10"
+                  fill="#fce2ea"
+                />
+                <text
+                  x="360"
+                  y="32"
+                  text-anchor="middle"
+                  font-size="9.5"
+                  font-weight="800"
+                  letter-spacing="0.6"
+                  fill="#b33257"
+                >
+                  OPEN
+                </text>
+              </g>
+              <g transform="translate(50 294)">
+                <rect
+                  x="6"
+                  y="8"
+                  width="420"
+                  height="58"
+                  rx="14"
+                  fill="#c93a5f"
+                  opacity="0.65"
+                />
+                <rect x="0" y="0" width="420" height="58" rx="14" fill="#fff" />
+                <text
+                  x="22"
+                  y="26"
+                  font-size="14"
+                  font-weight="800"
+                  fill="#1e1d27"
+                >
+                  Models
+                </text>
+                <text
+                  x="22"
+                  y="45"
+                  font-size="10.5"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  40 providers, your keys, a model per Bot
+                </text>
+                <rect
+                  x="358"
+                  y="18"
+                  width="44"
+                  height="20"
+                  rx="10"
+                  fill="#fce2ea"
+                />
+                <text
+                  x="380"
+                  y="32"
+                  text-anchor="middle"
+                  font-size="9.5"
+                  font-weight="800"
+                  letter-spacing="0.6"
+                  fill="#b33257"
+                >
+                  OPEN
+                </text>
+              </g>
+              <g transform="translate(40 360)">
+                <rect
+                  x="6"
+                  y="8"
+                  width="440"
+                  height="58"
+                  rx="14"
+                  fill="#c93a5f"
+                  opacity="0.75"
+                />
+                <rect x="0" y="0" width="440" height="58" rx="14" fill="#fff" />
+                <text
+                  x="22"
+                  y="26"
+                  font-size="14"
+                  font-weight="800"
+                  fill="#1e1d27"
+                >
+                  Your Cloudflare account
+                </text>
+                <text
+                  x="22"
+                  y="45"
+                  font-size="10.5"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  one command to install · MIT licensed
+                </text>
+                <rect
+                  x="378"
+                  y="18"
+                  width="44"
+                  height="20"
+                  rx="10"
+                  fill="#fce2ea"
+                />
+                <text
+                  x="400"
+                  y="32"
+                  text-anchor="middle"
+                  font-size="9.5"
+                  font-weight="800"
+                  letter-spacing="0.6"
+                  fill="#b33257"
+                >
+                  OPEN
+                </text>
+              </g>
+            </svg>
+          </div>
         </div>
       </section>
 
