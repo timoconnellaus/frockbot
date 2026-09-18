@@ -26,6 +26,10 @@ import 'semantics.dart';
 bool get desktopTitleBarless =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
 
+/// The Mac traffic lights occupy the sidebar's top-left corner. Only that
+/// column reserves space for them; the conversation chrome stays at the top.
+const double desktopSidebarTrafficLightClearance = 28;
+
 /// The window's own drag gesture, which Flutter cannot perform itself.
 abstract final class DesktopWindow {
   static const _channel = MethodChannel('com.frockbot/window');

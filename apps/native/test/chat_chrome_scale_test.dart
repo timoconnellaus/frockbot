@@ -9,12 +9,14 @@
 /// because 24 points of line art beside 14-point text reads as massive.
 library;
 
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride, defaultTargetPlatform;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_icons.dart';
+import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -144,6 +146,26 @@ void main() {
       if (glyph != null) expect(glyph, chatIconSizeV1, reason: id);
     }
   }, variant: _phones);
+
+  testWidgets('the Mac sidebar clears lights without a left inset', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    tester.view.physicalSize = const Size(1000, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_sidebar(phone: false));
+    await tester.pumpAndSettle();
+
+    final profile = tester.getRect(byIdentifier(ShellIds.sidebarProfile));
+    expect(profile.left, 12);
+    expect(profile.top, desktopSidebarTrafficLightClearance);
+    expect(
+      tester.getRect(byIdentifier(ShellIds.sidebarCreateBot)).top,
+      desktopSidebarTrafficLightClearance,
+    );
+    debugDefaultTargetPlatformOverride = null;
+  });
 
   testWidgets('a desk names the Marketplace in the list\'s own weight', (
     tester,

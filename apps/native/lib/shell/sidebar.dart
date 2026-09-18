@@ -1618,7 +1618,12 @@ class _Header extends StatelessWidget {
     );
     return DesktopWindowDragRegion(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(desktopTitleBarless ? 72 : 12, 6, 10, 10),
+        padding: EdgeInsets.fromLTRB(
+          12,
+          desktopTitleBarless ? desktopSidebarTrafficLightClearance : 10,
+          10,
+          desktopTitleBarless ? 10 : 6,
+        ),
         child: Row(
           children: [
             identified(
