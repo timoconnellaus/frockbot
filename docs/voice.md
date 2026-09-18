@@ -654,10 +654,15 @@ never subtract one side's elapsed from another's.
   `microphone.first-signal`, `microphone.first-speech` (the energy gate's
   decision, not a transcript), `upstream.starting`/`upstream.awake`,
   `call.listening`, `audio.first-down`, `player.first-feed`,
-  `player.first-played`, and `call.end`/`call.ended`/`call.failed`. The two
-  player lines are the speaker seam and **neither is an audible start**: a feed
-  is audio handed to the platform, a receipt is one buffer past the playback
-  head, and the room's own latency is not observable from the process.
+  `player.first-played`, and `call.end`/`call.ended`/`call.failed`. Read the
+  names per milestone rather than as one order: the socket attempt runs beside
+  the route and the capture, so `socket.open` precedes `route.begin` and
+  `socket.ready`, `socket.welcome`, `upstream.*`, `call.listening` and
+  `audio.first-down` land whenever the attempt and its frames arrive,
+  interleaved with the capture opening. The two player lines are the speaker
+  seam and **neither is an audible start**: a feed is audio handed to the
+  platform, a receipt is one buffer past the playback head, and the room's own
+  latency is not observable from the process.
 - **`edge`** (`apps/cloudflare/src/index.ts`, `gateway.ts`): `edge-fetch`,
   `edge-backend-ready`, `edge-auth-start`, `edge-auth-ready`,
   `edge-assistant-forward`, `edge-assistant-upgraded`, `edge-answered`.
@@ -673,8 +678,9 @@ never subtract one side's elapsed from another's.
   actually waited on it, followed by the fresh `session-voice-memory` read
   with its own duration — then `upstream-open-start`, `upstream-socket-open`,
   `upstream-setup-sent`, `upstream-setup-ack`, `listening`,
-  `client-audio-first`, `upstream-audio-held`/`upstream-audio-sent` (with
-  `buffered`: audio that waited for the setup), `upstream-audio-first` and
+  `client-audio-first` (the first frame this session received, which is not the
+  microphone's own first frame), `upstream-audio-held`/`upstream-audio-sent`
+  (with `buffered`: audio that waited for the setup), `upstream-audio-first` and
   `client-audio-out-first` (received from Google, then handed to the client,
   with this object's own turn admission between them),
   `delegation-dispatched`/`delegation-answered`, `refused`,

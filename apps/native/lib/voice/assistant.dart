@@ -93,7 +93,12 @@ class AssistantSessionController extends ChangeNotifier {
   /// ([voiceDiagnosticsEnabledV1]). The same object gave the socket opener the
   /// `trace` this call's query carries, so the two sides' lines correlate.
   ///
-  /// What each milestone means, in the order a healthy call passes them:
+  /// What each milestone means. These are per-name meanings, not one order for
+  /// the whole call: [start] opens the socket beside the route and the capture,
+  /// so `socket.open` is marked before `route.begin`, and the socket's own
+  /// lines (`socket.ready`, `socket.welcome`, `upstream.*`, `call.listening`,
+  /// `audio.first-down`) land whenever that attempt and its frames arrive,
+  /// interleaved with the capture opening.
   ///
   /// * `controller.start` — [start] entered; the person has pressed voice.
   /// * `route.begin` / `route.ready` — around the platform audio session

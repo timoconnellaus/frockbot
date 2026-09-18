@@ -1741,8 +1741,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
             (message as ArrayBufferView).byteLength,
           );
     if (bytes.byteLength === 0) return;
-    // The first frame of the person's microphone to reach this object, and
-    // nothing about the frames after it: this is a milestone, not a meter.
+    // The first frame this session received from the person's microphone — a
+    // frame arriving before the call or the session exists, or while the call
+    // is muted or over its cap, writes no line, so this is not the
+    // microphone's own first frame — and nothing about the frames after it:
+    // this is a milestone, not a meter.
     this.timing(
       connection,
       "client-audio-first",
