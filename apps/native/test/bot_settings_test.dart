@@ -132,34 +132,93 @@ void main() {
     state.dispose();
   });
 
-  testWidgets('Look opens a page of built-ins plus Custom and writes bot/update-look', (
+  testWidgets(
+    'Look opens a page of built-ins plus Custom and writes bot/update-look',
+    (tester) async {
+      final store = MemoryStore();
+      final commands = <Map<String, Object?>>[];
+      final state = BotSettingsController(api(store, commands), 'alpha');
+      await open(tester, state);
+      expect(byIdentifier(SettingsIds.botLook), findsOneWidget);
+      expect(find.text('Inherit'), findsWidgets);
+      expect(find.text('LOOKS'), findsNothing);
+      await tester.tap(byIdentifier(SettingsIds.botLook));
+      await tester.pumpAndSettle();
+      expect(byIdentifier(LookIds.settings), findsOneWidget);
+      expect(byIdentifier(LookIds.option('inherit')), findsOneWidget);
+      expect(byIdentifier(LookIds.option('studio')), findsOneWidget);
+      expect(byIdentifier(LookIds.option('custom')), findsOneWidget);
+      expect(find.text('Custom'), findsOneWidget);
+      expect(find.text('This Bot’s own tokens'), findsOneWidget);
+      expect(find.textContaining('A Plugin'), findsNothing);
+      await tester.tap(byIdentifier(LookIds.option('studio')));
+      await tester.pumpAndSettle();
+      expect(commands, isNotEmpty);
+      expect(commands.last['type'], 'bot/update-look');
+      expect(commands.last['look'], 'studio');
+      expect(commands.last.containsKey('document'), isFalse);
+      expect(state.look, BotLook.studio);
+      state.dispose();
+    },
+  );
+
+  testWidgets(
+    'Custom seeds a document, opens the editor, and writes token edits',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 3200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final store = MemoryStore();
+      final commands = <Map<String, Object?>>[];
+      final state = BotSettingsController(api(store, commands), 'alpha');
+      await open(tester, state);
+      await tester.tap(byIdentifier(SettingsIds.botLook));
+      await tester.pumpAndSettle();
+      await tester.tap(byIdentifier(LookIds.option('custom')));
+      await tester.pumpAndSettle();
+      expect(commands.last['look'], 'custom');
+      expect(commands.last['document'], isA<Map>());
+      final seeded = Map<String, Object?>.from(
+        commands.last['document']! as Map,
+      );
+      expect(seeded['look'], 'ink');
+      expect(state.look, BotLook.custom);
+      expect(byIdentifier(LookIds.editor), findsOneWidget);
+      expect(byIdentifier(LookIds.preview), findsOneWidget);
+      expect(byIdentifier(LookIds.surface('accent')), findsOneWidget);
+      await tester.ensureVisible(byIdentifier(LookIds.surface('accent')));
+      await tester.enterText(
+        find.descendant(
+          of: byIdentifier(LookIds.surface('accent')),
+          matching: find.byType(TextField),
+        ),
+        '#9c1a44',
+      );
+      await tester.pump(
+        botSettingsAutosaveDelay + const Duration(milliseconds: 50),
+      );
+      await tester.pumpAndSettle();
+      expect(commands.last['look'], 'custom');
+      final edited = Map<String, Object?>.from(
+        commands.last['document']! as Map,
+      );
+      final tokens = Map<String, Object?>.from(edited['tokens']! as Map);
+      final surfaces = Map<String, Object?>.from(tokens['surfaces']! as Map);
+      expect(surfaces['accent'], '#9c1a44');
+      await tester.ensureVisible(byIdentifier(LookIds.typeface));
+      await tester.tap(find.bySemanticsLabel('Typeface: Inter'));
+      await tester.pumpAndSettle();
+      final typed = Map<String, Object?>.from(
+        commands.last['document']! as Map,
+      );
+      expect((typed['tokens']! as Map)['type'], 'inter');
+      state.dispose();
+    },
+  );
+
+  testWidgets('Custom shows a stored document and lets Inherit drop it', (
     tester,
   ) async {
-    final store = MemoryStore();
-    final commands = <Map<String, Object?>>[];
-    final state = BotSettingsController(api(store, commands), 'alpha');
-    await open(tester, state);
-    expect(byIdentifier(SettingsIds.botLook), findsOneWidget);
-    expect(find.text('Inherit'), findsWidgets);
-    expect(find.text('LOOKS'), findsNothing);
-    await tester.tap(byIdentifier(SettingsIds.botLook));
-    await tester.pumpAndSettle();
-    expect(byIdentifier(LookIds.settings), findsOneWidget);
-    expect(byIdentifier(LookIds.option('inherit')), findsOneWidget);
-    expect(byIdentifier(LookIds.option('studio')), findsOneWidget);
-    expect(byIdentifier(LookIds.option('custom')), findsOneWidget);
-    expect(find.text('Custom'), findsOneWidget);
-    expect(find.text('A Plugin that changes this Bot’s look appears here'), findsOneWidget);
-    await tester.tap(byIdentifier(LookIds.option('studio')));
-    await tester.pumpAndSettle();
-    expect(commands, isNotEmpty);
-    expect(commands.last['type'], 'bot/update-look');
-    expect(commands.last['look'], 'studio');
-    expect(state.look, BotLook.studio);
-    state.dispose();
-  });
-
-  testWidgets('Custom shows the document a Plugin assembled', (tester) async {
     final store = MemoryStore();
     final commands = <Map<String, Object?>>[];
     final document = {
@@ -210,11 +269,49 @@ void main() {
     await tester.tap(byIdentifier(SettingsIds.botLook));
     await tester.pumpAndSettle();
     expect(byIdentifier(LookIds.preview), findsOneWidget);
-    expect(find.text('What a Plugin assembled for this Bot'), findsWidgets);
+    expect(byIdentifier(LookIds.editor), findsOneWidget);
+    expect(find.text('What a Plugin assembled for this Bot'), findsNothing);
+    expect(find.text('#9c1a44'), findsOneWidget);
     await tester.tap(byIdentifier(LookIds.option('inherit')));
     await tester.pumpAndSettle();
     expect(commands.last['look'], 'inherit');
+    expect(commands.last.containsKey('document'), isFalse);
     expect(state.look, BotLook.inherit);
+    state.dispose();
+  });
+
+  testWidgets('Custom refuses a contrast-floor edit without writing', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemoryStore();
+    final commands = <Map<String, Object?>>[];
+    final state = BotSettingsController(api(store, commands), 'alpha');
+    await open(tester, state);
+    await tester.tap(byIdentifier(SettingsIds.botLook));
+    await tester.pumpAndSettle();
+    await tester.tap(byIdentifier(LookIds.option('custom')));
+    await tester.pumpAndSettle();
+    final before = commands.length;
+    await tester.ensureVisible(byIdentifier(LookIds.surface('text')));
+    await tester.enterText(
+      find.descendant(
+        of: byIdentifier(LookIds.surface('text')),
+        matching: find.byType(TextField),
+      ),
+      '#1f1e24',
+    );
+    await tester.pump(
+      botSettingsAutosaveDelay + const Duration(milliseconds: 50),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Those colours don’t meet the contrast floor.'),
+      findsOneWidget,
+    );
+    expect(commands.length, before);
     state.dispose();
   });
 

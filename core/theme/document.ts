@@ -7,7 +7,7 @@
 export type HexColorV1 = string;
 
 export type AccountLookV1 = "ink" | "paper" | "system";
-/** Named Bot picks. More built-ins join this list; Custom is the Plugin result. */
+/** Named Bot picks. More built-ins join this list; Custom is a stored document. */
 export type BuiltInBotLookV1 = "inherit" | "studio";
 export type BotLookV1 = BuiltInBotLookV1 | "custom";
 export type NamedLookV1 = "ink" | "paper" | "studio";

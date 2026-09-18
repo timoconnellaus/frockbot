@@ -359,17 +359,24 @@ export class FlockBotBackendContribution {
       const current = decodeLookIdentityViewV1(currentValue);
       if (current.revision !== command.expectedRevision)
         throw new FlockConflictError(current.revision);
-      if (command.look === "custom" && current.document === undefined) {
-        throw new FlockDecodeError("custom look needs an assembled document");
+      if (command.look !== "custom" && command.document !== undefined) {
+        throw new FlockDecodeError("named look does not take a document");
+      }
+      const customDocument =
+        command.look === "custom"
+          ? (command.document ?? current.document)
+          : undefined;
+      if (command.look === "custom" && customDocument === undefined) {
+        throw new FlockDecodeError("custom look needs a document");
       }
       const next = {
         schemaVersion: 1 as const,
         botId: current.botId,
         revision: current.revision + 1,
         look: command.look,
-        ...(command.look === "custom" && current.document !== undefined
-          ? { document: structuredClone(current.document) }
-          : {}),
+        ...(customDocument === undefined
+          ? {}
+          : { document: structuredClone(customDocument) }),
       } satisfies LookIdentityViewV1;
       const receipt = {
         schemaVersion: 1,

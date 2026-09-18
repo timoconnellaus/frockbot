@@ -292,6 +292,36 @@
     }
   },
   {
+    "name": "BotLookCommand with document",
+    "schema": "BotLookCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/update-look",
+      "commandId": "command-2",
+      "expectedRevision": 3,
+      "botId": "default",
+      "look": "custom",
+      "document": {
+        "schemaVersion": 1,
+        "look": "studio",
+        "tokens": {
+          "surfaces": {
+            "window": "#faf7f2",
+            "surface": "#ffffff",
+            "raised": "#f2ece4",
+            "text": "#1e1d27",
+            "muted": "#6d6974",
+            "line": "#e7e0d9",
+            "accent": "#c23359",
+            "onAccent": "#ffffff"
+          },
+          "type": "manrope",
+          "bubbles": { "bot": "plain", "me": "accent" }
+        }
+      }
+    }
+  },
+  {
     "name": "BotDirectory valid",
     "schema": "BotDirectory",
     "value": {

@@ -73,10 +73,10 @@ class BotSettingsController extends ChangeNotifier {
   /// speaks in its character's default voice.
   BotVoiceAppearanceV1? voice;
 
-  /// Inherit the account look, Studio, or Custom (a Plugin-assembled document).
+  /// Inherit the account look, Studio, or Custom (this Bot's own tokens).
   BotLook look = BotLook.inherit;
 
-  /// The last assembled document, when Custom (or a Plugin) has one.
+  /// The last stored document, when Custom has one.
   ThemeDocument? lookDocument;
 
   /// The Bot's model override, as the `custom-models` Package stores it, and
@@ -404,20 +404,25 @@ class BotSettingsController extends ChangeNotifier {
   }
 
   /// This Bot's look, saved as the person changes it. Fenced on its own
-  /// revision like the voice, so a profile save never races it.
-  Future<bool> saveLook(BotLook next) {
-    final write = _lookWrites.then((_) => _writeLook(next));
+  /// revision like the voice, so a profile save never races it. Custom sends
+  /// the document when the person is writing one.
+  Future<bool> saveLook(BotLook next, {ThemeDocument? document}) {
+    final write = _lookWrites.then((_) => _writeLook(next, document: document));
     _lookWrites = write;
     return write;
   }
 
-  Future<bool> _writeLook(BotLook next) async {
+  Future<bool> _writeLook(BotLook next, {ThemeDocument? document}) async {
     saving = true;
     message = null;
     final previous = look;
     final previousDocument = lookDocument;
     look = next;
-    if (next != BotLook.custom) lookDocument = null;
+    if (next != BotLook.custom) {
+      lookDocument = null;
+    } else if (document != null) {
+      lookDocument = document;
+    }
     _changed();
     try {
       await _lookCommand({
@@ -426,6 +431,8 @@ class BotSettingsController extends ChangeNotifier {
         'commandId': randomId(),
         'botId': botId,
         'look': next.name,
+        if (next == BotLook.custom && document != null)
+          'document': encodeThemeDocument(document),
       });
       message = 'Saved.';
       return true;
@@ -518,9 +525,7 @@ class BotSettingsController extends ChangeNotifier {
     if (receipt['status'] != 'rejected') return;
     final failure = receipt['failure'];
     throw RequestFailure(
-      failure is String
-          ? failure
-          : 'Couldn’t save this Bot’s look. Try again.',
+      failure is String ? failure : 'Couldn’t save this Bot’s look. Try again.',
     );
   }
 

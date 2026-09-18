@@ -37,6 +37,50 @@ class ThemeSurfaces {
     required this.accent,
     required this.onAccent,
   });
+
+  ThemeSurfaces copyWith({
+    Color? window,
+    Color? surface,
+    Color? raised,
+    Color? text,
+    Color? muted,
+    Color? line,
+    Color? accent,
+    Color? onAccent,
+  }) => ThemeSurfaces(
+    window: window ?? this.window,
+    surface: surface ?? this.surface,
+    raised: raised ?? this.raised,
+    text: text ?? this.text,
+    muted: muted ?? this.muted,
+    line: line ?? this.line,
+    accent: accent ?? this.accent,
+    onAccent: onAccent ?? this.onAccent,
+  );
+
+  ThemeSurfaces replacing(String name, Color colour) => switch (name) {
+    'window' => copyWith(window: colour),
+    'surface' => copyWith(surface: colour),
+    'raised' => copyWith(raised: colour),
+    'text' => copyWith(text: colour),
+    'muted' => copyWith(muted: colour),
+    'line' => copyWith(line: colour),
+    'accent' => copyWith(accent: colour),
+    'onAccent' => copyWith(onAccent: colour),
+    _ => this,
+  };
+
+  Color named(String name) => switch (name) {
+    'window' => window,
+    'surface' => surface,
+    'raised' => raised,
+    'text' => text,
+    'muted' => muted,
+    'line' => line,
+    'accent' => accent,
+    'onAccent' => onAccent,
+    _ => window,
+  };
 }
 
 class ThemeTokens {
@@ -50,6 +94,18 @@ class ThemeTokens {
     required this.botBubble,
     required this.meBubble,
   });
+
+  ThemeTokens copyWith({
+    ThemeSurfaces? surfaces,
+    ThemeTypeface? type,
+    BotBubble? botBubble,
+    MeBubble? meBubble,
+  }) => ThemeTokens(
+    surfaces: surfaces ?? this.surfaces,
+    type: type ?? this.type,
+    botBubble: botBubble ?? this.botBubble,
+    meBubble: meBubble ?? this.meBubble,
+  );
 }
 
 class ThemePhase {
@@ -68,20 +124,24 @@ class ThemeDocument {
     this.phases = const [],
   });
 
-  static ThemeDocument get ink => ThemeDocument(
-    look: NamedLook.ink,
-    tokens: inkTokens,
+  ThemeDocument copyWith({
+    NamedLook? look,
+    ThemeTokens? tokens,
+    List<ThemePhase>? phases,
+  }) => ThemeDocument(
+    look: look ?? this.look,
+    tokens: tokens ?? this.tokens,
+    phases: phases ?? this.phases,
   );
 
-  static ThemeDocument get paper => ThemeDocument(
-    look: NamedLook.paper,
-    tokens: paperTokens,
-  );
+  static ThemeDocument get ink =>
+      ThemeDocument(look: NamedLook.ink, tokens: inkTokens);
 
-  static ThemeDocument get studio => ThemeDocument(
-    look: NamedLook.studio,
-    tokens: studioTokens,
-  );
+  static ThemeDocument get paper =>
+      ThemeDocument(look: NamedLook.paper, tokens: paperTokens);
+
+  static ThemeDocument get studio =>
+      ThemeDocument(look: NamedLook.studio, tokens: studioTokens);
 }
 
 const inkTokens = ThemeTokens(
@@ -209,6 +269,51 @@ Color? parseHexColor(String? value) {
   }
   return Color(int.parse('ff${value.substring(1)}', radix: 16));
 }
+
+String encodeHexColor(Color colour) =>
+    '#${colour.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toLowerCase()}';
+
+Map<String, Object> encodeThemeTokens(ThemeTokens tokens) => {
+  'surfaces': {
+    'window': encodeHexColor(tokens.surfaces.window),
+    'surface': encodeHexColor(tokens.surfaces.surface),
+    'raised': encodeHexColor(tokens.surfaces.raised),
+    'text': encodeHexColor(tokens.surfaces.text),
+    'muted': encodeHexColor(tokens.surfaces.muted),
+    'line': encodeHexColor(tokens.surfaces.line),
+    'accent': encodeHexColor(tokens.surfaces.accent),
+    'onAccent': encodeHexColor(tokens.surfaces.onAccent),
+  },
+  'type': tokens.type.name,
+  'bubbles': {'bot': tokens.botBubble.name, 'me': tokens.meBubble.name},
+};
+
+Map<String, Object> encodeThemeDocument(ThemeDocument document) => {
+  'schemaVersion': 1,
+  'look': document.look.name,
+  'tokens': encodeThemeTokens(document.tokens),
+  if (document.phases.isNotEmpty)
+    'phases': [
+      for (final phase in document.phases)
+        {
+          'after':
+              '${phase.after.hour.toString().padLeft(2, '0')}:${phase.after.minute.toString().padLeft(2, '0')}',
+          'tokens': encodeThemeTokens(phase.tokens),
+        },
+    ],
+};
+
+/// The eight surfaces a person can edit on Custom.
+const themeSurfaceFields = [
+  (name: 'window', label: 'Window'),
+  (name: 'surface', label: 'Surface'),
+  (name: 'raised', label: 'Raised'),
+  (name: 'text', label: 'Text'),
+  (name: 'muted', label: 'Muted'),
+  (name: 'line', label: 'Line'),
+  (name: 'accent', label: 'Accent'),
+  (name: 'onAccent', label: 'On accent'),
+];
 
 ThemeTokens? decodeThemeTokens(Object? value) {
   if (value is! Map) return null;

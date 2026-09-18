@@ -86,7 +86,8 @@ in Plugin order, so a later Plugin sees an earlier one's change. Live objects
 never cross. `theme/assemble` can change how this Bot looks; the directory
 row is what the client paints, and switching Bots never waits on the hook.
 When a Plugin actually changes the tokens, the pick becomes Custom — that is
-where the person sees the assembled document.
+where the person sees the assembled document, and where they can edit the
+tokens by hand.
 
 ### Records
 

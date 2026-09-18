@@ -452,6 +452,19 @@
     }
   },
   {
+    "name": "BotLookCommand invalid document",
+    "schema": "BotLookCommand",
+    "value": {
+      "schemaVersion": 1,
+      "type": "bot/update-look",
+      "commandId": "command-1",
+      "expectedRevision": 2,
+      "botId": "default",
+      "look": "custom",
+      "document": { "schemaVersion": 1 }
+    }
+  },
+  {
     "name": "BotDirectory wrong shape",
     "schema": "BotDirectory",
     "value": null

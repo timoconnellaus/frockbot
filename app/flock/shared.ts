@@ -16,6 +16,7 @@ export type { BotVoiceAppearanceV1 } from "@frockbot/app/voice/appearance";
 import {
   decodeBotLookV1,
   decodeThemeDocumentV1,
+  ThemeDocumentDecodeError,
   type BotLookV1,
   type ThemeDocumentV1,
 } from "@frockbot/core/theme";
@@ -91,11 +92,11 @@ export interface BotRegistrationV1 {
   voice?: BotVoiceAppearanceV1;
   /**
    * The named look this Bot paints: Inherit (the account look), Studio, or
-   * Custom (a Plugin-assembled document). Absent means Inherit.
+   * Custom (a stored document the User can edit). Absent means Inherit.
    */
   look?: BotLookV1;
   /**
-   * Last assembled ThemeDocument. The client paints this when present and
+   * Last stored ThemeDocument. The client paints this when present and
    * otherwise compiles `look` locally — never waits on a hook to switch Bots.
    */
   document?: ThemeDocumentV1;
@@ -209,6 +210,8 @@ export interface UpdateLookCommandV1 {
   expectedRevision: number;
   botId: string;
   look: BotLookV1;
+  /** Required to pick Custom when none is stored; replaces the stored document. */
+  document?: ThemeDocumentV1;
 }
 export interface LookIdentityViewV1 {
   schemaVersion: 1;
@@ -493,14 +496,11 @@ export function decodeUpdateVoiceCommandV1(
 
 export function decodeUpdateLookCommandV1(input: unknown): UpdateLookCommandV1 {
   const value = record(input, "update look command");
-  exact(value, [
-    "schemaVersion",
-    "type",
-    "commandId",
-    "expectedRevision",
-    "botId",
-    "look",
-  ]);
+  exact(
+    value,
+    ["schemaVersion", "type", "commandId", "expectedRevision", "botId", "look"],
+    ["document"],
+  );
   if (value.schemaVersion !== 1 || value.type !== "bot/update-look")
     throw new FlockDecodeError("unsupported update look command");
   return {
@@ -510,7 +510,20 @@ export function decodeUpdateLookCommandV1(input: unknown): UpdateLookCommandV1 {
     expectedRevision: revision(value.expectedRevision),
     botId: botIdentifier(value.botId),
     look: decodeBotLookV1(value.look),
+    ...(value.document === undefined
+      ? {}
+      : { document: decodeLookDocument(value.document) }),
   };
+}
+
+function decodeLookDocument(input: unknown): ThemeDocumentV1 {
+  try {
+    return decodeThemeDocumentV1(input);
+  } catch (error) {
+    if (error instanceof ThemeDocumentDecodeError)
+      throw new FlockDecodeError(error.message);
+    throw error;
+  }
 }
 
 export function decodeLookIdentityViewV1(input: unknown): LookIdentityViewV1 {

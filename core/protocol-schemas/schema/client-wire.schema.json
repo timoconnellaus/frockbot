@@ -925,7 +925,8 @@
           "maximum": 9007199254740991
         },
         "botId": { "$ref": "#/$defs/BotId" },
-        "look": { "enum": ["inherit", "studio", "custom"] }
+        "look": { "enum": ["inherit", "studio", "custom"] },
+        "document": { "$ref": "#/$defs/ThemeDocument" }
       },
       "required": [
         "schemaVersion",

@@ -132,7 +132,7 @@ describe("Flock Bot contribution", () => {
     ).rejects.toBeInstanceOf(FlockConflictError);
   });
 
-  test("custom look keeps an assembled document and refuses without one", async () => {
+  test("custom look stores a document and refuses without one", async () => {
     const storage = new MemoryStorage();
     const create = () =>
       createFlockBotBackendContribution({
@@ -151,13 +151,28 @@ describe("Flock Bot contribution", () => {
         look: "custom",
       }),
     ).rejects.toBeInstanceOf(FlockDecodeError);
-    await create().persistAssembledDocument(
-      registration,
-      "user-1",
-      STUDIO_DOCUMENT_V1,
-      "custom",
-    );
+    const written = {
+      ...STUDIO_DOCUMENT_V1,
+      tokens: {
+        ...STUDIO_DOCUMENT_V1.tokens,
+        type: "inter" as const,
+      },
+    };
     const applied = await create().updateLook(registration, "user-1", {
+      schemaVersion: 1,
+      type: "bot/update-look",
+      commandId: "custom-write",
+      expectedRevision: 0,
+      botId: "alpha",
+      look: "custom",
+      document: written,
+    });
+    expect(applied).toMatchObject({ status: "applied", revision: 1 });
+    expect(await create().readLook(registration, "user-1")).toMatchObject({
+      look: "custom",
+      document: written,
+    });
+    const kept = await create().updateLook(registration, "user-1", {
       schemaVersion: 1,
       type: "bot/update-look",
       commandId: "custom-keep",
@@ -165,11 +180,22 @@ describe("Flock Bot contribution", () => {
       botId: "alpha",
       look: "custom",
     });
-    expect(applied).toMatchObject({ status: "applied", revision: 2 });
+    expect(kept).toMatchObject({ status: "applied", revision: 2 });
     expect(await create().readLook(registration, "user-1")).toMatchObject({
       look: "custom",
-      document: STUDIO_DOCUMENT_V1,
+      document: written,
     });
+    await expect(
+      create().updateLook(registration, "user-1", {
+        schemaVersion: 1,
+        type: "bot/update-look",
+        commandId: "studio-with-document",
+        expectedRevision: 2,
+        botId: "alpha",
+        look: "studio",
+        document: STUDIO_DOCUMENT_V1,
+      }),
+    ).rejects.toBeInstanceOf(FlockDecodeError);
     await create().updateLook(registration, "user-1", {
       schemaVersion: 1,
       type: "bot/update-look",

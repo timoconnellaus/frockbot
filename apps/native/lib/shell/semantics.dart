@@ -168,7 +168,12 @@ abstract final class VoiceIds {
 abstract final class LookIds {
   static const settings = 'bot-look-settings';
   static const preview = 'bot-look-preview';
+  static const editor = 'bot-look-editor';
+  static const typeface = 'bot-look-typeface';
+  static const botBubble = 'bot-look-bot-bubble';
+  static const meBubble = 'bot-look-me-bubble';
   static String option(String look) => 'bot-look-$look';
+  static String surface(String name) => 'bot-look-surface-$name';
 }
 
 /// Settings: the account surfaces, and the Bot's own panel.

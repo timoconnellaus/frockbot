@@ -218,6 +218,7 @@ export type BotLookCommand = {
   expectedRevision: number;
   botId: BotId;
   look: "inherit" | "studio" | "custom";
+  document?: ThemeDocument;
 };
 export type FlockReceipt = {
   schemaVersion: 1;

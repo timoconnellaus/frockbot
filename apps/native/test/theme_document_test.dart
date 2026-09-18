@@ -77,6 +77,15 @@ void main() {
     expect(botLookSummary(BotLook.custom), 'Custom');
   });
 
+  test('encoding a document round-trips through decode', () {
+    final encoded = encodeThemeDocument(ThemeDocument.studio);
+    expect(encoded['schemaVersion'], 1);
+    expect(encoded['look'], 'studio');
+    expect(decodeThemeDocument(encoded)?.look, NamedLook.studio);
+    expect(decodeThemeDocument(encoded)?.tokens.botBubble, BotBubble.plain);
+    expect(encodeHexColor(ThemeDocument.ink.tokens.surfaces.window), '#1f1e24');
+  });
+
   test('forbidden keys and a contrast failure skip the document', () {
     expect(
       decodeThemeDocument({
