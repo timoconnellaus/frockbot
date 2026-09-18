@@ -3,6 +3,10 @@
 // writes beside them.
 
 import type { SessionEvent } from "@frockbot/core/contracts";
+import {
+  storedRunIsRoutineDeliveryV1,
+  type StoredRunAdmissionV1,
+} from "@frockbot/core/durable";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import type {
   BotNotificationIntent,
@@ -57,6 +61,7 @@ export async function failedTurnRecordsV1(input: {
     runId: string;
     failure: string;
     events: readonly SessionEvent[];
+    admission?: StoredRunAdmissionV1;
   };
   read<T>(key: string): Promise<T | undefined>;
 }): Promise<Record<string, unknown>> {
@@ -82,16 +87,17 @@ export async function failedTurnRecordsV1(input: {
       },
     ],
   });
-  // A chat Turn drains the pending queue before the model runs, so a Turn that
-  // then failed consumed hand-offs it never delivered. The person used to be
-  // there to ask again; a delivery Turn the alarm opened has nobody, and the
-  // failure notice would stand alone over a morning's triage nothing carried.
-  // The drained inputs go back on the queue in the transaction that settles
-  // the failure, so the Bot's next conversational Turn carries them.
-  await requeueDrainedInputsV1(
-    pendingInputSettlementWritesV1(records, input.read),
-    input.failed.runId,
-  );
+  // A delivery Turn the alarm opened drains the pending queue before the model
+  // runs, and has nobody present to ask again: the failure notice would stand
+  // alone over a morning's triage nothing carried. The drained inputs go back
+  // on the queue in the transaction that settles the failure, so the Bot's next
+  // conversational Turn carries them.
+  if (storedRunIsRoutineDeliveryV1(input.failed)) {
+    await requeueDrainedInputsV1(
+      pendingInputSettlementWritesV1(records, input.read),
+      input.failed.runId,
+    );
+  }
   return records;
 }
 

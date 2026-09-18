@@ -306,6 +306,25 @@ export function storedRunLaneV1(run: {
 }
 
 /**
+ * Whether this run is the delivery Turn the routine alarm opened.
+ *
+ * A chat Turn drains the pending queue before the model runs, so a Turn that
+ * does not complete has consumed hand-offs it never delivered. Only a delivery
+ * Turn gives them back: it is a Turn nobody asked for and nobody watched, so
+ * losing its hand-off loses a morning's triage with no one there to ask again.
+ * A Turn the person started keeps the behaviour it has always had — they were
+ * there, and re-queuing what it drained would make the Bot re-tell them
+ * something it has already said.
+ */
+export function storedRunIsRoutineDeliveryV1(run: {
+  // Structural rather than `StoredRunAdmissionV1`, so the one predicate also
+  // answers for the Shell's deliberately wide settled-run shape.
+  admission?: { origin?: { kind?: string } };
+}): boolean {
+  return run.admission?.origin?.kind === "routine-delivery";
+}
+
+/**
  * The `admission` field a Turn records — nothing at all for a chat Turn with
  * no recorded origin, so no stored bytes change for the Turn every producer
  * writes today.

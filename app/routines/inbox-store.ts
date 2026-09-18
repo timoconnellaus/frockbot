@@ -218,16 +218,17 @@ export async function enqueuePendingBotInputV1(
 }
 
 /**
- * The inputs a Turn drained but never carried, queued again.
+ * The inputs a delivery Turn drained but never carried, queued again.
  *
  * `drainInto` takes the whole queue in one transaction, before the model runs,
  * so a Turn that then fails, is stopped, or is superseded has consumed
- * hand-offs it never delivered. That was survivable while the only Turn that
- * drained was one the person themselves started — they were there, and they
- * could ask again — and it stopped being survivable when the alarm began
- * opening a delivery Turn with nobody present. The drain receipt is the
- * durable record of exactly what that Turn took, so a settlement that is not
- * `completed` gives it back.
+ * hand-offs it never delivered. That is survivable when the Turn is one the
+ * person themselves started — they were there, they may already have been told,
+ * and they can ask again — and it stopped being survivable when the alarm began
+ * opening a delivery Turn with nobody present. The drain receipt is the durable
+ * record of exactly what that Turn took, so a delivery Turn that settles
+ * anything other than `completed` gives it back. Every caller is guarded on
+ * `storedRunIsRoutineDeliveryV1`; a Turn the person started re-queues nothing.
  *
  * Composed into the transaction that settles the Turn, never after it: between
  * "this Turn will not deliver" and "the queue owes it again" there must be no

@@ -168,6 +168,11 @@ describe("a delivery Turn that did not deliver", () => {
           runId: "rd-rf-1",
           failure: "Bot turn ended with outcome model-error: 401",
           events: chatAdmission(),
+          admission: {
+            schemaVersion: 1,
+            turnType: "chat",
+            origin: { kind: "routine-delivery", wakeRunId: "rf-1" },
+          },
         },
       }),
     );
@@ -219,6 +224,76 @@ describe("a delivery Turn that did not deliver", () => {
 
     expect(await inbox.pending()).toHaveLength(1);
     expect(await nextChatTurnText(inbox)).toContain(HANDOFF);
+  });
+
+  test("a failed chat Turn the person started re-queues nothing", async () => {
+    const storage = createMemoryRoutineStorageV1();
+    const inbox = new RoutineInboxStore(storage);
+    await inbox.enqueue(wake("rf-1", HANDOFF));
+    expect(
+      await turnInputTextV1(stateWith(inbox), {
+        runId: "chat-1",
+        text: "morning",
+        turnType: "chat",
+      }),
+    ).toContain(HANDOFF);
+
+    await applyV1(
+      storage,
+      await failedTurnRecordsV1({
+        settings: {
+          ...initializeBotSettingsV1("primary"),
+          profile: { name: "Bob" },
+          notifications: { enabled: true },
+        },
+        read: <T>(key: string) => storage.get<T>(key),
+        failed: {
+          runId: "chat-1",
+          failure: "Bot turn ended with outcome model-error: 401",
+          events: chatAdmission(),
+        },
+      }),
+    );
+
+    // The person was there and can ask again. Giving it back would make the
+    // Bot re-tell a triage it may already have relayed before it failed.
+    expect(await inbox.pending()).toHaveLength(0);
+    expect(await nextChatTurnText(inbox)).toBe("morning");
+  });
+
+  test("a superseded chat Turn the person started re-queues nothing", async () => {
+    const storage = createMemoryRoutineStorageV1();
+    const inbox = new RoutineInboxStore(storage);
+    await inbox.enqueue(wake("rf-1", HANDOFF));
+    expect(
+      await turnInputTextV1(stateWith(inbox), {
+        runId: "chat-1",
+        text: "morning",
+        turnType: "chat",
+      }),
+    ).toContain(HANDOFF);
+
+    await applyV1(
+      storage,
+      await supersededTurnRecordsV1({
+        run: {
+          runId: "chat-1",
+          sessionId: "user-1:primary",
+          acceptedAt: "2026-09-16T23:45:00.000Z",
+          input: "morning",
+          events: [],
+          admission: { turnType: "chat" },
+        },
+        now: "2026-09-16T23:45:05.000Z",
+        read: <T>(key: string) => storage.get<T>(key),
+      }),
+    );
+
+    // Only the note that the Turn was cut off. The hand-off it drained stays
+    // consumed, so the Turn that replaced it does not repeat what was said.
+    const queued = await inbox.pending();
+    expect(queued.map(({ input }) => input.kind)).toEqual(["superseded-turn"]);
+    expect(await nextChatTurnText(inbox)).not.toContain(HANDOFF);
   });
 
   test("a completed delivery consumes the hand-off exactly once", async () => {
