@@ -2622,7 +2622,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
         ShellTier.single) {
       _push(
-        ConnectionsPage(
+        MarketplacePage(
           onFeaturesChanged: _featuresChanged,
           api: widget.api,
           store: widget.store,

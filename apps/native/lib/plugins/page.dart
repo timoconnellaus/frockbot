@@ -19,6 +19,7 @@ class PluginsController extends ViewSurfaceController {
   final NativeApi api;
   final String userId;
   final bool capabilities;
+  final bool marketplace;
   final String? botId;
   final VoidCallback? onFeaturesChanged;
 
@@ -85,6 +86,7 @@ class PluginsController extends ViewSurfaceController {
     this.userId, {
     this.openHome,
     this.capabilities = false,
+    this.marketplace = false,
     this.botId,
     this.onFeaturesChanged,
   });
@@ -98,12 +100,16 @@ class PluginsController extends ViewSurfaceController {
   @override
   String get surfaceId => botId != null
       ? 'bot-plugins'
+      : marketplace
+      ? 'marketplace-plugins'
       : capabilities
       ? 'capabilities'
       : 'plugins';
 
   String get _path => botId != null
       ? '/api/bots/${Uri.encodeComponent(botId!)}/plugins'
+      : marketplace
+      ? '/api/settings/marketplace/plugins'
       : '/api/settings/${capabilities ? 'capabilities' : 'plugins'}';
 
   void _changed() {
@@ -222,6 +228,7 @@ class PluginsPage extends StatefulWidget {
   final LocalStore store;
   final String userId;
   final bool capabilities;
+  final bool marketplace;
 
   /// The Bot whose Plugins this page shows; absent, the account's list.
   final String? botId;
@@ -237,6 +244,7 @@ class PluginsPage extends StatefulWidget {
     required this.store,
     required this.userId,
     this.capabilities = false,
+    this.marketplace = false,
     this.botId,
     this.onFeaturesChanged,
     this.botName,
@@ -244,16 +252,21 @@ class PluginsPage extends StatefulWidget {
   });
 
   @override
-  State<PluginsPage> createState() => _PluginsPageState();
+  State<PluginsPage> createState() => PluginsPageState();
 }
 
-class _PluginsPageState extends State<PluginsPage> {
+class PluginsPageState extends State<PluginsPage>
+    with AutomaticKeepAliveClientMixin<PluginsPage> {
   NativeApi get api => widget.api;
   LocalStore get store => widget.store;
   String get userId => widget.userId;
   bool get capabilities => widget.capabilities;
+  bool get marketplace => widget.marketplace;
   String? get botId => widget.botId;
   String? get botName => widget.botName;
+
+  @override
+  bool get wantKeepAlive => true;
 
   /// One controller for the page's life: the surface below binds to the
   /// controller it was created with, so a rebuild must hand it the same one.
@@ -261,6 +274,7 @@ class _PluginsPageState extends State<PluginsPage> {
     api,
     userId,
     capabilities: capabilities,
+    marketplace: marketplace,
     botId: botId,
     onFeaturesChanged: () => widget.onFeaturesChanged?.call(),
     openHome: (home, packageId) => _openHome(context, home, packageId),
@@ -299,18 +313,24 @@ class _PluginsPageState extends State<PluginsPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return ViewSurfacePage(
       title: botId != null
+          ? 'Plugins'
+          : marketplace
           ? 'Plugins'
           : capabilities
           ? 'Account features'
           : 'Plugins',
       cardGroups: capabilities && botId == null,
+      gridGroups: marketplace && botId == null,
       switchRows: botId != null,
       chrome: widget.chrome,
       store: store,
       userId: userId,
-      documentId: PluginIds.document,
+      documentId: marketplace
+          ? PluginIds.marketplaceDocument
+          : PluginIds.document,
       refreshId: PluginIds.refresh,
       controller: controller,
       banner: (_) => Padding(

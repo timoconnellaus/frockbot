@@ -198,9 +198,11 @@ An installed provider Plugin is listed on the account's Plugins surface beside
 the seeded ones, described as the Plugin it is rather than as the compiled
 Package's capability, and a row there can uninstall the Package — which takes
 the Plugin out of the Composition and returns a Bot whose model went with it to
-the platform default. Installing one is still the Models surface's business:
-until there is a marketplace, a provider an account does not have is not
-listed as something to add.
+the platform default. The Marketplace's Plugins tab lists only deployment
+catalog entries marked `installable`; its Add Plugin and Remove actions use the
+same account command path and never choose a model or create a credential.
+After installation, Set up in Models remains the path to add a key and choose
+a DeepSeek model.
 
 ### The trust choice, stated plainly
 

@@ -921,6 +921,29 @@ export function createGateway(dependencies: GatewayDependencies) {
       }
     }
 
+    if (url.pathname === "/api/settings/marketplace/plugins") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      try {
+        const frame = decodeProtocol(
+          "PluginsFrame",
+          await dependencies
+            .userConfigurationFor(userId)
+            .readMarketplacePluginsFrame({ schemaVersion: 1, userId }),
+        );
+        return Response.json(
+          url.searchParams.get("as") === "document"
+            ? pluginsDocumentV1(frame, false, true)
+            : frame,
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch {
+        return jsonError(
+          503,
+          "Marketplace Plugins are temporarily unavailable.",
+        );
+      }
+    }
+
     if (
       ["/api/settings/application", "/api/settings/models"].includes(
         url.pathname,

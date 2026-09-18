@@ -673,6 +673,8 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     hasBot: (request) => rpc.hasBot(request),
     readConnectionsFrame: (request) => rpc.readConnectionsFrame(request),
     readPluginsFrame: (request) => rpc.readPluginsFrame(request),
+    readMarketplacePluginsFrame: (request) =>
+      rpc.readMarketplacePluginsFrame(request),
     readSettingsFrame: (request) => rpc.readSettingsFrame(request),
     readSettingsOptions: (request) => rpc.readSettingsOptions(request),
     changeSettings: (request) => rpc.changeSettings(request),

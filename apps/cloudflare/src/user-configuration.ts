@@ -100,7 +100,10 @@ import {
   userCompositionFailuresV1,
   userCompositionStoreV1,
 } from "@frockbot/app/composition/user";
-import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "@frockbot/app/plugins/catalog";
+import {
+  DEPLOYMENT_PLUGIN_CATALOG_V1,
+  marketplacePluginPackageIdsV1,
+} from "@frockbot/app/plugins/catalog";
 import {
   decodeAppletProvenanceV1,
   decodeAppletToolDeclarationV1,
@@ -919,6 +922,32 @@ export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
     return (await this.settingsContribution()).readPluginsFrame(
       request.userId as string,
     );
+  }
+
+  async readMarketplacePluginsFrame(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    const frame = await (
+      await this.settingsContribution()
+    ).readPluginsFrame(request.userId as string);
+    // A catalog entry is not an offer unless this deployment has the worker
+    // loader that can mount it. The settings frame remains authoritative for
+    // the account's installed Package and revision; this projection only
+    // narrows it to the trusted, actually runnable Marketplace catalog.
+    if (!this.env.BOT_PACKAGES) return { ...frame, plugins: [] };
+    const installable = new Set(marketplacePluginPackageIdsV1());
+    return {
+      ...frame,
+      plugins: frame.plugins
+        .filter((plugin) => installable.has(plugin.packageId))
+        .map((plugin) => ({
+          ...plugin,
+          state:
+            plugin.state === "disabled"
+              ? ("not-installed" as const)
+              : plugin.state,
+        })),
+    };
   }
 
   async readSettingsFrame(input: unknown) {

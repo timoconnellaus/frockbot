@@ -62,7 +62,7 @@ test("an installed provider Plugin is described and offers its removal", () => {
     walk(document.root).some(
       (node) =>
         node.type === "text" &&
-        node.text.startsWith("Run this Bot's replies on DeepSeek models."),
+        node.text.startsWith("Run replies on DeepSeek models."),
     ),
   ).toBe(true);
   expect(actions.map((node) => node.input?.kind)).toEqual([
@@ -99,6 +99,105 @@ test("a plugin that is not installed is added rather than turned on", () => {
       (node) => node.type === "text" && node.text === "0 installed",
     ),
   ).toBe(true);
+});
+
+test("the Marketplace separates account installation from Bot enablement", () => {
+  const document = pluginsDocumentV1(
+    frame([
+      {
+        ...ollama,
+        packageId: "provider-deepseek",
+        displayName: "DeepSeek",
+        state: "not-installed",
+      },
+    ]),
+    false,
+    true,
+  );
+  const nodes = walk(document.root);
+  expect(document.surfaceId).toBe("marketplace-plugins");
+  expect(
+    nodes.some(
+      (node) =>
+        node.type === "text" && node.text === "Install once for your account",
+    ),
+  ).toBe(true);
+  expect(
+    nodes.some((node) => node.type === "action" && node.label === "Add Plugin"),
+  ).toBe(true);
+  expect(
+    nodes.some(
+      (node) =>
+        node.type === "action" && node.input?.kind === "set-package-enabled",
+    ),
+  ).toBe(false);
+});
+
+test("an installed Marketplace Plugin can be set up or removed, but not enabled per Bot", () => {
+  const document = pluginsDocumentV1(
+    frame([
+      {
+        ...ollama,
+        packageId: "provider-deepseek",
+        displayName: "DeepSeek",
+        state: "installed",
+      },
+    ]),
+    false,
+    true,
+  );
+  const actions = walk(document.root).filter((node) => node.type === "action");
+  expect(
+    actions.map((node) => (node.type === "action" ? node.input?.kind : "")),
+  ).toEqual(["open-home", "uninstall-package"]);
+  expect(
+    actions.some(
+      (node) => node.type === "action" && node.label === "Set up in Models",
+    ),
+  ).toBe(true);
+  expect(
+    actions.some((node) => node.type === "action" && node.label === "Remove"),
+  ).toBe(true);
+});
+
+test("Marketplace documents stay within the host node budget with failures and controls", () => {
+  const document = pluginsDocumentV1(
+    frame(
+      Array.from({ length: 100 }, (_, index) => ({
+        ...ollama,
+        packageId: `provider-deepseek-${index}`,
+        displayName: `DeepSeek ${index}`,
+        state: "failed" as const,
+        failure: "The Plugin could not be mounted.",
+      })),
+    ),
+    false,
+    true,
+  );
+  expect(walk(document.root).length).toBeLessThanOrEqual(512);
+});
+
+test("a failed Marketplace install exposes the supported account recovery command", () => {
+  const document = pluginsDocumentV1(
+    frame([
+      {
+        ...ollama,
+        packageId: "provider-deepseek",
+        displayName: "DeepSeek",
+        state: "failed",
+        failure: "activation failed",
+      },
+    ]),
+    false,
+    true,
+  );
+  const action = walk(document.root).find((node) => node.type === "action");
+  expect(action?.type === "action" && action.label).toBe("Retry installation");
+  expect(action?.type === "action" && action.input).toEqual({
+    kind: "set-package-enabled",
+    packageId: "provider-deepseek",
+    enabled: true,
+  });
 });
 
 test("a failed installation carries its reason on its own row", () => {

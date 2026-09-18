@@ -368,6 +368,41 @@ describe("UserConfiguration Connection routing", () => {
     expect(first.packages.map((pkg) => pkg.packageId)).toContain("web");
   });
 
+  test("Marketplace offers only runnable catalog Plugins", async () => {
+    const userId = "marketplace-user";
+    const storage = new MemoryStorage();
+    const bound = identity(userId);
+    const withoutLoader = new UserConfiguration(bound.ctx(storage), {
+      ...bound.env,
+      CREDENTIAL_KEYRING: credentialKeyring,
+    });
+    await withoutLoader.readConfiguration({
+      schemaVersion: 1,
+      view: 2,
+      userId,
+    });
+    expect(
+      await withoutLoader.readMarketplacePluginsFrame({
+        schemaVersion: 1,
+        userId,
+      }),
+    ).toMatchObject({ plugins: [] });
+
+    const withLoader = new UserConfiguration(bound.ctx(storage), {
+      ...bound.env,
+      BOT_PACKAGES: { get: () => ({}) } as never,
+      CREDENTIAL_KEYRING: credentialKeyring,
+    });
+    const frame = await withLoader.readMarketplacePluginsFrame({
+      schemaVersion: 1,
+      userId,
+    });
+    expect(frame.plugins.map((plugin) => plugin.packageId)).toEqual([
+      "provider-deepseek",
+    ]);
+    expect(frame.plugins[0]?.state).toBe("not-installed");
+  });
+
   test("repairs a legacy model account and preserves explicit model recovery", async () => {
     const userId = "legacy-model-user";
     const storage = new MemoryStorage();

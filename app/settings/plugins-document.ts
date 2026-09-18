@@ -32,6 +32,22 @@ export type PluginActionKindV1 = (typeof PLUGIN_ACTION_KINDS_V1)[number];
 
 /** The renderer's node budget, checked before it builds a widget. */
 const NODE_LIMIT = 512;
+
+function countViewNodesV1(node: ViewNode): number {
+  if (node.type === "group") {
+    return (
+      1 +
+      node.children.reduce((total, child) => total + countViewNodesV1(child), 0)
+    );
+  }
+  if (node.type === "list") {
+    return (
+      1 +
+      node.rows.reduce((total, row) => total + countViewNodesV1(row.node), 0)
+    );
+  }
+  return 1;
+}
 const IDENTIFIER: ActionValueSchema = { type: "string", maxLength: 128 };
 const KIND: ActionValueSchema = {
   type: "string",
@@ -166,10 +182,92 @@ function pluginNode(plugin: Plugin, capabilities: boolean): ViewNode {
   };
 }
 
+function marketplacePluginNode(plugin: Plugin): ViewNode {
+  const controls: ViewNode[] = [];
+  const home = HOME_LABELS[plugin.home];
+  if (home && plugin.state === "installed") {
+    controls.push(
+      press("open-home", `Set up in ${home}`, {
+        kind: "open-home",
+        home: plugin.home,
+        packageId: plugin.packageId,
+      }),
+    );
+  }
+  if (plugin.state === "not-installed") {
+    controls.push(
+      press("install-package", "Add Plugin", {
+        kind: "install-package",
+        packageId: plugin.packageId,
+        version: plugin.version,
+      }),
+    );
+  } else if (plugin.state === "failed") {
+    controls.push(
+      press("set-package-enabled", "Retry installation", {
+        kind: "set-package-enabled",
+        packageId: plugin.packageId,
+        enabled: true,
+      }),
+    );
+  } else {
+    controls.push(
+      press(
+        "uninstall-package",
+        "Remove",
+        { kind: "uninstall-package", packageId: plugin.packageId },
+        "danger",
+      ),
+    );
+  }
+  return {
+    type: "group",
+    orientation: "column",
+    title: plugin.displayName.slice(0, 150),
+    children: [
+      {
+        type: "text",
+        text: (
+          PROVIDER_PLUGIN_DESCRIPTIONS_V1[plugin.packageId] ?? plugin.summary
+        ).slice(0, 4000),
+        style: "body",
+      },
+      {
+        type: "text",
+        text:
+          plugin.state === "installed"
+            ? "Installed"
+            : STATE_LABELS[plugin.state],
+        style: "status" as const,
+      },
+      ...(plugin.failure
+        ? [
+            {
+              type: "text" as const,
+              text: plugin.failure,
+              style: "status" as const,
+            },
+          ]
+        : []),
+      {
+        type: "group" as const,
+        orientation: "column" as const,
+        title: "Details & controls",
+        collapsed: true,
+        children: [
+          { type: "text", text: `Version ${plugin.version}`, style: "status" },
+          ...controls,
+        ],
+      },
+    ],
+  };
+}
+
 /** A `PluginsFrame` as a `ViewDocument`. */
 export function pluginsDocumentV1(
   frame: PluginsFrame,
   capabilities = false,
+  marketplace = false,
 ): ViewDocument {
   const installed = frame.plugins.filter(
     (plugin) => plugin.state !== "not-installed",
@@ -177,24 +275,30 @@ export function pluginsDocumentV1(
   const children: ViewNode[] = [
     {
       type: "text",
-      text: capabilities
-        ? "Available to all your Bots"
-        : `${installed} installed`,
+      text: marketplace
+        ? "Install once for your account"
+        : capabilities
+          ? "Available to all your Bots"
+          : `${installed} installed`,
       style: "status",
     },
     {
       type: "text",
-      text: capabilities
-        ? "Choose which extra abilities your Bots can use. Each card explains what the feature does."
-        : "Extensions add new abilities to your Bots. Open an extension for its description and controls. Models and built-in features have their own settings.",
+      text: marketplace
+        ? "Install a Plugin for your account. Set it up in Models to add a key and choose the model your Bots should use."
+        : capabilities
+          ? "Choose which extra abilities your Bots can use. Each card explains what the feature does."
+          : "Extensions add new abilities to your Bots. Open an extension for its description and controls. Models and built-in features have their own settings.",
     },
   ];
   // The root, the two lines above and the overflow status the tail may need.
   let nodes = 4;
   let complete = true;
   for (const plugin of frame.plugins) {
-    const node = pluginNode(plugin, capabilities);
-    const cost = 7 + (plugin.failure ? 1 : 0);
+    const node = marketplace
+      ? marketplacePluginNode(plugin)
+      : pluginNode(plugin, capabilities);
+    const cost = countViewNodesV1(node);
     if (nodes + cost > NODE_LIMIT) {
       complete = false;
       break;
@@ -212,12 +316,18 @@ export function pluginsDocumentV1(
   if (frame.plugins.length === 0) {
     children.push({
       type: "text",
-      text: "No extensions are available yet. Your Bots already include memory, skills, routines and a hosted Computer. Model providers are in Models; optional features are in Account features.",
+      text: marketplace
+        ? "No installable Plugins are available in this deployment yet."
+        : "No extensions are available yet. Your Bots already include memory, skills, routines and a hosted Computer. Model providers are in Models; optional features are in Account features.",
     });
   }
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
-    surfaceId: capabilities ? "capabilities" : "plugins",
+    surfaceId: marketplace
+      ? "marketplace-plugins"
+      : capabilities
+        ? "capabilities"
+        : "plugins",
     revision: frame.revision,
     root: { type: "group", orientation: "column", children },
     actions: [

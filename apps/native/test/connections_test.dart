@@ -101,6 +101,135 @@ Widget page(
   ),
 );
 
+Map<String, Object?> marketplacePluginsDocument({
+  int revision = 1,
+  String state = 'not-installed',
+}) {
+  final installed = state == 'installed';
+  return {
+    'schemaVersion': 1,
+    'surfaceId': 'marketplace-plugins',
+    'revision': revision,
+    'root': {
+      'type': 'group',
+      'orientation': 'column',
+      'children': [
+        {
+          'type': 'text',
+          'text': 'Install once for your account',
+          'style': 'status',
+        },
+        {'type': 'text', 'text': 'Browse deployment-supplied Plugins.'},
+        {
+          'type': 'group',
+          'orientation': 'column',
+          'title': 'DeepSeek',
+          'children': [
+            {
+              'type': 'text',
+              'text': 'Run this Bot\'s replies on DeepSeek models.',
+            },
+            {
+              'type': 'text',
+              'text': installed ? 'Installed' : 'Not installed',
+              'style': 'status',
+            },
+            {
+              'type': 'group',
+              'orientation': 'column',
+              'title': 'Details & controls',
+              'collapsed': true,
+              'children': [
+                {'type': 'text', 'text': 'Version 0.0.1', 'style': 'status'},
+                if (installed)
+                  {
+                    'type': 'action',
+                    'actionId': 'open-home',
+                    'label': 'Set up in Models',
+                    'input': {
+                      'kind': 'open-home',
+                      'home': 'models',
+                      'packageId': 'provider-deepseek',
+                    },
+                  },
+                {
+                  'type': 'action',
+                  'actionId': installed
+                      ? 'uninstall-package'
+                      : 'install-package',
+                  'label': installed ? 'Remove' : 'Add Plugin',
+                  'input': installed
+                      ? {
+                          'kind': 'uninstall-package',
+                          'packageId': 'provider-deepseek',
+                        }
+                      : {
+                          'kind': 'install-package',
+                          'packageId': 'provider-deepseek',
+                          'version': '0.0.1',
+                        },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    'actions': [
+      {
+        'id': 'install-package',
+        'schema': {
+          'type': 'object',
+          'properties': {
+            'kind': {
+              'type': 'string',
+              'enum': ['install-package'],
+            },
+            'packageId': {'type': 'string', 'maxLength': 128},
+            'version': {'type': 'string', 'maxLength': 64},
+          },
+          'required': ['kind', 'packageId', 'version'],
+          'additionalProperties': false,
+        },
+      },
+      {
+        'id': 'uninstall-package',
+        'schema': {
+          'type': 'object',
+          'properties': {
+            'kind': {
+              'type': 'string',
+              'enum': ['uninstall-package'],
+            },
+            'packageId': {'type': 'string', 'maxLength': 128},
+          },
+          'required': ['kind', 'packageId'],
+          'additionalProperties': false,
+        },
+      },
+      {
+        'id': 'open-home',
+        'schema': {
+          'type': 'object',
+          'properties': {
+            'kind': {
+              'type': 'string',
+              'enum': ['open-home'],
+            },
+            'home': {
+              'type': 'string',
+              'enum': ['models'],
+            },
+            'packageId': {'type': 'string', 'maxLength': 128},
+          },
+          'required': ['kind', 'home'],
+          'additionalProperties': false,
+        },
+      },
+    ],
+  };
+}
+
 void main() {
   group('the projection read back', () {
     test('a connect action becomes the credential route\'s command', () {
@@ -666,6 +795,147 @@ void main() {
       expect(find.byType(Dialog), findsNothing);
     },
   );
+
+  testWidgets(
+    'Marketplace tabs install and remove through authoritative rereads',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore();
+      final sent = <Map<String, Object?>>[];
+      var state = 'not-installed';
+      var revision = 1;
+      var connectorReads = 0;
+      var pluginReads = 0;
+      final api = SettingsApi(store, (path, body) async {
+        if (body == null) {
+          if (path == '/api/settings/connections') {
+            connectorReads++;
+            return connectionsFrame();
+          }
+          expect(path, '/api/settings/marketplace/plugins?as=document');
+          pluginReads++;
+          return marketplacePluginsDocument(revision: revision, state: state);
+        }
+        expect(path, '/api/settings');
+        final command = (body as Map).cast<String, Object?>();
+        sent.add(command);
+        if (command['type'] == 'user/install-package') {
+          state = 'installed';
+        } else if (command['type'] == 'user/uninstall-package') {
+          state = 'not-installed';
+        }
+        revision += 1;
+        return {
+          'schemaVersion': 1,
+          'commandId': command['commandId'],
+          'revision': revision,
+          'status': 'applied',
+        };
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: MarketplacePage(api: api, store: store, userId: 'tim'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Connectors'), findsOneWidget);
+      await tester.tap(find.byType(Tab).at(1));
+      await tester.pumpAndSettle();
+      expect(find.text('DeepSeek'), findsOneWidget);
+      expect(find.text('Not installed'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'deep');
+      await tester.pump();
+      await tester.tap(find.byType(Tab).at(0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(Tab).at(1));
+      await tester.pumpAndSettle();
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is EditableText && widget.controller.text == 'deep',
+        ),
+        findsOneWidget,
+      );
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pump();
+      await tester.tap(find.text('Details & controls'));
+      await tester.pumpAndSettle();
+
+      final pluginReadsBeforeRefresh = pluginReads;
+      final connectorReadsBeforeRefresh = connectorReads;
+      await tester.tap(find.byTooltip('Refresh marketplace'));
+      await tester.pumpAndSettle();
+      expect(pluginReads, greaterThan(pluginReadsBeforeRefresh));
+      expect(connectorReads, connectorReadsBeforeRefresh);
+
+      await tester.tap(find.byType(Tab).at(0));
+      await tester.pumpAndSettle();
+      final connectorReadsBeforeSecondRefresh = connectorReads;
+      await tester.tap(find.byTooltip('Refresh marketplace'));
+      await tester.pumpAndSettle();
+      expect(connectorReads, greaterThan(connectorReadsBeforeSecondRefresh));
+
+      await tester.tap(find.byType(Tab).at(1));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add Plugin'));
+      await tester.pumpAndSettle();
+      expect(sent.single['type'], 'user/install-package');
+      expect(find.text('Installed'), findsOneWidget);
+      await tester.tap(find.text('Details & controls'));
+      await tester.pumpAndSettle();
+      expect(find.text('Set up in Models'), findsOneWidget);
+      await tester.tap(find.text('Remove'));
+      await tester.pumpAndSettle();
+      expect(sent.last['type'], 'user/uninstall-package');
+      expect(find.text('Not installed'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Marketplace host refresh retries a failed Plugin read', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    var pluginReadFailed = true;
+    final api = SettingsApi(store, (path, body) async {
+      if (body != null) {
+        return {
+          'schemaVersion': 1,
+          'commandId': (body as Map)['commandId'],
+          'revision': 1,
+          'status': 'rejected',
+          'failure': 'The Plugin is not available yet.',
+        };
+      }
+      if (path == '/api/settings/connections') return connectionsFrame();
+      expect(path, '/api/settings/marketplace/plugins?as=document');
+      if (pluginReadFailed) {
+        pluginReadFailed = false;
+        throw StateError('synthetic backend outage');
+      }
+      return marketplacePluginsDocument();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: MarketplacePage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Tab).at(1));
+    await tester.pumpAndSettle();
+    expect(find.text('Plugins couldn’t load'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Refresh marketplace'));
+    await tester.pumpAndSettle();
+    expect(find.text('DeepSeek'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('turning an account off says so at once, and one row waits', (
     tester,

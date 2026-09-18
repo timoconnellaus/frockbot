@@ -20,7 +20,7 @@ export const BUILT_IN_PACKAGE_IDS = new Set(
  */
 export const PROVIDER_PLUGIN_DESCRIPTIONS_V1: Record<string, string> = {
   "provider-deepseek":
-    "Run this Bot's replies on DeepSeek models. Connect a DeepSeek API key in Models, then choose a DeepSeek model. The key is held by the deployment and never reaches the Plugin.",
+    "Run replies on DeepSeek models. Connect a DeepSeek API key in Models, then choose a DeepSeek model. The key is held by the deployment and never reaches the Plugin.",
 };
 
 /**
@@ -47,8 +47,8 @@ export function providerPluginPackageV1(packageId: string): boolean {
  * The state that counts is `installed`, not merely a row's existence: every
  * account starts holding a disabled row for each Package the deployment turns
  * on by default, which is not an installation of anything. Before the account
- * installs a provider Plugin there is nothing here to list — installing one
- * belongs to Models until a marketplace exists.
+ * installs a provider Plugin there is nothing here to list — the Marketplace
+ * is the separate surface that offers installable catalog entries.
  */
 export function pluginsPageRowV1(plugin: {
   packageId: string;

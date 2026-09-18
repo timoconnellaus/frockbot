@@ -98,10 +98,9 @@ class ViewCardGroups extends StatelessWidget {
 /// is the group drawn by the shared renderer, title and all, so the document,
 /// its identifiers and its action targets are the ones the list draws.
 ///
-/// This is the Marketplace on a desktop. The columns follow the width, and a
-/// row is as tall as its tallest card rather than the whole grid being as tall
-/// as the tallest of all of them: opening one provider's connect form should
-/// not stretch every other row on the page.
+/// This is the Marketplace on a desktop. The columns follow the width, and
+/// each card keeps its natural height so opening one card cannot clip its
+/// controls or stretch every other card around it.
 class ViewGridGroups extends StatelessWidget {
   final Map<String, Object?> node;
   const ViewGridGroups({super.key, required this.node});
@@ -124,17 +123,23 @@ class ViewGridGroups extends StatelessWidget {
                 : constraints.maxWidth < 860
                 ? 2
                 : 3;
-            return _EqualHeightCards(
-              columns: columns,
-              perRow: true,
+            const gap = 12.0;
+            final width =
+                (constraints.maxWidth - gap * (columns - 1)) / columns;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
               children: [
                 for (final card in batch)
-                  Card(
-                    key: ValueKey(card['title']),
-                    margin: EdgeInsets.zero,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                      child: ViewNodeView(node: card),
+                  SizedBox(
+                    width: width,
+                    child: Card(
+                      key: ValueKey(card['title']),
+                      margin: EdgeInsets.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                        child: ViewNodeView(node: card),
+                      ),
                     ),
                   ),
               ],

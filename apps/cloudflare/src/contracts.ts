@@ -541,6 +541,11 @@ export interface UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
   }): Promise<PluginsFrame>;
+  /** The Marketplace projection, empty when this deployment cannot mount Plugin workers. */
+  readMarketplacePluginsFrame(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<PluginsFrame>;
   readSettingsFrame(
     request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
   ): Promise<SettingsFrame>;
