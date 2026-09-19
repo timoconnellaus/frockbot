@@ -295,6 +295,45 @@ Map<String, Object?> routinesDocumentWithEditor({
   'actions': routinesDocument()['actions'],
 };
 
+/// The surface above, with the action `routinesDocumentV1` declares for Save:
+/// pressing it carries the four field values the form holds, which is what a
+/// save from the editor is made of.
+Map<String, Object?> routinesDocumentThatSaves(Map<String, Object?> document) => {
+  ...document,
+  'actions': [
+    ...(document['actions']! as List),
+    {
+      'id': 'save-routine',
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'kind': {
+            'type': 'string',
+            'enum': ['save-routine'],
+          },
+          'routineId': {'type': 'string', 'maxLength': 128},
+          'routine.name': {'type': 'string', 'maxLength': 100},
+          'routine.prompt': {'type': 'string', 'maxLength': 8000},
+          'routine.timing': {'type': 'string', 'maxLength': 256},
+          'routine.schedule': {'type': 'string', 'maxLength': 256},
+        },
+        'required': [
+          'kind',
+          'routine.name',
+          'routine.prompt',
+          'routine.timing',
+        ],
+        'additionalProperties': false,
+      },
+    },
+  ],
+};
+
+/// What the editor's schedule controls hold, as the person sees them.
+int dayControl(WidgetTester tester) => tester
+    .state<FormFieldState<int>>(find.byType(DropdownButtonFormField<int>))
+    .value!;
+
 /// The surface as a page, on a display tall enough to hold all of it: a form
 /// and the rows under it are both things these tests press.
 Widget routinesPage(SettingsApi api, MemoryStore store) {
@@ -546,6 +585,95 @@ void main() {
           .value,
       90,
     );
+  });
+
+  testWidgets('switching cadence shows the day the switch stores', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return routinesDocumentThatSaves(
+          routinesDocumentWithEditor(
+            editing: {
+              'routineId': 'r1',
+              'name': 'Friday brief',
+              'prompt': 'Summarise overnight email.',
+              'schedule': '0 9 * * 5',
+              'scheduleDescription': 'Every Friday at 9:00am',
+              'timing': 'schedule',
+            },
+          ),
+        );
+      }
+      final command = (body as Map).cast<String, Object?>();
+      sent.add(command);
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    // Friday is a day of the week, not a day of the month: the control the
+    // switch draws is the month's, reading the day the value now holds.
+    await tester.tap(find.text('Monthly'));
+    await tester.pumpAndSettle();
+    expect(dayControl(tester), 1);
+    expect(find.textContaining('of every month'), findsOneWidget);
+
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, 'Monthly brief');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(sent.single['schedule'], '0 9 1 * *');
+  });
+
+  testWidgets('a day of the month above seven leaves the weekly control whole', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return routinesDocumentWithEditor(
+          editing: {
+            'routineId': 'r1',
+            'name': 'Twentieth',
+            'prompt': 'Summarise overnight email.',
+            'schedule': '0 9 20 * *',
+            'scheduleDescription': 'On day 20 of every month at 9:00am',
+            'timing': 'schedule',
+          },
+        );
+      }
+      final command = (body as Map).cast<String, Object?>();
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    // Twenty is not one of the week's seven days, so the control the switch
+    // draws holds the stored weekday rather than the number it replaced.
+    await tester.tap(find.text('Weekly'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(dayControl(tester), 1);
+    expect(find.textContaining('Every Monday'), findsOneWidget);
   });
 
   testWidgets('the key controls follow the stored Routine, not the form', (
