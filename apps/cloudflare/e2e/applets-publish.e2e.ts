@@ -26,6 +26,7 @@ import {
   expect,
   press,
   answerInputs,
+  closeOverlay,
   composerInput,
   builderBotId,
   enableApplets,
@@ -375,8 +376,7 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   // generation carrying it, and this next Turn runs on it.
   // Older bubbles can leave Flutter's visible semantics tree as this long
   // thread scrolls. The synchronized todo below proves this send was handled.
-  await press(sem(page, "applet-canvas-close"));
-  await expect(sem(page, "shell-conversation")).toBeVisible();
+  await closeOverlay(page);
   await answerInputs([
     [
       composerInput(page),
