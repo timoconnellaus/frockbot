@@ -14,7 +14,6 @@ export interface AuthoringSourceFileV1 {
   size: number;
 }
 
-/** Product-specific policy around the shared authoring source store. */
 export interface AuthoringSourcePolicyV1 {
   /** Used in failures a Bot or operator acts on. */
   artifactName: "Applet" | "Plugin";

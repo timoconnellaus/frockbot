@@ -311,7 +311,6 @@ export async function switchPluginForBotV1(
   }
 }
 
-/** Plugin policy over the shared Bot-authored source repository. */
 export function pluginAuthoringSourceRepositoryV1(
   workspace: WorkspaceFilesV1,
   userId: string,

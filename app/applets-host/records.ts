@@ -543,7 +543,6 @@ function failed(
   };
 }
 
-/** Applet policy over the shared Bot-authored source repository. */
 export function appletAuthoringSourceRepositoryV1(
   workspace: WorkspaceFilesV1,
   userId: string,

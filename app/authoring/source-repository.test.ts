@@ -5,6 +5,7 @@ import {
   appletsSourceRootV1,
 } from "@frockbot/applets/root";
 import type {
+  WorkspaceFailureStatusV1,
   WorkspaceFilesV1,
   WorkspacePathV1,
   WorkspaceRootV1,
@@ -24,10 +25,27 @@ const WRITER = {
   runId: "run-1",
 };
 
+async function rejectionMessage(action: () => Promise<unknown>) {
+  try {
+    await action();
+  } catch (error) {
+    if (error instanceof Error) return error.message;
+    throw error;
+  }
+  throw new Error("the action unexpectedly succeeded");
+}
+
 function workspace(root: WorkspaceRootV1) {
   const files = new Map<string, { bytes: Uint8Array; generationId: string }>();
   const writes: WorkspaceWriteRequestV1[] = [];
   let generation = 0;
+  let beforeNextWrite: (() => void) | undefined;
+  let listFailure:
+    { status: WorkspaceFailureStatusV1; reason: string } | undefined;
+  const readFailures = new Map<
+    string,
+    { status: WorkspaceFailureStatusV1; reason: string }
+  >();
   const entry = (
     path: string,
     held: { bytes: Uint8Array; generationId: string },
@@ -55,6 +73,8 @@ function workspace(root: WorkspaceRootV1) {
   };
   const api: WorkspaceFilesV1 = {
     async read(path) {
+      const failure = readFailures.get(path.path);
+      if (failure) return failure;
       const held = files.get(path.path);
       return held
         ? {
@@ -70,6 +90,7 @@ function workspace(root: WorkspaceRootV1) {
         : { status: "not-found", reason: "no such file" };
     },
     async list(request) {
+      if (listFailure) return listFailure;
       return {
         status: "ok",
         entries: [...files]
@@ -80,6 +101,13 @@ function workspace(root: WorkspaceRootV1) {
     },
     async write(request) {
       writes.push(request);
+      beforeNextWrite?.();
+      beforeNextWrite = undefined;
+      const currentGenerationId =
+        files.get(request.path.path)?.generationId ?? null;
+      if (currentGenerationId !== request.expectedGenerationId) {
+        return { status: "conflict", reason: "the file moved on" };
+      }
       generation += 1;
       const held = {
         bytes: request.bytes,
@@ -95,7 +123,21 @@ function workspace(root: WorkspaceRootV1) {
       return { status: "refused", reason: "not used" };
     },
   };
-  return { api, set, setBytes, writes };
+  return {
+    api,
+    set,
+    setBytes,
+    writes,
+    failList(status: WorkspaceFailureStatusV1, reason: string) {
+      listFailure = { status, reason };
+    },
+    failRead(path: string, status: WorkspaceFailureStatusV1, reason: string) {
+      readFailures.set(path, { status, reason });
+    },
+    mutateBeforeNextWrite(path: string, text: string) {
+      beforeNextWrite = () => set(path, text);
+    },
+  };
 }
 
 const adapters = [
@@ -147,17 +189,21 @@ describe("Bot-authored source repositories", () => {
 
       await repository.write(adapter.artifactId, "z.ts", "changed", WRITER);
       await repository.write(adapter.artifactId, "new.ts", "new", WRITER);
+      await repository.write(adapter.artifactId, "config.json", "{}", WRITER);
       expect(store.writes.map((write) => write.expectedGenerationId)).toEqual([
         "generation-1",
+        null,
         null,
       ]);
       expect(store.writes.map((write) => write.mediaType)).toEqual([
         adapter.sourceMediaType,
         adapter.sourceMediaType,
+        "application/json",
       ]);
       expect(store.writes.map((write) => write.path.path)).toEqual([
         `${prefix}z.ts`,
         `${prefix}new.ts`,
+        `${prefix}config.json`,
       ]);
     });
 
@@ -195,6 +241,82 @@ describe("Bot-authored source repositories", () => {
       ).toEqual({
         failure: `${adapter.artifactId}'s source is over the ${APPLET_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
       });
+
+      const aggregateStore = workspace(adapter.root);
+      aggregateStore.set(
+        `${prefix}first.ts`,
+        "x".repeat(APPLET_BUILD_LIMITS.fileText),
+      );
+      aggregateStore.set(
+        `${prefix}second.ts`,
+        "x".repeat(APPLET_BUILD_LIMITS.fileText),
+      );
+      aggregateStore.set(`${prefix}third.ts`, "x");
+      expect(
+        await adapter
+          .repository(aggregateStore.api, USER)
+          .readBuildSource(adapter.artifactId),
+      ).toEqual({
+        failure: `${adapter.artifactId}'s source is over the ${APPLET_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
+      });
+
+      const exactStore = workspace(adapter.root);
+      exactStore.set(
+        `${prefix}first.ts`,
+        "x".repeat(APPLET_BUILD_LIMITS.fileText),
+      );
+      exactStore.set(
+        `${prefix}second.ts`,
+        "x".repeat(APPLET_BUILD_LIMITS.fileText),
+      );
+      const exact = await adapter
+        .repository(exactStore.api, USER)
+        .readBuildSource(adapter.artifactId);
+      expect("files" in exact).toBe(true);
+      if ("files" in exact) {
+        expect(exact.files.map((file) => file.text.length)).toEqual([
+          APPLET_BUILD_LIMITS.fileText,
+          APPLET_BUILD_LIMITS.fileText,
+        ]);
+      }
+    });
+
+    test(`${adapter.name} preserves exact store failures and write conflicts`, async () => {
+      const listStore = workspace(adapter.root);
+      listStore.failList("unavailable", "store is offline");
+      expect(
+        await adapter.repository(listStore.api, USER).list(adapter.artifactId),
+      ).toEqual({
+        failure: `the ${adapter.name}'s source could not be listed: unavailable — store is offline`,
+      });
+
+      const prefix = adapter.sourcePath(adapter.artifactId);
+      const readStore = workspace(adapter.root);
+      readStore.failRead(
+        `${prefix}source.ts`,
+        "refused",
+        "the caller cannot read it",
+      );
+      expect(
+        await rejectionMessage(() =>
+          adapter
+            .repository(readStore.api, USER)
+            .read(adapter.artifactId, "source.ts"),
+        ),
+      ).toBe('"source.ts" is refused');
+
+      const writeStore = workspace(adapter.root);
+      writeStore.set(`${prefix}source.ts`, "original");
+      writeStore.mutateBeforeNextWrite(`${prefix}source.ts`, "concurrent");
+      expect(
+        await rejectionMessage(() =>
+          adapter
+            .repository(writeStore.api, USER)
+            .write(adapter.artifactId, "source.ts", "replacement", WRITER),
+        ),
+      ).toBe('"source.ts" could not be written: conflict — the file moved on');
+      expect(writeStore.writes).toHaveLength(1);
+      expect(writeStore.writes[0]?.expectedGenerationId).toBe("generation-1");
     });
   }
 
