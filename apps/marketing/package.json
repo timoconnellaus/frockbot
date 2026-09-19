@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "wrangler deploy --dry-run --outdir dist",
+    "build": "bun run capabilities:check && wrangler deploy --dry-run --outdir dist",
     "dev": "wrangler dev",
     "test": "bun test src",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "capabilities:generate": "bun scripts/render-capabilities.ts",
+    "capabilities:check": "bun scripts/render-capabilities.ts --check"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260907.1",
