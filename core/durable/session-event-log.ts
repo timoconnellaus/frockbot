@@ -10,6 +10,7 @@ import {
   SESSION_EVENT_LOG_PAGE_PREFIX,
   SESSION_EVENT_PAYLOAD_PREFIX,
 } from "./storage-keys.js";
+import { sha256HexTextV1 } from "../crypto.js";
 
 /** Maximum serialized size of one Session page value. */
 export const SESSION_EVENT_PAGE_BYTES_V1 = 256 * 1024;
@@ -108,13 +109,6 @@ function sessionEventPayloadKey(
   return `${sessionEventPayloadPrefixV1(sessionId)}${String(seq).padStart(12, "0")}:${String(chunk).padStart(6, "0")}`;
 }
 
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(value));
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 function cutUtf8(value: string, maximum: number): string {
   if (encoder.encode(value).byteLength <= maximum) return value;
   const marker = "\n[… content cut …]";
@@ -171,7 +165,7 @@ async function cutProjection(
   if (event.type === "model/request") {
     const requestSerialized = JSON.stringify(event.request);
     const requestBytes = encoder.encode(requestSerialized).byteLength;
-    const requestDigest = await sha256(requestSerialized);
+    const requestDigest = await sha256HexTextV1(requestSerialized);
     const lastMessage = event.request.messages.at(-1);
     const excerptPartBytes = Math.floor(SESSION_EVENT_EXCERPT_BYTES_V1 / 2);
     return {
@@ -495,7 +489,7 @@ export class SessionEventLog {
           ) {
             return event;
           }
-          const digest = await sha256(serialized);
+          const digest = await sha256HexTextV1(serialized);
           return cutProjection(event, serialized, digest);
         }),
       );
@@ -616,7 +610,7 @@ export class SessionEventLog {
     ) {
       return { storage: "inline", event: structuredClone(event) };
     }
-    const digest = await sha256(serialized);
+    const digest = await sha256HexTextV1(serialized);
     const chunks = payloadChunks(serialized);
     for (const [chunk, value] of chunks.entries()) {
       if (
@@ -673,7 +667,7 @@ export class SessionEventLog {
     const serialized = parts.join("");
     if (
       encoder.encode(serialized).byteLength !== entry.payload.bytes ||
-      (await sha256(serialized)) !== entry.payload.sha256
+      (await sha256HexTextV1(serialized)) !== entry.payload.sha256
     ) {
       throw new Error(
         `Session event payload ${entry.projection.seq} is corrupt`,

@@ -18,6 +18,7 @@ import {
   encodeIsolateModelEventLineV1,
   pluginNetworkAdmitsHostV1,
 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type { BotIsolateArtifactStore } from "@frockbot/frock-compose";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "@frockbot/app/plugins/seeded/artifacts.generated";
 import { boundedPromiseCacheV1 } from "@frockbot/core/promise-cache";
@@ -313,15 +314,7 @@ export function pluginEgressPolicyV1(
   return open ? { hosts: [], open: true } : { hosts: [...hosts].sort(), open };
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+const sha256Hex = sha256HexTextV1;
 
 /**
  * Reads a Bot Package artifact from object storage and verifies its content

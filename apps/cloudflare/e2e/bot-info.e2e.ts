@@ -5,11 +5,13 @@ import type { Locator, Page } from "@playwright/test";
 import {
   createBot,
   expect,
+  expectNoHorizontalOverflow,
   openApplication,
   openBotPage,
   press,
   sem,
   SHELL_TIMEOUT_MS,
+  settle,
   test,
 } from "./fixtures.ts";
 
@@ -23,10 +25,6 @@ import {
  * engine hit-tests a press against the frame it is painting, so a press issued
  * then lands on whatever is passing under the pointer.
  */
-async function settle(page: Page): Promise<void> {
-  await page.waitForTimeout(700);
-}
-
 /**
  * Words the product shows, wherever the engine put them.
  *
@@ -37,21 +35,6 @@ async function settle(page: Page): Promise<void> {
  */
 function says(scope: Page | Locator, text: string) {
   return scope.locator(`[aria-label*="${text}"]`).or(scope.getByText(text));
-}
-
-/**
- * How far the window scrolls sideways.
- *
- * Flutter paints to a canvas sized to the window, so an overflowing layout
- * clips rather than widening the document — but a host element that escaped
- * its bounds still would, which is the failure this has always watched for.
- */
-async function horizontalOverflow(page: Page): Promise<number> {
-  return page.evaluate(
-    () =>
-      document.documentElement.scrollWidth -
-      document.documentElement.clientWidth,
-  );
 }
 
 test("the panel opens on the Bot page and its rows push onto it", async ({
@@ -101,7 +84,7 @@ test("the panel opens on the Bot page and its rows push onto it", async ({
   await openBotPage(page);
   await expect(sem(page, "bot-settings")).toHaveCount(0);
 
-  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
+  await expectNoHorizontalOverflow(page, 1);
 });
 
 test("the Bot page and Settings fit the mobile shell", async ({
@@ -123,5 +106,5 @@ test("the Bot page and Settings fit the mobile shell", async ({
   await press(sem(page, "bot-page-settings").first());
   await expect(sem(page, "bot-settings")).toBeVisible({ timeout: 60_000 });
 
-  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
+  await expectNoHorizontalOverflow(page, 1);
 });

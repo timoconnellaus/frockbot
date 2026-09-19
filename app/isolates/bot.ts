@@ -46,6 +46,8 @@ import {
   type PluginDescriptorV1,
   type WorkspacePathV1,
 } from "@frockbot/core/contracts";
+import { latestOpenStepPositionV1 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   resolveEffectiveBotModelV1,
   type BotSettingsViewV1,
@@ -483,14 +485,12 @@ async function recordPluginModelUsageV1(
     input.sessionId,
   );
   if (!session) return;
-  const started = session.events.findLast(
-    (event) => event.type === "step/start",
-  );
-  if (started?.type !== "step/start") return;
+  const position = latestOpenStepPositionV1(session);
+  if (!position) return;
   session.append({
     type: "package/model-usage",
-    turn: started.turn,
-    step: started.step,
+    turn: position.turn,
+    step: position.step,
     packageId: input.packageId,
     requestId: usage.requestId,
     provider: usage.provider,
@@ -545,16 +545,8 @@ async function invokeBotToolForIsolateV1(
       reason: "the active Session is unavailable",
     };
   }
-  const started = session.events.findLast(
-    (event) => event.type === "step/start",
-  );
-  const ended = session.events.findLast((event) => event.type === "step/end");
-  if (
-    started?.type !== "step/start" ||
-    (ended?.type === "step/end" &&
-      ended.turn === started.turn &&
-      ended.step === started.step)
-  ) {
+  const position = latestOpenStepPositionV1(session);
+  if (!position) {
     return {
       status: "unavailable",
       reason: "the active step is unavailable",
@@ -591,8 +583,8 @@ async function invokeBotToolForIsolateV1(
   if (!priorCall) {
     session.append({
       type: "package/tool-call",
-      turn: started.turn,
-      step: started.step,
+      turn: position.turn,
+      step: position.step,
       effectId,
       packageId: input.packageId,
       callId: request.callId,
@@ -651,8 +643,8 @@ async function invokeBotToolForIsolateV1(
   }
   session.append({
     type: "package/tool-result",
-    turn: started.turn,
-    step: started.step,
+    turn: position.turn,
+    step: position.step,
     effectId,
     packageId: input.packageId,
     callId: request.callId,
@@ -1051,13 +1043,7 @@ async function isolateToolEffectId(
   packageId: string,
   callId: string,
 ): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`${packageId}\0${callId}`),
-  );
-  const hex = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const hex = await sha256HexTextV1(`${packageId}\0${callId}`);
   return `package-tool:${hex}`;
 }
 

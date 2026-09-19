@@ -20,6 +20,7 @@ import {
   VOICE_ASSISTANT_MAX_DELEGATIONS_PER_TURN_V1,
   VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1,
 } from "./shared.js";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 
 /** The key-value surface a Durable Object's storage already offers. */
 export interface VoiceLedgerStorageV1 {
@@ -235,13 +236,7 @@ export function voiceTurnOrdinalV1(turnId: string): number {
 /** `voice-<32 hex>`: a public identifier the Bot's run door accepts. */
 export async function voiceDelegationRunIdV1(parts: readonly string[]) {
   // The separator is NUL so the hashed tuple stays unambiguous across parts.
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(parts.join("\0")),
-  );
-  const hex = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const hex = await sha256HexTextV1(parts.join("\0"));
   return `voice-${hex.slice(0, 32)}`;
 }
 

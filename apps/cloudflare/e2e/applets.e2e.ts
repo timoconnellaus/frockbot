@@ -18,7 +18,9 @@ import {
   test,
   expect,
   answerComposer,
+  builderBotId,
   enableApplets,
+  expectNoHorizontalOverflow,
   provisionThroughApi,
   press,
   sem,
@@ -31,16 +33,6 @@ import {
 
 const PHONE = { width: 390, height: 844 } as const;
 const DESKTOP = { width: 1280, height: 800 } as const;
-
-async function expectNoHorizontalOverflow(page: Page): Promise<void> {
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
-    ),
-  ).toBeLessThanOrEqual(0);
-}
 
 /**
  * A Bot whose Turns reach the fake provider, with Applets held by the account.
@@ -280,20 +272,6 @@ test("a Bot creates an Applet, its Applets list opens the source, and deletion r
     /No Applets yet\. Ask Builder to build one\./u,
   );
 });
-
-/**
- * The Builder Bot this spec provisions. Applets are listed per Bot (ADR 0027),
- * so every directory read names it rather than the bootstrapped General Bot.
- */
-async function builderBotId(page: Page): Promise<string> {
-  const response = await page.request.get("/api/bots");
-  const body = (await response.json()) as {
-    bots: Array<{ botId: string; initialName: string }>;
-  };
-  const botId = body.bots.find((bot) => bot.initialName === "Builder")?.botId;
-  if (!botId) throw new Error("this account has no Builder Bot");
-  return botId;
-}
 
 /** The Applet's id, read from the same directory as the native Applets list. */
 async function appletIdFromDirectory(page: Page): Promise<string> {

@@ -190,6 +190,32 @@ export type PersistSessionEvents = (
   events: readonly SessionEvent[],
 ) => Promise<void>;
 
+/**
+ * The position of the Session's latest open step, if any.
+ *
+ * A Session can contain many completed steps, so checking only the final
+ * event is not enough: the latest start and latest end must name the same
+ * position to say that the step is closed. Returning the position lets each
+ * caller retain its own error/status wrapper without repeating either scan.
+ */
+export function latestOpenStepPositionV1(
+  session: Session,
+): { turn: number; step: number } | undefined {
+  const started = session.events.findLast(
+    (event) => event.type === "step/start",
+  );
+  if (started?.type !== "step/start") return undefined;
+  const ended = session.events.findLast((event) => event.type === "step/end");
+  if (
+    ended?.type === "step/end" &&
+    ended.turn === started.turn &&
+    ended.step === started.step
+  ) {
+    return undefined;
+  }
+  return { turn: started.turn, step: started.step };
+}
+
 /** Most resolved attachments one resident Session holds. */
 export const SESSION_ATTACHMENT_CACHE_LIMIT = 4;
 /** Largest resolved attachment a Session holds, in base64 characters. */

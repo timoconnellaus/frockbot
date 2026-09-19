@@ -11,9 +11,7 @@
 // spec asserts the surface itself: Settings is one level under the Bot page,
 // behind its gear, and everything that used to be under an Advanced expander
 // is on it in the open.
-import type { Locator, Page } from "@playwright/test";
 import {
-  composerInput,
   createBot,
   expect,
   field,
@@ -22,66 +20,12 @@ import {
   openApplication,
   press,
   sem,
+  sendMessage,
+  settle,
   spokenText,
   SHELL_TIMEOUT_MS,
   test,
-  transcriptMessages,
 } from "./fixtures.ts";
-
-/**
- * Press a named widget.
- *
- * A `Semantics(identifier:)` around a widget that lays itself out — an
- * `ExpansionTile`, a `Card`'s `ListTile` — reaches the accessibility tree as a
- * container with `pointer-events: none`, and the node that takes the tap is
- * its child. Clicking the identifier itself would land on the canvas behind
- * it, so this presses whichever of the two the engine made tappable.
- */
-function tap(scope: Page | Locator, identifier: string) {
-  const node = `[flt-semantics-identifier="${identifier}"]`;
-  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
-}
-
-/**
- * Let a surface finish arriving before pressing anything on it.
- *
- * Flutter rebuilds the accessibility tree when semantics change rather than
- * once a frame, so a sliding sheet or a pushed page reaches the DOM at its
- * final position while the canvas is still moving — and Playwright's own
- * stability check, which watches that DOM box, sees nothing to wait for. The
- * engine hit-tests a press against the frame it is painting, so a press issued
- * then lands on whatever is passing under the pointer.
- */
-async function settle(page: Page): Promise<void> {
-  await page.waitForTimeout(700);
-}
-
-/**
- * Give this Bot a Turn to hold, so its conversation has something to load.
- *
- * What the Bot answers is `defaults.e2e.ts`'s subject, not this one's: here it
- * is enough that the Turn was admitted and is in the thread the client reads
- * back.
- */
-async function sendMessage(page: Page, text: string): Promise<void> {
-  const composer = composerInput(page);
-  // Focusing a Flutter text field replaces the DOM input the semantics tree
-  // was holding, so a fill issued in the same breath as the click writes to a
-  // node the engine has already discarded and the draft stays empty — which
-  // leaves the send button disabled, and disabled means no tappable node at
-  // all. The whole gesture is retried until the button is there to press.
-  await expect(async () => {
-    await composerInput(page).click();
-    await page.waitForTimeout(300);
-    await composerInput(page).fill(text);
-    await expect(tap(page, "send-button")).toBeVisible({ timeout: 5_000 });
-  }).toPass({ timeout: 120_000 });
-  await tap(page, "send-button").click();
-  await expect(composer).toHaveValue("", { timeout: 120_000 });
-  await expect(transcriptMessages(page).first()).toBeVisible({
-    timeout: 120_000,
-  });
-}
 
 test("Settings is one level under the Bot page, in one card grammar", async ({
   page,

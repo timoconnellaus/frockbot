@@ -8,7 +8,6 @@
 import {
   test,
   expect,
-  answerInputs,
   composerInput,
   provisionThroughApi,
   sem,
@@ -31,21 +30,20 @@ async function expectHighlighted(
  * Type the trigger and wait for the popover, the way a person reaches it: tap
  * the composer, then type.
  *
- * Choosing a Skill rewrites the field's value from Dart, and the engine
- * answers a rewrite by tearing its editing element down. `answerInputs`
- * reopens the engine's editing session and proves the widget—not only the DOM
- * element—accepted the slash. The field is focused again after that helper's
- * deliberate blur so the arrow-key assertions exercise the real keyboard
- * path. The gesture must not be retried: once the popover exists, another
- * click can select the option under that point before its semantics node
- * reaches the browser.
+ * Flutter can expose an editing element before the widget is ready to process
+ * its value. Retry the keyboard input until the widget paints the menu; the
+ * retry selects the existing value first, so it remains safe after a partial
+ * attempt and never clicks through a newly painted option.
  */
 async function openPopover(page: Page): Promise<void> {
   const composer = composerInput(page);
-  await answerInputs([[composer, "/"]]);
   await sem(page, "chat-composer").click();
   await expect(composer).toBeFocused();
-  await expect(sem(page, "skill-menu")).toBeVisible({ timeout: 60_000 });
+  await expect(async () => {
+    await composer.press("ControlOrMeta+a");
+    await composer.pressSequentially("/");
+    await expect(sem(page, "skill-menu")).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 60_000 });
 }
 
 test("the Skill popover keeps the highlight the arrow keys put on it", async ({

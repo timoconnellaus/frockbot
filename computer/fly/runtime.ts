@@ -14,6 +14,8 @@
  * There is one copy. `computer/fly` imports this module rather than holding its
  * own, so a change to the Computer's layout cannot mean two Computers.
  */
+import { shellQuote } from "./shell.js";
+
 export const DESKTOP_SERVICE = "frockbot-viewer-gateway";
 /**
  * The durable-root sync's on-Sprite half, declared as a service so
@@ -78,6 +80,7 @@ export const SHIMS_ROOT = `${RUNTIME_ROOT}/shims`;
 /** The shipped reference documents a Bot reads to debug its own Computer. */
 export const REFERENCE_ROOT = `${HOME_ROOT}/reference`;
 export const CONTROL_SCRIPT = `${RUNTIME_ROOT}/control.sh`;
+export { shellQuote } from "./shell.js";
 export const BOUNDED_LOG_SCRIPT = `${RUNTIME_ROOT}/bounded-log.sh`;
 /** Bytes kept from the head of a background process's log. */
 export const BOUNDED_LOG_HEAD_BYTES = 131_072;
@@ -1613,10 +1616,6 @@ ${referenceFilesInstallScript
   .map((line) => `  ${line}`)
   .join("\n")}
 fi`;
-
-export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
 
 export function base64(value: string): string {
   return Buffer.from(value).toString("base64");

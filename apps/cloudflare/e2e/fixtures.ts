@@ -390,6 +390,26 @@ export function sem(page: Page | Locator, identifier: string): Locator {
   return page.locator(`[flt-semantics-identifier="${identifier}"]`);
 }
 
+/** Press the tappable node a Flutter semantics identifier names. */
+export function tap(scope: Page | Locator, identifier: string): Locator {
+  const node = `[flt-semantics-identifier="${identifier}"]`;
+  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
+}
+
+/** Assert that the host document did not grow wider than its viewport. */
+export async function expectNoHorizontalOverflow(
+  page: Page,
+  tolerance = 0,
+): Promise<void> {
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(tolerance);
+}
+
 /**
  * The text input inside a named field.
  *
@@ -550,6 +570,17 @@ export async function openApplication(
   ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
 }
 
+/** Find the Builder Bot provisioned for Applets browser specs. */
+export async function builderBotId(page: Page): Promise<string> {
+  const response = await page.request.get("/api/bots");
+  const body = (await response.json()) as {
+    bots: Array<{ botId: string; initialName: string }>;
+  };
+  const botId = body.bots.find((bot) => bot.initialName === "Builder")?.botId;
+  if (!botId) throw new Error("this account has no Builder Bot");
+  return botId;
+}
+
 /**
  * Turn an account's features on, as an administrator does.
  *
@@ -637,7 +668,7 @@ export async function createBot(
   await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
     new RegExp(escapeRegExp(name), "u"),
     {
-      timeout: 30_000,
+      timeout: 60_000,
     },
   );
 }
@@ -1355,6 +1386,13 @@ export async function answerComposer(page: Page, text: string): Promise<void> {
   const composer = composerInput(page);
   const sendsStanding = text.length > 0 ? 1 : 0;
   for (let attempt = 0; ; attempt += 1) {
+    // Unlike document fields, the composer sits beside other tappable canvas
+    // controls. Give Flutter a real pointer activation before the generic
+    // read-back path: a synthetic click can be interpreted at the canvas's
+    // previous pointer position and open a neighbouring control instead.
+    await composer.click();
+    await page.waitForTimeout(300);
+    await composer.fill(text);
     await answerInputs([[composer, text]]);
     try {
       await expect(sem(page, "send-button")).toHaveCount(sendsStanding, {

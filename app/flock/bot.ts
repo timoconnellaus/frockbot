@@ -9,7 +9,6 @@ import {
   decodeVoiceIdentityViewV1,
   decodeLookIdentityViewV1,
   decodeStoredBotLifecycleReceiptV1,
-  decodeStoredFlockReceiptV1,
   flockCommandFingerprint,
   type BotLifecycleCommandV1,
   type BotLifecycleReceiptV1,
@@ -23,6 +22,7 @@ import {
   type LookIdentityViewV1,
   type UpdateLookCommandV1,
 } from "./shared.js";
+import { readBotLifecycleReceiptV1, readFlockReceiptV1 } from "./receipts.js";
 import {
   defaultBotLookV1,
   type BotLookV1,
@@ -166,16 +166,13 @@ export class FlockBotBackendContribution {
       await this.assertActive(storage, registration.botId);
       const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
       const storedValue = await storage.get<unknown>(receiptKey);
-      const stored =
-        storedValue === undefined
-          ? undefined
-          : decodeStoredFlockReceiptV1(storedValue);
+      const stored = readFlockReceiptV1(
+        storedValue,
+        fingerprint,
+        command.commandId,
+      );
       if (stored) {
-        if (stored.fingerprint !== fingerprint)
-          throw new FlockDecodeError(
-            `command ID collision: ${command.commandId}`,
-          );
-        return structuredClone(stored.receipt);
+        return stored;
       }
       const currentValue = await storage.get<unknown>(IDENTITY_KEY);
       if (currentValue === undefined)
@@ -259,16 +256,13 @@ export class FlockBotBackendContribution {
       await this.assertActive(storage, registration.botId);
       const receiptKey = `${VOICE_RECEIPT_PREFIX}${command.commandId}`;
       const storedValue = await storage.get<unknown>(receiptKey);
-      const stored =
-        storedValue === undefined
-          ? undefined
-          : decodeStoredFlockReceiptV1(storedValue);
+      const stored = readFlockReceiptV1(
+        storedValue,
+        fingerprint,
+        command.commandId,
+      );
       if (stored) {
-        if (stored.fingerprint !== fingerprint)
-          throw new FlockDecodeError(
-            `command ID collision: ${command.commandId}`,
-          );
-        return structuredClone(stored.receipt);
+        return stored;
       }
       const currentValue = await storage.get<unknown>(VOICE_KEY);
       if (currentValue === undefined)
@@ -342,16 +336,13 @@ export class FlockBotBackendContribution {
       await this.assertActive(storage, registration.botId);
       const receiptKey = `${LOOK_RECEIPT_PREFIX}${command.commandId}`;
       const storedValue = await storage.get<unknown>(receiptKey);
-      const stored =
-        storedValue === undefined
-          ? undefined
-          : decodeStoredFlockReceiptV1(storedValue);
+      const stored = readFlockReceiptV1(
+        storedValue,
+        fingerprint,
+        command.commandId,
+      );
       if (stored) {
-        if (stored.fingerprint !== fingerprint)
-          throw new FlockDecodeError(
-            `command ID collision: ${command.commandId}`,
-          );
-        return structuredClone(stored.receipt);
+        return stored;
       }
       const currentValue = await storage.get<unknown>(LOOK_KEY);
       if (currentValue === undefined)
@@ -484,12 +475,11 @@ export class FlockBotBackendContribution {
       const receiptKey = `${LIFECYCLE_RECEIPT_PREFIX}${command.commandId}`;
       const storedReceipt = await storage.get<unknown>(receiptKey);
       if (storedReceipt !== undefined) {
-        const decoded = decodeStoredBotLifecycleReceiptV1(storedReceipt);
-        if (decoded.fingerprint !== fingerprint)
-          throw new FlockDecodeError(
-            `command ID collision: ${command.commandId}`,
-          );
-        return structuredClone(decoded.receipt);
+        return readBotLifecycleReceiptV1(
+          storedReceipt,
+          fingerprint,
+          command.commandId,
+        )!;
       }
       const currentValue = await storage.get<unknown>(LIFECYCLE_KEY);
       if (currentValue === undefined)

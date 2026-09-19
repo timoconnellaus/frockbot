@@ -9,6 +9,7 @@ import {
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
 import { decodeBotIdV1 } from "@frockbot/core/configuration";
+import { constantTimeEqualsV1 } from "@frockbot/core/crypto";
 
 /**
  * The operator surface: `/api/debug/*`, authorized by a shared token rather
@@ -76,15 +77,7 @@ function forbiddenUser(): Response {
  * returns early leaks the token one character at a time.
  */
 function tokenMatches(presented: string, expected: string): boolean {
-  const encoder = new TextEncoder();
-  const left = encoder.encode(presented);
-  const right = encoder.encode(expected);
-  if (left.byteLength !== right.byteLength) return false;
-  let difference = 0;
-  for (let index = 0; index < left.byteLength; index += 1) {
-    difference |= left[index]! ^ right[index]!;
-  }
-  return difference === 0;
+  return constantTimeEqualsV1(presented, expected);
 }
 
 function presentedToken(request: Request): string | undefined {

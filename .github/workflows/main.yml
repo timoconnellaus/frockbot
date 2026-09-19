@@ -318,10 +318,10 @@ jobs:
     needs: scope
     if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
-    # Twenty was one crash short: a shard that lost `wrangler dev` twice and
-    # then spent two four-minute test timeouts was cancelled at the limit,
-    # and a cancelled job uploads nothing, so the cause was gone with it.
-    timeout-minutes: 30
+    # Publication may spend seven minutes cold-starting its Applet build
+    # container before Playwright's 27-minute suite budget begins. Leave room
+    # for setup and artifact upload so failures retain their diagnostics.
+    timeout-minutes: 40
 
     # Four runners share the ordinary corpus. The two real publication journeys
     # have a fifth lane because they alone need the Applet build container; the

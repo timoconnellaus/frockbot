@@ -73,15 +73,14 @@ import {
   executionPackagesV1,
   type ShellBotStateV1,
 } from "@frockbot/app/shell/backend-state";
+import {
+  requireMatchingConfigurationReceiptV1,
+  type StoredConfigurationReceiptV1,
+} from "./shared.js";
 
 /** The Bot Durable Object key holding this Bot's durable configuration. */
 export const BOT_CONFIGURATION_KEY = "bot-configuration";
 const CONFIGURATION_RECEIPT_PREFIX = "configuration-receipt:";
-
-interface StoredConfigurationReceipt {
-  commandFingerprint: string;
-  receipt: OperationReceiptV1;
-}
 
 const HIDDEN_BOT_NOTIFICATIONS_FAILURE =
   "A Bot hidden from the sidebar can’t send notifications. Show it in the sidebar first.";
@@ -206,19 +205,6 @@ export async function assertLifecycleActiveV1(
   );
 }
 
-function requireMatchingConfigurationReceipt(
-  stored: StoredConfigurationReceipt,
-  commandFingerprint: string,
-  commandId: string,
-): OperationReceiptV1 {
-  if (stored.commandFingerprint !== commandFingerprint) {
-    throw new Error(
-      `Configuration command idempotency key "${commandId}" was reused for a different command`,
-    );
-  }
-  return stored.receipt;
-}
-
 export async function executeConfigurationCommand(
   state: ShellBotStateV1,
   identity: BotIdentity,
@@ -258,9 +244,9 @@ async function executeConfigurationDurably(
   const settings = await readBotSettingsV1(state, identity);
   const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
   const existing =
-    await state.ctx.storage.get<StoredConfigurationReceipt>(receiptKey);
+    await state.ctx.storage.get<StoredConfigurationReceiptV1>(receiptKey);
   if (existing) {
-    return requireMatchingConfigurationReceipt(
+    return requireMatchingConfigurationReceiptV1(
       existing,
       commandFingerprint,
       command.commandId,
@@ -327,9 +313,9 @@ async function applySimpleConfigurationCommand(
     await state.lifecycleAdmission?.(transaction, identity.botId);
     const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
     const existing =
-      await transaction.get<StoredConfigurationReceipt>(receiptKey);
+      await transaction.get<StoredConfigurationReceiptV1>(receiptKey);
     if (existing) {
-      return requireMatchingConfigurationReceipt(
+      return requireMatchingConfigurationReceiptV1(
         existing,
         commandFingerprint,
         command.commandId,

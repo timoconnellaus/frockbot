@@ -9,6 +9,7 @@ import {
 import {
   appletBuildShardCountV1,
   appletBuildShardV1,
+  fnv1aV1,
   routeAppletBuildRequestV1,
 } from "./router.ts";
 
@@ -132,6 +133,12 @@ describe("the Applet build router", () => {
 });
 
 describe("Applet build sharding", () => {
+  test("uses the neutral UTF-8 FNV-1a vectors", () => {
+    expect(fnv1aV1("")).toBe(2_166_136_261);
+    expect(fnv1aV1("a")).toBe(0xe40c_292c);
+    expect(fnv1aV1("💡")).toBe(0x3091_f3c5);
+  });
+
   test("sends every build of one Applet to one container", () => {
     expect(appletBuildShardV1(APPLET_ID, 4)).toBe(
       appletBuildShardV1(APPLET_ID, 4),

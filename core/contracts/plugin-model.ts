@@ -20,6 +20,7 @@ import {
   MODEL_PROVIDER_FAILURE_REASON_MAX_LENGTH_V1,
   type ModelProviderFailureClassV1,
 } from "./model-invocation.js";
+import { exactKeysV1, recordV1 } from "./records.js";
 
 /**
  * The version of this protocol a Plugin contribution names. A descriptor may
@@ -281,10 +282,7 @@ const PROVIDER_TYPE = /^[a-z][a-z0-9-]{0,63}$/;
 const MAX_DELTA_CHARS_V1 = 1_000_000;
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
+  return recordV1(value, label);
 }
 
 function exactKeys(
@@ -293,13 +291,7 @@ function exactKeys(
   label: string,
   optional: readonly string[] = [],
 ): void {
-  const allowed = new Set<string>([...required, ...optional]);
-  if (
-    !required.every((key) => Object.hasOwn(value, key)) ||
-    !Object.keys(value).every((key) => allowed.has(key))
-  ) {
-    throw new Error(`${label} has invalid fields`);
-  }
+  exactKeysV1(value, required, optional, label);
 }
 
 function boundedString(

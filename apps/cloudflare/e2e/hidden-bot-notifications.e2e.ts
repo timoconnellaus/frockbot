@@ -11,15 +11,10 @@ import {
   openApplication,
   sem,
   settle,
+  tap,
   test,
   openBotSettings,
 } from "./fixtures.ts";
-
-/** Press a named widget: the identifier's node, or the child that takes taps. */
-function tap(scope: Page | Locator, identifier: string): Locator {
-  const node = `[flt-semantics-identifier="${identifier}"]`;
-  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
-}
 
 /**
  * A named switch. The identifier is the switch's own, so it is the same node

@@ -10,7 +10,7 @@ import 'bot_switch_test.dart' show registration;
 
 import 'package:frockbot_native/recovery/controller.dart';
 
-import 'settings_test.dart' show SettingsApi;
+import 'native_session.dart' show NativeSessionApi;
 import 'widget_test.dart' show MemoryStore;
 
 Map<String, dynamic> setup() => {
@@ -33,7 +33,7 @@ Map<String, dynamic> setup() => {
 };
 void main() {
   test('an unavailable audit region does not hide setup history or repeat a command', () async {
-    final api = SettingsApi(MemoryStore(), (path, body) async {
+    final api = NativeSessionApi(MemoryStore(), (path, body) async {
       if (path.startsWith('/api/audit')) throw StateError('private details');
       return setup();
     });
@@ -50,7 +50,7 @@ void main() {
       (tester) async {
         final store = MemoryStore();
         final writes = <Map>[];
-        final api = SettingsApi(store, (path, body) async {
+        final api = NativeSessionApi(store, (path, body) async {
           if (body != null) {
             writes.add(body as Map);
             return {
@@ -153,7 +153,7 @@ void main() {
     final store = MemoryStore();
     final calls = <Map>[];
     var lost = true;
-    final api = SettingsApi(store, (path, body) async {
+    final api = NativeSessionApi(store, (path, body) async {
       if (body == null) {
         return path.endsWith('lifecycles')
             ? {'schemaVersion': 1, 'lifecycles': []}

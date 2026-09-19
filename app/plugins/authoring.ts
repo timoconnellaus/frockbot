@@ -22,6 +22,7 @@ import {
   type SendToUserApprovalRiskV1,
   type WorkspaceFilesV1,
 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   CompositionGenerationV1,
   CompositionMemberV1,
@@ -177,15 +178,7 @@ export interface PluginAuthoringHostV1 {
 const TEXT = new TextDecoder("utf-8", { fatal: true });
 const MAX_SETTINGS_BYTES = 16 * 1_024;
 
-async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+const sha256Hex = sha256HexTextV1;
 
 function decodeTemplate(base64: string): string {
   const binary = atob(base64);

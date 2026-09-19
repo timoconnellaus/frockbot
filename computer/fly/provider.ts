@@ -46,6 +46,7 @@ import {
   declaredWorkspaceRootsV1,
   type WorkspaceSyncReportV1,
 } from "./sync.js";
+import { shellQuote } from "./shell.js";
 
 const encoder = new TextEncoder();
 
@@ -160,10 +161,6 @@ function browserState(output: string): ComputerBrowserState {
     // Preserve provider output as a diagnostic snapshot.
   }
   return { accessibilitySnapshot: output };
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 function commandFor(

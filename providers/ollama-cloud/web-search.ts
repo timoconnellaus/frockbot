@@ -37,6 +37,7 @@ import {
   decodeOllamaApiBaseUrl,
   type OllamaFetch,
 } from "./client.js";
+import { boundedResponseBytesV1 } from "./body.js";
 
 /** The provider answer is bounded before it is parsed, as chat's is. */
 const MAX_SEARCH_RESPONSE_BYTES = 256 * 1024;
@@ -55,31 +56,10 @@ async function boundedJson(
   response: Response,
   maximum: number,
 ): Promise<unknown> {
-  const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > maximum) {
-    throw new Error("Ollama Cloud web search response is too large");
-  }
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  const reader = response.body?.getReader();
-  if (reader) {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      length += chunk.value.byteLength;
-      if (length > maximum) {
-        await reader.cancel().catch(() => undefined);
-        throw new Error("Ollama Cloud web search response is too large");
-      }
-      chunks.push(chunk.value);
-    }
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const bytes = await boundedResponseBytesV1(response, maximum, {
+    oversizedMessage: "Ollama Cloud web search response is too large",
+    cancelOnLimit: "ignore",
+  });
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   } catch {

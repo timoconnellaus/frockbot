@@ -22,7 +22,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
-  readStoredRunWithEventsV1,
+  readStoredRunEventsV1,
   useApplicationArtifact,
   flockRevision,
 } from "./fixtures.ts";
@@ -32,18 +32,6 @@ useApplicationArtifact();
 const SKILL_SLUG = "daily-standup";
 const SKILL_NAME = "Daily standup";
 const SKILL_BODY = "SHARED-STANDUP-BODY: ask each Bot for its blockers.";
-
-interface StoredRun {}
-
-/** The session events the Bot Durable Object durably recorded for one run. */
-async function runEvents(
-  userId: string,
-  botId: string,
-  runId: string,
-): Promise<Array<Record<string, unknown>>> {
-  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
-  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
-}
 
 function systemPromptOfStep(
   events: Array<Record<string, unknown>>,
@@ -100,7 +88,7 @@ describe("a Skill in the User's shared instruction root", () => {
       text: "What Skills do you have?",
     });
     expect(turn.status).toBe(200);
-    const events = await runEvents(userId, reader, "reader-turn-1");
+    const events = await readStoredRunEventsV1(userId, reader, "reader-turn-1");
 
     const injected = events.find((event) => event.type === "skill/injected") as
       | {
@@ -133,7 +121,11 @@ describe("a Skill in the User's shared instruction root", () => {
       }),
     )) as unknown;
     expect(popover).toBeDefined();
-    const invoked = await runEvents(userId, reader, "reader-turn-invoke");
+    const invoked = await readStoredRunEventsV1(
+      userId,
+      reader,
+      "reader-turn-invoke",
+    );
     expect(
       invoked.find((event) => event.type === "skill/invoked"),
     ).toMatchObject({
@@ -145,7 +137,11 @@ describe("a Skill in the User's shared instruction root", () => {
 
     // Nothing was copied into either Bot's own root: the shared root is the
     // one place the Skill lives.
-    const authorEvents = await runEvents(userId, author, "user-skill-write");
+    const authorEvents = await readStoredRunEventsV1(
+      userId,
+      author,
+      "user-skill-write",
+    );
     const authorInjected = authorEvents.find(
       (event) => event.type === "skill/injected",
     ) as { skills?: Array<{ name: string }> } | undefined;

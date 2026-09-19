@@ -4,6 +4,7 @@ import {
   appletBuildProblemResponseV1,
   decodeAppletBuildHttpRequestV1,
 } from "@frockbot/applets/build-contract";
+import { constantTimeEqualsV1, fnv1a32Utf8V1 } from "@frockbot/core/crypto";
 
 export interface AppletBuildRouteConfiguration {
   /** The shared secret the app Worker presents and the container re-checks. */
@@ -19,15 +20,8 @@ export type AppletBuildContainerResolver = (
   shard: string,
 ) => AppletBuildContainerStub;
 
-/** FNV-1a over the UTF-8 bytes of a key. Deterministic across deploys. */
-export function fnv1aV1(key: string): number {
-  let hash = 2_166_136_261;
-  for (const byte of new TextEncoder().encode(key)) {
-    hash ^= byte;
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return hash >>> 0;
-}
+/** Kept as the router's public alias for the neutral stable-hash primitive. */
+export const fnv1aV1 = fnv1a32Utf8V1;
 
 function poolSize(shards: number): number {
   return Number.isFinite(shards) ? Math.max(1, Math.floor(shards)) : 1;
@@ -78,7 +72,10 @@ export async function routeAppletBuildRequestV1(
     );
   }
   const presented = request.headers.get(APPLET_BUILD_TOKEN_HEADER);
-  if (!configuration.hostToken || presented !== configuration.hostToken) {
+  if (
+    !configuration.hostToken ||
+    !constantTimeEqualsV1(presented ?? "", configuration.hostToken)
+  ) {
     return appletBuildProblemResponseV1(
       401,
       "not-authorized",

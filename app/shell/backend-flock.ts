@@ -16,6 +16,7 @@
 // HIBERNATION. Nothing here reaches the Computer registry, a Computer
 // provider, or the Computer: identity is Durable Object state, so self-management
 // works while the Computer is hibernated and does not wake it.
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   BotSettingsViewV1,
   ConfigurationCommandV1,
@@ -143,13 +144,9 @@ export async function handoffRunIdV1(
   identity: BotSelfManagementIdentity,
   effectId: string,
 ): Promise<string> {
-  const bytes = new TextEncoder().encode(
+  const hex = await sha256HexTextV1(
     `${identity.userId}\u0000${identity.botId}\u0000handoff\u0000${effectId}`,
   );
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  const hex = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
   return `handoff-${hex.slice(0, 32)}`;
 }
 
@@ -158,13 +155,9 @@ async function agentRunIdV1(
   targetBotId: string,
   effectId: string,
 ): Promise<string> {
-  const bytes = new TextEncoder().encode(
+  const hex = await sha256HexTextV1(
     `${identity.userId}\u0000${identity.botId}\u0000${targetBotId}\u0000${effectId}`,
   );
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  const hex = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
   return `agent-${hex.slice(0, 32)}`;
 }
 

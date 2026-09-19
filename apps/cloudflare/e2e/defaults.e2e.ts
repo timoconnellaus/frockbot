@@ -7,23 +7,10 @@ import {
   openApplication,
   sem,
   SHELL_TIMEOUT_MS,
+  tap,
   test,
   transcriptMessages,
 } from "./fixtures.ts";
-
-/**
- * Press a named widget.
- *
- * A `Semantics(identifier:)` around a widget that lays itself out reaches the
- * accessibility tree as a container with `pointer-events: none`, and the node
- * that takes the tap is its child — which is also the node that disappears
- * when the widget is disabled. Clicking the identifier itself would land on
- * the canvas behind it.
- */
-function tap(scope: Page | Locator, identifier: string) {
-  const node = `[flt-semantics-identifier="${identifier}"]`;
-  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
-}
 
 /**
  * Words the product shows, wherever the engine put them.

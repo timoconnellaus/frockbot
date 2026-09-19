@@ -21,6 +21,8 @@
 //
 // It never calls the Computer interface and never wakes a Computer; see the
 // hibernation seam documented in `./catalog.ts`.
+import { latestOpenStepPositionV1 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   Session,
   SkillRefV1,
@@ -101,15 +103,7 @@ export interface SkillsRuntimeHostV1 {
   withheldManagedSlugs?: readonly string[];
 }
 
-export async function sha256HexV1(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+export const sha256HexV1 = sha256HexTextV1;
 
 /** The turn and step a Skill write is recorded under. */
 export interface SkillTurnPositionV1 {
@@ -123,21 +117,11 @@ export interface SkillTurnPositionV1 {
  * replay in place.
  */
 export function openSkillTurnPositionV1(session: Session): SkillTurnPositionV1 {
-  const started = session.events.findLast(
-    (event) => event.type === "step/start",
-  );
-  const ended = session.events.findLast((event) => event.type === "step/end");
-  if (started?.type !== "step/start") {
+  const position = latestOpenStepPositionV1(session);
+  if (!position) {
     throw new Error("a Skill write has no open step to record against");
   }
-  if (
-    ended?.type === "step/end" &&
-    ended.turn === started.turn &&
-    ended.step === started.step
-  ) {
-    throw new Error("a Skill write has no open step to record against");
-  }
-  return { turn: started.turn, step: started.step };
+  return position;
 }
 
 /** What resolving a Turn's invoked refs produced. Declared, never thrown. */

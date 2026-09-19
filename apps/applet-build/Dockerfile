@@ -16,9 +16,12 @@ RUN npm ci --omit=dev
 COPY applets/package.json ./applets/package.json
 COPY applets/build-contract.ts ./applets/build-contract.ts
 COPY applets/sdk ./applets/sdk
+COPY core/package.json ./core/package.json
+COPY core/crypto.ts ./core/crypto.ts
 RUN mkdir -p node_modules/@frockbot \
   && ln -s ../../applets node_modules/@frockbot/applets \
   && ln -s ../../applets/sdk node_modules/@frockbot/applet-sdk \
+  && ln -s ../../core node_modules/@frockbot/core \
   && ln -s /app/node_modules applets/sdk/node_modules
 
 COPY apps/applet-build/container ./container
