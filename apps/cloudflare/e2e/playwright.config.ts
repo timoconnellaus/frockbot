@@ -77,11 +77,11 @@ export default defineConfig<object, E2EOptions>({
   // rest. What is left in common is the app Worker and the browser, which
   // several files can use at once.
   //
-  // A CI runner has two cores and is already sharded across four of them, so
+  // The core corpus is sharded across four CI runners, each with two cores, so
   // the parallelism there is between runners; locally it is between workers.
-  // Publication owns one real build service, so its two journeys stay serial
-  // everywhere and cannot tear down a content-addressed image under each
-  // other.
+  // Publication owns one real build service, so the lane that holds its two
+  // journeys runs them serially: neither can tear down a content-addressed
+  // image under the other.
   workers: suite === "publication" || process.env.CI ? 1 : 4,
   forbidOnly: !!process.env.CI,
   // The old blanket retries were for a wrangler crash that is now patched and

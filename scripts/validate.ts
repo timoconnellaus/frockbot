@@ -23,11 +23,12 @@ export const categories: Record<string, string[][]> = {
     ["bun", "run", "--filter", "@frockbot/cloudflare", "test:integration"],
   ],
   // Worker count and retries belong to `e2e/playwright.config.ts`, which
-  // chooses both per environment and explains each: files share nothing a run
-  // can see, so locally the parallelism is between workers rather than between
-  // CI runners, and locally "a failure should stay failed". Overriding them to
-  // `--workers=1 --retries=2` here contradicted both and made the slowest
-  // category run on one core while hiding the flake it then retried.
+  // chooses the worker count per environment and retries nothing in any lane,
+  // and explains both: files share nothing a run can see, so locally the
+  // parallelism is between workers rather than between CI runners, and a
+  // failure stays failed. Overriding them to `--workers=1 --retries=2` here
+  // contradicted both and made the slowest category run on one core while
+  // hiding the flake it then retried.
   // `--forbid-only` stays: the config only forbids `.only` under CI, and a
   // push is the other place it must not leave the machine.
   e2e: [

@@ -5,7 +5,7 @@ name: Main
 # on the merge commit — a pull request merges without rebasing, so this is
 # the first time the combination exists — and then the slow tier: the
 # Cloudflare app's workerd and integration suites, the real build, and the
-# browser suite across four runners.
+# browser suite across five runners.
 #
 # The slow tier is spread across runners on purpose. `Validate`, the workerd
 # suite and the integration suite share nothing but `bun install`, which is

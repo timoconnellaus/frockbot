@@ -1213,7 +1213,7 @@ Five workflows live in `.github/workflows/`:
   tier again, plus the marketing and admin-portal bundles, then — when the
   `Scope` job says the change could have affected them — the Flutter suite, the
   Cloudflare workerd and integration suites, the application build, and the
-  browser suite across four runners. Green deploys staging when
+  browser suite across five runners. Green deploys staging when
   `DEPLOY_STAGING` is `true`, cuts the next patch tag and starts `release.yml`
   for it. A push touching only `docs/**` and root Markdown starts no run.
   `Scope` (`scripts/ci-change-scope.ts`) measures from the newest release tag

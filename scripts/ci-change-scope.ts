@@ -2,7 +2,7 @@
 //
 // Most pushes to `main` touch the application, and the slow tier — the
 // Flutter client's suite, the Cloudflare workerd and integration suites and
-// the browser suite across four runners — is the whole point of running it
+// the browser suite across five runners — is the whole point of running it
 // once per landed change. A few pushes cannot possibly affect any of them: the
 // marketing site and the admin portal are separate Workers, deployed by their
 // own release job, and nothing under `apps/cloudflare`, `core`, `app` or
