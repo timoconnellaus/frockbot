@@ -23,6 +23,7 @@ import {
   ollamaChatBaseUrl,
   ollamaNativeChatBodyV1,
 } from "./runtime.js";
+import { manualClock, settle } from "../test-support.ts";
 
 function serializedKeyring(): string {
   const bytes = Uint8Array.from({ length: 32 }, (_, index) => index + 11);
@@ -520,39 +521,6 @@ describe("Ollama Cloud runtime Contribution", () => {
     },
   );
 });
-
-/** A clock the test advances by hand, so a deadline costs no real seconds. */
-function manualClock() {
-  const pending = new Map<number, { run: () => void; due: number }>();
-  let next = 1;
-  let now = 0;
-  return {
-    schedule(run: () => void, milliseconds: number): () => void {
-      const id = next++;
-      pending.set(id, { run, due: now + milliseconds });
-      return () => pending.delete(id);
-    },
-    advance(milliseconds: number): void {
-      now += milliseconds;
-      for (const [id, timer] of [...pending]) {
-        if (timer.due <= now) {
-          pending.delete(id);
-          timer.run();
-        }
-      }
-    },
-    get armed(): number {
-      return pending.size;
-    },
-  };
-}
-
-/** Let the stream's own pump run: the clock is manual, the event loop is not. */
-async function settle(): Promise<void> {
-  for (let tick = 0; tick < 10; tick += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-}
 
 /** An endpoint body the test feeds one chunk at a time. */
 function pushableSse(): {

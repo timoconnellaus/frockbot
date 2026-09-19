@@ -17,6 +17,7 @@
 // never the source of a fact — a search result is hydrated back out of the
 // files before it is shown.
 import { remoteCallV1 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { chunkMarkdown, type MemoryChunk } from "./chunker.js";
 import { memoryDocumentKeyV1, type MemoryDocumentV1 } from "./documents.js";
 import type { EmbedMemory, MemoryVectorIndex } from "./types.js";
@@ -146,15 +147,9 @@ export async function updateMemoryIndexV1(
 export async function memoryChunkVectorIdV1(
   chunk: MemoryIndexChunkV1,
 ): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(
-      `${chunk.documentKey}\u0000${chunk.documentHash}\u0000${chunk.startLine}\u0000${chunk.hash}`,
-    ),
+  return sha256HexTextV1(
+    `${chunk.documentKey}\u0000${chunk.documentHash}\u0000${chunk.startLine}\u0000${chunk.hash}`,
   );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 /** The namespace one tier's vectors live in. */

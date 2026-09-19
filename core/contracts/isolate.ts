@@ -35,6 +35,7 @@ import type {
   PluginModelTransportOutcomeV1,
   PluginModelTransportRequestV1,
 } from "./plugin-model.js";
+import { exactKeysV1, recordV1 } from "./records.js";
 
 /**
  * The wire contract version the kernel wrapper emits. Version 2 added
@@ -615,10 +616,7 @@ export interface BotIsolateEnv {
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
+  return recordV1(value, label);
 }
 
 function exactKeys(
@@ -627,13 +625,7 @@ function exactKeys(
   label: string,
   optional: readonly string[] = [],
 ): void {
-  const allowed = new Set<string>([...required, ...optional]);
-  if (
-    !required.every((key) => Object.hasOwn(value, key)) ||
-    !Object.keys(value).every((key) => allowed.has(key))
-  ) {
-    throw new Error(`${label} has invalid fields`);
-  }
+  exactKeysV1(value, required, optional, label);
 }
 
 function boundedString(

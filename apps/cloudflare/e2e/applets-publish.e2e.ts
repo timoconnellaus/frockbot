@@ -27,7 +27,9 @@ import {
   press,
   answerInputs,
   composerInput,
+  builderBotId,
   enableApplets,
+  expectNoHorizontalOverflow,
   provisionThroughUi,
   sem,
   sendMessage,
@@ -104,20 +106,7 @@ async function runTool(
   await sendMessage(page, `${text}\n${e2eFrockbotToolCallPrompt(name, input)}`);
 }
 
-/**
- * The Builder Bot this spec provisions. Applets are listed per Bot (ADR 0027),
- * so every directory read names it rather than the bootstrapped General Bot.
- */
-async function builderBotId(page: Page): Promise<string> {
-  const response = await page.request.get("/api/bots");
-  const body = (await response.json()) as {
-    bots: Array<{ botId: string; initialName: string }>;
-  };
-  const botId = body.bots.find((bot) => bot.initialName === "Builder")?.botId;
-  if (!botId) throw new Error("this account has no Builder Bot");
-  return botId;
-}
-
+/** The Applet's id, read from the Builder Bot's directory. */
 async function appletIdNamed(page: Page, displayName: string): Promise<string> {
   const response = await page.request.get(
     `/api/bots/${encodeURIComponent(await builderBotId(page))}/applets`,
@@ -251,16 +240,6 @@ async function shot(page: Page, name: string): Promise<void> {
     animations: "disabled",
     timeout: 30_000,
   });
-}
-
-async function expectNoHorizontalOverflow(page: Page): Promise<void> {
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
-    ),
-  ).toBeLessThanOrEqual(0);
 }
 
 // The canvas asks for the live Applet the moment it opens, and until the first

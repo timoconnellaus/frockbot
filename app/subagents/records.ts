@@ -11,6 +11,8 @@
 // A previous stored shape crosses its explicit forward migration first; an
 // unknown shape remains a visible failure.
 
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
+
 /** The five subagent roles GrokBot declares. */
 export const TASK_TYPES_V1 = [
   "executor",
@@ -696,9 +698,5 @@ export function utf8ByteLengthV1(value: string): number {
  * identity, never a secret: the prompt itself is the child's Session input.
  */
 export async function taskPromptDigestV1(prompt: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", UTF8.encode(prompt));
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, 64);
+  return (await sha256HexTextV1(prompt)).slice(0, 64);
 }

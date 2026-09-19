@@ -8,7 +8,6 @@ import {
   decodeBotLifecycleViewV1,
   decodeDirectoryViewV1,
   decodeStoredBotLifecycleReceiptV1,
-  decodeStoredFlockReceiptV1,
   flockCommandFingerprint,
   lifecycleTargetStatusV1,
   migrateStoredBotDirectoryV1,
@@ -25,6 +24,7 @@ import {
   type FlockBootstrapViewV1,
   type FlockReceiptV1,
 } from "./shared.js";
+import { readBotLifecycleReceiptV1, readFlockReceiptV1 } from "./receipts.js";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
 const DIRECTORY_KEY = "flock:directory:v1";
@@ -286,16 +286,13 @@ export class FlockUserBackendContribution {
     return this.host.storage.transaction(async (storage) => {
       const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
       const storedValue = await storage.get<unknown>(receiptKey);
-      const stored =
-        storedValue === undefined
-          ? undefined
-          : decodeStoredFlockReceiptV1(storedValue);
+      const stored = readFlockReceiptV1(
+        storedValue,
+        fingerprint,
+        command.commandId,
+      );
       if (stored) {
-        if (stored.fingerprint !== fingerprint)
-          throw new FlockDecodeError(
-            `command ID collision: ${command.commandId}`,
-          );
-        return structuredClone(stored.receipt);
+        return stored;
       }
       const currentValue = await storage.get<unknown>(DIRECTORY_KEY);
       const current =
@@ -504,12 +501,11 @@ export class FlockUserBackendContribution {
     const admitted = await this.host.storage.transaction(async (storage) => {
       const existingValue = await storage.get<unknown>(receiptKey);
       if (existingValue !== undefined) {
-        const existing = decodeStoredBotLifecycleReceiptV1(existingValue);
-        if (existing.fingerprint !== fingerprint)
-          throw new FlockDecodeError(
-            `command ID collision: ${command.commandId}`,
-          );
-        return existing.receipt;
+        return readBotLifecycleReceiptV1(
+          existingValue,
+          fingerprint,
+          command.commandId,
+        )!;
       }
       const activeOperation = await storage.get<unknown>(
         `${LIFECYCLE_OPERATION_PREFIX}${command.botId}`,

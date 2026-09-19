@@ -7,6 +7,7 @@ import {
   decodeAccountAdmissionDecisionV1,
   decodeAdminUserFeaturesV1,
   decodeAdminUserListViewV1,
+  decodeAdminWriteResultV1,
   decodeAdmissionIdentityV1,
   decodeDeploymentPolicyV1,
   decodeIdentityCreationRequestV1,
@@ -99,6 +100,48 @@ describe("deployment policy codecs", () => {
         expectedRevision: 2,
       }),
     ).toThrow("unknown fields");
+  });
+});
+
+describe("administrative write result codec", () => {
+  test("decodes the applied value with the caller's value decoder", () => {
+    expect(
+      decodeAdminWriteResultV1(
+        { status: "applied", value: { revision: 4 } },
+        (value) => {
+          if (!value || typeof value !== "object") throw new Error("bad value");
+          return (value as { revision: number }).revision;
+        },
+        "policy answer",
+      ),
+    ).toEqual({ status: "applied", value: 4 });
+  });
+
+  test("keeps a conflict as a union value with its current revision", () => {
+    expect(
+      decodeAdminWriteResultV1(
+        { status: "conflict", currentRevision: 7 },
+        () => "unused",
+        "policy answer",
+      ),
+    ).toEqual({ status: "conflict", currentRevision: 7 });
+  });
+
+  test("rejects malformed write answers with the seam label", () => {
+    expect(() =>
+      decodeAdminWriteResultV1(
+        { status: "conflict", currentRevision: "7" },
+        () => "unused",
+        "policy answer",
+      ),
+    ).toThrow("policy answer.currentRevision is invalid");
+    expect(() =>
+      decodeAdminWriteResultV1(
+        { status: "unknown" },
+        () => "unused",
+        "policy answer",
+      ),
+    ).toThrow("policy answer.status is invalid");
   });
 });
 

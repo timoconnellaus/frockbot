@@ -3,6 +3,8 @@
 // module set a Bot isolate mounts. Both sides of a hash comparison have to
 // agree byte for byte, so there is exactly one implementation.
 
+import { sha256HexTextV1 } from "../crypto.js";
+
 export function canonicalJson(value: unknown): string {
   if (
     value === null ||
@@ -28,11 +30,5 @@ export function canonicalJson(value: unknown): string {
 }
 
 export async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256HexTextV1(value);
 }

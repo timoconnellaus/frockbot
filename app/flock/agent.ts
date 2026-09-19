@@ -63,6 +63,7 @@ import type {
   TurnTypeV1,
 } from "@frockbot/core/contracts";
 import { decodeTurnTypeV1 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   BOT_MESSAGE_TOOL_V1,
   FlockConflictError,
@@ -519,15 +520,7 @@ function canonicalProfile(profile: BotProfile): unknown[] {
   ];
 }
 
-async function sha256HexV1(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+const sha256HexV1 = sha256HexTextV1;
 
 /**
  * The Bot id one `bot_create` occurrence asks for.

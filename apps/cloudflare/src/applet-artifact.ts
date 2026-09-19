@@ -11,6 +11,7 @@
  * etag, or none recorded, hashes in full and, when the hash holds, becomes the
  * new pin. Nothing is ever loaded that was not hashed against its key.
  */
+import { sha256HexV1 } from "@frockbot/core/crypto";
 
 export interface AppletArtifactObjectV1 {
   etag: string;
@@ -25,15 +26,7 @@ export interface AppletArtifactVerifiedV1 {
   hashed: boolean;
 }
 
-export async function sha256HexV1(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+export { sha256HexV1 };
 
 export async function verifyAppletArtifactV1(input: {
   contentHash: string;

@@ -63,6 +63,8 @@ export function accessTokenOfV1(headers: Headers): string | undefined {
  * not bound to that shape.
  */
 export async function accessUserIdV1(subject: string): Promise<string> {
+  // The Access Package is deliberately self-contained: ADR 0028 permits it
+  // to depend only on the auth contract and shared auth responses.
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(`frockbot-access-identity-v1:${subject}`),

@@ -18,6 +18,7 @@ import type {
   WorkspaceFilesV1,
   WorkspaceWriteRequestV1,
 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   botInstructionRootV1,
   countSkillDocumentsV1,
@@ -68,15 +69,8 @@ export type SkillWriteOutcomeV1 =
     }
   | { status: "refused"; reason: string };
 
-export async function sha256HexV1(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+/** Skill content hashes remain named for the Skill package at its seam. */
+export const sha256HexV1 = sha256HexTextV1;
 
 /**
  * Renders and writes one Skill, enforcing that root's quota on the way.

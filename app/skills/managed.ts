@@ -45,6 +45,7 @@ import {
   A2UI_SKILL_REFERENCES_V1,
   A2UI_SKILL_SLUG_V1,
 } from "./managed-a2ui.generated.js";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 
 // Re-exported because the generated modules they come from are not package
 // exports, and a caller outside this package needs the slugs to withhold them.
@@ -249,15 +250,7 @@ export function managedSkillPathV1(slug: string): string {
   return `${MANAGED_SKILL_PATH_PREFIX}/${slug}/${SKILL_FILE_NAME}`;
 }
 
-async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+const sha256Hex = sha256HexTextV1;
 
 /**
  * Parses the bundled documents into loaded Skills.

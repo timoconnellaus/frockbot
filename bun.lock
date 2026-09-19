@@ -88,6 +88,7 @@
         "@cloudflare/containers": "0.3.7",
         "@frockbot/applet-sdk": "workspace:*",
         "@frockbot/applets": "workspace:*",
+        "@frockbot/core": "workspace:*",
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "^1.1.4",
@@ -130,6 +131,7 @@
         "@cloudflare/containers": "0.3.7",
         "@fly/sprites": "0.1.0",
         "@frockbot/computer": "workspace:*",
+        "@frockbot/core": "workspace:*",
         "ws": "8.21.3",
       },
       "devDependencies": {

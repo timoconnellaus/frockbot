@@ -10,6 +10,8 @@
 // capability, and the hosted client, so they are declared once here and every
 // inbound value is decoded at its seam.
 
+import { exactKeysV1, recordV1 } from "./records.js";
+
 type AppletJsonScalarV1 = null | boolean | number | string;
 type AppletJsonDepth1V1 =
   | AppletJsonScalarV1
@@ -326,10 +328,7 @@ export const APPLET_BOT_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 export const APPLET_MAX_SHARES_V1 = 100;
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
+  return recordV1(value, label);
 }
 
 function exactKeys(
@@ -338,13 +337,7 @@ function exactKeys(
   optional: readonly string[],
   label: string,
 ): void {
-  const allowed = new Set<string>([...required, ...optional]);
-  if (
-    !required.every((key) => Object.hasOwn(value, key)) ||
-    !Object.keys(value).every((key) => allowed.has(key))
-  ) {
-    throw new Error(`${label} has invalid fields`);
-  }
+  exactKeysV1(value, required, optional, label);
 }
 
 function boundedString(value: unknown, label: string, maximum: number): string {

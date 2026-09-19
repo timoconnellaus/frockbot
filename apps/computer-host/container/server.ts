@@ -24,6 +24,7 @@ import {
   decodeComputerHostHttpRequestV1,
   problem,
 } from "@frockbot/computer/host-protocol";
+import { constantTimeEqualsV1 } from "@frockbot/core/crypto";
 import { ComputerHost, type SpritesClientHandle } from "./computer.ts";
 
 /** The SDK reaches the Sprite over a WebSocket; Node needs one supplied. */
@@ -64,12 +65,11 @@ const host = new ComputerHost({
  * separate path to the same port.
  */
 function tokenMatches(presented: string | undefined): boolean {
-  if (!presented || presented.length !== hostToken.length) return false;
-  let difference = 0;
-  for (let index = 0; index < hostToken.length; index += 1) {
-    difference |= hostToken.charCodeAt(index) ^ presented.charCodeAt(index);
-  }
-  return difference === 0;
+  return (
+    presented !== undefined &&
+    presented.length > 0 &&
+    constantTimeEqualsV1(presented, hostToken)
+  );
 }
 
 async function webRequest(incoming: IncomingMessage): Promise<Request> {

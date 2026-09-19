@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import {
   answerInputs,
   chooseDefaultModel,
@@ -13,37 +13,11 @@ import {
   openProfileMenu,
   sem,
   SHELL_TIMEOUT_MS,
+  settle,
+  tap,
   test,
 } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
-
-/**
- * Press a named widget.
- *
- * A `Semantics(identifier:)` around a widget that lays itself out — a view
- * action's `Align`, a `Card`'s `ListTile` — reaches the accessibility tree as
- * a container with `pointer-events: none`, and the node that takes the tap is
- * its child. Clicking the identifier itself would land on the canvas behind
- * it, so this presses whichever of the two the engine made tappable.
- */
-function tap(scope: Page | Locator, identifier: string) {
-  const node = `[flt-semantics-identifier="${identifier}"]`;
-  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
-}
-
-/**
- * Let a surface finish arriving before pressing anything on it.
- *
- * Flutter rebuilds the accessibility tree when semantics change rather than
- * once a frame, so a sliding sheet or a pushed page reaches the DOM at its
- * final position while the canvas is still moving — and Playwright's own
- * stability check, which watches that DOM box, sees nothing to wait for. The
- * engine hit-tests a press against the frame it is painting, so a press issued
- * then lands on whatever is passing under the pointer.
- */
-async function settle(page: Page): Promise<void> {
-  await page.waitForTimeout(700);
-}
 
 /** Something a person can press, by the words on it. */
 function pressable(page: Page, text: string) {

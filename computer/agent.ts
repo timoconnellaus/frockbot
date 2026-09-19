@@ -39,6 +39,7 @@ import {
   type WorkspaceRootV1,
   type WorkspaceWriterV1,
 } from "@frockbot/core/contracts";
+import { shellQuote } from "./fly/shell.js";
 import { computerBotPathKeyV1, ComputerError } from "@frockbot/computer/core";
 import {
   type ComputerDoctorReportV1,
@@ -259,11 +260,6 @@ function record(input: unknown): Record<string, unknown> | undefined {
 const MAX_EXEC_COMMAND_LENGTH = 20_000;
 /** An absolute path on the Computer, at the Computer host's own path bound. */
 const MAX_EXEC_CWD_LENGTH = 4_096;
-
-/** One shell word, whatever the path holds. */
-function shellQuoteV1(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
 
 /** Every key `computer_exec` accepts; anything else is refused by name. */
 const EXEC_INPUT_KEYS = ["command", "background", "cwd"] as const;
@@ -768,7 +764,7 @@ export function createComputerAgentFeature(
               // process before it starts, which is what a wrong path deserves.
               launchBackground(
                 decoded.cwd
-                  ? `cd ${shellQuoteV1(decoded.cwd)} && ${decoded.command}`
+                  ? `cd ${shellQuote(decoded.cwd)} && ${decoded.command}`
                   : decoded.command,
                 context,
               )

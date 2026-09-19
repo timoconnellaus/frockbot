@@ -20,7 +20,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
-  readStoredRunWithEventsV1,
+  readStoredRunEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -28,20 +28,6 @@ useApplicationArtifact();
 
 const SKILL_SLUG = "daily-standup";
 const SKILL_BODY = "INVOKED-STANDUP-BODY: ask each Bot for its blockers.";
-
-interface StoredRun {
-  runId?: string;
-}
-
-/** The session events the Bot Durable Object durably recorded for one run. */
-async function runEvents(
-  userId: string,
-  botId: string,
-  runId: string,
-): Promise<Array<Record<string, unknown>>> {
-  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
-  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
-}
 
 async function writeSkill(userId: string, botId: string): Promise<void> {
   const turn = (await expectOkJson(
@@ -94,7 +80,7 @@ describe("invoking a Skill from the composer", () => {
     });
     expect(invoked.status).toBe(200);
 
-    const events = await runEvents(userId, botId, "skill-invoke-1");
+    const events = await readStoredRunEventsV1(userId, botId, "skill-invoke-1");
     const invocation = events.find((event) => event.type === "skill/invoked");
     expect(invocation).toMatchObject({
       type: "skill/invoked",

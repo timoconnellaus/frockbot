@@ -24,6 +24,14 @@
 // here writes key material to durable storage, and no view carries any.
 
 import { decodeMachineIdV1 } from "./protocol.js";
+import {
+  base64urlDecodeV1,
+  base64urlEncodeV1,
+  constantTimeEqualsV1,
+  sha256HexTextV1,
+} from "../crypto.js";
+
+export { constantTimeEqualsV1 };
 
 /** The self-describing claims a machine token carries. */
 export interface MachineTokenClaimsV1 {
@@ -49,49 +57,6 @@ const INVALID = "machine token is invalid";
 
 const TEXT = new TextEncoder();
 
-function base64url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-function fromBase64url(value: string): Uint8Array {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-function hex(bytes: ArrayBuffer): string {
-  return [...new Uint8Array(bytes)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-/**
- * Constant-time comparison. A signature check that returns early on the first
- * differing byte leaks the signature one byte at a time to anyone willing to
- * time it, and this check is the whole of the edge's authority.
- */
-export function constantTimeEqualsV1(left: string, right: string): boolean {
-  const a = TEXT.encode(left);
-  const b = TEXT.encode(right);
-  // The lengths themselves are not secret; the contents are, so the loop runs
-  // over a fixed span either way.
-  let mismatch = a.length ^ b.length;
-  const span = Math.max(a.length, b.length);
-  for (let index = 0; index < span; index += 1) {
-    mismatch |= (a[index] ?? 0) ^ (b[index] ?? 0);
-  }
-  return mismatch === 0;
-}
-
 async function signingKey(secret: string): Promise<CryptoKey> {
   if (typeof secret !== "string" || secret.length < 16) {
     throw new MachineTokenError(
@@ -110,7 +75,7 @@ async function signingKey(secret: string): Promise<CryptoKey> {
 
 /** `SHA-256` of a token, hex. The only form of a key the backend keeps. */
 export async function machineTokenDigestV1(token: string): Promise<string> {
-  return hex(await crypto.subtle.digest("SHA-256", TEXT.encode(token)));
+  return sha256HexTextV1(token);
 }
 
 /** Mint the token for one machine at one key version. Deterministic. */
@@ -118,7 +83,7 @@ export async function mintMachineTokenV1(
   secret: string,
   claims: MachineTokenClaimsV1,
 ): Promise<string> {
-  const payload = base64url(
+  const payload = base64urlEncodeV1(
     TEXT.encode(JSON.stringify({ u: claims.u, m: claims.m, v: claims.v })),
   );
   const signature = await crypto.subtle.sign(
@@ -126,7 +91,7 @@ export async function mintMachineTokenV1(
     await signingKey(secret),
     TEXT.encode(payload),
   );
-  return `${payload}.${base64url(new Uint8Array(signature))}`;
+  return `${payload}.${base64urlEncodeV1(new Uint8Array(signature))}`;
 }
 
 /**
@@ -150,7 +115,7 @@ export async function verifyMachineTokenV1(
   const presented = token.slice(separator + 1);
   let expected: string;
   try {
-    expected = base64url(
+    expected = base64urlEncodeV1(
       new Uint8Array(
         await crypto.subtle.sign(
           "HMAC",
@@ -168,7 +133,7 @@ export async function verifyMachineTokenV1(
   }
   let decoded: unknown;
   try {
-    decoded = JSON.parse(new TextDecoder().decode(fromBase64url(payload)));
+    decoded = JSON.parse(new TextDecoder().decode(base64urlDecodeV1(payload)));
   } catch {
     throw new MachineTokenError(401, INVALID);
   }

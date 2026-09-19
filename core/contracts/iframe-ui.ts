@@ -3,6 +3,7 @@ import {
   type AppletBuildViewV1,
   type AppletSummaryV1,
 } from "./applets.js";
+import { exactKeysV1, recordV1 } from "./records.js";
 
 /** Versioned, deliberately tiny postMessage seam for sandboxed Package pages. */
 export const PACKAGE_IFRAME_BRIDGE_VERSION = 2 as const;
@@ -201,10 +202,7 @@ export interface PackageIframeToolCommandV1 {
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
+  return recordV1(value, label);
 }
 
 function exact(
@@ -212,12 +210,7 @@ function exact(
   fields: readonly string[],
   label: string,
 ): void {
-  if (
-    Object.keys(value).length !== fields.length ||
-    !fields.every((field) => Object.hasOwn(value, field))
-  ) {
-    throw new Error(`${label} has invalid fields`);
-  }
+  exactKeysV1(value, fields, [], label);
 }
 
 function boundedString(value: unknown, label: string, maximum = 256): string {

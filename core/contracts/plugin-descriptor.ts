@@ -22,6 +22,7 @@ import {
   PLUGIN_MODEL_PROTOCOL_VERSIONS_V1,
   type PluginModelProviderV1,
 } from "./plugin-model.js";
+import { exactKeysV1, recordV1 } from "./records.js";
 
 /** Authority a plugin may hold. */
 export const PLUGIN_GRANTS_V1 = [
@@ -223,10 +224,7 @@ export function servedPluginContractVersionsV1(): IsolateContractVersion[] {
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
+  return recordV1(value, label);
 }
 
 function exactKeys(
@@ -235,13 +233,7 @@ function exactKeys(
   optional: readonly string[],
   label: string,
 ): void {
-  const allowed = new Set<string>([...required, ...optional]);
-  if (
-    !required.every((key) => Object.hasOwn(value, key)) ||
-    !Object.keys(value).every((key) => allowed.has(key))
-  ) {
-    throw new Error(`${label} has invalid fields`);
-  }
+  exactKeysV1(value, required, optional, label);
 }
 
 function boundedString(value: unknown, label: string, maximum: number): string {

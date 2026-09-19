@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   SESSION_ATTACHMENT_MAX_BASE64,
   SessionStore,
+  latestOpenStepPositionV1,
   type SessionStoreConfig,
   validateToolOccurrenceJournal,
 } from "./session.js";
@@ -185,6 +186,24 @@ test("a compaction is an exact durable session event", () => {
 });
 
 describe("SessionStore", () => {
+  test("the latest open step position ignores completed earlier steps", () => {
+    const store = createStore();
+    const session = store.create("steps");
+    expect(latestOpenStepPositionV1(session)).toBeUndefined();
+    session.append({ type: "turn/start", turn: 1 });
+    session.append({ type: "step/start", turn: 1, step: 1 });
+    expect(latestOpenStepPositionV1(session)).toEqual({ turn: 1, step: 1 });
+    session.append({
+      type: "step/end",
+      turn: 1,
+      step: 1,
+      outcome: "completed",
+    });
+    expect(latestOpenStepPositionV1(session)).toBeUndefined();
+    session.append({ type: "step/start", turn: 1, step: 2 });
+    expect(latestOpenStepPositionV1(session)).toEqual({ turn: 1, step: 2 });
+  });
+
   test("accepts resumable tool crash states only while their step is open", () => {
     const assistant = [
       { type: "turn/start" as const, turn: 1 },

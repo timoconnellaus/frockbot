@@ -20,6 +20,8 @@
  * Bot's runtime Contribution and the browser alike.
  */
 
+import { sha256HexTextV1 } from "../crypto.js";
+
 export class TemplateDecodeError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -629,13 +631,7 @@ export function assertTemplateDocumentSizeV1(document: string): void {
  * must mean "these bytes", not "something that re-serializes to this".
  */
 export async function templateContentHashV1(document: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(document),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256HexTextV1(document);
 }
 
 /** The immutable object key one template blob lives at. */

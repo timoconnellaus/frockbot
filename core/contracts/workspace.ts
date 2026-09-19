@@ -40,6 +40,7 @@ export const WORKSPACE_MAX_PATH_LENGTH = 1024;
 export const WORKSPACE_MAX_SEGMENT_LENGTH = 255;
 /** Deepest relative path accepted inside a durable root. */
 export const WORKSPACE_MAX_PATH_SEGMENTS = 32;
+import { exactKeysV1, recordV1 } from "./records.js";
 /** Longest Package-declared root id, matching the Package id bound. */
 export const WORKSPACE_MAX_ROOT_ID_LENGTH = 128;
 /** Longest owner identifier, matching `IsolateIdentityV1.botId`. */
@@ -625,10 +626,7 @@ export function workspaceRootKeyV1(root: WorkspaceRootV1): string {
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
+  return recordV1(value, label);
 }
 
 function exactKeys(
@@ -637,13 +635,7 @@ function exactKeys(
   label: string,
   optional: readonly string[] = [],
 ): void {
-  const allowed = new Set<string>([...required, ...optional]);
-  if (
-    !required.every((key) => Object.hasOwn(value, key)) ||
-    !Object.keys(value).every((key) => allowed.has(key))
-  ) {
-    throw new Error(`${label} has invalid fields`);
-  }
+  exactKeysV1(value, required, optional, label);
 }
 
 function boundedString(

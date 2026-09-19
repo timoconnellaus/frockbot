@@ -84,6 +84,31 @@ export type AdminWriteResultV1<T> =
   | { status: "applied"; value: T }
   | { status: "conflict"; currentRevision: number };
 
+/** Decode an administrative compare-and-swap answer at the RPC seam. */
+export function decodeAdminWriteResultV1<T>(
+  input: unknown,
+  decodeValue: (value: unknown) => T,
+  label: string,
+): AdminWriteResultV1<T> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const answer = input as Record<string, unknown>;
+  if (answer.status === "conflict") {
+    if (!Number.isSafeInteger(answer.currentRevision)) {
+      throw new Error(`${label}.currentRevision is invalid`);
+    }
+    return {
+      status: "conflict",
+      currentRevision: answer.currentRevision as number,
+    };
+  }
+  if (answer.status !== "applied") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  return { status: "applied", value: decodeValue(answer.value) };
+}
+
 export interface SetAccountAccessCommandV1 {
   schemaVersion: 1;
   type: "account/set-access";

@@ -114,6 +114,8 @@ import {
   workspaceChunkOffsetsV1,
   workspaceStagingNameV1,
 } from "./workspace.js";
+import { shellQuote } from "./shell.js";
+import { stageFlyWorkspaceBytesV1 } from "./staging.js";
 
 /** Where the sync keeps notes that are not scoped to one root. */
 const SYNC_NOTES_DIR = ".frockbot/sync";
@@ -184,10 +186,6 @@ function failure(
   reason: string,
 ): WorkspaceFailureV1 {
   return { status, reason: reason.slice(0, 512) };
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 function isFailure(value: { status: string }): value is WorkspaceFailureV1 {
@@ -1336,38 +1334,6 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
    * chunk by chunk and the caller's own command moves it into place, so a file
    * only ever appears at its real path complete.
    */
-  private async stage(
-    mount: string,
-    name: string,
-    bytes: Uint8Array,
-  ): Promise<string | WorkspaceFailureV1 | undefined> {
-    if (bytes.byteLength <= WORKSPACE_CHUNK_BYTES_V1) return undefined;
-    const staged = `${mount}/${WORKSPACE_SYNC_DIR}/${SYNC_STAGING_DIR}/${name}`;
-    for (
-      let offset = 0;
-      offset < bytes.byteLength;
-      offset += WORKSPACE_CHUNK_BYTES_V1
-    ) {
-      const chunk = bytes.subarray(offset, offset + WORKSPACE_CHUNK_BYTES_V1);
-      const output = await this.run(
-        [
-          "set -eu",
-          `STAGE=${shellQuote(staged)}`,
-          'mkdir -p "$(dirname "$STAGE")"',
-          ...(offset === 0 ? ['rm -f "$STAGE"'] : []),
-          `printf %s ${shellQuote(Buffer.from(chunk).toString("base64"))} | base64 -d >> "$STAGE"`,
-          'chmod 600 "$STAGE"',
-          "echo __STAGED__",
-        ].join("\n"),
-      );
-      if (typeof output !== "string") return output;
-      if (!output.includes("__STAGED__")) {
-        return failure("unavailable", "Invalid Fly Workspace sync response");
-      }
-    }
-    return staged;
-  }
-
   async materialize(
     root: WorkspaceRootV1,
     path: string,
@@ -1380,11 +1346,15 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (typeof relative !== "string") return relative;
     const oversized = this.oversized(relative, bytes);
     if (oversized) return oversized;
-    const staged = await this.stage(
+    const staged = await stageFlyWorkspaceBytesV1({
       mount,
-      workspaceStagingNameV1(generation.generationId, "pull"),
+      stagingRoot: WORKSPACE_SYNC_DIR + "/" + SYNC_STAGING_DIR,
+      name: workspaceStagingNameV1(generation.generationId, "pull"),
       bytes,
-    );
+      chunkBytes: WORKSPACE_CHUNK_BYTES_V1,
+      invalidResponse: "Invalid Fly Workspace sync response",
+      run: (script) => this.run(script),
+    });
     if (staged && typeof staged !== "string") return staged;
     const script = [
       "set -eu",
@@ -1527,11 +1497,15 @@ export class FlySpriteSyncSurface implements ComputerSyncSurfaceV1 {
     if (typeof relative !== "string") return relative;
     const oversized = this.oversized(relative, bytes);
     if (oversized) return oversized;
-    const staged = await this.stage(
+    const staged = await stageFlyWorkspaceBytesV1({
       mount,
-      workspaceStagingNameV1(generation.generationId, "conflict"),
+      stagingRoot: WORKSPACE_SYNC_DIR + "/" + SYNC_STAGING_DIR,
+      name: workspaceStagingNameV1(generation.generationId, "conflict"),
       bytes,
-    );
+      chunkBytes: WORKSPACE_CHUNK_BYTES_V1,
+      invalidResponse: "Invalid Fly Workspace sync response",
+      run: (script) => this.run(script),
+    });
     if (staged && typeof staged !== "string") return staged;
     const script = [
       "set -eu",

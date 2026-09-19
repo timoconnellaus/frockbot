@@ -104,6 +104,20 @@ export async function readStoredRunWithEventsV1<Run extends object>(
   );
 }
 
+/** Read only the hydrated event journal for an integration assertion. */
+export async function readStoredRunEventsV1(
+  userId: string,
+  botId: string,
+  runId: string,
+): Promise<Array<Record<string, unknown>>> {
+  const run = await readStoredRunWithEventsV1<Record<string, unknown>>(
+    userId,
+    botId,
+    runId,
+  );
+  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
+}
+
 /** Exact journals for integration assertions that inspect the raw run index. */
 export async function listStoredRunsWithEventsV1<Run extends object>(
   userId: string,

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./crypto": "./crypto.ts",
     "./concurrency": "./concurrency.ts",
     "./promise-cache": "./promise-cache.ts",
     "./contracts": "./contracts/index.ts",

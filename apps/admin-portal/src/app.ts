@@ -9,6 +9,7 @@ import {
   decodeAccountAccessViewV1,
   decodeAdminUserBillingV1,
   decodeAdminUserListViewV1,
+  decodeAdminWriteResultV1,
   decodeDeploymentPolicyV1,
   decodeEmailInvitationV1,
   decodeUserFeaturesV1,
@@ -36,30 +37,6 @@ export interface AdminAppBindingV1 {
   inviteEmail(input: unknown): Promise<unknown>;
   setAccountFeatures(input: unknown): Promise<unknown>;
   grantCredit(input: unknown): Promise<unknown>;
-}
-
-function writeResult<T>(
-  input: unknown,
-  decodeValue: (value: unknown) => T,
-  label: string,
-): AdminWriteResultV1<T> {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error(`${label} must be an object`);
-  }
-  const answer = input as Record<string, unknown>;
-  if (answer.status === "conflict") {
-    if (!Number.isSafeInteger(answer.currentRevision)) {
-      throw new Error(`${label}.currentRevision is invalid`);
-    }
-    return {
-      status: "conflict",
-      currentRevision: answer.currentRevision as number,
-    };
-  }
-  if (answer.status !== "applied") {
-    throw new Error(`${label}.status is invalid`);
-  }
-  return { status: "applied", value: decodeValue(answer.value) };
 }
 
 export interface AdministrationV1 {
@@ -93,7 +70,7 @@ export function administrationV1(app: AdminAppBindingV1): AdministrationV1 {
     readPolicy: async () => decodeDeploymentPolicyV1(await app.readPolicy()),
 
     setAdmissionMode: async (command, updatedBy) =>
-      writeResult(
+      decodeAdminWriteResultV1(
         await app.setAdmissionMode({ schemaVersion: 1, command, updatedBy }),
         decodeDeploymentPolicyV1,
         "admission mode answer",
@@ -108,7 +85,7 @@ export function administrationV1(app: AdminAppBindingV1): AdministrationV1 {
       ),
 
     setAccountAccess: async (userId, command, updatedBy) =>
-      writeResult(
+      decodeAdminWriteResultV1(
         await app.setAccountAccess({
           schemaVersion: 1,
           userId,

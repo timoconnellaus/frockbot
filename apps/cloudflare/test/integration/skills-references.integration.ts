@@ -22,7 +22,7 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
-  readStoredRunWithEventsV1,
+  readStoredRunEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -35,10 +35,6 @@ interface TurnEvent {
   type: string;
   content?: string;
   isError?: boolean;
-}
-
-interface StoredRun {
-  runId?: string;
 }
 
 async function runTurn(
@@ -59,15 +55,6 @@ async function runTurn(
 
 function toolResults(events: TurnEvent[]): TurnEvent[] {
   return events.filter((event) => event.type === "tool/result");
-}
-
-async function runEvents(
-  userId: string,
-  botId: string,
-  runId: string,
-): Promise<Array<Record<string, unknown>>> {
-  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
-  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
 }
 
 describe("a Skill's references, end to end", () => {
@@ -166,7 +153,11 @@ describe("a Skill's references, end to end", () => {
 
     // The durable record of that Turn says which references were on offer and
     // at exactly which generation each was listed.
-    const events = await runEvents(userId, botId, "skill-reference-3");
+    const events = await readStoredRunEventsV1(
+      userId,
+      botId,
+      "skill-reference-3",
+    );
     const injected = events.find((event) => event.type === "skill/injected") as
       | {
           skills?: Array<{

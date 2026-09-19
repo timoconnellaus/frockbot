@@ -3,3 +3,4 @@ export * from "./host-client.js";
 export * from "./provider.js";
 export * from "./sync.js";
 export * from "./workspace.js";
+export * from "./shell.js";

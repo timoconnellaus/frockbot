@@ -22,6 +22,7 @@ import {
   expect,
   createBot,
   openApplication,
+  expectNoHorizontalOverflow,
   sem,
   settle,
 } from "./fixtures.ts";
@@ -46,16 +47,6 @@ const OTHER_STATE =
 
 /** What the host says when it cannot be reached at all. */
 const NO_HOST = /The Computer host answered|Couldn’t read the computer/u;
-
-async function expectNoHorizontalOverflow(page: Page): Promise<void> {
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
-    ),
-  ).toBeLessThanOrEqual(0);
-}
 
 /**
  * Open the desktop from the chat header.

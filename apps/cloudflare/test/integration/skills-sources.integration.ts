@@ -19,7 +19,7 @@ import {
   postAsUser,
   provisionThroughGateway,
   setAccountFeaturesV1,
-  readStoredRunWithEventsV1,
+  readStoredRunEventsV1,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
@@ -31,8 +31,6 @@ const APPLETS_REF = "managed/applets";
 /** A line only the managed `add-connector` body carries. */
 const MANAGED_BODY_MARKER = "Install it and switch it on";
 
-interface StoredRun {}
-
 /** What an admin does before an account's Bots see the Applets surfaces. */
 async function setApplets(userId: string, applets: boolean): Promise<void> {
   await setAccountFeaturesV1(userId, {
@@ -40,16 +38,6 @@ async function setApplets(userId: string, applets: boolean): Promise<void> {
     type: "user/set-features",
     applets,
   });
-}
-
-/** The session events the Bot Durable Object durably recorded for one run. */
-async function runEvents(
-  userId: string,
-  botId: string,
-  runId: string,
-): Promise<Array<Record<string, unknown>>> {
-  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
-  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
 }
 
 function systemPromptOfStep(
@@ -77,7 +65,7 @@ async function turn(
     status: response.status,
     body: await response.text(),
   }).toMatchObject({ status: 200 });
-  return runEvents(userId, botId, commandId);
+  return readStoredRunEventsV1(userId, botId, commandId);
 }
 
 describe("the managed Skill source", () => {

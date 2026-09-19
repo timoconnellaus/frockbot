@@ -25,6 +25,11 @@ import {
   MACHINE_LIMITS_V1,
   MachineTokenError,
 } from "@frockbot/core/machine-protocol";
+import {
+  base64urlDecodeV1,
+  base64urlEncodeV1,
+  sha256HexTextV1,
+} from "@frockbot/core/crypto";
 
 /** What a verified pairing code names. */
 export interface MachinePairingClaimsV1 {
@@ -50,31 +55,6 @@ const TEXT = new TextEncoder();
 const TAG_BYTES = 16;
 const NONCE_BYTES = 12;
 
-function base64url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-function fromBase64url(value: string): Uint8Array {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-function hex(bytes: ArrayBuffer): string {
-  return [...new Uint8Array(bytes)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 async function signingKey(secret: string): Promise<CryptoKey> {
   if (typeof secret !== "string" || secret.length < 16) {
     throw new MachineTokenError(
@@ -97,19 +77,19 @@ async function tag(secret: string, payload: string): Promise<string> {
     await signingKey(secret),
     TEXT.encode(payload),
   );
-  return base64url(new Uint8Array(signature).slice(0, TAG_BYTES));
+  return base64urlEncodeV1(new Uint8Array(signature).slice(0, TAG_BYTES));
 }
 
 /** A fresh, unpredictable nonce. One per mint, so no two codes are the same. */
 export function machinePairingNonceV1(): string {
-  return base64url(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
+  return base64urlEncodeV1(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
 }
 
 /** `SHA-256` of a code, hex. The only form of a code the backend keeps. */
 export async function machinePairingCodeDigestV1(
   code: string,
 ): Promise<string> {
-  return hex(await crypto.subtle.digest("SHA-256", TEXT.encode(code)));
+  return sha256HexTextV1(code);
 }
 
 /**
@@ -120,7 +100,7 @@ export async function mintMachinePairingCodeV1(
   secret: string,
   claims: MachinePairingClaimsV1,
 ): Promise<string> {
-  const payload = `${base64url(TEXT.encode(claims.userId))}.${claims.machineId}.${claims.nonce}`;
+  const payload = `${base64urlEncodeV1(TEXT.encode(claims.userId))}.${claims.machineId}.${claims.nonce}`;
   const code = `${payload}.${await tag(secret, payload)}`;
   if (code.length > MACHINE_LIMITS_V1.pairingCode) {
     // Refused rather than truncated: a code the enrollment decoder would
@@ -171,7 +151,7 @@ export async function verifyMachinePairingCodeV1(
   if (parts.length !== 3) throw new MachineTokenError(401, INVALID);
   let userId: string;
   try {
-    userId = new TextDecoder().decode(fromBase64url(parts[0]!));
+    userId = new TextDecoder().decode(base64urlDecodeV1(parts[0]!));
   } catch {
     throw new MachineTokenError(401, INVALID);
   }

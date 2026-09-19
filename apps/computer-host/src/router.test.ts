@@ -102,6 +102,7 @@ describe("shard function", () => {
     // The empty string is the offset basis; "a" is one round.
     expect(fnv1aV1("")).toBe(2_166_136_261);
     expect(fnv1aV1("a")).toBe(0xe40c_292c);
+    expect(fnv1aV1("💡")).toBe(0x3091_f3c5);
   });
 });
 

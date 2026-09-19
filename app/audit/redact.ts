@@ -26,6 +26,7 @@
 // through it. Steps 1 and 2 are not — they are structural, and they are what
 // the rule actually rests on.
 import { redactSecretShapesV1 } from "@frockbot/core/secret-shapes";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { AUDIT_MAX_PREVIEW_LENGTH_V1, type AuditKindV1 } from "./shared.js";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -104,11 +105,5 @@ export function auditPreviewV1(
  */
 export async function auditArgumentDigestV1(input: unknown): Promise<string> {
   const canonical = JSON.stringify(input ?? null) ?? "null";
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(canonical),
-  );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  return sha256HexTextV1(canonical);
 }
