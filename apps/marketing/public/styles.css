@@ -1937,3 +1937,118 @@
   --soft-time: 31s;
   --phase: -22s;
 }
+
+/* An editorial doorway, separate from the full-width work section. */
+.inside-teaser-section {
+  background: var(--cream);
+  padding: 50px 0 90px;
+}
+.inside-teaser {
+  background: var(--ink);
+  color: white;
+  border-radius: 28px;
+  padding: 64px;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  align-items: center;
+  gap: 60px;
+}
+.inside-teaser .section-label {
+  color: #efa2ba;
+}
+.inside-teaser h2 {
+  font-size: clamp(2.5rem, 4vw, 3.8rem);
+  line-height: 1.13;
+  margin-block: 20px 26px;
+}
+.inside-teaser h2 em {
+  color: #efa2ba;
+}
+.inside-teaser-copy > p:not(.section-label) {
+  max-width: 530px;
+  color: #d4ccd7;
+  line-height: 1.8;
+  margin-bottom: 28px;
+}
+.inside-teaser-art {
+  padding: 28px 24px;
+  background: #302a36;
+  border: 1px solid #554758;
+  border-radius: 22px;
+}
+.teaser-extensions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.teaser-extensions span {
+  font-size: 0.74rem;
+  padding: 8px 14px;
+  border: 1px solid #b185a0;
+  border-radius: 7px;
+  background: #564155;
+  transform: rotate(-4deg);
+}
+.teaser-extensions span:nth-child(2) {
+  transform: rotate(4deg);
+}
+.teaser-bot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-block: 12px 24px;
+  font-size: 0.88rem;
+}
+.teaser-bot img {
+  margin-bottom: -8px;
+}
+.teaser-clients {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  border-top: 1px solid #715572;
+  padding-top: 20px;
+  font-size: 0.78rem;
+  color: #e4cbdc;
+}
+.tinker-architecture-link {
+  display: inline-block;
+  margin-top: 18px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+@media (max-width: 860px) {
+  .inside-teaser {
+    padding: 40px;
+    gap: 30px;
+  }
+  .inside-teaser h2 {
+    font-size: 2.7rem;
+  }
+  .inside-teaser-art {
+    padding: 22px 14px;
+  }
+  .teaser-extensions span {
+    padding: 7px 10px;
+    font-size: 0.63rem;
+  }
+}
+@media (max-width: 560px) {
+  .inside-teaser {
+    grid-template-columns: 1fr;
+    padding: 30px 24px;
+    border-radius: 20px;
+    gap: 36px;
+  }
+  .inside-teaser h2 {
+    font-size: 2.6rem;
+  }
+  .inside-teaser-copy > p:not(.section-label) {
+    font-size: 0.9rem;
+  }
+  .inside-teaser-section {
+    padding: 30px 0 60px;
+  }
+}
