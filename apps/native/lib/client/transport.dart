@@ -30,12 +30,14 @@ extension on String {
   String ifEmpty(String Function() fallback) => isEmpty ? fallback() : this;
 }
 
-const clientHello = <String, Object>{
-  'schemaVersion': 1,
-  'protocolVersion': wire.clientProtocolVersion,
-  'nativeVersion': wire.minimumNativeVersion,
-  'catalogs': <Object>[],
-};
+Map<String, Object> clientHelloForVersion(String nativeVersion) =>
+    <String, Object>{
+      'schemaVersion': 1,
+      'protocolVersion': wire.clientProtocolVersion,
+      'nativeVersion': nativeVersion,
+      'catalogs': <Object>[],
+    };
+final clientHello = clientHelloForVersion(wire.nativeAppVersion);
 String randomId() {
   final bytes = List<int>.generate(24, (_) => Random.secure().nextInt(256));
   return 'n${base64Url.encode(bytes).replaceAll('=', '')}';

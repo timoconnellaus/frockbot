@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { readNativeMetadata } from "./native-metadata.ts";
@@ -50,6 +50,31 @@ test("native metadata reports one checked build identity", async () => {
       minimumNativeVersion: "1.6.0",
     },
   });
+});
+
+test("the native hello identifies the app build, not the enforcement floor", async () => {
+  const repositoryRoot = resolve(import.meta.dirname, "..");
+  const metadata = await readNativeMetadata(repositoryRoot);
+  const [generated, transport] = await Promise.all([
+    readFile(
+      resolve(
+        repositoryRoot,
+        "apps/native/lib/protocol/client_wire.generated.dart",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(repositoryRoot, "apps/native/lib/client/transport.dart"),
+      "utf8",
+    ),
+  ]);
+  expect(generated).toContain(
+    `const nativeAppVersion = '${metadata.app.versionName}';`,
+  );
+  expect(transport).toContain(
+    "final clientHello = clientHelloForVersion(wire.nativeAppVersion);",
+  );
+  expect(transport).not.toContain("'nativeVersion': wire.minimumNativeVersion");
 });
 
 describe("malformed source metadata fails closed", () => {
