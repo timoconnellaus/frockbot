@@ -17,6 +17,7 @@
 // untrusted code, and a descriptor that shipped a bad `SKILL.md` must not take
 // the Turn's whole catalog with it.
 import type { PluginSkillV1 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type { LoadedSkillV1, SkillRefusalV1 } from "./catalog.js";
 import {
   isSkillReferenceNameV1,
@@ -41,15 +42,7 @@ export function pluginSkillPathV1(pluginId: string, slug: string): string {
   return `plugin/${pluginId}/${slug}/${SKILL_FILE_NAME}`;
 }
 
-async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+const sha256Hex = sha256HexTextV1;
 
 /**
  * Parses the contributed documents into loaded Skills.

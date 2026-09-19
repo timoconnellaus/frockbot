@@ -16,19 +16,10 @@ import {
   openProfileMenu,
   sem,
   SHELL_TIMEOUT_MS,
+  settle,
+  tap,
   test,
 } from "./fixtures.ts";
-
-/** Press a named widget; see `bot-settings.e2e.ts` for why both nodes. */
-function tap(scope: Page | Locator, identifier: string) {
-  const node = `[flt-semantics-identifier="${identifier}"]`;
-  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
-}
-
-/** Let a pushed page finish arriving before pressing anything on it. */
-async function settle(page: Page): Promise<void> {
-  await page.waitForTimeout(700);
-}
 
 /**
  * Prose a widget carries as a label reaches the tree as an `aria-label` on an

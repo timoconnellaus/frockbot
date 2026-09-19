@@ -22,6 +22,7 @@ import type {
   TemplateRoutineV1,
 } from "@frockbot/core/template";
 import { TemplateDecodeError } from "@frockbot/core/template";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 
 export type TemplateImportPackageStatusV1 =
   "will-install" | "already-installed" | "missing";
@@ -202,13 +203,7 @@ export async function importedBotIdV1(
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 80) || "bot";
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`${userId} ${importId}`),
-  );
-  const hex = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const hex = await sha256HexTextV1(`${userId} ${importId}`);
   return `${base}-${hex.slice(0, 12)}`;
 }
 

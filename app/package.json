@@ -169,6 +169,7 @@
     "./settings/definition": "./settings/definition.ts",
     "./settings/document": "./settings/settings-document.ts",
     "./settings/plugins-document": "./settings/plugins-document.ts",
+    "./settings/shared": "./settings/shared.ts",
     "./settings/user": "./settings/user.ts",
     "./shell/agent": "./shell/agent.ts",
     "./shell/approvals": "./shell/approvals.ts",

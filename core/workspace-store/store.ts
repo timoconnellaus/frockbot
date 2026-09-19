@@ -70,6 +70,7 @@ import {
   type WorkspaceWriteRequestV1,
   type WorkspaceWriterV1,
 } from "@frockbot/core/contracts";
+import { sha256HexBytesV1 } from "../crypto.js";
 import type {
   ObjectBucketV1,
   ObjectConditionsV1,
@@ -112,10 +113,7 @@ function failure(
 }
 
 async function digestV1(bytes: Uint8Array): Promise<string> {
-  const buffer = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
-  return [...new Uint8Array(buffer)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256HexBytesV1(bytes);
 }
 
 /** True for the empty marker a delete leaves while it sweeps the key. */

@@ -44,6 +44,7 @@ import {
   type AppletBuildResponseV1,
   type AppletBuildSourceFileV1,
 } from "@frockbot/applets/build-contract";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   appletSourceFilePathV1,
   appletSourcePathV1,
@@ -361,15 +362,7 @@ export function appletRpcSnapshotV1<T>(value: T): T {
   return JSON.parse(serialized) as T;
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+const sha256Hex = sha256HexTextV1;
 
 /** The media type Applet source of one path is stored under. */
 function sourceMediaType(path: string): string {

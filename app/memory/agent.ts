@@ -29,7 +29,9 @@ import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
 } from "@frockbot/core/contracts";
+import { latestOpenStepPositionV1 } from "@frockbot/core/contracts";
 import { createConcurrencyLimiterV1 } from "@frockbot/core/concurrency";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { createMemoryEmbedder } from "./embeddings.js";
 import {
   readAllMemoryDocumentsV1,
@@ -115,15 +117,7 @@ export interface MemoryRuntimeHostV1 {
   clock?: () => Date;
 }
 
-export async function sha256HexV1(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+export const sha256HexV1 = sha256HexTextV1;
 
 /** The turn and step a Memory effect is recorded under. */
 export interface MemoryTurnPositionV1 {
@@ -139,21 +133,11 @@ export interface MemoryTurnPositionV1 {
 export function openMemoryTurnPositionV1(
   session: Session,
 ): MemoryTurnPositionV1 {
-  const started = session.events.findLast(
-    (event) => event.type === "step/start",
-  );
-  const ended = session.events.findLast((event) => event.type === "step/end");
-  if (started?.type !== "step/start") {
+  const position = latestOpenStepPositionV1(session);
+  if (!position) {
     throw new Error("a Memory effect has no open step to record against");
   }
-  if (
-    ended?.type === "step/end" &&
-    ended.turn === started.turn &&
-    ended.step === started.step
-  ) {
-    throw new Error("a Memory effect has no open step to record against");
-  }
-  return { turn: started.turn, step: started.step };
+  return position;
 }
 
 /**

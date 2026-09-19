@@ -1,3 +1,5 @@
+import { sha256HexBytesV1, sha256HexTextV1 } from "@frockbot/core/crypto";
+
 // What the bytes an image model returned actually are.
 //
 // The tool records `mimeType`, `width` and `height` in its durable
@@ -109,17 +111,9 @@ export function decodeImageDimensionsV1(
 }
 
 /** The sha-256 content address of some bytes, hex encoded. */
-export async function sha256HexV1(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    bytes.slice().buffer as ArrayBuffer,
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+export const sha256HexV1 = sha256HexBytesV1;
 
 /** The sha-256 of a string, for the prompt hash the intent event records. */
 export function sha256HexOfTextV1(text: string): Promise<string> {
-  return sha256HexV1(new TextEncoder().encode(text));
+  return sha256HexTextV1(text);
 }

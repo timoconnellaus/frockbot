@@ -4,6 +4,7 @@ import {
   decodeComputerHostHttpRequestV1,
   problem,
 } from "@frockbot/computer/host-protocol";
+import { constantTimeEqualsV1, fnv1a32Utf8V1 } from "@frockbot/core/crypto";
 
 export interface ComputerHostRouteConfiguration {
   /** The shared secret the app Worker presents and the container re-checks. */
@@ -26,14 +27,8 @@ export type ComputerHostContainerResolver = (
  * must land on the same container every time, so its Computer's slot
  * allocation, provisioning, and human-control lease serialize in one place.
  */
-export function fnv1aV1(key: string): number {
-  let hash = 2_166_136_261;
-  for (const byte of new TextEncoder().encode(key)) {
-    hash ^= byte;
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return hash >>> 0;
-}
+/** Kept as the router's public alias for the neutral stable-hash primitive. */
+export const fnv1aV1 = fnv1a32Utf8V1;
 
 /**
  * The container a User's Computer lives on.
@@ -83,7 +78,10 @@ export async function routeComputerHostRequestV1(
     return problem(404, "not-found", "no such Computer host route");
   }
   const presented = request.headers.get(COMPUTER_HOST_TOKEN_HEADER);
-  if (!configuration.hostToken || presented !== configuration.hostToken) {
+  if (
+    !configuration.hostToken ||
+    !constantTimeEqualsV1(presented ?? "", configuration.hostToken)
+  ) {
     return problem(
       401,
       "not-authorized",

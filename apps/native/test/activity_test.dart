@@ -7,7 +7,7 @@ import 'package:frockbot_native/client/transport.dart' show hostedOrigin;
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/shell/focus.dart' show sidebarUnreadFor;
 
-import 'settings_test.dart' show SettingsApi;
+import 'native_session.dart' show NativeSessionApi;
 import 'widget_test.dart' show MemoryStore;
 
 void main() {
@@ -18,7 +18,7 @@ void main() {
       final firstStarted = Completer<void>();
       final releaseFirst = Completer<void>();
       var calls = 0;
-      final api = SettingsApi(store, (path, body) async {
+      final api = NativeSessionApi(store, (path, body) async {
         calls += 1;
         if (calls == 1) {
           firstStarted.complete();
@@ -57,7 +57,7 @@ void main() {
   test('read and manual unread commands carry the authoritative message boundaries', () async {
     final store = MemoryStore();
     final commands = <Map<String, dynamic>>[];
-    final api = SettingsApi(store, (path, body) async {
+    final api = NativeSessionApi(store, (path, body) async {
       final command = Map<String, dynamic>.from(body as Map);
       commands.add(command);
       return {
@@ -115,7 +115,7 @@ void main() {
       },
     });
     final commands = <Map<String, dynamic>>[];
-    final api = SettingsApi(store, (path, body) async {
+    final api = NativeSessionApi(store, (path, body) async {
       if (body == null) {
         return path.endsWith('unread')
             ? {
@@ -175,7 +175,7 @@ void main() {
       final store = MemoryStore();
       final writes = <Map>[];
       var lost = true;
-      final api = SettingsApi(store, (path, body) async {
+      final api = NativeSessionApi(store, (path, body) async {
         if (body == null) {
           return path.endsWith('unread')
               ? {'schemaVersion': 1, 'unread': []}
@@ -237,7 +237,7 @@ void main() {
     test('the badge is empty before the receipt lands', () async {
       final store = MemoryStore();
       final receipts = Completer<void>();
-      final api = SettingsApi(store, (path, body) async {
+      final api = NativeSessionApi(store, (path, body) async {
         final command = Map<String, dynamic>.from(body as Map);
         await receipts.future;
         return {
@@ -271,7 +271,7 @@ void main() {
     test('marking unread lights the badge on the tap', () async {
       final store = MemoryStore();
       final receipts = Completer<void>();
-      final api = SettingsApi(store, (path, body) async {
+      final api = NativeSessionApi(store, (path, body) async {
         await receipts.future;
         throw StateError('never answered');
       });
@@ -299,7 +299,7 @@ void main() {
 
     test('a refusal puts the badge back and says so', () async {
       final store = MemoryStore();
-      final api = SettingsApi(store, (path, body) async {
+      final api = NativeSessionApi(store, (path, body) async {
         throw const FormatException('synthetic backend detail');
       });
       final controller = ActivityController(api, store, 'tim');
@@ -323,7 +323,7 @@ void main() {
     test('one Bot in flight leaves every other Bot alone', () async {
       final store = MemoryStore();
       final held = Completer<void>();
-      final api = SettingsApi(store, (path, body) async {
+      final api = NativeSessionApi(store, (path, body) async {
         final command = Map<String, dynamic>.from(body as Map);
         if (command['botId'] == 'alpha') await held.future;
         return {

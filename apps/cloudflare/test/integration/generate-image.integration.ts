@@ -22,14 +22,12 @@ import {
   freshUserId,
   postAsUser,
   provisionThroughGateway,
-  readStoredRunWithEventsV1,
+  readStoredRunEventsV1,
   frockbotToolCallPrompt,
   useApplicationArtifact,
 } from "./fixtures.ts";
 
 useApplicationArtifact();
-
-interface StoredRun {}
 
 interface TurnView {
   runId: string;
@@ -39,15 +37,6 @@ interface TurnView {
     content?: string;
     isError?: boolean;
   }>;
-}
-
-async function runEvents(
-  userId: string,
-  botId: string,
-  runId: string,
-): Promise<Array<Record<string, unknown>>> {
-  const run = await readStoredRunWithEventsV1<StoredRun>(userId, botId, runId);
-  return (run?.events ?? []) as unknown as Array<Record<string, unknown>>;
 }
 
 /** What the fake `AI` binding has been asked to generate so far. */
@@ -126,7 +115,11 @@ describe("generating an image", () => {
 
     // Intent before effect, and the generation the write produced, both in the
     // Bot's own durable log.
-    const events = await runEvents(userId, botId, "generate-image-1");
+    const events = await readStoredRunEventsV1(
+      userId,
+      botId,
+      "generate-image-1",
+    );
     const types = events.map((event) => event.type);
     expect(types.indexOf("image/generate-intent")).toBeGreaterThanOrEqual(0);
     expect(types.indexOf("image/generate-intent")).toBeLessThan(

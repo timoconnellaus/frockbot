@@ -60,6 +60,7 @@ import {
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
 import { boundedPromiseCacheV1 } from "@frockbot/core/promise-cache";
+import { sha256HexV1 } from "@frockbot/core/crypto";
 import {
   cardSurfacePrefixV1,
   decodePluginWorkerModelResultV1,
@@ -127,14 +128,7 @@ async function mintedCardSurfaceIdV1(
   sessionId: string,
   effectId: string,
 ): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`${sessionId}\n${effectId}`),
-  );
-  const unique = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, 24);
+  const unique = (await sha256HexV1(`${sessionId}\n${effectId}`)).slice(0, 24);
   return `${cardSurfacePrefixV1(pluginId, cardId)}${unique}`;
 }
 

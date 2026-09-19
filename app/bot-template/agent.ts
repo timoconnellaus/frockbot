@@ -22,6 +22,7 @@
 import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   decodeTurnTypeV1,
+  latestOpenStepPositionV1,
   type AgentRuntimeV1,
   type FirstPartyCardDrawsV1,
   type RuntimeFeatureV1,
@@ -76,21 +77,11 @@ function openStepPositionV1(
   session: Session,
   tool: string,
 ): { turn: number; step: number } {
-  const started = session.events.findLast(
-    (event) => event.type === "step/start",
-  );
-  const ended = session.events.findLast((event) => event.type === "step/end");
-  if (started?.type !== "step/start") {
+  const position = latestOpenStepPositionV1(session);
+  if (!position) {
     throw new Error(`${tool} has no open step to record against`);
   }
-  if (
-    ended?.type === "step/end" &&
-    ended.turn === started.turn &&
-    ended.step === started.step
-  ) {
-    throw new Error(`${tool} has no open step to record against`);
-  }
-  return { turn: started.turn, step: started.step };
+  return position;
 }
 
 /** A `commandId` derived from the occurrence, so a retry reuses one receipt. */

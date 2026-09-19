@@ -11,6 +11,7 @@ import {
   type CredentialLeaseV1,
 } from "@frockbot/core/connection";
 import type { ConnectionView } from "@frockbot/core/configuration";
+import { sha256HexV1 } from "@frockbot/core/crypto";
 import type {
   CredentialStorage,
   CredentialTransaction,
@@ -337,13 +338,7 @@ export function modelConnectionLifecycleV1(
   }
 
   async function fingerprint(value: unknown): Promise<string> {
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(JSON.stringify(value)),
-    );
-    return Array.from(new Uint8Array(digest), (byte) =>
-      byte.toString(16).padStart(2, "0"),
-    ).join("");
+    return sha256HexV1(JSON.stringify(value));
   }
 
   function receipt(

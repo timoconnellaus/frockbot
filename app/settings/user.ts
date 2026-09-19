@@ -42,6 +42,10 @@ import type {
   ConnectionTypeDefinition,
 } from "@frockbot/core/contracts";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
+import {
+  requireMatchingConfigurationReceiptV1,
+  type StoredConfigurationReceiptV1,
+} from "./shared.js";
 
 const STATE_KEY = "user-configuration";
 const ACCOUNT_MODEL_KEY = "user-account-model:v1";
@@ -88,11 +92,6 @@ function decodeDefaultPackagesMarker(
 }
 const IDENTITY_KEY = "user-id";
 const RECEIPT_PREFIX = "configuration-receipt:";
-
-interface StoredConfigurationReceipt {
-  commandFingerprint: string;
-  receipt: OperationReceiptV1;
-}
 
 export interface UserSettingsTransaction {
   get<T>(key: string): Promise<T | undefined>;
@@ -182,7 +181,7 @@ function initialState(): UserSettingsViewV1 {
 
 function decodeStoredConfigurationReceipt(
   input: unknown,
-): StoredConfigurationReceipt {
+): StoredConfigurationReceiptV1 {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("Stored configuration receipt is invalid");
   }
@@ -199,19 +198,6 @@ function decodeStoredConfigurationReceipt(
     commandFingerprint: value.commandFingerprint,
     receipt: decodeOperationReceiptV1(value.receipt),
   };
-}
-
-function requireMatchingConfigurationReceipt(
-  stored: StoredConfigurationReceipt,
-  commandFingerprint: string,
-  commandId: string,
-): OperationReceiptV1 {
-  if (stored.commandFingerprint !== commandFingerprint) {
-    throw new Error(
-      `Configuration command idempotency key "${commandId}" was reused for a different command`,
-    );
-  }
-  return stored.receipt;
 }
 
 /**
@@ -989,7 +975,7 @@ export class UserSettingsBackendContribution {
     const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
     const storedReceipt = await storage.get<unknown>(receiptKey);
     if (storedReceipt !== undefined) {
-      return requireMatchingConfigurationReceipt(
+      return requireMatchingConfigurationReceiptV1(
         decodeStoredConfigurationReceipt(storedReceipt),
         commandFingerprint,
         command.commandId,

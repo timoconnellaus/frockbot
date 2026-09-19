@@ -14,6 +14,7 @@ import {
   type AuthPackageIdentityStoreV1,
   type PackageIframeCompositionV1,
 } from "@frockbot/core/contracts";
+import { sha256HexV1 as sha256Hex } from "@frockbot/core/crypto";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
 import { createFoundationBackendContributions } from "@frockbot/app/runtime";
 import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/applets/pages";
@@ -1631,16 +1632,6 @@ function packageUiArtifactKey(contentHash: string): string {
     throw new Error("package UI artifact contentHash is invalid");
   }
   return `packages/${contentHash}.html`;
-}
-
-async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 class R2ApplicationArtifacts

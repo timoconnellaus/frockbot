@@ -12,6 +12,7 @@ import {
   type NormalizedModelRequest,
 } from "@frockbot/core/contracts";
 import { OpenAICompatibleProvider } from "./index.js";
+import { manualClock, settle } from "../test-support.ts";
 
 const request: NormalizedModelRequest = {
   requestId: "request-1",
@@ -21,40 +22,6 @@ const request: NormalizedModelRequest = {
   messages: [{ role: "user", content: "hello" }],
   tools: [],
 };
-
-/** A clock the test advances by hand. */
-function manualClock() {
-  const pending = new Map<number, { run: () => void; due: number }>();
-  let next = 1;
-  let now = 0;
-  return {
-    schedule(run: () => void, milliseconds: number): () => void {
-      const id = next++;
-      pending.set(id, { run, due: now + milliseconds });
-      return () => pending.delete(id);
-    },
-    /** Fire everything due at or before `now + milliseconds`. */
-    advance(milliseconds: number): void {
-      now += milliseconds;
-      for (const [id, timer] of [...pending]) {
-        if (timer.due <= now) {
-          pending.delete(id);
-          timer.run();
-        }
-      }
-    },
-    get armed(): number {
-      return pending.size;
-    },
-  };
-}
-
-/** Let the generator's own pump run: the clock here is manual, real time is not. */
-async function settle(): Promise<void> {
-  for (let tick = 0; tick < 10; tick += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-}
 
 async function collect(iterable: AsyncIterable<unknown>): Promise<unknown[]> {
   const events: unknown[] = [];

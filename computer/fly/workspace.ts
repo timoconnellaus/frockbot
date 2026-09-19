@@ -62,6 +62,8 @@ import {
   type WorkspaceWriterV1,
 } from "@frockbot/core/contracts";
 import type { FlyAgentComputer } from "./computer.js";
+import { shellQuote } from "./shell.js";
+import { stageFlyWorkspaceBytesV1 } from "./staging.js";
 
 /** Where a root records the generation of each file beneath it. */
 export const WORKSPACE_GENERATIONS_DIR = ".frockbot-generations";
@@ -124,10 +126,6 @@ export const WORKSPACE_EMPTY_SHA256 =
   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 const EMPTY_SHA256 = WORKSPACE_EMPTY_SHA256;
 const DEFAULT_LIST_LIMIT = 100;
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
 
 function failure(
   status: WorkspaceFailureV1["status"],
@@ -653,40 +651,6 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
    * the caller's own locked command moves it into place, so a file only ever
    * appears at its real path complete.
    */
-  private async stage(
-    mount: string,
-    name: string,
-    bytes: Uint8Array,
-  ): Promise<string | WorkspaceFailureV1 | undefined> {
-    if (bytes.byteLength <= WORKSPACE_CHUNK_BYTES_V1) return undefined;
-    const staged = `${mount}/${WORKSPACE_SYNC_DIR}/${SYNC_STAGING_DIR}/${name}`;
-    for (
-      let offset = 0;
-      offset < bytes.byteLength;
-      offset += WORKSPACE_CHUNK_BYTES_V1
-    ) {
-      const chunk = bytes.subarray(offset, offset + WORKSPACE_CHUNK_BYTES_V1);
-      const output = await this.run(
-        [
-          "set -eu",
-          `STAGE=${shellQuote(staged)}`,
-          'mkdir -p "$(dirname "$STAGE")"',
-          // A staging name is this write's own, so a leftover file under it is
-          // a previous attempt's and never another writer's.
-          ...(offset === 0 ? ['rm -f "$STAGE"'] : []),
-          `printf %s ${shellQuote(Buffer.from(chunk).toString("base64"))} | base64 -d >> "$STAGE"`,
-          'chmod 600 "$STAGE"',
-          "echo __STAGED__",
-        ].join("\n"),
-      );
-      if (typeof output !== "string") return output;
-      if (!output.includes("__STAGED__")) {
-        return failure("unavailable", "Invalid Fly Workspace write response");
-      }
-    }
-    return staged;
-  }
-
   async write(
     request: WorkspaceWriteRequestV1,
   ): Promise<WorkspaceWriteOutcomeV1> {
@@ -727,11 +691,15 @@ export class FlyWorkspaceFiles implements WorkspaceFilesV1 {
     // writers of the same path never share a staging file, and the lock is
     // taken only for the last command — the one that checks the generation the
     // writer expected, proves the staged bytes, and renames them into place.
-    const staged = await this.stage(
+    const staged = await stageFlyWorkspaceBytesV1({
       mount,
-      workspaceStagingNameV1(generationId, "write"),
-      request.bytes,
-    );
+      stagingRoot: WORKSPACE_SYNC_DIR + "/" + SYNC_STAGING_DIR,
+      name: workspaceStagingNameV1(generationId, "write"),
+      bytes: request.bytes,
+      chunkBytes: WORKSPACE_CHUNK_BYTES_V1,
+      invalidResponse: "Invalid Fly Workspace write response",
+      run: (script) => this.run(script),
+    });
     if (staged !== undefined && typeof staged !== "string") return staged;
     const script = [
       "set -eu",

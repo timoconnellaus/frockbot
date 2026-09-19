@@ -78,6 +78,7 @@ import {
   type A2uiJsonObjectV1,
   type A2uiJsonValueV1,
 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   approvalKeyV1,
   decodeApprovalRecordV1,
@@ -1217,14 +1218,10 @@ export async function cardApprovalSeedV1(
   sessionId: string,
   effectId: string,
 ): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`${secret}\n${sessionId}\n${effectId}`),
+  return (await sha256HexTextV1(`${secret}\n${sessionId}\n${effectId}`)).slice(
+    0,
+    32,
   );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, 32);
 }
 
 /** The Approval id the Nth decision on one card send is recorded under. */
@@ -1304,13 +1301,7 @@ function canonicalCardValueV1(value: unknown): unknown {
 /** The content address of the values a Card is showing. */
 export async function cardValuesDigestV1(values: unknown): Promise<string> {
   const canonical = JSON.stringify(canonicalCardValueV1(values) ?? null);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(canonical),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256HexTextV1(canonical);
 }
 
 /** The storage one Bot's card approval bindings are read and written through. */

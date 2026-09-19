@@ -20,6 +20,7 @@ import {
   chooseDefaultModel,
   createBot,
   enableApplets,
+  expectNoHorizontalOverflow,
   expectReadyToSend,
   openApplication,
   enablePackage,
@@ -324,16 +325,6 @@ async function installAppletRoutes(
       return focused;
     },
   };
-}
-
-async function expectNoHorizontalOverflow(page: Page): Promise<void> {
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
-    ),
-  ).toBeLessThanOrEqual(0);
 }
 
 /** Turn a Package on from its Plugins row. */

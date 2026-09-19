@@ -1,3 +1,5 @@
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
+
 const CHUNK_SIZE_CHARS = 1600;
 const OVERLAP_CHARS = 320;
 
@@ -15,13 +17,7 @@ interface LineRange {
 }
 
 export async function hashMemoryContent(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256HexTextV1(text);
 }
 
 function paragraphs(lines: string[]): LineRange[] {

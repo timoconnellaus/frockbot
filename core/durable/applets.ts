@@ -31,6 +31,12 @@ import {
   APPLET_BOT_ID_V1,
   APPLET_ID_V1,
 } from "@frockbot/core/contracts";
+import {
+  base64urlDecodeV1,
+  base64urlEncodeV1,
+  constantTimeEqualsV1,
+  sha256HexTextV1,
+} from "../crypto.js";
 
 export type {
   AppletDirectoryEntryV1,
@@ -493,13 +499,6 @@ export function decodeAppletHealthV1(
 
 const TEXT = new TextEncoder();
 
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", TEXT.encode(value));
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 const APPLET_SECRET_V1 = /^[0-9a-f]{32}$/;
 // A User id as the auth layer mints it: mixed case, underscore allowed. Must
 // agree with `APPLET_ID_V1`'s owner half.
@@ -546,7 +545,7 @@ export function appletBindingDigestV1(input: {
   capabilities: readonly string[];
   contract: number;
 }): Promise<string> {
-  return sha256Hex(
+  return sha256HexTextV1(
     JSON.stringify({
       userId: input.userId,
       capabilities: [...input.capabilities].sort(),
@@ -570,7 +569,7 @@ export function appletLoaderIdV1(input: {
   serverHash: string;
   bindingDigest: string;
 }): Promise<string> {
-  return sha256Hex(
+  return sha256HexTextV1(
     JSON.stringify({
       contract: input.contract,
       appletId: input.appletId,
@@ -639,39 +638,7 @@ export class AppletViewerTokenError extends Error {
 /** The one thing a failed verify says. Which half failed is not the caller's. */
 const INVALID_TOKEN = "Applet viewer token is invalid";
 
-function base64url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-function fromBase64url(value: string): Uint8Array {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-/**
- * Constant-time comparison. A signature check that returns early on the first
- * differing byte leaks the signature to anyone willing to time it.
- */
-export function constantTimeEqualsV1(left: string, right: string): boolean {
-  const a = TEXT.encode(left);
-  const b = TEXT.encode(right);
-  let mismatch = a.length ^ b.length;
-  const span = Math.max(a.length, b.length);
-  for (let index = 0; index < span; index += 1) {
-    mismatch |= (a[index] ?? 0) ^ (b[index] ?? 0);
-  }
-  return mismatch === 0;
-}
+export { constantTimeEqualsV1 } from "../crypto.js";
 
 async function signingKey(secret: string): Promise<CryptoKey> {
   if (typeof secret !== "string" || secret.length < 16) {
@@ -709,7 +676,7 @@ export async function mintAppletViewerTokenV1(
   if (!APPLET_BOT_ID_V1.test(claims.b)) {
     throw new AppletViewerTokenError(400, "Bot id is invalid");
   }
-  const payload = base64url(
+  const payload = base64urlEncodeV1(
     TEXT.encode(
       JSON.stringify({
         u: claims.u,
@@ -725,7 +692,7 @@ export async function mintAppletViewerTokenV1(
     await signingKey(secret),
     TEXT.encode(payload),
   );
-  return `${payload}.${base64url(new Uint8Array(signature))}`;
+  return `${payload}.${base64urlEncodeV1(new Uint8Array(signature))}`;
 }
 
 /**
@@ -746,7 +713,7 @@ export async function verifyAppletViewerTokenV1(
   if (separator <= 0) throw new AppletViewerTokenError(401, INVALID_TOKEN);
   const payload = token.slice(0, separator);
   const presented = token.slice(separator + 1);
-  const expected = base64url(
+  const expected = base64urlEncodeV1(
     new Uint8Array(
       await crypto.subtle.sign(
         "HMAC",
@@ -760,7 +727,7 @@ export async function verifyAppletViewerTokenV1(
   }
   let decoded: unknown;
   try {
-    decoded = JSON.parse(new TextDecoder().decode(fromBase64url(payload)));
+    decoded = JSON.parse(new TextDecoder().decode(base64urlDecodeV1(payload)));
   } catch {
     throw new AppletViewerTokenError(401, INVALID_TOKEN);
   }

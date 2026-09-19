@@ -377,6 +377,26 @@ export function sem(page: Page | Locator, identifier: string): Locator {
   return page.locator(`[flt-semantics-identifier="${identifier}"]`);
 }
 
+/** Press the tappable node a Flutter semantics identifier names. */
+export function tap(scope: Page | Locator, identifier: string): Locator {
+  const node = `[flt-semantics-identifier="${identifier}"]`;
+  return scope.locator(`${node}[flt-tappable], ${node} [flt-tappable]`).first();
+}
+
+/** Assert that the host document did not grow wider than its viewport. */
+export async function expectNoHorizontalOverflow(
+  page: Page,
+  tolerance = 0,
+): Promise<void> {
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(tolerance);
+}
+
 /**
  * The text input inside a named field.
  *
@@ -535,6 +555,17 @@ export async function openApplication(
   await expect(
     sem(page, "shell-sidebar").or(sem(page, "sidebar-toggle")).first(),
   ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+}
+
+/** Find the Builder Bot provisioned for Applets browser specs. */
+export async function builderBotId(page: Page): Promise<string> {
+  const response = await page.request.get("/api/bots");
+  const body = (await response.json()) as {
+    bots: Array<{ botId: string; initialName: string }>;
+  };
+  const botId = body.bots.find((bot) => bot.initialName === "Builder")?.botId;
+  if (!botId) throw new Error("this account has no Builder Bot");
+  return botId;
 }
 
 /**

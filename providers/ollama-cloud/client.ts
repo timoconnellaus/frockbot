@@ -4,6 +4,7 @@ import {
   type ConnectionModelV1,
 } from "@frockbot/core/connection";
 import { withDeadlineV1 } from "@frockbot/core/deadline";
+import { boundedResponseBytesV1 } from "./body.js";
 
 export type OllamaFetch = (
   input: string | URL | Request,
@@ -126,31 +127,10 @@ async function boundedJson(
   response: Response,
   maximum: number,
 ): Promise<unknown> {
-  const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > maximum) {
-    throw new Error("Ollama Cloud response is too large");
-  }
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  const reader = response.body?.getReader();
-  if (reader) {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      length += chunk.value.byteLength;
-      if (length > maximum) {
-        await reader.cancel();
-        throw new Error("Ollama Cloud response is too large");
-      }
-      chunks.push(chunk.value);
-    }
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const bytes = await boundedResponseBytesV1(response, maximum, {
+    oversizedMessage: "Ollama Cloud response is too large",
+    cancelOnLimit: "propagate",
+  });
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   } catch {
@@ -159,26 +139,11 @@ async function boundedJson(
 }
 
 async function boundedText(response: Response): Promise<string> {
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  const reader = response.body?.getReader();
-  if (reader) {
-    while (length <= MAX_PROBE_FAILURE_TEXT) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      length += chunk.value.byteLength;
-      chunks.push(chunk.value);
-    }
-    await reader.cancel().catch(() => undefined);
-  }
-  const bytes = new Uint8Array(
-    chunks.reduce((total, c) => total + c.byteLength, 0),
-  );
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const bytes = await boundedResponseBytesV1(response, MAX_PROBE_FAILURE_TEXT, {
+    truncate: true,
+    cancelOnLimit: "ignore",
+    cancelAfterRead: true,
+  });
   const text = new TextDecoder().decode(bytes).slice(0, MAX_PROBE_FAILURE_TEXT);
   try {
     const payload = JSON.parse(text) as unknown;

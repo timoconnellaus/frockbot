@@ -13,6 +13,7 @@ import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/theme/frock_theme.dart';
 
+import 'native_session.dart' show NativeSessionApi;
 import 'widget_test.dart' show MemoryStore;
 
 /// The shape `settingsDocumentV1` produces for the profile section, written by
@@ -103,17 +104,7 @@ Map<String, Object?> document({int revision = 1, Object? model}) => {
   ],
 };
 
-class SettingsApi extends NativeApi {
-  final Future<Object?> Function(String, Object?) handler;
-  SettingsApi(super.store, this.handler);
-  @override
-  Future<Object?> request(
-    String path, {
-    Object? body,
-    int limit = 512000,
-    bool authenticated = true,
-  }) => handler(path, body);
-}
+typedef SettingsApi = NativeSessionApi;
 
 void main() {
   group('the projection read back', () {

@@ -3,6 +3,7 @@ import {
   AccountAccessConflictError,
   decodeAccountAccessV1,
   decodeAccountAccessViewV1,
+  decodeAdminWriteResultV1,
   decodeDeploymentPolicyV1,
   decodeEmailInvitationV1,
   DeploymentPolicyConflictError,
@@ -22,14 +23,18 @@ function appliedWrite(
   conflict: (currentRevision: number) => Error,
 ): unknown {
   const write = rpcJsonSnapshotV1(answer) as Record<string, unknown> | null;
-  if (write?.status === "applied") return write.value;
-  if (
-    write?.status === "conflict" &&
-    Number.isSafeInteger(write.currentRevision)
-  ) {
-    throw conflict(write.currentRevision as number);
+  let decoded;
+  try {
+    decoded = decodeAdminWriteResultV1(
+      write,
+      (value) => value,
+      "access authority write result",
+    );
+  } catch {
+    throw new Error("access authority answered an unknown write result");
   }
-  throw new Error("access authority answered an unknown write result");
+  if (decoded.status === "conflict") throw conflict(decoded.currentRevision);
+  return decoded.value;
 }
 
 export function createDeploymentPolicyAdminHost(

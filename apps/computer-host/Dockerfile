@@ -16,15 +16,19 @@ RUN npm ci --omit=dev
 # it, because Node refuses to strip types from a file under `node_modules`
 # (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) and resolves a symlink to its
 # real path before deciding. This is the same shape a workspace install has.
-# Only the manifest, the protocol directory and the one Fly file are copied;
+# Only the manifest, the protocol directory and the Fly runtime files are copied;
 # the exports map resolves `@frockbot/computer/host-protocol` and
 # `@frockbot/computer/fly/runtime` to them. `computer/fly` holds the rest of
 # the Fly implementation, which runs in the Worker and is not copied.
 COPY computer/package.json ./computer/package.json
 COPY computer/host-protocol ./computer/host-protocol
 COPY computer/fly/runtime.ts ./computer/fly/runtime.ts
+COPY computer/fly/shell.ts ./computer/fly/shell.js
+COPY core/package.json ./core/package.json
+COPY core/crypto.ts ./core/crypto.ts
 RUN mkdir -p node_modules/@frockbot \
-  && ln -s ../../computer node_modules/@frockbot/computer
+  && ln -s ../../computer node_modules/@frockbot/computer \
+  && ln -s ../../core node_modules/@frockbot/core
 
 COPY apps/computer-host/container ./container
 RUN chmod 755 container/entrypoint.sh
