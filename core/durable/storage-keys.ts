@@ -20,11 +20,22 @@ export const PENDING_RUN_KEY = "pending-run";
 export const PENDING_AGENT_RUN_PREFIX = "pending-agent-run:";
 /** A Bot cannot accumulate an unbounded cross-Bot inbox. */
 export const MAX_PENDING_AGENT_RUNS_V1 = 32;
+
+/** Whether one durable key changes the run state projected to a client. */
+export function isRunStateStorageKeyV1(key: string): boolean {
+  return (
+    key === ACTIVE_RUN_KEY ||
+    key === PENDING_RUN_KEY ||
+    key.startsWith(RUN_PREFIX) ||
+    key.startsWith(RUN_INDEX_PREFIX)
+  );
+}
 /** Legacy Session value, read only for transparent migration. */
 export const LATEST_EVENTS_KEY = "latest-events";
-export const SESSION_EVENT_LOG_INDEX_PREFIX = "session-events:index:";
-export const SESSION_EVENT_LOG_PAGE_PREFIX = "session-events:page:";
-export const SESSION_EVENT_PAYLOAD_PREFIX = "session-events:payload:";
+export const SESSION_EVENT_LOG_PREFIX = "session-events:";
+export const SESSION_EVENT_LOG_INDEX_PREFIX = `${SESSION_EVENT_LOG_PREFIX}index:`;
+export const SESSION_EVENT_LOG_PAGE_PREFIX = `${SESSION_EVENT_LOG_PREFIX}page:`;
+export const SESSION_EVENT_PAYLOAD_PREFIX = `${SESSION_EVENT_LOG_PREFIX}payload:`;
 export const IDENTITY_KEY = "identity";
 export const NOTIFICATION_PREFIX = "notification:";
 // The Composition keys below are the User Durable Object's records (ADR 0026)
