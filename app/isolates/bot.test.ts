@@ -4,6 +4,8 @@
 // Plugin — never a shared attribution id, and never a Plugin the generation
 // does not hold.
 import { describe, expect, test } from "bun:test";
+import { SessionStore } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   ActiveTurnV1,
   ShellBotStateV1,
@@ -16,6 +18,7 @@ import {
 } from "../shell/cards.js";
 import {
   isolateEmail,
+  isolateSchedule,
   isolateWorkspaceRead,
   type IsolateCallScopeV1,
 } from "./bot.ts";
@@ -126,6 +129,58 @@ describe("a capability call from the Plugin worker", () => {
         scope({ runId: "run-2" }),
       ),
     ).toMatchObject({ status: "unavailable" });
+  });
+});
+
+describe("a scheduled tool replay", () => {
+  test("treats reordered JSON input as the same idempotent call", async () => {
+    const sessions = new SessionStore();
+    const session = sessions.create("user-1:bot-1");
+    session.append({ type: "turn/start", turn: 1 });
+    session.append({ type: "step/start", turn: 1, step: 1 });
+    const effectId = `package-tool:${await sha256HexTextV1("greeter\0call-1")}`;
+    session.append({
+      type: "package/tool-call",
+      turn: 1,
+      step: 1,
+      effectId,
+      packageId: "greeter",
+      callId: "call-1",
+      name: "routine_manage",
+      input: { first: 1, nested: { left: true, right: false } },
+    });
+    const subject = state([
+      { packageId: "greeter", artifact: { contentHash: "a" } },
+    ]);
+    const mounted = subject.turn.current!.mounted as unknown as {
+      runtime: unknown;
+    };
+    mounted.runtime = {
+      services: {
+        sessions,
+        tools: {
+          prepare: () =>
+            Promise.resolve({
+              kind: "denied" as const,
+              result: { content: "not run", isError: true },
+            }),
+        },
+      },
+    } as never;
+
+    const outcome = await isolateSchedule(subject, {
+      ...scope(),
+      request: {
+        callId: "call-1",
+        input: { nested: { right: false, left: true }, first: 1 },
+      },
+    });
+
+    expect(outcome).toEqual({
+      status: "completed",
+      content: "not run",
+      isError: true,
+    });
   });
 });
 

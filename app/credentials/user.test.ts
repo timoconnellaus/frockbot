@@ -242,6 +242,46 @@ describe("Credential User Contribution", () => {
     ).rejects.toThrow("Credential lease effect id was reused");
   });
 
+  test("opens the same lease when its object fields arrive in another order", async () => {
+    const { credentials } = contribution();
+    await credentials.stageApiKey({
+      ...authority,
+      generation: "generation-1",
+      apiKey: "secret",
+    });
+    await credentials.activate({ ...authority, generation: "generation-1" });
+    const lease = await credentials.lease({
+      ...authority,
+      effectId: "effect-reordered",
+      expiresAt: "2026-08-30T01:00:00.000Z",
+    });
+    const reordered = {
+      envelope: {
+        createdAt: lease.envelope.createdAt,
+        ciphertext: lease.envelope.ciphertext,
+        nonce: lease.envelope.nonce,
+        credentialGeneration: lease.envelope.credentialGeneration,
+        keyId: lease.envelope.keyId,
+        algorithm: lease.envelope.algorithm,
+        schemaVersion: lease.envelope.schemaVersion,
+      },
+      expiresAt: lease.expiresAt,
+      credentialGeneration: lease.credentialGeneration,
+      connectionId: lease.connectionId,
+      effectId: lease.effectId,
+      leaseId: lease.leaseId,
+      schemaVersion: lease.schemaVersion,
+    };
+
+    await expect(
+      credentials.openLease({
+        accountId: authority.accountId,
+        packageId: authority.packageId,
+        lease: reordered,
+      }),
+    ).resolves.toBe("secret");
+  });
+
   test("expires leases until a delayed durable outcome settles", async () => {
     let now = Date.parse("2026-08-30T00:00:00.000Z");
     const { credentials } = contribution(undefined, () => now);

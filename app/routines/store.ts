@@ -69,7 +69,6 @@ import {
   type RoutineListViewV1,
   type RoutineRunListViewV1,
   type RoutineViewV1,
-  type RoutineWriterViewV1,
 } from "./shared.js";
 
 /** A Routine the Bot does not hold. */
@@ -188,20 +187,6 @@ export interface RoutineStoreOptionsV1 {
   pluginTriggers?: RoutinePluginTriggerSeamV1;
 }
 
-function writerView(writer: RoutineWriterV1): RoutineWriterViewV1 {
-  // The Session and Turn travel with the Bot writer. A Routine a Bot wrote is
-  // provenance, and provenance that cannot name the Turn it came from is only
-  // half a record: "the Bot wrote this" is not answerable to "which Turn?".
-  return writer.kind === "user"
-    ? { kind: "user" }
-    : {
-        kind: "bot",
-        botId: writer.botId,
-        sessionId: writer.sessionId,
-        turnId: writer.turnId,
-      };
-}
-
 /**
  * The DTO for one record. Never carries key material, by construction.
  *
@@ -222,8 +207,8 @@ export function routineViewV1(
     prompt: record.prompt,
     timezone,
     enabled: record.enabled,
-    createdBy: writerView(record.createdBy),
-    updatedBy: writerView(record.updatedBy),
+    createdBy: record.createdBy,
+    updatedBy: record.updatedBy,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     ...(record.schedule === undefined ? {} : { schedule: record.schedule }),
