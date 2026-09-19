@@ -442,12 +442,7 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   const chip = sem(page, "bot-page-applets-all");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await shot(page, "phone-chip");
-  await press(chip);
-  await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
-  await press(
-    page.locator('[flt-semantics-identifier^="applet-row-"]').first(),
-  );
-  await expect(canvasOf(page)).toBeVisible({ timeout: 60_000 });
+  await openCanvas(page);
   await expect(appletUi(page).getByText("Buy milk")).toBeVisible({
     timeout: 60_000,
   });
