@@ -207,7 +207,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 if (onComputer != null) ...[
                   const SizedBox(width: 8),
                   identified(
-                    ShellIds.computerToggle,
+                    ShellIds.computerDestination,
                     _glyphPill(
                       'Computer',
                       ChatIconKind.computer,
@@ -334,7 +334,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
         actions: [
           if (onComputer != null)
             identified(
-              ShellIds.computerToggle,
+              ShellIds.computerDestination,
               _destination(
                 'Computer',
                 ChatIconKind.computer,

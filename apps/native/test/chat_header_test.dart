@@ -120,6 +120,43 @@ void main() {
   });
 
   testWidgets(
+    'the Computer destination keeps one browser identifier in every header',
+    (tester) async {
+      final opened = <String>[];
+      for (final (phone, voice) in [
+        (false, false),
+        (true, false),
+        (false, true),
+      ]) {
+        await tester.pumpWidget(
+          host(
+            ChatHeader(
+              name: 'Bot',
+              phone: phone,
+              voiceMode: voice,
+              onComputer: () => opened.add('$phone:$voice'),
+            ),
+            voice: voice,
+            size: phone ? const Size(390, 900) : const Size(1200, 900),
+          ),
+        );
+        await tester.pump();
+
+        final computer = byIdentifier(ShellIds.computerDestination);
+        expect(computer, findsOneWidget);
+        expect(
+          tester.getSemantics(computer).identifier,
+          ShellIds.computerDestination,
+        );
+        expect(find.byTooltip('Computer'), findsOneWidget);
+        await tester.tap(computer);
+      }
+
+      expect(opened, ['false:false', 'true:false', 'false:true']);
+    },
+  );
+
+  testWidgets(
     'the panel switch is the last thing in the chrome and says which way',
     (tester) async {
       tester.view.physicalSize = const Size(1200, 900);
@@ -231,7 +268,7 @@ void main() {
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           await tester.tap(byIdentifier(ShellIds.botPanelToggle));
-          await tester.tap(byIdentifier(ShellIds.computerToggle));
+          await tester.tap(byIdentifier(ShellIds.computerDestination));
           await tester.tap(byIdentifier(ShellIds.rightPanelToggle));
           expect(opened, ['Bot', 'Computer', 'Panel']);
           expect(find.byType(AppBar), findsNothing);
@@ -275,7 +312,7 @@ void main() {
         expect(byIdentifier(ShellIds.botPanelToggle), findsOneWidget);
         await tester.tap(byIdentifier(ShellIds.sidebarToggle));
         await tester.tap(byIdentifier(ShellIds.botPanelToggle));
-        await tester.tap(byIdentifier(ShellIds.computerToggle));
+        await tester.tap(byIdentifier(ShellIds.computerDestination));
         expect(opened, ['Bots', 'Bot', 'Computer']);
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,
