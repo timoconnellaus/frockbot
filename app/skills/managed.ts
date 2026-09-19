@@ -20,16 +20,9 @@
 //
 // READ-ONLY follows from the same fact. There is no path from `skill_write` to
 // an artifact, so `scope: "managed"` is refused rather than routed anywhere.
-import {
-  isSkillReferenceNameV1,
-  isSkillSlugV1,
-  parseSkillDocumentV1,
-  skillReferencePathForV1,
-  SKILL_FILE_NAME,
-  SKILL_MAX_FILE_BYTES,
-  SKILL_MAX_REFERENCES,
-} from "./skill-md.js";
+import { SKILL_FILE_NAME } from "./skill-md.js";
 import type { LoadedSkillV1, SkillRefusalV1 } from "./catalog.js";
+import { loadArtifactSkillsV1 } from "./artifact.js";
 import {
   APPLETS_SKILL_DOCUMENT_V1,
   APPLETS_SKILL_REFERENCES_V1,
@@ -45,7 +38,6 @@ import {
   A2UI_SKILL_REFERENCES_V1,
   A2UI_SKILL_SLUG_V1,
 } from "./managed-a2ui.generated.js";
-import { sha256HexTextV1 } from "@frockbot/core/crypto";
 
 // Re-exported because the generated modules they come from are not package
 // exports, and a caller outside this package needs the slugs to withhold them.
@@ -250,8 +242,6 @@ export function managedSkillPathV1(slug: string): string {
   return `${MANAGED_SKILL_PATH_PREFIX}/${slug}/${SKILL_FILE_NAME}`;
 }
 
-const sha256Hex = sha256HexTextV1;
-
 /**
  * Parses the bundled documents into loaded Skills.
  *
@@ -269,78 +259,10 @@ const sha256Hex = sha256HexTextV1;
 export async function loadManagedSkillsV1(
   documents: readonly ManagedSkillDocumentV1[] = MANAGED_SKILL_DOCUMENTS_V1,
 ): Promise<{ skills: LoadedSkillV1[]; refusals: SkillRefusalV1[] }> {
-  const skills: LoadedSkillV1[] = [];
-  const refusals: SkillRefusalV1[] = [];
-  for (const document of documents) {
-    const path = managedSkillPathV1(document.slug);
-    if (!isSkillSlugV1(document.slug)) {
-      refusals.push({
-        path,
-        kind: "malformed",
-        reason: `the managed Skill slug "${document.slug}" is not a well-formed slug`,
-      });
-      continue;
-    }
-    const parsed = parseSkillDocumentV1(document.text);
-    if (parsed.status !== "ok") {
-      refusals.push({ path, kind: "malformed", reason: parsed.reason });
-      continue;
-    }
-    const declared = document.references ?? [];
-    if (declared.length > SKILL_MAX_REFERENCES) {
-      refusals.push({
-        path,
-        kind: "oversized",
-        reason: `the Skill offers ${declared.length} references; the bound is ${SKILL_MAX_REFERENCES}`,
-      });
-      continue;
-    }
-    const oversized = declared.find(
-      (reference) =>
-        new TextEncoder().encode(reference.text).byteLength >
-        SKILL_MAX_FILE_BYTES,
-    );
-    if (oversized) {
-      refusals.push({
-        path,
-        kind: "oversized",
-        reason: `its reference ${oversized.path} is larger than ${SKILL_MAX_FILE_BYTES} bytes`,
-      });
-      continue;
-    }
-    const malformedReference = declared.find(
-      (reference) => !isSkillReferenceNameV1(reference.path),
-    );
-    if (malformedReference) {
-      refusals.push({
-        path,
-        kind: "malformed",
-        reason: `its reference "${malformedReference.path}" is not a single .md file name`,
-      });
-      continue;
-    }
-    const references = [];
-    for (const reference of declared) {
-      references.push({
-        path: skillReferencePathForV1(path, reference.path),
-        by: MANAGED_SKILL_ATTRIBUTION,
-        generationId: await sha256Hex(reference.text),
-        text: reference.text,
-      });
-    }
-    const contentHash = await sha256Hex(document.text);
-    skills.push({
-      path,
-      source: "managed",
-      ref: { schemaVersion: 1, source: "managed", slug: document.slug },
-      by: MANAGED_SKILL_ATTRIBUTION,
-      name: parsed.document.name,
-      description: parsed.document.description,
-      body: parsed.document.body,
-      references,
-      generationId: contentHash,
-      contentHash,
-    });
-  }
-  return { skills, refusals };
+  return loadArtifactSkillsV1(documents, (document) => ({
+    source: "managed",
+    ref: { schemaVersion: 1, source: "managed", slug: document.slug },
+    path: managedSkillPathV1(document.slug),
+    attribution: MANAGED_SKILL_ATTRIBUTION,
+  }));
 }

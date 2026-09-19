@@ -16,7 +16,11 @@ import {
   ISOLATE_CONTRACT_VERSION,
   type IsolateContractVersion,
 } from "./isolate.js";
-import { isSkillReferenceNameV1, isSkillRefSlugV1 } from "./skills.js";
+import {
+  ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1,
+  isSkillReferenceNameV1,
+  isSkillRefSlugV1,
+} from "./skills.js";
 import { assertEnforceableJsonSchemaV1 } from "./json-schema.js";
 import {
   PLUGIN_MODEL_PROTOCOL_VERSIONS_V1,
@@ -203,12 +207,12 @@ const MAX_PLUGIN_SKILL_BYTES_V1 = 65_536;
  * that write with nothing pointing at the Skill that caused it, so the total
  * is bounded here, where every other declared ceiling is refused.
  */
-const MAX_PLUGIN_SKILLS_TOTAL_BYTES_V1 = 262_144;
 const MAX_PLUGIN_SETTINGS_SCHEMA_BYTES_V1 = 65_536;
 const MAX_PLUGIN_CARDS_V1 = 16;
 const MAX_PLUGIN_CARD_ACTIONS_V1 = 16;
 const MAX_PLUGIN_CARD_SCHEMA_BYTES_V1 = 65_536;
 const MAX_PLUGIN_MODEL_PROVIDERS_V1 = 4;
+const PLUGIN_DESCRIPTOR_TEXT_ENCODER_V1 = new TextEncoder();
 /** A model provider type: the id a model binding names. */
 const PLUGIN_PROVIDER_ID = /^[a-z][a-z0-9-]{0,63}$/;
 
@@ -472,16 +476,18 @@ function decodePluginSkillsV1(input: unknown, label: string): PluginSkillV1[] {
   const total = skills.reduce(
     (bytes, skill) =>
       bytes +
-      skill.text.length +
+      PLUGIN_DESCRIPTOR_TEXT_ENCODER_V1.encode(skill.text).byteLength +
       (skill.references ?? []).reduce(
-        (referenced, reference) => referenced + reference.text.length,
+        (referenced, reference) =>
+          referenced +
+          PLUGIN_DESCRIPTOR_TEXT_ENCODER_V1.encode(reference.text).byteLength,
         0,
       ),
     0,
   );
-  if (total > MAX_PLUGIN_SKILLS_TOTAL_BYTES_V1) {
+  if (total > ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1) {
     throw new Error(
-      `${label} carries ${total} bytes of Skill text; the bound is ${MAX_PLUGIN_SKILLS_TOTAL_BYTES_V1}`,
+      `${label} carries ${total} bytes of Skill text; the bound is ${ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1}`,
     );
   }
   return skills;

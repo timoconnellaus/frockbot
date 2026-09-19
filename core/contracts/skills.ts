@@ -38,6 +38,9 @@ export interface SkillRefV1 {
 /** Most Skills one Turn may invoke. */
 export const MAX_INVOKED_SKILLS_V1 = 3;
 
+/** Most Skill text one managed or Plugin artifact group may carry in total. */
+export const ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 = 262_144;
+
 /** The file name that marks a directory as a Skill. */
 export const SKILL_DOCUMENT_FILE_NAME_V1 = "SKILL.md";
 
