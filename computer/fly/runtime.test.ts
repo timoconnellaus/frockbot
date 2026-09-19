@@ -529,7 +529,7 @@ describe("Sprite naming", () => {
   });
 
   test("refuses an empty User", () => {
-    expect(() => spriteName("   ")).toThrow(/non-empty userId/);
+    expect(() => spriteName("   ")).toThrow(/1-200 characters/);
   });
 });
 

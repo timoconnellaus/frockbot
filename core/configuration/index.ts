@@ -6,7 +6,11 @@ import {
   decodeConnectionAuthorizationViewV1,
   decodeConnectionModelCatalogV1,
 } from "@frockbot/core/connection";
-import type { PackageSettingDefinition } from "@frockbot/core/contracts";
+import {
+  indexPackageCatalogV1,
+  type PackageCatalogIndexV1,
+  type PackageSettingDefinition,
+} from "@frockbot/core/contracts";
 import { ConfigurationDecodeError } from "./errors.js";
 export {
   packageConfigurationHomeV1,
@@ -574,6 +578,15 @@ type ModelBindingEntityResolutionV1 =
   | { status: "resolved"; entities: ResolvedModelBindingEntitiesV1 }
   | { status: "failed"; failure: string };
 
+function executionPackageCatalogV1(
+  packages: readonly ExecutionPackageDefinition[],
+): PackageCatalogIndexV1<ExecutionPackageDefinition> {
+  return indexPackageCatalogV1(packages, ({ packageId, version }) => ({
+    packageId,
+    version,
+  }));
+}
+
 function compareIdentifiers(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -583,6 +596,7 @@ function resolveModelBindingEntitiesV1(input: {
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): ModelBindingEntityResolutionV1 {
+  const catalog = executionPackageCatalogV1(input.packages);
   const connection = input.user.connections.find(
     (candidate) => candidate.connectionId === input.model.connectionId,
   );
@@ -608,11 +622,7 @@ function resolveModelBindingEntitiesV1(input: {
       failure: "Turn this model's plugin back on in Plugins to use it.",
     };
   }
-  const pkg = input.packages.find(
-    (candidate) =>
-      candidate.packageId === connection.packageId &&
-      candidate.version === installation.version,
-  );
+  const pkg = catalog.get(connection.packageId, installation.version);
   if (!pkg) {
     return {
       status: "failed",
@@ -725,15 +735,12 @@ export function resolveEffectiveBotModelV1(input: {
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): EffectiveBotModelV1 {
+  const catalog = executionPackageCatalogV1(input.packages);
   const enabled = input.user.packages
     .filter((installation) => installation.state === "installed")
     .map((installation) => ({
       installation,
-      pkg: input.packages.find(
-        (candidate) =>
-          candidate.packageId === installation.packageId &&
-          candidate.version === installation.version,
-      ),
+      pkg: catalog.get(installation.packageId, installation.version),
     }))
     .filter(
       (
@@ -878,13 +885,10 @@ export function resolveBotExecutionPlanV1(input: {
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
 }): BotExecutionPlanV1 {
+  const catalog = executionPackageCatalogV1(input.packages);
   const capabilities = input.user.packages.flatMap((installation) => {
     if (installation.state !== "installed") return [];
-    const pkg = input.packages.find(
-      (candidate) =>
-        candidate.packageId === installation.packageId &&
-        candidate.version === installation.version,
-    );
+    const pkg = catalog.get(installation.packageId, installation.version);
     if (!pkg) return [];
     return pkg.capabilities.flatMap((capability): EnabledCapabilityV1[] => {
       const base = {
@@ -2094,10 +2098,10 @@ function migrateCatalogRelativeUserSettingsV1(
   scope: StoredUserSettingsMigrationScopeV1,
 ): Record<string, unknown> {
   const migrate = scope === "migrate";
-  const availableVersions = new Map(
-    packages.map((pkg) => [`${pkg.packageId}\u0000${pkg.version}`, pkg]),
-  );
-  const availablePackageIds = new Set(packages.map((pkg) => pkg.packageId));
+  const catalog = indexPackageCatalogV1(packages, ({ packageId, version }) => ({
+    packageId,
+    version,
+  }));
   const storedPackages = storedDataValueV1(settings, "packages");
   const storedConnections = storedDataValueV1(settings, "connections");
   if (!Array.isArray(storedPackages) || !Array.isArray(storedConnections)) {
@@ -2117,7 +2121,7 @@ function migrateCatalogRelativeUserSettingsV1(
     // A different immutable version remains a visible, repairable mismatch.
     // Only an id absent from the deployment proves that the Package was
     // retired and that its row is now orphaned durable state.
-    const retained = !migrate || availablePackageIds.has(packageId);
+    const retained = !migrate || catalog.has(packageId);
     if (!retained) retiredFirstPartyPackageIds.add(packageId);
     changed ||= !retained;
     return retained;
@@ -2127,21 +2131,18 @@ function migrateCatalogRelativeUserSettingsV1(
   // catalog-relative read, including records whose bootstrap ledger already
   // holds every current default, and collapse any duplicate rows to one current
   // first-party installation.
-  const platformPackages = new Map(
-    packages
-      .filter((pkg) => pkg.platformOwned)
-      .map((pkg) => [pkg.packageId, pkg]),
-  );
+  const platformPackages = catalog.entries.filter((pkg) => pkg.platformOwned);
   const repairedPlatformPackageIds = new Set<string>();
   installations = installations.flatMap((storedInstallation) => {
     const installation = storedPlainRecordV1(storedInstallation);
     const packageId = installation
       ? storedDataValueV1(installation, "packageId")
       : undefined;
-    const platformPackage =
-      typeof packageId === "string"
-        ? platformPackages.get(packageId)
-        : undefined;
+    const availablePackage =
+      typeof packageId === "string" ? catalog.get(packageId) : undefined;
+    const platformPackage = availablePackage?.platformOwned
+      ? availablePackage
+      : undefined;
     if (!installation || !platformPackage) return [storedInstallation];
     if (repairedPlatformPackageIds.has(platformPackage.packageId)) {
       changed = true;
@@ -2167,7 +2168,7 @@ function migrateCatalogRelativeUserSettingsV1(
       ),
     ];
   });
-  for (const platformPackage of platformPackages.values()) {
+  for (const platformPackage of platformPackages) {
     if (repairedPlatformPackageIds.has(platformPackage.packageId)) continue;
     changed = true;
     installations.push({
@@ -2207,7 +2208,7 @@ function migrateCatalogRelativeUserSettingsV1(
       if (typeof packageId !== "string" || typeof version !== "string") {
         return storedInstallation;
       }
-      const pkg = availableVersions.get(`${packageId}\u0000${version}`);
+      const pkg = catalog.get(packageId, version);
       if (!pkg || (pkg.dependencies ?? []).every((id) => enabledIds.has(id))) {
         return storedInstallation;
       }
@@ -2279,7 +2280,7 @@ function migrateCatalogRelativeUserSettingsV1(
       storedDataValueV1(connectionRecord, "state") === "ready" &&
       typeof ownerId === "string" &&
       typeof ownerVersion === "string" &&
-      availableVersions.has(`${ownerId}\u0000${ownerVersion}`);
+      catalog.has(ownerId, ownerVersion);
     if (binding && !resolvable) {
       changed = true;
       platformModel = undefined;

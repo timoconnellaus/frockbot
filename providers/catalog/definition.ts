@@ -2,19 +2,7 @@ import type {
   PackageDefinitionV1,
   PackageSettingDefinition,
 } from "@frockbot/core/contracts";
-import data from "./providers.json";
-export const oauthProviderIdsV1 = [
-  "openai-codex",
-  "github-copilot",
-  "kimi-coding",
-  "openrouter",
-  "xai",
-  "radius",
-] as const;
-
-export const catalogProvidersV1 = data.filter(
-  (provider) => provider.apiKey || provider.id === "openai-codex",
-);
+import { catalogProvidersV1, catalogSettingsV1 } from "./registry.js";
 
 /**
  * One provider this deployment serves only through a Plugin (ADR 0032).
@@ -103,13 +91,6 @@ export function pluginServedProvidersForPackageV1(
     (entry) => entry.packageId === packageId,
   );
 }
-export const catalogSettingKeysV1 = [
-  "region",
-  "account-id",
-  "gateway-id",
-  "api-version",
-] as const;
-
 function setting(
   id: string,
   title: string,
@@ -139,11 +120,7 @@ export const catalogProviderDefinitionsV1: PackageDefinitionV1[] =
         kind: "model",
         connectionTypes: [
           ...(provider.apiKey ? [`${provider.id}-account`] : []),
-          ...(oauthProviderIdsV1.includes(
-            provider.id as (typeof oauthProviderIdsV1)[number],
-          )
-            ? [`${provider.id}-oauth`]
-            : []),
+          ...(provider.oauthProviderId ? [`${provider.id}-oauth`] : []),
         ],
         admission: { turnTypes: ["chat", "agent", "automation", "subagent"] },
       },
@@ -166,25 +143,15 @@ export const catalogProviderDefinitionsV1: PackageDefinitionV1[] =
                   "API base URL",
                   "Optional endpoint override. Azure requires your resource endpoint.",
                 ),
-                ...(provider.id === "amazon-bedrock"
-                  ? [setting("region", "AWS region")]
-                  : []),
-                ...(provider.id.startsWith("cloudflare-")
-                  ? [setting("account-id", "Cloudflare account ID")]
-                  : []),
-                ...(provider.id === "cloudflare-ai-gateway"
-                  ? [setting("gateway-id", "Gateway ID")]
-                  : []),
-                ...(provider.id === "azure-openai-responses"
-                  ? [setting("api-version", "API version")]
-                  : []),
+                ...provider.connectionSettings.map((id) => {
+                  const metadata = catalogSettingsV1[id];
+                  return setting(metadata.id, metadata.title);
+                }),
               ],
             },
           ]
         : []),
-      ...(oauthProviderIdsV1.includes(
-        provider.id as (typeof oauthProviderIdsV1)[number],
-      )
+      ...(provider.oauthProviderId
         ? [
             {
               id: `${provider.id}-oauth`,

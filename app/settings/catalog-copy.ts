@@ -1,12 +1,5 @@
-import {
-  FOUNDATION_PACKAGES_V1,
-  foundationPackageV1,
-} from "@frockbot/app/packages";
+import { FOUNDATION_PACKAGE_CATALOG_V1 } from "@frockbot/app/packages";
 import { PLUGIN_SERVED_PROVIDERS_V1 } from "@frockbot/providers/catalog/definition";
-
-export const BUILT_IN_PACKAGE_IDS = new Set(
-  FOUNDATION_PACKAGES_V1.map((pkg) => pkg.id),
-);
 
 /**
  * What a provider Plugin does, keyed by the Package whose installation puts it
@@ -54,7 +47,7 @@ export function pluginsPageRowV1(plugin: {
   packageId: string;
   state: string;
 }): boolean {
-  if (!BUILT_IN_PACKAGE_IDS.has(plugin.packageId)) return true;
+  if (!FOUNDATION_PACKAGE_CATALOG_V1.has(plugin.packageId)) return true;
   return (
     providerPluginPackageV1(plugin.packageId) && plugin.state === "installed"
   );
@@ -82,9 +75,9 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
  * this surface offers like any other.
  */
 function providerPackageV1(packageId: string): boolean {
-  return (foundationPackageV1(packageId)?.capabilities ?? []).some(
-    (capability) => capability.kind === "model",
-  );
+  return (
+    FOUNDATION_PACKAGE_CATALOG_V1.get(packageId)?.capabilities ?? []
+  ).some((capability) => capability.kind === "model");
 }
 
 /**

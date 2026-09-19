@@ -17,10 +17,8 @@ import {
   type OllamaFetch,
 } from "./client.js";
 import { ollamaChatBaseUrl } from "./runtime.js";
-import {
-  createOllamaCloudUserBackendContribution,
-  type OllamaUserBackendHost,
-} from "./user.js";
+import { createOllamaCloudUserBackendContribution } from "./user.js";
+import type { ModelConnectionUserBackendHostV1 } from "../model-connections/user.js";
 
 class MemoryStorage implements UserSettingsStorage, CredentialStorage {
   readonly values = new Map<string, unknown>();
@@ -149,7 +147,8 @@ async function fixture(options: { reject?: (url: string) => boolean } = {}) {
   const ollama = createOllamaCloudUserBackendContribution({
     storage,
     settings,
-    credentials: credentials as unknown as OllamaUserBackendHost["credentials"],
+    credentials:
+      credentials as unknown as ModelConnectionUserBackendHostV1["credentials"],
     createClient: (config) => {
       configs.push(config.apiBaseUrl);
       return new OllamaCloudClient({ ...config, fetch });
@@ -380,7 +379,7 @@ describe("Ollama endpoint contract", () => {
         storage: base.storage,
         keyring: keyring(),
         now: () => Date.parse("2026-08-30T00:00:00.000Z"),
-      }) as unknown as OllamaUserBackendHost["credentials"],
+      }) as unknown as ModelConnectionUserBackendHostV1["credentials"],
       client: new OllamaCloudClient({
         apiBaseUrl: "https://stub.example.com",
         fetch: (input) => {

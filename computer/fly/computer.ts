@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   COMPUTER_UNCONFIGURED_MESSAGE_V1,
+  computerBotPathKeyV1,
   ComputerError,
   type ComputerOperationOptions,
 } from "@frockbot/computer/core";
@@ -245,7 +246,7 @@ function provisioningMessage(progress: ComputerHostProvisioningV1): string {
     : `Preparing the Computer: ${progress.label}`;
 }
 
-function configuredName(): string {
+export function configuredName(): string {
   const name = process.env.FROCKBOT_SPRITE_NAME?.trim() || "frockbot-barebones";
   if (!/^[a-z][a-z0-9-]{2,62}$/.test(name)) {
     throw new Error(
@@ -253,21 +254,6 @@ function configuredName(): string {
     );
   }
   return name;
-}
-
-export function flySpriteNameForBot(
-  botId: string,
-  baseName = configuredName(),
-): string {
-  const normalizedBase = baseName.trim();
-  if (!/^[a-z][a-z0-9-]{2,62}$/.test(normalizedBase)) {
-    throw new Error(
-      "Fly Sprite base name must be 3-63 lowercase letters, numbers, or hyphens",
-    );
-  }
-  const suffix = createHash("sha256").update(botId).digest("hex").slice(0, 12);
-  const prefix = normalizedBase.slice(0, 49).replace(/-+$/g, "");
-  return `${prefix}-${suffix}`;
 }
 
 function normalizedIdentity(
@@ -286,15 +272,7 @@ function normalizedIdentity(
 }
 
 export function computerBotKey(botId: string): string {
-  const id = normalizedIdentity(botId).id;
-  const slug = id
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 28);
-  const digest = createHash("sha256").update(id).digest("hex").slice(0, 12);
-  return `${slug || "bot"}-${digest}`;
+  return computerBotPathKeyV1(normalizedIdentity(botId).id);
 }
 
 function layoutFor(input: string | ComputerBotIdentity): AgentLayout {

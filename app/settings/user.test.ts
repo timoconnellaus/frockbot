@@ -95,6 +95,18 @@ async function installOllama(
 }
 
 describe("User settings backend Contribution", () => {
+  test("rejects an ambiguous Package catalog before reading durable state", () => {
+    expect(() =>
+      createUserSettingsBackendContribution({
+        storage: new MemoryStorage(),
+        availablePackages: [
+          { packageId: "web", version: "1.0.0" },
+          { packageId: "web", version: "2.0.0" },
+        ],
+      }),
+    ).toThrow('duplicate Package id "web"');
+  });
+
   test("reads old settings purely and writes the migrated shape on the next command", async () => {
     const storage = new MemoryStorage();
     // Literal durable shape from eb0283edcce5daea976a21a9f6a6414bedc6e2bc,

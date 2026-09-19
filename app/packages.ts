@@ -6,7 +6,10 @@
 // exports that data from its own package as a `PackageDefinitionV1`. A
 // Package with none of it appears here as an id and a display name, which is
 // all the product ever needed to know about it.
-import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
+import {
+  indexPackageCatalogV1,
+  type PackageDefinitionV1,
+} from "@frockbot/core/contracts";
 import { adminDefinitionV1 } from "@frockbot/app/admin/definition";
 import { appletsDefinitionV1 } from "@frockbot/applets/definition";
 import { auditDefinitionV1 } from "@frockbot/app/audit/definition";
@@ -41,45 +44,39 @@ import { webDefinitionV1 } from "@frockbot/app/web/definition";
  */
 export const FOUNDATION_PACKAGE_VERSION_V1 = "0.0.1";
 
-export const FOUNDATION_PACKAGES_V1: readonly PackageDefinitionV1[] = [
-  uiThemeDefinitionV1,
-  authDefinitionV1,
-  adminDefinitionV1,
-  { id: "identity", displayName: "FrockBot Identity" },
-  { id: "provider-foundation", displayName: "Built-in models" },
-  { id: "skills", displayName: "Skills" },
-  { id: "echo", displayName: "Echo" },
-  shellDefinitionV1,
-  settingsDefinitionV1,
-  customModelsDefinitionV1,
-  routinesDefinitionV1,
-  credentialsDefinitionV1,
-  connectDefinitionV1,
-  webDefinitionV1,
-  voiceDefinitionV1,
-  providerOllamaCloudDefinitionV1,
-  providerFlockAiDefinitionV1,
-  ...catalogProviderDefinitionsV1,
-  flockDefinitionV1,
-  botTemplateDefinitionV1,
-  searchDefinitionV1,
-  auditDefinitionV1,
-  { id: "clock", displayName: "Clock" },
-  { id: "memory", displayName: "Memory" },
-  imageDefinitionV1,
-  computerDefinitionV1,
-  { id: "computer-host", displayName: "Computer" },
-  userMachineDefinitionV1,
-  machineMessagesDefinitionV1,
-  subagentsDefinitionV1,
-  appletsDefinitionV1,
-];
-
-/** One Package's definition, or `undefined` when this deployment has none. */
-export function foundationPackageV1(
-  packageId: string,
-): PackageDefinitionV1 | undefined {
-  return FOUNDATION_PACKAGES_V1.find(
-    (definition) => definition.id === packageId,
-  );
-}
+export const FOUNDATION_PACKAGE_CATALOG_V1 = indexPackageCatalogV1(
+  [
+    uiThemeDefinitionV1,
+    authDefinitionV1,
+    adminDefinitionV1,
+    { id: "identity", displayName: "FrockBot Identity" },
+    { id: "provider-foundation", displayName: "Built-in models" },
+    { id: "skills", displayName: "Skills" },
+    { id: "echo", displayName: "Echo" },
+    shellDefinitionV1,
+    settingsDefinitionV1,
+    customModelsDefinitionV1,
+    routinesDefinitionV1,
+    credentialsDefinitionV1,
+    connectDefinitionV1,
+    webDefinitionV1,
+    voiceDefinitionV1,
+    providerOllamaCloudDefinitionV1,
+    providerFlockAiDefinitionV1,
+    ...catalogProviderDefinitionsV1,
+    flockDefinitionV1,
+    botTemplateDefinitionV1,
+    searchDefinitionV1,
+    auditDefinitionV1,
+    { id: "clock", displayName: "Clock" },
+    { id: "memory", displayName: "Memory" },
+    imageDefinitionV1,
+    computerDefinitionV1,
+    { id: "computer-host", displayName: "Computer" },
+    userMachineDefinitionV1,
+    machineMessagesDefinitionV1,
+    subagentsDefinitionV1,
+    appletsDefinitionV1,
+  ] satisfies readonly PackageDefinitionV1[],
+  ({ id }) => ({ packageId: id }),
+);

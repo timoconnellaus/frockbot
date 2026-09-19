@@ -4,32 +4,35 @@ import {
 } from "@frockbot/core/connection";
 import { ModelOAuthUserV1 } from "./oauth-user.js";
 import {
-  oauthProviderIdsV1,
   decodeOAuthTokenV1,
   encodeOAuthTokenV1,
   refreshOAuthV1,
   OAUTH_SECRET_PREFIX,
-  type OAuthProviderIdV1,
 } from "./oauth-protocol.js";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 import {
   modelConnectionLifecycleV1,
-  type OllamaCloudUserApplicationHostV1,
+  type ModelConnectionsUserApplicationHostV1,
   type ModelConnectionClientV1,
-  type OllamaUserBackendHost,
-} from "../ollama-cloud/user.js";
-import { catalogProvidersV1, catalogSettingKeysV1 } from "./definition.js";
+  type ModelConnectionUserBackendHostV1,
+} from "../model-connections/user.js";
+import {
+  catalogProvidersV1,
+  catalogSettingKeysV1,
+  validateCatalogSettingsV1,
+  type CatalogProviderV1,
+} from "./registry.js";
 import { connectionModelV1, loadProviderModelsV1 } from "./models.js";
 
 function catalogClientV1(
-  providerId: string,
+  provider: CatalogProviderV1,
   baseUrl?: string,
 ): ModelConnectionClientV1 {
   return {
     async listModels(apiKey) {
       return (
         await loadProviderModelsV1(
-          providerId,
+          provider,
           decodeOAuthTokenV1(apiKey)?.access ?? apiKey,
           baseUrl,
         )
@@ -40,14 +43,14 @@ function catalogClientV1(
     async resolveModel(apiKey, id) {
       const model = (
         await loadProviderModelsV1(
-          providerId,
+          provider,
           decodeOAuthTokenV1(apiKey)?.access ?? apiKey,
           baseUrl,
         )
       ).find((candidate) => candidate.id === id);
       if (!model)
         throw new Error(
-          `Model "${id}" is absent from the installed ${providerId} catalog`,
+          `Model "${id}" is absent from the installed ${provider.id} catalog`,
         );
       return connectionModelV1(model, "exact-resolution");
     },
@@ -55,28 +58,36 @@ function catalogClientV1(
     async probeInference() {},
   };
 }
-export function validateCatalogSettingsV1(
-  providerId: string,
-  settings: Record<string, string>,
-): void {
-  if (providerId === "azure-openai-responses" && !settings["api-base-url"])
-    throw new Error("Azure requires your resource API base URL");
-  if (providerId.startsWith("cloudflare-") && !settings["api-base-url"]) {
-    if (!/^[a-f0-9]{32}$/i.test(settings["account-id"] ?? ""))
-      throw new Error("Cloudflare requires a valid account ID");
-    if (
-      providerId === "cloudflare-ai-gateway" &&
-      !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(settings["gateway-id"] ?? "")
-    )
-      throw new Error("Cloudflare AI Gateway requires a gateway ID");
+function decodeCatalogApiBaseUrlV1(
+  displayName: string,
+  value: unknown,
+): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 2_048) {
+    throw new Error(`${displayName} endpoint must be an absolute HTTP URL`);
   }
-  if (settings.region && !/^[a-z]{2}(?:-[a-z]+)+-\d+$/.test(settings.region))
-    throw new Error("AWS region is invalid");
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    throw new Error(`${displayName} endpoint must be an absolute HTTP URL`);
+  }
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(
+      `${displayName} endpoint must use HTTP or HTTPS without credentials, query or fragment`,
+    );
+  }
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
 }
 
 export function createCatalogConnectionOwnerV1(
-  provider: (typeof catalogProvidersV1)[number],
-  host: OllamaUserBackendHost,
+  provider: CatalogProviderV1,
+  host: ModelConnectionUserBackendHostV1,
 ) {
   const Contribution = modelConnectionLifecycleV1({
     packageId: `provider-${provider.id}`,
@@ -85,15 +96,17 @@ export function createCatalogConnectionOwnerV1(
     providerType: provider.id,
     storagePrefix: `catalog-${provider.id}`,
     settingKeys: catalogSettingKeysV1,
+    apiBaseUrl: {
+      settingKey: "api-base-url",
+      decode: (value) => decodeCatalogApiBaseUrlV1(provider.name, value),
+    },
+    createClient: ({ apiBaseUrl }) => catalogClientV1(provider, apiBaseUrl),
     validateSettings: (settings) =>
-      validateCatalogSettingsV1(provider.id, settings),
+      validateCatalogSettingsV1(provider, settings),
   });
-  const keyed = new Contribution({
-    ...host,
-    createClient: ({ apiBaseUrl }) => catalogClientV1(provider.id, apiBaseUrl),
-  });
-  const oauthId = oauthProviderIdsV1.find((id) => id === provider.id);
-  if (!oauthId) return keyed;
+  const keyed = new Contribution(host);
+  if (!provider.oauthProviderId) return keyed;
+  const oauthId = provider.oauthProviderId;
   const OAuthContribution = modelConnectionLifecycleV1({
     packageId: `provider-${provider.id}`,
     displayName: provider.name,
@@ -101,10 +114,10 @@ export function createCatalogConnectionOwnerV1(
     providerType: provider.id,
     storagePrefix: `catalog-oauth-${provider.id}`,
     authorizationKind: "grant",
+    createClient: ({ apiBaseUrl }) => catalogClientV1(provider, apiBaseUrl),
   });
   const oauth = new OAuthContribution({
     ...host,
-    createClient: () => catalogClientV1(provider.id),
     beforeModelLease: async (input) => {
       try {
         await host.credentials.refreshActiveSecret({
@@ -230,13 +243,13 @@ export function createCatalogConnectionOwnerV1(
 }
 export const catalogUserContributionsV1 = catalogProvidersV1.map((provider) =>
   defineUserBackendContribution<
-    OllamaCloudUserApplicationHostV1,
+    ModelConnectionsUserApplicationHostV1,
     ReturnType<typeof createCatalogConnectionOwnerV1>
   >({
     specifier: `@frockbot/providers/catalog/user/${provider.id}`,
     mount: (host, lifecycle) =>
       lifecycle.mount(
-        createCatalogConnectionOwnerV1(provider, host.ollamaCloud),
+        createCatalogConnectionOwnerV1(provider, host.modelConnections),
       ),
   }),
 );

@@ -27,6 +27,10 @@ import {
   systemWithInstructionV1,
 } from "../openai-compatible/index.js";
 import { loadProviderModelsV1 } from "./models.js";
+import {
+  catalogRuntimeEnvironmentV1,
+  type CatalogProviderV1,
+} from "./registry.js";
 
 const providers = new Map(
   builtinProviders().map((provider) => [provider.id, provider]),
@@ -165,7 +169,7 @@ export async function* decodeCatalogStreamV1(
 }
 
 export interface CatalogRuntimeConfigV1 {
-  providerId: string;
+  catalogProvider: CatalogProviderV1;
   accountId: string;
   connectionId: string;
   settings?: Record<string, unknown>;
@@ -174,7 +178,7 @@ export interface CatalogRuntimeConfigV1 {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential(effectId: string): Promise<void>;
-  provider?: Provider;
+  implementation?: Provider;
 }
 
 class CatalogProvider implements LlmProvider {
@@ -184,7 +188,7 @@ class CatalogProvider implements LlmProvider {
     private readonly config: CatalogRuntimeConfigV1,
     private readonly credentials: CredentialLeaseRuntime,
   ) {
-    this.id = config.providerId;
+    this.id = config.catalogProvider.id;
   }
   async *stream(
     request: NormalizedModelRequest,
@@ -222,7 +226,11 @@ class CatalogProvider implements LlmProvider {
       (typeof config.settings?.["api-base-url"] === "string"
         ? config.settings["api-base-url"]
         : undefined);
-    const catalog = await loadProviderModelsV1(this.id, apiKey, endpoint);
+    const catalog = await loadProviderModelsV1(
+      config.catalogProvider,
+      apiKey,
+      endpoint,
+    );
     const selected = catalog.find((model) => model.id === request.model);
     if (!selected)
       throw new ModelProviderFailureError({
@@ -230,21 +238,12 @@ class CatalogProvider implements LlmProvider {
         reason: `Model "${request.model}" is unavailable from ${this.id}`,
       });
     const model = endpoint ? { ...selected, baseUrl: endpoint } : selected;
-    const provider = config.provider ?? providers.get(this.id);
+    const provider = config.implementation ?? providers.get(this.id);
     if (!provider) throw new Error(`Provider ${this.id} is unavailable`);
-    const env: Record<string, string> = {};
-    for (const [setting, name] of Object.entries({
-      region: "AWS_REGION",
-      "account-id": "CLOUDFLARE_ACCOUNT_ID",
-      "gateway-id": "CLOUDFLARE_GATEWAY_ID",
-      "api-version": "AZURE_OPENAI_API_VERSION",
-    })) {
-      const value = config.settings?.[setting];
-      if (typeof value === "string") env[name] = value;
-    }
+    const env = catalogRuntimeEnvironmentV1(config.settings);
     const plan = structuredOutputPlanV1(request, "none");
     if (plan.note) yield { type: "response-format-note", note: plan.note };
-    if (this.id === "amazon-bedrock") {
+    if (config.catalogProvider.runtimeAdapter === "bedrock") {
       const region =
         typeof config.settings?.region === "string"
           ? config.settings.region
@@ -282,14 +281,19 @@ class CatalogProvider implements LlmProvider {
               model,
               catalogContextV1(request, model, plan.instruction),
               {
-                apiKey: oauth && this.id === "kimi-coding" ? undefined : apiKey,
+                apiKey:
+                  oauth &&
+                  config.catalogProvider.oauthRequestAuth === "bearer-header"
+                    ? undefined
+                    : apiKey,
                 env,
                 signal: deadlineSignal,
                 maxRetries: 0,
                 transport: "sse",
                 headers: {
                   "Idempotency-Key": request.requestId,
-                  ...(oauth && this.id === "kimi-coding"
+                  ...(oauth &&
+                  config.catalogProvider.oauthRequestAuth === "bearer-header"
                     ? { Authorization: `Bearer ${oauth.access}` }
                     : {}),
                 },

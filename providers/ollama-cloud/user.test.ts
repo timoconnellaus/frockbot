@@ -10,11 +10,11 @@ import {
   type UserSettingsTransaction,
 } from "@frockbot/app/settings/user";
 import { OllamaCloudClient, type OllamaFetch } from "./client.js";
+import { createOllamaCloudUserBackendContribution } from "./user.js";
 import {
   catalogRetryDelayMsV1,
-  createOllamaCloudUserBackendContribution,
-  type OllamaUserBackendHost,
-} from "./user.js";
+  type ModelConnectionUserBackendHostV1,
+} from "../model-connections/user.js";
 
 class MemoryStorage implements UserSettingsStorage, CredentialStorage {
   readonly values = new Map<string, unknown>();
@@ -172,7 +172,8 @@ async function fixture(
   const ollama = createOllamaCloudUserBackendContribution({
     storage,
     settings,
-    credentials: credentials as unknown as OllamaUserBackendHost["credentials"],
+    credentials:
+      credentials as unknown as ModelConnectionUserBackendHostV1["credentials"],
     client,
     now,
     randomId: () => `id-${++id}`,

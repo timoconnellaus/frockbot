@@ -3,12 +3,12 @@ import {
   decodeOAuthTokenV1,
   encodeOAuthTokenV1,
   type OAuthFlowV1,
-  type OAuthProviderIdV1,
   type OAuthTokenV1,
   pollOAuthV1,
   refreshOAuthV1,
   startOAuthV1,
 } from "./oauth-protocol.js";
+import type { OAuthProviderIdV1 } from "./registry.js";
 
 interface FetchCall {
   url: string;

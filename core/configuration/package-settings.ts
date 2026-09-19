@@ -25,6 +25,7 @@ import type {
   PackageSettingSchema,
   PackageSettingSchemaValue,
 } from "@frockbot/core/contracts";
+import { indexPackageCatalogV1 } from "@frockbot/core/contracts";
 import { ConfigurationDecodeError } from "./errors.js";
 import { isConnectionIdentifier, isPublicIdentifier } from "./identifiers.js";
 
@@ -432,11 +433,10 @@ export function decodeInstalledPackageSettingsPatchV1(input: {
       `Package "${input.packageId}" is not installed`,
     );
   }
-  const pkg = input.packages.find(
-    (candidate) =>
-      candidate.packageId === installation.packageId &&
-      candidate.version === installation.version,
-  );
+  const pkg = indexPackageCatalogV1(
+    input.packages,
+    ({ packageId, version }) => ({ packageId, version }),
+  ).get(installation.packageId, installation.version);
   if (!pkg) {
     throw new ConfigurationDecodeError(
       `Installed Package "${installation.packageId}" version "${installation.version}" has no manifest`,
@@ -461,11 +461,10 @@ export function decodeInstalledPackageSettingIdsV1(input: {
       `Package "${input.packageId}" is not installed`,
     );
   }
-  const pkg = input.packages.find(
-    (candidate) =>
-      candidate.packageId === installation.packageId &&
-      candidate.version === installation.version,
-  );
+  const pkg = indexPackageCatalogV1(
+    input.packages,
+    ({ packageId, version }) => ({ packageId, version }),
+  ).get(installation.packageId, installation.version);
   if (!pkg) {
     throw new ConfigurationDecodeError(
       `Installed Package "${installation.packageId}" version "${installation.version}" has no manifest`,

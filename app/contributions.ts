@@ -70,10 +70,8 @@ import {
   userContribution as connectUserContribution,
   type ConnectUserApplicationHostV1,
 } from "@frockbot/app/connect/user";
-import {
-  userContribution as ollamaCloudUserContribution,
-  type OllamaCloudUserApplicationHostV1,
-} from "@frockbot/providers/ollama-cloud/user";
+import { userContribution as ollamaCloudUserContribution } from "@frockbot/providers/ollama-cloud/user";
+import type { ModelConnectionsUserApplicationHostV1 } from "@frockbot/providers/model-connections/user";
 import {
   userContribution as frockAiUserContribution,
   type FrockAiUserApplicationHostV1,
@@ -223,7 +221,7 @@ export type FoundationUserBackendHostV1 = {
 } & SettingsUserApplicationHostV1 &
   CredentialsUserApplicationHostV1 &
   ConnectUserApplicationHostV1 &
-  OllamaCloudUserApplicationHostV1 &
+  ModelConnectionsUserApplicationHostV1 &
   FrockAiUserApplicationHostV1 &
   BotTemplateUserApplicationHostV1 &
   MachineUserApplicationHostV1 &

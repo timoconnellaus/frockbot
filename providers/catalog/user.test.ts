@@ -11,8 +11,10 @@ import {
 } from "@frockbot/app/settings/user";
 import {
   modelConnectionLifecycleV1,
-  type OllamaUserBackendHost,
-} from "../ollama-cloud/user.js";
+  type ModelConnectionUserBackendHostV1,
+} from "../model-connections/user.js";
+import { catalogProvidersV1 } from "./registry.js";
+import { createCatalogConnectionOwnerV1 } from "./user.js";
 
 class Storage implements UserSettingsStorage, CredentialStorage {
   readonly values = new Map<string, unknown>();
@@ -83,9 +85,13 @@ test("provider connections isolate command receipts, credentials, and disabled a
     });
     const Contribution = modelConnectionLifecycleV1({
       packageId: `provider-${id}`,
+      displayName: id,
       connectionTypeId: `${id}-account`,
       providerType: id,
       storagePrefix: `catalog-${id}`,
+      createClient: () => {
+        throw new Error("the test host client should win");
+      },
     });
     const model = {
       providerModelId: "model",
@@ -96,7 +102,8 @@ test("provider connections isolate command receipts, credentials, and disabled a
     const owner = new Contribution({
       storage,
       settings,
-      credentials: credentials as OllamaUserBackendHost["credentials"],
+      credentials:
+        credentials as ModelConnectionUserBackendHostV1["credentials"],
       client: {
         async listModels() {
           return [model];
@@ -162,4 +169,95 @@ test("provider connections isolate command receipts, credentials, and disabled a
   ).rejects.toThrow();
   expect(JSON.stringify([...storage.values])).not.toContain("deepseek-secret");
   expect(JSON.stringify([...storage.values])).not.toContain("google-secret");
+});
+
+test("a catalog provider owns its endpoint language and client selection", async () => {
+  const provider = catalogProvidersV1.find(({ id }) => id === "deepseek")!;
+  const storage = new Storage();
+  const settings = createUserSettingsBackendContribution({
+    storage,
+    availablePackages: [{ packageId: "provider-deepseek", version: "0.0.1" }],
+  });
+  await settings.executeConfiguration({
+    schemaVersion: 1,
+    userId: "user-1",
+    command: {
+      schemaVersion: 1,
+      type: "user/install-package",
+      commandId: "install-deepseek",
+      expectedRevision: 0,
+      packageId: "provider-deepseek",
+      version: "0.0.1",
+    },
+  });
+  const credentials = createCredentialUserBackendContribution({
+    storage,
+    keyring: JSON.stringify({
+      schemaVersion: 1,
+      currentKeyId: "primary",
+      keys: {
+        primary: btoa("y".repeat(32))
+          .replaceAll("+", "-")
+          .replaceAll("/", "_")
+          .replace(/=+$/, ""),
+      },
+    }),
+  });
+  const endpoints: Array<string | undefined> = [];
+  const model = {
+    providerModelId: "deepseek-chat",
+    displayName: "DeepSeek Chat",
+    capabilities: { tools: true, vision: false, reasoning: false },
+    source: "discovered" as const,
+  };
+  let id = 0;
+  const owner = createCatalogConnectionOwnerV1(provider, {
+    storage,
+    settings,
+    credentials: credentials as ModelConnectionUserBackendHostV1["credentials"],
+    createClient: ({ apiBaseUrl }) => {
+      endpoints.push(apiBaseUrl);
+      return {
+        async listModels() {
+          return [model];
+        },
+        async resolveModel() {
+          return model;
+        },
+        async probeInference() {},
+      };
+    },
+    randomId: () => `catalog-id-${++id}`,
+  });
+
+  const accepted = await owner.executeConnection("user-1", {
+    schemaVersion: 1,
+    type: "connection/create-api-key",
+    commandId: "connect-deepseek",
+    packageId: "provider-deepseek",
+    connectionTypeId: "deepseek-account",
+    label: "Primary",
+    apiKey: "secret",
+    settings: { "api-base-url": "https://proxy.example/v1/" },
+  });
+  expect(accepted.status).toBe("applied");
+  expect(endpoints).toContain("https://proxy.example/v1");
+
+  const refused = await owner.executeConnection("user-1", {
+    schemaVersion: 1,
+    type: "connection/create-api-key",
+    commandId: "connect-invalid-deepseek",
+    packageId: "provider-deepseek",
+    connectionTypeId: "deepseek-account",
+    label: "Invalid",
+    apiKey: "secret",
+    settings: { "api-base-url": "not a URL" },
+  });
+  expect(refused.status).toBe("failed");
+  const connection = await settings.getConnection(
+    "user-1",
+    refused.connectionId,
+  );
+  expect(connection?.failure).toContain("DeepSeek endpoint");
+  expect(connection?.failure).not.toContain("Ollama");
 });

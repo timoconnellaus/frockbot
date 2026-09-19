@@ -10,14 +10,12 @@ import type {
 } from "@frockbot/app/settings/user";
 import { createUserSettingsBackendContribution } from "@frockbot/app/settings/user";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/core/connection";
-import type { OllamaUserBackendHost } from "../ollama-cloud/user.js";
-import {
-  catalogProviderDefinitionsV1,
-  catalogProvidersV1,
-} from "./definition.js";
+import type { ModelConnectionUserBackendHostV1 } from "../model-connections/user.js";
+import { catalogProviderDefinitionsV1 } from "./definition.js";
 import { providerModelsV1 } from "./models.js";
 import { decodeOAuthTokenV1 } from "./oauth-protocol.js";
 import { ModelOAuthUserV1 } from "./oauth-user.js";
+import { catalogProviderV1, catalogProvidersV1 } from "./registry.js";
 import { createCatalogConnectionOwnerV1 } from "./user.js";
 
 class MemoryStorage implements UserSettingsStorage, CredentialStorage {
@@ -136,9 +134,9 @@ function fixture(provider: "xai" | "openrouter", initialNow = 1_000_000) {
         if (accountId !== "account-1") throw new Error("unknown account");
         return {};
       },
-    } as unknown as OllamaUserBackendHost["settings"],
+    } as unknown as ModelConnectionUserBackendHostV1["settings"],
     now: () => clock.now,
-  } satisfies OllamaUserBackendHost;
+  } satisfies ModelConnectionUserBackendHostV1;
   const install = async (
     accountId: string,
     attemptId: string,
@@ -249,7 +247,8 @@ describe("durable model OAuth manager", () => {
     const owner = createCatalogConnectionOwnerV1(provider, {
       storage,
       settings,
-      credentials: credentials as OllamaUserBackendHost["credentials"],
+      credentials:
+        credentials as ModelConnectionUserBackendHostV1["credentials"],
       now: () => clock.now,
       randomId: () => crypto.randomUUID(),
     });
@@ -299,7 +298,7 @@ describe("durable model OAuth manager", () => {
       providerType: "xai",
       state: "ready",
     });
-    const providerModelId = providerModelsV1("xai")[0]!.id;
+    const providerModelId = providerModelsV1(catalogProviderV1("xai"))[0]!.id;
     const lease = await owner.leaseModelCredential({
       accountId: "account-1",
       connectionId: completed.connectionId,

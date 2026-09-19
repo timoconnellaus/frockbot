@@ -1,8 +1,6 @@
 /** Hosted equivalents of pi-ai 0.85.1 OAuth flows; no loopback servers or ambient credentials. */
 import { withDeadlineV1 } from "@frockbot/core/deadline";
-import { oauthProviderIdsV1 } from "./definition.js";
-export { oauthProviderIdsV1 };
-export type OAuthProviderIdV1 = (typeof oauthProviderIdsV1)[number];
+import type { OAuthProviderIdV1 } from "./registry.js";
 export const OAUTH_SECRET_PREFIX = "frockbot-oauth:";
 export interface OAuthTokenV1 {
   access: string;

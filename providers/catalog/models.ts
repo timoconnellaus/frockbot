@@ -9,21 +9,22 @@ import {
   getBuiltinModels,
   getBuiltinProviders,
 } from "@earendil-works/pi-ai/providers/all";
+import type { CatalogProviderV1 } from "./registry.js";
 
-export function providerModelsV1(providerId: string): Model<Api>[] {
-  const provider = getBuiltinProviders().find((id) => id === providerId);
-  return provider ? getBuiltinModels(provider) : [];
+export function providerModelsV1(provider: CatalogProviderV1): Model<Api>[] {
+  const builtin = getBuiltinProviders().find((id) => id === provider.id);
+  return builtin ? getBuiltinModels(builtin) : [];
 }
 export async function loadProviderModelsV1(
-  providerId: string,
+  provider: CatalogProviderV1,
   apiKey: string,
   baseUrl?: string,
 ): Promise<Model<Api>[]> {
-  if (providerId !== "radius") return providerModelsV1(providerId);
+  if (provider.modelSource === "builtin") return providerModelsV1(provider);
   const deadline = withDeadlineV1(15_000);
   try {
     return getRadiusModelsFromConfig(
-      providerId,
+      provider.id,
       await loadRadiusGatewayConfig(
         baseUrl ?? "https://radius.pi.dev",
         apiKey,

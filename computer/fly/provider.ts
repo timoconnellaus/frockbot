@@ -26,13 +26,15 @@ import {
 import { type WorkspaceRootV1 } from "@frockbot/core/contracts";
 import {
   computerBotKey,
+  configuredName,
   type BrowserAction,
   type ComputerHostFactoryV1,
   FlyComputer,
   type FlyAgentComputer,
-  flySpriteNameForBot,
 } from "./computer.js";
 import {
+  computerSpriteNameSourceV1,
+  computerSpriteNameV1,
   computerGuiRefusalV1,
   DESKTOP_SLOTS,
   SCRATCH_ROOT,
@@ -557,8 +559,17 @@ function handle(
  * from nothing else, so every Bot the User owns lands on the same Computer,
  * sharing its browser profile, installed tooling, and Workspace.
  */
-export function flySpriteNameForComputer(identity: ComputerIdentityV1): string {
-  return flySpriteNameForBot(JSON.stringify(["user", identity.userId.trim()]));
+export function flySpriteNameForComputer(
+  identity: ComputerIdentityV1,
+  baseName = configuredName(),
+): string {
+  const userId = identity.userId.trim();
+  const source = computerSpriteNameSourceV1(userId);
+  return computerSpriteNameV1(
+    userId,
+    createHash("sha256").update(source).digest("hex"),
+    baseName,
+  );
 }
 
 /** Provider adapter that keeps Fly-specific lifecycle behind Computer core. */

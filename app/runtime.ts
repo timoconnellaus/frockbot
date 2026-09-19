@@ -1,7 +1,5 @@
-import {
-  catalogProvidersV1,
-  PLUGIN_SERVED_PROVIDER_IDS_V1,
-} from "@frockbot/providers/catalog/definition";
+import { PLUGIN_SERVED_PROVIDER_IDS_V1 } from "@frockbot/providers/catalog/definition";
+import { catalogProvidersV1 } from "@frockbot/providers/catalog/registry";
 import { createCatalogProviderFeatureV1 } from "@frockbot/providers/catalog/runtime";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import { createConfiguredConnectRuntimeContribution } from "@frockbot/app/connect/agent";
@@ -107,13 +105,12 @@ import { createPluginsFeature } from "@frockbot/app/plugins/feature";
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 import {
-  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_CATALOG_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "./packages.js";
 export {
-  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_CATALOG_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
-  foundationPackageV1,
 } from "./packages.js";
 
 /** Everything a feature may register into, for one Turn. */
@@ -369,7 +366,7 @@ const modelRuntimeContributionFactories = new Map<
           if (!config.leaseCredential || !config.settleCredential)
             throw new Error(`${provider.name} credential host is unavailable`);
           return createCatalogProviderFeatureV1({
-            providerId: provider.id,
+            catalogProvider: provider,
             accountId: config.accountId,
             connectionId: config.connectionId,
             settings: config.settings,
@@ -630,7 +627,7 @@ export function createFoundationModelRuntimePackage(
  * reads no part of this application directly.
  */
 export const foundationShellApplicationV1: ShellApplicationV1 = {
-  packages: FOUNDATION_PACKAGES_V1,
+  packages: FOUNDATION_PACKAGE_CATALOG_V1.entries,
   packageVersion: FOUNDATION_PACKAGE_VERSION_V1,
   runtime: {
     base: foundationBaseRuntimePackagesV1,
