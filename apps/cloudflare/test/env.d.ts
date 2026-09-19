@@ -13,6 +13,9 @@ import type { D1Migration } from "cloudflare:test";
 
 interface ComputerTestEnv {
   APPLICATION_ARTIFACTS: R2Bucket;
+  // The durable-root bucket. `vitest.config.ts` binds it, and a suite that
+  // reads a stored file's own bytes or content type heads the object directly.
+  MEMORY_FILES: R2Bucket;
   AUTH_DB: D1Database;
   TEST_MIGRATIONS: D1Migration[];
   AI: Ai;
@@ -25,6 +28,12 @@ interface ComputerTestEnv {
   CREDENTIAL_KEYRING: string;
   SECRET_TOKEN: string;
   APPLET_VIEWER_SECRET: string;
+  // The build service the Applet and Plugin hosts post source to. A stand-in
+  // here, because a real build needs a container this pool cannot start; the
+  // token is what makes the host reach for it rather than call the deployment
+  // unable to build.
+  APPLET_BUILD: Fetcher;
+  APPLET_BUILD_TOKEN: string;
   APPLETS: WorkerLoader;
   APPLET_STATES: DurableObjectNamespace<AppletState>;
   COMPOSITIONS: DurableObjectNamespace<CompositionProbe>;
