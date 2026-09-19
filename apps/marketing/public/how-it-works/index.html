@@ -114,9 +114,9 @@
               even the interface around the conversation.
             </p>
             <p>
-              That’s the idea behind FrockBot. A persistent agent in the cloud,
-              native apps on your devices, and plugins that let you dress your
-              Bot however you want.
+              FrockBot is a persistent agent in the cloud, with native apps on
+              your devices and plugins that let you dress your Bot however you
+              want.
             </p>
             <a class="inside-text-link" href="#plugins"
               >Start with the plugin architecture
@@ -286,10 +286,11 @@
               instructions and routines.
             </p>
             <p>
-              Each Bot is a Cloudflare Durable Object. Each User has a Durable
-              Object too, coordinating account state and installed plugins. Your
-              devices submit commands and render the results; the cloud holds
-              the authoritative state and runs the agent loop.
+              Each Bot has a persistent identity with its own state, backed by a
+              Cloudflare Durable Object. Each User has a Durable Object too,
+              coordinating account state and installed plugins. Your devices
+              submit commands and render the results; the cloud holds the
+              authoritative state and runs the agent loop.
             </p>
             <p>
               A <strong>Turn</strong> is one run of a Bot, started by a message,
@@ -344,11 +345,11 @@
               </figcaption>
             </figure>
             <p>
-              Recording input before acknowledging it means an accepted message
-              is not lost when your connection drops. Recording enough of the
-              Turn lets the system resume after Cloudflare evicts a process.
-              “Always on” means the Bot remains available and its work persists;
-              it does not mean a CPU spins all day.
+              Input is recorded before the service acknowledges it, so an
+              accepted message survives a dropped connection. Enough of the Turn
+              is also recorded for the system to resume after Cloudflare evicts
+              a process. “Always on” describes availability and durable work,
+              not a CPU that spins continuously.
             </p>
             <details class="inside-detail">
               <summary>A little deeper: effects and recovery</summary>
@@ -375,22 +376,22 @@
               services and supply interfaces.
             </p>
             <p>
-              The architecture takes inspiration from
               <a href="https://github.com/deepseek-ai/deepseek-harness"
                 >dsh / DeepSeek Harness</a
               >
-              and <a href="https://pi.dev/">Pi</a>: make the harness something
-              you can shape. FrockBot brings that idea into a persistent cloud
-              service, with a deliberate boundary between the Bot, its
-              extensions and your devices.
+              and <a href="https://pi.dev/">Pi</a> showed that the harness
+              itself should be something you can shape. FrockBot applies that
+              principle in a persistent cloud service, with a deliberate
+              boundary between the Bot, its extensions and your devices.
             </p>
             <p>
               Plugin code runs in a
               <a href="https://developers.cloudflare.com/dynamic-workers/"
                 >Cloudflare Dynamic Worker</a
-              >, separate from the Bot’s Durable Object. A User’s installed
-              plugins share one worker. You install a plugin for your account,
-              then choose which Bots run it.
+              >—a separate execution environment created on demand, distinct
+              from the Bot’s Durable Object. A User’s installed plugins share
+              one worker. You install a plugin for your account, then choose
+              which Bots run it.
             </p>
             <figure
               class="inside-figure runtime-figure"
@@ -478,7 +479,7 @@
               access if you approve it. Because the plugins share a worker,
               network authority must be understood as shared across that
               worker’s enabled plugins. Credentials are attached by the host at
-              the network boundary; the plugin does not receive the secret.
+              the network boundary.
             </p>
             <div class="code-example">
               <div class="code-heading">
@@ -565,9 +566,8 @@
             <p>
               You can ask for a new capability and have the Bot write the
               plugin. The resulting artifact is immutable and identified by its
-              content. New code does not grant itself new powers: its requested
-              access must be approved before activation, within the Bot’s
-              existing authority.
+              content. The requested access must be approved before activation,
+              within the Bot’s existing authority.
             </p>
             <ol class="authoring-flow" aria-label="Plugin lifecycle">
               <li><b>Request</b><span>Ask the Bot for a capability.</span></li>
@@ -595,8 +595,7 @@
                 failures can be skipped or quarantined so the Turn can continue.
                 The budget belongs to the worker, and a worker-wide failure can
                 affect several plugins. Failures in required, locked plugins can
-                stop the operation. Isolation limits reach; it is not a promise
-                that every failure is invisible.
+                stop the operation. Isolation limits what a failure can affect.
               </p>
             </details>
           </section>
@@ -612,14 +611,13 @@
               Give it a place.<br /><em>Let it take shape.</em>
             </h2>
             <p class="section-lede">
-              A slot says where something appears. A renderer says how it is
-              drawn.
+              Plugins should be able to shape more than the text of a reply.
             </p>
             <p>
-              Plugins should be able to shape more than the text of a reply. A
-              card in the conversation, a panel beside your work, a settings
+              A card in the conversation, a panel beside your work, a settings
               section or a whole page can give a capability its own useful
-              interface, backed by the plugin’s stored data.
+              interface, backed by the plugin’s stored data. A slot says where
+              something appears; a renderer says how it is drawn.
             </p>
             <figure
               class="inside-figure rendering-figure"
@@ -631,7 +629,10 @@
               </div>
               <div class="render-split">
                 <div class="render-path">
-                  <span class="diagram-label">A2UI</span>
+                  <span class="diagram-label"
+                    >A2UI
+                    <small>(structured interface description)</small></span
+                  >
                   <h3 id="a2ui-components">Describe components</h3>
                   <div class="render-preview">
                     <span class="preview-label">Research notes</span
@@ -716,10 +717,10 @@
               platform.
             </p>
             <p>
-              The host keeps ownership of the conversation, audit, undo and
-              trusted approval controls. A plugin can draw its own interface,
-              but it cannot mint an approval identity or replace the parts of
-              the app that let you see and control its work. A new native
+              The host retains ownership of the conversation, audit, undo and
+              trusted approval controls. A plugin draws its own interface within
+              those boundaries. Approval identities and the surfaces that let
+              you see and undo a Bot’s work belong to the host. A new native
               component or operating-system integration still needs to be
               shipped in the client.
             </p>
@@ -734,13 +735,13 @@
               An event here.<br /><em>A possibility there.</em>
             </h2>
             <p class="section-lede">
-              The cloud Bot connects capabilities across devices, services and
-              the interface itself.
+              A Bot’s work often spans more than one device or service.
             </p>
             <p>
-              A phone event can start a Turn that uses a desktop capability. A
-              webhook can update a conversation card. The plugin combines the
-              pieces; the host decides what is available and allowed.
+              The cloud Bot connects those capabilities: a phone event can start
+              a Turn that uses a desktop, and a webhook can update a
+              conversation card. The plugin combines the pieces; the host
+              decides what is available and allowed.
             </p>
             <figure
               class="cross-device-flow"
@@ -2459,11 +2460,12 @@
               </article>
             </div>
             <p>
-              Conversation history records what happened. Memory keeps the
-              information worth carrying forward. Skills describe a way of
-              working. Routines make that work recur. These are distinct pieces,
-              so a long chat does not have to carry every instruction and every
-              fact forever.
+              Conversation history records what happened, but not everything in
+              a conversation is worth carrying forward. Memory holds the durable
+              facts, Skills describe how to approach a task, and Routines bring
+              the Bot back at the right time. Because these are distinct pieces,
+              a long chat does not have to carry every instruction and every
+              fact in its context window.
             </p>
             <p>
               You can give different Bots different jobs, identities,
@@ -2526,9 +2528,10 @@
               approved interface.
             </p>
             <p>
-              A connected desktop app is another client on your own machine.
-              Giving a Bot a cloud Computer does not silently give it access to
-              that machine’s filesystem or operating system.
+              A connected desktop app is another client on your own machine. The
+              cloud Computer is a separate environment; your desktop’s
+              filesystem and operating system are reached only through their own
+              client.
             </p>
           </section>
           <section
@@ -2565,10 +2568,10 @@
               transport.
             </p>
             <p>
-              Frock AI is the built-in path. On a deployment without model keys
-              or an AI Gateway configuration, it can use the Cloudflare
-              account’s Workers AI binding. You can start with the default and
-              configure another provider when you need it.
+              Frock AI is the built-in path. The simplest deployment uses the
+              Cloudflare account’s Workers AI binding directly. Additional
+              providers become available when model keys or an AI Gateway are
+              configured.
             </p>
             <p>
               <a
@@ -2584,7 +2587,7 @@
           >
             <p class="section-label">09 / Yours to shape</p>
             <h2 id="source-title">
-              The freedom goes<br /><em>all the way down.</em>
+              Open source.<br /><em>Yours to shape.</em>
             </h2>
             <p class="section-lede">
               FrockBot is open source under the MIT licence.
