@@ -57,7 +57,6 @@ test("Marketplace installs, sets up, removes, and leaves a fresh Bot usable", as
   page,
   userId,
 }, testInfo) => {
-  test.slow();
   await openApplication(page, userId);
   await openBotList(page);
 
