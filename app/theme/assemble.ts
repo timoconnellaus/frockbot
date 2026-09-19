@@ -14,6 +14,7 @@ import {
   type ThemeDocumentV1,
 } from "@frockbot/core/theme";
 import type { LoopEventPayloadMapV1 } from "@frockbot/core/contracts";
+import { canonicalJson } from "@frockbot/core/contracts";
 import type { FlockBotBackendContribution } from "@frockbot/app/flock/bot";
 import type {
   BotLookV1,
@@ -141,7 +142,10 @@ export async function assembleBotThemeV1(
         : seed;
   const same =
     look.look === nextLook &&
-    JSON.stringify(look.document) === JSON.stringify(document);
+    (look.document === document ||
+      (look.document !== undefined &&
+        document !== undefined &&
+        canonicalJson(look.document) === canonicalJson(document)));
   const next = same
     ? look
     : await host.flock.persistAssembledDocument(

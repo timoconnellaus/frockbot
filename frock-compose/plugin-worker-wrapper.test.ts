@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   BOT_ISOLATE_CONTEXT_KEYS_V1,
   BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1,
+  decodePluginDescriptorV1,
+  decodePluginWorkerHealthV1,
   decodePluginWorkerHookResultV1,
+  ISOLATE_CONTRACT_VERSION,
 } from "@frockbot/core/contracts";
 import {
   BOT_ISOLATE_DEADLINE_SOURCE,
@@ -417,6 +420,99 @@ describe("the generated wrapper's invocation decoders", () => {
     ).toThrow(/invalid fields/);
     const { turnId: _turnId, ...missing } = action;
     expect(() => decodeCardActionInvocation(missing)).toThrow(/invalid fields/);
+  });
+
+  test("keeps host and emitted card action name decoders on one contract", () => {
+    const actionInvocation = {
+      schemaVersion: 1,
+      pluginId: "email",
+      cardId: "draft",
+      surfaceId: "email_draft.surface",
+      action: "send",
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "run-1",
+      turnId: "run-1",
+      generationId: "gen-1",
+      deadlineMs: 1_000,
+    };
+    const descriptor = (name: string) => ({
+      id: "email",
+      displayName: "Email",
+      version: "1.0.0",
+      contractVersion: ISOLATE_CONTRACT_VERSION,
+      tools: [],
+      hooks: [],
+      grants: [],
+      contextKeys: ["user", "bot", "session"],
+      cards: [
+        {
+          id: "draft",
+          displayName: "Draft",
+          description: "Shows a draft.",
+          dataSchema: { type: "object", properties: {} },
+          actions: [{ name, description: "Run it." }],
+        },
+      ],
+    });
+    const corpus = [
+      ["a", true],
+      ["send", true],
+      ["send_now", true],
+      ["send-now", true],
+      [`a${"0".repeat(63)}`, true],
+      ["", false],
+      ["Send", false],
+      ["0send", false],
+      ["send.now", false],
+      ["send/now", false],
+      [`a${"0".repeat(64)}`, false],
+    ] as const;
+
+    for (const [name, accepted] of corpus) {
+      let descriptorAccepted = true;
+      try {
+        decodePluginDescriptorV1(descriptor(name));
+      } catch {
+        descriptorAccepted = false;
+      }
+      const hostAccepted =
+        decodePluginWorkerHealthV1({
+          schemaVersion: 1,
+          contractVersion: ISOLATE_CONTRACT_VERSION,
+          plugins: [
+            {
+              pluginId: "email",
+              ok: true,
+              tools: [],
+              hooks: [],
+              provides: [],
+              consumes: [],
+              triggers: [],
+              views: [],
+              cards: [{ id: "draft", actions: [name] }],
+              modelProviders: [],
+            },
+          ],
+        }).plugins[0]?.ok === true;
+      let workerAccepted = true;
+      try {
+        decodeCardActionInvocation({ ...actionInvocation, action: name });
+      } catch {
+        workerAccepted = false;
+      }
+      expect({
+        name,
+        descriptorAccepted,
+        hostAccepted,
+        workerAccepted,
+      }).toEqual({
+        name,
+        descriptorAccepted: accepted,
+        hostAccepted: accepted,
+        workerAccepted: accepted,
+      });
+    }
   });
 });
 

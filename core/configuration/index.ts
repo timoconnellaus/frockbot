@@ -562,29 +562,51 @@ export interface ExecutionPackageDefinition {
   }>;
 }
 
+type ResolvedModelBindingEntitiesV1 = {
+  connection: ConnectionView;
+  installation: PackageInstallationView;
+  pkg: ExecutionPackageDefinition;
+  connectionType: ExecutionPackageDefinition["connectionTypes"][number];
+  modelCapability: ExecutionPackageDefinition["capabilities"][number];
+};
+
+type ModelBindingEntityResolutionV1 =
+  | { status: "resolved"; entities: ResolvedModelBindingEntitiesV1 }
+  | { status: "failed"; failure: string };
+
 function compareIdentifiers(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-export function modelBindingFailureV1(input: {
+function resolveModelBindingEntitiesV1(input: {
   model: ModelBindingV1;
   user: UserSettingsViewV1;
   packages: readonly ExecutionPackageDefinition[];
-}): string | undefined {
+}): ModelBindingEntityResolutionV1 {
   const connection = input.user.connections.find(
     (candidate) => candidate.connectionId === input.model.connectionId,
   );
   if (!connection) {
-    return "That account is no longer connected. Reconnect it, or pick another model.";
+    return {
+      status: "failed",
+      failure:
+        "That account is no longer connected. Reconnect it, or pick another model.",
+    };
   }
   if (connection.state !== "ready") {
-    return "That account needs reconnecting before this Bot can reply.";
+    return {
+      status: "failed",
+      failure: "That account needs reconnecting before this Bot can reply.",
+    };
   }
   const installation = input.user.packages.find(
     (candidate) => candidate.packageId === connection.packageId,
   );
   if (!installation || installation.state !== "installed") {
-    return "Turn this model's plugin back on in Plugins to use it.";
+    return {
+      status: "failed",
+      failure: "Turn this model's plugin back on in Plugins to use it.",
+    };
   }
   const pkg = input.packages.find(
     (candidate) =>
@@ -592,7 +614,10 @@ export function modelBindingFailureV1(input: {
       candidate.version === installation.version,
   );
   if (!pkg) {
-    return "This model's plugin is unavailable. Pick another model.";
+    return {
+      status: "failed",
+      failure: "This model's plugin is unavailable. Pick another model.",
+    };
   }
   const connectionType = pkg.connectionTypes.find(
     (candidate) => candidate.id === connection.connectionTypeId,
@@ -604,9 +629,31 @@ export function modelBindingFailureV1(input: {
       connectionType?.capabilities.includes(candidate.id),
   );
   if (!connectionType || !modelCapability) {
-    return "That account can't provide this model. Pick another one in Models.";
+    return {
+      status: "failed",
+      failure:
+        "That account can't provide this model. Pick another one in Models.",
+    };
   }
-  return undefined;
+  return {
+    status: "resolved",
+    entities: {
+      connection,
+      installation,
+      pkg,
+      connectionType,
+      modelCapability,
+    },
+  };
+}
+
+export function modelBindingFailureV1(input: {
+  model: ModelBindingV1;
+  user: UserSettingsViewV1;
+  packages: readonly ExecutionPackageDefinition[];
+}): string | undefined {
+  const resolution = resolveModelBindingEntitiesV1(input);
+  return resolution.status === "failed" ? resolution.failure : undefined;
 }
 
 export interface ResolvedModelBindingV1 {
@@ -628,19 +675,9 @@ export function resolveBotModelBindingV1(input: {
     state: "unavailable",
     failure,
   });
-  const failure = modelBindingFailureV1(input);
-  if (failure) return unavailable(failure);
-  const connection = input.user.connections.find(
-    (candidate) => candidate.connectionId === input.model.connectionId,
-  )!;
-  const installation = input.user.packages.find(
-    (candidate) => candidate.packageId === connection.packageId,
-  )!;
-  const pkg = input.packages.find(
-    (candidate) =>
-      candidate.packageId === connection.packageId &&
-      candidate.version === installation.version,
-  )!;
+  const resolution = resolveModelBindingEntitiesV1(input);
+  if (resolution.status === "failed") return unavailable(resolution.failure);
+  const { connection, pkg } = resolution.entities;
   if (!connection.providerType) {
     return unavailable("That account isn't set up for models yet.");
   }

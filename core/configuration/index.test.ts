@@ -1183,6 +1183,144 @@ describe("Bot execution-plan authority", () => {
     ).toBe("requires-resolution");
   });
 
+  test("keeps failure reporting and resolution on one validation path", () => {
+    const model = {
+      connectionId: "ollama-work",
+      providerModelId: "glm-5.3-flash:cloud",
+    };
+    const expectFailure = (
+      user: UserSettingsViewV1,
+      packages: readonly ExecutionPackageDefinition[],
+      failure: string,
+    ) => {
+      const input = { model, user, packages };
+      expect(modelBindingFailureV1(input)).toBe(failure);
+      expect(resolveBotModelBindingV1(input)).toEqual({
+        model,
+        state: "unavailable",
+        failure,
+      });
+    };
+
+    expectFailure(
+      { ...modelUser(), connections: [] },
+      modelPackages,
+      "That account is no longer connected. Reconnect it, or pick another model.",
+    );
+    expectFailure(
+      {
+        ...modelUser(),
+        connections: [{ ...modelUser().connections[0]!, state: "authorizing" }],
+      },
+      modelPackages,
+      "That account needs reconnecting before this Bot can reply.",
+    );
+    expectFailure(
+      { ...modelUser(), packages: [] },
+      modelPackages,
+      "Turn this model's plugin back on in Plugins to use it.",
+    );
+    expectFailure(
+      {
+        ...modelUser(),
+        packages: [{ ...modelUser().packages[0]!, state: "disabled" }],
+      },
+      modelPackages,
+      "Turn this model's plugin back on in Plugins to use it.",
+    );
+    expectFailure(
+      modelUser(),
+      [],
+      "This model's plugin is unavailable. Pick another model.",
+    );
+    expectFailure(
+      modelUser(),
+      [{ ...modelPackages[0]!, connectionTypes: [] }],
+      "That account can't provide this model. Pick another one in Models.",
+    );
+    expectFailure(
+      modelUser(),
+      [{ ...modelPackages[0]!, capabilities: [] }],
+      "That account can't provide this model. Pick another one in Models.",
+    );
+  });
+
+  test("keeps provider resolution and cloned results after entity validation", () => {
+    const model = {
+      connectionId: "ollama-work",
+      providerModelId: "glm-5.3-flash:cloud",
+    };
+    const providerUser = modelUser();
+    const { providerType: _providerType, ...connectionWithoutProvider } =
+      providerUser.connections[0]!;
+    const withoutProvider = {
+      ...providerUser,
+      connections: [connectionWithoutProvider],
+    };
+    expect(
+      modelBindingFailureV1({
+        model,
+        user: withoutProvider,
+        packages: modelPackages,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveBotModelBindingV1({
+        model,
+        user: withoutProvider,
+        packages: modelPackages,
+      }),
+    ).toEqual({
+      model,
+      state: "unavailable",
+      failure: "That account isn't set up for models yet.",
+    });
+
+    const user = modelUser();
+    const ready = resolveBotModelBindingV1({
+      model,
+      user,
+      packages: modelPackages,
+    });
+    expect(
+      modelBindingFailureV1({ model, user, packages: modelPackages }),
+    ).toBe(undefined);
+    expect(ready).toMatchObject({
+      model,
+      state: "ready",
+      packageId: "provider-ollama-cloud",
+      providerType: "ollama-cloud",
+      connection: user.connections[0],
+    });
+    expect(ready.model).not.toBe(model);
+    expect(ready.connection).not.toBe(user.connections[0]);
+
+    const uncatalogued = {
+      ...model,
+      providerModelId: "new-model:cloud",
+    };
+    expect(
+      modelBindingFailureV1({
+        model: uncatalogued,
+        user,
+        packages: modelPackages,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveBotModelBindingV1({
+        model: uncatalogued,
+        user,
+        packages: modelPackages,
+      }),
+    ).toMatchObject({
+      model: uncatalogued,
+      state: "requires-resolution",
+      connection: user.connections[0],
+      packageId: "provider-ollama-cloud",
+      providerType: "ollama-cloud",
+    });
+  });
+
   test("disabling the Package or revoking the Connection fails every Bot closed", () => {
     const model = {
       connectionId: "ollama-work",

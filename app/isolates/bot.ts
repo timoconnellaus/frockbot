@@ -12,6 +12,7 @@ import type {
   RuntimeModelSelection,
 } from "@frockbot/app/agent-runtime";
 import {
+  canonicalJson,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateEmailRequestV1,
@@ -573,7 +574,7 @@ async function invokeBotToolForIsolateV1(
     (priorCall.packageId !== input.packageId ||
       priorCall.callId !== request.callId ||
       priorCall.name !== request.name ||
-      JSON.stringify(priorCall.input) !== JSON.stringify(request.input))
+      canonicalJson(priorCall.input) !== canonicalJson(request.input))
   ) {
     return {
       status: "unavailable",

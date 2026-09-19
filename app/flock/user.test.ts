@@ -212,6 +212,20 @@ describe("Flock User contribution", () => {
     expect(
       (await contribution.mirrorLook("alpha", "studio", document)).revision,
     ).toBe(2);
+    const reordered = {
+      tokens: {
+        bubbles: document.tokens.bubbles,
+        type: document.tokens.type,
+        surfaces: Object.fromEntries(
+          Object.entries(document.tokens.surfaces).reverse(),
+        ) as typeof document.tokens.surfaces,
+      },
+      look: document.look,
+      schemaVersion: document.schemaVersion,
+    };
+    expect(
+      (await contribution.mirrorLook("alpha", "studio", reordered)).revision,
+    ).toBe(2);
     const dropped = await contribution.mirrorLook(
       "alpha",
       "inherit",

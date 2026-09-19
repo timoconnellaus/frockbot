@@ -46,6 +46,7 @@
 // Everything is pure over a key-value surface (the Durable Object's own
 // storage, the same one the ledger uses), so it is tested in bun.
 import { refuseMemorySecretV1 } from "@frockbot/app/memory/secrets";
+import { canonicalJson } from "@frockbot/core/contracts";
 import type { VoiceLedgerStorageV1 } from "./ledger.js";
 
 export const VOICE_MEMORY_RECORD_KEY_V1 = "voice:memory:record";
@@ -1181,7 +1182,7 @@ export class VoiceMemoryLedgerV1 {
       const key = forgottenKey(fence.kind, fence.id);
       keys.add(key);
       const existing = before.get(key);
-      if (existing && JSON.stringify(existing) === JSON.stringify(fence)) {
+      if (existing && canonicalJson(existing) === canonicalJson(fence)) {
         continue;
       }
       await this.storage.put(key, fence);

@@ -90,6 +90,32 @@ describe("routineCommandFingerprintV1", () => {
 });
 
 describe("RoutineViewV1", () => {
+  test("uses the durable writer codec for projected provenance", () => {
+    const boundary = "a".repeat(256);
+    const decoded = decodeRoutineViewV1({
+      schemaVersion: 1,
+      routineId: "brief",
+      name: "Brief",
+      prompt: "Do it",
+      schedule: "@daily",
+      timezone: "UTC",
+      enabled: true,
+      createdBy: {
+        kind: "bot",
+        botId: "scout",
+        sessionId: boundary,
+        turnId: boundary,
+      },
+      updatedBy: { kind: "user" },
+      createdAt: "2026-08-31T00:00:00.000Z",
+      updatedAt: "2026-08-31T00:00:00.000Z",
+    });
+    expect(decoded.createdBy).toMatchObject({
+      sessionId: boundary,
+      turnId: boundary,
+    });
+  });
+
   test("carries no key material, and round-trips through its codec", async () => {
     const store = new RoutineStore(createMemoryRoutineStorageV1());
     const receipt = await store.execute(

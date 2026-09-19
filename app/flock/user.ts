@@ -26,6 +26,7 @@ import {
 } from "./shared.js";
 import { readBotLifecycleReceiptV1, readFlockReceiptV1 } from "./receipts.js";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
+import { canonicalJson } from "@frockbot/core/contracts";
 
 const DIRECTORY_KEY = "flock:directory:v1";
 const RECEIPT_PREFIX = "flock:create-receipt:";
@@ -215,7 +216,10 @@ export class FlockUserBackendContribution {
           : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(currentValue));
       const found = current.bots.find((bot) => bot.botId === botId);
       if (!found) return structuredClone(current);
-      if (JSON.stringify(found.voice) === JSON.stringify(voice))
+      if (
+        found.voice !== undefined &&
+        canonicalJson(found.voice) === canonicalJson(voice)
+      )
         return structuredClone(current);
       const next = {
         ...current,
@@ -244,7 +248,10 @@ export class FlockUserBackendContribution {
       if (!found) return structuredClone(current);
       const sameLook = (found.look ?? "inherit") === (look ?? "inherit");
       const sameDocument =
-        JSON.stringify(found.document) === JSON.stringify(document);
+        found.document === document ||
+        (found.document !== undefined &&
+          document !== undefined &&
+          canonicalJson(found.document) === canonicalJson(document));
       if (sameLook && sameDocument) return structuredClone(current);
       const next = {
         ...current,

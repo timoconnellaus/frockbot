@@ -8,6 +8,7 @@ import {
   sealCredentialV1,
 } from "@frockbot/core/connection";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
+import { canonicalJson } from "@frockbot/core/contracts";
 export { createCredentialsFeature, CredentialLeaseRuntime } from "./runtime.js";
 
 const CREDENTIAL_PREFIX = "credential:";
@@ -891,7 +892,7 @@ export class CredentialUserBackendContribution {
       stored.accountId !== input.accountId ||
       stored.packageId !== input.packageId ||
       stored.leaseId !== input.lease.leaseId ||
-      JSON.stringify(this.publicLease(stored)) !== JSON.stringify(input.lease)
+      canonicalJson(this.publicLease(stored)) !== canonicalJson(input.lease)
     ) {
       throw new Error("Credential lease is unavailable");
     }

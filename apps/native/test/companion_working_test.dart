@@ -8,7 +8,9 @@ import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/flock/avatar.dart';
+import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
+import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/shell/run_view.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/transcript.dart';
@@ -188,6 +190,103 @@ void main() {
       c.dispose();
     });
   }
+
+  testWidgets(
+    'the working companion stays in the header with the desk panel open',
+    (tester) async {
+      tester.view.physicalSize = const Size(1351, 831);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final store = MemoryStore();
+      final active = {
+        ...running(),
+        'events': <Object>[
+          {
+            'type': 'send/to-user',
+            'payload': {'type': 'text', 'text': 'Half a thought'},
+            'ordinal': 0,
+          },
+        ],
+      };
+      final transport = FakeTransport(store)..observed = active;
+      final controller = ChatController(
+        transport: transport,
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-2',
+      );
+      await controller.initialize();
+      controller.connection = ConnectionState.connected;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: ShellLayout(
+            panelOpen: true,
+            onDismiss: () {},
+            conversationOpen: true,
+            onBack: () {},
+            sidebar: const SizedBox(),
+            rightPanel: const SizedBox(),
+            conversation: ChatPane(
+              controller: controller,
+              onReconnect: () async {},
+              background: 'fox',
+              primary: '#ff6b57',
+              overlay: (companion) => ChatHeader(
+                name: 'Bot',
+                companion: companion,
+                onOpenBot: () {},
+                onComputer: () {},
+                onTogglePanel: () {},
+                panelShown: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(byIdentifier(ShellIds.rightPanel), findsOneWidget);
+      final indicator = byIdentifier(ShellIds.workingIndicator);
+      final bubble = byIdentifier(ShellIds.message('send-1:send:0'));
+      final transcript = byIdentifier(ShellIds.transcript);
+      expect(indicator, findsOneWidget);
+      expect(bubble, findsOneWidget);
+      expect(
+        find.descendant(of: find.byType(ChatHeader), matching: indicator),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: transcript, matching: indicator),
+        findsNothing,
+      );
+      final runningBubble = tester.getRect(bubble);
+      expect(tester.getTopLeft(indicator).dy, chatHeaderChromeTop);
+      expect(tester.getBottomLeft(indicator).dy, lessThan(runningBubble.top));
+
+      transport.observed = {
+        ...active,
+        'status': 'completed',
+        'outcome': {'type': 'completed', 'text': ''},
+      };
+      await controller.refresh();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(indicator, findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(ChatHeader),
+          matching: find.bySemanticsLabel('Bot is ready'),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.getRect(bubble), runningBubble);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
 
   testWidgets('the companion looks where the pointer is over the pane', (
     tester,

@@ -1,3 +1,15 @@
+import {
+  ACTIVE_RUN_KEY,
+  IDENTITY_KEY,
+  LATEST_EVENTS_KEY,
+  NOTIFICATION_PREFIX,
+  PENDING_AGENT_RUN_PREFIX,
+  PENDING_RUN_KEY,
+  RUN_INDEX_PREFIX,
+  RUN_PREFIX,
+  SESSION_EVENT_LOG_PREFIX,
+} from "@frockbot/core/durable";
+
 /** One-time cleanup explicitly authorized by the owner for this incident.
  * Remove after the receipts have been verified in the release.
  * There is deliberately no route, configuration knob, or caller-supplied scope.
@@ -12,10 +24,10 @@ const BOTS = new Set([
 ]);
 const RECEIPT = "maintenance:chat-reset:2026-09-08";
 const PREFIXES = [
-  "run:",
-  "run-index:",
-  "session-events:",
-  "notification:",
+  RUN_PREFIX,
+  RUN_INDEX_PREFIX,
+  SESSION_EVENT_LOG_PREFIX,
+  NOTIFICATION_PREFIX,
   "shell:unread",
   "shell:preview",
   "shell:approval:",
@@ -24,9 +36,9 @@ const PREFIXES = [
   "bot-announcement:",
 ];
 const KEYS = [
-  "active-run",
-  "pending-run",
-  "latest-events",
+  ACTIVE_RUN_KEY,
+  PENDING_RUN_KEY,
+  LATEST_EVENTS_KEY,
   "conversation",
   "conversation-index",
   "bot-announcement-sequence",
@@ -37,7 +49,7 @@ export async function cleanIncidentTestChatsV1(
 ): Promise<void> {
   const receipt = await storage.transaction(async (tx) => {
     const identity = await tx.get<{ userId: string; botId: string }>(
-      "identity",
+      IDENTITY_KEY,
     );
     if (
       identity?.userId !== OWNER ||
@@ -45,13 +57,13 @@ export async function cleanIncidentTestChatsV1(
       (await tx.get(RECEIPT))
     )
       return;
-    for (const prefix of ["pending-agent-run:", "task-active:"]) {
+    for (const prefix of [PENDING_AGENT_RUN_PREFIX, "task-active:"]) {
       if ((await tx.list({ prefix, limit: 1 })).size) return;
     }
     let startAfter: string | undefined;
     for (;;) {
       const page = await tx.list<{ status?: string }>({
-        prefix: "run:",
+        prefix: RUN_PREFIX,
         limit: 64,
         ...(startAfter ? { startAfter } : {}),
       });

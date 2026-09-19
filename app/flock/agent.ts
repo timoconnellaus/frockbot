@@ -62,7 +62,7 @@ import type {
   ToolExecutionResult,
   TurnTypeV1,
 } from "@frockbot/core/contracts";
-import { decodeTurnTypeV1 } from "@frockbot/core/contracts";
+import { canonicalJson, decodeTurnTypeV1 } from "@frockbot/core/contracts";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   BOT_MESSAGE_TOOL_V1,
@@ -698,7 +698,7 @@ async function applySelfVoiceV1(
       ...(record.characterId ? { characterId: record.characterId } : {}),
     });
     const next = mergeVoicePatchV1(current, patch);
-    if (record.voice && JSON.stringify(record.voice) === JSON.stringify(next)) {
+    if (record.voice && canonicalJson(record.voice) === canonicalJson(next)) {
       return false;
     }
     try {

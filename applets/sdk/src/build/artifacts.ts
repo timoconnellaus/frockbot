@@ -21,13 +21,12 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
-import { relative, resolve } from "node:path";
 
-import { build as esbuild, type Metafile } from "esbuild";
+import { build as esbuild } from "esbuild";
 
 import type { AppletDescriptionV1 } from "../server/applet.js";
 import { readDescriptor, type AppletBuildManifestV1 } from "./manifest.js";
+import { stableModulePaths } from "./module-paths.js";
 import { bundlerNodePaths, SDK_ENTRIES, SDK_ROOT } from "./paths.js";
 import { withOneMoreBoot } from "./boot.js";
 import { startAppletRuntime } from "./runtime.js";
@@ -40,66 +39,6 @@ export interface AppletArtifactsV1 {
 
 function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
-}
-
-/** esbuild reports real paths; a temp directory is often a symlink to one. */
-function real(path: string): string {
-  try {
-    return realpathSync(resolve(path));
-  } catch {
-    return resolve(path);
-  }
-}
-
-/**
- * Where a bundled module came from, said the same way everywhere.
- *
- * An Applet's directory, the SDK's directory and the working directory are all
- * different on an author's machine and in the build container — and esbuild
- * writes each module's path into the unminified output as a comment. Left
- * alone, identical source bundled in two places produces two different files
- * and therefore two different content hashes, which would give R2 a new object
- * on every publish of unchanged code.
- */
-function moduleLabel(absolute: string, appletRoot: string): string {
-  for (const [root, prefix] of [
-    [appletRoot, ""],
-    [real(SDK_ROOT), "applet-sdk/"],
-  ] as const) {
-    const inside = relative(root, absolute);
-    if (!inside.startsWith("..") && inside !== "") return prefix + inside;
-  }
-  const dependency = absolute.lastIndexOf("node_modules/");
-  return dependency === -1 ? absolute : absolute.slice(dependency);
-}
-
-/**
- * Rewrites esbuild's module comments to those stable labels.
- *
- * The paths come from the metafile rather than from a pattern over the output,
- * so only lines esbuild actually wrote are touched and a comment in someone's
- * own source is left alone.
- */
-function stableModulePaths(
-  text: string,
-  metafile: Metafile,
-  appletRoot: string,
-): string {
-  const root = real(appletRoot);
-  const labels = new Map(
-    Object.keys(metafile.inputs).map((input) => [
-      input,
-      moduleLabel(real(input), root),
-    ]),
-  );
-  return text
-    .split("\n")
-    .map((line) => {
-      if (!line.startsWith("// ")) return line;
-      const label = labels.get(line.slice(3));
-      return label === undefined ? line : `// ${label}`;
-    })
-    .join("\n");
 }
 
 async function bundle(options: {
@@ -136,7 +75,9 @@ async function bundle(options: {
   });
   const file = result.outputFiles?.[0];
   if (!file) throw new Error("The bundler produced no output");
-  return stableModulePaths(file.text, result.metafile, options.resolveDir);
+  return stableModulePaths(file.text, result.metafile, options.resolveDir, [
+    { directory: SDK_ROOT, prefix: "applet-sdk/" },
+  ]);
 }
 
 function page(title: string, script: string): string {

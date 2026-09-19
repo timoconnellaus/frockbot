@@ -3,6 +3,8 @@ import type {
   BotStateTopicV1,
 } from "@frockbot/core/protocol";
 import { decodeBotStateCursorV1 } from "@frockbot/core/protocol";
+import { isRunStateStorageKeyV1 } from "@frockbot/core/durable";
+import { CARD_PREFIX } from "@frockbot/app/shell/cards";
 import type {
   ComputerBotStorage,
   ComputerBotTransaction,
@@ -217,14 +219,8 @@ class ChannelComputerStorage implements ComputerBotStorage {
  * executing and which is waiting, and the Cards a `card` send folded into
  * (ADR 0030). A write to any of them means the transcript moved.
  */
-const RUN_STATE_KEY_PREFIXES = ["run:", "run-index:", "shell:card:"] as const;
-const RUN_STATE_KEYS = ["active-run", "pending-run"] as const;
-
 function namesRunState(key: string): boolean {
-  return (
-    RUN_STATE_KEYS.some((named) => named === key) ||
-    RUN_STATE_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))
-  );
+  return isRunStateStorageKeyV1(key) || key.startsWith(CARD_PREFIX);
 }
 
 function writtenKeys(keyOrEntries: unknown): readonly string[] {

@@ -52,12 +52,13 @@ const NO_HOST = /The Computer host answered|Couldn’t read the computer/u;
 /**
  * Open the desktop from the chat header.
  *
- * The header keeps two icons — the Computer and the panel's own switch. The
- * Computer identifier is shared by both responsive header layouts, and opens
- * one thing: the desktop, full window.
+ * The header keeps two icons — the Computer and the panel's own switch. One
+ * identifier, shared by both responsive header layouts, distinguishes its
+ * Computer from the card on the Bot page. It opens one thing: the desktop,
+ * full window.
  */
 async function openComputerViewer(page: Page): Promise<void> {
-  await press(sem(page, "computer-toggle"));
+  await press(sem(page, "computer-destination"));
   await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
 }
 

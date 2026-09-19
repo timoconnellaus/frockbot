@@ -10,6 +10,7 @@
 import { canonicalCommandFingerprintV1 } from "@frockbot/core/configuration";
 import {
   decodeRoutineTriggerV1,
+  decodeRoutineWriterV1,
   isRoutineIdV1,
   requireScheduleXorTriggerV1,
   RoutineDecodeError,
@@ -25,6 +26,7 @@ import {
   type RoutineRunStatusV1,
   type RoutineTriggerKindV1,
   type RoutineTriggerV1,
+  type RoutineWriterV1,
 } from "./records.js";
 
 export {
@@ -54,18 +56,6 @@ export const ROUTINE_LIST_MAX = 100;
 /** Most run-log entries one listing carries. */
 export const ROUTINE_RUN_LIST_MAX = 50;
 
-/**
- * Who wrote a Routine, as the client is told it.
- *
- * A Bot writer names the Session and the Turn it wrote from. The panel only
- * says "the Bot wrote this", but provenance that cannot answer "which Turn?"
- * is not provenance: the audit trail and the run log both address a Turn, and
- * a Routine that a Bot wrote must be traceable to the one that wrote it.
- */
-export type RoutineWriterViewV1 =
-  | { kind: "user" }
-  | { kind: "bot"; botId: string; sessionId: string; turnId: string };
-
 /** One Routine as the hosted client sees it. Never any key material. */
 export interface RoutineViewV1 {
   schemaVersion: 1;
@@ -77,8 +67,8 @@ export interface RoutineViewV1 {
   /** The User Profile timezone this projection was rendered under. */
   timezone: string;
   enabled: boolean;
-  createdBy: RoutineWriterViewV1;
-  updatedBy: RoutineWriterViewV1;
+  createdBy: RoutineWriterV1;
+  updatedBy: RoutineWriterV1;
   createdAt: string;
   updatedAt: string;
   lastRunAt?: string;
@@ -393,32 +383,6 @@ function hookKeyVersion(value: unknown): number {
   return value as number;
 }
 
-function decodeRoutineWriterViewV1(
-  value: unknown,
-  label: string,
-): RoutineWriterViewV1 {
-  const candidate = record(value, label);
-  if (candidate.kind === "user") {
-    routineExactKeys(candidate, ["kind"], [], label);
-    return { kind: "user" };
-  }
-  if (candidate.kind !== "bot") {
-    throw new RoutineDecodeError(`${label} kind is invalid`);
-  }
-  routineExactKeys(
-    candidate,
-    ["kind", "botId", "sessionId", "turnId"],
-    [],
-    label,
-  );
-  return {
-    kind: "bot",
-    botId: routineText(candidate.botId, 128, `${label} botId`),
-    sessionId: routineText(candidate.sessionId, 128, `${label} sessionId`),
-    turnId: routineText(candidate.turnId, 128, `${label} turnId`),
-  };
-}
-
 export function decodeRoutineViewV1(value: unknown): RoutineViewV1 {
   const candidate = record(value, "Routine view");
   routineExactKeys(
@@ -459,14 +423,8 @@ export function decodeRoutineViewV1(value: unknown): RoutineViewV1 {
       "Routine timezone",
     ),
     enabled: candidate.enabled,
-    createdBy: decodeRoutineWriterViewV1(
-      candidate.createdBy,
-      "Routine createdBy",
-    ),
-    updatedBy: decodeRoutineWriterViewV1(
-      candidate.updatedBy,
-      "Routine updatedBy",
-    ),
+    createdBy: decodeRoutineWriterV1(candidate.createdBy, "Routine createdBy"),
+    updatedBy: decodeRoutineWriterV1(candidate.updatedBy, "Routine updatedBy"),
     createdAt: routineTimestamp(candidate.createdAt, "Routine createdAt"),
     updatedAt: routineTimestamp(candidate.updatedAt, "Routine updatedAt"),
     ...(candidate.schedule === undefined

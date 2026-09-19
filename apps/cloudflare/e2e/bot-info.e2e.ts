@@ -37,6 +37,17 @@ function says(scope: Page | Locator, text: string) {
   return scope.locator(`[aria-label*="${text}"]`).or(scope.getByText(text));
 }
 
+/**
+ * The Computer destination in the chat header.
+ *
+ * The bar keeps the Bot's name, the Computer and the panel's own switch; every
+ * other door is a row on the Bot page. Its identifier distinguishes this
+ * full-window destination from the Computer card on the Bot page.
+ */
+function computerDestination(page: Page) {
+  return sem(page, "computer-destination");
+}
+
 test("the panel opens on the Bot page and its rows push onto it", async ({
   page,
   userId,
@@ -57,7 +68,7 @@ test("the panel opens on the Bot page and its rows push onto it", async ({
   await expect(sem(page, "right-panel-back")).toHaveCount(0);
 
   await settle(page);
-  await press(sem(page, "computer-toggle"));
+  await press(computerDestination(page));
   await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
   // Computer opens a full window; returning restores the Bot page.
   await expect(says(page, "Observed's screen")).toHaveCount(0);

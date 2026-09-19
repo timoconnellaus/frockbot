@@ -49,12 +49,12 @@ async function withOneBot(
  * The words a person reads, wherever the engine put them.
  *
  * Flutter gives a leaf its text as the element's own content, but a sentence
- * drawn inside a container reaches the accessibility tree as that container's
- * `aria-label` and has no text node of its own. Both failure lines below are
- * the second kind, so they are named by label rather than by text.
+ * drawn inside a container reaches the accessibility tree as part of that
+ * container's `aria-label` and has no text node of its own. Both failure lines
+ * below are the second kind, so their exact copy is found within that label.
  */
 function spoken(scope: Page | Locator, copy: string): Locator {
-  return scope.getByLabel(copy, { exact: true });
+  return scope.getByLabel(copy, { exact: false });
 }
 
 /**

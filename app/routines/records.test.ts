@@ -138,6 +138,34 @@ describe("RoutineWriterV1", () => {
       /kind is invalid/,
     );
   });
+
+  test("uses one 256-character boundary for Session and Turn provenance", () => {
+    const boundary = "a".repeat(256);
+    expect(
+      decodeRoutineWriterV1({
+        kind: "bot",
+        botId: "scout",
+        sessionId: boundary,
+        turnId: boundary,
+      }),
+    ).toMatchObject({ sessionId: boundary, turnId: boundary });
+    expect(() =>
+      decodeRoutineWriterV1({
+        kind: "bot",
+        botId: "scout",
+        sessionId: `${boundary}a`,
+        turnId: "turn-1",
+      }),
+    ).toThrow(/sessionId must be at most 256 characters/);
+    expect(() =>
+      decodeRoutineWriterV1({
+        kind: "bot",
+        botId: "scout",
+        sessionId: "session-1",
+        turnId: `${boundary}a`,
+      }),
+    ).toThrow(/turnId must be at most 256 characters/);
+  });
 });
 
 describe("RoutineRunEntryV1", () => {
