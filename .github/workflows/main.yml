@@ -47,7 +47,9 @@ permissions:
 # the run in progress plus one for the newest head, which covers every commit
 # between. This is also what makes the tag numbering below race-free.
 concurrency:
-  group: main
+  # A branch dispatch qualifies workflow changes without blocking a landed
+  # `main` run. Remove the branch form after this E2E split is qualified.
+  group: ${{ github.ref == 'refs/heads/main' && 'main' || format('main-{0}', github.ref_name) }}
   cancel-in-progress: false
 
 jobs:
@@ -92,6 +94,7 @@ jobs:
 
   validate:
     name: Validate
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -139,7 +142,7 @@ jobs:
   flutter:
     name: Flutter
     needs: scope
-    if: needs.scope.outputs.slow-tier != 'false'
+    if: github.ref == 'refs/heads/main' && needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -221,7 +224,7 @@ jobs:
   runtime:
     name: Cloudflare runtime
     needs: scope
-    if: needs.scope.outputs.slow-tier != 'false'
+    if: github.ref == 'refs/heads/main' && needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -247,7 +250,7 @@ jobs:
   integration:
     name: Cloudflare integration
     needs: scope
-    if: needs.scope.outputs.slow-tier != 'false'
+    if: github.ref == 'refs/heads/main' && needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
