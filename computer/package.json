@@ -11,6 +11,7 @@
     "./protocol": "./protocol.ts",
     "./roots": "./roots.ts",
     "./core": "./core/core.ts",
+    "./core/bot-path": "./core/bot-path.ts",
     "./core/host": "./core/host.ts",
     "./fake": "./fake/host.ts",
     "./host-protocol": "./host-protocol/protocol.ts",

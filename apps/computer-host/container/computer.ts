@@ -22,7 +22,7 @@
  *    API, which is a plain HTTP body and has no such limit.
  */
 
-import { computerBotPathKeyV1 } from "@frockbot/computer/core";
+import { computerBotPathKeyV1 } from "@frockbot/computer/core/bot-path";
 import {
   BOTS_ROOT,
   BROWSER_LIVE_MARKER,

@@ -16,12 +16,14 @@ RUN npm ci --omit=dev
 # it, because Node refuses to strip types from a file under `node_modules`
 # (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) and resolves a symlink to its
 # real path before deciding. This is the same shape a workspace install has.
-# Only the manifest, the protocol directory and the Fly runtime files are copied;
-# the exports map resolves `@frockbot/computer/host-protocol` and
-# `@frockbot/computer/fly/runtime` to them. `computer/fly` holds the rest of
-# the Fly implementation, which runs in the Worker and is not copied.
+# Only the manifest, the protocol directory, the Bot path-key leaf and the Fly
+# runtime files are copied; the exports map resolves
+# `@frockbot/computer/host-protocol`, `@frockbot/computer/core/bot-path` and
+# `@frockbot/computer/fly/runtime` to them. `computer/core` and `computer/fly`
+# hold the rest, which runs in the Worker and is not copied.
 COPY computer/package.json ./computer/package.json
 COPY computer/host-protocol ./computer/host-protocol
+COPY computer/core/bot-path.ts ./computer/core/bot-path.ts
 COPY computer/fly/runtime.ts ./computer/fly/runtime.ts
 COPY computer/fly/shell.ts ./computer/fly/shell.ts
 COPY core/package.json ./core/package.json
