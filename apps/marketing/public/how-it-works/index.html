@@ -125,7 +125,7 @@
           </div>
           <figure class="inside-overview" aria-labelledby="overview-caption">
             <div class="overview-orbit">
-              <span>Tools</span><span>Behaviour</span><span>Interfaces</span>
+              <span>Plugins</span><span>Computer</span>
             </div>
             <div class="overview-cloud">
               <p class="diagram-label">Always on, in the cloud</p>
@@ -155,7 +155,8 @@
               </div>
             </div>
             <figcaption id="overview-caption">
-              One persistent Bot. Different ways to reach it.
+              Native clients connect to one cloud Bot. Plugins and the Computer
+              extend what it can do.
             </figcaption>
           </figure>
         </div>
@@ -301,22 +302,34 @@
             >
               <ol class="turn-flow">
                 <li>
-                  <span>01</span><strong>Receive</strong>
-                  <p>A message or event arrives.</p>
+                  <span>01</span><strong>Store input</strong>
+                  <p>Durably admit the message or event.</p>
                 </li>
                 <li>
-                  <span>02</span><strong>Record</strong>
-                  <p>Store the input, then acknowledge it.</p>
+                  <span>02</span><strong>Acknowledge</strong>
+                  <p>Tell the client its input is accepted.</p>
                 </li>
                 <li>
-                  <span>03</span><strong>Work</strong>
-                  <p>Call models and tools; record progress.</p>
+                  <span>03</span><strong>Prepare a request</strong>
+                  <p>Prompt, tool-exposure and request hooks run.</p>
                 </li>
                 <li>
-                  <span>04</span><strong>Return</strong>
-                  <p>Save the result for connected clients.</p>
+                  <span>04</span><strong>Model step</strong>
+                  <p>The model responds or asks for a tool.</p>
+                </li>
+                <li>
+                  <span>05 · repeat</span><strong>Tool step</strong>
+                  <p>Pre- and post-execute hooks wrap the tool.</p>
+                </li>
+                <li>
+                  <span>06</span><strong>Settle</strong>
+                  <p>Notify stopping, save the result and update clients.</p>
                 </li>
               </ol>
+              <p class="turn-repeat">
+                <span aria-hidden="true">↻</span> Model and tool steps can
+                repeat, with progress recorded between them.
+              </p>
               <div class="recovery-note">
                 <span aria-hidden="true">↳</span>
                 <p>
@@ -387,16 +400,23 @@
                 <div class="runtime-node">
                   <span class="diagram-label">User Durable Object</span
                   ><strong>Your account</strong
-                  ><small>Installed plugins · configuration</small>
+                  ><small>Account authority · installed plugins</small>
                 </div>
                 <div class="runtime-node">
                   <span class="diagram-label">Bot Durable Object</span
                   ><strong>Your Bot</strong
                   ><small>Conversation · Turn · authority</small>
                 </div>
+                <div class="runtime-node">
+                  <span class="diagram-label">Connected clients</span
+                  ><strong>Web · native apps</strong
+                  ><small>Submit commands · render cloud state</small>
+                </div>
               </div>
               <div class="runtime-arrow">
-                <span>Bot calls the plugin worker</span
+                <span
+                  >A client or trigger starts a Turn; the Bot calls the plugin
+                  worker</span
                 ><b aria-hidden="true">↓</b>
               </div>
               <div class="runtime-worker">
@@ -414,12 +434,30 @@
               </div>
               <div class="runtime-gate">
                 <span class="diagram-label"
-                  >Host checks the Turn’s approved authority</span
+                  >Host checks the Bot and admitted operation authority</span
                 ><strong>Storage · memory · models · network · Computer</strong
                 ><small
-                  >Credentials attached here, when making an allowed network
-                  request.</small
+                  >Agent-loop work stays scoped to its Turn. Credentials are
+                  attached here for an allowed network request.</small
                 >
+              </div>
+              <div class="runtime-arrow">
+                <span>Mediated effects leave through the host</span
+                ><b aria-hidden="true">↓</b>
+              </div>
+              <div class="runtime-endpoints">
+                <div class="runtime-node">
+                  <span class="diagram-label">External services</span
+                  ><strong>Approved network destinations</strong
+                  ><small>The plugin never receives the credential.</small>
+                </div>
+                <div class="runtime-node">
+                  <span class="diagram-label">Connected devices · planned</span
+                  ><strong>Authorised device actions</strong
+                  ><small
+                    >Permission and an available client are required.</small
+                  >
+                </div>
               </div>
               <figcaption id="runtime-caption">
                 Plugins reach capabilities through the host. Plugins belonging
@@ -431,8 +469,9 @@
             <p>
               A descriptor declares what the plugin contributes and what access
               it needs. The Bot calls the plugin worker, and plugins call back
-              through host-provided stubs. Every callback is checked against the
-              Bot and Turn it serves.
+              through host-provided stubs. The host checks every callback
+              against the serving Bot and the authority admitted for that
+              operation. Agent-loop work is also scoped to its Turn.
             </p>
             <p>
               Network access is limited to approved hosts, or open network
@@ -531,10 +570,16 @@
               existing authority.
             </p>
             <ol class="authoring-flow" aria-label="Plugin lifecycle">
-              <li><b>Write</b><span>The Bot proposes code.</span></li>
-              <li><b>Check</b><span>Validate the artifact.</span></li>
-              <li><b>Approve</b><span>You grant its access.</span></li>
-              <li><b>Activate</b><span>Mount a new version.</span></li>
+              <li><b>Request</b><span>Ask the Bot for a capability.</span></li>
+              <li><b>Author</b><span>The Bot proposes code.</span></li>
+              <li><b>Check & build</b><span>Validate the artifact.</span></li>
+              <li><b>Approve grants</b><span>You grant its access.</span></li>
+              <li><b>Activate</b><span>Mount a new generation.</span></li>
+              <li><b>Next Turn</b><span>The Bot uses the generation.</span></li>
+              <li>
+                <b>Record & revert</b
+                ><span>Keep versions; restore one later.</span>
+              </li>
             </ol>
             <p>
               Versions can be replaced or a previous composition restored.
@@ -737,24 +782,34 @@
             <div class="surface-types">
               <article>
                 <span>01</span>
+                <strong class="surface-type-label"
+                  >Show something useful</strong
+                >
                 <h3 id="capability-type-slot">Slot</h3>
                 <p>A place for a plugin’s interface.</p>
                 <small>Cards, panels, widgets</small>
               </article>
               <article>
                 <span>02</span>
+                <strong class="surface-type-label">Start it your way</strong>
                 <h3 id="capability-type-entry">Entry</h3>
                 <p>A person starts work or opens a surface.</p>
                 <small>Shortcuts, share sheets</small>
               </article>
               <article>
                 <span>03</span>
+                <strong class="surface-type-label"
+                  >React when something happens</strong
+                >
                 <h3 id="capability-type-trigger">Trigger</h3>
                 <p>An event starts work in the background.</p>
                 <small>Webhooks, device events</small>
               </article>
               <article>
                 <span>04</span>
+                <strong class="surface-type-label"
+                  >Shape what happens next</strong
+                >
                 <h3 id="capability-type-handler">Handler</h3>
                 <p>
                   The host asks for a decision or transformation, or sends a
@@ -764,6 +819,7 @@
               </article>
               <article>
                 <span>05</span>
+                <strong class="surface-type-label">Get something done</strong>
                 <h3 id="capability-type-action">Action</h3>
                 <p>A tool reaches a device or service.</p>
                 <small>Files, network, hardware</small>

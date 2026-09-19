@@ -11,30 +11,6 @@ if (contents) {
   });
 }
 
-const sectionLinks = [...document.querySelectorAll(".inside-contents nav a")];
-if ("IntersectionObserver" in window) {
-  const visibleSections = new Map();
-  const observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries)
-        visibleSections.set(entry.target.id, entry.isIntersecting);
-      const current = sectionLinks.find((link) =>
-        visibleSections.get(link.hash.slice(1)),
-      );
-      if (!current) return;
-      for (const link of sectionLinks) {
-        if (link === current) link.setAttribute("aria-current", "location");
-        else link.removeAttribute("aria-current");
-      }
-    },
-    { rootMargin: "-15% 0px -55% 0px" },
-  );
-  for (const link of sectionLinks) {
-    const section = document.querySelector(link.hash);
-    if (section) observer.observe(section);
-  }
-}
-
 for (const example of document.querySelectorAll(".code-example")) {
   const heading = example.querySelector(".code-heading");
   const code = example.querySelector("pre code");
