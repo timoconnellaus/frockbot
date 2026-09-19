@@ -30,6 +30,10 @@ import type {
   ShellApplicationV1,
   ShellComputerHostFactoryV1,
 } from "./backend-runtime.js";
+import type {
+  BotStateNamespaceV1,
+  BotUserConfigurationNamespaceV1,
+} from "./durable-rpc-targets.js";
 
 export interface BotStateEnv {
   BILLING?: (userId: string, botId: string, sessionId: string) => ModelBilling;
@@ -71,14 +75,14 @@ export interface BotStateEnv {
       body: Record<string, unknown>,
     ): Promise<ReadableStream<Uint8Array>>;
   };
-  USER_CONFIGURATIONS: DurableObjectNamespace;
+  USER_CONFIGURATIONS: BotUserConfigurationNamespaceV1;
   /**
    * The Bot Durable Object namespace, as the Subagent Durable Object namespace:
    * the same class, named `<userId>:<botId>#task:<taskId>`. Optional so a host
    * without it still compiles — `Task` is then not offered at all, rather than
    * offered and unable to dispatch.
    */
-  BOT_STATES?: DurableObjectNamespace;
+  BOT_STATES?: BotStateNamespaceV1;
   COMPUTER_HOST?: Fetcher;
   /**
    * The Applet build service. Optional so a host without it still compiles; a

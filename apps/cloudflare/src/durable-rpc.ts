@@ -6,6 +6,8 @@ import {
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
 
+export { rpcJsonSnapshotV1 } from "@frockbot/app/durable-rpc";
+
 type RpcValueDecoder = (value: unknown, label: string) => unknown;
 export type RpcJsonValue =
   | null
@@ -20,26 +22,6 @@ function record(value: unknown, label: string): Record<string, unknown> {
     throw new Error(`${label} must be an object`);
   }
   return value as Record<string, unknown>;
-}
-
-/**
- * The plain-JSON value one Durable Object's answer really is.
- *
- * A cross-object RPC answer arrives as a live stub carrying `Symbol.dispose`
- * and whatever else the runtime attached to it, and an exact-keys decoder is
- * right to refuse that. Snapshotting first is what turns the answer into the
- * DTO it claims to be, before anything decodes it.
- */
-export function rpcJsonSnapshotV1<T>(value: T): T {
-  try {
-    const serialized = JSON.stringify(value);
-    if (serialized === undefined) {
-      throw new Error("RPC response is not a JSON value");
-    }
-    return JSON.parse(serialized) as T;
-  } catch (error) {
-    throw new Error("RPC response is not valid JSON", { cause: error });
-  }
 }
 
 export function decodeRpcEnvelopeV1(

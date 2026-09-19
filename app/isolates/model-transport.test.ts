@@ -12,6 +12,7 @@ import {
   parseCredentialKeyringV1,
   sealCredentialV1,
 } from "@frockbot/core/connection";
+import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import {
   pluginServedProviderV1,
   PLUGIN_SERVED_PROVIDERS_V1,
@@ -315,17 +316,28 @@ function botState(options: {
       USER_CONFIGURATIONS: {
         idFromName: (name: string) => name,
         get: () => ({
-          readConfiguration: async () => ({
-            connections: [
-              {
-                connectionId: "connection-1",
-                packageId: options.connectionPackageId ?? "provider-deepseek",
-                state: options.connectionState ?? "ready",
-                generation: options.connectionGeneration ?? "generation-1",
-                settings: {},
-              },
-            ],
-          }),
+          readConfiguration: async () =>
+            ({
+              // This stands in for the UserConfiguration RPC itself, whose
+              // boundary returns the complete, versioned settings view.
+              schemaVersion: 1,
+              revision: 1,
+              profile: { name: "Test user" },
+              packages: [],
+              connections: [
+                {
+                  connectionId: "connection-1",
+                  packageId: options.connectionPackageId ?? "provider-deepseek",
+                  connectionTypeId: "deepseek-api-key",
+                  displayName: "DeepSeek",
+                  state: options.connectionState ?? "ready",
+                  generation: options.connectionGeneration ?? "generation-1",
+                  providerType: "deepseek",
+                  safeMetadata: {},
+                  settings: {},
+                },
+              ],
+            }) satisfies UserSettingsViewV1,
           ...(options.credentials === true
             ? { leaseModelCredential: async () => sealedLease(requestId) }
             : {}),
