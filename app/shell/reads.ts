@@ -210,6 +210,13 @@ export async function listRuns(
   if (!query.before) {
     await runWorkingV1(state, activeRunId ?? candidates[0]?.runId);
   }
+  // Announcements share the newest page's wire envelope with its Turns. Read
+  // them once and budget them during selection; adding them only after the
+  // page was full could push an otherwise valid transcript over the limit and
+  // make every restore of that conversation answer 500.
+  const announcements = query.before
+    ? []
+    : await projectAnnouncementPage(state);
 
   const selected = new Map<string, { cursor?: string; run: ClientRunV1 }>();
   if (activeRunId) {
@@ -314,10 +321,14 @@ export async function listRuns(
             left.admittedAt.localeCompare(right.admittedAt) ||
             left.runId.localeCompare(right.runId),
         );
-      const tentativePage = createClientRunListV1(ordered, {
-        truncated: true,
-        nextCursor: candidate.cursor,
-      });
+      const tentativePage = createClientRunListV1(
+        ordered,
+        {
+          truncated: true,
+          nextCursor: candidate.cursor,
+        },
+        announcements,
+      );
       const isNewestTerminal =
         ![...selected.values()].some(
           (entry) =>
@@ -368,7 +379,7 @@ export async function listRuns(
       : { truncated: false },
     // Announcements belong to the Session, not to a page of Turns, so only
     // the newest page carries them.
-    query.before ? [] : await projectAnnouncementPage(state),
+    announcements,
   );
   if (clientRunListWireBytes(page) > CLIENT_RUN_LIST_MAX_BYTES) {
     throw new Error("required run projections exceed the wire byte limit");
