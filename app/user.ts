@@ -300,13 +300,11 @@ export async function createFoundationUserBackendContributions(host: {
         ...(callbackBaseUrl ? { callbackBaseUrl } : {}),
       };
     },
-    get ollamaCloud() {
+    get modelConnections() {
       const settings = mountedContributions.get(settingsUserContribution);
       const credentials = mountedContributions.get(credentialsUserContribution);
       if (!settings || !credentials) {
-        throw new Error(
-          "Ollama Cloud requires Settings and Credential Contributions",
-        );
+        throw new Error("Model Connections require Settings and Credentials");
       }
       return { storage: host.storage, settings, credentials };
     },

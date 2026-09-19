@@ -10,7 +10,7 @@ import type {
 } from "@frockbot/app/settings/user";
 import { createUserSettingsBackendContribution } from "@frockbot/app/settings/user";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/core/connection";
-import type { OllamaUserBackendHost } from "../ollama-cloud/user.js";
+import type { ModelConnectionUserBackendHostV1 } from "../model-connections/user.js";
 import {
   catalogProviderDefinitionsV1,
   catalogProvidersV1,
@@ -136,9 +136,9 @@ function fixture(provider: "xai" | "openrouter", initialNow = 1_000_000) {
         if (accountId !== "account-1") throw new Error("unknown account");
         return {};
       },
-    } as unknown as OllamaUserBackendHost["settings"],
+    } as unknown as ModelConnectionUserBackendHostV1["settings"],
     now: () => clock.now,
-  } satisfies OllamaUserBackendHost;
+  } satisfies ModelConnectionUserBackendHostV1;
   const install = async (
     accountId: string,
     attemptId: string,
@@ -249,7 +249,8 @@ describe("durable model OAuth manager", () => {
     const owner = createCatalogConnectionOwnerV1(provider, {
       storage,
       settings,
-      credentials: credentials as OllamaUserBackendHost["credentials"],
+      credentials:
+        credentials as ModelConnectionUserBackendHostV1["credentials"],
       now: () => clock.now,
       randomId: () => crypto.randomUUID(),
     });

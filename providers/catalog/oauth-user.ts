@@ -7,7 +7,7 @@ import type {
   CredentialTransaction,
   PreparedApiKeyCredential,
 } from "@frockbot/app/credentials/user";
-import type { OllamaUserBackendHost } from "../ollama-cloud/user.js";
+import type { ModelConnectionUserBackendHostV1 } from "../model-connections/user.js";
 import {
   startOAuthV1,
   pollOAuthV1,
@@ -46,7 +46,7 @@ export class ModelOAuthUserV1 {
   private readonly now: () => number;
   constructor(
     private readonly provider: OAuthProviderIdV1,
-    private readonly host: OllamaUserBackendHost,
+    private readonly host: ModelConnectionUserBackendHostV1,
     private readonly install: (
       accountId: string,
       attemptId: string,

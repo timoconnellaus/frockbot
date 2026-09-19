@@ -9,7 +9,7 @@ import type {
   UserSettingsTransaction,
 } from "@frockbot/app/settings/user";
 import type { ConnectionCommandV1 } from "@frockbot/core/connection";
-import type { OllamaUserBackendHost } from "@frockbot/providers/ollama-cloud/user";
+import type { ModelConnectionUserBackendHostV1 } from "@frockbot/providers/model-connections/user";
 import { ModelOAuthUserV1 } from "../../providers/catalog/oauth-user.js";
 import { createSettingsBackendContribution } from "./backend.js";
 
@@ -75,7 +75,7 @@ function fixture() {
       if (value === undefined) throw new Error("sealed value unavailable");
       return value;
     },
-  } as unknown as OllamaUserBackendHost["credentials"];
+  } as unknown as ModelConnectionUserBackendHostV1["credentials"];
   const manager = new ModelOAuthUserV1(
     "xai",
     {
@@ -88,7 +88,7 @@ function fixture() {
           if (accountId !== "account-1") throw new Error("unknown account");
           return {};
         },
-      } as unknown as OllamaUserBackendHost["settings"],
+      } as unknown as ModelConnectionUserBackendHostV1["settings"],
       now: () => clock.now,
     },
     async (_accountId: string, attemptId: string) => ({
