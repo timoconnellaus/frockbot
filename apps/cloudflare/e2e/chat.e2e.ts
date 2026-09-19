@@ -415,11 +415,10 @@ test("a delivered reply is one bubble, wide enough for its own text", async () =
 
 // The settled case above, from the other end of a Turn. The avatar used to sit
 // in a gutter to the left of the running Turn's bubbles and then vanish when
-// the Turn ended, which took the bubble sideways with it. The working
-// indicator is the companion outside the transcript now — the thread draws no
-// working row at all — so a bubble is at the transcript's left edge while the
-// Bot is still writing, and the end of the Turn moves nothing.
-test("the working companion stays outside the transcript and never shifts the bubbles", async () => {
+// the Turn ended, which took the bubble sideways with it. The companion now
+// stays in the conversation header and the thread draws no working row at all,
+// so changing its pose at the end of the Turn moves no bubble.
+test("the working companion stays in the header and never shifts the bubbles", async () => {
   const { page, ollamaBaseUrl } = application();
   // Measure layout without the bubble's entrance motion.
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -440,7 +439,11 @@ test("the working companion stays outside the transcript and never shifts the bu
   // time a bubble and the working row are both drawn, whenever that happens.
   let running: {
     bubbleLeft: number;
+    bubbleTop: number;
     bubbleBottom: number;
+    companionTop: number;
+    companionBottom: number;
+    transcriptTop: number;
   } | null = null;
   const conversation = sem(page, "shell-conversation");
   await expect
@@ -453,10 +456,17 @@ test("the working companion stays outside the transcript and never shifts the bu
         const row = await sem(conversation, "working-indicator")
           .boundingBox()
           .catch(() => null);
-        if (!bubble || !row || bubble.width === 0) return false;
+        const transcript = await sem(page, "chat-transcript")
+          .boundingBox()
+          .catch(() => null);
+        if (!bubble || !row || !transcript || bubble.width === 0) return false;
         running = {
           bubbleLeft: bubble.x,
+          bubbleTop: bubble.y,
           bubbleBottom: bubble.y + bubble.height,
+          companionTop: row.y,
+          companionBottom: row.y + row.height,
+          transcriptTop: transcript.y,
         };
         return true;
       },
@@ -465,11 +475,17 @@ test("the working companion stays outside the transcript and never shifts the bu
     .toBe(true);
   const midTurn = running as unknown as {
     bubbleLeft: number;
+    bubbleTop: number;
     bubbleBottom: number;
+    companionTop: number;
+    companionBottom: number;
+    transcriptTop: number;
   };
 
-  // Outside the thread: the transcript has no working row to draw or to take
-  // away. Its exact position belongs to the responsive conversation chrome.
+  // The working pose occupies the header's fixed top inset, above the bubble
+  // and outside the transcript: the thread has no row to draw or take away.
+  expect(midTurn.companionTop - midTurn.transcriptTop).toBeCloseTo(20, 0);
+  expect(midTurn.companionBottom).toBeLessThanOrEqual(midTurn.bubbleTop);
   await expect(
     sem(page, "chat-transcript").locator(
       '[flt-semantics-identifier="working-indicator"]',
