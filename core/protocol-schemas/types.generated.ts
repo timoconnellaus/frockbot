@@ -589,7 +589,7 @@ export type SettingField = {
   maxLength?: number;
   required?: boolean;
   choices?: Array<SettingChoice>;
-  choiceSource?: "account-models";
+  choiceSource?: "account-models" | "routine-editor" | "routine-editor-hidden";
   isSet?: boolean;
   canReset?: boolean;
 };

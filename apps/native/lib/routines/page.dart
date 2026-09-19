@@ -18,6 +18,7 @@ import '../shell/semantics.dart';
 import '../shell/transcript_model.dart';
 import '../view/surface.dart';
 import 'document.dart';
+import 'editor.dart';
 import 'runs.dart';
 
 /// Reads the Routines document, and carries each action where it belongs.
@@ -48,6 +49,7 @@ class RoutinesController extends ViewSurfaceController {
   Map<String, Object?>? mintedKey;
 
   wire.ViewDocument? _document;
+  List<RoutinePluginSourceV1> pluginSources = const [];
   bool _busy = false;
   bool _closed = false;
   String? _message;
@@ -71,6 +73,18 @@ class RoutinesController extends ViewSurfaceController {
 
   String get _path => '/api/bots/${Uri.encodeComponent(botId)}/routines';
 
+  Future<Object?> _loadPluginFrame() async {
+    try {
+      return await api.request(
+        '/api/bots/${Uri.encodeComponent(botId)}/plugins',
+      );
+    } catch (_) {
+      // A Plugin catalog failure must not hide Routines that are otherwise
+      // available. The editor can still offer schedules and webhooks.
+      return null;
+    }
+  }
+
   void _changed() {
     if (!_closed) notifyListeners();
   }
@@ -82,6 +96,7 @@ class RoutinesController extends ViewSurfaceController {
     _message = null;
     _changed();
     try {
+      final plugins = _loadPluginFrame();
       final next = wire.ViewDocument.fromJson(
         await api.request(
           '$_path?as=document${editing == null ? '' : '&edit=${Uri.encodeQueryComponent(editing!)}'}',
@@ -91,6 +106,7 @@ class RoutinesController extends ViewSurfaceController {
         throw const FormatException('Routines surface mismatch');
       }
       _document = next;
+      pluginSources = routinePluginSourcesV1(await plugins);
       onInbox?.call(unacknowledgedOnScreen.length);
     } catch (_) {
       _message = 'Couldn’t load this Bot’s Routines. Check your connection and try again.';
@@ -281,6 +297,7 @@ class _RoutinesViewState extends State<RoutinesView> {
       chrome: widget.chrome,
       controller: controller,
       banner: (context) => WebhookKeyCard(controller: controller),
+      fields: routineEditorFieldBuildersV1(controller.pluginSources),
     ),
   );
 }

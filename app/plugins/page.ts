@@ -12,7 +12,11 @@ import {
   type ViewDocument,
   type ViewNode,
 } from "@frockbot/core/protocol-schemas";
-import type { PluginGrantV1, PluginNetworkV1 } from "@frockbot/core/contracts";
+import type {
+  PluginGrantV1,
+  PluginNetworkV1,
+  PluginTriggerV1,
+} from "@frockbot/core/contracts";
 import {
   pluginModelProviderDisplayNameV1,
   pluginServedProviderV1,
@@ -42,6 +46,8 @@ export interface BotPluginRowV1 {
   network?: PluginNetworkV1;
   /** The grants the descriptor asked for; `http` also opens this deployment's sender. */
   grants?: readonly PluginGrantV1[];
+  /** Human-facing triggers this Plugin declares, for the Routine picker. */
+  triggers?: readonly PluginTriggerV1[];
   /**
    * The model providers the descriptor serves (ADR 0032). A Bot whose model
    * names one of them runs it whatever this row's switch says.

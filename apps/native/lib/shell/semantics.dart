@@ -312,6 +312,14 @@ abstract final class RoutineIds {
   static const document = 'routines-document';
   static const refresh = 'routines-refresh';
   static const panel = 'routines-panel';
+  static const editor = 'routine-editor';
+  static const sourceSchedule = 'routine-source-schedule';
+  static const sourceWebhook = 'routine-source-webhook';
+  static String sourcePlugin(String pluginId) => 'routine-source-$pluginId';
+  static String pluginTrigger(String pluginId, String trigger) =>
+      'routine-trigger-$pluginId-$trigger';
+  static const editorBack = 'routine-editor-back';
+  static const editorContinue = 'routine-editor-continue';
   static const inboxDrawer = 'routine-inbox-drawer';
   static const runLog = 'routine-run-log';
   static const confirmDelete = 'routine-delete-confirm';

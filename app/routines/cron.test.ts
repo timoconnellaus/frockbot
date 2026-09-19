@@ -1,11 +1,32 @@
 import { describe, expect, test } from "bun:test";
 import {
+  describeRoutineScheduleV1,
   isRoutineTimezoneV1,
   missedRoutineRunsV1,
   nextRoutineRunV1,
   normalizeRoutineScheduleV1,
   RoutineScheduleError,
 } from "./cron.js";
+
+describe("describeRoutineScheduleV1", () => {
+  test("uses plain language for the schedules the Routine editor creates", () => {
+    expect(describeRoutineScheduleV1("0 9 * * *")).toBe("Every day at 9:00am");
+    expect(describeRoutineScheduleV1("30 8 * * 1-5")).toBe(
+      "Every weekday at 8:30am",
+    );
+    expect(describeRoutineScheduleV1("0 18 * * 5")).toBe(
+      "Every Friday at 6:00pm",
+    );
+    expect(describeRoutineScheduleV1("15 7 3 * *")).toBe(
+      "On day 3 of every month at 7:15am",
+    );
+    expect(describeRoutineScheduleV1("@every 15m")).toBe("Every 15 minutes");
+  });
+
+  test("does not expose an arbitrary cron expression", () => {
+    expect(describeRoutineScheduleV1("0 9 1-7 * 1")).toBe("Custom schedule");
+  });
+});
 
 describe("normalizeRoutineScheduleV1", () => {
   test("accepts a five-field cron expression in the account zone", () => {

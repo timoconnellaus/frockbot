@@ -3511,7 +3511,7 @@
           }
         },
         "choiceSource": {
-          "const": "account-models"
+          "enum": ["account-models", "routine-editor", "routine-editor-hidden"]
         },
         "isSet": {
           "type": "boolean"

@@ -111,10 +111,10 @@ test("a Routine says what it fires on and when it last did and next will", () =>
     (node) =>
       node.type === "text" &&
       node.style === "status" &&
-      node.text.includes("0 9 * * *"),
+      node.text.includes("Every day at 9:00am"),
   );
   expect(facts?.type === "text" && facts.text).toBe(
-    "0 9 * * * · Australia/Sydney · Last 3 Sep 2026, 9:00am · Next 4 Sep 2026, 9:00am",
+    "Every day at 9:00am · Australia/Sydney · Last 3 Sep 2026, 9:00am · Next 4 Sep 2026, 9:00am",
   );
   expect(document.surfaceId).toBe("routines");
 });
@@ -122,12 +122,11 @@ test("a Routine says what it fires on and when it last did and next will", () =>
 test("every control names the command it means", () => {
   const document = routinesDocumentV1(frame());
   const actions = walk(document.root).filter((node) => node.type === "action");
-  // The editor is first and holds everything one Routine can be asked when it
-  // is open; a row holds the two controls a row draws for itself.
+  // The editor's host-owned field draws its controls; the document still
+  // declares every action schema, while rows carry their own controls.
   expect(
     actions.map((node) => (node.type === "action" ? node.input?.kind : "")),
   ).toEqual([
-    "save-routine",
     "edit-routine",
     "set-routine-enabled",
     "acknowledge-inbox",
@@ -145,6 +144,9 @@ test("every control names the command it means", () => {
     "save-routine",
     "set-routine-enabled",
   ]);
+  expect(document.actions.some((action) => action.id === "save-routine")).toBe(
+    true,
+  );
 });
 
 test("a paused Routine offers Resume and promises no next firing", () => {
@@ -250,12 +252,14 @@ test("the editor is one collapsed form until a Routine is named", () => {
   expect(
     fields.map((node) => (node.type === "field" ? node.field.id : "")),
   ).toEqual([
+    ROUTINE_EDITOR_FIELDS_V1.routineId,
     ROUTINE_EDITOR_FIELDS_V1.name,
     ROUTINE_EDITOR_FIELDS_V1.prompt,
-    ROUTINE_EDITOR_FIELDS_V1.timing,
     ROUTINE_EDITOR_FIELDS_V1.schedule,
-    ROUTINE_EDITOR_FIELDS_V1.pluginId,
-    ROUTINE_EDITOR_FIELDS_V1.pluginTrigger,
+    ROUTINE_EDITOR_FIELDS_V1.scheduleDescription,
+    ROUTINE_EDITOR_FIELDS_V1.timezone,
+    ROUTINE_EDITOR_FIELDS_V1.keyVersion,
+    ROUTINE_EDITOR_FIELDS_V1.timing,
   ]);
 });
 
@@ -270,69 +274,54 @@ test("naming a Routine opens the editor on its own values and moves the revision
   const values = walk(editor!)
     .filter((node) => node.type === "field")
     .map((node) => (node.type === "field" ? node.field.value : null));
-  // The editor's two Plugin-trigger fields are empty for a scheduled Routine.
   expect(values).toEqual([
+    "r1",
     "Morning brief",
     "Summarise overnight email.",
-    "schedule",
     "0 9 * * *",
+    "Every day at 9:00am",
+    "Australia/Sydney",
     null,
-    null,
+    "schedule",
   ]);
-  // Editing offers a way back out; creating has nothing to cancel.
-  expect(
-    walk(open.root).some(
-      (node) => node.type === "action" && node.actionId === "cancel-edit",
-    ),
-  ).toBe(true);
-  expect(
-    walk(closed.root).some(
-      (node) => node.type === "action" && node.actionId === "cancel-edit",
-    ),
-  ).toBe(false);
+  // The host uses this identity to show edit-only controls such as Cancel,
+  // Run now, and Delete; a create form carries no identity.
+  const createdId = walk(closed.root).find(
+    (node) =>
+      node.type === "field" &&
+      node.field.id === ROUTINE_EDITOR_FIELDS_V1.routineId,
+  );
+  expect(createdId?.type === "field" && createdId.field.value).toBe(null);
 });
 
-test("only a webhook Routine is offered a key, and only a keyed one a revoke", () => {
-  const scheduled = walk(routinesDocumentV1(frame({ editing: morning })).root)
-    .filter((node) => node.type === "action")
-    .map((node) => (node.type === "action" ? node.actionId : ""));
-  expect(scheduled).not.toContain("rotate-key");
-  expect(scheduled).not.toContain("revoke-key");
-
+test("the host editor is told whether a triggered Routine has a key", () => {
   const fresh: RoutineViewV1 = {
     ...morning,
     schedule: undefined,
     trigger: { kind: "webhook" },
     nextRunAt: undefined,
   };
-  const minting = walk(
-    routinesDocumentV1(frame({ routines: [fresh], editing: fresh })).root,
-  );
-  const mint = minting.find(
-    (node) => node.type === "action" && node.actionId === "rotate-key",
-  );
-  expect(mint?.type === "action" && mint.label).toBe("Mint key");
-  expect(
-    minting.some(
-      (node) => node.type === "action" && node.actionId === "revoke-key",
-    ),
-  ).toBe(false);
-
   const keyedRoutine = { ...fresh, hookKeyVersion: 2 };
-  const keyed = walk(
-    routinesDocumentV1(
-      frame({ routines: [keyedRoutine], editing: keyedRoutine }),
-    ).root,
-  );
-  const rotate = keyed.find(
-    (node) => node.type === "action" && node.actionId === "rotate-key",
-  );
-  expect(rotate?.type === "action" && rotate.label).toBe("Rotate key");
+  const version = (routine: RoutineViewV1) =>
+    walk(
+      routinesDocumentV1(frame({ routines: [routine], editing: routine })).root,
+    )
+      .filter((node) => node.type === "field")
+      .find(
+        (node) =>
+          node.type === "field" &&
+          node.field.id === ROUTINE_EDITOR_FIELDS_V1.keyVersion,
+      );
   expect(
-    keyed.some(
-      (node) => node.type === "action" && node.actionId === "revoke-key",
-    ),
-  ).toBe(true);
+    version(morning)?.type === "field" && version(morning)?.field.value,
+  ).toBe(null);
+  expect(version(fresh)?.type === "field" && version(fresh)?.field.value).toBe(
+    null,
+  );
+  expect(
+    version(keyedRoutine)?.type === "field" &&
+      version(keyedRoutine)?.field.value,
+  ).toBe("2");
 });
 
 test("a minted key is never in the document", () => {

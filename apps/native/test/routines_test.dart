@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/routines/document.dart';
+import 'package:frockbot_native/routines/editor.dart';
 import 'package:frockbot_native/routines/page.dart';
 import 'package:frockbot_native/routines/runs.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -187,6 +188,104 @@ Map<String, Object?> routinesDocument({
 };
 
 void main() {
+  test('only usable trigger-capable Plugins become Routine sources', () {
+    final sources = routinePluginSourcesV1({
+      'plugins': [
+        {
+          'pluginId': 'github',
+          'displayName': 'GitHub',
+          'on': true,
+          'triggers': [
+            {
+              'name': 'issue-opened',
+              'description': 'When a new issue is opened',
+            },
+          ],
+        },
+        {
+          'pluginId': 'off',
+          'displayName': 'Off Plugin',
+          'on': false,
+          'triggers': [
+            {'name': 'event', 'description': 'An event'},
+          ],
+        },
+        {
+          'pluginId': 'quarantined',
+          'displayName': 'Quarantined Plugin',
+          'on': true,
+          'quarantined': {'reason': 'review'},
+          'triggers': [
+            {'name': 'event', 'description': 'An event'},
+          ],
+        },
+      ],
+    });
+
+    expect(sources, hasLength(1));
+    expect(sources.single.displayName, 'GitHub');
+    expect(sources.single.triggers.single.name, 'issue-opened');
+    expect(sources.single.triggers.single.displayName, 'Issue Opened');
+  });
+
+  testWidgets('the guided editor only configures the selected trigger type', (
+    tester,
+  ) async {
+    final plugin = RoutinePluginSourceV1(
+      pluginId: 'github',
+      displayName: 'GitHub',
+      triggers: const [
+        RoutinePluginTriggerV1(
+          'issue-opened',
+          'When a new issue is opened in a repository',
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: RoutineEditorV1(
+              plugins: [plugin],
+              source: 'schedule',
+              routineId: null,
+              name: '',
+              prompt: '',
+              schedule: '0 9 * * *',
+              scheduleDescription: 'Every day at 9:00am',
+              timezone: 'Australia/Sydney',
+              hookKeyVersion: null,
+              enabled: true,
+              onSourceChanged: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Schedule'), findsOneWidget);
+    expect(find.text('Webhook'), findsOneWidget);
+    expect(find.text('GitHub'), findsOneWidget);
+    expect(find.text('github'), findsNothing);
+
+    await tester.tap(find.text('Webhook'));
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Configure Webhook'), findsOneWidget);
+    expect(find.text('Configure Schedule'), findsNothing);
+    expect(find.textContaining('0 9 * * *'), findsNothing);
+
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('GitHub'));
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Configure GitHub'), findsOneWidget);
+    expect(find.text('Issue Opened'), findsOneWidget);
+    expect(find.text('issue-opened'), findsNothing);
+  });
+
   group('the projection read back', () {
     test('pausing and resuming are the two Routine enablement commands', () {
       expect(
@@ -547,9 +646,7 @@ void main() {
         save({
           'routine.name': 'Alerts',
           'routine.prompt': 'Read the alert.',
-          'routine.timing': 'plugin',
-          'routine.pluginId': 'weather',
-          'routine.pluginTrigger': 'alert',
+          'routine.timing': 'plugin:weather:alert',
         }),
         'bot-1',
       );
@@ -565,7 +662,7 @@ void main() {
           save({
             'routine.name': 'Alerts',
             'routine.prompt': 'Read the alert.',
-            'routine.timing': 'plugin',
+            'routine.timing': 'plugin:weather:',
           }),
           'bot-1',
         ),
