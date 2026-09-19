@@ -16,18 +16,11 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import {
   test,
   expect,
-  connectOllama,
-  chooseDefaultModel,
-  createBot,
   enableApplets,
-  expectReadyToSend,
-  openApplication,
-  enablePackage,
+  provisionThroughApi,
   press,
   sem,
   sendMessage,
-  E2E_CONNECTION_LABEL,
-  E2E_MODEL_LABEL,
 } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY, e2eToolCallPrompt } from "./harness.ts";
 
@@ -37,19 +30,6 @@ const PACKAGE_ID = "applets";
 const APPLET_ID = "u1abc.todo";
 const PHONE = { width: 390, height: 844 } as const;
 const DESKTOP = { width: 1280, height: 800 } as const;
-
-/**
- * The window the Plugins list is turned on from.
- *
- * Tall enough that both rows this spec presses are on screen at once, which is
- * the whole point: a Flutter list paints to a canvas, and steering it by the
- * wheel is not reliable enough to build on — the engine drops a row out of the
- * accessibility tree as the list moves and puts it back a frame or two later,
- * so a scroll can walk past a row that is on screen. Nothing about a Package
- * being turned on is about the size of the window, so the size is chosen to
- * take the scroll out of the path rather than to prove anything.
- */
-const PROVISIONING_WINDOW = { width: 1280, height: 1800 } as const;
 
 function listPageHtml(): string {
   return "<!doctype html><html><body><h1>Your Applets</h1></body></html>";
@@ -336,34 +316,28 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   ).toBeLessThanOrEqual(0);
 }
 
-/** Turn a Package on from its Plugins row. */
-
 /**
- * A Bot whose Turns reach the fake provider, by the path a person walks.
+ * A Bot whose Turns reach the fake provider, with Applets held by the account.
  *
- * The same path as `provisionThroughUi`, in a window where the Plugins list
- * needs no scrolling. The caller sets the size its own claims are about
- * afterwards.
+ * Through `provisionThroughApi`: nothing this spec asserts is about the
+ * Packages page, the connect form or the create sheet, and the window it opens
+ * in is the one the caller set rather than one provisioning needed. Applets go
+ * on first, because the Bot page reads the account's features when the Bot is
+ * opened.
  */
 async function provision(
   page: Page,
   options: { userId: string; apiBaseUrl: string; botName: string },
 ): Promise<void> {
-  await page.setViewportSize(PROVISIONING_WINDOW);
-  await openApplication(page, options.userId);
   await enableApplets(page, options.userId);
-  await enablePackage(page, "Custom models");
-  await enablePackage(page, "Ollama Cloud");
-  await connectOllama(page, {
+  await provisionThroughApi(page, {
+    userId: options.userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: options.apiBaseUrl,
+    botName: options.botName,
+    // Custom models, as the UI walk this replaced turned on from Plugins.
+    perBotModels: true,
   });
-  await chooseDefaultModel(
-    page,
-    `${E2E_MODEL_LABEL} · ${E2E_CONNECTION_LABEL}`,
-  );
-  await createBot(page, options.botName);
-  await expectReadyToSend(page);
 }
 
 /**

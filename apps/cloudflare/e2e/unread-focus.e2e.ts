@@ -26,7 +26,7 @@ import {
   createBot,
   expectReadyToSend,
   press,
-  provisionThroughUi,
+  provisionThroughApi,
   revealSidebar,
   sem,
   SHELL_TIMEOUT_MS,
@@ -102,7 +102,7 @@ test("a Bot that replies while another chat is open badges only its own row", as
   // a granted permission is also what lets the background intent be delivered
   // and acknowledged rather than waiting forever for an answer.
   await page.context().grantPermissions(["notifications"]);
-  await provisionThroughUi(page, {
+  await provisionThroughApi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,
@@ -170,7 +170,7 @@ test("a reply in the chat the User is reading never raises a badge", async ({
   ollamaBaseUrl,
 }) => {
   await page.context().grantPermissions(["notifications"]);
-  await provisionThroughUi(page, {
+  await provisionThroughApi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,

@@ -25,7 +25,7 @@ import {
   test,
   expect,
   composerInput,
-  provisionThroughUi,
+  provisionThroughApi,
   sem,
   sendMessage,
   setFakeOllamaChatMode,
@@ -142,9 +142,10 @@ test("the shell is usable on a phone", async ({
   userId,
   ollamaBaseUrl,
 }) => {
-  // `provisionThroughUi` opens a wide window of its own to walk the Plugins
-  // document and gives this one back, so everything below is at 390x844.
-  await provisionThroughUi(page, {
+  // `provisionThroughApi` never touches the window: the account is built over
+  // the product's own command routes, so everything below — the shell's first
+  // frame included — happens at 390x844, which is what this spec is about.
+  await provisionThroughApi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,

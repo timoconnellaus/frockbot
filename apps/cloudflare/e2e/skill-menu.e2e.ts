@@ -10,7 +10,7 @@ import {
   expect,
   answerInputs,
   composerInput,
-  provisionThroughUi,
+  provisionThroughApi,
   sem,
 } from "./fixtures.ts";
 import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
@@ -53,7 +53,7 @@ test("the Skill popover keeps the highlight the arrow keys put on it", async ({
   userId,
   ollamaBaseUrl,
 }) => {
-  await provisionThroughUi(page, {
+  await provisionThroughApi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,
