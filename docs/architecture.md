@@ -840,7 +840,9 @@ Three more projections in the settings-document family:
   say the same thing about when it fires. The editor's Plugin choices are read
   from the Bot's Plugins frame (`GET /api/bots/:botId/plugins`) beside this
   document and may land after it, because a Plugin route that is slow or broken
-  must not hold back the Routines it is not needed for. A triggered Routine also
+  must not hold back the Routines it is not needed for; until it lands the
+  editor says the list is still being read rather than calling a stored Plugin
+  unavailable. A triggered Routine also
   gets its two key controls, and only a triggered one: the route refuses a key
   for a scheduled Routine, so the control is absent rather than offered.
 
