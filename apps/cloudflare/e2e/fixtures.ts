@@ -668,7 +668,7 @@ export async function createBot(
   await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
     new RegExp(escapeRegExp(name), "u"),
     {
-      timeout: 60_000,
+      timeout: 30_000,
     },
   );
 }
