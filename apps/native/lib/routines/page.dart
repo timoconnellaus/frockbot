@@ -18,6 +18,7 @@ import '../shell/semantics.dart';
 import '../shell/transcript_model.dart';
 import '../view/surface.dart';
 import 'document.dart';
+import 'editor.dart';
 import 'runs.dart';
 
 /// Reads the Routines document, and carries each action where it belongs.
@@ -48,9 +49,21 @@ class RoutinesController extends ViewSurfaceController {
   Map<String, Object?>? mintedKey;
 
   wire.ViewDocument? _document;
+  List<RoutinePluginSourceV1> pluginSources = const [];
+
+  /// Whether the read that answers for [pluginSources] is still out. An empty
+  /// list under a read that is still out is not a statement about this Bot's
+  /// Plugins, and the editor draws the difference rather than telling someone
+  /// their Plugin is gone.
+  bool pluginCatalogPending = true;
   bool _busy = false;
   bool _closed = false;
   String? _message;
+
+  /// Which read is the current one. A read that publishes its document stops
+  /// being busy while its catalog is still out, so a newer read can start over
+  /// it — and the newer read's catalog is the one that counts.
+  int _reads = 0;
 
   RoutinesController(
     this.api,
@@ -71,6 +84,18 @@ class RoutinesController extends ViewSurfaceController {
 
   String get _path => '/api/bots/${Uri.encodeComponent(botId)}/routines';
 
+  Future<Object?> _loadPluginFrame() async {
+    try {
+      return await api.request(
+        '/api/bots/${Uri.encodeComponent(botId)}/plugins',
+      );
+    } catch (_) {
+      // A Plugin catalog failure must not hide Routines that are otherwise
+      // available. The editor can still offer schedules and webhooks.
+      return null;
+    }
+  }
+
   void _changed() {
     if (!_closed) notifyListeners();
   }
@@ -80,7 +105,13 @@ class RoutinesController extends ViewSurfaceController {
     if (_busy) return;
     _busy = true;
     _message = null;
+    final read = ++_reads;
+    pluginCatalogPending = true;
     _changed();
+    // The catalog widens what the editor offers and nothing else, so it is
+    // asked for beside the document and read whenever it lands: a slow Plugin
+    // route must not hold back Routines that are otherwise available.
+    final plugins = _loadPluginFrame();
     try {
       final next = wire.ViewDocument.fromJson(
         await api.request(
@@ -98,6 +129,16 @@ class RoutinesController extends ViewSurfaceController {
       _busy = false;
       _changed();
     }
+    unawaited(_adoptPluginSources(read, plugins));
+  }
+
+  /// The catalog the read that asked for it was owed, applied on arrival.
+  Future<void> _adoptPluginSources(int read, Future<Object?> plugins) async {
+    final frame = await plugins;
+    if (_closed || read != _reads) return;
+    pluginSources = routinePluginSourcesV1(frame);
+    pluginCatalogPending = false;
+    _changed();
   }
 
   List<String> get unacknowledgedOnScreen =>
@@ -281,6 +322,10 @@ class _RoutinesViewState extends State<RoutinesView> {
       chrome: widget.chrome,
       controller: controller,
       banner: (context) => WebhookKeyCard(controller: controller),
+      fields: routineEditorFieldBuildersV1(
+        () => controller.pluginSources,
+        pluginsPending: () => controller.pluginCatalogPending,
+      ),
     ),
   );
 }

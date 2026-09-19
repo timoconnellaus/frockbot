@@ -93,7 +93,10 @@
         "onAccent": "#ffffff"
       },
       "type": "manrope",
-      "bubbles": { "bot": "raised", "me": "tint" }
+      "bubbles": {
+        "bot": "raised",
+        "me": "tint"
+      }
     }
   },
   {
@@ -242,7 +245,10 @@
             "onAccent": "#ffffff"
           },
           "type": "manrope",
-          "bubbles": { "bot": "plain", "me": "accent" }
+          "bubbles": {
+            "bot": "plain",
+            "me": "accent"
+          }
         }
       }
     }
@@ -265,7 +271,10 @@
           "onAccent": "#ffffff"
         },
         "type": "manrope",
-        "bubbles": { "bot": "raised", "me": "tint" }
+        "bubbles": {
+          "bot": "raised",
+          "me": "tint"
+        }
       }
     }
   },
@@ -316,7 +325,10 @@
             "onAccent": "#ffffff"
           },
           "type": "manrope",
-          "bubbles": { "bot": "plain", "me": "accent" }
+          "bubbles": {
+            "bot": "plain",
+            "me": "accent"
+          }
         }
       }
     }
@@ -1046,13 +1058,25 @@
               {
                 "type": "field",
                 "field": {
+                  "id": "routine.editorId",
+                  "label": "Routine",
+                  "kind": "text",
+                  "value": "r1",
+                  "editable": true,
+                  "choiceSource": "routine-editor-hidden"
+                }
+              },
+              {
+                "type": "field",
+                "field": {
                   "id": "routine.name",
                   "label": "Name",
                   "kind": "text",
                   "value": "Morning brief",
                   "editable": true,
                   "maxLength": 100,
-                  "required": true
+                  "required": true,
+                  "choiceSource": "routine-editor-hidden"
                 }
               },
               {
@@ -1064,31 +1088,8 @@
                   "value": "Summarise overnight email.",
                   "editable": true,
                   "maxLength": 8000,
-                  "hint": "What the Routine does when it fires."
-                }
-              },
-              {
-                "type": "field",
-                "field": {
-                  "id": "routine.timing",
-                  "label": "Fires on",
-                  "kind": "select",
-                  "value": "schedule",
-                  "editable": true,
-                  "choices": [
-                    {
-                      "label": "A schedule",
-                      "value": "schedule"
-                    },
-                    {
-                      "label": "A webhook",
-                      "value": "webhook"
-                    },
-                    {
-                      "label": "A Plugin trigger",
-                      "value": "plugin"
-                    }
-                  ]
+                  "hint": "What the Routine does when it fires.",
+                  "choiceSource": "routine-editor-hidden"
                 }
               },
               {
@@ -1100,84 +1101,54 @@
                   "value": "0 9 * * *",
                   "editable": true,
                   "maxLength": 256,
-                  "hint": "cron, or @daily / @every 15m. Ignored for a webhook or Plugin Routine, which is given a key instead."
+                  "choiceSource": "routine-editor-hidden"
                 }
               },
               {
                 "type": "field",
                 "field": {
-                  "id": "routine.pluginId",
-                  "label": "Plugin",
+                  "id": "routine.scheduleDescription",
+                  "label": "Schedule description",
                   "kind": "text",
-                  "value": null,
+                  "value": "Every day at 9:00am",
                   "editable": true,
-                  "maxLength": 64,
-                  "hint": "For a Plugin trigger: the Plugin's id, as the Plugins page names it."
+                  "choiceSource": "routine-editor-hidden"
                 }
               },
               {
                 "type": "field",
                 "field": {
-                  "id": "routine.pluginTrigger",
-                  "label": "Plugin trigger",
+                  "id": "routine.timezone",
+                  "label": "Timezone",
                   "kind": "text",
-                  "value": null,
+                  "value": "Australia/Sydney",
                   "editable": true,
-                  "maxLength": 64,
-                  "hint": "The trigger the Plugin exports. The Plugin reads each delivery first and says what this Routine runs on."
+                  "choiceSource": "routine-editor-hidden"
                 }
               },
               {
-                "type": "group",
-                "orientation": "row",
-                "children": [
-                  {
-                    "type": "action",
-                    "actionId": "save-routine",
-                    "label": "Save changes",
-                    "style": "primary",
-                    "input": {
-                      "kind": "save-routine",
-                      "routineId": "r1"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "run-routine",
-                    "label": "Run now",
-                    "input": {
-                      "kind": "run-routine",
-                      "routineId": "r1"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "open-runs",
-                    "label": "Run log",
-                    "input": {
-                      "kind": "open-runs",
-                      "routineId": "r1"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "cancel-edit",
-                    "label": "Cancel",
-                    "input": {
-                      "kind": "cancel-edit"
-                    }
-                  },
-                  {
-                    "type": "action",
-                    "actionId": "delete-routine",
-                    "label": "Delete",
-                    "style": "danger",
-                    "input": {
-                      "kind": "delete-routine",
-                      "routineId": "r1"
-                    }
-                  }
-                ]
+                "type": "field",
+                "field": {
+                  "id": "routine.keyVersion",
+                  "label": "Webhook key version",
+                  "kind": "text",
+                  "value": null,
+                  "editable": true,
+                  "choiceSource": "routine-editor-hidden"
+                }
+              },
+              {
+                "type": "field",
+                "field": {
+                  "id": "routine.timing",
+                  "label": "Fires on",
+                  "kind": "text",
+                  "value": "schedule",
+                  "editable": true,
+                  "maxLength": 256,
+                  "required": true,
+                  "choiceSource": "routine-editor"
+                }
               }
             ]
           },
@@ -1193,7 +1164,7 @@
                 "children": [
                   {
                     "type": "text",
-                    "text": "0 9 * * * · Australia/Sydney · Last 3 Sep 2026, 9:00am · Next 4 Sep 2026, 9:00am",
+                    "text": "Every day at 9:00am · Australia/Sydney · Last 3 Sep 2026, 9:00am · Next 4 Sep 2026, 9:00am",
                     "style": "status"
                   },
                   {
@@ -1578,19 +1549,11 @@
               },
               "routine.timing": {
                 "type": "string",
-                "enum": ["schedule", "webhook", "plugin"]
+                "maxLength": 256
               },
               "routine.schedule": {
                 "type": "string",
                 "maxLength": 256
-              },
-              "routine.pluginId": {
-                "type": "string",
-                "maxLength": 64
-              },
-              "routine.pluginTrigger": {
-                "type": "string",
-                "maxLength": 64
               }
             },
             "required": [
@@ -2129,7 +2092,7 @@
           ]
         }
       ],
-      "modelInUse": "Auto \u00b7 Frock AI"
+      "modelInUse": "Auto · Frock AI"
     }
   },
   {

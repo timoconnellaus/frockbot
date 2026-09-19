@@ -85,11 +85,13 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
   const document = sem(page, "routines-document");
   await expect(document).toBeVisible({ timeout: 60_000 });
   await group(page, "New Routine").click();
+  await press(sem(page, "routine-source-schedule"));
+  await press(sem(page, "routine-editor-continue"));
+  await press(sem(page, "routine-editor-continue"));
   await expect(documentField(page, "routine.name")).toBeVisible();
   await answerFields(page, {
     "routine.name": "Morning brief",
     "routine.prompt": "Summarise overnight email.",
-    "routine.schedule": "0 9 * * *",
   });
   await press(action(page, "save-routine"));
   const card = group(page, "Morning brief");
@@ -103,6 +105,9 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
     // Run now is on the editor the row opens, beside Save: a row is what is
     // armed and the switch that pauses it.
     await card.click({ position: { x: 24, y: 20 } });
+    await expect(sem(page, "routine-editor")).toBeVisible();
+    await press(sem(page, "routine-editor-continue"));
+    await press(sem(page, "routine-editor-continue"));
     await expect(documentField(page, "routine.name")).toBeVisible();
     await press(action(page, "run-routine"));
 

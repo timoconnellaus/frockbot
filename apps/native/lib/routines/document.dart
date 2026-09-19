@@ -28,8 +28,6 @@ const routineEditorFieldsV1 = (
   prompt: 'routine.prompt',
   timing: 'routine.timing',
   schedule: 'routine.schedule',
-  pluginId: 'routine.pluginId',
-  pluginTrigger: 'routine.pluginTrigger',
 );
 
 /// The kind an action names, or nothing when it names none.
@@ -117,8 +115,6 @@ bool routineSaveIsNoOpV1(
     routineEditorFieldsV1.prompt,
     routineEditorFieldsV1.timing,
     routineEditorFieldsV1.schedule,
-    routineEditorFieldsV1.pluginId,
-    routineEditorFieldsV1.pluginTrigger,
   ]) {
     if (input.containsKey(id) && input[id] != seeds[id]) return false;
   }
@@ -183,16 +179,18 @@ Map<String, Object?> _saveCommandV1(
   }
   final timing = input[routineEditorFieldsV1.timing];
   final webhook = timing == 'webhook';
-  final plugin = timing == 'plugin';
+  final plugin = timing is String && timing.startsWith('plugin:');
+  if (timing != 'schedule' && !webhook && !plugin) {
+    throw const FormatException('Choose what starts this Routine.');
+  }
   final schedule = (input[routineEditorFieldsV1.schedule] as String? ?? '')
       .trim();
   if (!webhook && !plugin && schedule.isEmpty) {
     throw const FormatException('Give this Routine a schedule.');
   }
-  final pluginId = (input[routineEditorFieldsV1.pluginId] as String? ?? '')
-      .trim();
-  final pluginTrigger =
-      (input[routineEditorFieldsV1.pluginTrigger] as String? ?? '').trim();
+  final pluginParts = plugin ? timing.split(':') : const <String>[];
+  final pluginId = pluginParts.length == 3 ? pluginParts[1].trim() : '';
+  final pluginTrigger = pluginParts.length == 3 ? pluginParts[2].trim() : '';
   if (plugin && (pluginId.isEmpty || pluginTrigger.isEmpty)) {
     throw const FormatException(
       'Name the Plugin and the trigger this Routine fires on.',

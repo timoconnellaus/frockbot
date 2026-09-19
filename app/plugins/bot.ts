@@ -124,6 +124,9 @@ export async function readBotPluginsFrameV1(
       ...(member.descriptor.grants.length > 0
         ? { grants: member.descriptor.grants }
         : {}),
+      ...(member.descriptor.triggers?.length
+        ? { triggers: member.descriptor.triggers }
+        : {}),
       ...(servedProviders.length > 0
         ? { modelProviders: servedProviders }
         : {}),

@@ -163,9 +163,58 @@ export function normalizeRoutineScheduleV1(
   return { kind: "cron", pattern: body, timezone: zone };
 }
 
-/** A one-line summary of a schedule for a list row. */
+/**
+ * A one-line, human summary of a schedule: the words a list row says it in, and
+ * the sentence the Routine editor falls back to for a pattern its own controls
+ * cannot express. A person reads it, so a pattern it cannot describe comes back
+ * as "Custom schedule" rather than as the cron itself.
+ */
 export function describeRoutineScheduleV1(schedule: string): string {
-  return schedule.trim();
+  const value = schedule.trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    "@hourly": "Every hour",
+    "@daily": "Every day at 12:00am",
+    "@midnight": "Every day at 12:00am",
+    "@weekly": "Every Sunday at 12:00am",
+    "@monthly": "On day 1 of every month at 12:00am",
+    "@yearly": "Every 1 January at 12:00am",
+    "@annually": "Every 1 January at 12:00am",
+  };
+  if (aliases[value]) return aliases[value];
+  const interval = /^@every\s+(\d+)\s*([mhd])$/.exec(value);
+  if (interval) {
+    const unit =
+      interval[2] === "m" ? "minute" : interval[2] === "h" ? "hour" : "day";
+    return `Every ${interval[1]} ${unit}${interval[1] === "1" ? "" : "s"}`;
+  }
+  const fields = value.split(/\s+/);
+  if (fields.length !== 5) return "Custom schedule";
+  const [minute, hour, day, month, weekday] = fields;
+  if (!/^\d+$/.test(minute!) || !/^\d+$/.test(hour!)) {
+    return "Custom schedule";
+  }
+  const minutes = Number(minute);
+  const hours = Number(hour);
+  if (minutes > 59 || hours > 23 || month !== "*") return "Custom schedule";
+  const time = `${hours % 12 || 12}:${String(minutes).padStart(2, "0")}${hours >= 12 ? "pm" : "am"}`;
+  if (day === "*" && weekday === "*") return `Every day at ${time}`;
+  if (day === "*" && weekday === "1-5") return `Every weekday at ${time}`;
+  const weekdays = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  if (day === "*" && /^[0-6]$/.test(weekday!)) {
+    return `Every ${weekdays[Number(weekday)]} at ${time}`;
+  }
+  if (/^\d+$/.test(day!) && weekday === "*" && Number(day) <= 28) {
+    return `On day ${Number(day)} of every month at ${time}`;
+  }
+  return "Custom schedule";
 }
 
 /**

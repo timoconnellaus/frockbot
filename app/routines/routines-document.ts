@@ -21,6 +21,7 @@ import {
 } from "@frockbot/core/protocol-schemas";
 import type { RoutineInboxEntryViewV1, RoutineViewV1 } from "./shared.js";
 import { routineTriggerLabelV1 } from "./records.js";
+import { describeRoutineScheduleV1 } from "./cron.js";
 
 export const ROUTINE_ACTION_KINDS_V1 = [
   "set-routine-enabled",
@@ -74,21 +75,21 @@ const TEXT = (maxLength: number): ActionValueSchema => ({
   type: "string",
   maxLength,
 });
-/** What a Routine fires on. Exactly one of the two, which the codec enforces. */
-const TIMING: ActionValueSchema = {
-  type: "string",
-  enum: ["schedule", "webhook", "plugin"],
-};
-
 /** The field ids the editor's one form uses, and the action that reads them. */
 export const ROUTINE_EDITOR_FIELDS_V1 = {
+  editorId: "routine.editorId",
   name: "routine.name",
   prompt: "routine.prompt",
+  /**
+   * What starts the Routine, as the host answers it: `schedule`, `webhook`, or
+   * `plugin:<pluginId>:<trigger>` — one value, because a Routine fires on
+   * exactly one of them, and the host names the Plugin and the trigger in it.
+   */
   timing: "routine.timing",
   schedule: "routine.schedule",
-  /** A Plugin trigger's two names, read only when the timing says `plugin`. */
-  pluginId: "routine.pluginId",
-  pluginTrigger: "routine.pluginTrigger",
+  scheduleDescription: "routine.scheduleDescription",
+  timezone: "routine.timezone",
+  keyVersion: "routine.keyVersion",
 } as const;
 const KIND: ActionValueSchema = {
   type: "string",
@@ -214,7 +215,7 @@ function status(text: string): ViewNode {
 /** What a Routine fires on, and when it last did and next will. */
 function routineFacts(routine: RoutineViewV1): string {
   const timing = routine.schedule
-    ? `${routine.schedule} · ${routine.timezone}`
+    ? `${describeRoutineScheduleV1(routine.schedule)} · ${routine.timezone}`
     : routine.trigger
       ? routineTriggerLabelV1(routine.trigger)
       : "Webhook trigger";
@@ -292,103 +293,55 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
   const webhook = editing !== undefined && editing.schedule === undefined;
   const plugin =
     editing?.trigger?.kind === "plugin" ? editing.trigger : undefined;
+  const timing = plugin
+    ? `plugin:${plugin.pluginId}:${plugin.trigger}`
+    : webhook
+      ? "webhook"
+      : "schedule";
+  const schedule = editing?.schedule ?? "0 9 * * *";
   return {
     type: "group",
     orientation: "column",
     title: editing ? `Edit ${editing.name}` : "New Routine",
     collapsed: editing === undefined,
     children: [
+      field(ids.editorId, "Routine", editing?.routineId ?? null, {
+        choiceSource: "routine-editor-hidden",
+      }),
       field(ids.name, "Name", editing?.name ?? null, {
         maxLength: 100,
         required: true,
+        choiceSource: "routine-editor-hidden",
       }),
       field(ids.prompt, "Prompt", editing?.prompt ?? null, {
         maxLength: 8000,
         hint: "What the Routine does when it fires.",
+        choiceSource: "routine-editor-hidden",
       }),
-      {
-        type: "field",
-        field: {
-          id: ids.timing,
-          label: "Fires on",
-          kind: "select",
-          value: plugin ? "plugin" : webhook ? "webhook" : "schedule",
-          editable: true,
-          choices: [
-            { label: "A schedule", value: "schedule" },
-            { label: "A webhook", value: "webhook" },
-            { label: "A Plugin trigger", value: "plugin" },
-          ],
-        },
-      } as ViewNode,
-      field(ids.schedule, "Schedule", editing?.schedule ?? "0 9 * * *", {
+      field(ids.schedule, "Schedule", schedule, {
         maxLength: 256,
-        hint: "cron, or @daily / @every 15m. Ignored for a webhook or Plugin Routine, which is given a key instead.",
+        choiceSource: "routine-editor-hidden",
       }),
-      field(ids.pluginId, "Plugin", plugin?.pluginId ?? null, {
-        maxLength: 64,
-        hint: "For a Plugin trigger: the Plugin's id, as the Plugins page names it.",
+      field(
+        ids.scheduleDescription,
+        "Schedule description",
+        describeRoutineScheduleV1(schedule),
+        { choiceSource: "routine-editor-hidden" },
+      ),
+      field(ids.timezone, "Timezone", editing?.timezone ?? null, {
+        choiceSource: "routine-editor-hidden",
       }),
-      field(ids.pluginTrigger, "Plugin trigger", plugin?.trigger ?? null, {
-        maxLength: 64,
-        hint: "The trigger the Plugin exports. The Plugin reads each delivery first and says what this Routine runs on.",
+      field(
+        ids.keyVersion,
+        "Webhook key version",
+        editing?.hookKeyVersion == null ? null : String(editing.hookKeyVersion),
+        { choiceSource: "routine-editor-hidden" },
+      ),
+      field(ids.timing, "Fires on", timing, {
+        maxLength: 256,
+        required: true,
+        choiceSource: "routine-editor",
       }),
-      {
-        type: "group",
-        orientation: "row",
-        children: [
-          press(
-            "save-routine",
-            editing ? "Save changes" : "Create Routine",
-            editing
-              ? { kind: "save-routine", routineId: editing.routineId }
-              : { kind: "save-routine" },
-            "primary",
-          ),
-          ...(editing
-            ? [
-                press("run-routine", "Run now", {
-                  kind: "run-routine",
-                  routineId: editing.routineId,
-                }),
-                press("open-runs", "Run log", {
-                  kind: "open-runs",
-                  routineId: editing.routineId,
-                }),
-                // A key belongs to a triggered Routine — webhook or Plugin —
-                // and to nothing else, and the route refuses one for a
-                // scheduled Routine, so the controls are absent rather than
-                // offered and then refused.
-                ...(webhook
-                  ? [
-                      press(
-                        "rotate-key",
-                        editing.hookKeyVersion ? "Rotate key" : "Mint key",
-                        { kind: "rotate-key", routineId: editing.routineId },
-                      ),
-                    ]
-                  : []),
-                ...(webhook && editing.hookKeyVersion
-                  ? [
-                      press(
-                        "revoke-key",
-                        "Revoke key",
-                        { kind: "revoke-key", routineId: editing.routineId },
-                        "danger",
-                      ),
-                    ]
-                  : []),
-                press("cancel-edit", "Cancel", { kind: "cancel-edit" }),
-                press(
-                  "delete-routine",
-                  "Delete",
-                  { kind: "delete-routine", routineId: editing.routineId },
-                  "danger",
-                ),
-              ]
-            : []),
-        ],
-      },
     ],
   };
 }
@@ -635,10 +588,8 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
             routineId: IDENTIFIER,
             [ROUTINE_EDITOR_FIELDS_V1.name]: TEXT(100),
             [ROUTINE_EDITOR_FIELDS_V1.prompt]: TEXT(8000),
-            [ROUTINE_EDITOR_FIELDS_V1.timing]: TIMING,
+            [ROUTINE_EDITOR_FIELDS_V1.timing]: TEXT(256),
             [ROUTINE_EDITOR_FIELDS_V1.schedule]: TEXT(256),
-            [ROUTINE_EDITOR_FIELDS_V1.pluginId]: TEXT(64),
-            [ROUTINE_EDITOR_FIELDS_V1.pluginTrigger]: TEXT(64),
           },
           required: [
             "kind",

@@ -1,12 +1,5 @@
-// The Routines panel, through the browser: the two places it used to fail a
-// person quietly.
-//
-// Both were found by dogfooding, and neither could be seen from a unit test.
-// The write path already refused a bad schedule correctly and the delete
-// command already worked — what was missing was the browser telling anyone.
-// A refusal was invisible, so the form simply appeared to do nothing; and
-// Delete went straight through from a single click, in a row of six other
-// buttons, taking the schedule, the prompt and the whole run log with it.
+// The Routines panel, through the browser: trigger-specific setup, friendly
+// schedules, and a destructive action that always asks first.
 //
 // Routines is a server-projected document, so every control here is named by
 // the projection's own ids — `view-field-routine.*`, `view-action-*` and the
@@ -70,57 +63,49 @@ async function openRoutines(page: Page): Promise<Locator> {
  */
 async function openEditor(page: Page): Promise<void> {
   await group(page, "New Routine").click();
+  await expect(sem(page, "routine-editor")).toBeVisible();
+}
+
+/** Move through a scheduled Routine's two setup steps to its action fields. */
+async function configureSchedule(page: Page): Promise<void> {
+  await press(sem(page, "routine-source-schedule"));
+  await press(sem(page, "routine-editor-continue"));
+  await expect
+    .poll(() => spokenText(sem(page, "routines-document")))
+    .toContain("Configure Schedule");
+  await press(sem(page, "routine-editor-continue"));
   await expect(documentField(page, "routine.name")).toBeVisible();
 }
 
-test("a refused schedule is said out loud, and the form keeps what to correct", async ({
+test("the trigger choice only shows its own setup, and schedules stay human", async ({
   page,
   userId,
-  allowedFailures,
 }) => {
-  // The refusal is a real 400 from the write path; the spec is about what the
-  // browser does with it.
-  allowedFailures.requests.push(/\/api\/bots\/[^/]+\/routines$/u);
-  allowedFailures.console.push(/Failed to load resource.*400/u);
-
   await openApplication(page, userId);
   await createBot(page, "Scheduler");
   const document = await openRoutines(page);
   await openEditor(page);
 
+  // Webhook setup contains no schedule editor and never leaks the cron value
+  // that remains behind the friendly schedule controls.
+  await press(sem(page, "routine-source-webhook"));
+  await press(sem(page, "routine-editor-continue"));
+  await expect.poll(() => spokenText(document)).toContain("Configure Webhook");
+  expect(await spokenText(document)).not.toContain("Configure Schedule");
+  expect(await spokenText(document)).not.toContain("0 9 * * *");
+
+  // Going back to Schedule offers plain-language cadence and time controls.
+  await press(sem(page, "routine-editor-back"));
+  await configureSchedule(page);
+  expect(await spokenText(document)).toMatch(/Every day at 9:00\s?AM/iu);
+  expect(await spokenText(document)).not.toContain("0 9 * * *");
+
   await answer(page, {
-    "routine.name": "Blursday brief",
+    "routine.name": "Morning brief",
     "routine.prompt": "Summarise overnight email.",
-    "routine.schedule": "every Blursday",
   });
   await press(action(page, "save-routine"));
-
-  // The refusal is on the surface, in the host's own words. The reason the
-  // route gave is not among them — the client does not carry a refusal's text
-  // — so what this proves is that the press was answered rather than swallowed.
-  await expect
-    .poll(async () => await spokenText(document))
-    .toContain("That action couldn’t be completed. Refresh and try again.");
-
-  // Nothing was stored, and the form is still open with the value to correct.
-  await expect(group(page, "Blursday brief")).toHaveCount(0);
-  await expect
-    .poll(async () => await spokenText(document))
-    .toContain("No Routines yet");
-  // Focused before it is read. Flutter mirrors a field's text into the DOM
-  // input only while it is holding an editing session open on it, and it puts
-  // the text nowhere in the semantics tree at all — so a settled field reads
-  // back empty from the browser whatever it is showing a person. Focusing is
-  // what opens the session, and costs nothing: the reader's next act on a form
-  // they are being asked to correct is to put the caret in it.
-  const schedule = documentField(page, "routine.schedule");
-  await schedule.focus();
-  await expect(schedule).toHaveValue("every Blursday");
-
-  // Correcting it saves, and the Routine is on the surface.
-  await answer(page, { "routine.schedule": "0 9 * * *" });
-  await press(action(page, "save-routine"));
-  const card = group(page, "Blursday brief");
+  const card = group(page, "Morning brief");
   await expect(card).toBeVisible({ timeout: 60_000 });
 
   // The moment reads as a moment, not as the wire: the house order, in the
@@ -141,11 +126,11 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
   await createBot(page, "Keeper");
   const document = await openRoutines(page);
   await openEditor(page);
+  await configureSchedule(page);
 
   await answer(page, {
     "routine.name": "Morning brief",
     "routine.prompt": "Summarise overnight email.",
-    "routine.schedule": "0 9 * * *",
   });
   await press(action(page, "save-routine"));
   const card = group(page, "Morning brief");
@@ -156,6 +141,9 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
   // one press further in. The press is aimed at the row's words rather than
   // at its centre: the switch at the end of it is tappable too.
   await card.click({ position: { x: 24, y: 20 } });
+  await expect(sem(page, "routine-editor")).toBeVisible();
+  await press(sem(page, "routine-editor-continue"));
+  await press(sem(page, "routine-editor-continue"));
   await expect(documentField(page, "routine.name")).toBeVisible();
   await press(action(page, "delete-routine"));
   const confirm = sem(page, "routine-delete-confirm");
