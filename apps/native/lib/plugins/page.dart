@@ -268,9 +268,9 @@ class PluginsPageState extends State<PluginsPage>
   @override
   bool get wantKeepAlive => true;
 
-  /// One controller for the page's life: the surface below binds to the
-  /// controller it was created with, so a rebuild must hand it the same one.
-  late final PluginsController controller = PluginsController(
+  late PluginsController controller;
+
+  PluginsController _createController() => PluginsController(
     api,
     userId,
     capabilities: capabilities,
@@ -279,6 +279,33 @@ class PluginsPageState extends State<PluginsPage>
     onFeaturesChanged: () => widget.onFeaturesChanged?.call(),
     openHome: (home, packageId) => _openHome(context, home, packageId),
   );
+
+  @override
+  void initState() {
+    super.initState();
+    controller = _createController();
+  }
+
+  @override
+  void didUpdateWidget(PluginsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.api == widget.api &&
+        oldWidget.userId == widget.userId &&
+        oldWidget.capabilities == widget.capabilities &&
+        oldWidget.marketplace == widget.marketplace &&
+        oldWidget.botId == widget.botId) {
+      return;
+    }
+    final previous = controller;
+    controller = _createController();
+    previous.dispose();
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
 
   void _openHome(BuildContext context, String home, String? packageId) {
     final page = switch (home) {

@@ -182,7 +182,7 @@ class TemplatesController extends ViewSurfaceController {
 }
 
 /// Both halves, a tab apiece.
-class TemplatesPage extends StatelessWidget {
+class TemplatesPage extends StatefulWidget {
   final NativeApi api;
   final LocalStore store;
   final String userId;
@@ -201,9 +201,58 @@ class TemplatesPage extends StatelessWidget {
   });
 
   @override
+  State<TemplatesPage> createState() => _TemplatesPageState();
+}
+
+class _TemplatesPageState extends State<TemplatesPage> {
+  TemplatesController? shareController;
+  late TemplatesController importController;
+
+  TemplatesController? _createShareController() => widget.botId == null
+      ? null
+      : TemplatesController(
+          widget.api,
+          path: '/api/bot-templates',
+          surfaceId: 'bot-templates',
+          botId: widget.botId,
+        );
+
+  TemplatesController _createImportController() => TemplatesController(
+    widget.api,
+    path: '/api/bot-template-imports',
+    surfaceId: 'bot-template-imports',
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    shareController = _createShareController();
+    importController = _createImportController();
+  }
+
+  @override
+  void didUpdateWidget(TemplatesPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.api == widget.api && oldWidget.botId == widget.botId) return;
+    final previousShare = shareController;
+    final previousImport = importController;
+    shareController = _createShareController();
+    importController = _createImportController();
+    previousShare?.dispose();
+    previousImport.dispose();
+  }
+
+  @override
+  void dispose() {
+    shareController?.dispose();
+    importController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) => DefaultTabController(
     length: 2,
-    initialIndex: botId == null ? 1 : 0,
+    initialIndex: widget.botId == null ? 1 : 0,
     child: Scaffold(
       appBar: DesktopHeader(
         child: AppBar(
@@ -218,35 +267,30 @@ class TemplatesPage extends StatelessWidget {
       ),
       body: TabBarView(
         children: [
-          if (botId == null)
-            _ChooseTemplateBot(api: api, store: store, userId: userId)
+          if (widget.botId == null)
+            _ChooseTemplateBot(
+              api: widget.api,
+              store: widget.store,
+              userId: widget.userId,
+            )
           else
             ViewSurfacePage(
-              title: 'Share ${botName ?? 'this Bot'}',
-              store: store,
-              userId: userId,
+              title: 'Share ${widget.botName ?? 'this Bot'}',
+              store: widget.store,
+              userId: widget.userId,
               documentId: TemplateIds.shareDocument,
               refreshId: TemplateIds.shareRefresh,
               chrome: false,
-              controller: TemplatesController(
-                api,
-                path: '/api/bot-templates',
-                surfaceId: 'bot-templates',
-                botId: botId,
-              ),
+              controller: shareController!,
             ),
           ViewSurfacePage(
             title: 'Import',
-            store: store,
-            userId: userId,
+            store: widget.store,
+            userId: widget.userId,
             documentId: TemplateIds.importDocument,
             refreshId: TemplateIds.importRefresh,
             chrome: false,
-            controller: TemplatesController(
-              api,
-              path: '/api/bot-template-imports',
-              surfaceId: 'bot-template-imports',
-            ),
+            controller: importController,
           ),
         ],
       ),

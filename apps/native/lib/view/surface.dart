@@ -29,6 +29,9 @@ abstract class ViewSurfaceController extends ChangeNotifier {
 /// A host over `ViewDocumentView`, with the surface's own chrome.
 class ViewSurfacePage extends StatefulWidget {
   final String title;
+
+  /// Borrowed from the page that created it. The owner replaces and disposes
+  /// it; this surface only listens while it is mounted.
   final ViewSurfaceController controller;
   final LocalStore store;
   final String userId;
@@ -108,12 +111,26 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
   }
 
   @override
+  void didUpdateWidget(ViewSurfacePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller.removeListener(_adopt);
+    view?.removeListener(_afterAction);
+    view?.dispose();
+    view = null;
+    shown = null;
+    reading = false;
+    reloadWanted = false;
+    widget.controller.addListener(_adopt);
+    unawaited(widget.controller.load());
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_adopt);
     view?.removeListener(_afterAction);
     view?.dispose();
-    widget.controller.dispose();
     super.dispose();
   }
 

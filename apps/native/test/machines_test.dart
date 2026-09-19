@@ -102,6 +102,34 @@ Map<String, Object?> machinesDocument({bool revoked = false}) => {
 };
 
 void main() {
+  testWidgets('the page owns replacement and disposal of its controller', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final firstApi = SettingsApi(store, (_, _) async => machinesDocument());
+    final secondApi = SettingsApi(store, (_, _) async => machinesDocument());
+
+    Widget page(NativeApi api) => MaterialApp(
+      home: MachinesPage(api: api, store: store, userId: 'tim'),
+    );
+
+    await tester.pumpWidget(page(firstApi));
+    await tester.pumpAndSettle();
+    final state = tester.state(find.byType(MachinesPage)) as dynamic;
+    final first = state.controller as MachinesController;
+
+    await tester.pumpWidget(page(secondApi));
+    await tester.pumpAndSettle();
+    final second = state.controller as MachinesController;
+    expect(second, isNot(same(first)));
+    expect(() => first.addListener(() {}), throwsFlutterError);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(() => second.addListener(() {}), throwsFlutterError);
+    firstApi.close();
+    secondApi.close();
+  });
+
   testWidgets('a pairing code is shown once, by the host, and then let go', (
     tester,
   ) async {
