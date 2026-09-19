@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -60,15 +60,16 @@ describe("build", () => {
       prefix: "plugin-second-",
     });
     const pluginSource = [
-      'import { answer } from "./value";',
+      'import { answer } from "./..hidden/value";',
       'export const tools = [{ name: "answer", description: "Answers.", inputSchema: { type: "object" } }];',
       "export const execute = () => answer;",
       "",
     ].join("\n");
     for (const directory of [first.directory, second.directory]) {
       await writeFile(join(directory, "plugin.ts"), pluginSource, "utf8");
+      await mkdir(join(directory, "..hidden"));
       await writeFile(
-        join(directory, "value.ts"),
+        join(directory, "..hidden", "value.ts"),
         "export const answer = 42;\n",
         "utf8",
       );
@@ -76,7 +77,7 @@ describe("build", () => {
 
     const firstModule = await bundlePlugin(first.directory);
     expect(await bundlePlugin(second.directory)).toBe(firstModule);
-    expect(firstModule).toContain("// value.ts");
+    expect(firstModule).toContain("// ..hidden/value.ts");
     expect(firstModule).toContain("// plugin.ts");
 
     const linkParent = await mkdtemp(join(tmpdir(), "plugin-link-"));

@@ -7,11 +7,12 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { runAppletBuildV1 } from "../src/build/pipeline.js";
+import { bundleAppletArtifacts } from "../src/build/artifacts.js";
 import { decodeDescriptor } from "../src/build/manifest.js";
+import { runAppletBuildV1 } from "../src/build/pipeline.js";
 import { formatDiagnostic } from "../src/lint/index.js";
 import { scaffoldTemplateV1 } from "./scaffold.js";
 
@@ -80,6 +81,35 @@ describe("check", () => {
 });
 
 describe("build", () => {
+  it("emits identical artifact bytes for dot-prefixed modules in different roots", async () => {
+    const first = await scaffoldTemplateV1({ prefix: "applet-first-" });
+    const second = await scaffoldTemplateV1({ prefix: "applet-second-" });
+    for (const directory of [first.directory, second.directory]) {
+      const serverPath = join(directory, "server.ts");
+      const server = await readFile(serverPath, "utf8");
+      await writeFile(
+        serverPath,
+        [
+          'import { addTodoDescription } from "./..hidden/value";',
+          server.replace('"Add a todo to the list"', "addTodoDescription"),
+        ].join("\n"),
+        "utf8",
+      );
+      await mkdir(join(directory, "..hidden"));
+      await writeFile(
+        join(directory, "..hidden", "value.ts"),
+        'export const addTodoDescription = "Add a todo to the list";\n',
+        "utf8",
+      );
+    }
+
+    const firstArtifacts = await bundleAppletArtifacts(first.directory);
+    const secondArtifacts = await bundleAppletArtifacts(second.directory);
+    expect(secondArtifacts.server).toBe(firstArtifacts.server);
+    expect(secondArtifacts.ui).toBe(firstArtifacts.ui);
+    expect(firstArtifacts.server).toContain("// ..hidden/value.ts");
+  }, 120_000);
+
   it("emits a server module, a self-contained page, and a manifest", async () => {
     const outcome = await runAppletBuildV1(await scaffold(), { mode: "build" });
     if (outcome.status !== "built") throw new Error("expected artifacts");

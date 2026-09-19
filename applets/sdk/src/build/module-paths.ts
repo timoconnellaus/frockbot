@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import type { Metafile } from "esbuild";
 
@@ -17,13 +17,20 @@ function real(path: string): string {
   }
 }
 
+function portable(path: string): string {
+  return path.split(sep).join("/").replaceAll("\\", "/");
+}
+
 function moduleLabel(absolute: string, roots: readonly StableModuleRoot[]) {
   for (const { directory, prefix } of roots) {
     const inside = relative(directory, absolute);
-    if (!inside.startsWith("..") && inside !== "") return prefix + inside;
+    const outside =
+      inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside);
+    if (!outside && inside !== "") return prefix + portable(inside);
   }
-  const dependency = absolute.lastIndexOf("node_modules/");
-  return dependency === -1 ? absolute : absolute.slice(dependency);
+  const path = portable(absolute);
+  const dependency = path.lastIndexOf("node_modules/");
+  return dependency === -1 ? path : path.slice(dependency);
 }
 
 /**
