@@ -348,12 +348,8 @@ export interface AppletBuildServiceV1 {
 const TEXT = new TextDecoder();
 
 /**
- * The plain JSON a cross-object RPC answer really is.
- *
- * A Durable Object answer arrives as a live stub carrying `Symbol.dispose` and
- * whatever else the runtime attached, and an exact-keys decoder is right to
- * refuse that. Snapshotting first is what turns the answer into the DTO it
- * claims to be.
+ * The Applet seam's name for {@link rpcJsonSnapshotV1}, under this boundary's
+ * own label: a refusal names the Applet answer it came from.
  */
 export function appletRpcSnapshotV1<T>(value: T): T {
   return rpcJsonSnapshotV1(value, "Applet RPC response");
