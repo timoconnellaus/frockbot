@@ -364,7 +364,7 @@ function appletsUnconfigured(): Error {
 
 /** The summaries of a directory listing, decoded at this seam. */
 function appletsOf(listed: unknown): AppletSummaryV1[] {
-  const answer = rpcJsonSnapshot(listed) as { applets?: unknown };
+  const answer = rpcJsonSnapshotV1(listed) as { applets?: unknown };
   return (Array.isArray(answer.applets) ? answer.applets : []).map((value) =>
     decodeAppletSummaryV1(value),
   );
@@ -437,7 +437,7 @@ function debugSurface(env: Env): DebugGatewaySurface {
     },
     setAccountFeatures: async (userId, command) =>
       decodeUserFeaturesV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userFeaturesStub(env, userId).setFeatures({
             schemaVersion: 1,
             userId,
@@ -649,18 +649,6 @@ function botStateObject(
   return env.BOT_STATES.get(id);
 }
 
-function rpcJsonSnapshot<T>(value: T): T {
-  try {
-    const serialized = JSON.stringify(value);
-    if (serialized === undefined) {
-      throw new Error("RPC response is not a JSON value");
-    }
-    return JSON.parse(serialized) as T;
-  } catch (error) {
-    throw new Error("RPC response is not valid JSON", { cause: error });
-  }
-}
-
 function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
   const id = env.USER_CONFIGURATIONS.idFromName(userId);
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its RPC surface.
@@ -753,7 +741,7 @@ async function admitAccount(
   }
   if (AUTH_PACKAGE_DECIDES_ADMISSION_V1) return ADMITTED_BY_AUTH_PACKAGE_V1;
   return decodeAccountAdmissionDecisionV1(
-    rpcJsonSnapshot(await deploymentPolicyStub(env).admitAccount(identity)),
+    rpcJsonSnapshotV1(await deploymentPolicyStub(env).admitAccount(identity)),
   );
 }
 
@@ -796,7 +784,7 @@ async function checkStoredAccount(
     return { schemaVersion: 1, admitted: true, basis: "admin" };
   }
   return decodeAccountAdmissionDecisionV1(
-    rpcJsonSnapshot(await deploymentPolicyStub(env).checkAccount(identity)),
+    rpcJsonSnapshotV1(await deploymentPolicyStub(env).checkAccount(identity)),
   );
 }
 
@@ -1152,7 +1140,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   private async requireApplets(): Promise<void> {
     const userId = this.ctx.props.userId;
     const features = decodeUserFeaturesV1(
-      rpcJsonSnapshot(
+      rpcJsonSnapshotV1(
         await userFeaturesStub(this.env, userId).readFeatures({
           schemaVersion: 1,
           userId,
@@ -1172,7 +1160,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     });
     const userId = this.ctx.props.userId;
     await this.requireApplets();
-    return rpcJsonSnapshot(
+    return rpcJsonSnapshotV1(
       await userAppletDirectoryStub(this.env, userId).deleteApplet({
         schemaVersion: 1,
         userId,
@@ -1187,7 +1175,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     const userId = this.ctx.props.userId;
     await this.requireApplets();
-    return rpcJsonSnapshot(
+    return rpcJsonSnapshotV1(
       await userAppletDirectoryStub(this.env, userId).listApplets({
         schemaVersion: 1,
         userId,
@@ -1204,7 +1192,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   async readBotAppletImpact(input: unknown): Promise<unknown> {
     const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     const userId = this.ctx.props.userId;
-    return rpcJsonSnapshot(
+    return rpcJsonSnapshotV1(
       await userAppletDirectoryStub(this.env, userId).readBotAppletImpact({
         schemaVersion: 1,
         userId,
@@ -1308,7 +1296,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       }),
     ]);
     let applets = appletsOf(listed);
-    const focusedId = (rpcJsonSnapshot(focus) as { appletId?: unknown })
+    const focusedId = (rpcJsonSnapshotV1(focus) as { appletId?: unknown })
       .appletId;
     if (typeof focusedId !== "string") return { schemaVersion: 1, applets };
     let entry = applets.find((applet) => applet.appletId === focusedId);
@@ -1382,7 +1370,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     const namespace = this.env.APPLET_STATES;
     // `warm`: the facet comes up behind this answer, so the socket the page
     // opens next finds the isolate and its schema already there.
-    const opened = rpcJsonSnapshot(
+    const opened = rpcJsonSnapshotV1(
       await namespace
         .get(namespace.idFromName(appletStateNameV1(userId, appletId)))
         .open({ schemaVersion: 1, userId, appletId, warm: true }),
@@ -1427,7 +1415,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     appletId: string,
     options: { owner?: boolean } = {},
   ): Promise<unknown> {
-    return rpcJsonSnapshot(
+    return rpcJsonSnapshotV1(
       await userAppletDirectoryStub(this.env, userId).readApplet({
         schemaVersion: 1,
         userId,
@@ -1443,7 +1431,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     const userId = this.ctx.props.userId;
     await this.requireApplets();
     const botId = request.botId as string;
-    return rpcJsonSnapshot(
+    return rpcJsonSnapshotV1(
       await botStateStub(this.env, userId, botId).readFocusedApplet({
         schemaVersion: 1,
         userId,
@@ -1460,7 +1448,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     const userId = this.ctx.props.userId;
     await this.requireApplets();
     const botId = request.botId as string;
-    return rpcJsonSnapshot(
+    return rpcJsonSnapshotV1(
       await botStateStub(this.env, userId, botId).setFocusedApplet({
         schemaVersion: 1,
         userId,
@@ -1745,7 +1733,7 @@ async function listBotIdentities(
   userId: string,
 ): Promise<BotIdentityDirectoryViewV1> {
   const directory = decodeDirectoryViewV1(
-    rpcJsonSnapshot(
+    rpcJsonSnapshotV1(
       await userConfigurationStub(env, userId).listBots({
         schemaVersion: 1,
         userId,
@@ -1777,11 +1765,11 @@ async function fanOutBotIds(env: Env, userId: string): Promise<string[]> {
   const [directory, lifecycles] = await Promise.all([
     userConfigurationStub(env, userId)
       .listBots({ schemaVersion: 1, userId })
-      .then((value) => decodeDirectoryViewV1(rpcJsonSnapshot(value))),
+      .then((value) => decodeDirectoryViewV1(rpcJsonSnapshotV1(value))),
     userConfigurationStub(env, userId)
       .listBotLifecycles({ schemaVersion: 1, userId })
       .then((value) =>
-        decodeBotLifecycleDirectoryViewV1(rpcJsonSnapshot(value)),
+        decodeBotLifecycleDirectoryViewV1(rpcJsonSnapshotV1(value)),
       ),
   ]);
   const archived = new Set(
@@ -1805,7 +1793,7 @@ async function listBotUnread(
     botIds.map((botId) =>
       botStateStub(env, userId, botId)
         .readUnread()
-        .then((value) => rpcJsonSnapshot(value)),
+        .then((value) => rpcJsonSnapshotV1(value)),
     ),
   );
   return decodeBotUnreadDirectoryViewV1({ schemaVersion: 1, unread });
@@ -1826,7 +1814,7 @@ async function listBotNotifications(
         (intent) => ({
           schemaVersion: 1 as const,
           botId,
-          ...rpcJsonSnapshot(intent),
+          ...rpcJsonSnapshotV1(intent),
         }),
       ),
     ),
@@ -1845,7 +1833,7 @@ async function executeBotUnreadCommand(
 ): Promise<BotUnreadReceiptV1> {
   // Membership first: a Bot this User does not own is not found, never marked.
   const membership = decodeBotMembershipViewV1(
-    rpcJsonSnapshot(
+    rpcJsonSnapshotV1(
       await userConfigurationStub(env, userId).hasBot({
         schemaVersion: 1,
         userId,
@@ -1855,7 +1843,7 @@ async function executeBotUnreadCommand(
   );
   if (!membership.registered) throw new BotNotFoundError(botId);
   return decodeBotUnreadReceiptV1(
-    rpcJsonSnapshot(
+    rpcJsonSnapshotV1(
       await botStateStub(env, userId, botId).executeUnreadCommand(command),
     ),
   );
@@ -1872,7 +1860,7 @@ async function ownedComputerBotState(
   botId: string,
 ): Promise<BotStateRpc> {
   const membership = decodeBotMembershipViewV1(
-    rpcJsonSnapshot(
+    rpcJsonSnapshotV1(
       await userConfigurationStub(env, userId).hasBot({
         schemaVersion: 1,
         userId,
@@ -2078,7 +2066,7 @@ async function readPublishedTemplate(
   // A share that is missing, private, or revoked all answer the same way, and
   // that answer is not a JSON value, so it is checked before the snapshot.
   if (answered === undefined || answered === null) return undefined;
-  const found = rpcJsonSnapshot(answered);
+  const found = rpcJsonSnapshotV1(answered);
   if (!found || typeof found !== "object") return undefined;
   const value = found as Record<string, unknown>;
   if (
@@ -2104,7 +2092,7 @@ const createGatewayBackendContributions = (env: Env) =>
     backendHost: "gateway",
     listTemplateShares: async (userId: string) =>
       decodeTemplateShareListViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).listTemplateShares({
             schemaVersion: 1,
             userId,
@@ -2116,7 +2104,7 @@ const createGatewayBackendContributions = (env: Env) =>
       command: TemplateCommandV1,
     ) =>
       decodeTemplateShareReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).executeTemplateCommand({
             schemaVersion: 1,
             userId,
@@ -2128,7 +2116,7 @@ const createGatewayBackendContributions = (env: Env) =>
       readPublishedTemplate(env, shareId),
     listTemplateImports: async (userId: string) =>
       decodeTemplateImportListViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).listTemplateImports({
             schemaVersion: 1,
             userId,
@@ -2137,7 +2125,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     executeTemplateImport: async (userId: string, command: TemplateCommandV1) =>
       decodeTemplateImportRecordV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).executeTemplateImport({
             schemaVersion: 1,
             userId,
@@ -2147,7 +2135,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     listBots: async (userId) =>
       decodeDirectoryViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).listBots({
             schemaVersion: 1,
             userId,
@@ -2156,7 +2144,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     readFlockBootstrap: async (userId: string) =>
       decodeFlockBootstrapViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).readFlockBootstrap({
             schemaVersion: 1,
             userId,
@@ -2165,7 +2153,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     listBotLifecycles: async (userId: string) =>
       decodeBotLifecycleDirectoryViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).listBotLifecycles({
             schemaVersion: 1,
             userId,
@@ -2177,7 +2165,7 @@ const createGatewayBackendContributions = (env: Env) =>
       command: BotLifecycleCommandV1,
     ) =>
       decodeBotLifecycleReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).executeBotLifecycle({
             schemaVersion: 1,
             userId,
@@ -2187,7 +2175,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     createBot: async (userId, command) =>
       decodeFlockReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).createBot({
             schemaVersion: 1,
             userId,
@@ -2198,7 +2186,7 @@ const createGatewayBackendContributions = (env: Env) =>
     listBotIdentities: (userId: string) => listBotIdentities(env, userId),
     readComputer: async (userId: string, botId: string) =>
       decodeComputerProjectionV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await (
             await ownedComputerBotState(env, userId, botId)
           ).readComputerPresence(),
@@ -2210,7 +2198,7 @@ const createGatewayBackendContributions = (env: Env) =>
       command: ComputerCommandV1,
     ) =>
       decodeComputerCommandResponse(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await (
             await ownedComputerBotState(env, userId, botId)
           ).executeComputerPresenceCommand(command),
@@ -2218,7 +2206,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     searchTranscripts: async (userId: string, query: SearchQueryV1) =>
       decodeSearchIndexResultsV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userSearchStub(env, userId).searchTranscripts({
             schemaVersion: 1,
             userId,
@@ -2228,7 +2216,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     rebuildSearchIndex: async (userId: string) =>
       decodeClientSearchRebuildReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userSearchStub(env, userId).rebuildSearchIndex({
             schemaVersion: 1,
             userId,
@@ -2237,7 +2225,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     readAudit: async (userId: string, query: AuditQueryV1) =>
       decodeClientAuditPageV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userAuditStub(env, userId).readAuditEntries({
             schemaVersion: 1,
             userId,
@@ -2251,7 +2239,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     rebuildAuditIndex: async (userId: string) =>
       decodeAuditRebuildReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userAuditStub(env, userId).rebuildAuditIndex({
             schemaVersion: 1,
             userId,
@@ -2267,7 +2255,7 @@ const createGatewayBackendContributions = (env: Env) =>
     ) => executeBotUnreadCommand(env, userId, botId, command),
     readAvatar: async (userId, botId) =>
       decodeAvatarIdentityViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await botStateStub(env, userId, botId).readAvatar({
             schemaVersion: 1,
             userId,
@@ -2277,7 +2265,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     readVoice: async (userId, botId) =>
       decodeVoiceIdentityViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await botStateStub(env, userId, botId).readVoice({
             schemaVersion: 1,
             userId,
@@ -2287,7 +2275,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     readLook: async (userId, botId) =>
       decodeLookIdentityViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await botStateStub(env, userId, botId).readLook({
             schemaVersion: 1,
             userId,
@@ -2393,7 +2381,7 @@ const createGatewayBackendContributions = (env: Env) =>
       : {}),
     createMachinePairing: async (userId, request) =>
       decodeMachinePairingOfferV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userMachineStub(env, userId).createMachinePairing({
             schemaVersion: 1,
             userId,
@@ -2405,7 +2393,7 @@ const createGatewayBackendContributions = (env: Env) =>
       const refusal = await externalAccountRefusal(env, userId);
       if (refusal) throw new MachineTokenError(refusal.status, refusal.message);
       return decodeMachineEnrollmentReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userMachineStub(env, userId).enrollMachine({
             schemaVersion: 1,
             userId,
@@ -2417,7 +2405,7 @@ const createGatewayBackendContributions = (env: Env) =>
     },
     pollMachine: async (userId, call) =>
       decodeMachinePollResultV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userMachineStub(env, userId).pollMachine({
             schemaVersion: 1,
             userId,
@@ -2430,7 +2418,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     claimMachineCommand: async (userId, call) =>
       decodeMachineClaimReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userMachineStub(env, userId).claimMachineCommand({
             schemaVersion: 1,
             userId,
@@ -2443,7 +2431,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     recordMachineResult: async (userId, call) => {
       const receipt = decodeMachineResultReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userMachineStub(env, userId).recordMachineResult({
             schemaVersion: 1,
             userId,
@@ -2465,7 +2453,7 @@ const createGatewayBackendContributions = (env: Env) =>
     },
     listMachines: async (userId) =>
       decodeMachineListViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userMachineStub(env, userId).listMachines({
             schemaVersion: 1,
             userId,
@@ -2474,7 +2462,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     revokeMachine: async (userId, machineId) =>
       decodeMachineListViewV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userMachineStub(env, userId).revokeMachine({
             schemaVersion: 1,
             userId,
@@ -2546,7 +2534,7 @@ const createGatewayBackendContributions = (env: Env) =>
     // the User's directory, which every Bot list reads, is told of it.
     updateAvatar: async (userId, botId, command) =>
       decodeFlockReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).updateBotAvatar({
             schemaVersion: 1,
             userId,
@@ -2557,7 +2545,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     updateVoice: async (userId, botId, command) =>
       decodeFlockReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).updateBotVoice({
             schemaVersion: 1,
             userId,
@@ -2568,7 +2556,7 @@ const createGatewayBackendContributions = (env: Env) =>
       ),
     updateLook: async (userId, botId, command) =>
       decodeFlockReceiptV1(
-        rpcJsonSnapshot(
+        rpcJsonSnapshotV1(
           await userConfigurationStub(env, userId).updateBotLook({
             schemaVersion: 1,
             userId,
