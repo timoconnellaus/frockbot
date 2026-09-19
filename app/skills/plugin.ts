@@ -17,17 +17,9 @@
 // untrusted code, and a descriptor that shipped a bad `SKILL.md` must not take
 // the Turn's whole catalog with it.
 import type { PluginSkillV1 } from "@frockbot/core/contracts";
-import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type { LoadedSkillV1, SkillRefusalV1 } from "./catalog.js";
-import {
-  isSkillReferenceNameV1,
-  isSkillSlugV1,
-  parseSkillDocumentV1,
-  skillReferencePathForV1,
-  SKILL_FILE_NAME,
-  SKILL_MAX_FILE_BYTES,
-  SKILL_MAX_REFERENCES,
-} from "./skill-md.js";
+import { loadArtifactSkillsV1 } from "./artifact.js";
+import { SKILL_FILE_NAME } from "./skill-md.js";
 
 /** One Plugin's Skills, as the Turn's host offers them. */
 export interface PluginSkillContributionV1 {
@@ -41,8 +33,6 @@ export interface PluginSkillContributionV1 {
 export function pluginSkillPathV1(pluginId: string, slug: string): string {
   return `plugin/${pluginId}/${slug}/${SKILL_FILE_NAME}`;
 }
-
-const sha256Hex = sha256HexTextV1;
 
 /**
  * Parses the contributed documents into loaded Skills.
@@ -58,64 +48,9 @@ export async function loadPluginSkillsV1(
   const refusals: SkillRefusalV1[] = [];
   for (const contribution of contributions) {
     const attribution = `Plugin "${contribution.displayName ?? contribution.pluginId}"`;
-    for (const document of contribution.skills) {
-      const path = pluginSkillPathV1(contribution.pluginId, document.slug);
-      if (!isSkillSlugV1(document.slug)) {
-        refusals.push({
-          path,
-          kind: "malformed",
-          reason: `the Plugin Skill slug "${document.slug}" is not a well-formed slug`,
-        });
-        continue;
-      }
-      const parsed = parseSkillDocumentV1(document.text);
-      if (parsed.status !== "ok") {
-        refusals.push({ path, kind: "malformed", reason: parsed.reason });
-        continue;
-      }
-      const declared = document.references ?? [];
-      if (declared.length > SKILL_MAX_REFERENCES) {
-        refusals.push({
-          path,
-          kind: "oversized",
-          reason: `the Skill offers ${declared.length} references; the bound is ${SKILL_MAX_REFERENCES}`,
-        });
-        continue;
-      }
-      const references = [];
-      let refused: SkillRefusalV1 | undefined;
-      for (const reference of declared) {
-        if (!isSkillReferenceNameV1(reference.path)) {
-          refused = {
-            path,
-            kind: "malformed",
-            reason: `its reference "${reference.path}" is not a single .md file name`,
-          };
-          break;
-        }
-        const bytes = new TextEncoder().encode(reference.text).byteLength;
-        if (bytes > SKILL_MAX_FILE_BYTES) {
-          refused = {
-            path,
-            kind: "oversized",
-            reason: `its reference ${reference.path} is ${bytes} bytes; the bound is ${SKILL_MAX_FILE_BYTES}`,
-          };
-          break;
-        }
-        references.push({
-          path: skillReferencePathForV1(path, reference.path),
-          by: attribution,
-          generationId: await sha256Hex(reference.text),
-          text: reference.text,
-        });
-      }
-      if (refused) {
-        refusals.push(refused);
-        continue;
-      }
-      const contentHash = await sha256Hex(document.text);
-      skills.push({
-        path,
+    const loaded = await loadArtifactSkillsV1(
+      contribution.skills,
+      (document) => ({
         source: "plugin",
         ref: {
           schemaVersion: 1,
@@ -123,15 +58,12 @@ export async function loadPluginSkillsV1(
           pluginId: contribution.pluginId,
           slug: document.slug,
         },
-        by: attribution,
-        name: parsed.document.name,
-        description: parsed.document.description,
-        body: parsed.document.body,
-        references,
-        generationId: contentHash,
-        contentHash,
-      });
-    }
+        path: pluginSkillPathV1(contribution.pluginId, document.slug),
+        attribution,
+      }),
+    );
+    skills.push(...loaded.skills);
+    refusals.push(...loaded.refusals);
   }
   return { skills, refusals };
 }
