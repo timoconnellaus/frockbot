@@ -1361,10 +1361,11 @@ export async function selectBot(
   const row = sem(page, `sidebar-bot-${botId}`);
   await expect(row).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   await press(row);
-  await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
-    new RegExp(escapeRegExp(name), "u"),
-    { timeout: 60_000 },
-  );
+  await expect(
+    sem(page, "bot-panel-toggle").getByRole("button", {
+      name: new RegExp(escapeRegExp(name), "u"),
+    }),
+  ).toBeVisible({ timeout: 60_000 });
 }
 
 /**
