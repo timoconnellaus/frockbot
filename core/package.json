@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./concurrency": "./concurrency.ts",
+    "./promise-cache": "./promise-cache.ts",
     "./contracts": "./contracts/index.ts",
     "./deadline": "./deadline.ts",
     "./contracts/contributions": "./contracts/contributions.ts",

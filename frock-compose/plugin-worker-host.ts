@@ -41,6 +41,7 @@ import {
   type LoopStepSnapshotV1,
   loopToolExecutionContextSnapshotV1,
   type PluginWorkerEntrypoint,
+  type PluginWorkerHealthV1,
   type PluginWorkerHookInvocationV1,
   type PluginWorkerPluginHealthV1,
   type IsolateToolResultV1,
@@ -58,6 +59,7 @@ import {
   type ToolRegistration,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+import { boundedPromiseCacheV1 } from "@frockbot/core/promise-cache";
 import {
   cardSurfacePrefixV1,
   decodePluginWorkerModelResultV1,
@@ -150,6 +152,33 @@ const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
  * card (ADR 0026 step 9); the other four wait on the surfaces that use them.
  */
 const OPEN_PLUGIN_SLOTS_V1: readonly PluginSlotV1[] = ["settings.sections"];
+
+const PLUGIN_WORKER_HEALTH_CACHE_LIMIT_V1 = 64;
+const pluginWorkerHealthCacheV1 = new WeakMap<
+  BotIsolateLoader,
+  Map<string, Promise<PluginWorkerHealthV1>>
+>();
+
+function pluginWorkerHealthV1(
+  loader: BotIsolateLoader,
+  loaderId: string,
+  load: () => Promise<PluginWorkerHealthV1>,
+): Promise<PluginWorkerHealthV1> {
+  let cache = pluginWorkerHealthCacheV1.get(loader);
+  if (!cache) {
+    cache = new Map();
+    pluginWorkerHealthCacheV1.set(loader, cache);
+  }
+  // The loader id addresses immutable modules, identities and bindings, so a
+  // successful declaration is stable across Turns. Failures remain retryable:
+  // an overloaded worker must not poison that generation for its lifetime.
+  return boundedPromiseCacheV1(
+    cache,
+    loaderId,
+    PLUGIN_WORKER_HEALTH_CACHE_LIMIT_V1,
+    load,
+  );
+}
 
 /** The `WorkerCode` a Plugin worker is loaded from. Structurally the platform's. */
 export interface BotIsolateWorkerCode {
@@ -841,16 +870,21 @@ export class PluginWorkerHost {
     let health;
     try {
       entrypoint = this.load(loaderId, resolved).getEntrypoint();
-      health = decodePluginWorkerHealthV1(
-        await raceDeadline(
-          () => entrypoint.health(),
-          Math.min(
-            this.options.healthDeadlineMs ??
-              BOT_ISOLATE_DEFAULT_HEALTH_DEADLINE_MS,
-            ISOLATE_MAX_DEADLINE_MS,
+      health = await pluginWorkerHealthV1(
+        this.options.loader,
+        loaderId,
+        async () =>
+          decodePluginWorkerHealthV1(
+            await raceDeadline(
+              () => entrypoint.health(),
+              Math.min(
+                this.options.healthDeadlineMs ??
+                  BOT_ISOLATE_DEFAULT_HEALTH_DEADLINE_MS,
+                ISOLATE_MAX_DEADLINE_MS,
+              ),
+            ),
+            "plugin worker health",
           ),
-        ),
-        "plugin worker health",
       );
     } catch (error) {
       // Site two: `LOADER.get` plus the first RPC. A module that does not

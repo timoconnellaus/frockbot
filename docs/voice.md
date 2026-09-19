@@ -41,10 +41,15 @@ General Bot, recorded by the flock bootstrap rather than spelled by a name. No
 General marker does not mean no Bots — an account that already owned Bots when
 the bootstrap ran is never given one, and deleting General does not bring it
 back — so the directory is asked next and the first Bot in it that can be read
-takes the call. Only an account the directory says is empty, or cannot be read
-at all, opens a Bot-less call: that one is answered by the account-wide
-assistant, which is told it has no Bot to hand work to and is offered only the
-tools that need none, so its rules and its tools say the same thing.
+takes the call. That read happens up front, before anything durable is
+recorded, and serves ownership, the voice and the prompt's Bot list: it is
+retried once if it fails, and a directory that still cannot be read refuses the
+call (`unconfigured`) rather than opening one without a Bot, because unreadable
+authority is not an empty account. Only a call no listed Bot can take — the
+account has none, or none of its Bots can be read — opens Bot-less: that one is
+answered by the account-wide assistant, which is told it has no Bot to hand
+work to and is offered only the tools that need none, so its rules and its
+tools say the same thing.
 
 The voice layer then wears that Bot. The prompt opens as it, in the first
 person, and carries `<you>` (its name, description and live activity),
@@ -674,7 +679,8 @@ never subtract one side's elapsed from another's.
   `target-resolved`, then the prompt the session is instructed with —
   `prompt-context-start`, one line per constituent read
   (`prompt-directory`, `prompt-user-memory`, `prompt-timezone`,
-  `prompt-voice-memory`, `prompt-bot-identity`, `prompt-bot-memory`,
+  `prompt-voice-memory`, `prompt-bot-identity` (the actual identity-read
+  duration reused from target admission), `prompt-bot-memory`,
   `prompt-bot-history`, each with its `durationMs`),
   `prompt-context-ready`, and `prompt-context-awaited` where the session
   actually waited on it, followed by the fresh `session-voice-memory` read

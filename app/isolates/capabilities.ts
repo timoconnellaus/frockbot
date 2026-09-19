@@ -20,6 +20,7 @@ import {
 } from "@frockbot/core/contracts";
 import type { BotIsolateArtifactStore } from "@frockbot/frock-compose";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "@frockbot/app/plugins/seeded/artifacts.generated";
+import { boundedPromiseCacheV1 } from "@frockbot/core/promise-cache";
 
 export type { IsolateModelBindingV1 } from "@frockbot/core/contracts";
 
@@ -330,35 +331,52 @@ async function sha256Hex(value: string): Promise<string> {
  * Nothing is ever *built* here, which is what "Composition consumes immutable
  * content-addressed artifacts and never builds them" asks of this seam.
  */
+const PACKAGE_ARTIFACT_CACHE_LIMIT_V1 = 128;
+const packageArtifactCacheV1 = new WeakMap<
+  R2Bucket,
+  Map<string, Promise<string>>
+>();
+
 export function createR2PackageArtifactStore(
   bucket: R2Bucket,
 ): BotIsolateArtifactStore {
+  let cache = packageArtifactCacheV1.get(bucket);
+  if (!cache) {
+    cache = new Map();
+    packageArtifactCacheV1.set(bucket, cache);
+  }
   return {
-    async loadPackageArtifact(contentHash: string): Promise<string> {
-      // A seeded Plugin's artifact ships in the bundle: the deployment built
-      // it from source and there is no publisher to have put it in R2. It is
-      // read by the same content address and verified by the same hash below,
-      // so nothing about mounting one is different.
-      const seeded = SEEDED_PLUGIN_ARTIFACTS_V1.find(
-        (artifact) => artifact.contentHash === contentHash,
+    loadPackageArtifact(contentHash: string): Promise<string> {
+      return boundedPromiseCacheV1(
+        cache,
+        contentHash,
+        PACKAGE_ARTIFACT_CACHE_LIMIT_V1,
+        async (): Promise<string> => {
+          // A seeded Plugin's artifact ships in the bundle: the deployment
+          // built it from source and there is no publisher to have put it in
+          // R2. It is read and verified by the same content address.
+          const seeded = SEEDED_PLUGIN_ARTIFACTS_V1.find(
+            (artifact) => artifact.contentHash === contentHash,
+          );
+          let module: string;
+          if (seeded) {
+            module = seeded.module;
+          } else {
+            const key = `packages/${contentHash}.mjs`;
+            const object = await bucket.get(key);
+            if (!object) {
+              throw new Error(`package artifact "${contentHash}" is missing`);
+            }
+            module = await object.text();
+          }
+          if ((await sha256Hex(module)) !== contentHash) {
+            throw new Error(
+              `package artifact "${contentHash}" failed hash verification`,
+            );
+          }
+          return module;
+        },
       );
-      let module: string;
-      if (seeded) {
-        module = seeded.module;
-      } else {
-        const key = `packages/${contentHash}.mjs`;
-        const object = await bucket.get(key);
-        if (!object) {
-          throw new Error(`package artifact "${contentHash}" is missing`);
-        }
-        module = await object.text();
-      }
-      if ((await sha256Hex(module)) !== contentHash) {
-        throw new Error(
-          `package artifact "${contentHash}" failed hash verification`,
-        );
-      }
-      return module;
     },
   };
 }

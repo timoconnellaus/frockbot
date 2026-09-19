@@ -39,7 +39,10 @@ import {
   firstPartyFeatureOnForBotV1,
   maskPlanForBotV1,
 } from "@frockbot/app/plugins/catalog";
-import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
+import {
+  readPluginEnablementV1,
+  type PluginEnablementV1,
+} from "@frockbot/app/plugins/enablement";
 import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
@@ -198,6 +201,8 @@ export async function agentRuntime(
   agentPackages: FoundationAgentPackage[];
   capabilities: EnabledCapabilityV1[];
   modelSelection: RuntimeModelSelection;
+  /** One Turn's exact enablement read, shared with Composition mounting. */
+  pluginEnablement: PluginEnablementV1;
   /**
    * The model provider Plugin host for this mount, present exactly when the
    * Bot's model names a provider this deployment serves only through a Plugin
@@ -210,10 +215,16 @@ export async function agentRuntime(
   // Three gates below ask the User object for the same account features
   // record. One mount, one read: see `userAccountFeaturesReaderV1`.
   const accountFeatures = userAccountFeaturesReaderV1(state, identity);
-  const user = await userConfiguration.readConfiguration({
-    schemaVersion: 1,
-    userId: identity.userId,
-  });
+  // User configuration and Bot-local Plugin enablement are independent
+  // authorities. Start both together: serializing them put two storage/DO
+  // round trips ahead of every text response.
+  const [user, enablement] = await Promise.all([
+    userConfiguration.readConfiguration({
+      schemaVersion: 1,
+      userId: identity.userId,
+    }),
+    readPluginEnablementV1(state.ctx.storage),
+  ]);
   await projectRoutineAccountTimezoneV1(
     state,
     userTimezoneV1(user.profile),
@@ -227,7 +238,6 @@ export async function agentRuntime(
   // seams below, which never see a plan — a switch that only masked the plan
   // would leave image, routines, subagents and machine messages registering
   // their tools on a Turn the Plugins page reports as off.
-  const enablement = await readPluginEnablementV1(state.ctx.storage);
   const featureOn = (packageId: string): boolean =>
     firstPartyFeatureOnForBotV1(packageId, enablement);
   const plan = maskPlanForBotV1(
@@ -308,26 +318,37 @@ export async function agentRuntime(
   // tools exist and refuse would still have told the model they were there.
   // The registry is read only when the setting is on.
   const machines = turn ? machineSeam(state, identity) : undefined;
-  const messagesGate =
+  const messagesGatePromise =
     machines && featureOn("machine-messages")
-      ? await resolveBotMachineMessagesGateV1(
+      ? resolveBotMachineMessagesGateV1(
           primitivePackageSettings("machine-messages"),
           () => machines.list(),
         )
-      : ({ status: "off" } as const);
+      : Promise.resolve({ status: "off" } as const);
   // A Bot builds an Applet only inside an admitted Turn: the publish is a
   // durable effect whose intent record has to name the Session and Turn that
   // asked for it, and the scaffold write names the same writer. Resolved
   // before the Composition is built for the same reason the machine gate is:
   // the answer decides whether the Package is mounted at all.
-  const applets = turn
-    ? await appletsRuntimeHost(state, identity, turn, accountFeatures)
-    : undefined;
+  const appletsPromise = turn
+    ? appletsRuntimeHost(state, identity, turn, accountFeatures)
+    : Promise.resolve(undefined);
   // A Bot writes a Plugin only inside an admitted Turn, for the same reason,
   // and only behind the account's Plugin-authoring switch (ADR 0026).
-  const plugins = turn
-    ? await pluginAuthoringRuntimeHost(state, identity, turn, accountFeatures)
-    : undefined;
+  const pluginsPromise = turn
+    ? pluginAuthoringRuntimeHost(state, identity, turn, accountFeatures)
+    : Promise.resolve(undefined);
+  const skillsPromise = turn
+    ? createBotSkillsHost(state, identity, turn, accountFeatures)
+    : Promise.resolve(undefined);
+  // These gates share the account-feature read above but otherwise touch
+  // independent authorities. Resolve them as one preparation stage.
+  const [messagesGate, applets, plugins, skills] = await Promise.all([
+    messagesGatePromise,
+    appletsPromise,
+    pluginsPromise,
+    skillsPromise,
+  ]);
   // Filled in once this Turn's model binding is resolved, below. The tool
   // and the prompt section both read it lazily, from inside the Turn.
   const subagentModels: SubagentModelOptionV1[] = [];
@@ -335,16 +356,7 @@ export async function agentRuntime(
     ...state.application.runtime.hosted({
       userId: identity.userId,
       readSecret,
-      ...(turn
-        ? {
-            skills: await createBotSkillsHost(
-              state,
-              identity,
-              turn,
-              accountFeatures,
-            ),
-          }
-        : {}),
+      ...(turn ? { skills } : {}),
       ...(turn
         ? { memory: createBotMemoryHost(identity, turn, state.env) }
         : {}),
@@ -779,6 +791,7 @@ export async function agentRuntime(
   return {
     agentPackages,
     capabilities: structuredClone(plan.capabilities),
+    pluginEnablement: structuredClone(enablement),
     ...(pluginModel ? { pluginModel } : {}),
     modelSelection: {
       provider: binding.providerType,

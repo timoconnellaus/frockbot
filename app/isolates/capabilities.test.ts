@@ -40,6 +40,16 @@ const BINDING: IsolateModelBindingV1 = {
 
 const IDENTITY = { userId: "user-1", botId: "bot-1" } as const;
 
+async function contentHashV1(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function request(
   overrides: Partial<NormalizedModelRequest> = {},
 ): NormalizedModelRequest {
@@ -413,7 +423,8 @@ describe("mounting a Bot Package artifact", () => {
   }
 
   test("a seeded artifact is verified against its content address like any other", async () => {
-    const store = createR2PackageArtifactStore(bucketOf({}));
+    const bucket = bucketOf({});
+    const store = createR2PackageArtifactStore(bucket);
     const seeded = SEEDED_PLUGIN_ARTIFACTS_V1[0]!;
     // The artifact as generated mounts: the module is the content its address
     // names.
@@ -428,7 +439,9 @@ describe("mounting a Bot Package artifact", () => {
     (seeded as { module: string }).module = `${original}\n// edited by hand`;
     try {
       await expect(
-        store.loadPackageArtifact(seeded.contentHash),
+        createR2PackageArtifactStore(bucketOf({})).loadPackageArtifact(
+          seeded.contentHash,
+        ),
       ).rejects.toThrow(/failed hash verification/);
     } finally {
       (seeded as { module: string }).module = original;
@@ -440,5 +453,37 @@ describe("mounting a Bot Package artifact", () => {
     await expect(store.loadPackageArtifact("a".repeat(64))).rejects.toThrow(
       /is missing/,
     );
+  });
+
+  test("reuses verified immutable bytes across Turns and retries failures", async () => {
+    const module = "export const tools = [];";
+    const contentHash = await contentHashV1(module);
+    let reads = 0;
+    let available = true;
+    const bucket = {
+      get: () => {
+        reads += 1;
+        return Promise.resolve(
+          available ? { text: () => Promise.resolve(module) } : null,
+        );
+      },
+    } as unknown as R2Bucket;
+
+    const firstTurn = createR2PackageArtifactStore(bucket);
+    expect(await firstTurn.loadPackageArtifact(contentHash)).toBe(module);
+    const nextTurn = createR2PackageArtifactStore(bucket);
+    expect(await nextTurn.loadPackageArtifact(contentHash)).toBe(module);
+    expect(reads).toBe(1);
+
+    const missingHash = "a".repeat(64);
+    available = false;
+    await expect(nextTurn.loadPackageArtifact(missingHash)).rejects.toThrow(
+      /is missing/,
+    );
+    available = true;
+    await expect(nextTurn.loadPackageArtifact(missingHash)).rejects.toThrow(
+      /failed hash verification/,
+    );
+    expect(reads).toBe(3);
   });
 });

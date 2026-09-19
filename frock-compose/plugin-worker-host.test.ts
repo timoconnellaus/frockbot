@@ -160,6 +160,7 @@ interface RecordedLoad {
 
 interface Harness {
   host: PluginWorkerHost;
+  healthCalls(): number;
   cardFailures: PluginCardFailureV1[];
   loads: RecordedLoad[];
   definitions: ToolDefinition[];
@@ -199,8 +200,10 @@ function harness(
   const hookInvocations: PluginWorkerHookInvocationV1[] = [];
   const toolInvocations: PluginWorkerToolInvocationV1[] = [];
   const triggerInvocations: PluginWorkerTriggerInvocationV1[] = [];
+  let healthCalls = 0;
   const entrypoint: PluginWorkerEntrypoint = {
     health: () => {
+      healthCalls += 1;
       if (input.healthThrows) throw new Error(input.healthThrows);
       const last = loads.at(-1)!;
       const plugins = last.code.env.IDENTITY.plugins.map(
@@ -325,6 +328,7 @@ function harness(
   };
   return {
     host: new PluginWorkerHost(options),
+    healthCalls: () => healthCalls,
     loads,
     definitions,
     namespaces,
@@ -429,6 +433,29 @@ describe("one worker per User", () => {
     expect(first.loads[0]!.code.env.IDENTITY).not.toEqual(
       second.loads[0]!.code.env.IDENTITY,
     );
+  });
+
+  test("reuses immutable worker health by loader generation", async () => {
+    const subject = harness();
+    await subject.host.mount([member("weather")]);
+    await subject.host.mount([member("weather")]);
+    expect(subject.healthCalls()).toBe(1);
+
+    await subject.host.mount([
+      member("weather", { contentHash: "c".repeat(64) }),
+    ]);
+    expect(subject.healthCalls()).toBe(2);
+  });
+
+  test("does not cache a failed worker health check", async () => {
+    const subject = harness({ healthThrows: "temporarily unavailable" });
+    await expect(subject.host.mount([member("weather")])).rejects.toThrow(
+      /temporarily unavailable/,
+    );
+    await expect(subject.host.mount([member("weather")])).rejects.toThrow(
+      /temporarily unavailable/,
+    );
+    expect(subject.healthCalls()).toBe(2);
   });
 
   test("no plugins means no loader call and nothing registered", async () => {

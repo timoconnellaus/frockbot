@@ -376,6 +376,79 @@ describe("the session the call talks through", () => {
     expect(setup.instruction).toContain(identity.botId);
   });
 
+  test("retries a directory read that failed at admission", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-directory-retry-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ failDirectoryReads: 1 });
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+
+    expect(
+      opened.frames.find((frame) => frame.type === "voice/target"),
+    ).toMatchObject({ botId: identity.botId });
+
+    const setup = (await stub.probeUpstreamFrames()).find(
+      (frame) => frame.kind === "setup",
+    );
+    expect(setup?.instruction).toContain("<you>");
+    expect(setup?.instruction).toContain(`- id: ${identity.botId}`);
+  });
+
+  test("refuses while Bot authority remains unavailable", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-directory-unavailable-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const active = await open(identity.userId, {}, "phone");
+    await startCall(active, identity.botId);
+    const activeCallId = await callIdOf(stub);
+    const upstreamBefore = await stub.probeUpstreamFrames();
+    await stub.probeSetScript({ failDirectoryReads: 2 });
+    const opened = await open(identity.userId, {}, "laptop");
+    await opened.waitFor((frame) => frame.type === "welcome", "welcome");
+    opened.socket.send(JSON.stringify({ type: "hello", protocol_version: 1 }));
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/target",
+        botId: identity.botId,
+      }),
+    );
+    opened.socket.send(
+      JSON.stringify({ type: "start_call", preferred_format: "pcm16" }),
+    );
+
+    const refusal = await opened.waitFor(
+      (frame) => frame.type === "voice/refusal",
+      "the unavailable authority refusal",
+    );
+    expect(refusal).toMatchObject({ code: "unconfigured" });
+    expect(await stub.probeUpstreamFrames()).toEqual(upstreamBefore);
+    expect(
+      opened.frames.find((frame) => frame.type === "voice/target"),
+    ).toBeUndefined();
+    expect(await stub.probeMemoryJobs()).toEqual([]);
+    expect(
+      active.frames.find(
+        (frame) =>
+          frame.type === "voice/refusal" && frame.code === "superseded",
+      ),
+    ).toBeUndefined();
+    expect(
+      (await stub.probeTraces()).filter(
+        (trace) => trace.event === "call-admitted",
+      ),
+    ).toEqual([expect.objectContaining({ call: activeCallId })]);
+  });
+
   test("bridges binary Live messages both ways and meters what crossed", async () => {
     const userId = `voice-audio-${crypto.randomUUID()}`;
     const stub = assistant(userId);

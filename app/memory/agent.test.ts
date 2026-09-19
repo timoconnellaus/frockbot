@@ -455,14 +455,200 @@ describe("the Turn's Memory read", () => {
 
     await projection.refresh(4, session);
 
-    // The render and the index are the same pass over the same bytes. They
-    // used to be two, one after the other, on the turn-start critical path.
+    // The render and the index use the same pass over the same bytes. Search
+    // waits for the derived index, while the first model request does not.
+    await projection.ensureIndex();
     expect(reads.length).toBeGreaterThan(0);
     expect(new Set(reads).size).toBe(reads.length);
     expect(
       projection
         .index()
         .chunks.some((chunk) => chunk.content.includes("Brompton")),
+    ).toBe(true);
+    await dispose();
+  });
+
+  test("does not keep the first response behind derived embeddings", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const host = hostFor("bot-1", files);
+    expect(
+      (
+        await host.store.write({
+          root: userMemoryRootV1(OWNER),
+          tier: "profile",
+          fact: "Tim rides a Brompton to the station.",
+          writer: botWriter("bot-1"),
+        })
+      ).status,
+    ).toBe("ok");
+    let releaseEmbedding!: () => void;
+    const embeddingReleased = new Promise<void>((resolve) => {
+      releaseEmbedding = resolve;
+    });
+    let embeddingStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      embeddingStarted = resolve;
+    });
+    let embeddingCalls = 0;
+    const projection = new MemoryProjection({
+      ...host,
+      embed: async (texts) => {
+        embeddingCalls += 1;
+        embeddingStarted();
+        await embeddingReleased;
+        return texts.map(() => [1]);
+      },
+      vectorize: {
+        upsert: () => Promise.resolve(),
+        query: () => Promise.resolve({ matches: [] }),
+        deleteByIds: () => Promise.resolve(),
+      },
+    });
+    const { session, dispose } = await openSession();
+    let promptReady = false;
+    const refresh = projection.refresh(4, session).then(() => {
+      promptReady = true;
+    });
+
+    await refresh;
+    expect(promptReady).toBe(true);
+    expect(embeddingCalls).toBe(0);
+
+    let searchReady = false;
+    const index = projection.ensureIndex().then((result) => {
+      searchReady = true;
+      return result;
+    });
+    await started;
+    expect(searchReady).toBe(false);
+    releaseEmbedding();
+    expect(
+      (await index).chunks.some((chunk) => chunk.content.includes("Brompton")),
+    ).toBe(true);
+    await dispose();
+  });
+
+  test("an invalidation wins over an in-flight lazy index build", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const host = hostFor("bot-1", files);
+    const store = new MemoryStore({ files, owner: OWNER, clock: () => AT });
+    expect(
+      (
+        await store.write({
+          root: userMemoryRootV1(OWNER),
+          tier: "profile",
+          fact: "Tim rides a Brompton to the station.",
+          writer: botWriter("bot-1"),
+        })
+      ).status,
+    ).toBe("ok");
+    let releaseEmbedding!: () => void;
+    const embeddingReleased = new Promise<void>((resolve) => {
+      releaseEmbedding = resolve;
+    });
+    let embeddingStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      embeddingStarted = resolve;
+    });
+    const projection = new MemoryProjection({
+      ...host,
+      embed: async (texts) => {
+        embeddingStarted();
+        await embeddingReleased;
+        return texts.map(() => [1]);
+      },
+      vectorize: {
+        upsert: () => Promise.resolve(),
+        query: () => Promise.resolve({ matches: [] }),
+        deleteByIds: () => Promise.resolve(),
+      },
+    });
+    const { session, dispose } = await openSession();
+    await projection.refresh(4, session);
+    const indexing = projection.ensureIndex();
+    await started;
+
+    projection.invalidate();
+    expect(
+      (
+        await store.write({
+          root: userMemoryRootV1(OWNER),
+          tier: "profile",
+          fact: "Tim's Project membership changed while indexing.",
+          writer: botWriter("bot-1"),
+        })
+      ).status,
+    ).toBe("ok");
+    releaseEmbedding();
+
+    expect(
+      (await indexing).chunks.some((chunk) =>
+        chunk.content.includes("Project membership changed"),
+      ),
+    ).toBe(true);
+    await dispose();
+  });
+
+  test("an invalidation wins over an in-flight explicit rebuild", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const host = hostFor("bot-1", files);
+    const store = new MemoryStore({ files, owner: OWNER, clock: () => AT });
+    expect(
+      (
+        await store.write({
+          root: userMemoryRootV1(OWNER),
+          tier: "profile",
+          fact: "Tim rides a Brompton to the station.",
+          writer: botWriter("bot-1"),
+        })
+      ).status,
+    ).toBe("ok");
+    let releaseEmbedding!: () => void;
+    const embeddingReleased = new Promise<void>((resolve) => {
+      releaseEmbedding = resolve;
+    });
+    let embeddingStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      embeddingStarted = resolve;
+    });
+    const projection = new MemoryProjection({
+      ...host,
+      embed: async (texts) => {
+        embeddingStarted();
+        await embeddingReleased;
+        return texts.map(() => [1]);
+      },
+      vectorize: {
+        upsert: () => Promise.resolve(),
+        query: () => Promise.resolve({ matches: [] }),
+        deleteByIds: () => Promise.resolve(),
+      },
+    });
+    const { session, dispose } = await openSession();
+    await projection.refresh(4, session);
+    const rebuilding = projection.rebuild();
+    await started;
+
+    projection.invalidate();
+    expect(
+      (
+        await store.write({
+          root: userMemoryRootV1(OWNER),
+          tier: "profile",
+          fact: "Tim's Project membership changed during the rebuild.",
+          writer: botWriter("bot-1"),
+        })
+      ).status,
+    ).toBe("ok");
+    releaseEmbedding();
+
+    expect((await rebuilding).deferred).toBeUndefined();
+    expect(
+      projection
+        .index()
+        .chunks.some((chunk) =>
+          chunk.content.includes("Project membership changed"),
+        ),
     ).toBe(true);
     await dispose();
   });

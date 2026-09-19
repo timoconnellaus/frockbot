@@ -6,7 +6,10 @@
 // — ownership, exclusivity, sleep and wake ordering, the ledger, a delegation
 // across an eviction — not that Gemini answers.
 import type { Connection } from "agents";
-import { VoiceAssistant } from "../src/voice-assistant.ts";
+import {
+  VoiceAssistant,
+  type VoiceBotReuseContextV1,
+} from "../src/voice-assistant.ts";
 import { GeminiFakeV1, type GeminiFakeFrameV1 } from "./voice-gemini-fake.ts";
 import type { VoiceDelegationRecordV1 } from "@frockbot/app/voice/ledger";
 import type {
@@ -47,6 +50,8 @@ export interface VoiceProbeScript {
   slowUpstreamMs?: number;
   /** The Bot directory takes this long to answer. */
   slowDirectoryMs?: number;
+  /** This many directory reads fail before the authority answers again. */
+  failDirectoryReads?: number;
 }
 
 function sse(events: unknown[]): ReadableStream<Uint8Array> {
@@ -243,10 +248,23 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   }
 
   /** The directory, as slow as a test asked for. */
-  protected override async listBots(userId: string) {
+  protected override async listBots(
+    userId: string,
+    reuse?: VoiceBotReuseContextV1,
+  ) {
     const slow = this.#script.slowDirectoryMs;
     if (slow) await new Promise((resolve) => setTimeout(resolve, slow));
-    return super.listBots(userId);
+    return super.listBots(userId, reuse);
+  }
+
+  /** Fails admission reads so prompt preparation can prove it retries. */
+  protected override async directory(userId: string) {
+    const failures = this.#script.failDirectoryReads ?? 0;
+    if (failures > 0) {
+      this.#script.failDirectoryReads = failures - 1;
+      throw new Error("the scripted directory read failed");
+    }
+    return super.directory(userId);
   }
 
   /** Records the memory lines too, so a test reads what an operator would. */
