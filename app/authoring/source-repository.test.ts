@@ -336,7 +336,7 @@ describe("Bot-authored source repositories", () => {
       `${pluginSourcePathV1("notes")}plugin.ts`,
       invalidUtf8,
     );
-    expect(
+    await expect(
       pluginAuthoringSourceRepositoryV1(pluginStore.api, USER).read(
         "notes",
         "plugin.ts",
