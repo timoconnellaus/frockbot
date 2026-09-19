@@ -416,11 +416,10 @@ test("a delivered reply is one bubble, wide enough for its own text", async () =
 // The settled case above, from the other end of a Turn. The avatar used to sit
 // in a gutter to the left of the running Turn's bubbles and then vanish when
 // the Turn ended, which took the bubble sideways with it. The working
-// indicator is the companion beside the composer now — the thread draws no
+// indicator is the companion outside the transcript now — the thread draws no
 // working row at all — so a bubble is at the transcript's left edge while the
-// Bot is still writing, the working character is below the thread rather than
-// in it, and the end of the Turn moves nothing.
-test("the working companion sits beside the composer and never shifts the bubbles", async () => {
+// Bot is still writing, and the end of the Turn moves nothing.
+test("the working companion stays outside the transcript and never shifts the bubbles", async () => {
   const { page, ollamaBaseUrl } = application();
   // Measure layout without the bubble's entrance motion.
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -442,7 +441,6 @@ test("the working companion sits beside the composer and never shifts the bubble
   let running: {
     bubbleLeft: number;
     bubbleBottom: number;
-    gap: number;
   } | null = null;
   await expect
     .poll(
@@ -458,9 +456,6 @@ test("the working companion sits beside the composer and never shifts the bubble
         running = {
           bubbleLeft: bubble.x,
           bubbleBottom: bubble.y + bubble.height,
-          // How far the companion's top is below the bubble's bottom. Negative
-          // would mean the two overlap, which is the old side-by-side row.
-          gap: row.y - (bubble.y + bubble.height),
         };
         return true;
       },
@@ -470,12 +465,10 @@ test("the working companion sits beside the composer and never shifts the bubble
   const midTurn = running as unknown as {
     bubbleLeft: number;
     bubbleBottom: number;
-    gap: number;
   };
 
-  // Below, not beside — and outside the thread: the transcript has no working
-  // row to draw or to take away.
-  expect(midTurn.gap).toBeGreaterThanOrEqual(0);
+  // Outside the thread: the transcript has no working row to draw or to take
+  // away. Its exact position belongs to the responsive conversation chrome.
   await expect(
     sem(page, "chat-transcript").locator(
       '[flt-semantics-identifier="working-indicator"]',
