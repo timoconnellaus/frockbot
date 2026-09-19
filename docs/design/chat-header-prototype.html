@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FrockBot — chat header lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --accent: #db4b6d;
+        --accent-deep: #9c1a44;
+        --blush: #3a2229;
+        --blush-ink: #f6d2db;
+        --window: #1f1e24;
+        --surface: #1a191e;
+        --raised: #2c2a33;
+        --line: #3a3742;
+        --muted: #a8a3a6;
+        --subtle: #8d8896;
+        --text: #f6f2ee;
+        --on-accent: #fff;
+        --sidebar: 288px;
+        --dude: 112px;
+        --fade: 168px;
+        --chrome: "Manrope", system-ui, sans-serif;
+        --chat: "Inter", system-ui, sans-serif;
+      }
+      [data-look="paper"] {
+        --window: #faf7f2;
+        --surface: #fff;
+        --raised: #f2ece4;
+        --line: #e7e0d9;
+        --muted: #6d6974;
+        --subtle: #6d6974;
+        --text: #1e1d27;
+        --blush: #fce2ea;
+        --blush-ink: #b11f4b;
+        --accent: #c23359;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        background: #121116;
+        color: var(--text);
+        font-family: var(--chrome);
+      }
+      .lab {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 18px;
+        align-items: center;
+        padding: 10px 16px;
+        background: #0e0d11;
+        color: #f6f2ee;
+        border-bottom: 1px solid #2a2830;
+        font-size: 12.5px;
+      }
+      .lab strong {
+        font-size: 13px;
+        letter-spacing: -0.02em;
+      }
+      .lab label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        color: #c9c4c8;
+        white-space: nowrap;
+      }
+      .lab input[type="range"] {
+        width: 88px;
+      }
+      .stage {
+        min-height: 0;
+        padding: 18px;
+      }
+      .window {
+        height: 100%;
+        display: grid;
+        grid-template-columns: var(--sidebar) 1fr;
+        overflow: hidden;
+        border: 1px solid #3a3742;
+        border-radius: 16px;
+        background: var(--window);
+        box-shadow: 0 24px 80px rgb(0 0 0 / 0.45);
+      }
+      .bots {
+        background: var(--surface);
+        border-right: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+        padding: 12px 10px;
+      }
+      .bots h1 {
+        margin: 6px 8px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .bot {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 8px;
+        border-radius: 12px;
+        color: var(--text);
+      }
+      .bot.active {
+        background: var(--blush);
+        color: var(--blush-ink);
+      }
+      .bot img,
+      .mini {
+        width: 32px;
+        height: 32px;
+        object-fit: contain;
+      }
+      .bot b {
+        display: block;
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .bot span {
+        display: block;
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .chat {
+        position: relative;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--window);
+      }
+
+      /* Current: solid bar, dude by the composer. */
+      .chat[data-layout="now"] .header-now {
+        display: flex;
+      }
+      .chat[data-layout="now"] .overlay,
+      .chat[data-layout="now"] .fade {
+        display: none;
+      }
+      .chat[data-layout="proposed"] .header-now {
+        display: none;
+      }
+
+      .header-now {
+        height: 52px;
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 8px 0 14px;
+        background: var(--surface);
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+      }
+      .name-now {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        height: 34px;
+        padding: 0 9px 0 12px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--text);
+        font: 500 14px/1 var(--chrome);
+      }
+      .header-now .actions {
+        display: flex;
+        gap: 2px;
+      }
+      .icon-btn {
+        width: 36px;
+        height: 40px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+      }
+
+      .thread {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 18px 28px 20px;
+      }
+      .chat[data-layout="proposed"] .thread {
+        padding-top: 28px;
+      }
+      .col {
+        max-width: 720px;
+        min-height: 100%;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+      .bubble {
+        max-width: 72%;
+        padding: 10px 14px;
+        font: 400 14px/1.5 var(--chat);
+        letter-spacing: -0.1px;
+      }
+      .bot-msg {
+        align-self: flex-start;
+        background: var(--raised);
+        color: var(--text);
+        border-radius: 18px 18px 18px 4px;
+      }
+      .me-msg {
+        align-self: flex-end;
+        background: color-mix(in srgb, var(--accent) 20%, var(--raised));
+        color: var(--text);
+        border-radius: 18px 18px 4px 18px;
+      }
+      [data-look="paper"] .me-msg {
+        background: var(--accent);
+        color: var(--on-accent);
+      }
+
+      .composer-wrap {
+        position: relative;
+        padding: 0 18px 16px;
+      }
+      .chat[data-layout="now"] .composer-wrap {
+        padding-left: 78px;
+      }
+      .composer {
+        display: flex;
+        align-items: center;
+        min-height: 48px;
+        padding: 4px 4px 4px 16px;
+        border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+        border-radius: 24px;
+        background: var(--surface);
+        color: var(--muted);
+        font: 400 14px/1.45 var(--chat);
+      }
+      .composer span {
+        flex: 1;
+      }
+      .round {
+        width: 40px;
+        height: 40px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--muted);
+        display: grid;
+        place-items: center;
+      }
+      .send {
+        background: var(--accent);
+        color: white;
+      }
+
+      .dude-now {
+        display: none;
+        position: absolute;
+        left: 12px;
+        bottom: 18px;
+        width: 64px;
+        height: 64px;
+      }
+      .chat[data-layout="now"] .dude-now {
+        display: block;
+      }
+
+      .fade {
+        pointer-events: none;
+        position: absolute;
+        inset: 0 0 auto;
+        height: var(--fade);
+        z-index: 2;
+        background: linear-gradient(
+          to bottom,
+          var(--window) 0%,
+          color-mix(in srgb, var(--window) 82%, transparent) 42%,
+          color-mix(in srgb, var(--window) 38%, transparent) 72%,
+          transparent 100%
+        );
+      }
+      .overlay {
+        pointer-events: none;
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 3;
+        display: flex;
+        align-items: flex-start;
+        gap: 4px;
+        padding: 8px 12px 0;
+      }
+      .dude {
+        pointer-events: none;
+        width: var(--dude);
+        height: var(--dude);
+        flex: 0 0 var(--dude);
+        margin: -10px -18px 0 -12px;
+        filter: drop-shadow(0 10px 18px rgb(0 0 0 / 0.28));
+        transform-origin: 50% 80%;
+      }
+      .dude img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+      .chat[data-working="true"] .dude {
+        animation: work 0.7s ease-in-out infinite;
+      }
+      @keyframes work {
+        0%,
+        100% {
+          transform: translateY(0) rotate(-1.5deg);
+        }
+        50% {
+          transform: translateY(-7px) rotate(2deg);
+        }
+      }
+      .badge {
+        position: absolute;
+        left: calc(var(--dude) * 0.62);
+        top: calc(var(--dude) * 0.72);
+        display: none;
+        gap: 3px;
+        padding: 5px 7px;
+        border-radius: 999px;
+        background: var(--raised);
+        border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+      }
+      .chat[data-working="true"] .badge {
+        display: flex;
+      }
+      .badge i {
+        width: 4px;
+        height: 4px;
+        border-radius: 99px;
+        background: var(--accent);
+        animation: dots 1s ease-in-out infinite;
+      }
+      .badge i:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+      .badge i:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+      @keyframes dots {
+        0%,
+        80%,
+        100% {
+          opacity: 0.35;
+          transform: translateY(0);
+        }
+        40% {
+          opacity: 1;
+          transform: translateY(-2px);
+        }
+      }
+
+      /* WhatsApp-ish: one frosted stadium over the fade, top-left. */
+      .pill {
+        pointer-events: auto;
+        display: flex;
+        align-items: center;
+        margin-top: 8px;
+        padding: 3px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--surface) 64%, transparent);
+        border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+        box-shadow:
+          inset 0 1px 0 rgb(255 255 255 / 0.06),
+          0 8px 24px rgb(0 0 0 / 0.18);
+        backdrop-filter: blur(18px) saturate(1.35);
+        -webkit-backdrop-filter: blur(18px) saturate(1.35);
+      }
+      [data-look="paper"] .pill {
+        background: color-mix(in srgb, var(--paper, #fff) 70%, transparent);
+        box-shadow:
+          inset 0 1px 0 rgb(255 255 255 / 0.8),
+          0 8px 24px rgb(30 29 39 / 0.08);
+      }
+      .pill button {
+        height: 32px;
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        padding: 0 10px;
+        border-radius: 999px;
+        font: 600 13.5px/1 var(--chrome);
+        letter-spacing: -0.15px;
+        cursor: pointer;
+      }
+      .pill button:hover {
+        background: color-mix(in srgb, var(--text) 8%, transparent);
+      }
+      .pill .glyph {
+        width: 32px;
+        padding: 0;
+        color: var(--muted);
+      }
+      .pill .split {
+        width: 1px;
+        height: 16px;
+        background: var(--line);
+        opacity: 0.85;
+      }
+      .pill .chev {
+        width: 14px;
+        height: 14px;
+        opacity: 0.55;
+      }
+      .pill.icons-only .name {
+        display: none;
+      }
+      .pill.icons-only .split:first-of-type {
+        display: none;
+      }
+
+      svg.icon {
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab">
+      <strong>Chat header lab</strong>
+      <label>
+        Layout
+        <select id="layout">
+          <option value="proposed">Proposed</option>
+          <option value="now">Current</option>
+        </select>
+      </label>
+      <label>
+        Look
+        <select id="look">
+          <option value="ink">Ink</option>
+          <option value="paper">Paper</option>
+        </select>
+      </label>
+      <label>
+        Character
+        <input id="dude" type="range" min="80" max="140" value="112" />
+        <span id="dudeLabel">112</span>
+      </label>
+      <label>
+        Fade
+        <input id="fade" type="range" min="110" max="220" value="168" />
+      </label>
+      <label><input id="working" type="checkbox" /> Working</label>
+      <label>
+        Pill
+        <select id="pill">
+          <option value="name">Name + buttons</option>
+          <option value="icons">Buttons only</option>
+        </select>
+      </label>
+    </div>
+    <div class="stage">
+      <div class="window" id="app">
+        <aside class="bots">
+          <h1>Your Bots</h1>
+          <div class="bot active">
+            <img
+              class="mini"
+              alt=""
+              src="../../output/flock-svg-rig/versions/v7/pixel.svg"
+            />
+            <div>
+              <b>Pixel</b>
+              <span>Ready when you are</span>
+            </div>
+          </div>
+          <div class="bot">
+            <div class="mini" aria-hidden="true"></div>
+            <div>
+              <b>Sunny</b>
+              <span>Good morning</span>
+            </div>
+          </div>
+        </aside>
+        <section class="chat" id="chat" data-layout="proposed" data-working="false">
+          <header class="header-now">
+            <button class="name-now" type="button">
+              Pixel
+              <svg class="icon chev" viewBox="0 0 24 24">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <div class="actions">
+              <button class="icon-btn" type="button" aria-label="Computer">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <rect x="3" y="4" width="18" height="13" rx="1.5" />
+                  <path d="M12 17v4M8 21h8" />
+                </svg>
+              </button>
+              <button class="icon-btn" type="button" aria-label="Panel">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <rect x="3" y="4" width="18" height="16" rx="2" />
+                  <path d="M15 4v16" />
+                </svg>
+              </button>
+            </div>
+          </header>
+          <div class="fade"></div>
+          <div class="overlay">
+            <div class="dude" aria-hidden="true">
+              <img
+                alt=""
+                src="../../output/flock-svg-rig/versions/v7/pixel.svg"
+              />
+              <span class="badge"><i></i><i></i><i></i></span>
+            </div>
+            <div class="pill" id="chromePill">
+              <button class="name" type="button">
+                Pixel
+                <svg class="icon chev" viewBox="0 0 24 24">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+              <span class="split"></span>
+              <button class="glyph" type="button" aria-label="Computer">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <rect x="3" y="4" width="18" height="13" rx="1.5" />
+                  <path d="M12 17v4M8 21h8" />
+                </svg>
+              </button>
+              <button class="glyph" type="button" aria-label="Show the panel">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <rect x="3" y="4" width="18" height="16" rx="2" />
+                  <path d="M15 4v16" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="thread" id="thread">
+            <div class="col">
+              <div class="bubble bot-msg">
+                I moved the watering to after school so you are not out there
+                in the heat.
+              </div>
+              <div class="bubble me-msg">Did the seedlings make it?</div>
+              <div class="bubble bot-msg">
+                Yes. Two trays on the bench, one still in the porch so it does
+                not bolt.
+              </div>
+              <div class="bubble bot-msg">
+                Morning. The forecast is clear after lunch, so the beds will
+                actually dry.
+              </div>
+              <div class="bubble me-msg">What’s on this week?</div>
+              <div class="bubble bot-msg">
+                Tuesday is the council bins, Wednesday the tomatoes need water,
+                and Saturday is planting — not feeding.
+              </div>
+              <div class="bubble me-msg">
+                Can you check the garden jobs for Saturday and tell me if we
+                still need compost?
+              </div>
+              <div class="bubble bot-msg">
+                Compost is already in the shed from last week — skip the tip
+                run unless you want a spare bag for the tomatoes.
+              </div>
+              <div class="bubble me-msg">Perfect. Remind me at 8.</div>
+              <div class="bubble bot-msg">
+                I’ll nudge you at 8. Wear the old boots — the path is still
+                wet from Thursday.
+              </div>
+              <div class="bubble me-msg">And the animated dude?</div>
+              <div class="bubble bot-msg">
+                Up here now, overlapping the thread, with the buttons in a
+                little pill on the fade so the chat stays the room.
+              </div>
+            </div>
+          </div>
+          <div class="composer-wrap">
+            <img
+              class="dude-now"
+              alt=""
+              src="../../output/flock-svg-rig/versions/v7/pixel.svg"
+            />
+            <div class="composer">
+              <span>Message Pixel</span>
+              <button class="round" type="button" aria-label="Voice">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <rect x="9" y="3" width="6" height="10" rx="3" />
+                  <path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" />
+                </svg>
+              </button>
+              <button class="round send" type="button" aria-label="Send">
+                <svg class="icon" viewBox="0 0 24 24">
+                  <path d="M12 20V4M6 10l6-6 6 6" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <script>
+      const chat = document.getElementById("chat");
+      const app = document.getElementById("app");
+      const pill = document.getElementById("chromePill");
+      const dudeLabel = document.getElementById("dudeLabel");
+      const thread = document.getElementById("thread");
+      thread.scrollTop = thread.scrollHeight;
+
+      document.getElementById("layout").onchange = (e) => {
+        chat.dataset.layout = e.target.value;
+      };
+      document.getElementById("look").onchange = (e) => {
+        app.dataset.look = e.target.value;
+      };
+      document.getElementById("working").onchange = (e) => {
+        chat.dataset.working = e.target.checked ? "true" : "false";
+      };
+      document.getElementById("pill").onchange = (e) => {
+        pill.classList.toggle("icons-only", e.target.value === "icons");
+      };
+      document.getElementById("dude").oninput = (e) => {
+        const n = e.target.value;
+        chat.style.setProperty("--dude", n + "px");
+        dudeLabel.textContent = n;
+      };
+      document.getElementById("fade").oninput = (e) => {
+        chat.style.setProperty("--fade", e.target.value + "px");
+      };
+    </script>
+  </body>
+</html>
