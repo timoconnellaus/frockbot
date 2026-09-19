@@ -23,9 +23,11 @@ RUN npm ci --omit=dev
 COPY computer/package.json ./computer/package.json
 COPY computer/host-protocol ./computer/host-protocol
 COPY computer/fly/runtime.ts ./computer/fly/runtime.ts
-COPY computer/fly/shell.ts ./computer/fly/shell.js
+COPY computer/fly/shell.ts ./computer/fly/shell.ts
 COPY core/package.json ./core/package.json
 COPY core/crypto.ts ./core/crypto.ts
+RUN node --no-warnings -e \
+  "const fs = require('node:fs'); const { stripTypeScriptTypes } = require('node:module'); const source = fs.readFileSync('computer/fly/shell.ts', 'utf8'); fs.writeFileSync('computer/fly/shell.js', stripTypeScriptTypes(source, { mode: 'strip' }));"
 RUN mkdir -p node_modules/@frockbot \
   && ln -s ../../computer node_modules/@frockbot/computer \
   && ln -s ../../core node_modules/@frockbot/core
