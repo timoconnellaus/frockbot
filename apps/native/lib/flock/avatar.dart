@@ -45,6 +45,30 @@ enum CharacterEmotion {
 
 enum CharacterMotion { active, quiet, still }
 
+/// Opaque pixels of a still, in the still's own canvas. The conversation
+/// companion sizes itself to this silhouette so the empty frame around a
+/// drawing is not part of the height from the top of the thread.
+@immutable
+class CharacterInk {
+  final double canvasWidth;
+  final double canvasHeight;
+  final double left;
+  final double top;
+  final double width;
+  final double height;
+  const CharacterInk({
+    required this.canvasWidth,
+    required this.canvasHeight,
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.height,
+  });
+
+  Size boxForHeight(double inkHeight) =>
+      Size(inkHeight * width / height, inkHeight);
+}
+
 @immutable
 class CharacterDefinition {
   final String id;
@@ -52,13 +76,15 @@ class CharacterDefinition {
   final Color primary;
   final Color shade;
   final Color eyes;
+  final CharacterInk ink;
   const CharacterDefinition(
     this.id,
     this.label,
     this.primary,
     this.shade,
-    this.eyes,
-  );
+    this.eyes, {
+    required this.ink,
+  });
 }
 
 const characterCatalogV1 = <String, CharacterDefinition>{
@@ -68,6 +94,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xfffc85ae),
     Color(0xffa95d75),
     Color(0xfffcf6e3),
+    ink: CharacterInk(
+      canvasWidth: 640,
+      canvasHeight: 760,
+      left: 98,
+      top: 113,
+      width: 447,
+      height: 585,
+    ),
   ),
   'guardian': CharacterDefinition(
     'guardian',
@@ -75,6 +109,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xff3c3543),
     Color(0xff211d26),
     Color(0xffffeee0),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 25,
+      top: 119,
+      width: 421,
+      height: 464,
+    ),
   ),
   'sunny': CharacterDefinition(
     'sunny',
@@ -82,6 +124,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xffffc928),
     Color(0xffd99a00),
     Color(0xfffff6df),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 11,
+      top: 146,
+      width: 421,
+      height: 438,
+    ),
   ),
   'chill': CharacterDefinition(
     'chill',
@@ -89,6 +139,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xff59c7ff),
     Color(0xff258dc5),
     Color(0xfff4fbff),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 29,
+      top: 98,
+      width: 402,
+      height: 491,
+    ),
   ),
   'nudge': CharacterDefinition(
     'nudge',
@@ -96,6 +154,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xffff8b27),
     Color(0xffc95b12),
     Color(0xfffff4e9),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 29,
+      top: 191,
+      width: 403,
+      height: 400,
+    ),
   ),
   'fox': CharacterDefinition(
     'fox',
@@ -103,6 +169,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xffef6b4a),
     Color(0xffae402b),
     Color(0xfffff0dc),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 17,
+      top: 134,
+      width: 423,
+      height: 459,
+    ),
   ),
   'dog': CharacterDefinition(
     'dog',
@@ -110,6 +184,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xffdca258),
     Color(0xffb67c39),
     Color(0xfffff1d3),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 28,
+      top: 24,
+      width: 362,
+      height: 568,
+    ),
   ),
   'goat': CharacterDefinition(
     'goat',
@@ -117,6 +199,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xffd8c8ab),
     Color(0xff9d8968),
     Color(0xfffff8e8),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 19,
+      top: 70,
+      width: 420,
+      height: 520,
+    ),
   ),
   'cow': CharacterDefinition(
     'cow',
@@ -124,6 +214,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xfff4eee4),
     Color(0xffb9a99a),
     Color(0xfffff8e8),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 18,
+      top: 176,
+      width: 425,
+      height: 416,
+    ),
   ),
   'cat': CharacterDefinition(
     'cat',
@@ -131,6 +229,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xff8b72d9),
     Color(0xff5942a0),
     Color(0xfffff2dc),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 25,
+      top: 102,
+      width: 411,
+      height: 487,
+    ),
   ),
   'rabbit': CharacterDefinition(
     'rabbit',
@@ -138,6 +244,14 @@ const characterCatalogV1 = <String, CharacterDefinition>{
     Color(0xffd7b9f1),
     Color(0xff9d78be),
     Color(0xfffff7e8),
+    ink: CharacterInk(
+      canvasWidth: 457,
+      canvasHeight: 615,
+      left: 49,
+      top: 31,
+      width: 358,
+      height: 560,
+    ),
   ),
 };
 
@@ -201,10 +315,15 @@ class CharacterAvatar extends StatefulWidget {
   /// Where the eyes look, as a point in the artboard's own frame: `-1` to `1`
   /// on each axis, or nothing when there is nowhere to look. The surface
   /// that owns the pointer feeds this — the conversation pane, for the
-  /// companion beside the composer — so the eyes follow a pointer anywhere
+  /// companion in the thread overlay — so the eyes follow a pointer anywhere
   /// over that surface rather than only over the character's own square.
   /// Written straight into the artboard on each change; nothing rebuilds.
   final ValueListenable<Offset?>? gaze;
+
+  /// Size [size] as the silhouette's height and clip the empty canvas around
+  /// the drawing. Compact squares in the list keep this off; the conversation
+  /// companion turns it on so every character shares one inset from the top.
+  final bool cropToInk;
 
   /// While true, the eyes may turn but the artboard is not woken to draw
   /// them, and a moment's wake already running is cut short. The surface
@@ -230,6 +349,7 @@ class CharacterAvatar extends StatefulWidget {
     this.hold,
     this.workingRing = false,
     this.working = false,
+    this.cropToInk = false,
     this.tempo = thinkingBadgeDefaultTempo,
     this.semanticsLabel,
   });
@@ -429,58 +549,91 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     model.color('eyeColor')?.value = definition.eyes;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final avatar = SizedBox.square(
-      dimension: widget.size,
-      // `still` is the checked-in picture, not a paused artboard: a live
-      // artboard beside the composer — even one holding its rest pose — cost
-      // keystrokes typed right after a tap on the field, and the picture is
-      // what the design shows at rest anyway.
-      child:
-          _isFlutterTest ||
-              !riveRuntimeReady.value ||
-              widget.motion == CharacterMotion.still
-          ? Image.asset(
-              'assets/characters/$_characterId.png',
-              fit: BoxFit.contain,
-              excludeFromSemantics: true,
-            )
-          : rive.RiveWidgetBuilder(
-              key: ValueKey(_characterId),
-              fileLoader: _loader,
-              dataBind: rive.DataBind.auto(),
-              onLoaded: (loaded) {
-                _loaded = loaded;
-                _synced = null;
-                _sync();
-                if (widget.gaze != null) _gazeChanged();
-              },
-              builder: (context, state) => switch (state) {
-                // Decoration only: the artboard takes no pointer and holds no
-                // focus. Hover and gaze belong to the MouseRegion around it.
-                rive.RiveLoaded() => ExcludeFocus(
-                  child: IgnorePointer(
-                    child: rive.RiveWidget(
-                      controller: state.controller,
-                      fit: rive.Fit.contain,
-                      hitTestBehavior: rive.RiveHitTestBehavior.none,
-                    ),
+  /// The still or the live artboard, filling [size].
+  ///
+  /// `still` is the checked-in picture, not a paused artboard: a live
+  /// artboard while the composer is attaching its field — even one holding
+  /// its rest pose — cost keystrokes typed right after a tap, and the
+  /// picture is what the design shows at rest anyway.
+  Widget _figure(Size size, {required BoxFit fit}) => SizedBox(
+    width: size.width,
+    height: size.height,
+    child:
+        _isFlutterTest ||
+            !riveRuntimeReady.value ||
+            widget.motion == CharacterMotion.still
+        ? Image.asset(
+            'assets/characters/$_characterId.png',
+            fit: fit,
+            excludeFromSemantics: true,
+          )
+        : rive.RiveWidgetBuilder(
+            key: ValueKey(_characterId),
+            fileLoader: _loader,
+            dataBind: rive.DataBind.auto(),
+            onLoaded: (loaded) {
+              _loaded = loaded;
+              _synced = null;
+              _sync();
+              if (widget.gaze != null) _gazeChanged();
+            },
+            builder: (context, state) => switch (state) {
+              // Decoration only: the artboard takes no pointer and holds no
+              // focus. Hover and gaze belong to the MouseRegion around it.
+              rive.RiveLoaded() => ExcludeFocus(
+                child: IgnorePointer(
+                  child: rive.RiveWidget(
+                    controller: state.controller,
+                    fit: rive.Fit.contain,
+                    hitTestBehavior: rive.RiveHitTestBehavior.none,
                   ),
                 ),
-                // A runtime that never arrives — a script the CSP refuses, a
-                // request that hangs — leaves the loader in `RiveLoading`
-                // forever rather than failing, so the still stands in for
-                // waiting as well as for failure. An empty slot is never the
-                // better answer: the still is what the animation replaces.
-                _ => Image.asset(
-                  'assets/characters/$_characterId.png',
-                  fit: BoxFit.contain,
-                  excludeFromSemantics: true,
+              ),
+              // A runtime that never arrives — a script the CSP refuses, a
+              // request that hangs — leaves the loader in `RiveLoading`
+              // forever rather than failing, so the still stands in for
+              // waiting as well as for failure. An empty slot is never the
+              // better answer: the still is what the animation replaces.
+              _ => Image.asset(
+                'assets/characters/$_characterId.png',
+                fit: fit,
+                excludeFromSemantics: true,
+              ),
+            },
+          ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget avatar;
+    if (widget.cropToInk) {
+      final ink =
+          (characterCatalogV1[_characterId] ??
+                  characterCatalogV1[defaultCharacterIdV1]!)
+              .ink;
+      final scale = widget.size / ink.height;
+      final box = ink.boxForHeight(widget.size);
+      avatar = ClipRect(
+        child: SizedBox(
+          width: box.width,
+          height: box.height,
+          child: Stack(
+            children: [
+              Positioned(
+                left: -ink.left * scale,
+                top: -ink.top * scale,
+                child: _figure(
+                  Size(ink.canvasWidth * scale, ink.canvasHeight * scale),
+                  fit: BoxFit.fill,
                 ),
-              },
-            ),
-    );
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      avatar = _figure(Size.square(widget.size), fit: BoxFit.contain);
+    }
     final interactive = MouseRegion(
       onEnter: (_) {
         setState(() => _localHovered = true);
@@ -517,9 +670,8 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
         children: [
           result,
           // Over the character's shoulder, not under its feet. Hung below the
-          // box, the badge left the artboard entirely — beside the composer it
-          // floated in the gap under the field and read as a stray control
-          // rather than as this character thinking.
+          // box, the badge left the artboard entirely and read as a stray
+          // control rather than as this character thinking.
           Positioned(
             right: -badge.height * 0.3,
             top: -badge.height * 0.3,
@@ -537,17 +689,17 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     return Semantics(
       // A labelled image is a node of its own. Left as an annotation it merged
       // into the nearest ancestor node — the conversation pane's, once the
-      // companion sat beside the composer — and the web engine's image
-      // handling then dropped that node's identifier, so `shell-conversation`
-      // vanished from the accessibility tree while its contents stayed.
+      // companion sat in the thread — and the web engine's image handling
+      // then dropped that node's identifier, so `shell-conversation` vanished
+      // from the accessibility tree while its contents stayed.
       container: true,
       image: true,
       label: widget.semanticsLabel,
       // Excluded below the label: the artboard publishes semantic nodes of
-      // its own, with focus handling, and beside the composer those took the
-      // keyboard focus the text field had — every keystroke after a tap on
-      // the composer was lost. The character is one image to a screen reader,
-      // not a set of controls.
+      // its own, with focus handling, and those took the keyboard focus the
+      // text field had — every keystroke after a tap on the composer was
+      // lost. The character is one image to a screen reader, not a set of
+      // controls.
       excludeSemantics: true,
       child: result,
     );

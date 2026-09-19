@@ -50,32 +50,27 @@ void main() {
     });
   }
   for (final width in [390.0, 1280.0]) {
-    testWidgets('the companion sits on the composer field at $width', (
+    testWidgets('the companion sits on the thread overlay at $width', (
       tester,
     ) async {
       final harness = VoiceShellHarness();
       await harness.mount(tester, width: width, brightness: Brightness.dark);
-      final inset = width == 390 ? 34.0 : 0.0;
       final companion = find.bySemanticsLabel('Bot is ready');
       expect(companion, findsOneWidget);
-      // The field's container is padded ten points off the composer's bottom,
-      // above the system inset; the companion's feet rest on the same line at
-      // every width, with or without a gesture bar below. On a phone it used
-      // to hang the bar's height lower than the field.
+      expect(tester.getTopLeft(companion).dy, chatHeaderChromeTop);
+      expect(tester.getSize(companion).height, chatCompanionSize);
       final field = find.byKey(const ValueKey('composer'));
-      final fieldBottom = tester.getBottomLeft(field).dy;
-      final companionBottom = tester.getBottomLeft(companion).dy;
-      expect(companionBottom, closeTo(800 - 10 - inset, 0.01));
-      expect(companionBottom, greaterThan(fieldBottom - 40));
-      expect(companionBottom, lessThanOrEqualTo(fieldBottom + 20));
-      // The bar names the Bot without drawing it: the companion is the one
-      // character on the conversation.
+      expect(
+        tester.getBottomLeft(companion).dy,
+        lessThan(tester.getTopLeft(field).dy),
+      );
+      // The header draws the companion; the composer is the field alone.
       expect(
         find.descendant(
           of: find.byType(ChatHeader),
           matching: find.byType(CharacterAvatar),
         ),
-        findsNothing,
+        findsOneWidget,
       );
       await capture(tester, 'composer-companion-${width.toInt()}');
       await harness.dispose(tester);
@@ -83,7 +78,7 @@ void main() {
   }
 
   for (final width in [390.0, 1280.0]) {
-    testWidgets('typing tucks the companion only on a phone at $width', (
+    testWidgets('typing leaves the companion in the header at $width', (
       tester,
     ) async {
       tester.view.physicalSize = Size(width, 800);
@@ -123,42 +118,22 @@ void main() {
       final field = find.byKey(const ValueKey('composer'));
       expect(companion, findsOneWidget);
       final restLeft = tester.getTopLeft(field).dx;
+      final restTop = tester.getTopLeft(companion).dy;
       await capture(tester, 'companion-tuck-rest-${width.toInt()}');
 
       await tester.enterText(field, 'hello');
       await tester.pump();
       await tester.pump(FrockTheme.enter);
 
-      final seat = tester.widget<AnimatedPositioned>(
-        find.byType(AnimatedPositioned),
-      );
-      final fade = tester.widget<AnimatedOpacity>(
-        find.descendant(
-          of: find.byType(AnimatedPositioned),
-          matching: find.byType(AnimatedOpacity),
-        ),
-      );
-      if (width == 390) {
-        expect(seat.left, -50);
-        expect(fade.opacity, 0);
-        expect(companion.hitTestable(), findsNothing);
-        expect(tester.getTopLeft(field).dx, lessThan(restLeft - 24));
-      } else {
-        expect(seat.left, 6);
-        expect(fade.opacity, 1);
-        expect(companion, findsOneWidget);
-        expect(tester.getTopLeft(field).dx, restLeft);
-      }
+      expect(companion, findsOneWidget);
+      expect(tester.getTopLeft(companion).dy, restTop);
+      expect(tester.getTopLeft(field).dx, restLeft);
       await capture(tester, 'companion-tuck-typing-${width.toInt()}');
 
       await tester.enterText(field, '');
       await tester.pump();
       await tester.pump(FrockTheme.enter);
       expect(companion, findsOneWidget);
-      expect(
-        tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned)).left,
-        6,
-      );
       expect(tester.getTopLeft(field).dx, restLeft);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
@@ -217,10 +192,7 @@ void main() {
         tester.getTopLeft(voice).dx,
         greaterThanOrEqualTo(tester.getTopRight(pill).dx - 1),
       );
-      expect(
-        tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned)).left,
-        6,
-      );
+      expect(find.bySemanticsLabel('Bot is ready'), findsOneWidget);
       await capture(tester, 'composer-dictation-${width.toInt()}');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());

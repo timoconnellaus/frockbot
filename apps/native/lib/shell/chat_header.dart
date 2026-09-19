@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart' hide ConnectionState;
 
@@ -12,20 +13,37 @@ import 'desktop_layout.dart';
 /// accent, so "working" and "yours" never read as the same colour.
 const computerRunningColor = Color(0xff5aa9ff);
 
-/// The conversation's title bar.
+/// Silhouette height of the conversation companion. The empty canvas around
+/// a still is clipped, so this is the drawing, not the frame.
+const chatCompanionSize = 88.0;
+
+/// How far the thread fade reaches down from the top of the conversation.
+const chatHeaderFadeHeight = 168.0;
+
+/// Shared inset from the top of the conversation for the companion and the
+/// chrome pills, so characters of different ink heights still line up.
+const chatHeaderChromeTop = 20.0;
+
+/// Inset from the conversation's left and right for the companion and pills.
+const chatHeaderChromeSide = 16.0;
+
+/// Extra list padding at the visual top of the thread, so the first rows
+/// clear the companion a little while still sliding under the fade.
+const chatHeaderThreadPadding = 28.0;
+
+/// The conversation's title chrome.
 ///
-/// On a phone it is GrokBot's: the way back to the Bot list, the Bot's name as
-/// a pill that opens the Bot's page, and the Computer. Everything else the Bot
-/// holds — its Routines, its Applets, the pages its Packages mount — is on that
-/// page rather than in a row of icons. At the wider tiers the right panel is a
-/// column or a drawer beside the conversation, and the bar names each entry of
-/// it separately.
+/// On a call this is still an [AppBar]: the thread is gone, and the bar is
+/// the name, a mark that says why, and the Computer. In a conversation it is
+/// an overlay — a fade, the Bot's companion at the top-left, and frosted
+/// pills on the far right (the name, the Computer, the panel). A phone keeps
+/// Back as a pill on the left, at the same inset as the character.
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
 
-  /// Whether this is a phone's bar, where the name is always a pill and the
-  /// panel is a page rather than a column.
+  /// Whether this is a phone's chrome, where the name is always a pill and
+  /// the panel is a page rather than a column.
   final bool phone;
 
   /// Back to the Bot list. The phone's, where the conversation is a page.
@@ -49,6 +67,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   /// other door leads out of a call that has no way out but ending it.
   final bool voiceMode;
 
+  /// The Bot's companion, laid in the overlay at the same top inset as the
+  /// pills. Null on a call, and in chrome-only tests.
+  final Widget? companion;
+
   const ChatHeader({
     super.key,
     required this.name,
@@ -62,12 +84,14 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.onTogglePanel,
     this.panelShown = false,
     this.voiceMode = false,
+    this.companion,
   });
 
   double get _toolbarHeight => 52 * textScale.clamp(1, 3);
 
   /// A call sits past the lights. A phone page drops a band of the same
-  /// surface under them. A conversation beside the list does neither.
+  /// surface under them. A conversation beside the list does neither: its
+  /// overlay is inside the conversation column.
   DesktopChrome get _chrome => voiceMode
       ? DesktopChrome.leading
       : phone
@@ -75,17 +99,197 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       : DesktopChrome.overlay;
 
   @override
-  Size get preferredSize =>
-      Size.fromHeight(_toolbarHeight + desktopChromeHeight(_chrome));
+  Size get preferredSize => voiceMode
+      ? Size.fromHeight(_toolbarHeight + desktopChromeHeight(_chrome))
+      : Size.zero;
+
+  Size get _glyphTarget =>
+      chatDesktopChrome ? const Size(36, 36) : const Size(44, 44);
+
+  double get _overlayTop =>
+      chatHeaderChromeTop +
+      (phone && desktopTitleBarless ? desktopTitleBarBand : 0);
 
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final title = Row(
-      mainAxisSize: onOpenBot == null ? MainAxisSize.max : MainAxisSize.min,
+  Widget build(BuildContext context) =>
+      voiceMode ? _bar(context) : _overlay(context);
+
+  Widget _overlay(BuildContext context) {
+    final window = Theme.of(context).scaffoldBackgroundColor;
+    return Stack(
       children: [
-        // Slow recovery marks the name itself: the bar carries no character
-        // now that the Bot's companion sits beside the composer.
+        Align(
+          alignment: Alignment.topCenter,
+          child: IgnorePointer(
+            child: SizedBox(
+              key: const ValueKey('chat-header-fade'),
+              height: chatHeaderFadeHeight,
+              width: double.infinity,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      window,
+                      window.withValues(alpha: 0.82),
+                      window.withValues(alpha: 0.38),
+                      window.withValues(alpha: 0),
+                    ],
+                    stops: const [0, 0.42, 0.72, 1],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: _overlayTop,
+          left: chatHeaderChromeSide,
+          right: chatHeaderChromeSide,
+          child: DesktopWindowDragRegion(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (onBack != null) ...[
+                  identified(
+                    ShellIds.sidebarToggle,
+                    _ChromePill(
+                      tooltip: 'Your Bots',
+                      onPressed: onBack,
+                      size: _glyphTarget,
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        size: chatIconSize,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (companion != null) IgnorePointer(child: companion!),
+                if (onOpenBot != null) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Spacer(),
+                        Flexible(
+                          child: identified(
+                            ShellIds.botPanelToggle,
+                            _ChromePill(
+                              tooltip: 'Open $name',
+                              onPressed: onOpenBot,
+                              padding: const EdgeInsets.fromLTRB(14, 0, 12, 0),
+                              size: Size(0, chatDesktopChrome ? 40 : 44),
+                              child: _title(
+                                context,
+                                chevron: true,
+                                flexible: true,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  const Spacer(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 8,
+                    ),
+                    child: _title(context, chevron: false),
+                  ),
+                ],
+                if (onComputer != null) ...[
+                  const SizedBox(width: 8),
+                  _glyphPill(
+                    'Computer',
+                    ChatIconKind.computer,
+                    onComputer,
+                    color: computerRunning ? computerRunningColor : null,
+                  ),
+                ],
+                if (onTogglePanel != null) ...[
+                  const SizedBox(width: 8),
+                  identified(
+                    ShellIds.rightPanelToggle,
+                    _glyphPill(
+                      panelShown ? 'Hide the panel' : 'Show the panel',
+                      ChatIconKind.panel,
+                      onTogglePanel,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _glyphPill(
+    String label,
+    ChatIconKind icon,
+    VoidCallback? open, {
+    Color? color,
+  }) => Builder(
+    builder: (context) => _ChromePill(
+      tooltip: label,
+      onPressed: open,
+      size: _glyphTarget,
+      child: IconTheme(
+        data: IconThemeData(
+          color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        child: ChatIcon(icon),
+      ),
+    ),
+  );
+
+  Widget _title(
+    BuildContext context, {
+    required bool chevron,
+    bool flexible = false,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Text(
+      name,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.15,
+      ),
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (connection == ConnectionState.reconnecting) ...[
+          const _DelayedConnectionDot(),
+          const SizedBox(width: 6),
+        ],
+        if (flexible) Flexible(child: text) else text,
+        if (chevron) ...[
+          const SizedBox(width: 3),
+          Icon(
+            Icons.expand_more_rounded,
+            size: 16,
+            color: scheme.onSurfaceVariant,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _bar(BuildContext context) {
+    final title = Row(
+      mainAxisSize: MainAxisSize.max,
+      children: [
         if (connection == ConnectionState.reconnecting) ...[
           const _DelayedConnectionDot(),
           const SizedBox(width: 6),
@@ -102,15 +306,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
             ),
           ),
         ),
-        if (voiceMode) ...[const SizedBox(width: 8), const VoiceHeaderPill()],
-        if (onOpenBot != null && !voiceMode) ...[
-          const SizedBox(width: 3),
-          Icon(
-            Icons.expand_more_rounded,
-            size: 16,
-            color: scheme.onSurfaceVariant,
-          ),
-        ],
+        const SizedBox(width: 8),
+        const VoiceHeaderPill(),
       ],
     );
     return DesktopHeader(
@@ -128,30 +325,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                   icon: Icon(Icons.arrow_back_rounded, size: chatIconSize),
                 ),
               ),
-        // With no back arrow the name is the first thing in the bar, and it
-        // sits as far from the left edge as the last icon's glyph does from the
-        // right: 4 of trailing space plus the icon's own margin inside its
-        // 40-wide button.
         titleSpacing: onBack == null ? 14 : 4,
-        title: onOpenBot == null || voiceMode
-            ? title
-            : Align(
-                alignment: Alignment.centerLeft,
-                // A button rather than a bare InkWell, so its semantics are the
-                // same shape as every other control in this bar: one node that
-                // is the identifier, one tappable node inside it.
-                child: identified(
-                  ShellIds.botPanelToggle,
-                  Tooltip(
-                    message: 'Open $name',
-                    child: _BotNameButton(
-                      phone: phone,
-                      onPressed: onOpenBot!,
-                      child: title,
-                    ),
-                  ),
-                ),
-              ),
+        title: title,
         actions: [
           if (onComputer != null)
             _destination(
@@ -159,17 +334,6 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               ChatIconKind.computer,
               onComputer,
               color: computerRunning ? computerRunningColor : null,
-            ),
-          // The wide tiers' one switch for the panel beside the conversation:
-          // rightmost, against the column it shows and hides.
-          if (onTogglePanel != null && !voiceMode)
-            identified(
-              ShellIds.rightPanelToggle,
-              _destination(
-                panelShown ? 'Hide the panel' : 'Show the panel',
-                ChatIconKind.panel,
-                onTogglePanel,
-              ),
             ),
           const SizedBox(width: 4),
         ],
@@ -184,7 +348,6 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     Color? color,
   }) => Builder(
     builder: (context) {
-      // A phone keeps 44-point targets; a desk packs the doors closer.
       final target = chatDesktopChrome
           ? const Size(36, 40)
           : const Size(44, 46);
@@ -205,48 +368,55 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   );
 }
 
-/// The Bot's name, which is the door to its page.
-///
-/// A phone wears the pill all the time: it is the only affordance in that bar
-/// saying the name can be pressed. At a desk there is a pointer to say it
-/// instead, so the fill arrives on hover and on focus and the resting bar is
-/// the name and nothing else.
-class _BotNameButton extends StatefulWidget {
-  final bool phone;
-  final VoidCallback onPressed;
+/// A frosted stadium for one header control. Pointer-events stay on the
+/// control; the fade behind it does not take a tap.
+class _ChromePill extends StatelessWidget {
+  final String tooltip;
+  final VoidCallback? onPressed;
   final Widget child;
-  const _BotNameButton({
-    required this.phone,
+  final Size size;
+  final EdgeInsetsGeometry padding;
+  const _ChromePill({
+    required this.tooltip,
     required this.onPressed,
     required this.child,
+    required this.size,
+    this.padding = EdgeInsets.zero,
   });
-
-  @override
-  State<_BotNameButton> createState() => _BotNameButtonState();
-}
-
-class _BotNameButtonState extends State<_BotNameButton> {
-  bool _lit = false;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final filled = widget.phone || _lit;
-    return TextButton(
-      onPressed: widget.onPressed,
-      onHover: widget.phone ? null : (over) => setState(() => _lit = over),
-      onFocusChange: widget.phone ? null : (has) => setState(() => _lit = has),
-      style: TextButton.styleFrom(
-        backgroundColor: filled
-            ? scheme.onSurface.withValues(alpha: 0.06)
-            : Colors.transparent,
-        foregroundColor: scheme.onSurface,
-        shape: const StadiumBorder(),
-        padding: const EdgeInsets.fromLTRB(12, 5, 9, 5),
-        minimumSize: const Size(0, 34),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return Tooltip(
+      message: tooltip,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(999),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Material(
+            color: scheme.surface.withValues(alpha: 0.64),
+            shape: StadiumBorder(
+              side: BorderSide(color: scheme.outline.withValues(alpha: 0.55)),
+            ),
+            child: InkWell(
+              onTap: onPressed,
+              customBorder: const StadiumBorder(),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: size.width,
+                  minHeight: size.height,
+                  maxWidth: size.width == 0 ? double.infinity : size.width,
+                  maxHeight: size.width == 0 ? double.infinity : size.height,
+                ),
+                child: Padding(
+                  padding: padding,
+                  child: Center(child: child),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
-      child: widget.child,
     );
   }
 }

@@ -62,12 +62,17 @@ final _phones = TargetPlatformVariant({
 Widget _header() => MaterialApp(
   theme: FrockTheme.theme(Brightness.dark),
   home: Scaffold(
-    appBar: ChatHeader(
-      name: 'Rosemary',
-      connection: ConnectionState.connected,
-      onOpenBot: () {},
-      onComputer: () {},
-      onTogglePanel: () {},
+    body: Stack(
+      fit: StackFit.expand,
+      children: [
+        ChatHeader(
+          name: 'Rosemary',
+          connection: ConnectionState.connected,
+          onOpenBot: () {},
+          onComputer: () {},
+          onTogglePanel: () {},
+        ),
+      ],
     ),
   ),
 );
@@ -215,7 +220,7 @@ void main() {
   }, variant: _phones);
 
   testWidgets(
-    'a desk\'s header draws 19-point glyphs in compact 36 by 40 doors',
+    'a desk\'s header draws 19-point glyphs in compact 36 by 36 doors',
     (tester) async {
       tester.view.physicalSize = const Size(1200, 900);
       tester.view.devicePixelRatio = 1;
@@ -227,7 +232,7 @@ void main() {
       for (final name in _headerDoors) {
         expect(
           tester.getSize(find.byTooltip(name)),
-          const Size(36, 40),
+          const Size(36, 36),
           reason: name,
         );
         expect(

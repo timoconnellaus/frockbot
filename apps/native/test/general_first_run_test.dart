@@ -11,6 +11,7 @@ import 'package:frockbot_native/client/bot_sessions.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/shell/app_shell.dart';
+import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/starters.dart';
@@ -458,7 +459,7 @@ void main() {
         directoryOf([registration(generalId, 'General')]),
       );
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(AppBar, 'General'), findsOneWidget);
+      expect(find.widgetWithText(ChatHeader, 'General'), findsOneWidget);
       expect(harness.store.values['selection.test-user'], generalId);
       expect(identifiedBy(StarterIds.suggestion('research')), findsOneWidget);
       expect(identifiedBy(StarterIds.suggestion('recurring')), findsNothing);
@@ -642,8 +643,8 @@ void main() {
               ]),
             );
             await tester.pumpAndSettle();
-            expect(find.widgetWithText(AppBar, 'Rosemary'), findsOneWidget);
-            expect(find.widgetWithText(AppBar, 'General'), findsNothing);
+            expect(find.widgetWithText(ChatHeader, 'Rosemary'), findsOneWidget);
+            expect(find.widgetWithText(ChatHeader, 'General'), findsNothing);
             expect(harness.store.values['selection.test-user'], 'bot-one');
             expect(links.value, isNull);
             expect(
@@ -667,8 +668,8 @@ void main() {
         ]),
       );
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(AppBar, 'Rosemary'), findsOneWidget);
-      expect(find.widgetWithText(AppBar, 'General'), findsNothing);
+      expect(find.widgetWithText(ChatHeader, 'Rosemary'), findsOneWidget);
+      expect(find.widgetWithText(ChatHeader, 'General'), findsNothing);
       expect(harness.store.values['selection.test-user'], 'bot-one');
       await close(tester, harness);
     });
@@ -681,7 +682,7 @@ void main() {
           directoryOf([registration(generalId, 'General')]),
         );
         await tester.pumpAndSettle();
-        expect(find.widgetWithText(AppBar, 'General'), findsNothing);
+        expect(find.widgetWithText(ChatHeader, 'General'), findsNothing);
         expect(find.text('Choose a Bot to begin'), findsOneWidget);
         await close(tester, harness);
       },
@@ -720,7 +721,7 @@ void main() {
         directoryOf([registration('general', 'General')]),
       );
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(AppBar, 'General'), findsNothing);
+      expect(find.widgetWithText(ChatHeader, 'General'), findsNothing);
       expect(harness.store.values['selection.test-user'], isNull);
       await tester.tap(find.byKey(const ValueKey('bot-general')));
       await tester.pumpAndSettle();
@@ -737,7 +738,7 @@ void main() {
         directoryOf([registration('bot-one', 'Rosemary')]),
       );
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(AppBar, 'Rosemary'), findsNothing);
+      expect(find.widgetWithText(ChatHeader, 'Rosemary'), findsNothing);
       expect(harness.store.values['selection.test-user'], isNull);
       await close(tester, harness);
     });
