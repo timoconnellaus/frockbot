@@ -81,8 +81,9 @@ List<RoutinePluginSourceV1> routinePluginSourcesV1(Object? value) {
 }
 
 Map<String, ViewFieldBuilder> routineEditorFieldBuildersV1(
-  List<RoutinePluginSourceV1> Function() plugins,
-) => {
+  List<RoutinePluginSourceV1> Function() plugins, {
+  required bool Function() pluginsPending,
+}) => {
   'routine-editor-hidden': (_, _, _, _, _) => const SizedBox.shrink(),
   'routine-editor': (context, field, id, value, onChanged) {
     final scope = ViewScope.of(context);
@@ -91,6 +92,7 @@ Map<String, ViewFieldBuilder> routineEditorFieldBuildersV1(
       RoutineEditorV1(
         key: ValueKey('routine-editor.${scope.controller.revision}'),
         plugins: plugins(),
+        pluginsPending: pluginsPending(),
         source: value as String? ?? 'schedule',
         routineId: scope.controller.values[_editorId] as String?,
         name: scope.controller.values[_name] as String? ?? '',
@@ -266,6 +268,11 @@ const _weekdayNames = [
 
 class RoutineEditorV1 extends StatefulWidget {
   final List<RoutinePluginSourceV1> plugins;
+
+  /// Whether the read that answers for [plugins] is still out. A list that is
+  /// empty because nobody has read it yet is not a list of no Plugins, and a
+  /// stored trigger the editor cannot see yet is not a trigger that is gone.
+  final bool pluginsPending;
   final String source;
   final String? routineId;
   final String name;
@@ -280,6 +287,7 @@ class RoutineEditorV1 extends StatefulWidget {
   const RoutineEditorV1({
     super.key,
     required this.plugins,
+    required this.pluginsPending,
     required this.source,
     required this.routineId,
     required this.name,
@@ -492,10 +500,25 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
                 context,
                 identifier: RoutineIds.sourcePlugin(pluginId ?? 'unavailable'),
                 width: constraints.maxWidth,
-                icon: Icons.extension_off_rounded,
+                icon: widget.pluginsPending
+                    ? Icons.extension_rounded
+                    : Icons.extension_off_rounded,
                 title: 'Current Plugin',
-                detail: 'Unavailable for this Bot',
+                detail: widget.pluginsPending
+                    ? 'Checking availability…'
+                    : 'Unavailable for this Bot',
                 selected: true,
+                onTap: () {},
+              ),
+            if (widget.pluginsPending && widget.plugins.isEmpty)
+              _sourceChoice(
+                context,
+                identifier: RoutineIds.sourcePluginsPending,
+                width: constraints.maxWidth,
+                icon: Icons.extension_rounded,
+                title: 'Plugins',
+                detail: 'Checking this Bot’s Plugins…',
+                selected: false,
                 onTap: () {},
               ),
           ],
@@ -595,11 +618,17 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
         ),
         const SizedBox(height: 14),
         if (plugin == null)
-          const _InfoBox(
-            icon: Icons.extension_off_rounded,
-            title: 'This Plugin is unavailable',
-            detail: 'The existing trigger will be kept. Choose another source to replace it.',
-          )
+          widget.pluginsPending
+              ? const _InfoBox(
+                  icon: Icons.extension_rounded,
+                  title: 'Still loading Plugins',
+                  detail: 'This Bot’s Plugin list is still being read. The existing trigger will be kept.',
+                )
+              : const _InfoBox(
+                  icon: Icons.extension_off_rounded,
+                  title: 'This Plugin is unavailable',
+                  detail: 'The existing trigger will be kept. Choose another source to replace it.',
+                )
         else
           RadioGroup<String>(
             groupValue: trigger,

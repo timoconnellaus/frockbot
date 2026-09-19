@@ -315,6 +315,10 @@ abstract final class RoutineIds {
   static const editor = 'routine-editor';
   static const sourceSchedule = 'routine-source-schedule';
   static const sourceWebhook = 'routine-source-webhook';
+
+  /// Where the Plugin choices will be, for as long as the read that answers for
+  /// them is still out.
+  static const sourcePluginsPending = 'routine-source-plugins-pending';
   static String sourcePlugin(String pluginId) => 'routine-source-$pluginId';
   static String pluginTrigger(String pluginId, String trigger) =>
       'routine-trigger-$pluginId-$trigger';

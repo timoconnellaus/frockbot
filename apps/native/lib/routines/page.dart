@@ -50,6 +50,12 @@ class RoutinesController extends ViewSurfaceController {
 
   wire.ViewDocument? _document;
   List<RoutinePluginSourceV1> pluginSources = const [];
+
+  /// Whether the read that answers for [pluginSources] is still out. An empty
+  /// list under a read that is still out is not a statement about this Bot's
+  /// Plugins, and the editor draws the difference rather than telling someone
+  /// their Plugin is gone.
+  bool pluginCatalogPending = true;
   bool _busy = false;
   bool _closed = false;
   String? _message;
@@ -100,6 +106,7 @@ class RoutinesController extends ViewSurfaceController {
     _busy = true;
     _message = null;
     final read = ++_reads;
+    pluginCatalogPending = true;
     _changed();
     // The catalog widens what the editor offers and nothing else, so it is
     // asked for beside the document and read whenever it lands: a slow Plugin
@@ -130,6 +137,7 @@ class RoutinesController extends ViewSurfaceController {
     final frame = await plugins;
     if (_closed || read != _reads) return;
     pluginSources = routinePluginSourcesV1(frame);
+    pluginCatalogPending = false;
     _changed();
   }
 
@@ -314,7 +322,10 @@ class _RoutinesViewState extends State<RoutinesView> {
       chrome: widget.chrome,
       controller: controller,
       banner: (context) => WebhookKeyCard(controller: controller),
-      fields: routineEditorFieldBuildersV1(() => controller.pluginSources),
+      fields: routineEditorFieldBuildersV1(
+        () => controller.pluginSources,
+        pluginsPending: () => controller.pluginCatalogPending,
+      ),
     ),
   );
 }

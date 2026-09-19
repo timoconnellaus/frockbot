@@ -418,6 +418,7 @@ void main() {
           body: SingleChildScrollView(
             child: RoutineEditorV1(
               plugins: [plugin],
+              pluginsPending: false,
               source: 'schedule',
               routineId: null,
               name: '',
@@ -550,6 +551,57 @@ void main() {
     await tester.tap(find.text('New Routine'));
     await tester.pumpAndSettle();
     expect(find.text('GitHub'), findsOneWidget);
+  });
+
+  testWidgets('a Plugin catalog still being read is not an unavailable Plugin', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final catalog = Completer<Object?>();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return catalog.future;
+      return routinesDocumentWithEditor(
+        routines: [
+          {
+            'routineId': 'r1',
+            'name': 'Alerts',
+            'schedule': null,
+            'enabled': true,
+          },
+        ],
+        editing: {
+          'routineId': 'r1',
+          'name': 'Alerts',
+          'prompt': 'Read the alert.',
+          'timing': 'plugin:weather:alert',
+        },
+      );
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+
+    // The document landed and the catalog did not: the stored trigger is one
+    // nobody has looked for yet, which is not the same as one that is gone.
+    expect(find.text('Unavailable for this Bot'), findsNothing);
+    expect(find.text('Checking availability…'), findsOneWidget);
+    expect(find.text('Checking this Bot’s Plugins…'), findsOneWidget);
+
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('This Plugin is unavailable'), findsNothing);
+    expect(find.text('Still loading Plugins'), findsOneWidget);
+
+    // Once the read settles without it, the editor says what it always said.
+    catalog.complete({'plugins': []});
+    await tester.pumpAndSettle();
+    expect(find.text('Still loading Plugins'), findsNothing);
+    expect(find.text('This Plugin is unavailable'), findsOneWidget);
+
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    expect(find.text('Checking availability…'), findsNothing);
+    expect(find.text('Unavailable for this Bot'), findsOneWidget);
   });
 
   testWidgets('an open editor leaves every row control on its own Routine', (
