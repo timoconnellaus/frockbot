@@ -182,10 +182,11 @@ export class MemoryProjection {
     | undefined;
   #turn: number | undefined;
   /**
-   * The documents this Turn's tier reads already decoded, for the one reindex
-   * that follows the render. Taken exactly once and cleared: a reindex after
-   * `memory_write` or `memory_forget` is reindexing files that just changed,
-   * and must read them rather than trust what the render saw.
+   * The documents this Turn's tier reads already decoded, kept for the index
+   * built from that snapshot on the first search. Taken exactly once and
+   * cleared: a reindex after `memory_write` or `memory_forget` is reindexing
+   * files that just changed, and must read them rather than trust what the
+   * render saw.
    */
   #rendered: MemoryDocumentListingV1 | undefined;
   /** This Turn's one Project-membership read, shared by injection and index. */
