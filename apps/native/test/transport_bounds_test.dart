@@ -18,6 +18,7 @@ void main() {
     // that raises the minimum without raising the app's own version ships a
     // build the deployment refuses on every request.
     final hello = wire.ClientHello.fromJson(clientHello);
+    expect((hello.toJson() as Map)['nativeVersion'], wire.nativeAppVersion);
     expect(
       atLeast(
         (hello.toJson() as Map)['nativeVersion'] as String,
@@ -26,6 +27,19 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'a newer build keeps its identity when the deployment floor advances',
+    () {
+      // Release 1.7 while 1.6 remains the grace-period floor, then enforce 1.7.
+      // The already-updated client must still identify as 1.7 at both stages.
+      final hello = wire.ClientHello.fromJson(clientHelloForVersion('1.7.0'));
+      final nativeVersion = (hello.toJson() as Map)['nativeVersion'] as String;
+      expect(atLeast(nativeVersion, '1.6.0'), isTrue);
+      expect(atLeast(nativeVersion, '1.7.0'), isTrue);
+      expect(nativeVersion, '1.7.0');
+    },
+  );
 
   test('JSON transport bounds depth before decoding, including escaped strings and UTF-8', () {
     final sixteen =
