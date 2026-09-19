@@ -62,7 +62,10 @@ export default defineConfig<object, E2EOptions>({
   //
   // A CI runner has two cores and is already sharded across four of them, so
   // the parallelism there is between runners; locally it is between workers.
-  workers: process.env.CI ? 1 : 4,
+  // Publication owns one real build service, so its two journeys stay serial
+  // everywhere and cannot tear down a content-addressed image under each
+  // other.
+  workers: suite === "publication" || process.env.CI ? 1 : 4,
   forbidOnly: !!process.env.CI,
   // The old blanket retries were for a wrangler crash that is now patched and
   // supervised. They turned deterministic regressions into thirty-minute
