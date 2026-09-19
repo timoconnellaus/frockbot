@@ -117,14 +117,10 @@ export const APPLET_MAX_GENERATIONS_V1 = 64;
 export const APPLET_MAX_PER_USER_V1 = 64;
 
 /**
- * The Applets Package's declared durable root, where an Applet's source and
- * built `dist/` live on the Computer.
+ * Core-side names for the Applets Package's durable source root.
  *
- * TODO(lane C1): import `APPLETS_PACKAGE_ID_V1` / `APPLETS_SOURCE_ROOT_ID_V1`
- * from `@frockbot/applets/root` once that lane lands. They are declared
- * here for now because core imports no Package — the constants are two
- * strings the manifest also declares, and the architecture check that the
- * kernel names no Package keeps them from becoming an import.
+ * `applets/root.ts` owns the root and its object-storage semantics. These
+ * exact strings stay local because core imports no Package code.
  */
 export const APPLETS_PACKAGE_ID_V1 = "applets";
 export const APPLETS_SOURCE_ROOT_ID_V1 = "source";

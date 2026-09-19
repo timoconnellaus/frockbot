@@ -649,9 +649,10 @@ export async function createBot(
   await sem(page, "flock-create-submit").click();
   await expect(sheet).toBeHidden({ timeout: 60_000 });
   // Closing the sheet precedes bootstrap selecting the new Bot.
-  await expect(
-    sem(page, "bot-panel-toggle").getByRole("button", { name, exact: true }),
-  ).toBeVisible({ timeout: 60_000 });
+  await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
+    new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    { timeout: 60_000 },
+  );
 }
 
 /** The sheet the list's own avatar opens: every account surface is in it. */
@@ -1143,6 +1144,13 @@ export async function answerComposer(page: Page, text: string): Promise<void> {
   const composer = composerInput(page);
   const sendsStanding = text.length > 0 ? 1 : 0;
   for (let attempt = 0; ; attempt += 1) {
+    // Unlike document fields, the composer sits beside other tappable canvas
+    // controls. Give Flutter a real pointer activation before the generic
+    // read-back path: a synthetic click can be interpreted at the canvas's
+    // previous pointer position and open a neighbouring control instead.
+    await composer.click();
+    await page.waitForTimeout(300);
+    await composer.fill(text);
     await answerInputs([[composer, text]]);
     try {
       await expect(sem(page, "send-button")).toHaveCount(sendsStanding, {
