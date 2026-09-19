@@ -30,6 +30,7 @@ import ts from "typescript";
 
 import type { AppletDiagnostic } from "../lint/index.js";
 import { bootedWithin, withOneMoreBoot } from "./boot.js";
+import { stableModulePaths } from "./module-paths.js";
 import { APPLET_COMPATIBILITY_DATE } from "./runtime.js";
 import { SDK_PLUGIN_TYPES } from "./paths.js";
 
@@ -241,20 +242,12 @@ export async function bundlePlugin(directory: string): Promise<string> {
       },
     ],
     define: { "process.env.NODE_ENV": '"production"' },
+    metafile: true,
     logLevel: "silent",
   });
   const file = result.outputFiles?.[0];
   if (!file) throw new Error("The bundler produced no output");
-  // The bundle's module comments carry the temp directory; keep the artifact a
-  // function of the source alone, as the Applet build does.
-  return file.text
-    .split("\n")
-    .map((line) =>
-      line.startsWith("// ") && line.includes(directory)
-        ? `// ${relative(directory, line.slice(3))}`
-        : line,
-    )
-    .join("\n");
+  return stableModulePaths(file.text, result.metafile, directory);
 }
 
 /**

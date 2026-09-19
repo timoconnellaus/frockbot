@@ -7,10 +7,11 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { writeFile } from "node:fs/promises";
+import { mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runPluginBuildV1 } from "../src/build/plugin.js";
+import { bundlePlugin, runPluginBuildV1 } from "../src/build/plugin.js";
 import { scaffoldPluginTemplateV1 } from "./plugin-scaffold.js";
 
 async function scaffold(): Promise<string> {
@@ -53,6 +54,49 @@ describe("check", () => {
 });
 
 describe("build", () => {
+  it("emits identical module bytes from different and symlinked roots", async () => {
+    const first = await scaffoldPluginTemplateV1({ prefix: "plugin-first-" });
+    const second = await scaffoldPluginTemplateV1({
+      prefix: "plugin-second-",
+    });
+    const pluginSource = [
+      'import { answer } from "./value";',
+      'export const tools = [{ name: "answer", description: "Answers.", inputSchema: { type: "object" } }];',
+      "export const execute = () => answer;",
+      "",
+    ].join("\n");
+    for (const directory of [first.directory, second.directory]) {
+      await writeFile(join(directory, "plugin.ts"), pluginSource, "utf8");
+      await writeFile(
+        join(directory, "value.ts"),
+        "export const answer = 42;\n",
+        "utf8",
+      );
+    }
+
+    const firstModule = await bundlePlugin(first.directory);
+    expect(await bundlePlugin(second.directory)).toBe(firstModule);
+    expect(firstModule).toContain("// value.ts");
+    expect(firstModule).toContain("// plugin.ts");
+
+    const linkParent = await mkdtemp(join(tmpdir(), "plugin-link-"));
+    const linkedDirectory = join(linkParent, "source");
+    try {
+      await symlink(first.directory, linkedDirectory, "dir");
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error.code === "EPERM" || error.code === "EACCES")
+      ) {
+        return;
+      }
+      throw error;
+    }
+    expect(await bundlePlugin(linkedDirectory)).toBe(firstModule);
+  });
+
   it("bundles one module and describes it by running it", async () => {
     const { directory, files } = await scaffoldPluginTemplateV1();
     const outcome = await runPluginBuildV1(directory, {
