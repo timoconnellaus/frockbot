@@ -6,7 +6,7 @@
     <title>Inside FrockBot · Dress your Bot however you want</title>
     <meta
       name="description"
-      content="A persistent cloud Bot. Native apps. Plugins that shape its behaviour and interface. Go inside FrockBot's open-source architecture and explore its planned capabilities."
+      content="The architecture being built: a persistent cloud Bot, native apps, and plugins that shape behaviour and interface. See what ships today and what is planned."
     />
     <meta name="theme-color" content="#1e1d27" />
     <meta property="og:type" content="website" />
@@ -118,6 +118,15 @@
               your devices and plugins that let you dress your Bot however you
               want.
             </p>
+            <p class="inside-scope">
+              This page describes the architecture being built, from what ships
+              today through to the target design. The cloud agent loop, six
+              plugin hooks and a small set of core capabilities are available
+              now; the wider platform of device integrations, slots and native
+              clients described here is planned work. Each section and the
+              <a href="#capabilities">capability reference</a> label what is
+              available and what is in the plan.
+            </p>
             <a class="inside-text-link" href="#plugins"
               >Start with the plugin architecture
               <span aria-hidden="true">↗</span></a
@@ -155,8 +164,8 @@
               </div>
             </div>
             <figcaption id="overview-caption">
-              Native clients connect to one cloud Bot. Plugins and the Computer
-              extend what it can do.
+              The target: native clients connect to one cloud Bot. Plugins and
+              the Computer extend what it can do.
             </figcaption>
           </figure>
         </div>
@@ -203,7 +212,8 @@
               with Flutter and render their interface locally. Native
               integrations connect that interface to the device’s audio, windows
               and operating system, and the browser client reaches the same
-              cloud state.
+              cloud state. Today that means web and macOS in early access; the
+              broader device reach described here is the target.
             </p>
             <figure class="native-scene" aria-labelledby="native-caption">
               <div class="native-desktop">
@@ -622,9 +632,11 @@
             </p>
             <p>
               A card in the conversation, a panel beside your work, a settings
-              section or a whole page can give a capability its own useful
+              section or a whole page could give a capability its own useful
               interface, backed by the plugin’s stored data. A slot says where
-              something appears; a renderer says how it is drawn.
+              something appears; a renderer says how it is drawn. Most of these
+              placements are part of the target design; conversation cards and
+              settings sections are the starting point today.
             </p>
             <figure
               class="inside-figure rendering-figure"
@@ -716,11 +728,10 @@
               </p>
             </div>
             <p>
-              Conversation cards and settings sections are the starting point
-              today. Cards use A2UI; settings sections currently use a smaller
+              Cards use A2UI; settings sections currently use a smaller
               host-rendered view format. General A2UI/HTML slots, full pages and
-              the broader placements below describe the direction of the
-              platform.
+              the broader placements in the capability reference describe the
+              target platform.
             </p>
             <p>
               The host retains ownership of the conversation, audit, undo and
@@ -744,10 +755,11 @@
               A Bot’s work often spans more than one device or service.
             </p>
             <p>
-              The cloud Bot connects those capabilities: a phone event can start
-              a Turn that uses a desktop, and a webhook can update a
-              conversation card. The plugin combines the pieces; the host
-              decides what is available and allowed.
+              The target platform connects those capabilities: a phone event
+              could start a Turn that uses a desktop, and a webhook can already
+              update a conversation card. The plugin combines the pieces; the
+              host decides what is available and allowed. Of the 148
+              capabilities in the reference below, 10 are available today.
             </p>
             <figure
               class="cross-device-flow"
