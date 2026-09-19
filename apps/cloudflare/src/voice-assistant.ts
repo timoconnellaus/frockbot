@@ -1552,6 +1552,15 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     this.timing(connection, "ledger-checked", {
       displaced: Boolean(displaced),
     });
+    const directory = await this.callDirectory(identity.userId);
+    if (!directory) {
+      this.refuse(
+        connection,
+        "unconfigured",
+        "Couldn't reach FrockBot. Try the call again.",
+      );
+      return;
+    }
     // ADR 0029: a call addresses one Bot. The client says which before it
     // says `start_call`, and that is what the call opens on whether it is a
     // new call or a rejoin — the person pressed voice on a Bot just now, and
@@ -1571,6 +1580,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     const target = await this.resolveCallTarget(
       identity.userId,
       admission.call.botId ?? requested,
+      directory,
     );
     this.timing(connection, "target-resolved");
     // Whatever this admission displaced — another device's call, or this
@@ -2364,26 +2374,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   private async resolveCallTarget(
     userId: string,
     botId: string | undefined,
+    directory: BotDirectoryViewV1,
   ): Promise<VoiceCallTargetV1> {
-    let directory: BotDirectoryViewV1;
-    try {
-      directory = await this.directory(userId);
-    } catch {
-      // Admission is a narrow critical path, but one transient authority read
-      // must not silently move an explicitly selected Bot onto the generic
-      // identity and omit its Memory. Retry only after a real failure; if the
-      // authority remains unavailable, prompt assembly gets its own retry and
-      // the call still opens with the documented Bot-less fallback.
-      try {
-        directory = await this.directory(userId);
-      } catch {
-        return {
-          botId: "",
-          name: "",
-          voice: resolveBotVoiceV1({}),
-        };
-      }
-    }
     const attempted = new Set<string>();
     const resolve = async (
       candidate: string | undefined,
@@ -2414,6 +2406,26 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       voice: resolveBotVoiceV1({}),
       directory,
     };
+  }
+
+  /** Reads call authority once on the fast path and retries one real failure. */
+  private async callDirectory(
+    userId: string,
+  ): Promise<BotDirectoryViewV1 | undefined> {
+    try {
+      return await this.directory(userId);
+    } catch {
+      // Admission is a narrow critical path, but one transient authority read
+      // must not silently move an explicitly selected Bot onto the generic
+      // identity and omit its Memory. Retry only after a real failure.
+      try {
+        return await this.directory(userId);
+      } catch {
+        // Unreadable authority is not an authoritatively empty account. The
+        // caller refuses before recording or displacing a call.
+        return undefined;
+      }
+    }
   }
 
   /**

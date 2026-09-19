@@ -172,6 +172,7 @@ export class MemoryProjection {
   };
   #index: MemoryIndexV1 = emptyMemoryIndexV1();
   #indexReady = false;
+  #indexEpoch = 0;
   #indexing:
     | Promise<{
         documentsChanged: number;
@@ -369,7 +370,7 @@ export class MemoryProjection {
     return this.#index;
   }
 
-  private startIndex(): Promise<{
+  private async startIndex(): Promise<{
     documentsChanged: number;
     chunksTotal: number;
     deferred?: true;
@@ -380,18 +381,33 @@ export class MemoryProjection {
         chunksTotal: this.#index.chunks.length,
       });
     }
-    this.#indexing ??= this.reindexCurrent().then(
+    if (this.#indexing) {
+      const result = await this.#indexing;
+      return this.#indexReady ? result : this.startIndex();
+    }
+    const epoch = this.#indexEpoch;
+    const indexing = this.reindexCurrent().then(
       (result) => {
-        this.#indexReady = true;
-        this.#indexing = undefined;
+        if (epoch === this.#indexEpoch) {
+          this.#indexReady = true;
+        } else {
+          // A Project membership mutation invalidated this snapshot while its
+          // embeddings were still being built. It must never republish the
+          // pre-mutation index after invalidation won the race.
+          this.#index = emptyMemoryIndexV1();
+          this.#indexReady = false;
+        }
+        if (this.#indexing === indexing) this.#indexing = undefined;
         return result;
       },
       (error: unknown) => {
-        this.#indexing = undefined;
+        if (this.#indexing === indexing) this.#indexing = undefined;
         throw error;
       },
     );
-    return this.#indexing;
+    this.#indexing = indexing;
+    const result = await indexing;
+    return this.#indexReady ? result : this.startIndex();
   }
 
   /**
@@ -504,10 +520,10 @@ export class MemoryProjection {
 
   /** Drops the projection, so the next Turn reloads it rather than reusing it. */
   invalidate(): void {
+    this.#indexEpoch += 1;
     this.#injection = { text: "", facts: [], omissions: [], faded: [] };
     this.#index = emptyMemoryIndexV1();
     this.#indexReady = false;
-    this.#indexing = undefined;
     this.#turn = undefined;
     this.#rendered = undefined;
     // Membership is exactly the thing a `project_*` tool just changed, so the
