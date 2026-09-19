@@ -2369,11 +2369,20 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     try {
       directory = await this.directory(userId);
     } catch {
-      return {
-        botId: "",
-        name: "",
-        voice: resolveBotVoiceV1({}),
-      };
+      // Admission is a narrow critical path, but one transient authority read
+      // must not silently move an explicitly selected Bot onto the generic
+      // identity and omit its Memory. Retry only after a real failure; if the
+      // authority remains unavailable, prompt assembly gets its own retry and
+      // the call still opens with the documented Bot-less fallback.
+      try {
+        directory = await this.directory(userId);
+      } catch {
+        return {
+          botId: "",
+          name: "",
+          voice: resolveBotVoiceV1({}),
+        };
+      }
     }
     const attempted = new Set<string>();
     const resolve = async (

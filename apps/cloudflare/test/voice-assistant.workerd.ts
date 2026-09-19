@@ -388,10 +388,15 @@ describe("the session the call talks through", () => {
     const opened = await open(identity.userId);
     await startCall(opened, identity.botId);
 
+    expect(
+      opened.frames.find((frame) => frame.type === "voice/target"),
+    ).toMatchObject({ botId: identity.botId });
+
     const setup = (await stub.probeUpstreamFrames()).find(
       (frame) => frame.kind === "setup",
     );
-    expect(setup?.instruction).toContain(identity.botId);
+    expect(setup?.instruction).toContain("<you>");
+    expect(setup?.instruction).toContain(`- id: ${identity.botId}`);
   });
 
   test("bridges binary Live messages both ways and meters what crossed", async () => {
