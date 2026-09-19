@@ -197,7 +197,7 @@ function renderRow(
             ? `<div class="capability-status--${status}"><dt>${STATUS_LABELS[status]}</dt><dd>${names.join(", ")}</dd></div>`
             : "";
         }).join("")}</dl>`;
-  return `<article class="capability-row" data-capability-row data-capability-type="${row.type}" data-scope="${row.scope}" ${statuses} data-search="${escapeHtml(search)}" aria-labelledby="capability-${row.id}">
+  return `<article class="capability-row" data-capability-row data-capability-id="${row.id}" data-capability-type="${row.type}" data-capability-category-value="${escapeHtml(row.category)}" data-scope="${row.scope}" ${statuses} data-search="${escapeHtml(search)}" aria-labelledby="capability-${row.id}">
 <h5 id="capability-${row.id}">${escapeHtml(row.name)}</h5>
 <p class="capability-description">${escapeHtml(row.description)}</p>
 ${availability}
@@ -205,8 +205,41 @@ ${row.notes.map((note) => `<p class="capability-note">${escapeHtml(note)}</p>`).
 </article>`;
 }
 
+function renderComparison(
+  capabilities: Capability[],
+  platforms: CapabilityData["platforms"],
+): string {
+  const statusCell = (status: Status) =>
+    `<td class="capability-status--${status}">${STATUS_LABELS[status]}</td>`;
+  return `<details class="capability-comparison" data-capability-comparison>
+<summary>See the full platform comparison</summary>
+<p>Shared cloud capabilities apply across clients, so they appear once instead of being repeated in every platform column.</p>
+<div class="capability-comparison-scroll" role="region" aria-label="Full capability and platform comparison" tabindex="0">
+<table>
+<thead><tr><th scope="col">Capability</th><th scope="col">Type</th>${platforms.map(({ name }) => `<th scope="col">${escapeHtml(name)}</th>`).join("")}</tr></thead>
+<tbody>${capabilities
+    .map(
+      (row) => `<tr data-capability-comparison-row="${row.id}">
+<th scope="row"><span>${escapeHtml(row.name)}</span><small>${escapeHtml(row.category)}</small></th>
+<td>${escapeHtml(row.type)}</td>
+${
+  row.scope === "cloud"
+    ? `<td colspan="${platforms.length}" class="capability-status--${row.status}">${STATUS_LABELS[row.status]} · Shared cloud runtime</td>`
+    : platforms.map(({ id }) => statusCell(row.platforms[id])).join("")
+}
+</tr>`,
+    )
+    .join("")}</tbody>
+</table>
+</div>
+</details>`;
+}
+
 export function renderCapabilities(input: unknown): string {
   const data = validateCapabilityData(input);
+  const categories = [
+    ...new Set(data.capabilities.map((capability) => capability.category)),
+  ].sort((left, right) => left.localeCompare(right));
   const options = (items: { id: string; name: string }[]) =>
     items
       .map(
@@ -221,6 +254,7 @@ export function renderCapabilities(input: unknown): string {
 <form class="capability-filters" data-capability-filters hidden role="search" aria-label="Filter capabilities">
 <div class="capability-filter capability-filter--search"><label for="capability-query">Find a capability</label><input id="capability-query" name="query" type="search" placeholder="Try clipboard, voice, webhook…" autocomplete="off"></div>
 <div class="capability-filter"><label for="capability-type">Surface type</label><select id="capability-type" name="type"><option value="all">All types</option>${options(data.types)}</select></div>
+<div class="capability-filter"><label for="capability-category">Category</label><select id="capability-category" name="category"><option value="all">All categories</option>${options(categories.map((category) => ({ id: category, name: category })))}</select></div>
 <div class="capability-filter"><label for="capability-platform">Platform</label><select id="capability-platform" name="platform"><option value="all">All platforms</option>${options(data.platforms)}</select></div>
 <div class="capability-filter"><label for="capability-status">Status</label><select id="capability-status" name="status"><option value="all">All statuses</option>${options(STATUSES.map((id) => ({ id, name: STATUS_LABELS[id] })))}</select></div>
 <button class="capability-reset" type="reset">Reset filters</button>
@@ -249,6 +283,7 @@ ${categories
 </details>`;
   })
   .join("\n")}
+${renderComparison(data.capabilities, data.platforms)}
 </div>`;
 }
 

@@ -585,6 +585,25 @@
   color: #e3d7e8;
   font-size: 0.65rem;
 }
+.code-copy-status {
+  margin-left: auto;
+  color: #f2ceda;
+}
+.code-copy {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: white;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+.code-copy:focus-visible {
+  outline: 3px solid #f3afc5;
+  outline-offset: 4px;
+}
 .code-example pre {
   background: var(--ink);
   color: #f1c1d2;
@@ -768,14 +787,24 @@
   color: white;
   border-radius: 16px;
   padding: 28px;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr auto 1fr;
-  gap: 16px;
-  align-items: center;
 }
-.cross-device-flow div {
+.cross-device-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 22px;
+}
+.cross-device-step {
+  position: relative;
   display: grid;
   gap: 12px;
+}
+.cross-device-step:not(:last-child)::after {
+  position: absolute;
+  top: 50%;
+  right: -17px;
+  color: #dc88a4;
+  content: "→";
+  transform: translateY(-50%);
 }
 .cross-device-flow span {
   color: #e6a9be;
@@ -786,11 +815,17 @@
 .cross-device-flow strong {
   font-size: 0.85rem;
 }
-.cross-device-flow > b {
-  color: #dc88a4;
+.cross-device-branch {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px dashed #9c8290;
+  border-radius: 8px;
+  color: #eadde2;
+  font-size: 0.74rem;
+  line-height: 1.6;
 }
 .cross-device-flow figcaption {
-  grid-column: 1/-1;
+  margin-top: 14px;
   color: #d1c4d7;
   font-size: 0.72rem;
 }
@@ -1154,8 +1189,15 @@
     padding: 12px;
     font-size: 0.58rem;
   }
-  .code-heading > span:last-child {
+  .code-heading > span:nth-child(2) {
     display: none;
+  }
+  .code-copy-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
   .code-example pre {
     padding: 18px 12px;
@@ -1167,15 +1209,17 @@
   .render-split {
     grid-template-columns: 1fr;
   }
-  .cross-device-flow {
+  .cross-device-steps {
     grid-template-columns: 1fr;
     gap: 14px;
   }
-  .cross-device-flow > b {
-    transform: rotate(90deg);
-    justify-self: center;
+  .cross-device-step:not(:last-child)::after {
+    top: auto;
+    right: 50%;
+    bottom: -17px;
+    transform: translateX(50%) rotate(90deg);
   }
-  .cross-device-flow div {
+  .cross-device-step {
     text-align: center;
     gap: 6px;
   }

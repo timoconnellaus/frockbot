@@ -1,6 +1,8 @@
 /** A cloud capability is shared, so selecting a device never hides it. */
 export function matchesCapability(capability, filters) {
   if (filters.type !== "all" && capability.type !== filters.type) return false;
+  if (filters.category !== "all" && capability.category !== filters.category)
+    return false;
   const terms = filters.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.every((term) => capability.search.toLowerCase().includes(term))) {
     return false;
@@ -38,6 +40,7 @@ export function initialiseCapabilityReference(reference) {
     element,
     capability: {
       type: element.getAttribute("data-capability-type"),
+      category: element.getAttribute("data-capability-category-value"),
       scope: element.getAttribute("data-scope"),
       status: element.getAttribute("data-runtime-status"),
       search: element.getAttribute("data-search") ?? "",
@@ -55,12 +58,13 @@ export function initialiseCapabilityReference(reference) {
     const filters = {
       query: value("query"),
       type: value("type"),
+      category: value("category"),
       platform: value("platform"),
       status: value("status"),
     };
     const filtering =
       filters.query.trim() !== "" ||
-      [filters.type, filters.platform, filters.status].some(
+      [filters.type, filters.category, filters.platform, filters.status].some(
         (filter) => filter !== "all",
       );
     if (filtering && savedOpenGroups === null)
@@ -69,6 +73,18 @@ export function initialiseCapabilityReference(reference) {
     for (const { element, capability } of entries) {
       element.hidden = !matchesCapability(capability, filters);
       if (!element.hidden) visible += 1;
+    }
+    const visibleIds = new Set(
+      entries
+        .filter(({ element }) => !element.hidden)
+        .map(({ element }) => element.getAttribute("data-capability-id")),
+    );
+    for (const row of reference.querySelectorAll(
+      "[data-capability-comparison-row]",
+    )) {
+      row.hidden = !visibleIds.has(
+        row.getAttribute("data-capability-comparison-row"),
+      );
     }
     for (const category of categories) {
       category.hidden = !category.querySelector(
