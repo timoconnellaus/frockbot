@@ -59,7 +59,8 @@
     "validate:format": "bun scripts/validate.ts format",
     "validate:build": "bun scripts/validate.ts build",
     "eval:greeting": "bun scripts/eval-greeting.ts",
-    "eval:conversation": "bun scripts/eval-conversation.ts"
+    "eval:conversation": "bun scripts/eval-conversation.ts",
+    "eval:tool-approval": "bun scripts/eval-tool-approval.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.1",
