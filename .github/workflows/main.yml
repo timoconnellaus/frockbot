@@ -318,9 +318,12 @@ jobs:
     needs: scope
     if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
-    # Publication may spend seven minutes cold-starting its Applet build
-    # container before Playwright's 27-minute suite budget begins. Leave room
-    # for setup and artifact upload so failures retain their diagnostics.
+    # Twenty was one crash short: a shard that lost `wrangler dev` twice and
+    # then spent two four-minute test timeouts was cancelled at the limit,
+    # and a cancelled job uploads nothing, so the cause was gone with it.
+    # Publication's Playwright budget is twenty-seven minutes — the core
+    # twenty plus the container-ready wait — so the job has to outlast that
+    # with time left for reporters and diagnostic uploads.
     timeout-minutes: 40
 
     # Four runners share the ordinary corpus. The two real publication journeys

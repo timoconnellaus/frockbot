@@ -72,9 +72,11 @@ export default defineConfig<object, E2EOptions>({
   // the retained traces are enough to diagnose it. Stopping there prevents a
   // shared helper regression from spending every test's timeout in a shard.
   maxFailures: process.env.CI ? 2 : 0,
-  // Exit through Playwright, not GitHub's thirty-minute SIGTERM, so reporters
-  // can finish their blob and the diagnostic steps can upload it.
-  globalTimeout: process.env.CI ? 20 * 60_000 : 0,
+  // Exit through Playwright, not GitHub's job SIGTERM, so reporters can finish
+  // their blob and the diagnostic steps can upload it. This clock includes
+  // webServer startup; the publication lane needs the container-ready wait on
+  // top of the core suite's budget.
+  globalTimeout: process.env.CI ? (appletBuild ? 27 : 20) * 60_000 : 0,
   // A CI runner is several times slower than a laptop, and the paths here are
   // the product's coldest: an application isolate load, a Durable Object start,
   // a Composition mount. The budget is for that, not for hiding a hang — a
