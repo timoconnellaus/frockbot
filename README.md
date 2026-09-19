@@ -496,6 +496,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   approvals/      Recording one approval decision inside the Bot Durable Object
   audit/          Audited-effect projection and the User's rebuildable audit table
   auth/           The two auth Packages behind `AuthPackageV1` — `better-auth/` and `access/` — and what they share
+  authoring/      The source persistence Bot-authored Applets and Plugins share, up to the build boundary
   billing/        The account's subscription, its metered usage ledger, the Stripe seam, and the billing page
   bot-template/   Bot template export, share records, and guarded import
   cards/          The Bot's half of Cards: an approval, a Plugin's own action, or conversation input

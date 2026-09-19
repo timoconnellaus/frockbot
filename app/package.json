@@ -12,6 +12,7 @@
     "./applets-host/bot": "./applets-host/bot.ts",
     "./applets-host/records": "./applets-host/records.ts",
     "./approvals/bot": "./approvals/bot.ts",
+    "./authoring/source-repository": "./authoring/source-repository.ts",
     "./cards/bot": "./cards/bot.ts",
     "./audit": "./audit/index.ts",
     "./audit/audit-document": "./audit/audit-document.ts",

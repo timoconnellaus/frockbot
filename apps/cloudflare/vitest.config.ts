@@ -2,6 +2,10 @@ import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 import {
+  createAppletBuildFake,
+  FAKE_APPLET_BUILD_TOKEN,
+} from "./test/applet-build-fake.ts";
+import {
   createComputerHostFake,
   FAKE_COMPUTER_HOST_SHARDS,
   FAKE_COMPUTER_HOST_TOKEN,
@@ -23,6 +27,12 @@ import {
 // One instance for the whole project. It runs in Node, so the suites reach its
 // state over the same binding, under `/__fake/*`.
 const computerHost = createComputerHostFake();
+
+// The build service as well, for the same reason: a build needs a container
+// this pool cannot start. Binding it is what makes `applet_check` and
+// `plugin_check` reach the source-reading half at all — without a binding the
+// hosts answer "the build service is unavailable" and read nothing.
+const appletBuild = createAppletBuildFake();
 
 // better-auth's D1 schema, so `auth-schema.workerd.ts` can boot the real
 // better-auth Package against the migrations a deployment actually applies. A
@@ -65,6 +75,10 @@ const workerdBindings = {
   // The Applet viewer door's signing secret. Fixed, so a test can mint
   // the token a page presents and forge one that must be refused.
   APPLET_VIEWER_SECRET: "workerd-applet-viewer-secret-0123456789ab",
+  // The build service's token, so the Applet and Plugin hosts find a build
+  // service behind the `APPLET_BUILD` binding below rather than reporting the
+  // deployment as unable to build.
+  APPLET_BUILD_TOKEN: FAKE_APPLET_BUILD_TOKEN,
 };
 
 // The voice suite multiplies every waiting budget in
@@ -98,6 +112,7 @@ export default defineConfig({
         // a service binding, decoding the real v1 protocol.
         serviceBindings: {
           COMPUTER_HOST: (request: Request) => computerHost.fetch(request),
+          APPLET_BUILD: (request: Request) => appletBuild.fetch(request),
           AI: FROCK_AI_FAKE_SERVICE,
           MEMORY_INDEX: VECTORIZE_FAKE_SERVICE,
           MEMORY_INDEX_PROBE: VECTORIZE_FAKE_SERVICE,

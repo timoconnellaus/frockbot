@@ -7,7 +7,6 @@
 // the Bot may do. What the User approves is applied by `bot.ts`, after the
 // decision commits.
 import {
-  APPLET_BUILD_LIMITS,
   APPLET_BUILD_PROTOCOL_VERSION,
   decodeAppletSourcePathV1,
   isPluginBuiltResponseV1,
@@ -16,6 +15,10 @@ import {
   type AppletBuildSourceFileV1,
   type PluginBuildManifestV1,
 } from "@frockbot/applets/build-contract";
+import {
+  createAuthoringSourceRepositoryV1,
+  type AuthoringSourceRepositoryV1,
+} from "@frockbot/app/authoring/source-repository";
 import {
   decodePluginDescriptorV1,
   type PluginDescriptorV1,
@@ -204,10 +207,6 @@ export function pluginScaffoldV1(
   }));
 }
 
-function sourceMediaType(path: string): string {
-  return path.endsWith(".json") ? "application/json" : "text/typescript";
-}
-
 /** A source path the build service will accept, or a thrown sentence. */
 export function requirePluginSourcePathV1(input: unknown): string {
   if (typeof input !== "string" || input.length === 0) {
@@ -312,11 +311,32 @@ export async function switchPluginForBotV1(
   }
 }
 
+export function pluginAuthoringSourceRepositoryV1(
+  workspace: WorkspaceFilesV1,
+  userId: string,
+): AuthoringSourceRepositoryV1 {
+  return createAuthoringSourceRepositoryV1(workspace, {
+    artifactName: "Plugin",
+    root: pluginsSourceRootV1(userId),
+    sourcePath: pluginSourcePathV1,
+    sourceFilePath: (pluginId, path) =>
+      pluginSourceFilePathV1(userId, pluginId, path),
+    sourceMediaType: (path) =>
+      path.endsWith(".json") ? "application/json" : "text/typescript",
+    emptySourceFailure: (pluginId) =>
+      `${pluginId} has no source. Call plugin_create, or write plugin.ts and plugin.json with plugin_write_file.`,
+    textDecoder: TEXT,
+  });
+}
+
 export function createPluginAuthoringHostV1(
   seams: PluginAuthoringSeamsV1,
 ): PluginAuthoringHostV1 {
   const now = seams.now ?? (() => new Date());
-  const root = pluginsSourceRootV1(seams.userId);
+  const sourceRepository = pluginAuthoringSourceRepositoryV1(
+    seams.workspace,
+    seams.userId,
+  );
   const writer = {
     kind: "bot" as const,
     botId: seams.botId,
@@ -339,73 +359,6 @@ export function createPluginAuthoringHostV1(
     return undefined;
   }
 
-  async function listSource(
-    pluginId: string,
-  ): Promise<{ entries: PluginSourceFileV1[] } | { failure: string }> {
-    const prefix = pluginSourcePathV1(pluginId);
-    const listed = await seams.workspace.list({
-      root,
-      prefix: prefix.slice(0, -1),
-      limit: APPLET_BUILD_LIMITS.files + 1,
-    });
-    if (listed.status !== "ok") {
-      return {
-        failure: `the Plugin's source could not be listed: ${listed.status}${
-          listed.reason ? ` — ${listed.reason}` : ""
-        }`,
-      };
-    }
-    return {
-      entries: listed.entries
-        .filter((entry) => entry.path.path.startsWith(prefix))
-        .map((entry) => ({
-          path: entry.path.path.slice(prefix.length),
-          size: entry.generation.size,
-        }))
-        .filter((entry) => entry.path.length > 0)
-        .sort((left, right) => left.path.localeCompare(right.path)),
-    };
-  }
-
-  async function readSource(
-    pluginId: string,
-  ): Promise<{ files: AppletBuildSourceFileV1[] } | { failure: string }> {
-    const listed = await listSource(pluginId);
-    if ("failure" in listed) return listed;
-    if (listed.entries.length === 0) {
-      return {
-        failure: `${pluginId} has no source. Call plugin_create, or write plugin.ts and plugin.json with plugin_write_file.`,
-      };
-    }
-    if (listed.entries.length > APPLET_BUILD_LIMITS.files) {
-      return {
-        failure: `${pluginId} has more than ${APPLET_BUILD_LIMITS.files} source files; the build service takes no more.`,
-      };
-    }
-    const files: AppletBuildSourceFileV1[] = [];
-    let total = 0;
-    for (const entry of listed.entries) {
-      const outcome = await seams.workspace.read(
-        pluginSourceFilePathV1(seams.userId, pluginId, entry.path),
-      );
-      if (outcome.status !== "ok") {
-        return { failure: `"${entry.path}" is ${outcome.status}` };
-      }
-      const text = TEXT.decode(outcome.file.bytes);
-      total += text.length;
-      if (
-        text.length > APPLET_BUILD_LIMITS.fileText ||
-        total > APPLET_BUILD_LIMITS.sourceBytes
-      ) {
-        return {
-          failure: `${pluginId}'s source is over the ${APPLET_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
-        };
-      }
-      files.push({ path: entry.path, text });
-    }
-    return { files };
-  }
-
   async function build(
     pluginId: string,
     mode: "check" | "build",
@@ -421,7 +374,7 @@ export function createPluginAuthoringHostV1(
           "the build service is unavailable in this deployment, so nothing can be checked or published",
       };
     }
-    const source = await readSource(pluginId);
+    const source = await sourceRepository.readBuildSource(pluginId);
     if ("failure" in source) return source;
     const request: AppletBuildRequestV1 = {
       version: APPLET_BUILD_PROTOCOL_VERSION,
@@ -544,7 +497,7 @@ export function createPluginAuthoringHostV1(
       const pluginId = pluginIdFromDisplayNameV1(displayName);
       const taken = reserved(pluginId);
       if (taken) throw new Error(taken);
-      const listed = await listSource(pluginId);
+      const listed = await sourceRepository.list(pluginId);
       if ("failure" in listed) throw new Error(listed.failure);
       if (listed.entries.length > 0) {
         throw new Error(
@@ -560,48 +513,25 @@ export function createPluginAuthoringHostV1(
     },
 
     async files(input) {
-      const listed = await listSource(assertPluginIdV1(input.pluginId));
+      const listed = await sourceRepository.list(
+        assertPluginIdV1(input.pluginId),
+      );
       if ("failure" in listed) throw new Error(listed.failure);
       return listed.entries;
     },
 
     async readFile(input) {
-      const outcome = await seams.workspace.read(
-        pluginSourceFilePathV1(
-          seams.userId,
-          assertPluginIdV1(input.pluginId),
-          input.path,
-        ),
+      return sourceRepository.read(
+        assertPluginIdV1(input.pluginId),
+        input.path,
       );
-      if (outcome.status !== "ok") {
-        throw new Error(`"${input.path}" is ${outcome.status}`);
-      }
-      return TEXT.decode(outcome.file.bytes);
     },
 
     async writeFile(input) {
       const pluginId = assertPluginIdV1(input.pluginId);
       const taken = reserved(pluginId);
       if (taken) throw new Error(taken);
-      const path = pluginSourceFilePathV1(seams.userId, pluginId, input.path);
-      const existing = await seams.workspace.stat(path);
-      const outcome = await seams.workspace.write({
-        path,
-        bytes: new TextEncoder().encode(input.text),
-        writer,
-        expectedGenerationId:
-          existing.status === "ok"
-            ? existing.entry.generation.generationId
-            : null,
-        mediaType: sourceMediaType(input.path),
-      });
-      if (outcome.status !== "ok") {
-        throw new Error(
-          `"${input.path}" could not be written: ${outcome.status}${
-            outcome.reason ? ` — ${outcome.reason}` : ""
-          }`,
-        );
-      }
+      await sourceRepository.write(pluginId, input.path, input.text, writer);
     },
 
     async check(input, effectId) {
