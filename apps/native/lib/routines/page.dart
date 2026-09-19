@@ -54,6 +54,11 @@ class RoutinesController extends ViewSurfaceController {
   bool _closed = false;
   String? _message;
 
+  /// Which read is the current one. A read that publishes its document stops
+  /// being busy while its catalog is still out, so a newer read can start over
+  /// it — and the newer read's catalog is the one that counts.
+  int _reads = 0;
+
   RoutinesController(
     this.api,
     this.botId, {
@@ -94,9 +99,13 @@ class RoutinesController extends ViewSurfaceController {
     if (_busy) return;
     _busy = true;
     _message = null;
+    final read = ++_reads;
     _changed();
+    // The catalog widens what the editor offers and nothing else, so it is
+    // asked for beside the document and read whenever it lands: a slow Plugin
+    // route must not hold back Routines that are otherwise available.
+    final plugins = _loadPluginFrame();
     try {
-      final plugins = _loadPluginFrame();
       final next = wire.ViewDocument.fromJson(
         await api.request(
           '$_path?as=document${editing == null ? '' : '&edit=${Uri.encodeQueryComponent(editing!)}'}',
@@ -106,7 +115,6 @@ class RoutinesController extends ViewSurfaceController {
         throw const FormatException('Routines surface mismatch');
       }
       _document = next;
-      pluginSources = routinePluginSourcesV1(await plugins);
       onInbox?.call(unacknowledgedOnScreen.length);
     } catch (_) {
       _message = 'Couldn’t load this Bot’s Routines. Check your connection and try again.';
@@ -114,6 +122,15 @@ class RoutinesController extends ViewSurfaceController {
       _busy = false;
       _changed();
     }
+    unawaited(_adoptPluginSources(read, plugins));
+  }
+
+  /// The catalog the read that asked for it was owed, applied on arrival.
+  Future<void> _adoptPluginSources(int read, Future<Object?> plugins) async {
+    final frame = await plugins;
+    if (_closed || read != _reads) return;
+    pluginSources = routinePluginSourcesV1(frame);
+    _changed();
   }
 
   List<String> get unacknowledgedOnScreen =>

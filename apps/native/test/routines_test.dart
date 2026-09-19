@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
@@ -486,6 +488,68 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('GitHub'), findsOneWidget);
     expect(find.text('github'), findsNothing);
+  });
+
+  testWidgets('Routines answer while the Plugin catalog is still out', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final catalog = Completer<Object?>();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return catalog.future;
+      if (body == null) {
+        return routinesDocumentWithEditor(
+          routines: [
+            {
+              'routineId': 'r1',
+              'name': 'First brief',
+              'schedule': '0 9 * * *',
+              'enabled': true,
+            },
+          ],
+        );
+      }
+      final command = (body as Map).cast<String, Object?>();
+      sent.add(command);
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+
+    // Only the Plugin read is outstanding, and the document is drawn and
+    // answering rather than held behind it.
+    expect(find.text('First brief'), findsOneWidget);
+    await tester.tap(find.text('Pause'));
+    await tester.pumpAndSettle();
+    expect(sent.single['type'], 'routine/pause');
+
+    // And the read that is still out is not forgotten: when the catalog lands
+    // it is the choices the editor offers.
+    catalog.complete({
+      'plugins': [
+        {
+          'pluginId': 'github',
+          'displayName': 'GitHub',
+          'on': true,
+          'triggers': [
+            {
+              'name': 'issue-opened',
+              'description': 'When a new issue is opened',
+            },
+          ],
+        },
+      ],
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    expect(find.text('GitHub'), findsOneWidget);
   });
 
   testWidgets('an open editor leaves every row control on its own Routine', (
