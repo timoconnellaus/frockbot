@@ -36,14 +36,12 @@ import type {
   AppletSourceFileV1,
 } from "@frockbot/applets/feature";
 import {
-  APPLET_BUILD_LIMITS,
   APPLET_BUILD_PROTOCOL_VERSION,
   isPluginBuiltResponseV1,
   type AppletBuildDiagnosticV1,
   type AppletBuildManifestV1,
   type AppletBuildRequestV1,
   type AppletBuildResponseV1,
-  type AppletBuildSourceFileV1,
 } from "@frockbot/applets/build-contract";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
@@ -63,6 +61,10 @@ import {
   type AppletToolDeclarationV1,
 } from "@frockbot/core/contracts";
 import type { WorkspaceFilesV1 } from "@frockbot/core/contracts";
+import {
+  createAuthoringSourceRepositoryV1,
+  type AuthoringSourceRepositoryV1,
+} from "@frockbot/app/authoring/source-repository";
 import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
@@ -345,8 +347,6 @@ export interface AppletBuildServiceV1 {
   build(request: AppletBuildRequestV1): Promise<AppletBuildResponseV1>;
 }
 
-const TEXT = new TextDecoder();
-
 /**
  * The Applet seam's name for {@link rpcJsonSnapshotV1}, under this boundary's
  * own label: a refusal names the Applet answer it came from.
@@ -356,13 +356,6 @@ export function appletRpcSnapshotV1<T>(value: T): T {
 }
 
 const sha256Hex = sha256HexTextV1;
-
-/** The media type Applet source of one path is stored under. */
-function sourceMediaType(path: string): string {
-  return path.endsWith(".json")
-    ? "application/json"
-    : "text/plain; charset=utf-8";
-}
 
 /** One diagnostic, as the Bot reads it: `path:line:col message`. */
 export function appletDiagnosticTextV1(
@@ -550,43 +543,23 @@ function failed(
   };
 }
 
-/**
- * The relative paths one Applet's source occupies, listed out of the store.
- *
- * The list prefix is the Applet id without its trailing slash: the store
- * validates a prefix as a relative path, and a path may not end in one. The
- * entries are then narrowed to the directory itself, so a listing can never
- * pick up a neighbour whose id merely starts the same way.
- */
-async function listAppletSourceV1(
+/** Applet policy over the shared Bot-authored source repository. */
+export function appletAuthoringSourceRepositoryV1(
   workspace: WorkspaceFilesV1,
   userId: string,
-  appletId: string,
-): Promise<
-  { entries: { path: string; size: number }[] } | { failure: string }
-> {
-  const prefix = appletSourcePathV1(appletId);
-  const listed = await workspace.list({
+): AuthoringSourceRepositoryV1 {
+  return createAuthoringSourceRepositoryV1(workspace, {
+    artifactName: "Applet",
     root: appletsSourceRootV1(userId),
-    prefix: prefix.slice(0, -1),
-    limit: APPLET_BUILD_LIMITS.files + 1,
+    sourcePath: appletSourcePathV1,
+    sourceFilePath: (appletId, path) =>
+      appletSourceFilePathV1(userId, appletId, path),
+    sourceMediaType: (path) =>
+      path.endsWith(".json") ? "application/json" : "text/plain; charset=utf-8",
+    emptySourceFailure: (appletId) =>
+      `${appletId} has no source. Call applet_create, or write server.ts, ui.tsx and applet.json with applet_write_file.`,
+    textDecoder: new TextDecoder(),
   });
-  if (listed.status !== "ok") {
-    return {
-      failure: `the Applet's source could not be listed: ${listed.status}${
-        listed.reason ? ` — ${listed.reason}` : ""
-      }`,
-    };
-  }
-  const entries = listed.entries
-    .filter((entry) => entry.path.path.startsWith(prefix))
-    .map((entry) => ({
-      path: entry.path.path.slice(prefix.length),
-      size: entry.generation.size,
-    }))
-    .filter((entry) => entry.path.length > 0)
-    .sort((left, right) => left.path.localeCompare(right.path));
-  return { entries };
 }
 
 /** `ctx.applets` over the Bot Durable Object's authority. */
@@ -594,58 +567,10 @@ export function createAppletCapabilityHostV1(
   options: AppletCapabilityHostOptionsV1,
 ): AppletCapabilityHostV1 {
   const now = options.now ?? (() => new Date());
-
-  /**
-   * One Applet's whole source, as the build service is posted it.
-   *
-   * The store is the home of Applet source, so this is a listing and a read
-   * per file — no Computer, no `dist/`, and nothing to reconcile first. The
-   * bounds are the contract's, refused here rather than after the bytes have
-   * crossed the wire.
-   */
-  async function readSource(
-    appletId: string,
-  ): Promise<{ files: AppletBuildSourceFileV1[] } | { failure: string }> {
-    const listed = await listAppletSourceV1(
-      options.workspace,
-      options.userId,
-      appletId,
-    );
-    if ("failure" in listed) return listed;
-    const paths = listed.entries.map((entry) => entry.path);
-    if (paths.length === 0) {
-      return {
-        failure: `${appletId} has no source. Call applet_create, or write server.ts, ui.tsx and applet.json with applet_write_file.`,
-      };
-    }
-    if (paths.length > APPLET_BUILD_LIMITS.files) {
-      return {
-        failure: `${appletId} has more than ${APPLET_BUILD_LIMITS.files} source files; the build service takes no more.`,
-      };
-    }
-    const files: AppletBuildSourceFileV1[] = [];
-    let total = 0;
-    for (const path of paths) {
-      const outcome = await options.workspace.read(
-        appletSourceFilePathV1(options.userId, appletId, path),
-      );
-      if (outcome.status !== "ok") {
-        return { failure: `"${path}" is ${outcome.status}` };
-      }
-      const text = TEXT.decode(outcome.file.bytes);
-      total += text.length;
-      if (
-        text.length > APPLET_BUILD_LIMITS.fileText ||
-        total > APPLET_BUILD_LIMITS.sourceBytes
-      ) {
-        return {
-          failure: `${appletId}'s source is over the ${APPLET_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
-        };
-      }
-      files.push({ path, text });
-    }
-    return { files };
-  }
+  const sourceRepository = appletAuthoringSourceRepositoryV1(
+    options.workspace,
+    options.userId,
+  );
 
   /**
    * Read the source, build it, and verify what came back.
@@ -669,7 +594,7 @@ export function createAppletCapabilityHostV1(
           "the Applet build service is unavailable in this deployment, so nothing can be built or published",
       };
     }
-    const source = await readSource(appletId);
+    const source = await sourceRepository.readBuildSource(appletId);
     if ("failure" in source) return { failure: source.failure };
     const request: AppletBuildRequestV1 = {
       version: APPLET_BUILD_PROTOCOL_VERSION,
@@ -893,60 +818,25 @@ export function createAppletCapabilityHostV1(
 
     async files(input) {
       await requireOwner(input.appletId);
-      const listed = await listAppletSourceV1(
-        options.workspace,
-        options.userId,
-        input.appletId,
-      );
+      const listed = await sourceRepository.list(input.appletId);
       if ("failure" in listed) throw new Error(listed.failure);
       return listed.entries satisfies AppletSourceFileV1[];
     },
 
     async readFile(input) {
       await requireOwner(input.appletId);
-      const outcome = await options.workspace.read(
-        appletSourceFilePathV1(options.userId, input.appletId, input.path),
-      );
-      if (outcome.status !== "ok") {
-        throw new Error(`"${input.path}" is ${outcome.status}`);
-      }
-      return TEXT.decode(outcome.file.bytes);
+      return sourceRepository.read(input.appletId, input.path);
     },
 
     async writeFile(input, scope) {
       await requireOwner(input.appletId);
-      const path = appletSourceFilePathV1(
-        options.userId,
-        input.appletId,
-        input.path,
-      );
-      // The generation the write supersedes, read immediately before it. A
-      // `null` assertion means "this file does not exist", so an overwrite
-      // that passed it would lose to the file it means to replace.
-      const existing = await options.workspace.stat(path);
-      const outcome = await options.workspace.write({
-        path,
-        bytes: new TextEncoder().encode(input.text),
-        writer: {
-          kind: "bot",
-          botId: options.botId,
-          sessionId: scope.sessionId,
-          turnId: scope.turnId,
-          runId: scope.runId,
-        },
-        expectedGenerationId:
-          existing.status === "ok"
-            ? existing.entry.generation.generationId
-            : null,
-        mediaType: sourceMediaType(input.path),
+      await sourceRepository.write(input.appletId, input.path, input.text, {
+        kind: "bot",
+        botId: options.botId,
+        sessionId: scope.sessionId,
+        turnId: scope.turnId,
+        runId: scope.runId,
       });
-      if (outcome.status !== "ok") {
-        throw new Error(
-          `"${input.path}" could not be written: ${outcome.status}${
-            outcome.reason ? ` — ${outcome.reason}` : ""
-          }`,
-        );
-      }
     },
 
     async check(input, scope) {
