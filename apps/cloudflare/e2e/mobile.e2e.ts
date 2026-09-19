@@ -25,7 +25,9 @@ import {
   test,
   expect,
   composerInput,
-  provisionThroughApi,
+  expectReadyToSend,
+  openApplication,
+  provisionAccountThroughApi,
   sem,
   sendMessage,
   setFakeOllamaChatMode,
@@ -142,15 +144,20 @@ test("the shell is usable on a phone", async ({
   userId,
   ollamaBaseUrl,
 }) => {
-  // `provisionThroughApi` never touches the window: the account is built over
-  // the product's own command routes, so everything below — the shell's first
-  // frame included — happens at 390x844, which is what this spec is about.
-  await provisionThroughApi(page, {
+  // Build the account without touching the window, then enter Pocket through
+  // the phone's own Bot list. A desktop can select the new Bot from its
+  // persistent sidebar; on a phone the list is a separate route, and entering
+  // through it is one of the behaviours this spec exists to prove.
+  await provisionAccountThroughApi(page.request, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,
     botName: "Pocket",
   });
+  await openApplication(page, userId);
+  await openBots(page);
+  await openConversation(page, "Pocket");
+  await expectReadyToSend(page);
 
   // One column: the conversation just opened has the window, and the way
   // back to the list is in its bar rather than a drawer beside it.
