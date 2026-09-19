@@ -21,6 +21,8 @@
         --sidebar: 288px;
         --dude: 112px;
         --fade: 168px;
+        --chrome-top: 20px;
+        --chrome-side: 16px;
         --chrome: "Manrope", system-ui, sans-serif;
         --chat: "Inter", system-ui, sans-serif;
       }
@@ -297,23 +299,40 @@
         right: 0;
         z-index: 3;
         display: flex;
+        justify-content: space-between;
         align-items: flex-start;
-        gap: 4px;
-        padding: 8px 12px 0;
+        padding: var(--chrome-top) var(--chrome-side) 0;
       }
+      /* Crop to Pixel's ink: the still is 640×760 with empty canvas
+         above the wool (y=113). The box is the silhouette, not the frame. */
       .dude {
         pointer-events: none;
-        width: var(--dude);
+        --ink-x: 98;
+        --ink-y: 113;
+        --ink-w: 447;
+        --ink-h: 585;
+        --canvas-w: 640;
+        --canvas-h: 760;
+        width: calc(var(--dude) * var(--ink-w) / var(--ink-h));
         height: var(--dude);
-        flex: 0 0 var(--dude);
-        margin: -10px -18px 0 -12px;
+        position: relative;
+        flex: 0 0 auto;
         filter: drop-shadow(0 10px 18px rgb(0 0 0 / 0.28));
         transform-origin: 50% 80%;
       }
-      .dude img {
+      .dude-ink {
         width: 100%;
         height: 100%;
-        object-fit: contain;
+        overflow: hidden;
+        position: relative;
+      }
+      .dude img {
+        position: absolute;
+        height: calc(var(--dude) * var(--canvas-h) / var(--ink-h));
+        width: auto;
+        max-width: none;
+        top: calc(var(--dude) * -1 * var(--ink-y) / var(--ink-h));
+        left: calc(var(--dude) * -1 * var(--ink-x) / var(--ink-h));
       }
       .chat[data-working="true"] .dude {
         animation: work 0.7s ease-in-out infinite;
@@ -367,21 +386,32 @@
         }
       }
 
-      /* WhatsApp-ish: one frosted stadium over the fade, top-left. */
-      .pill {
+      /* Three pills, far right. Tops share --chrome-top with the character. */
+      .pills {
         pointer-events: auto;
         display: flex;
-        align-items: center;
-        margin-top: 8px;
-        padding: 3px;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .pill {
+        margin: 0;
+        border: 0;
         border-radius: 999px;
         background: color-mix(in srgb, var(--surface) 64%, transparent);
-        border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
         box-shadow:
           inset 0 1px 0 rgb(255 255 255 / 0.06),
           0 8px 24px rgb(0 0 0 / 0.18);
+        outline: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
         backdrop-filter: blur(18px) saturate(1.35);
         -webkit-backdrop-filter: blur(18px) saturate(1.35);
+        color: var(--text);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        cursor: pointer;
+        font: 600 13.5px/1 var(--chrome);
+        letter-spacing: -0.15px;
       }
       [data-look="paper"] .pill {
         background: color-mix(in srgb, var(--paper, #fff) 70%, transparent);
@@ -389,45 +419,23 @@
           inset 0 1px 0 rgb(255 255 255 / 0.8),
           0 8px 24px rgb(30 29 39 / 0.08);
       }
-      .pill button {
-        height: 32px;
-        border: 0;
-        background: transparent;
-        color: var(--text);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 2px;
-        padding: 0 10px;
-        border-radius: 999px;
-        font: 600 13.5px/1 var(--chrome);
-        letter-spacing: -0.15px;
-        cursor: pointer;
-      }
-      .pill button:hover {
+      .pill:hover {
         background: color-mix(in srgb, var(--text) 8%, transparent);
       }
-      .pill .glyph {
-        width: 32px;
+      .pill.name {
+        height: 40px;
+        padding: 0 12px 0 14px;
+      }
+      .pill.glyph {
+        width: 36px;
+        height: 36px;
         padding: 0;
         color: var(--muted);
-      }
-      .pill .split {
-        width: 1px;
-        height: 16px;
-        background: var(--line);
-        opacity: 0.85;
       }
       .pill .chev {
         width: 14px;
         height: 14px;
         opacity: 0.55;
-      }
-      .pill.icons-only .name {
-        display: none;
-      }
-      .pill.icons-only .split:first-of-type {
-        display: none;
       }
 
       svg.icon {
@@ -467,14 +475,12 @@
         Fade
         <input id="fade" type="range" min="110" max="220" value="168" />
       </label>
-      <label><input id="working" type="checkbox" /> Working</label>
       <label>
-        Pill
-        <select id="pill">
-          <option value="name">Name + buttons</option>
-          <option value="icons">Buttons only</option>
-        </select>
+        From top
+        <input id="inset" type="range" min="8" max="36" value="20" />
+        <span id="insetLabel">20</span>
       </label>
+      <label><input id="working" type="checkbox" /> Working</label>
     </div>
     <div class="stage">
       <div class="window" id="app">
@@ -525,27 +531,28 @@
           <div class="fade"></div>
           <div class="overlay">
             <div class="dude" aria-hidden="true">
-              <img
-                alt=""
-                src="/output/flock-svg-rig/versions/v7/pixel.svg"
-              />
+              <div class="dude-ink">
+                <img
+                  alt=""
+                  src="/apps/native/assets/characters/pixel.png"
+                />
+              </div>
               <span class="badge"><i></i><i></i><i></i></span>
             </div>
-            <div class="pill" id="chromePill">
-              <button class="name" type="button">
+            <div class="pills">
+              <button class="pill name" type="button">
                 Pixel
                 <svg class="icon chev" viewBox="0 0 24 24">
                   <path d="M6 9l6 6 6-6" />
                 </svg>
               </button>
-              <span class="split"></span>
-              <button class="glyph" type="button" aria-label="Computer">
+              <button class="pill glyph" type="button" aria-label="Computer">
                 <svg class="icon" viewBox="0 0 24 24">
                   <rect x="3" y="4" width="18" height="13" rx="1.5" />
                   <path d="M12 17v4M8 21h8" />
                 </svg>
               </button>
-              <button class="glyph" type="button" aria-label="Show the panel">
+              <button class="pill glyph" type="button" aria-label="Show the panel">
                 <svg class="icon" viewBox="0 0 24 24">
                   <rect x="3" y="4" width="18" height="16" rx="2" />
                   <path d="M15 4v16" />
@@ -620,8 +627,8 @@
     <script>
       const chat = document.getElementById("chat");
       const app = document.getElementById("app");
-      const pill = document.getElementById("chromePill");
       const dudeLabel = document.getElementById("dudeLabel");
+      const insetLabel = document.getElementById("insetLabel");
       const thread = document.getElementById("thread");
       thread.scrollTop = thread.scrollHeight;
 
@@ -634,9 +641,6 @@
       document.getElementById("working").onchange = (e) => {
         chat.dataset.working = e.target.checked ? "true" : "false";
       };
-      document.getElementById("pill").onchange = (e) => {
-        pill.classList.toggle("icons-only", e.target.value === "icons");
-      };
       document.getElementById("dude").oninput = (e) => {
         const n = e.target.value;
         chat.style.setProperty("--dude", n + "px");
@@ -644,6 +648,11 @@
       };
       document.getElementById("fade").oninput = (e) => {
         chat.style.setProperty("--fade", e.target.value + "px");
+      };
+      document.getElementById("inset").oninput = (e) => {
+        const n = e.target.value;
+        chat.style.setProperty("--chrome-top", n + "px");
+        insetLabel.textContent = n;
       };
     </script>
   </body>
