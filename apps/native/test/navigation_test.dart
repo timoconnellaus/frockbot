@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/bot_sessions.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/shell/app_shell.dart';
+import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/update/app_version.dart';
@@ -199,7 +200,7 @@ void main() {
       // A row opens its conversation as a page, with the way back in its bar.
       await tester.tap(find.byKey(const ValueKey('bot-bot-one')));
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(AppBar, 'Rosemary'), findsOneWidget);
+      expect(find.widgetWithText(ChatHeader, 'Rosemary'), findsOneWidget);
       expect(identifiedBy(ShellIds.sidebarToggle), findsOneWidget);
       expect(identifiedBy(ShellIds.botPanelToggle), findsOneWidget);
       expect(find.byTooltip('Routines'), findsNothing);
@@ -209,7 +210,7 @@ void main() {
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
-      expect(find.widgetWithText(AppBar, 'Rosemary'), findsNothing);
+      expect(find.widgetWithText(ChatHeader, 'Rosemary'), findsNothing);
       expect(find.byType(AppShell), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('bot-bot-one')));

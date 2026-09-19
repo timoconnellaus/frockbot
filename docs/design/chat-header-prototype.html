@@ -159,7 +159,8 @@
         justify-content: space-between;
         padding: 0 8px 0 14px;
         background: var(--surface);
-        border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+        border-bottom: 1px solid
+          color-mix(in srgb, var(--line) 55%, transparent);
       }
       .name-now {
         display: flex;
@@ -505,7 +506,12 @@
             </div>
           </div>
         </aside>
-        <section class="chat" id="chat" data-layout="proposed" data-working="false">
+        <section
+          class="chat"
+          id="chat"
+          data-layout="proposed"
+          data-working="false"
+        >
           <header class="header-now">
             <button class="name-now" type="button">
               Pixel
@@ -532,10 +538,7 @@
           <div class="overlay">
             <div class="dude" aria-hidden="true">
               <div class="dude-ink">
-                <img
-                  alt=""
-                  src="/apps/native/assets/characters/pixel.png"
-                />
+                <img alt="" src="/apps/native/assets/characters/pixel.png" />
               </div>
               <span class="badge"><i></i><i></i><i></i></span>
             </div>
@@ -552,7 +555,11 @@
                   <path d="M12 17v4M8 21h8" />
                 </svg>
               </button>
-              <button class="pill glyph" type="button" aria-label="Show the panel">
+              <button
+                class="pill glyph"
+                type="button"
+                aria-label="Show the panel"
+              >
                 <svg class="icon" viewBox="0 0 24 24">
                   <rect x="3" y="4" width="18" height="16" rx="2" />
                   <path d="M15 4v16" />
@@ -563,8 +570,8 @@
           <div class="thread" id="thread">
             <div class="col">
               <div class="bubble bot-msg">
-                I moved the watering to after school so you are not out there
-                in the heat.
+                I moved the watering to after school so you are not out there in
+                the heat.
               </div>
               <div class="bubble me-msg">Did the seedlings make it?</div>
               <div class="bubble bot-msg">
@@ -585,13 +592,13 @@
                 still need compost?
               </div>
               <div class="bubble bot-msg">
-                Compost is already in the shed from last week — skip the tip
-                run unless you want a spare bag for the tomatoes.
+                Compost is already in the shed from last week — skip the tip run
+                unless you want a spare bag for the tomatoes.
               </div>
               <div class="bubble me-msg">Perfect. Remind me at 8.</div>
               <div class="bubble bot-msg">
-                I’ll nudge you at 8. Wear the old boots — the path is still
-                wet from Thursday.
+                I’ll nudge you at 8. Wear the old boots — the path is still wet
+                from Thursday.
               </div>
               <div class="bubble me-msg">And the animated dude?</div>
               <div class="bubble bot-msg">

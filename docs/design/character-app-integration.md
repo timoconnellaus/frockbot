@@ -47,8 +47,8 @@ still need to be established.
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bot list        | Mostly still; independently timed twitch every 7–18 seconds                                                                                           |
 | Bot row hover   | The whole row triggers one restrained hello on desktop/web                                                                                            |
-| Chat header     | A quiet live artboard at rest, cropped to ink; the working pose and typing badge while a Turn runs. Existing Rive motion, not a bounce. |
-| Mobile chat     | Same activity without pointer tracking; sits at the top of the thread under the status bar                                            |
+| Chat header     | A quiet live artboard at rest, cropped to ink; the working pose and typing badge while a Turn runs. Existing Rive motion, not a bounce.               |
+| Mobile chat     | Same activity without pointer tracking; sits at the top of the thread under the status bar                                                            |
 | Chat gaze       | The eyes follow the pointer anywhere over the conversation pane, held still for 900 ms after a pointer down so the composer keeps its first keystroke |
 | Picker/settings | Animated preview of character and selected colour                                                                                                     |
 | Voice footer    | The delegated Bot by its character alone: rise/fade/scale handoff, thinking while asked, content while answering, success on finish                   |
