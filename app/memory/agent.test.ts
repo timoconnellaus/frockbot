@@ -588,6 +588,70 @@ describe("the Turn's Memory read", () => {
     ).toBe(true);
     await dispose();
   });
+
+  test("an invalidation wins over an in-flight explicit rebuild", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const host = hostFor("bot-1", files);
+    const store = new MemoryStore({ files, owner: OWNER, clock: () => AT });
+    expect(
+      (
+        await store.write({
+          root: userMemoryRootV1(OWNER),
+          tier: "profile",
+          fact: "Tim rides a Brompton to the station.",
+          writer: botWriter("bot-1"),
+        })
+      ).status,
+    ).toBe("ok");
+    let releaseEmbedding!: () => void;
+    const embeddingReleased = new Promise<void>((resolve) => {
+      releaseEmbedding = resolve;
+    });
+    let embeddingStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      embeddingStarted = resolve;
+    });
+    const projection = new MemoryProjection({
+      ...host,
+      embed: async (texts) => {
+        embeddingStarted();
+        await embeddingReleased;
+        return texts.map(() => [1]);
+      },
+      vectorize: {
+        upsert: () => Promise.resolve(),
+        query: () => Promise.resolve({ matches: [] }),
+        deleteByIds: () => Promise.resolve(),
+      },
+    });
+    const { session, dispose } = await openSession();
+    await projection.refresh(4, session);
+    const rebuilding = projection.rebuild();
+    await started;
+
+    projection.invalidate();
+    expect(
+      (
+        await store.write({
+          root: userMemoryRootV1(OWNER),
+          tier: "profile",
+          fact: "Tim's Project membership changed during the rebuild.",
+          writer: botWriter("bot-1"),
+        })
+      ).status,
+    ).toBe("ok");
+    releaseEmbedding();
+
+    expect((await rebuilding).deferred).toBeUndefined();
+    expect(
+      projection
+        .index()
+        .chunks.some((chunk) =>
+          chunk.content.includes("Project membership changed"),
+        ),
+    ).toBe(true);
+    await dispose();
+  });
 });
 
 describe("a Memory read that a bound cut short", () => {

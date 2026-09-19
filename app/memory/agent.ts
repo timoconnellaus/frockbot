@@ -469,14 +469,45 @@ export class MemoryProjection {
     if (this.#indexing) await this.#indexing;
     this.#rendered = undefined;
     this.#indexReady = false;
-    const listing = await this.documents();
-    if (!listing.complete) {
-      return { chunksTotal: this.#index.chunks.length, deferred: true };
-    }
-    this.#index = await buildMemoryIndexV1(listing.documents);
-    await this.embed();
-    this.#indexReady = true;
-    return { chunksTotal: this.#index.chunks.length };
+    const epoch = this.#indexEpoch;
+    const rebuilding = (async () => {
+      const listing = await this.documents();
+      if (!listing.complete) {
+        return {
+          documentsChanged: 0,
+          chunksTotal: this.#index.chunks.length,
+          deferred: true as const,
+        };
+      }
+      this.#index = await buildMemoryIndexV1(listing.documents);
+      await this.embed();
+      return {
+        documentsChanged: 0,
+        chunksTotal: this.#index.chunks.length,
+      };
+    })().then(
+      (result) => {
+        if (epoch === this.#indexEpoch) {
+          this.#indexReady = !result.deferred;
+        } else {
+          this.#index = emptyMemoryIndexV1();
+          this.#indexReady = false;
+        }
+        if (this.#indexing === rebuilding) this.#indexing = undefined;
+        return result;
+      },
+      (error: unknown) => {
+        if (this.#indexing === rebuilding) this.#indexing = undefined;
+        throw error;
+      },
+    );
+    this.#indexing = rebuilding;
+    const result = await rebuilding;
+    if (epoch !== this.#indexEpoch) return this.rebuild();
+    return {
+      chunksTotal: result.chunksTotal,
+      ...(result.deferred ? { deferred: true } : {}),
+    };
   }
 
   private async documents(): Promise<MemoryDocumentListingV1> {

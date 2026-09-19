@@ -1541,6 +1541,15 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     this.timing(connection, "cap-checked");
+    const directory = await this.callDirectory(identity.userId);
+    if (!directory) {
+      this.refuse(
+        connection,
+        "unconfigured",
+        "Couldn't reach FrockBot. Try the call again.",
+      );
+      return;
+    }
     // A call about to be displaced has its memory work recorded *before* the
     // record naming it is replaced. Written the other way round, an eviction
     // in between would leave a call nothing remembers it has to finish. The
@@ -1552,15 +1561,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     this.timing(connection, "ledger-checked", {
       displaced: Boolean(displaced),
     });
-    const directory = await this.callDirectory(identity.userId);
-    if (!directory) {
-      this.refuse(
-        connection,
-        "unconfigured",
-        "Couldn't reach FrockBot. Try the call again.",
-      );
-      return;
-    }
     // ADR 0029: a call addresses one Bot. The client says which before it
     // says `start_call`, and that is what the call opens on whether it is a
     // new call or a rejoin — the person pressed voice on a Bot just now, and

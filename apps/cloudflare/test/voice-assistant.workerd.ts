@@ -407,8 +407,12 @@ describe("the session the call talks through", () => {
     };
     await provisionBot(identity);
     const stub = assistant(identity.userId);
+    const active = await open(identity.userId, {}, "phone");
+    await startCall(active, identity.botId);
+    const activeCallId = await callIdOf(stub);
+    const upstreamBefore = await stub.probeUpstreamFrames();
     await stub.probeSetScript({ failDirectoryReads: 2 });
-    const opened = await open(identity.userId);
+    const opened = await open(identity.userId, {}, "laptop");
     await opened.waitFor((frame) => frame.type === "welcome", "welcome");
     opened.socket.send(JSON.stringify({ type: "hello", protocol_version: 1 }));
     opened.socket.send(
@@ -427,10 +431,22 @@ describe("the session the call talks through", () => {
       "the unavailable authority refusal",
     );
     expect(refusal).toMatchObject({ code: "unconfigured" });
-    expect(await stub.probeUpstreamFrames()).toEqual([]);
+    expect(await stub.probeUpstreamFrames()).toEqual(upstreamBefore);
     expect(
       opened.frames.find((frame) => frame.type === "voice/target"),
     ).toBeUndefined();
+    expect(await stub.probeMemoryJobs()).toEqual([]);
+    expect(
+      active.frames.find(
+        (frame) =>
+          frame.type === "voice/refusal" && frame.code === "superseded",
+      ),
+    ).toBeUndefined();
+    expect(
+      (await stub.probeTraces()).filter(
+        (trace) => trace.event === "call-admitted",
+      ),
+    ).toEqual([expect.objectContaining({ call: activeCallId })]);
   });
 
   test("bridges binary Live messages both ways and meters what crossed", async () => {
