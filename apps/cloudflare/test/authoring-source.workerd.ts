@@ -177,7 +177,9 @@ describe("Bot-authored source through the tools", () => {
     expect(wrote).toContain("notes/readme.md");
     expect(wrote).toContain(`${notes.length} characters`);
 
-    const files = listedFiles(await tool(identity, "applet_files", { appletId }));
+    const files = listedFiles(
+      await tool(identity, "applet_files", { appletId }),
+    );
     // The scaffold's four files, plus the one just written, in the order the
     // repository lists them: `localeCompare`, so `notes/…` sorts before
     // `README.md` rather than by code unit.
@@ -260,7 +262,10 @@ describe("Bot-authored source through the tools", () => {
     const files = listedFiles(
       await tool(identity, "plugin_files", { pluginId: "notes" }),
     );
-    expect(files.map((file) => file.path)).toEqual(["plugin.json", "plugin.ts"]);
+    expect(files.map((file) => file.path)).toEqual([
+      "plugin.json",
+      "plugin.ts",
+    ]);
     expect(files.find((file) => file.path === "plugin.ts")?.size).toBe(
       module.length,
     );
@@ -403,7 +408,10 @@ describe("Bot-authored source through the tools", () => {
 
   test("a Plugin check reads its source the same way", async () => {
     const id = suffix();
-    const identity = { userId: `author-plugin-check-${id}`, botId: `bot-${id}` };
+    const identity = {
+      userId: `author-plugin-check-${id}`,
+      botId: `bot-${id}`,
+    };
     await provisionBot(identity);
     await setFeatures(identity.userId, { pluginAuthoring: true });
 
@@ -423,8 +431,8 @@ describe("Bot-authored source through the tools", () => {
     const listed = listedFiles(
       await tool(identity, "plugin_files", { pluginId: "checked-notes" }),
     );
-    expect(
-      pluginBuild?.files.map((file) => file.text.length),
-    ).toEqual(listed.map((file) => file.size));
+    expect(pluginBuild?.files.map((file) => file.text.length)).toEqual(
+      listed.map((file) => file.size),
+    );
   });
 });
