@@ -22,6 +22,7 @@
 import {
   test,
   expect,
+  answerComposer,
   composerInput,
   createBot,
   expectReadyToSend,
@@ -182,11 +183,11 @@ test("a reply in the chat the User is reading never raises a badge", async ({
   await botRow(page, "Alpha").click();
   await expectReadyToSend(page);
 
-  // A Flutter input is a live editing element only while the engine holds an
-  // editing session open on it, so the words go in as keystrokes.
+  // `expectReadyToSend` clears the draft by rebuilding Flutter's editing
+  // element, so use the composer helper that waits for the widget to own the
+  // text before Send is pressed.
   const composer = composerInput(page);
-  await composer.click();
-  await composer.pressSequentially("Say something back");
+  await answerComposer(page, "Say something back");
   await expect(composer).toHaveValue("Say something back");
   await press(sem(page, "send-button"));
   await expect(composer).toHaveValue("", { timeout: 120_000 });
