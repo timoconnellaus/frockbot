@@ -3,7 +3,7 @@ import {
   appletUiArtifactOriginV1,
 } from "@frockbot/applets/preview";
 import {
-  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_CATALOG_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "@frockbot/app/runtime";
 import { COMPUTER_HOST_CAPABILITIES_V1 } from "./computer-host.js";
@@ -476,7 +476,7 @@ function createUserApplicationRoute() {
         // platform-owned, so every Package is projected and each carries the
         // ownership its definition declares; enablement surfaces omit those
         // rows while model resolution still sees them.
-        packages: FOUNDATION_PACKAGES_V1.map((pkg) => ({
+        packages: FOUNDATION_PACKAGE_CATALOG_V1.entries.map((pkg) => ({
           id: pkg.id,
           displayName: pkg.displayName,
           version: FOUNDATION_PACKAGE_VERSION_V1,

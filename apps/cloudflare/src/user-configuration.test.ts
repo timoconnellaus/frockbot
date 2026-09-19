@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import {
-  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_CATALOG_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "@frockbot/app/runtime";
 import {
@@ -171,7 +171,7 @@ const credentialKeyring =
   '{"schemaVersion":1,"currentKeyId":"primary","keys":{"primary":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"}}';
 
 function executionPackages() {
-  return FOUNDATION_PACKAGES_V1.map((pkg) => ({
+  return FOUNDATION_PACKAGE_CATALOG_V1.entries.map((pkg) => ({
     packageId: pkg.id,
     version: FOUNDATION_PACKAGE_VERSION_V1,
     settings: [...(pkg.settings ?? [])],
@@ -589,9 +589,9 @@ describe("UserConfiguration Connection routing", () => {
     });
     // Platform-owned Packages are the ones whose definition says so; every
     // one of them is seeded installed on a first read.
-    const platformPackageIds = FOUNDATION_PACKAGES_V1.filter(
-      (pkg) => pkg.platformOwned,
-    ).map((pkg) => pkg.id);
+    const platformPackageIds = FOUNDATION_PACKAGE_CATALOG_V1.entries
+      .filter((pkg) => pkg.platformOwned)
+      .map((pkg) => pkg.id);
     for (const packageId of platformPackageIds) {
       expect(user.packages).toContainEqual(
         expect.objectContaining({ packageId, state: "installed" }),

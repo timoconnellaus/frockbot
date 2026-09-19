@@ -38,9 +38,11 @@ import {
 } from "@frockbot/core/configuration";
 import type { ConnectionCommandV1 } from "@frockbot/core/connection";
 import type {
+  PackageCatalogIndexV1,
   PackageSettingDefinition,
   ConnectionTypeDefinition,
 } from "@frockbot/core/contracts";
+import { indexPackageCatalogV1 } from "@frockbot/core/contracts";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 import {
   requireMatchingConfigurationReceiptV1,
@@ -381,16 +383,10 @@ function applyUserCommand(
 }
 
 export class UserSettingsBackendContribution {
-  private readonly availablePackages: ReadonlySet<string>;
+  private readonly packageCatalog: PackageCatalogIndexV1<AvailableUserPackage>;
 
   /** Catalog-relative facts supplied to the raw stored-settings migration. */
   private readonly storedSettingsPackages: readonly StoredUserSettingsPackageV1[];
-
-  /** Package ids whose installation state is platform policy, not a User choice. */
-  private readonly platformOwnedPackageIds: ReadonlySet<string>;
-
-  /** Declared Package dependencies, by Package id and version. */
-  private readonly packageDependencies: ReadonlyMap<string, readonly string[]>;
 
   /** The immutable first-party installation rows written on first read. */
   private readonly defaultPackages: readonly PackageInstallationView[];
@@ -412,12 +408,6 @@ export class UserSettingsBackendContribution {
     PackageInstallationView
   >;
 
-  /** Declared User-level settings, by Package id and version. */
-  private readonly packageSettingDefinitions: ReadonlyMap<
-    string,
-    readonly PackageSettingDefinition[]
-  >;
-
   private readonly connectionOwners = new Map<string, ConnectionCommandOwner>();
 
   private readonly readBootstraps = new Map<
@@ -426,35 +416,17 @@ export class UserSettingsBackendContribution {
   >();
 
   constructor(private readonly host: UserSettingsBackendHost) {
-    this.storedSettingsPackages = host.availablePackages.map((pkg) => ({
+    this.packageCatalog = indexPackageCatalogV1(
+      host.availablePackages,
+      ({ packageId, version }) => ({ packageId, version }),
+    );
+    this.storedSettingsPackages = this.packageCatalog.entries.map((pkg) => ({
       packageId: pkg.packageId,
       version: pkg.version,
       ...(pkg.dependencies ? { dependencies: pkg.dependencies } : {}),
       ...(pkg.platformOwned ? { platformOwned: true } : {}),
     }));
-    this.platformOwnedPackageIds = new Set(
-      host.availablePackages
-        .filter((pkg) => pkg.platformOwned)
-        .map((pkg) => pkg.packageId),
-    );
-    this.availablePackages = new Set(
-      host.availablePackages.map(
-        ({ packageId, version }) => `${packageId}\u0000${version}`,
-      ),
-    );
-    this.packageDependencies = new Map(
-      host.availablePackages.map((pkg) => [
-        `${pkg.packageId}\u0000${pkg.version}`,
-        pkg.dependencies ?? [],
-      ]),
-    );
-    this.packageSettingDefinitions = new Map(
-      host.availablePackages.map((pkg) => [
-        `${pkg.packageId}\u0000${pkg.version}`,
-        pkg.settings ?? [],
-      ]),
-    );
-    this.defaultPackages = host.availablePackages.flatMap((pkg) =>
+    this.defaultPackages = this.packageCatalog.entries.flatMap((pkg) =>
       pkg.installByDefault || pkg.platformOwned
         ? [
             {
@@ -469,20 +441,18 @@ export class UserSettingsBackendContribution {
           ]
         : [],
     );
-    const byPackageId = new Map(
-      host.availablePackages.map((pkg) => [pkg.packageId, pkg]),
-    );
     const rolloutPackageIds = new Set(
-      host.availablePackages
+      this.packageCatalog.entries
         .filter(
           (pkg) => pkg.installByDefault && pkg.defaultEnablement !== undefined,
         )
         .map((pkg) => pkg.packageId),
     );
     for (const packageId of rolloutPackageIds) {
-      for (const dependencyId of byPackageId.get(packageId)?.dependencies ??
-        []) {
-        if (byPackageId.has(dependencyId)) rolloutPackageIds.add(dependencyId);
+      for (const dependencyId of this.packageCatalog.get(packageId)
+        ?.dependencies ?? []) {
+        if (this.packageCatalog.has(dependencyId))
+          rolloutPackageIds.add(dependencyId);
       }
     }
     this.enablementRolloutPackages = this.defaultPackages.filter((pkg) =>
@@ -709,9 +679,7 @@ export class UserSettingsBackendContribution {
     packageId: string,
     version: string,
   ): readonly PackageSettingDefinition[] {
-    return (
-      this.packageSettingDefinitions.get(`${packageId}\u0000${version}`) ?? []
-    );
+    return this.packageCatalog.get(packageId, version)?.settings ?? [];
   }
 
   private packageDependencyFailure(
@@ -719,9 +687,10 @@ export class UserSettingsBackendContribution {
     version: string,
     settings: UserSettingsViewV1,
   ): string | undefined {
-    const dependencies = this.packageDependencies.get(
-      `${packageId}\u0000${version}`,
-    );
+    const dependencies = this.packageCatalog.get(
+      packageId,
+      version,
+    )?.dependencies;
     if (!dependencies) return undefined;
     for (const dependencyId of [...dependencies].sort()) {
       const available = settings.packages.some(
@@ -761,10 +730,12 @@ export class UserSettingsBackendContribution {
       );
       const cascaded = packages.map((pkg) => {
         if (pkg.state !== "installed") return pkg;
-        if (this.platformOwnedPackageIds.has(pkg.packageId)) return pkg;
-        const dependencies = this.packageDependencies.get(
-          `${pkg.packageId}\u0000${pkg.version}`,
+        const availablePackage = this.packageCatalog.get(
+          pkg.packageId,
+          pkg.version,
         );
+        if (availablePackage?.platformOwned) return pkg;
+        const dependencies = availablePackage?.dependencies;
         if (!dependencies) return pkg;
         const missing = dependencies.some(
           (dependencyId) => !enabled.has(dependencyId),
@@ -807,9 +778,7 @@ export class UserSettingsBackendContribution {
     current: UserSettingsViewV1,
     packageId: string,
   ): UserSettingsViewV1 {
-    const provider = this.host.availablePackages.find(
-      (pkg) => pkg.packageId === packageId,
-    );
+    const provider = this.packageCatalog.get(packageId);
     if (
       !provider?.capabilities?.some((capability) => capability.kind === "model")
     )
@@ -827,11 +796,7 @@ export class UserSettingsBackendContribution {
         throw new ConfigurationDecodeError(
           "Provider dependencies could not be resolved",
         );
-      const available = this.host.availablePackages.find(
-        (pkg) =>
-          pkg.packageId === id &&
-          (!existing || pkg.version === existing.version),
-      );
+      const available = this.packageCatalog.get(id, existing?.version);
       if (!available)
         throw new ConfigurationDecodeError(
           "A provider dependency is unavailable",
@@ -855,7 +820,7 @@ export class UserSettingsBackendContribution {
    * account fallback without restoring the removed Package setting/control. */
   previousSettingsView(settings: UserSettingsViewV1): UserSettingsViewV1 {
     const { accountModel, ...previous } = settings;
-    const packages = this.host.availablePackages.map((pkg) => ({
+    const packages = this.packageCatalog.entries.map((pkg) => ({
       ...pkg,
       settings: [...(pkg.settings ?? [])],
       capabilities: [...(pkg.capabilities ?? [])],
@@ -983,9 +948,7 @@ export class UserSettingsBackendContribution {
     }
     if (
       command.type === "user/install-package" &&
-      !this.availablePackages.has(
-        `${command.packageId}\u0000${command.version}`,
-      )
+      !this.packageCatalog.has(command.packageId, command.version)
     ) {
       throw new Error("Package is not available in this application");
     }
@@ -996,9 +959,7 @@ export class UserSettingsBackendContribution {
       );
       if (
         installed &&
-        !this.availablePackages.has(
-          `${installed.packageId}\u0000${installed.version}`,
-        )
+        !this.packageCatalog.has(installed.packageId, installed.version)
       ) {
         throw new Error("Package is not available in this application");
       }
@@ -1009,7 +970,7 @@ export class UserSettingsBackendContribution {
     if (
       (command.type === "user/uninstall-package" ||
         (command.type === "user/set-package-enabled" && !command.enabled)) &&
-      this.platformOwnedPackageIds.has(command.packageId)
+      this.packageCatalog.get(command.packageId)?.platformOwned
     ) {
       const receipt: OperationReceiptV1 = {
         schemaVersion: 1,
@@ -1025,10 +986,9 @@ export class UserSettingsBackendContribution {
       const installed = current.packages.find(
         (pkg) => pkg.packageId === command.packageId,
       );
-      const item = this.host.availablePackages.find(
-        (pkg) =>
-          pkg.packageId === command.packageId &&
-          pkg.version === installed?.version,
+      const item = this.packageCatalog.get(
+        command.packageId,
+        installed?.version,
       );
       if (
         installed?.state !== "installed" ||

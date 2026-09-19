@@ -1,4 +1,3 @@
-import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 import {
   type AuditUserBackendContribution,
   type AuditUserBackendHost,
@@ -36,9 +35,13 @@ import {
   type UserSettingsStorage,
 } from "@frockbot/app/settings/user";
 import {
-  FOUNDATION_PACKAGES_V1,
+  FOUNDATION_PACKAGE_CATALOG_V1,
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "./packages.js";
+import type {
+  PackageCatalogIndexV1,
+  PackageDefinitionV1,
+} from "@frockbot/core/contracts";
 import {
   auditUserContribution,
   botTemplateUserContribution,
@@ -145,11 +148,10 @@ export interface MountedFoundationUserBackend {
  * first repairing invisible dependency rows.
  */
 export function foundationDefaultPackageIds(
-  packages: readonly PackageDefinitionV1[] = FOUNDATION_PACKAGES_V1,
+  catalog: PackageCatalogIndexV1<PackageDefinitionV1> = FOUNDATION_PACKAGE_CATALOG_V1,
 ): ReadonlySet<string> {
-  const byId = new Map(packages.map((pkg) => [pkg.id, pkg]));
   const packageIds = new Set(
-    packages
+    catalog.entries
       .filter(
         (pkg) =>
           pkg.defaultEnablement !== undefined ||
@@ -161,8 +163,8 @@ export function foundationDefaultPackageIds(
 
   // A `Set` visits what the loop adds, so this is the whole closure.
   for (const packageId of packageIds) {
-    for (const dependencyId of byId.get(packageId)?.dependencies ?? []) {
-      if (byId.has(dependencyId)) packageIds.add(dependencyId);
+    for (const dependencyId of catalog.get(packageId)?.dependencies ?? []) {
+      if (catalog.has(dependencyId)) packageIds.add(dependencyId);
     }
   }
 
@@ -265,7 +267,7 @@ export async function createFoundationUserBackendContributions(host: {
     get settings() {
       return {
         storage: host.storage,
-        availablePackages: FOUNDATION_PACKAGES_V1.map((pkg) => ({
+        availablePackages: FOUNDATION_PACKAGE_CATALOG_V1.entries.map((pkg) => ({
           packageId: pkg.id,
           version: FOUNDATION_PACKAGE_VERSION_V1,
           dependencies: pkg.dependencies ?? [],
@@ -333,7 +335,7 @@ export async function createFoundationUserBackendContributions(host: {
           : {}),
         // Existence and display name for a template's Package lines both come
         // from the application's own list; there is no second index to consult.
-        availablePackages: FOUNDATION_PACKAGES_V1.map((pkg) => ({
+        availablePackages: FOUNDATION_PACKAGE_CATALOG_V1.entries.map((pkg) => ({
           packageId: pkg.id,
           displayName: pkg.displayName,
         })),

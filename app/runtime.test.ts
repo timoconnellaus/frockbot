@@ -6,14 +6,13 @@ import {
   createFoundationHostedRuntimePackages,
   createFoundationModelRuntimePackage,
   foundationBaseRuntimePackagesV1,
-  FOUNDATION_PACKAGES_V1,
-  foundationPackageV1,
+  FOUNDATION_PACKAGE_CATALOG_V1,
 } from "./runtime.js";
 import { foundationDefaultPackageIds } from "./user.js";
 
 describe("foundation application", () => {
   test("lists every Package this deployment ships, once", () => {
-    const ids = FOUNDATION_PACKAGES_V1.map((pkg) => pkg.id);
+    const ids = FOUNDATION_PACKAGE_CATALOG_V1.entries.map((pkg) => pkg.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toEqual([
       "ui-theme",
@@ -51,8 +50,10 @@ describe("foundation application", () => {
   });
 
   test("every declared dependency names a Package this deployment ships", () => {
-    const ids = new Set(FOUNDATION_PACKAGES_V1.map((pkg) => pkg.id));
-    for (const pkg of FOUNDATION_PACKAGES_V1) {
+    const ids = new Set(
+      FOUNDATION_PACKAGE_CATALOG_V1.entries.map((pkg) => pkg.id),
+    );
+    for (const pkg of FOUNDATION_PACKAGE_CATALOG_V1.entries) {
       for (const dependency of pkg.dependencies ?? []) {
         expect(ids.has(dependency)).toBe(true);
       }
@@ -66,9 +67,9 @@ describe("foundation application", () => {
     expect(packageIds.has("settings")).toBe(true);
     expect(packageIds.has("shell")).toBe(true);
     expect(packageIds.has("ui-theme")).toBe(true);
-    expect(foundationPackageV1("custom-models")?.defaultEnablement).toBe(
-      "disabled",
-    );
+    expect(
+      FOUNDATION_PACKAGE_CATALOG_V1.get("custom-models")?.defaultEnablement,
+    ).toBe("disabled");
   });
 
   test("mounts an enabled Ollama model through its Package runtime Contribution", async () => {
@@ -172,9 +173,9 @@ describe("foundation application", () => {
   test("names the Packages the platform owns rather than the User", () => {
     // The application root, the Packages with no enablement control to offer,
     // and the ambient zero-configuration model path.
-    const platformOwned = FOUNDATION_PACKAGES_V1.filter(
-      (pkg) => pkg.platformOwned,
-    ).map((pkg) => pkg.id);
+    const platformOwned = FOUNDATION_PACKAGE_CATALOG_V1.entries
+      .filter((pkg) => pkg.platformOwned)
+      .map((pkg) => pkg.id);
 
     expect(platformOwned.toSorted()).toEqual([
       "applets",
@@ -188,9 +189,15 @@ describe("foundation application", () => {
     ]);
     // Audit has no User control either, but it is not a default installation:
     // it is statically mounted rather than repaired into enablement state.
-    expect(foundationPackageV1("audit")?.platformOwned).toBeUndefined();
-    expect(foundationPackageV1("custom-models")?.platformOwned).toBeUndefined();
-    expect(foundationPackageV1("web")?.platformOwned).toBeUndefined();
+    expect(
+      FOUNDATION_PACKAGE_CATALOG_V1.get("audit")?.platformOwned,
+    ).toBeUndefined();
+    expect(
+      FOUNDATION_PACKAGE_CATALOG_V1.get("custom-models")?.platformOwned,
+    ).toBeUndefined();
+    expect(
+      FOUNDATION_PACKAGE_CATALOG_V1.get("web")?.platformOwned,
+    ).toBeUndefined();
   });
 
   test("resolves declared backend and enabled runtime Contributions through host seams", async () => {
