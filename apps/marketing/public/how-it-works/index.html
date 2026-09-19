@@ -82,7 +82,7 @@
         <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
           <a href="/#why">Why FrockBot</a>
           <a href="/how-it-works/" aria-current="page">How it works</a>
-          <a href="/#uses">What it's good at</a>
+          <a href="/#uses">What it is good at</a>
           <a href="/#pricing">Pricing</a>
           <a href="/open/">Open source</a>
           <a
@@ -110,8 +110,8 @@
               Your Bot.<br />Your rules.<br /><em>Your frock.</em>
             </h1>
             <p class="inside-lede">
-              A Bot should fit the person who uses it. Its tools, its behaviour,
-              even the interface around the conversation.
+              A Bot should fit the person who uses it — its tools, its
+              behaviour, even the interface around the conversation.
             </p>
             <p>
               FrockBot is a persistent agent in the cloud, with native apps on
@@ -191,18 +191,19 @@
           >
             <p class="section-label">01 / Native where you are</p>
             <h2 id="native-title">
-              Feels at home.<br /><em>Keeps you connected.</em>
+              At home on your device,<br /><em>connected to the cloud.</em>
             </h2>
             <p class="section-lede">
               The conversation belongs to the Bot. The experience belongs on
               your device.
             </p>
             <p>
-              FrockBot’s installed apps are built with Flutter and render their
-              interface locally. Native integrations connect that interface to
-              the device’s audio, windows and operating system. The browser
-              client reaches the same cloud state, so you can pick up the
-              conversation from another screen.
+              Conversations live in the cloud, so switching devices means
+              picking up where you left off. FrockBot’s installed apps are built
+              with Flutter and render their interface locally. Native
+              integrations connect that interface to the device’s audio, windows
+              and operating system, and the browser client reaches the same
+              cloud state.
             </p>
             <figure class="native-scene" aria-labelledby="native-caption">
               <div class="native-desktop">
@@ -263,7 +264,8 @@
               Web and macOS are available in early access. Android is in
               development; iPhone and the other device surfaces in the
               capability reference are planned. A platform appearing in the
-              architecture does not mean there is a released app for it yet.
+              architecture describes the intended design; availability labels
+              identify which clients are released.
             </p>
             <p>
               The long-term aim is to use what makes each platform useful: a
@@ -286,11 +288,12 @@
               instructions and routines.
             </p>
             <p>
-              Each Bot has a persistent identity with its own state, backed by a
-              Cloudflare Durable Object. Each User has a Durable Object too,
-              coordinating account state and installed plugins. Your devices
-              submit commands and render the results; the cloud holds the
-              authoritative state and runs the agent loop.
+              A conversation should survive a closed tab, a device switch, and a
+              process restart on the server. Each Bot is backed by a Cloudflare
+              Durable Object that holds its state. Each User has a Durable
+              Object too, coordinating account state and installed plugins. Your
+              devices submit commands and render the results; the cloud holds
+              the authoritative state and runs the agent loop.
             </p>
             <p>
               A <strong>Turn</strong> is one run of a Bot, started by a message,
@@ -340,8 +343,8 @@
                 </p>
               </div>
               <figcaption id="turn-caption">
-                Accepted input survives a disconnect. The service does not
-                depend on an open tab or a permanently resident process.
+                Accepted input survives a disconnect. The Turn resumes from
+                recorded progress.
               </figcaption>
             </figure>
             <p>
@@ -357,8 +360,8 @@
                 Operations that spend money or write to another service need a
                 recorded intent and an idempotency key. Retrying with that key
                 protects against repeating the same operation where the
-                receiving service supports it. Recovery is not a blanket promise
-                that every external system can provide exactly-once execution.
+                receiving service supports it. Exactly-once execution depends on
+                the external system’s own deduplication guarantees.
               </p>
             </details>
           </section>
@@ -369,7 +372,7 @@
           >
             <p class="section-label">03 / Dress your Bot</p>
             <h2 id="plugins-title">
-              Change what it does.<br /><em>And how it does it.</em>
+              Change what it does<br /><em>and how it does it.</em>
             </h2>
             <p class="section-lede">
               Plugins can add tools, change the agent’s behaviour, connect
@@ -461,12 +464,12 @@
                 </div>
               </div>
               <figcaption id="runtime-caption">
-                Plugins reach capabilities through the host. Plugins belonging
-                to the same User share a realm; they are not isolated from one
-                another.
+                Plugins reach capabilities through the host (the Bot’s Durable
+                Object). A User’s plugins share a realm and its combined
+                authority.
               </figcaption>
             </figure>
-            <h3 id="plugin-access">Access is granted, not assumed.</h3>
+            <h3 id="plugin-access">What a plugin can reach</h3>
             <p>
               A descriptor declares what the plugin contributes and what access
               it needs. The Bot calls the plugin worker, and plugins call back
@@ -499,10 +502,11 @@
 }</code></pre>
               <p>
                 A declared host is a request for access. The User still approves
-                the grant. This minimal descriptor declares no tools or cards.
+                each requested permission. This minimal descriptor declares no
+                tools or cards.
               </p>
             </div>
-            <h3 id="agent-loop-hooks">Six hooks into the agent loop.</h3>
+            <h3 id="agent-loop-hooks">The six agent-loop hooks</h3>
             <p>
               The host exposes specific moments for plugins to participate. For
               hooks that return a patch, the next plugin sees the previous
@@ -538,13 +542,14 @@
               </li>
             </ol>
             <p class="inside-small">
-              Today, the stopping hook is a notification, not a veto. Request
-              hooks cannot change the admitted provider, model or credential
-              binding.
+              Today, the stopping hook is read-only: plugins observe that the
+              Turn is settling. Request hooks may patch permitted fields but
+              leave the admitted provider, model and credential binding
+              unchanged.
             </p>
             <p class="inside-small">
               A seventh hook, <code>theme/assemble</code>, shapes the Bot’s look
-              outside a Turn. It does not run inside the agent loop.
+              outside a Turn.
             </p>
             <div class="code-example">
               <div class="code-heading">
@@ -558,8 +563,8 @@
 };</code></pre>
               <p>
                 This hook removes a tool from the model’s view. Tool visibility
-                is not itself a security boundary; the host still enforces
-                authority.
+                controls what the model sees; the host enforces authority
+                independently.
               </p>
             </div>
             <h3 id="bot-authored-plugins">Your Bot can write a plugin, too.</h3>
@@ -573,7 +578,10 @@
               <li><b>Request</b><span>Ask the Bot for a capability.</span></li>
               <li><b>Author</b><span>The Bot proposes code.</span></li>
               <li><b>Check & build</b><span>Validate the artifact.</span></li>
-              <li><b>Approve grants</b><span>You grant its access.</span></li>
+              <li>
+                <b>Approve permissions</b
+                ><span>You approve what it can reach.</span>
+              </li>
               <li><b>Activate</b><span>Mount a new generation.</span></li>
               <li><b>Next Turn</b><span>The Bot uses the generation.</span></li>
               <li>
@@ -582,11 +590,10 @@
               </li>
             </ol>
             <p>
-              Versions can be replaced or a previous composition restored.
-              Reverting code does not undo an email already sent or another
-              external effect. Plugins may also bundle Skills or offer typed
-              services to other plugins; a missing dependency disables the
-              dependent plugin.
+              Versions can be replaced or a previous set of artifacts restored.
+              External effects such as a sent email persist after a code revert.
+              Plugins may also bundle Skills or offer typed services to other
+              plugins; a missing dependency disables the dependent plugin.
             </p>
             <details class="inside-detail">
               <summary>What happens when a plugin fails?</summary>
@@ -675,14 +682,13 @@
             <p>
               <strong>A2UI</strong> is a structured description of an interface.
               The plugin names components, supplies values and declares actions;
-              the host renders components it already knows. It does not download
-              native executable UI code from the plugin.
+              the host renders components it already knows, drawn from its own
+              compiled catalogue.
             </p>
             <p>
               <strong>HTML</strong> is the intended option for a custom web
-              interface in a contained surface. That gives a plugin more control
-              over layout without making it native application code. The
-              plugin’s privileged logic still runs in the worker, and device
+              interface. A contained surface gives the plugin more control over
+              layout. Privileged logic still runs in the worker, and device
               access still passes through the host.
             </p>
             <div class="code-example">
@@ -732,7 +738,7 @@
           >
             <p class="section-label">05 / A much wider canvas</p>
             <h2 id="capabilities-title">
-              An event here.<br /><em>A possibility there.</em>
+              An event on your phone,<br /><em>an action on your desktop.</em>
             </h2>
             <p class="section-lede">
               A Bot’s work often spans more than one device or service.
@@ -2471,8 +2477,8 @@
               You can give different Bots different jobs, identities,
               instructions and plugin selections. They share an account’s
               connections and resources where appropriate, while keeping their
-              own conversations. That lets you build a small team without
-              configuring a separate service for every Bot.
+              own conversations — a small team of Bots without a separate
+              service for each one.
             </p>
           </section>
           <section
@@ -2523,9 +2529,8 @@
             <p>
               This is where a Bot can browse, use a terminal and work with
               files. It is also somewhere you can step in when a site needs
-              human attention. Plugins run in their Dynamic Worker, not on this
-              Computer; they reach Computer capabilities through the host’s
-              approved interface.
+              human attention. Plugins run in their Dynamic Worker and reach
+              Computer capabilities through the host’s approved interface.
             </p>
             <p>
               A connected desktop app is another client on your own machine. The
@@ -2540,18 +2545,16 @@
             aria-labelledby="voice-title"
           >
             <p class="section-label">08 / Talk naturally. Choose the engine.</p>
-            <h2 id="voice-title">
-              A voice to talk to.<br /><em>Room to choose.</em>
-            </h2>
+            <h2 id="voice-title">Live voice,<br /><em>durable work.</em></h2>
             <p class="section-lede">
               The interaction can be immediate while the work remains
               persistent.
             </p>
             <p>
               Dictation puts spoken words into the composer. Live voice is a
-              conversation: the realtime voice layer can hand work to your Bots
-              while you keep talking. The Bot’s durable Turn remains the place
-              where that work is executed and recorded.
+              real-time conversation: you keep talking while the voice layer
+              hands work to your Bots. The Bot’s durable Turn remains where that
+              work is executed and recorded.
             </p>
             <div class="voice-flow">
               <span>Speak</span><b aria-hidden="true">→</b
@@ -2569,9 +2572,9 @@
             </p>
             <p>
               Frock AI is the built-in path. The simplest deployment uses the
-              Cloudflare account’s Workers AI binding directly. Additional
-              providers become available when model keys or an AI Gateway are
-              configured.
+              Cloudflare account’s Workers AI inference service directly.
+              Additional providers become available when model keys or an AI
+              Gateway are configured.
             </p>
             <p>
               <a
@@ -2587,7 +2590,7 @@
           >
             <p class="section-label">09 / Yours to shape</p>
             <h2 id="source-title">
-              Read the source.<br /><em>Shape the platform.</em>
+              Read it, change it,<br /><em>run it yourself.</em>
             </h2>
             <p class="section-lede">
               FrockBot is open source under the MIT licence.
