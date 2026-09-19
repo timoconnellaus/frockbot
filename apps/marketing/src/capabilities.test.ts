@@ -12,7 +12,13 @@ const data = validateCapabilityData(source);
 const { matchesCapability } = await import(
   new URL("../public/how-it-works/capabilities.js", import.meta.url).href
 );
-const filters = { query: "", type: "all", platform: "all", status: "all" };
+const filters = {
+  query: "",
+  type: "all",
+  category: "all",
+  platform: "all",
+  status: "all",
+};
 const filterRecord = (id: string) => {
   const row = data.capabilities.find((capability) => capability.id === id);
   if (!row) throw new Error(`Missing capability ${id}`);
@@ -113,6 +119,15 @@ describe("capability reference", () => {
     const liveCount = await elements(html, "[data-capability-count]");
     expect(liveCount[0].attributes["aria-live"]).toBe("polite");
     expect(liveCount[0].text).toContain("148 capabilities");
+    const category = await elements(html, 'select[name="category"]');
+    expect(category).toHaveLength(1);
+    const comparisonRows = await elements(
+      html,
+      "[data-capability-comparison-row]",
+    );
+    expect(comparisonRows).toHaveLength(148);
+    const comparison = await elements(html, "[data-capability-comparison]");
+    expect(comparison).toHaveLength(1);
   });
 
   test("escapes contributed text and attributes instead of accepting markup", async () => {
@@ -196,6 +211,15 @@ describe("capability filters", () => {
       }),
     ).toBe(true);
     expect(matchesCapability(card, { ...filters, type: "action" })).toBe(false);
+    expect(
+      matchesCapability(card, {
+        ...filters,
+        category: "In the conversation",
+      }),
+    ).toBe(true);
+    expect(
+      matchesCapability(card, { ...filters, category: "System control" }),
+    ).toBe(false);
     expect(matchesCapability(card, { ...filters, query: "calendar" })).toBe(
       false,
     );
