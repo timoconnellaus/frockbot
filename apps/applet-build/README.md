@@ -41,7 +41,7 @@ There is **one** implementation of each pipeline, both in `applets/sdk/src/build
 
 What `container/build.test.ts` asserts is the property that makes one implementation enough: the same source posted to the service and built beside it produces the same manifest hashes.
 
-For that to hold anywhere, the artifact has to be independent of where it was built. esbuild writes each bundled module's path into the unminified output as a comment, so identical source built in two directories used to hash differently — a new R2 object on every publish of unchanged code. `stableModulePaths` in `applets/sdk/src/build/artifacts.ts` rewrites those comments to labels relative to the Applet root and the SDK root.
+For that to hold anywhere, the artifact has to be independent of where it was built. esbuild writes each bundled module's path into the unminified output as a comment, so identical source built in two directories used to hash differently — a new R2 object on every publish of unchanged code. `stableModulePaths` (`applets/sdk/src/build/module-paths.ts`), shared by both pipelines, rewrites those comments to labels relative to the roots the caller names: the Applet pipeline the Applet's directory and the SDK root, the Plugin pipeline the Plugin's own directory.
 
 ## Layout
 

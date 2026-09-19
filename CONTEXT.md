@@ -95,7 +95,7 @@ Code that wraps a Bot's loop, adds tools, keeps its own data or reaches the netw
 _Avoid_: Package, extension, capability
 
 **Plugin worker**:
-The one Dynamic Worker per User that holds every installed Plugin as a module map behind a generated index. Its identity is the hash of the artifacts, the index, the binding digest and the hook contract version; a deploy leaves it alone unless the contract version changes. The Bot Durable Object calls it once per open hook per Turn with the Bot's enabled list.
+The one Dynamic Worker per User that holds every installed Plugin as a module map behind a generated index. Its identity is the hash of the artifacts, the index, the binding digest and the hook contract version, so a deploy of unchanged code leaves it alone, and a new index or contract version is a new worker. The Bot Durable Object calls it once per open hook per Turn with the Bot's enabled list.
 _Avoid_: Isolate per plugin, runtime bundle
 
 **Hook**:
