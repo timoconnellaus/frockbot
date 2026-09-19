@@ -10,6 +10,7 @@ import {
   useApplicationArtifact,
 } from "./fixtures.ts";
 import { providerModelsV1 } from "../../../../providers/catalog/models.js";
+import { catalogProviderV1 } from "../../../../providers/catalog/registry.js";
 
 useApplicationArtifact();
 
@@ -122,7 +123,7 @@ it("connects a catalog provider and completes repeated tool turns through the bu
       expectedRevision: updated.revision,
       model: {
         connectionId: receipt.connectionId,
-        providerModelId: providerModelsV1("deepseek")[0]!.id,
+        providerModelId: providerModelsV1(catalogProviderV1("deepseek"))[0]!.id,
       },
     }),
   );

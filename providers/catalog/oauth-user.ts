@@ -13,9 +13,9 @@ import {
   pollOAuthV1,
   encodeOAuthTokenV1,
   type OAuthFlowV1,
-  type OAuthProviderIdV1,
   type OAuthTokenV1,
 } from "./oauth-protocol.js";
+import type { OAuthProviderIdV1 } from "./registry.js";
 interface Attempt {
   accountId: string;
   attemptId: string;

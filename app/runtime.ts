@@ -1,7 +1,5 @@
-import {
-  catalogProvidersV1,
-  PLUGIN_SERVED_PROVIDER_IDS_V1,
-} from "@frockbot/providers/catalog/definition";
+import { PLUGIN_SERVED_PROVIDER_IDS_V1 } from "@frockbot/providers/catalog/definition";
+import { catalogProvidersV1 } from "@frockbot/providers/catalog/registry";
 import { createCatalogProviderFeatureV1 } from "@frockbot/providers/catalog/runtime";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import { createConfiguredConnectRuntimeContribution } from "@frockbot/app/connect/agent";
@@ -369,7 +367,7 @@ const modelRuntimeContributionFactories = new Map<
           if (!config.leaseCredential || !config.settleCredential)
             throw new Error(`${provider.name} credential host is unavailable`);
           return createCatalogProviderFeatureV1({
-            providerId: provider.id,
+            catalogProvider: provider,
             accountId: config.accountId,
             connectionId: config.connectionId,
             settings: config.settings,

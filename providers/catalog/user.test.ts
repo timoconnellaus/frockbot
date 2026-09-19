@@ -13,7 +13,7 @@ import {
   modelConnectionLifecycleV1,
   type ModelConnectionUserBackendHostV1,
 } from "../model-connections/user.js";
-import { catalogProvidersV1 } from "./definition.js";
+import { catalogProvidersV1 } from "./registry.js";
 import { createCatalogConnectionOwnerV1 } from "./user.js";
 
 class Storage implements UserSettingsStorage, CredentialStorage {

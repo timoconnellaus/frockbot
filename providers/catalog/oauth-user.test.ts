@@ -11,13 +11,11 @@ import type {
 import { createUserSettingsBackendContribution } from "@frockbot/app/settings/user";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/core/connection";
 import type { ModelConnectionUserBackendHostV1 } from "../model-connections/user.js";
-import {
-  catalogProviderDefinitionsV1,
-  catalogProvidersV1,
-} from "./definition.js";
+import { catalogProviderDefinitionsV1 } from "./definition.js";
 import { providerModelsV1 } from "./models.js";
 import { decodeOAuthTokenV1 } from "./oauth-protocol.js";
 import { ModelOAuthUserV1 } from "./oauth-user.js";
+import { catalogProviderV1, catalogProvidersV1 } from "./registry.js";
 import { createCatalogConnectionOwnerV1 } from "./user.js";
 
 class MemoryStorage implements UserSettingsStorage, CredentialStorage {
@@ -300,7 +298,7 @@ describe("durable model OAuth manager", () => {
       providerType: "xai",
       state: "ready",
     });
-    const providerModelId = providerModelsV1("xai")[0]!.id;
+    const providerModelId = providerModelsV1(catalogProviderV1("xai"))[0]!.id;
     const lease = await owner.leaseModelCredential({
       accountId: "account-1",
       connectionId: completed.connectionId,

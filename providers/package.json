@@ -20,6 +20,7 @@
     "./model-connections/user": "./model-connections/user.ts",
     "./package.json": "./package.json",
     "./catalog/definition": "./catalog/definition.ts",
+    "./catalog/registry": "./catalog/registry.ts",
     "./catalog/oauth-protocol": "./catalog/oauth-protocol.ts",
     "./catalog/user": "./catalog/user.ts",
     "./catalog/runtime": "./catalog/runtime.ts"

@@ -4,12 +4,10 @@ import {
 } from "@frockbot/core/connection";
 import { ModelOAuthUserV1 } from "./oauth-user.js";
 import {
-  oauthProviderIdsV1,
   decodeOAuthTokenV1,
   encodeOAuthTokenV1,
   refreshOAuthV1,
   OAUTH_SECRET_PREFIX,
-  type OAuthProviderIdV1,
 } from "./oauth-protocol.js";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 import {
@@ -18,18 +16,23 @@ import {
   type ModelConnectionClientV1,
   type ModelConnectionUserBackendHostV1,
 } from "../model-connections/user.js";
-import { catalogProvidersV1, catalogSettingKeysV1 } from "./definition.js";
+import {
+  catalogProvidersV1,
+  catalogSettingKeysV1,
+  validateCatalogSettingsV1,
+  type CatalogProviderV1,
+} from "./registry.js";
 import { connectionModelV1, loadProviderModelsV1 } from "./models.js";
 
 function catalogClientV1(
-  providerId: string,
+  provider: CatalogProviderV1,
   baseUrl?: string,
 ): ModelConnectionClientV1 {
   return {
     async listModels(apiKey) {
       return (
         await loadProviderModelsV1(
-          providerId,
+          provider,
           decodeOAuthTokenV1(apiKey)?.access ?? apiKey,
           baseUrl,
         )
@@ -40,14 +43,14 @@ function catalogClientV1(
     async resolveModel(apiKey, id) {
       const model = (
         await loadProviderModelsV1(
-          providerId,
+          provider,
           decodeOAuthTokenV1(apiKey)?.access ?? apiKey,
           baseUrl,
         )
       ).find((candidate) => candidate.id === id);
       if (!model)
         throw new Error(
-          `Model "${id}" is absent from the installed ${providerId} catalog`,
+          `Model "${id}" is absent from the installed ${provider.id} catalog`,
         );
       return connectionModelV1(model, "exact-resolution");
     },
@@ -55,25 +58,6 @@ function catalogClientV1(
     async probeInference() {},
   };
 }
-export function validateCatalogSettingsV1(
-  providerId: string,
-  settings: Record<string, string>,
-): void {
-  if (providerId === "azure-openai-responses" && !settings["api-base-url"])
-    throw new Error("Azure requires your resource API base URL");
-  if (providerId.startsWith("cloudflare-") && !settings["api-base-url"]) {
-    if (!/^[a-f0-9]{32}$/i.test(settings["account-id"] ?? ""))
-      throw new Error("Cloudflare requires a valid account ID");
-    if (
-      providerId === "cloudflare-ai-gateway" &&
-      !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(settings["gateway-id"] ?? "")
-    )
-      throw new Error("Cloudflare AI Gateway requires a gateway ID");
-  }
-  if (settings.region && !/^[a-z]{2}(?:-[a-z]+)+-\d+$/.test(settings.region))
-    throw new Error("AWS region is invalid");
-}
-
 function decodeCatalogApiBaseUrlV1(
   displayName: string,
   value: unknown,
@@ -102,7 +86,7 @@ function decodeCatalogApiBaseUrlV1(
 }
 
 export function createCatalogConnectionOwnerV1(
-  provider: (typeof catalogProvidersV1)[number],
+  provider: CatalogProviderV1,
   host: ModelConnectionUserBackendHostV1,
 ) {
   const Contribution = modelConnectionLifecycleV1({
@@ -116,13 +100,13 @@ export function createCatalogConnectionOwnerV1(
       settingKey: "api-base-url",
       decode: (value) => decodeCatalogApiBaseUrlV1(provider.name, value),
     },
-    createClient: ({ apiBaseUrl }) => catalogClientV1(provider.id, apiBaseUrl),
+    createClient: ({ apiBaseUrl }) => catalogClientV1(provider, apiBaseUrl),
     validateSettings: (settings) =>
-      validateCatalogSettingsV1(provider.id, settings),
+      validateCatalogSettingsV1(provider, settings),
   });
   const keyed = new Contribution(host);
-  const oauthId = oauthProviderIdsV1.find((id) => id === provider.id);
-  if (!oauthId) return keyed;
+  if (!provider.oauthProviderId) return keyed;
+  const oauthId = provider.oauthProviderId;
   const OAuthContribution = modelConnectionLifecycleV1({
     packageId: `provider-${provider.id}`,
     displayName: provider.name,
@@ -130,7 +114,7 @@ export function createCatalogConnectionOwnerV1(
     providerType: provider.id,
     storagePrefix: `catalog-oauth-${provider.id}`,
     authorizationKind: "grant",
-    createClient: ({ apiBaseUrl }) => catalogClientV1(provider.id, apiBaseUrl),
+    createClient: ({ apiBaseUrl }) => catalogClientV1(provider, apiBaseUrl),
   });
   const oauth = new OAuthContribution({
     ...host,

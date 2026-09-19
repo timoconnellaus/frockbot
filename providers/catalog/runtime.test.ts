@@ -15,6 +15,7 @@ import { catalogContextV1, decodeCatalogStreamV1 } from "./runtime.js";
 import { providerModelsV1 } from "./models.js";
 import { bedrockStreamV1 } from "./bedrock.js";
 import { catalogProviderDefinitionsV1 } from "./definition.js";
+import { catalogProviderV1 } from "./registry.js";
 
 const request: NormalizedModelRequest = {
   requestId: "request-1",
@@ -163,7 +164,7 @@ describe("catalog provider bridge", () => {
         },
       ],
     });
-    const model = providerModelsV1("google").find(
+    const model = providerModelsV1(catalogProviderV1("google")).find(
       (model) => model.id === request.model,
     )!;
     expect(catalogContextV1(replay, model).messages[0]?.content).toEqual(
@@ -284,7 +285,7 @@ describe("catalog provider bridge", () => {
         },
       ],
     };
-    const model = providerModelsV1("google").find(
+    const model = providerModelsV1(catalogProviderV1("google")).find(
       (candidate) => candidate.id === request.model,
     )!;
     expect(catalogContextV1(replay, model).messages[0]?.content).toEqual(

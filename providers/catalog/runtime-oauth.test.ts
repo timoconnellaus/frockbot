@@ -12,9 +12,11 @@ import type {
 import { providerModelsV1 } from "./models.js";
 import { encodeOAuthTokenV1 } from "./oauth-protocol.js";
 import { createCatalogProviderFeatureV1 } from "./runtime.js";
+import { catalogProviderV1 } from "./registry.js";
 
 test("Kimi subscription transport sends OAuth only as its required header", async () => {
-  const model = providerModelsV1("kimi-coding")[0]!;
+  const catalogProvider = catalogProviderV1("kimi-coding");
+  const model = providerModelsV1(catalogProvider)[0]!;
   let options: StreamOptions | undefined;
   const provider = {
     async *streamSimple(
@@ -54,10 +56,10 @@ test("Kimi subscription transport sends OAuth only as its required header", asyn
   } as unknown as Provider;
   let registered: LlmProvider | undefined;
   const feature = createCatalogProviderFeatureV1({
-    providerId: "kimi-coding",
+    catalogProvider,
     accountId: "account-1",
     connectionId: "connection-1",
-    provider,
+    implementation: provider,
     async leaseCredential(effectId, expectedGeneration) {
       return {
         schemaVersion: 1,
