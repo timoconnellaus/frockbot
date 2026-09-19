@@ -3,7 +3,15 @@
 // settings). Nothing in the repository proved before this layer that the built
 // artifact boots in a browser at all: incident 1 shipped because the only
 // consumer of that path was a person.
-import { test, expect, composerInput, createBot, sem } from "./fixtures.ts";
+import {
+  test,
+  expect,
+  composerInput,
+  createBot,
+  press,
+  sem,
+  settle,
+} from "./fixtures.ts";
 
 test("a new User lands in General and can still create a Bot of their own", async ({
   page,
@@ -37,7 +45,8 @@ test("a new User lands in General and can still create a Bot of their own", asyn
   // The suggestions that need no feature are always offered, and choosing one
   // only writes the composer.
   await expect(sem(page, "starter-specialist")).toBeVisible();
-  await sem(page, "starter-project").click();
+  await settle(page);
+  await press(sem(page, "starter-project"));
   await expect(composerInput(page)).toHaveValue(
     /^Help me plan and complete \[project\]/,
     { timeout: 60_000 },

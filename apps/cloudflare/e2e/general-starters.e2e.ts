@@ -8,6 +8,7 @@ import {
   openBotPage,
   openBotSettings,
   press,
+  settle,
 } from "./fixtures.ts";
 
 for (const width of [390, 1280]) {
@@ -23,6 +24,7 @@ for (const width of [390, 1280]) {
     ).json();
     await expect(sem(page, "starter-research")).toBeVisible();
     await expect(sem(page, "starter-recurring")).toBeVisible();
+    await settle(page);
     await page.screenshot({
       path: testInfo.outputPath(`general-${width}.png`),
     });
@@ -36,7 +38,7 @@ for (const width of [390, 1280]) {
       ["recurring", /^Every \[weekday morning\]/],
       ["specialist", /^Create a specialist Bot for \[job\]/],
     ] as const) {
-      await sem(page, `starter-${id}`).click();
+      await press(sem(page, `starter-${id}`));
       await expect(composerInput(page)).toHaveValue(draft);
       await answerInputs([[composerInput(page), `Editable ${id} draft`]]);
       await expect(composerInput(page)).toHaveValue(`Editable ${id} draft`);
