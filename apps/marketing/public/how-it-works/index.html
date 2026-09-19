@@ -443,7 +443,7 @@
             </p>
             <div class="code-example">
               <div class="code-heading">
-                <span>Descriptor excerpt · current contract</span
+                <span>Minimal descriptor · current contract</span
                 ><span>JSON</span>
               </div>
               <pre><code id="plugin-descriptor-example">{
@@ -451,14 +451,15 @@
   "displayName": "Research tools",
   "version": "1",
   "contractVersion": 7,
+  "tools": [],
   "hooks": ["agent/tool-exposure"],
   "grants": ["storage", "http"],
-  "network": { "hosts": ["api.example.com"] }
+  "network": { "hosts": ["api.example.com"] },
+  "contextKeys": ["user", "bot", "session"]
 }</code></pre>
               <p>
                 A declared host is a request for access. The User still approves
-                the grant. This excerpt omits contributions such as tools and
-                cards.
+                the grant. This minimal descriptor declares no tools or cards.
               </p>
             </div>
             <h3>Six hooks into the agent loop.</h3>

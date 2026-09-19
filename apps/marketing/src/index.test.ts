@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { decodePluginDescriptorV1 } from "../../../core/contracts/plugin-descriptor";
 import { ISOLATE_CONTRACT_VERSION } from "../../../core/contracts/isolate";
 import worker, {
   MAC_DOWNLOAD_URL,
@@ -305,9 +306,7 @@ describe("Inside FrockBot examples", () => {
       await publicFile("how-it-works/index.html"),
     );
 
-    const descriptor = JSON.parse(descriptorJson) as {
-      contractVersion?: unknown;
-    };
+    const descriptor = decodePluginDescriptorV1(JSON.parse(descriptorJson));
     expect(descriptor.contractVersion).toBe(ISOLATE_CONTRACT_VERSION);
   });
 });
