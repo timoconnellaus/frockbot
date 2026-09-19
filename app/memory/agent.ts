@@ -170,6 +170,14 @@ export class MemoryProjection {
     faded: [],
   };
   #index: MemoryIndexV1 = emptyMemoryIndexV1();
+  #indexReady = false;
+  #indexing:
+    | Promise<{
+        documentsChanged: number;
+        chunksTotal: number;
+        deferred?: true;
+      }>
+    | undefined;
   #turn: number | undefined;
   /**
    * The documents this Turn's tier reads already decoded, for the one reindex
@@ -337,19 +345,52 @@ export class MemoryProjection {
     });
     await session.flush();
 
-    // The index is derived from the same documents the render just read, so it
-    // is refreshed on the same boundary and never outlives the Turn's view —
-    // and from the very bytes it read, rather than listing and reading every
-    // Memory file a second time. A tier that was cut short says so exactly as
-    // a fresh listing would: the indexer reads an absent document as a deleted
-    // one, so a partial view must never be applied as if it were whole.
+    // The index is derived from the same documents the render just read. Keep
+    // that exact snapshot for `memory_search`, but do not spend embedding or
+    // vector-store work on a Turn that never searches. `ensureIndex` builds it
+    // on first use, so prompt and search still see one Turn snapshot rather
+    // than independently reading Memory.
     const tiers = [ownTier, userTier, ...projectTiers.map((it) => it.tier)];
     this.#rendered = {
       documents: tiers.flatMap((tier) => tier.documents),
       complete: tiers.every((tier) => !tier.unavailable && !tier.omitted),
     };
-    await this.reindex();
+    this.#indexReady = false;
     return this.#injection;
+  }
+
+  /**
+   * Returns the derived index only after this Turn's background build has
+   * settled. The first model request never awaits it; `memory_search` does.
+   */
+  async ensureIndex(): Promise<MemoryIndexV1> {
+    if (!this.#indexReady) await this.startIndex();
+    return this.#index;
+  }
+
+  private startIndex(): Promise<{
+    documentsChanged: number;
+    chunksTotal: number;
+    deferred?: true;
+  }> {
+    if (this.#indexReady) {
+      return Promise.resolve({
+        documentsChanged: 0,
+        chunksTotal: this.#index.chunks.length,
+      });
+    }
+    this.#indexing ??= this.reindexCurrent().then(
+      (result) => {
+        this.#indexReady = true;
+        this.#indexing = undefined;
+        return result;
+      },
+      (error: unknown) => {
+        this.#indexing = undefined;
+        throw error;
+      },
+    );
+    return this.#indexing;
   }
 
   /**
@@ -363,6 +404,21 @@ export class MemoryProjection {
    * stale chunk until the next Turn.
    */
   async reindex(): Promise<{
+    documentsChanged: number;
+    chunksTotal: number;
+    /** True when the files could not be read whole and nothing was applied. */
+    deferred?: true;
+  }> {
+    // A write or forget may arrive while the speculative build is still in
+    // flight. Let that snapshot finish, then discard its rendered-file shortcut
+    // and read the generations the mutation actually produced.
+    if (this.#indexing) await this.#indexing;
+    this.#rendered = undefined;
+    this.#indexReady = false;
+    return this.startIndex();
+  }
+
+  private async reindexCurrent(): Promise<{
     documentsChanged: number;
     chunksTotal: number;
     /** True when the files could not be read whole and nothing was applied. */
@@ -393,12 +449,16 @@ export class MemoryProjection {
    * worse than a rebuild that says it could not run.
    */
   async rebuild(): Promise<{ chunksTotal: number; deferred?: true }> {
+    if (this.#indexing) await this.#indexing;
+    this.#rendered = undefined;
+    this.#indexReady = false;
     const listing = await this.documents();
     if (!listing.complete) {
       return { chunksTotal: this.#index.chunks.length, deferred: true };
     }
     this.#index = await buildMemoryIndexV1(listing.documents);
     await this.embed();
+    this.#indexReady = true;
     return { chunksTotal: this.#index.chunks.length };
   }
 
@@ -445,6 +505,8 @@ export class MemoryProjection {
   invalidate(): void {
     this.#injection = { text: "", facts: [], omissions: [], faded: [] };
     this.#index = emptyMemoryIndexV1();
+    this.#indexReady = false;
+    this.#indexing = undefined;
     this.#turn = undefined;
     this.#rendered = undefined;
     // Membership is exactly the thing a `project_*` tool just changed, so the
@@ -956,8 +1018,9 @@ export function createMemorySearchTool(
         );
       }
       const embed = memoryEmbedderV1(host);
+      const index = await projection.ensureIndex();
       const results = await searchMemoryV1({
-        index: projection.index(),
+        index,
         query: value.query,
         maxResults: value.maxResults ?? 5,
         ...(value.scope ? { scope: value.scope } : {}),

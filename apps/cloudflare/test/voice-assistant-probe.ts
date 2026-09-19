@@ -6,13 +6,18 @@
 // — ownership, exclusivity, sleep and wake ordering, the ledger, a delegation
 // across an eviction — not that Gemini answers.
 import type { Connection } from "agents";
-import { VoiceAssistant } from "../src/voice-assistant.ts";
+import {
+  VoiceAssistant,
+  type VoiceCurrentHistoryV1,
+} from "../src/voice-assistant.ts";
 import { GeminiFakeV1, type GeminiFakeFrameV1 } from "./voice-gemini-fake.ts";
 import type { VoiceDelegationRecordV1 } from "@frockbot/app/voice/ledger";
 import type {
   VoiceMemoryJobV1,
   VoiceMemoryRecordV1,
 } from "@frockbot/app/voice/memory";
+import type { VoiceBotSummaryV1 } from "@frockbot/app/voice/assistant";
+import type { BotDirectoryViewV1 } from "@frockbot/app/flock/shared";
 
 /** One scheduled row, with its payload as JSON. */
 export interface VoiceScheduleRow {
@@ -243,10 +248,15 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   }
 
   /** The directory, as slow as a test asked for. */
-  protected override async listBots(userId: string) {
+  protected override async listBots(
+    userId: string,
+    directory?: BotDirectoryViewV1,
+    known?: VoiceBotSummaryV1,
+    knownHistory?: Promise<VoiceCurrentHistoryV1 | undefined>,
+  ) {
     const slow = this.#script.slowDirectoryMs;
     if (slow) await new Promise((resolve) => setTimeout(resolve, slow));
-    return super.listBots(userId);
+    return super.listBots(userId, directory, known, knownHistory);
   }
 
   /** Records the memory lines too, so a test reads what an operator would. */

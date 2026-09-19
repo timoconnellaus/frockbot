@@ -455,14 +455,75 @@ describe("the Turn's Memory read", () => {
 
     await projection.refresh(4, session);
 
-    // The render and the index are the same pass over the same bytes. They
-    // used to be two, one after the other, on the turn-start critical path.
+    // The render and the index use the same pass over the same bytes. Search
+    // waits for the derived index, while the first model request does not.
+    await projection.ensureIndex();
     expect(reads.length).toBeGreaterThan(0);
     expect(new Set(reads).size).toBe(reads.length);
     expect(
       projection
         .index()
         .chunks.some((chunk) => chunk.content.includes("Brompton")),
+    ).toBe(true);
+    await dispose();
+  });
+
+  test("does not keep the first response behind derived embeddings", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const host = hostFor("bot-1", files);
+    expect(
+      (
+        await host.store.write({
+          root: userMemoryRootV1(OWNER),
+          tier: "profile",
+          fact: "Tim rides a Brompton to the station.",
+          writer: botWriter("bot-1"),
+        })
+      ).status,
+    ).toBe("ok");
+    let releaseEmbedding!: () => void;
+    const embeddingReleased = new Promise<void>((resolve) => {
+      releaseEmbedding = resolve;
+    });
+    let embeddingStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      embeddingStarted = resolve;
+    });
+    let embeddingCalls = 0;
+    const projection = new MemoryProjection({
+      ...host,
+      embed: async (texts) => {
+        embeddingCalls += 1;
+        embeddingStarted();
+        await embeddingReleased;
+        return texts.map(() => [1]);
+      },
+      vectorize: {
+        upsert: () => Promise.resolve(),
+        query: () => Promise.resolve({ matches: [] }),
+        deleteByIds: () => Promise.resolve(),
+      },
+    });
+    const { session, dispose } = await openSession();
+    let promptReady = false;
+    const refresh = projection.refresh(4, session).then(() => {
+      promptReady = true;
+    });
+
+    await refresh;
+    expect(promptReady).toBe(true);
+    expect(embeddingCalls).toBe(0);
+
+    let searchReady = false;
+    const index = projection.ensureIndex().then((result) => {
+      searchReady = true;
+      return result;
+    });
+    await started;
+    expect(searchReady).toBe(false);
+    releaseEmbedding();
+    expect(
+      (await index).chunks.some((chunk) => chunk.content.includes("Brompton")),
     ).toBe(true);
     await dispose();
   });

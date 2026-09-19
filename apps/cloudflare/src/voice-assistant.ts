@@ -67,6 +67,7 @@ import {
   renderVoiceBotStatusV1,
   VOICE_HISTORY_DEFAULT_LIMIT_V1,
   VOICE_HISTORY_MAX_LIMIT_V1,
+  type VoiceBotHistorySourceV1,
 } from "@frockbot/app/voice/history";
 import type { SearchIndexResultsV1 } from "@frockbot/app/search/shared";
 import {
@@ -115,6 +116,7 @@ import {
 import {
   decodeDirectoryViewV1,
   decodeFlockBootstrapViewV1,
+  type BotDirectoryViewV1,
 } from "@frockbot/app/flock/shared";
 import type {
   ClientRunLookupV1,
@@ -290,6 +292,20 @@ export function voiceAssistantConfiguredV1(env: {
 interface ConnectionIdentity {
   userId: string;
   deviceKey: string;
+}
+
+interface VoiceCallTargetV1 {
+  botId: string;
+  name: string;
+  description?: string;
+  voice: BotVoiceAppearanceV1;
+  /** The exact membership/appearance snapshot that admitted this target. */
+  directory: BotDirectoryViewV1;
+}
+
+export interface VoiceCurrentHistoryV1 {
+  thread: VoiceBotHistorySourceV1;
+  activity: "idle" | "working";
 }
 
 interface LiveCall {
@@ -1578,7 +1594,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       sequence: Date.parse(admission.call.startedAt),
       promptContext: this.buildPromptContext(
         identity.userId,
-        target.botId,
+        target,
         this.timingSink(connection),
       ),
       muted: false,
@@ -2341,83 +2357,70 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   private async resolveCallTarget(
     userId: string,
     botId: string | undefined,
-  ): Promise<{ botId: string; name: string; voice: BotVoiceAppearanceV1 }> {
-    if (botId) {
-      try {
-        const owned = await this.ownedBot(userId, botId);
-        return {
-          botId: owned.botId,
-          name: owned.name,
-          voice: await this.voiceForBot(userId, owned.botId),
-        };
-      } catch {
-        // Fall through to the account's default.
-      }
+  ): Promise<VoiceCallTargetV1> {
+    let directory: BotDirectoryViewV1;
+    try {
+      directory = await this.directory(userId);
+    } catch {
+      return {
+        botId: "",
+        name: "",
+        voice: resolveBotVoiceV1({}),
+        directory: { schemaVersion: 1, revision: 0, bots: [] },
+      };
     }
+    const attempted = new Set<string>();
+    const resolve = async (
+      candidate: string | undefined,
+    ): Promise<VoiceCallTargetV1 | undefined> => {
+      if (!candidate || attempted.has(candidate)) return undefined;
+      attempted.add(candidate);
+      try {
+        return await this.targetFromDirectory(userId, directory, candidate);
+      } catch {
+        return undefined;
+      }
+    };
+    const requested = await resolve(botId);
+    if (requested) return requested;
     // Which Bot is General is recorded by the flock bootstrap, not spelled by
     // a display name a person is free to change.
-    const generalBotId = await this.generalBotId(userId);
-    if (generalBotId) {
-      try {
-        const general = await this.ownedBot(userId, generalBotId);
-        return {
-          botId: general.botId,
-          name: general.name,
-          voice: await this.voiceForBot(userId, general.botId),
-        };
-      } catch {
-        // General has been deleted. The directory below still answers.
-      }
+    const general = await resolve(await this.generalBotId(userId));
+    if (general) return general;
+    // No General marker does not mean no Bots. Try the remaining membership
+    // entries using the directory already read for ownership and voice.
+    for (const entry of directory.bots) {
+      const fallback = await resolve(entry.botId);
+      if (fallback) return fallback;
     }
-    // No General marker does not mean no Bots: an account that already owned
-    // Bots when the bootstrap ran is never given one, and deleting General
-    // does not bring it back. Only the directory can say the account is
-    // empty, and only then is the call Bot-less.
-    try {
-      const directory = await this.directory(userId);
-      for (const entry of directory.bots) {
-        try {
-          const owned = await this.ownedBot(userId, entry.botId);
-          return {
-            botId: owned.botId,
-            name: owned.name,
-            voice: await this.voiceForBot(userId, owned.botId),
-          };
-        } catch {
-          // That Bot cannot be read; try the next one.
-        }
-      }
-    } catch {
-      // No directory to read: the call opens without a Bot.
-    }
-    return { botId: "", name: "", voice: resolveBotVoiceV1({}) };
+    return {
+      botId: "",
+      name: "",
+      voice: resolveBotVoiceV1({}),
+      directory,
+    };
   }
 
   /**
-   * How a Bot sounds (ADR 0031, decision 6).
-   *
-   * Its own stored voice if it has one, else its character's default with no
-   * delivery presets, so a Bot whose owner has only ever picked a look
-   * already sounds unlike its siblings. The character is read from the
-   * account directory's avatar mirror, which is already the authority for
-   * what a Bot wears.
+   * Keeps ownership, voice and prompt preparation on one directory revision.
+   * The Bot object remains the authority for its editable identity.
    */
-  private async voiceForBot(
+  private async targetFromDirectory(
     userId: string,
+    directory: BotDirectoryViewV1,
     botId: string,
-  ): Promise<BotVoiceAppearanceV1> {
-    try {
-      const directory = await this.directory(userId);
-      const entry = directory.bots.find((bot) => bot.botId === botId);
-      const chosen = entry?.voice;
-      return resolveBotVoiceV1({
-        ...(chosen ? { chosen } : {}),
-        ...(entry ? { characterId: entry.avatar.characterId } : {}),
-      });
-    } catch {
-      // No directory, no character: the default voice still speaks.
-      return resolveBotVoiceV1({});
-    }
+  ): Promise<VoiceCallTargetV1> {
+    const entry = directory.bots.find((candidate) => candidate.botId === botId);
+    if (!entry) throw new Error("that Bot is not in this account");
+    const identity = await this.botIdentity(userId, botId);
+    return {
+      ...identity,
+      voice: resolveBotVoiceV1({
+        ...(entry.voice ? { chosen: entry.voice } : {}),
+        characterId: entry.avatar.characterId,
+      }),
+      directory,
+    };
   }
 
   private turnHost(
@@ -2661,9 +2664,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
             message: "You are already the one talking to them.",
           };
         }
-        let bot: { botId: string; name: string };
+        let bot: VoiceCallTargetV1;
         try {
-          bot = await this.ownedBot(userId, target);
+          const directory = await this.directory(userId);
+          bot = await this.targetFromDirectory(userId, directory, target);
         } catch {
           return {
             status: "refused",
@@ -2685,10 +2689,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         call.botName = bot.name;
         // The voice moves with the Bot: once the session reopens the person
         // hears somebody else, which is the whole point of the hand-over.
-        call.voice = await this.voiceForBot(userId, bot.botId);
+        call.voice = bot.voice;
         // The Bot's own context is what the next turn wears, so it is read
         // now rather than left to the next turn's critical path.
-        call.promptContext = this.buildPromptContext(userId, bot.botId);
+        call.promptContext = this.buildPromptContext(userId, bot);
         return {
           status: "switched",
           botId: bot.botId,
@@ -3236,32 +3240,38 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     };
   }
 
-  /**
-   * Every Bot, as it is named today, with what it is doing now. The identity
-   * and activity look-ups go to each Bot's own object, so they go out
-   * together: a person with a dozen Bots waits one round trip, not twelve,
-   * before the first turn can start.
-   */
-  protected async listBots(userId: string): Promise<VoiceBotSummaryV1[]> {
-    const directory = await this.directory(userId);
+  /** Every Bot, as it is named today, with its live activity preserved. */
+  protected async listBots(
+    userId: string,
+    snapshot?: BotDirectoryViewV1,
+    known?: VoiceBotSummaryV1,
+    knownHistory?: Promise<VoiceCurrentHistoryV1 | undefined>,
+  ): Promise<VoiceBotSummaryV1[]> {
+    const directory = snapshot ?? (await this.directory(userId));
     return Promise.all(
       directory.bots.map(async (bot): Promise<VoiceBotSummaryV1> => {
-        const [identity, activity] = await Promise.all([
+        if (known?.botId === bot.botId) {
+          const history = await knownHistory;
+          return {
+            botId: known.botId,
+            name: known.name,
+            ...(known.description ? { description: known.description } : {}),
+            ...(history ? { activity: history.activity } : {}),
+          };
+        }
+        const [identity, runs] = await Promise.all([
           this.botIdentity(userId, bot.botId),
-          (async (): Promise<VoiceBotSummaryV1["activity"]> => {
-            try {
-              const runs = await this.recentRuns(userId, bot.botId);
-              return runs.some((run) => run.status === "running")
-                ? "working"
-                : "idle";
-            } catch {
-              return undefined;
-            }
-          })(),
+          this.recentRuns(userId, bot.botId).catch(() => undefined),
         ]);
         return {
           ...identity,
-          ...(activity ? { activity } : {}),
+          ...(runs
+            ? {
+                activity: runs.some((run) => run.status === "running")
+                  ? ("working" as const)
+                  : ("idle" as const),
+              }
+            : {}),
         };
       }),
     );
@@ -3363,7 +3373,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    */
   private async buildPromptContext(
     userId: string,
-    botId?: string,
+    target: VoiceCallTargetV1,
     timing?: (event: string, fields?: Record<string, unknown>) => void,
   ): Promise<Omit<VoiceAssistantPromptInputV1, "now">> {
     // The start is marked where the reads are actually issued, which is here
@@ -3371,12 +3381,20 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     // apart, and a line that said otherwise would put the fan-out's time in
     // the wrong place.
     timing?.("prompt-context-start");
-    // One directory read serves both the prompt's `<bots>` list and the
-    // current Bot's activity; asked twice it would double the per-Bot RPC
-    // fan-out on exactly this path.
-    const directory = this.listBots(userId).catch(
-      () => [] as VoiceBotSummaryV1[],
+    // Target admission already read membership, appearance and the selected
+    // Bot's identity. Reuse that exact snapshot instead of making prompt
+    // preparation repeat them.
+    const history = timed(
+      timing,
+      "prompt-bot-history",
+      this.loadCurrentBotHistory(userId, target),
     );
+    const directory = this.listBots(
+      userId,
+      target.directory,
+      target,
+      history,
+    ).catch(() => [] as VoiceBotSummaryV1[]);
     const [bots, memory, timezone, session, bot] = await Promise.all([
       timed(timing, "prompt-directory", directory),
       timed(
@@ -3405,7 +3423,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       ),
       timed(timing, "prompt-timezone", this.userTimezone(userId)),
       timed(timing, "prompt-voice-memory", this.sessionMemoryContext()),
-      this.buildCurrentBotContext(userId, botId, directory, timing),
+      this.buildCurrentBotContext(userId, target, history, timing),
     ]);
     timing?.("prompt-context-ready");
     return {
@@ -3430,24 +3448,18 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    */
   private async buildCurrentBotContext(
     userId: string,
-    botId: string | undefined,
-    directory: Promise<VoiceBotSummaryV1[]>,
+    target: VoiceCallTargetV1,
+    history: Promise<VoiceCurrentHistoryV1 | undefined>,
     timing?: (event: string, fields?: Record<string, unknown>) => void,
   ): Promise<VoiceCurrentBotV1 | undefined> {
+    const botId = target.botId;
     if (!botId) return undefined;
-    let bot: { botId: string; name: string; description?: string };
-    try {
-      bot = await timed(
-        timing,
-        "prompt-bot-identity",
-        this.ownedBot(userId, botId),
-      );
-    } catch {
-      // The Bot was deleted, or never belonged to this User. The call keeps
-      // going as the account-wide assistant rather than failing.
-      return undefined;
-    }
-    const [memory, thread, bots] = await Promise.all([
+    const bot = await timed(
+      timing,
+      "prompt-bot-identity",
+      Promise.resolve(target),
+    );
+    const [memory, loadedHistory] = await Promise.all([
       timed(
         timing,
         "prompt-bot-memory",
@@ -3461,37 +3473,39 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           }
         })(),
       ),
-      timed(
-        timing,
-        "prompt-bot-history",
-        (async () => {
-          try {
-            const page = await this.botDoor(userId, botId).listRuns();
-            const runs = page.runs.slice(-VOICE_HISTORY_DEFAULT_LIMIT_V1);
-            return {
-              botId,
-              botName: bot.name,
-              runs,
-              hasMore: page.page.truncated || page.runs.length > runs.length,
-            };
-          } catch {
-            return undefined;
-          }
-        })(),
-      ),
-      // The directory is already being read for the prompt's `<bots>` list;
-      // this takes the live activity for the current Bot out of the same
-      // answer rather than asking its object again.
-      directory,
+      history,
     ]);
-    const activity = bots.find((row) => row.botId === botId)?.activity;
     return {
       botId: bot.botId,
       name: bot.name,
       ...(bot.description ? { description: bot.description } : {}),
-      ...(activity ? { activity } : {}),
+      ...(loadedHistory?.activity ? { activity: loadedHistory.activity } : {}),
       ...(memory ? { memory } : {}),
-      ...(thread ? { thread } : {}),
+      ...(loadedHistory?.thread ? { thread: loadedHistory.thread } : {}),
     };
+  }
+
+  private async loadCurrentBotHistory(
+    userId: string,
+    target: VoiceCallTargetV1,
+  ): Promise<VoiceCurrentHistoryV1 | undefined> {
+    if (!target.botId) return undefined;
+    try {
+      const page = await this.botDoor(userId, target.botId).listRuns();
+      const runs = page.runs.slice(-VOICE_HISTORY_DEFAULT_LIMIT_V1);
+      return {
+        thread: {
+          botId: target.botId,
+          botName: target.name,
+          runs,
+          hasMore: page.page.truncated || page.runs.length > runs.length,
+        },
+        activity: page.runs.some((run) => run.status === "running")
+          ? "working"
+          : "idle",
+      };
+    } catch {
+      return undefined;
+    }
   }
 }
