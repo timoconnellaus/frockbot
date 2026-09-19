@@ -442,6 +442,7 @@ test("the working companion stays outside the transcript and never shifts the bu
     bubbleLeft: number;
     bubbleBottom: number;
   } | null = null;
+  const conversation = sem(page, "shell-conversation");
   await expect
     .poll(
       async () => {
@@ -449,7 +450,7 @@ test("the working companion stays outside the transcript and never shifts the bu
           .first()
           .boundingBox()
           .catch(() => null);
-        const row = await sem(page, "working-indicator")
+        const row = await sem(conversation, "working-indicator")
           .boundingBox()
           .catch(() => null);
         if (!bubble || !row || bubble.width === 0) return false;
