@@ -22,6 +22,7 @@
  *    API, which is a plain HTTP body and has no such limit.
  */
 
+import { computerBotPathKeyV1 } from "@frockbot/computer/core";
 import {
   BOTS_ROOT,
   BROWSER_LIVE_MARKER,
@@ -2706,14 +2707,7 @@ export function computerBotKeyV1(
   botId: string,
   digest: (value: string) => string,
 ): string {
-  const id = botId.trim();
-  const slug = id
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 28);
-  return `${slug || "bot"}-${digest(id).slice(0, 12)}`;
+  return computerBotPathKeyV1(botId, digest);
 }
 
 export { WORKSPACES_ROOT };

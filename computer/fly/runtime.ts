@@ -2535,14 +2535,19 @@ export function computerSpriteNameV1(
       "Computer Sprite base name must be 3-63 lowercase letters, numbers, or hyphens",
     );
   }
-  if (!userId.trim()) {
-    throw new Error("Computer Sprite name requires a non-empty userId");
-  }
+  const id = userId.trim();
+  if (!id || id.length > 200)
+    throw new Error("Computer Sprite userId must contain 1-200 characters");
+  if (!/^[a-f0-9]{64}$/.test(digestHex))
+    throw new Error("Computer Sprite name requires a SHA-256 hex digest");
   const prefix = base.slice(0, 49).replace(/-+$/g, "");
   return `${prefix}-${digestHex.slice(0, 12)}`;
 }
 
 /** What `computerSpriteNameV1` expects a digest of. */
 export function computerSpriteNameSourceV1(userId: string): string {
-  return JSON.stringify(["user", userId]);
+  const id = userId.trim();
+  if (!id || id.length > 200)
+    throw new Error("Computer Sprite userId must contain 1-200 characters");
+  return JSON.stringify(["user", id]);
 }

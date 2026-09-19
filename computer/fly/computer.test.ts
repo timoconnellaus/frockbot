@@ -8,7 +8,6 @@ import { DESKTOP_GUI_LEASE_KEY } from "./runtime.js";
 import {
   computerBotKey,
   FlyComputer,
-  flySpriteNameForBot,
   type ComputerHostFactoryV1,
 } from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
@@ -125,15 +124,6 @@ describe("Fly Sprite computer", () => {
     expect(computerBotKey("../../Health 🩺")).toMatch(/^health-[a-f0-9]{12}$/);
     expect(computerBotKey("General")).not.toBe(computerBotKey("general"));
     expect(() => computerBotKey("   ")).toThrow("1-200 characters");
-    expect(flySpriteNameForBot("general", "frockbot")).toMatch(
-      /^frockbot-[a-f0-9]{12}$/,
-    );
-    expect(flySpriteNameForBot("general", "frockbot")).not.toBe(
-      flySpriteNameForBot("health", "frockbot"),
-    );
-    expect(
-      flySpriteNameForBot("general", `f${"x".repeat(62)}`).length,
-    ).toBeLessThanOrEqual(63);
     // The Sprite name is derived from the User and nothing else, so every Bot
     // the User owns lands on the same Computer.
     expect(flySpriteNameForComputer({ userId: "owner" })).toBe(

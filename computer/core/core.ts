@@ -15,17 +15,24 @@ import { createHash } from "node:crypto";
  * mounted. It is a path segment, never an identity: the writer of a file is
  * what the generation records.
  */
-export function computerBotPathKeyV1(botId: string): string {
+export function computerBotPathKeyV1(
+  botId: string,
+  digest: (value: string) => string = (value) =>
+    createHash("sha256").update(value).digest("hex"),
+): string {
   const id = botId.trim();
-  if (!id) throw new Error("Computer Bot id must be non-empty");
+  if (!id || id.length > 200)
+    throw new Error("Computer Bot id must contain 1-200 characters");
+  const digestHex = digest(id);
+  if (!/^[a-f0-9]{64}$/.test(digestHex))
+    throw new Error("Computer Bot key requires a SHA-256 hex digest");
   const slug = id
     .normalize("NFKD")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 28);
-  const digest = createHash("sha256").update(id).digest("hex").slice(0, 12);
-  return `${slug || "bot"}-${digest}`;
+  return `${slug || "bot"}-${digestHex.slice(0, 12)}`;
 }
 
 export type ComputerErrorCode =
