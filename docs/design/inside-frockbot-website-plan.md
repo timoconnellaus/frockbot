@@ -269,9 +269,10 @@ Source groups to preserve:
   changes; battery/session/idle/active-app/device events; notifications,
   clipboard/calendar/contacts/media/home changes; page/tab/download/bookmark
   and history events.
-- Handlers: the six agent-loop hooks, the separate `theme/assemble` hook that
-  runs outside a Turn, approvals and routing; platform call/SMS/identity,
-  mail/focus and browser-request handlers. The reference contains 149 entries.
+- Handlers: the six agent-loop hooks, approvals and routing; platform
+  call/SMS/identity, mail/focus and browser-request handlers. The reference
+  contains 148 entries. The article separately explains the `theme/assemble`
+  hook that runs outside a Turn.
 - Actions: authenticated network and notifications; outbound share/compose,
   calls/maps/opening; personal data/files/clipboard/search; sensors, camera,
   media, speech, Bluetooth/USB/NFC, discovery/home/wallet/payment/biometrics,
