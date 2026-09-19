@@ -1,12 +1,15 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/bot_sessions.dart';
+import 'package:frockbot_native/client/chat_controller.dart'
+    show ConnectionState;
 import 'package:frockbot_native/shell/app_shell.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_icons.dart';
 import 'package:frockbot_native/shell/semantics.dart';
+import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'computer_test.dart' show projection;
@@ -60,103 +63,143 @@ class ComputerHeaderApi extends OfflineApi {
 
 void main() {
   for (final width in [390.0, 1280.0]) {
-    testWidgets(
-      'Bot Computer activity colors the closed viewer header at $width',
-      (tester) async {
-        tester.view.physicalSize = Size(width, 844);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.reset);
-        final store = MemoryStore();
-        store.values['directory/test-user'] = jsonEncode({
-          'schemaVersion': 1,
-          'revision': 1,
-          'bots': [
-            registration('bot-1', 'Rosemary'),
-            registration('bot-2', 'Clementine'),
-          ],
-        });
-        final api = ComputerHeaderApi(store);
-        final sessions = BotSessions(api: api, store: store);
-        final links = ValueNotifier<String?>(null);
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: FrockTheme.theme(Brightness.dark),
-            home: AppShell(
-              api: api,
-              store: store,
-              sessions: sessions,
-              userId: 'test-user',
-              botLinks: links,
-              onSignOut: () async {},
-            ),
+    testWidgets('selected Session drives shell state at $width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final store = MemoryStore();
+      store.values['directory/test-user'] = jsonEncode({
+        'schemaVersion': 1,
+        'revision': 1,
+        'bots': [
+          registration('bot-1', 'Rosemary'),
+          registration('bot-2', 'Clementine'),
+        ],
+      });
+      final api = ComputerHeaderApi(store);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: AppShell(
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: 'test-user',
+            botLinks: links,
+            onSignOut: () async {},
           ),
-        );
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('bot-bot-1')));
-        await tester.pumpAndSettle();
-        final chat = sessions.open('test-user', 'bot-1').controller;
-        Color? iconColor() => IconTheme.of(
-          tester.element(
-            find.descendant(
-              of: find.byTooltip('Computer'),
-              matching: find.byType(ChatIcon),
-            ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('bot-bot-1')));
+      await tester.pumpAndSettle();
+      final chat = sessions.open('test-user', 'bot-1').controller;
+      ChatHeader header() => tester.widget(find.byType(ChatHeader).first);
+      Color? iconColor() => IconTheme.of(
+        tester.element(
+          find.descendant(
+            of: find.byTooltip('Computer'),
+            matching: find.byType(ChatIcon),
           ),
-        ).color;
-        expect(iconColor(), isNot(computerRunningColor));
-        api.started = true;
-        api.events = [
-          {
-            'type': 'tool/call',
-            'call': {
-              'id': 'call-1',
-              'name': 'call_dynamic_tool',
-              'input': {
-                'namespace': 'frockbot',
-                'toolName': 'computer_exec',
-                'argumentsJson': '{"command":"pwd"}',
-              },
+        ),
+      ).color;
+      chat.connection = ConnectionState.connected;
+      chat.changed();
+      await tester.pump();
+      expect(header().connection, ConnectionState.connected);
+      expect(iconColor(), isNot(computerRunningColor));
+      api.started = true;
+      api.events = [
+        {
+          'type': 'tool/call',
+          'call': {
+            'id': 'call-1',
+            'name': 'call_dynamic_tool',
+            'input': {
+              'namespace': 'frockbot',
+              'toolName': 'computer_exec',
+              'argumentsJson': '{"command":"pwd"}',
             },
           },
-        ];
-        await chat.invalidate();
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 250));
-        expect(chat.error, isNull);
+        },
+      ];
+      await chat.invalidate();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(chat.error, isNull);
+      if (width == 1280) {
         expect(
-          iconColor(),
-          computerRunningColor,
-          reason: 'Bot activity must turn the header blue without opening it',
+          tester.widget<ShellSidebar>(find.byType(ShellSidebar)).workingBotId,
+          'bot-1',
         );
-        if (width == 390) {
-          await tester.tap(identifiedBy(ShellIds.sidebarToggle));
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 400));
-        }
-        await tester.tap(find.byKey(const ValueKey('bot-bot-2')));
+      }
+      expect(
+        iconColor(),
+        computerRunningColor,
+        reason: 'Bot activity must turn the header blue without opening it',
+      );
+      if (width == 390) {
+        await tester.tap(identifiedBy(ShellIds.sidebarToggle));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
-        expect(iconColor(), isNot(computerRunningColor));
-        if (width == 390) {
-          await tester.tap(identifiedBy(ShellIds.sidebarToggle));
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 400));
-        }
-        await tester.tap(find.byKey(const ValueKey('bot-bot-1')));
+      }
+      await tester.tap(find.byKey(const ValueKey('bot-bot-2')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final other = sessions.open('test-user', 'bot-2').controller;
+      other.connection = ConnectionState.paused;
+      other.changed();
+      await tester.pump();
+      expect(header().connection, ConnectionState.paused);
+      if (width == 1280) {
+        expect(
+          tester.widget<ShellSidebar>(find.byType(ShellSidebar)).workingBotId,
+          isNull,
+        );
+      }
+      expect(iconColor(), isNot(computerRunningColor));
+      // A cached Session can change while another Bot is selected. Returning
+      // reads that controller directly instead of a shell-side mirror.
+      chat.connection = ConnectionState.reconnecting;
+      chat.changed();
+      await tester.pump();
+      expect(header().connection, ConnectionState.paused);
+      if (width == 390) {
+        await tester.tap(identifiedBy(ShellIds.sidebarToggle));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
-        expect(iconColor(), computerRunningColor);
-        api.completed = true;
-        await chat.invalidate();
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 250));
-        expect(iconColor(), isNot(computerRunningColor));
-        expect(api.commands, isEmpty);
-        await tester.pumpWidget(const SizedBox());
-        sessions.clear();
-        links.dispose();
-        await tester.pump();
-      },
-    );
+      }
+      await tester.tap(find.byKey(const ValueKey('bot-bot-1')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(header().connection, ConnectionState.reconnecting);
+      if (width == 1280) {
+        expect(
+          tester.widget<ShellSidebar>(find.byType(ShellSidebar)).workingBotId,
+          'bot-1',
+        );
+      }
+      expect(iconColor(), computerRunningColor);
+      api.completed = true;
+      await chat.invalidate();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      if (width == 1280) {
+        expect(
+          tester.widget<ShellSidebar>(find.byType(ShellSidebar)).workingBotId,
+          isNull,
+        );
+      }
+      expect(iconColor(), isNot(computerRunningColor));
+      expect(api.commands, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+      sessions.clear();
+      links.dispose();
+      await tester.pump();
+    });
   }
 }

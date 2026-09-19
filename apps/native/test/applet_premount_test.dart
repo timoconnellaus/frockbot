@@ -28,6 +28,8 @@ import 'widget_test.dart' show MemoryStore;
 class PremountApi extends NativeApi {
   PremountApi(super.store, {this.entryLabel = 'Applets'});
   final requested = <String>[];
+  bool turnStarted = false;
+  bool turnCompleted = false;
 
   /// What the Applets Package's own entry is called. The shell leaves out a
   /// Package entry that is the same door as its built-in Applets one, so a
@@ -51,6 +53,24 @@ class PremountApi extends NativeApi {
       };
     }
     if (path.endsWith('/applets/focus')) return {'appletId': 'todo.applet'};
+    if (path.endsWith('/turns')) {
+      return {
+        'schemaVersion': 1,
+        'runs': [
+          if (turnStarted)
+            {
+              'schemaVersion': 1,
+              'runId': 'run-1',
+              'admittedAt': '2026-09-05T00:00:00.000Z',
+              'input': 'Build an Applet',
+              'status': turnCompleted ? 'completed' : 'running',
+              'events': <Object?>[],
+              if (turnCompleted) 'outcome': {'type': 'completed', 'text': ''},
+            },
+        ],
+        'page': {'truncated': false},
+      };
+    }
     // The Bot's page draws its rows — the Applets row among them — under its
     // settings, so the settings have to load for the row to be there.
     if (path.endsWith('/bots/bot-1/settings')) {
@@ -79,6 +99,59 @@ class PremountApi extends NativeApi {
 }
 
 void main() {
+  testWidgets('finishing the selected Session refreshes its Applets', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemoryStore();
+    store.values['directory/test-user'] = jsonEncode({
+      'schemaVersion': 1,
+      'revision': 1,
+      'bots': [registration('bot-1', 'Builder')],
+    });
+    final api = PremountApi(store);
+    final sessions = BotSessions(api: api, store: store);
+    final links = ValueNotifier<String?>(null);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AppShell(
+          api: api,
+          store: store,
+          sessions: sessions,
+          userId: 'test-user',
+          botLinks: links,
+          onSignOut: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('bot-bot-1')));
+    await tester.pumpAndSettle();
+    final chat = sessions.open('test-user', 'bot-1').controller;
+    int appletReads() =>
+        api.requested.where((path) => path.endsWith('/applets/open')).length;
+    final before = appletReads();
+    expect(before, greaterThan(0));
+
+    api.turnStarted = true;
+    await chat.invalidate();
+    await tester.pump();
+    expect(appletReads(), before);
+
+    api.turnCompleted = true;
+    await chat.invalidate();
+    await tester.pumpAndSettle();
+    expect(appletReads(), before + 1);
+
+    await tester.pumpWidget(const SizedBox());
+    sessions.clear();
+    links.dispose();
+    api.close();
+  });
+
   testWidgets(
     'a phone holds the live frame off stage and hands it to the page',
     (tester) async {

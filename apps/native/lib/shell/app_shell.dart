@@ -166,8 +166,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The Bot the account was given as General, from the authority.
   String? generalBotId;
   int featuresRevision = 0;
-  String? workingRunId;
-  ConnectionState selectedConnection = ConnectionState.initializing;
   BotSettingsController? botSettings;
   RoutineInboxController? routineInbox;
 
@@ -187,8 +185,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// holder builds nothing, so the one key is in one place.
   bool _appletPagePresented = false;
   ComputerController? computer;
-  ChatController? _headerChat;
-  bool _botComputerRunning = false;
+  BotSession? _selectedSession;
+
+  /// The last shell-visible projection observed for the selected Session.
+  /// The values drawn stay on [ChatController]; these markers only suppress
+  /// whole-shell rebuilds for controller changes the shell does not draw, and
+  /// identify the one working-to-idle transition that refreshes Applets.
+  String? _observedWorkingRunId;
+  ConnectionState? _observedConnection;
+  bool _observedBotComputerRunning = false;
   PackageCatalog? catalog;
 
   /// Bumped whenever [catalog] changes. A Bot page pushed as its own route
@@ -338,15 +343,37 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(push.syncRead());
   }
 
-  void _repaintHeader() {
-    final running = botComputerRunningV1(
-      _headerChat?.runs ?? const <Map<String, dynamic>>[],
-    );
-    if (running == _botComputerRunning) return;
-    _botComputerRunning = running;
+  ChatController? get _selectedChat => _selectedSession?.controller;
+  String? get _workingRunId => _selectedChat?.activeRunId;
+  ConnectionState get _selectedConnection =>
+      _selectedChat?.connection ?? ConnectionState.initializing;
+  bool get _botComputerRunning => botComputerRunningV1(
+    _selectedChat?.runs ?? const <Map<String, dynamic>>[],
+  );
+
+  void _selectedChatChanged() {
+    final session = _selectedSession;
+    if (session == null) return;
+    final workingRunId = session.controller.activeRunId;
+    final connection = session.controller.connection;
+    final computerRunning = botComputerRunningV1(session.controller.runs);
+    final settled = _observedWorkingRunId != null && workingRunId == null;
+    final repaint =
+        workingRunId != _observedWorkingRunId ||
+        connection != _observedConnection ||
+        computerRunning != _observedBotComputerRunning;
+    _observedWorkingRunId = workingRunId;
+    _observedConnection = connection;
+    _observedBotComputerRunning = computerRunning;
+    if (!repaint) return;
     // Restoring a cached conversation can notify while its pane is building.
     scheduleMicrotask(() {
-      if (mounted) setState(() {});
+      if (!mounted || !identical(_selectedSession, session)) return;
+      setState(() {});
+      // A Turn is how an Applet comes into existence. Refresh the directory
+      // when that Turn ends, without mirroring the Turn itself into the shell.
+      final canvas = appletCanvas;
+      if (settled && canvas != null) unawaited(canvas.load());
     });
   }
 
@@ -423,12 +450,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _activityTimer?.cancel();
     _activityTimer = null;
     if (appIsAwayV1(state)) {
+      widget.sessions.pause();
       // Voice is foreground-only by decision. Leaving the app ends capture,
       // playback and the call; in-app navigation does not.
       unawaited(_endVoice(reason: 'lifecycle:${state.name}'));
       unawaited(_stopDictation());
       return;
     }
+    widget.sessions.resume();
     _refresh();
     _startPolling();
   }
@@ -904,7 +933,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // the sidebar goes back to the Bots rather than showing Applets of a Bot
       // nobody asked the Applets of.
       if (switching) appletsMode = false;
-      if (switching) selectedConnection = ConnectionState.initializing;
       conversationOpen = true;
       _leaveRun();
       exchangeController?.dispose();
@@ -939,10 +967,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         botId;
     botSettings?.dispose();
     routineInbox?.dispose();
-    _headerChat?.removeListener(_repaintHeader);
-    _headerChat = widget.sessions.open(widget.userId, botId).controller
-      ..addListener(_repaintHeader);
-    _repaintHeader();
+    _selectedChat?.removeListener(_selectedChatChanged);
+    _selectedSession = widget.sessions.open(widget.userId, botId);
+    _observedWorkingRunId = _selectedChat?.activeRunId;
+    _observedConnection = _selectedChat?.connection;
+    _observedBotComputerRunning = _botComputerRunning;
+    _selectedChat?.addListener(_selectedChatChanged);
     final controller = BotSettingsController(widget.api, botId);
     final inbox = RoutineInboxController(widget.api, botId);
     botSettings = controller;
@@ -1648,7 +1678,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       builder: (context, _) => BotPageView(
         botName: _name(bot),
         computer: computer,
-        turnRunning: workingRunId != null,
+        turnRunning: _workingRunId != null,
         onOpenComputer: computer?.available == true
             ? () => unawaited(_openComputerViewer())
             : null,
@@ -2258,17 +2288,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     routineInbox?.dispose();
     appletCanvas?.dispose();
     computer?.dispose();
-    _headerChat?.removeListener(_repaintHeader);
+    _selectedChat?.removeListener(_selectedChatChanged);
     botSettings = null;
     routineInbox = null;
     appletCanvas = null;
     computer = null;
-    _headerChat = null;
-    _botComputerRunning = false;
+    _selectedSession = null;
+    _observedWorkingRunId = null;
+    _observedConnection = null;
+    _observedBotComputerRunning = false;
     setState(() {
       selected = null;
-      selectedConnection = ConnectionState.initializing;
-      workingRunId = null;
       openRun = null;
       runBorrowedPanel = false;
       exchangeController?.dispose();
@@ -2325,7 +2355,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     ChatHeader conversationHeader({Widget? companion}) => ChatHeader(
       name: _name(bot!),
       companion: companion,
-      connection: selectedConnection,
+      connection: _selectedConnection,
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
       // A phone's bar is GrokBot's three things; the wider tiers
       // name each entry of the right panel beside the title.
@@ -2423,7 +2453,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             // A phone's list is a list of doors, not a selection: no row
                             // is the current one once the conversation is a page.
                             activeBotId: single ? null : bot?.botId.value,
-                            workingBotId: workingRunId == null
+                            workingBotId: _workingRunId == null
                                 ? null
                                 : bot?.botId.value,
                             loaded: loaded,
@@ -2479,11 +2509,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                               key: ValueKey(
                                 '${widget.userId}:${bot.botId.value}',
                               ),
-                              sessions: widget.sessions,
-                              api: widget.api,
+                              session: _selectedSession!,
                               store: widget.store,
-                              userId: widget.userId,
-                              botId: bot.botId.value,
                               general: bot.botId.value == generalBotId,
                               featuresRevision: featuresRevision,
                               onOpenRun: _openRun,
@@ -2529,30 +2556,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                   ? dictation!.revertCleanup
                                   : null,
                               dictationLevel: dictation?.level,
-                              onWorkingChanged: (runId) {
-                                if (runId == workingRunId || !mounted) return;
-                                final settled =
-                                    workingRunId != null && runId == null;
-                                setState(() => workingRunId = runId);
-                                // A Turn is how an Applet comes into existence, and the
-                                // Bot's page names the Applets the Bot holds — so the
-                                // directory is re-read when the Turn that may have changed
-                                // it ends. Read on adoption alone, a Bot that had just made
-                                // its first Applet had no way to it until the page was
-                                // reloaded.
-                                final canvas = appletCanvas;
-                                if (settled && canvas != null) {
-                                  unawaited(canvas.load());
-                                }
-                              },
-                              onConnectionChanged: (botId, state) {
-                                if (!mounted ||
-                                    selected?.botId.value != botId ||
-                                    selectedConnection == state) {
-                                  return;
-                                }
-                                setState(() => selectedConnection = state);
-                              },
                             ),
                     ),
                   ),
@@ -3136,7 +3139,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     routineInbox?.dispose();
     appletCanvas?.dispose();
     computer?.dispose();
-    _headerChat?.removeListener(_repaintHeader);
+    _selectedChat?.removeListener(_selectedChatChanged);
     slots.dispose();
     catalogRevision.dispose();
     avatarRevision.dispose();
