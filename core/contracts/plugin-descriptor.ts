@@ -22,6 +22,7 @@ import {
   PLUGIN_MODEL_PROTOCOL_VERSIONS_V1,
   type PluginModelProviderV1,
 } from "./plugin-model.js";
+import { PLUGIN_CARD_ACTION_NAME_PATTERN_V1 } from "./plugin-card-contract.js";
 import { exactKeysV1, recordV1 } from "./records.js";
 
 /** Authority a plugin may hold. */
@@ -179,13 +180,6 @@ const PLUGIN_SERVICE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 const PLUGIN_TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 /** A card id, short enough that `<pluginId>_<cardId>` is still a tool name. */
 const PLUGIN_CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
-/**
- * The source shared with the generated Plugin worker's isolated decoder.
- *
- * The wrapper cannot import this module at runtime, so its generator embeds
- * this dependency-free contract metadata into the emitted JavaScript.
- */
-export const PLUGIN_CARD_ACTION_NAME_PATTERN_V1 = "^[a-z][a-z0-9_-]{0,63}$";
 const PLUGIN_CARD_ACTION_NAME = new RegExp(PLUGIN_CARD_ACTION_NAME_PATTERN_V1);
 /** A lowercase hostname, optionally with one leading wildcard label. */
 const PLUGIN_HOST =

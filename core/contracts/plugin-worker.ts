@@ -28,10 +28,10 @@ import {
 } from "./isolate.js";
 import type { BotIsolateHookEventNameV1 } from "./loop-events.js";
 import {
-  PLUGIN_CARD_ACTION_NAME_PATTERN_V1,
   servedPluginContractVersionsV1,
   type PluginServiceV1,
 } from "./plugin-descriptor.js";
+import { PLUGIN_CARD_ACTION_NAME_PATTERN_V1 } from "./plugin-card-contract.js";
 import type {
   PluginModelInvocationV1,
   PluginWorkerModelResultV1,
