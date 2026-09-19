@@ -2,9 +2,10 @@
 
 Observed on 2026-09-17 against `models/gemini-3.8-live` through
 `apps/cloudflare/test/voice-gemini-probe.ts`, which is run by hand and never
-in CI. Everything below is a shape that came back off the wire; where it
-contradicts [ADR 0031](adr/0031-voice-gemini-live.md) the API wins and the
-contradiction is called out. Re-run a scenario with
+in CI. Everything below is a shape that came back off the wire, apart from the
+few paragraphs that say they were not observed; where it contradicts
+[ADR 0031](adr/0031-voice-gemini-live.md) the API wins and the contradiction
+is called out. Re-run a scenario with
 `bun apps/cloudflare/test/voice-gemini-probe.ts <name>`.
 
 The endpoint is
@@ -64,6 +65,21 @@ in one `tools` array as two entries.
 An unknown field closes the socket immediately with code **1007** and a
 readable reason (`Invalid JSON payload received. Unknown name "x" at 'setup'`).
 That is the only error channel: there is no `error` message type.
+
+### `contextWindowCompression` is sent in production but has not been probed
+
+`buildGeminiLiveSetupV1` (`app/voice/gemini-live.ts`) adds one setup field to
+every frame it builds — `"contextWindowCompression":{"slidingWindow":{}}`, so
+a long audio conversation stays inside the context window rather than losing
+its earliest turns. No probe run has sent it, so the shape here is the
+documented `BidiGenerateContentSetup.contextWindowCompression.slidingWindow`
+rather than one observed from this codebase, and the server picks the window
+size. The failure to watch for is the deferred one `enableAffectiveDialog`
+showed: setup accepted, then the first content frame closes with 1007 — a
+rejected setup field costs every call rather than failing at review time. The
+`compression` scenario sends it; run
+`bun apps/cloudflare/test/voice-gemini-probe.ts compression` and replace this
+paragraph with what comes back.
 
 ### `enableAffectiveDialog` is not usable here — ADR contradicted
 
