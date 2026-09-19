@@ -665,12 +665,11 @@ export async function createBot(
   // accessible name belongs to the product (currently `Open <name>`) and
   // Flutter may merge the title into that name as well. The stable contract is
   // the semantic id plus the selected Bot's name, not an exact prose string.
-  await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
-    new RegExp(escapeRegExp(name), "u"),
-    {
-      timeout: 30_000,
-    },
-  );
+  await expect(
+    sem(page, "bot-panel-toggle").getByRole("button", {
+      name: new RegExp(escapeRegExp(name), "u"),
+    }),
+  ).toBeVisible({ timeout: 30_000 });
 }
 
 function escapeRegExp(value: string): string {
