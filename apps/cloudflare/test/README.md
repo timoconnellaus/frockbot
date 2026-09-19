@@ -9,6 +9,12 @@ Two Vitest projects run in local workerd, and they answer different questions.
 Durable Objects and probe subclasses directly. Hermetic; it does not read or
 expose a Sprites credential.
 
+`APPLET_BUILD` is a stand-in here: a build needs a container this pool cannot
+start, so `test/applet-build-fake.ts` answers the binding and records each
+request for a suite to read back. It has to be bound for `applet_check` or
+`plugin_check` to reach the source-reading half at all; unbound, both answer
+that the deployment cannot build.
+
 It also binds a local D1 `AUTH_DB`, and `vitest.config.ts` reads `migrations/`
 into `TEST_MIGRATIONS` so `auth-schema.workerd.ts` can apply the real schema and
 drive `/api/auth/*` through a configured better-auth Package. Every other suite here
@@ -28,9 +34,10 @@ bucket, so the bytes under test are the bytes that would deploy.
 
 Both projects run their files **sequentially** (`fileParallelism: false`). The
 fakes are shared: the Computer host fake is one Node-side object the whole run
-drives, the Frock AI fake's call log is one array per pool worker, and the
-outbound stub's MCP handshake counter and blocked-address tally are Node module
-state. Several tests read one of those counts, act, and assert it moved by
+drives, the Frock AI fake's call log is one array per pool worker, the outbound
+stub's MCP handshake counter and blocked-address tally are Node module state,
+and the Applet build fake's request log accumulates every build that reaches
+it. Several tests read one of those counts, act, and assert it moved by
 exactly one — true only if no other file is acting at the same time. Anything
 added here inherits that guarantee; nothing here should reintroduce parallelism
 without first giving every fake per-test isolation.
