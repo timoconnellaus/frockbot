@@ -171,6 +171,12 @@ function appletUi(page: Page): FrameLocator {
 async function openCanvas(page: Page): Promise<void> {
   const canvas = canvasOf(page);
   if (await canvas.isVisible().catch(() => false)) return;
+  // The Bot page draws All Applets before its directory arrives. Wait for the
+  // shortcut this journey created so Flutter cannot reuse the resolved row's
+  // semantics node while Playwright is in the middle of pressing it.
+  await expect(
+    page.locator('[flt-semantics-identifier^="bot-page-applet-"]').first(),
+  ).toBeVisible({ timeout: 60_000 });
   await press(sem(page, "bot-page-applets-all"));
   await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
   await press(
@@ -363,6 +369,17 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   await expect(ui.getByText("Buy milk")).toBeVisible();
 
   const second = await context.newPage();
+  // Let the Bot page appear before its Applet directory. This pins the race
+  // where Flutter used to recycle the All Applets semantics node as the new
+  // shortcut while Playwright was resolving the click.
+  let delayedDirectory = false;
+  await second.route("**/api/bots/*/applets/open", async (route) => {
+    if (!delayedDirectory) {
+      delayedDirectory = true;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 600));
+    }
+    await route.continue();
+  });
   await second.setViewportSize(DESKTOP);
   await second.goto(`/?as_user=${userId}`);
   await expect(sem(second, "shell-sidebar")).toBeVisible({ timeout: 120_000 });
@@ -425,12 +442,7 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   const chip = sem(page, "bot-page-applets-all");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await shot(page, "phone-chip");
-  await press(chip);
-  await expect(sem(page, "applet-list")).toBeVisible({ timeout: 60_000 });
-  await press(
-    page.locator('[flt-semantics-identifier^="applet-row-"]').first(),
-  );
-  await expect(canvasOf(page)).toBeVisible({ timeout: 60_000 });
+  await openCanvas(page);
   await expect(appletUi(page).getByText("Buy milk")).toBeVisible({
     timeout: 60_000,
   });
