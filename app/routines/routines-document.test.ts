@@ -252,7 +252,7 @@ test("the editor is one collapsed form until a Routine is named", () => {
   expect(
     fields.map((node) => (node.type === "field" ? node.field.id : "")),
   ).toEqual([
-    ROUTINE_EDITOR_FIELDS_V1.routineId,
+    ROUTINE_EDITOR_FIELDS_V1.editorId,
     ROUTINE_EDITOR_FIELDS_V1.name,
     ROUTINE_EDITOR_FIELDS_V1.prompt,
     ROUTINE_EDITOR_FIELDS_V1.schedule,
@@ -289,7 +289,7 @@ test("naming a Routine opens the editor on its own values and moves the revision
   const createdId = walk(closed.root).find(
     (node) =>
       node.type === "field" &&
-      node.field.id === ROUTINE_EDITOR_FIELDS_V1.routineId,
+      node.field.id === ROUTINE_EDITOR_FIELDS_V1.editorId,
   );
   expect(createdId?.type === "field" && createdId.field.value).toBe(null);
 });

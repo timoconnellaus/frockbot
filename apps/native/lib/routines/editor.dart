@@ -6,7 +6,7 @@ import '../view/document.dart';
 import '../view/embed.dart';
 import '../view/nodes.dart';
 
-const _routineId = 'routineId';
+const _editorId = 'routine.editorId';
 const _name = 'routine.name';
 const _prompt = 'routine.prompt';
 const _schedule = 'routine.schedule';
@@ -81,7 +81,7 @@ List<RoutinePluginSourceV1> routinePluginSourcesV1(Object? value) {
 }
 
 Map<String, ViewFieldBuilder> routineEditorFieldBuildersV1(
-  List<RoutinePluginSourceV1> plugins,
+  List<RoutinePluginSourceV1> Function() plugins,
 ) => {
   'routine-editor-hidden': (_, _, _, _, _) => const SizedBox.shrink(),
   'routine-editor': (context, field, id, value, onChanged) {
@@ -90,9 +90,9 @@ Map<String, ViewFieldBuilder> routineEditorFieldBuildersV1(
       RoutineIds.editor,
       RoutineEditorV1(
         key: ValueKey('routine-editor.${scope.controller.revision}'),
-        plugins: plugins,
+        plugins: plugins(),
         source: value as String? ?? 'schedule',
-        routineId: scope.controller.values[_routineId] as String?,
+        routineId: scope.controller.values[_editorId] as String?,
         name: scope.controller.values[_name] as String? ?? '',
         prompt: scope.controller.values[_prompt] as String? ?? '',
         schedule: scope.controller.values[_schedule] as String? ?? '0 9 * * *',
@@ -298,10 +298,17 @@ class RoutineEditorV1 extends StatefulWidget {
 
 class _RoutineEditorV1State extends State<RoutineEditorV1> {
   var step = 0;
+  late final _RoutineSourceKind storedSourceKind;
   late _RoutineSourceKind sourceKind;
   String? pluginId;
   String? trigger;
   late _FriendlySchedule schedule;
+
+  static _RoutineSourceKind _sourceKindOf(String source) {
+    if (source == 'webhook') return _RoutineSourceKind.webhook;
+    if (source.startsWith('plugin:')) return _RoutineSourceKind.plugin;
+    return _RoutineSourceKind.schedule;
+  }
 
   @override
   void initState() {
@@ -310,17 +317,14 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
       widget.schedule,
       widget.scheduleDescription,
     );
-    if (widget.source == 'webhook') {
-      sourceKind = _RoutineSourceKind.webhook;
-    } else if (widget.source.startsWith('plugin:')) {
-      sourceKind = _RoutineSourceKind.plugin;
+    storedSourceKind = _sourceKindOf(widget.source);
+    sourceKind = storedSourceKind;
+    if (storedSourceKind == _RoutineSourceKind.plugin) {
       final parts = widget.source.split(':');
       if (parts.length == 3) {
         pluginId = parts[1];
         trigger = parts[2];
       }
-    } else {
-      sourceKind = _RoutineSourceKind.schedule;
     }
   }
 
@@ -679,11 +683,16 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
             children: [
               Expanded(
                 child: DropdownButtonFormField<int>(
-                  initialValue: schedule.interval.clamp(1, 59),
+                  initialValue: schedule.interval,
                   decoration: const InputDecoration(labelText: 'Every'),
                   items: [
                     for (var value = 1; value <= 59; value++)
                       DropdownMenuItem(value: value, child: Text('$value')),
+                    if (schedule.interval > 59)
+                      DropdownMenuItem(
+                        value: schedule.interval,
+                        child: Text('${schedule.interval}'),
+                      ),
                   ],
                   onChanged: widget.enabled
                       ? (next) {
@@ -829,12 +838,12 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
             children: [
               _routineAction('run-routine', 'Run now'),
               _routineAction('open-runs', 'Run log'),
-              if (sourceKind != _RoutineSourceKind.schedule)
+              if (storedSourceKind != _RoutineSourceKind.schedule)
                 _routineAction(
                   'rotate-key',
                   widget.hookKeyVersion == null ? 'Mint key' : 'Rotate key',
                 ),
-              if (sourceKind != _RoutineSourceKind.schedule &&
+              if (storedSourceKind != _RoutineSourceKind.schedule &&
                   widget.hookKeyVersion != null)
                 _routineAction('revoke-key', 'Revoke key', style: 'danger'),
               _routineAction('cancel-edit', 'Cancel'),

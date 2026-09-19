@@ -297,7 +297,7 @@ class _RoutinesViewState extends State<RoutinesView> {
       chrome: widget.chrome,
       controller: controller,
       banner: (context) => WebhookKeyCard(controller: controller),
-      fields: routineEditorFieldBuildersV1(controller.pluginSources),
+      fields: routineEditorFieldBuildersV1(() => controller.pluginSources),
     ),
   );
 }

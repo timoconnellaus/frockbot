@@ -1058,7 +1058,7 @@
               {
                 "type": "field",
                 "field": {
-                  "id": "routineId",
+                  "id": "routine.editorId",
                   "label": "Routine",
                   "kind": "text",
                   "value": "r1",

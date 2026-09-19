@@ -77,7 +77,7 @@ const TEXT = (maxLength: number): ActionValueSchema => ({
 });
 /** The field ids the editor's one form uses, and the action that reads them. */
 export const ROUTINE_EDITOR_FIELDS_V1 = {
-  routineId: "routineId",
+  editorId: "routine.editorId",
   name: "routine.name",
   prompt: "routine.prompt",
   timing: "routine.timing",
@@ -300,7 +300,7 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
     title: editing ? `Edit ${editing.name}` : "New Routine",
     collapsed: editing === undefined,
     children: [
-      field(ids.routineId, "Routine", editing?.routineId ?? null, {
+      field(ids.editorId, "Routine", editing?.routineId ?? null, {
         choiceSource: "routine-editor-hidden",
       }),
       field(ids.name, "Name", editing?.name ?? null, {

@@ -187,6 +187,135 @@ Map<String, Object?> routinesDocument({
   ],
 };
 
+/// The editor as `routinesDocumentV1` projects it: the field the host draws,
+/// and the hidden fields that seed it. `collapsed` is what an unnamed Routine
+/// starts as.
+Map<String, Object?> routinesEditorGroup(Map<String, Object?>? editing) {
+  final seeds = <String, Object?>{
+    'routine.editorId': editing?['routineId'],
+    'routine.name': editing?['name'],
+    'routine.prompt': editing?['prompt'],
+    'routine.schedule': editing?['schedule'] ?? '0 9 * * *',
+    'routine.scheduleDescription':
+        editing?['scheduleDescription'] ?? 'Every day at 9:00am',
+    'routine.timezone': editing?['timezone'] ?? 'Australia/Sydney',
+    'routine.keyVersion': editing?['keyVersion'],
+  };
+  return {
+    'type': 'group',
+    'orientation': 'column',
+    'title': editing == null ? 'New Routine' : 'Edit ${editing['name']}',
+    'collapsed': editing == null,
+    'children': [
+      for (final seed in seeds.entries)
+        {
+          'type': 'field',
+          'field': {
+            'id': seed.key,
+            'label': seed.key,
+            'kind': 'text',
+            'value': seed.value,
+            'editable': true,
+            'choiceSource': 'routine-editor-hidden',
+          },
+        },
+      {
+        'type': 'field',
+        'field': {
+          'id': 'routine.timing',
+          'label': 'Fires on',
+          'kind': 'text',
+          'value': editing?['timing'] ?? 'schedule',
+          'editable': true,
+          'choiceSource': 'routine-editor',
+        },
+      },
+    ],
+  };
+}
+
+/// One Routine's row: what it fires on, and the two controls a row draws.
+Map<String, Object?> routineRow(Map<String, Object?> routine) {
+  final id = routine['routineId'];
+  final enabled = routine['enabled'] == true;
+  return {
+    'type': 'group',
+    'orientation': 'column',
+    'title': routine['name'],
+    'children': [
+      {
+        'type': 'text',
+        'text':
+            '${routine['schedule'] ?? 'Webhook trigger'} · Australia/Sydney'
+            ' · Never run · ${enabled ? 'No next firing scheduled' : 'Paused'}',
+        'style': 'status',
+      },
+      {
+        'type': 'group',
+        'orientation': 'row',
+        'children': [
+          {
+            'type': 'action',
+            'actionId': 'edit-routine',
+            'label': 'Edit',
+            'input': {'kind': 'edit-routine', 'routineId': id},
+          },
+          {
+            'type': 'action',
+            'actionId': 'set-routine-enabled',
+            'label': enabled ? 'Pause' : 'Resume',
+            'input': {
+              'kind': 'set-routine-enabled',
+              'routineId': id,
+              'enabled': !enabled,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/// The surface with the editor on it, above the rows it sits above.
+Map<String, Object?> routinesDocumentWithEditor({
+  List<Map<String, Object?>> routines = const [],
+  Map<String, Object?>? editing,
+}) => {
+  'schemaVersion': 1,
+  'surfaceId': 'routines',
+  'revision': 1,
+  'root': {
+    'type': 'group',
+    'orientation': 'column',
+    'children': [
+      routinesEditorGroup(editing),
+      for (final routine in routines) routineRow(routine),
+    ],
+  },
+  'actions': routinesDocument()['actions'],
+};
+
+/// The surface as a page, on a display tall enough to hold all of it: a form
+/// and the rows under it are both things these tests press.
+Widget routinesPage(SettingsApi api, MemoryStore store) {
+  return MaterialApp(
+    theme: FrockTheme.theme(Brightness.dark),
+    home: RoutinesView(
+      api: api,
+      store: store,
+      userId: 'tim',
+      botId: 'bot-1',
+      botName: 'Scout',
+    ),
+  );
+}
+
+void useTallSurface(WidgetTester tester) {
+  tester.view.physicalSize = const Size(1000, 2400);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+}
+
 void main() {
   test('only usable trigger-capable Plugins become Routine sources', () {
     final sources = routinePluginSourcesV1({
@@ -284,6 +413,248 @@ void main() {
     expect(find.text('Configure GitHub'), findsOneWidget);
     expect(find.text('Issue Opened'), findsOneWidget);
     expect(find.text('issue-opened'), findsNothing);
+  });
+
+  testWidgets('the guide offers the Plugins the surface read', (tester) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) {
+        return {
+          'plugins': [
+            {
+              'pluginId': 'github',
+              'displayName': 'GitHub',
+              'on': true,
+              'triggers': [
+                {
+                  'name': 'issue-opened',
+                  'description': 'When a new issue is opened',
+                },
+              ],
+            },
+          ],
+        };
+      }
+      return routinesDocumentWithEditor();
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+
+    // The catalog arrives after the document does, so the choices are the ones
+    // the surface holds rather than the ones it held when it was built.
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    expect(find.text('GitHub'), findsOneWidget);
+    expect(find.text('github'), findsNothing);
+  });
+
+  testWidgets('an open editor leaves every row control on its own Routine', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return routinesDocumentWithEditor(
+          routines: [
+            {
+              'routineId': 'r1',
+              'name': 'First brief',
+              'schedule': '0 9 * * *',
+              'enabled': true,
+            },
+            {
+              'routineId': 'r2',
+              'name': 'Second brief',
+              'schedule': '0 18 * * *',
+              'enabled': false,
+            },
+          ],
+          editing: {
+            'routineId': 'r2',
+            'name': 'Second brief',
+            'prompt': 'Summarise the day.',
+            'schedule': '0 18 * * *',
+            'timing': 'schedule',
+          },
+        );
+      }
+      final command = (body as Map).cast<String, Object?>();
+      sent.add(command);
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+
+    // The editor is seeded from the Routine it names, so it is the edit form.
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Run now'), findsOneWidget);
+
+    // And the control beside it still pauses the Routine whose row it is.
+    await tester.tap(find.text('Pause'));
+    await tester.pumpAndSettle();
+    expect(sent.single['routineId'], 'r1');
+    expect(sent.single['type'], 'routine/pause');
+  });
+
+  testWidgets('the interval control shows the interval the value holds', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return routinesDocumentWithEditor(
+          editing: {
+            'routineId': 'r1',
+            'name': 'Ninety minutes',
+            'prompt': 'Summarise overnight email.',
+            'schedule': '@every 90m',
+            'scheduleDescription': 'Every 90 minutes',
+            'timing': 'schedule',
+          },
+        );
+      }
+      final command = (body as Map).cast<String, Object?>();
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Configure Schedule'), findsOneWidget);
+
+    // Ninety is what the value says and what the summary under it reads, so it
+    // is what the control offers rather than a neighbour it would then write.
+    expect(find.text('90'), findsWidgets);
+    expect(
+      tester
+          .state<FormFieldState<int>>(find.byType(DropdownButtonFormField<int>))
+          .value,
+      90,
+    );
+  });
+
+  testWidgets('the key controls follow the stored Routine, not the form', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return routinesDocumentWithEditor(
+          routines: [
+            {
+              'routineId': 'r1',
+              'name': 'First brief',
+              'schedule': '0 9 * * *',
+              'enabled': true,
+            },
+          ],
+          editing: {
+            'routineId': 'r1',
+            'name': 'First brief',
+            'prompt': 'Summarise overnight email.',
+            'schedule': '0 9 * * *',
+            'timing': 'schedule',
+          },
+        );
+      }
+      final command = (body as Map).cast<String, Object?>();
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    // A scheduled Routine has no key to mint, whatever the form is about to
+    // save it as.
+    expect(find.text('Mint key'), findsNothing);
+
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Webhook'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mint key'), findsNothing);
+  });
+
+  testWidgets('a stored webhook Routine keeps its key controls', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return routinesDocumentWithEditor(
+          routines: [
+            {
+              'routineId': 'r1',
+              'name': 'On demand',
+              'schedule': null,
+              'enabled': true,
+            },
+          ],
+          editing: {
+            'routineId': 'r1',
+            'name': 'On demand',
+            'prompt': 'Do the thing.',
+            'timing': 'webhook',
+            'keyVersion': '2',
+          },
+        );
+      }
+      final command = (body as Map).cast<String, Object?>();
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rotate key'), findsOneWidget);
+
+    // Looking at the schedule form is not saving the Routine as scheduled.
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Schedule'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rotate key'), findsOneWidget);
   });
 
   group('the projection read back', () {
