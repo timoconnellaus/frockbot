@@ -134,6 +134,17 @@ describe("Fly Sprite computer", () => {
     );
   });
 
+  test("names the misconfigured Sprite variable it refuses", () => {
+    process.env.FROCKBOT_SPRITE_NAME = "My Sprite";
+    try {
+      expect(() => flySpriteNameForComputer({ userId: "owner" })).toThrow(
+        "FROCKBOT_SPRITE_NAME must be 3-63 lowercase letters, numbers, or hyphens",
+      );
+    } finally {
+      delete process.env.FROCKBOT_SPRITE_NAME;
+    }
+  });
+
   test("attaches each Bot as its own tenant with its own viewer", async () => {
     const host = fakeHost();
     const computer = attach(host);

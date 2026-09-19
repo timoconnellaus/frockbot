@@ -246,7 +246,7 @@ function provisioningMessage(progress: ComputerHostProvisioningV1): string {
     : `Preparing the Computer: ${progress.label}`;
 }
 
-function configuredName(): string {
+export function configuredName(): string {
   const name = process.env.FROCKBOT_SPRITE_NAME?.trim() || "frockbot-barebones";
   if (!/^[a-z][a-z0-9-]{2,62}$/.test(name)) {
     throw new Error(

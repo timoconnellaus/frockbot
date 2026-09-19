@@ -26,6 +26,7 @@ import {
 import { type WorkspaceRootV1 } from "@frockbot/core/contracts";
 import {
   computerBotKey,
+  configuredName,
   type BrowserAction,
   type ComputerHostFactoryV1,
   FlyComputer,
@@ -560,7 +561,7 @@ function handle(
  */
 export function flySpriteNameForComputer(
   identity: ComputerIdentityV1,
-  baseName = process.env.FROCKBOT_SPRITE_NAME?.trim() || "frockbot-barebones",
+  baseName = configuredName(),
 ): string {
   const userId = identity.userId.trim();
   const source = computerSpriteNameSourceV1(userId);
