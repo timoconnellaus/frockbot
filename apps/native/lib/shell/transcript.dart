@@ -11,6 +11,7 @@ import 'package:flutter/rendering.dart';
 import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
+import 'chat_header.dart';
 import 'markdown.dart';
 import 'run_view.dart';
 import 'semantics.dart';
@@ -64,7 +65,7 @@ class TranscriptView extends StatefulWidget {
   final String? focusRunId;
 
   /// The Bot's character. Every live avatar in the thread uses the same
-  /// appearance as the sidebar and composer companion.
+  /// appearance as the sidebar and conversation companion.
   final String? background;
 
   /// Drawn under the empty thread's greeting, and gone with the first row.
@@ -363,7 +364,7 @@ class _TranscriptViewState extends State<TranscriptView> {
           // The thread starts at the latest row. Earlier pages extend the
           // far end, so prepending history keeps the viewport where it was.
           reverse: true,
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.fromLTRB(0, chatHeaderThreadPadding, 0, 12),
           physics: const AlwaysScrollableScrollPhysics(),
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           key: PageStorageKey(storageKey),
@@ -439,7 +440,7 @@ class _TranscriptViewState extends State<TranscriptView> {
     }
     if (line.status == LineStatus.streaming && line.empty) {
       // A plain running Turn draws nothing in the thread: the companion
-      // beside the composer is the one that works. Two states earn words: a
+      // beside the companion in the header is the one that works. Two states earn words: a
       // Stop the person asked for and is now waiting on, and a Turn still
       // waiting behind the one it displaced.
       final label = line.stopRequested
@@ -459,10 +460,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       // nothing in it is worse than either the card or the silence.
       for (final send in line.sends)
         if (!sendDrawnAsCardV1(send))
-          SendPayloadView(
-            send: send,
-            onOpenLink: onOpenLink,
-          ),
+          SendPayloadView(send: send, onOpenLink: onOpenLink),
       if (line.text.isNotEmpty)
         ShellMarkdown(text: line.text, onOpenLink: onOpenLink),
     ];
@@ -549,9 +547,10 @@ class _Bubble extends StatelessWidget {
                   vertical: 9,
                 ),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).extension<FrockLook>()?.bubbleFill(
-                    mine: mine,
-                  ) ??
+                  color:
+                      Theme.of(context)
+                          .extension<FrockLook>()
+                          ?.bubbleFill(mine: mine) ??
                       (mine
                           ? Color.alphaBlend(
                               theme.colorScheme.primary.withValues(alpha: 0.2),
@@ -570,9 +569,9 @@ class _Bubble extends StatelessWidget {
                 ),
                 child: DefaultTextStyle.merge(
                   style: FrockTheme.message(theme).copyWith(
-                    color: Theme.of(
-                      context,
-                    ).extension<FrockLook>()?.bubbleInk(mine: mine),
+                    color: Theme.of(context)
+                        .extension<FrockLook>()
+                        ?.bubbleInk(mine: mine),
                   ),
                   child: Semantics(label: mine ? 'You' : 'Bot', child: child),
                 ),
@@ -665,7 +664,12 @@ class _EmptyThread extends StatelessWidget {
     final theme = Theme.of(context);
     return SingleChildScrollView(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.fromLTRB(
+          32,
+          chatHeaderChromeTop + chatCompanionSize,
+          32,
+          32,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

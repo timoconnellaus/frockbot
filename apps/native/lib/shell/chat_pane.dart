@@ -25,11 +25,10 @@ import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
 import '../flock/avatar.dart';
-import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
-import '../voice/motion.dart';
 import 'approvals.dart';
+import 'chat_header.dart';
 import 'composer.dart';
 import 'desktop_layout.dart';
 import 'lifecycle.dart';
@@ -96,6 +95,11 @@ class ChatPane extends StatefulWidget {
   final String? background;
   final String? primary;
 
+  /// Conversation chrome laid over the thread: the fade, the companion, the
+  /// name and the doors. The pane builds the companion so gaze and the
+  /// working pose stay with the Turn; the shell wraps it in [ChatHeader].
+  final Widget Function(Widget companion)? overlay;
+
   /// What the empty thread offers to write into the composer.
   final List<StarterSuggestionV1> starters;
   const ChatPane({
@@ -125,6 +129,7 @@ class ChatPane extends StatefulWidget {
     this.dictationLevel,
     this.background,
     this.primary,
+    this.overlay,
     this.starters = const [],
   });
 
@@ -150,15 +155,6 @@ class _ChatPaneState extends State<ChatPane> {
   final hold = ValueNotifier<bool>(false);
   Timer? _holdTimer;
   final _companionKey = GlobalKey();
-
-  /// The person has text in the composer they put there. Dictation writing
-  /// the same field is not typing, and tucking then would slide the dock.
-  bool _drafting = false;
-
-  /// The dictation dock keeps the composer's rest seat until VoiceReveal
-  /// has finished hiding it.
-  bool _dictationHeld = false;
-  Timer? _dictationHoldTimer;
 
   void _pointerDown() {
     hold.value = true;
@@ -192,24 +188,7 @@ class _ChatPaneState extends State<ChatPane> {
   void initState() {
     super.initState();
     editor.text = controller.draft;
-    _drafting = editor.text.isNotEmpty;
-    _dictationHeld = widget.dictationState.active;
     controller.addListener(_update);
-  }
-
-  @override
-  void didUpdateWidget(ChatPane oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.dictationState.active) {
-      _dictationHoldTimer?.cancel();
-      _dictationHeld = true;
-    } else if (oldWidget.dictationState.active) {
-      _dictationHoldTimer?.cancel();
-      _dictationHoldTimer = Timer(voiceExitDuration, () {
-        if (!mounted) return;
-        setState(() => _dictationHeld = false);
-      });
-    }
   }
 
   /// Mirrors the controller's draft into the composer. A live composing range
@@ -225,7 +204,6 @@ class _ChatPaneState extends State<ChatPane> {
         (editor.text.isEmpty || !editor.value.composing.isValid)) {
       editor.text = controller.draft;
     }
-    if (editor.text.isEmpty) _drafting = false;
     setState(() {});
     widget.onWorkingChanged?.call(controller.activeRunId);
     if (controller.ready) AcceptanceMetrics.instance.editableShown();
@@ -252,7 +230,6 @@ class _ChatPaneState extends State<ChatPane> {
     // Starting the send and clearing before the first await leaves no rebuild
     // in between.
     final sending = controller.send(text);
-    _drafting = false;
     editor.clear();
     await sending;
     if (mounted) focus.requestFocus();
@@ -261,7 +238,6 @@ class _ChatPaneState extends State<ChatPane> {
   /// Writes a suggestion into the composer and stops there. The draft is the
   /// person's to edit and send; nothing here admits a Turn.
   void _prefill(StarterSuggestionV1 starter) {
-    _drafting = starter.draft.isNotEmpty;
     editor.value = TextEditingValue(
       text: starter.draft,
       selection: starterSelectionV1(starter.draft),
@@ -309,19 +285,13 @@ class _ChatPaneState extends State<ChatPane> {
           onHover: (event) =>
               _pointerMoved(event.position, constraints.biggest),
           onExit: (_) => gaze.value = null,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: readingWidth),
-              child: _column(context, c),
-            ),
-          ),
+          child: _column(context, c),
         ),
       ),
     );
   }
 
   Widget _column(BuildContext context, ChatController c) {
-    final avatarSize = MediaQuery.sizeOf(context).width <= 640 ? 50.0 : 64.0;
     final runs = projectRuns(c.runs);
     final working = c.activeRunId != null;
     // The Turn the companion's badge is paced by: the assistant line of the
@@ -337,209 +307,190 @@ class _ChatPaneState extends State<ChatPane> {
               )
               .lastOrNull
         : null;
+    final thread = TranscriptView(
+      background: widget.background,
+      starters: widget.starters.isEmpty
+          ? null
+          : StarterSuggestions(starters: widget.starters, onSelect: _prefill),
+      lines: [...runs, ...projectAnnouncements(c.announcements)],
+      pendingText: c.visiblePendingText,
+      loading: c.loading,
+      hasEarlier: c.before != null,
+      storageKey: 'history-${c.botId}',
+      bottomSpace: c.stoppable
+          ? null
+          : const Visibility(
+              key: ValueKey('row:stop-space'),
+              visible: false,
+              maintainSize: true,
+              maintainAnimation: true,
+              maintainState: true,
+              child: ComposerStopButton(),
+            ),
+      focusRunId: c.focusRunId,
+      onRefresh: _refresh,
+      onOpenRun: widget.onOpenRun ?? (_) {},
+      onOpenExchange: widget.onOpenExchange,
+      backgroundOf: widget.backgroundOf,
+      primaryOf: widget.primaryOf,
+      nameOf: widget.nameOf,
+      onRetryTurn: c.canSend ? _retry : null,
+      onOpenBilling: widget.onOpenBilling,
+      onMessageActions: widget.onMessageActions,
+      unreadFromMessageId: widget.unreadFromMessageId,
+      onReadLatest: widget.onReadLatest,
+    );
     return Column(
       children: [
-        if (c.connection == ConnectionState.disconnected ||
-            c.connection == ConnectionState.paused)
-          MaterialBanner(
-            content: Text(switch (c.connection) {
-              ConnectionState.paused => 'Conversation paused on this device.',
-              _ => 'You’re offline. Your Bot can keep working.',
-            }),
-            actions: [
-              identified(
-                ShellIds.reconnect,
-                TextButton(
-                  key: const ValueKey('reconnect'),
-                  onPressed: widget.onReconnect,
-                  child: const Text('Reconnect'),
-                ),
-              ),
-            ],
-          ),
-        if (widget.outOfCredit)
-          identified(
-            ShellIds.outOfCredit,
-            MaterialBanner(
-              content: const Text(
-                'Your Bots can’t reply until you subscribe or add credit.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: widget.onOpenBilling,
-                  child: const Text('Open Billing'),
-                ),
-              ],
-            ),
-          ),
         Expanded(
-          child: TranscriptView(
-            background: widget.background,
-            starters: widget.starters.isEmpty
-                ? null
-                : StarterSuggestions(
-                    starters: widget.starters,
-                    onSelect: _prefill,
-                  ),
-            lines: [...runs, ...projectAnnouncements(c.announcements)],
-            pendingText: c.visiblePendingText,
-            loading: c.loading,
-            hasEarlier: c.before != null,
-            storageKey: 'history-${c.botId}',
-            bottomSpace: c.stoppable
-                ? null
-                : const Visibility(
-                    key: ValueKey('row:stop-space'),
-                    visible: false,
-                    maintainSize: true,
-                    maintainAnimation: true,
-                    maintainState: true,
-                    child: ComposerStopButton(),
-                  ),
-            focusRunId: c.focusRunId,
-            onRefresh: _refresh,
-            onOpenRun: widget.onOpenRun ?? (_) {},
-            onOpenExchange: widget.onOpenExchange,
-            backgroundOf: widget.backgroundOf,
-            primaryOf: widget.primaryOf,
-            nameOf: widget.nameOf,
-            onRetryTurn: c.canSend ? _retry : null,
-            onOpenBilling: widget.onOpenBilling,
-            onMessageActions: widget.onMessageActions,
-            unreadFromMessageId: widget.unreadFromMessageId,
-            onReadLatest: widget.onReadLatest,
-          ),
-        ),
-        if (c.error != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Text(
-              c.error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        if (c.pending.isNotEmpty && !c.sending)
-          identified(
-            ShellIds.checkDelivery,
-            TextButton(
-              key: const ValueKey('check-delivery'),
-              onPressed: c.checking ? null : c.checkDelivery,
-              child: const Text('Check message status'),
-            ),
-          ),
-        // The companion is laid over the row rather than in it. In a Row its
-        // column was 74 points tall — the artboard plus its bottom inset —
-        // which is more than the composer at rest and less than the composer
-        // with Stop showing, so the row's height switched masters at the end
-        // of every Turn and the thread above jumped ten points. The composer
-        // alone sets the height now; the transcript's reserved Stop space
-        // keeps the thread still, as it did before the companion arrived.
-        //
-        // A phone cannot keep that column and a usable field at once. The
-        // first character slides the composer into his seat and he leaves;
-        // an empty draft — send, or clearing — gives him back. A desk has
-        // the room, so he stays. Dictation writing the field is not typing:
-        // the capture has to keep the seat the composer had at rest.
-        Builder(
-          builder: (context) {
-            final dictating = widget.dictationState.active || _dictationHeld;
-            final tuck =
-                MediaQuery.sizeOf(context).width <= 640 &&
-                _drafting &&
-                !dictating;
-            // Dictation occupies the composer in place; sliding the field
-            // under a capture would move the strip. Dropping in is instant
-            // so a capture that starts on a tucked row still lands where
-            // the composer sat at rest.
-            final motion = dictating
-                ? Duration.zero
-                : FrockTheme.motion(context, FrockTheme.enter);
-            return Stack(
-              clipBehavior: Clip.none,
-              children: [
-                AnimatedPadding(
-                  duration: motion,
-                  curve: Curves.easeOutCubic,
-                  padding: EdgeInsets.only(left: tuck ? 0 : avatarSize),
-                  child: _composer(c),
-                ),
-                // The field sits above the system's bottom inset (the
-                // composer keeps it in a SafeArea); the companion sits
-                // above the same inset, or on a phone it hung a gesture
-                // bar's height below the field's baseline.
-                AnimatedPositioned(
-                  duration: motion,
-                  curve: Curves.easeOutCubic,
-                  key: _companionKey,
-                  left: tuck ? -avatarSize : 6,
-                  bottom: 10 + MediaQuery.paddingOf(context).bottom,
-                  child: IgnorePointer(
-                    ignoring: tuck,
-                    child: AnimatedOpacity(
-                      duration: motion,
-                      curve: Curves.easeOutCubic,
-                      opacity: tuck ? 0 : 1,
-                      child: ExcludeSemantics(
-                        excluding: tuck,
-                        // The companion is the working indicator: while a
-                        // Turn runs it takes the working pose and wears
-                        // the typing badge, paced by the Turn's own
-                        // stream. Nothing in the thread says "thinking"
-                        // any more; the character does.
-                        child: working
-                            ? identified(
-                                ShellIds.workingIndicator,
-                                Semantics(
-                                  container: true,
-                                  liveRegion: true,
-                                  label: 'Working',
-                                  child: WorkingPace(
-                                    line: runningLine,
-                                    builder: (context, tempo) =>
-                                        CharacterAvatar(
-                                          size: avatarSize,
-                                          characterId: widget.background,
-                                          primary: widget.primary,
-                                          gaze: gaze,
-                                          hold: hold,
-                                          motion: CharacterMotion.active,
-                                          activity: CharacterActivity.working,
-                                          working: true,
-                                          tempo: tempo,
-                                        ),
-                                  ),
-                                ),
-                              )
-                            : CharacterAvatar(
-                                size: avatarSize,
-                                characterId: widget.background,
-                                primary: widget.primary,
-                                gaze: gaze,
-                                hold: hold,
-                                // A live artboard at rest, so the eyes can
-                                // follow the pointer and the character can
-                                // twitch between Turns. Quiet, not active:
-                                // the ticker runs only for a moment after
-                                // a change and stops again, which is what
-                                // keeps an open chat from redrawing the
-                                // window sixty times a second. The
-                                // artboard takes no pointer and no focus,
-                                // so the field beside it keeps its
-                                // keystrokes (errors.e2e, skill-menu.e2e).
-                                motion: CharacterMotion.quiet,
-                                activity: CharacterActivity.idle,
-                                semanticsLabel: 'Bot is ready',
-                              ),
+          child: Stack(
+            children: [
+              Column(
+                children: [
+                  if (c.connection == ConnectionState.disconnected ||
+                      c.connection == ConnectionState.paused)
+                    MaterialBanner(
+                      content: Text(switch (c.connection) {
+                        ConnectionState.paused =>
+                          'Conversation paused on this device.',
+                        _ => 'You’re offline. Your Bot can keep working.',
+                      }),
+                      actions: [
+                        identified(
+                          ShellIds.reconnect,
+                          TextButton(
+                            key: const ValueKey('reconnect'),
+                            onPressed: widget.onReconnect,
+                            child: const Text('Reconnect'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  if (widget.outOfCredit)
+                    identified(
+                      ShellIds.outOfCredit,
+                      MaterialBanner(
+                        content: const Text(
+                          'Your Bots can’t reply until you subscribe or add credit.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: widget.onOpenBilling,
+                            child: const Text('Open Billing'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Expanded(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: readingWidth,
+                        ),
+                        child: thread,
                       ),
                     ),
                   ),
-                ),
-              ],
-            );
-          },
+                  if (c.error != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: Text(
+                        c.error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  if (c.pending.isNotEmpty && !c.sending)
+                    identified(
+                      ShellIds.checkDelivery,
+                      TextButton(
+                        key: const ValueKey('check-delivery'),
+                        onPressed: c.checking ? null : c.checkDelivery,
+                        child: const Text('Check message status'),
+                      ),
+                    ),
+                ],
+              ),
+              Positioned.fill(
+                child: _chrome(_companion(working: working, line: runningLine)),
+              ),
+            ],
+          ),
+        ),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: readingWidth),
+            child: _composer(c),
+          ),
         ),
       ],
     );
+  }
+
+  /// The fade and the pills wrap [companion] when the shell passed chrome;
+  /// pane-only tests still get the character at the same inset.
+  Widget _chrome(Widget companion) {
+    if (widget.overlay != null) return widget.overlay!(companion);
+    return Align(
+      alignment: Alignment.topLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(
+          top: chatHeaderChromeTop,
+          left: chatHeaderChromeSide,
+        ),
+        child: IgnorePointer(child: companion),
+      ),
+    );
+  }
+
+  Widget _companion({required bool working, required TranscriptLine? line}) {
+    final avatar = working
+        ? identified(
+            ShellIds.workingIndicator,
+            Semantics(
+              container: true,
+              liveRegion: true,
+              label: 'Working',
+              child: WorkingPace(
+                line: line,
+                builder: (context, tempo) => CharacterAvatar(
+                  size: chatCompanionSize,
+                  characterId: widget.background,
+                  primary: widget.primary,
+                  gaze: gaze,
+                  hold: hold,
+                  cropToInk: true,
+                  motion: CharacterMotion.active,
+                  activity: CharacterActivity.working,
+                  working: true,
+                  tempo: tempo,
+                ),
+              ),
+            ),
+          )
+        : CharacterAvatar(
+            size: chatCompanionSize,
+            characterId: widget.background,
+            primary: widget.primary,
+            gaze: gaze,
+            hold: hold,
+            cropToInk: true,
+            // A live artboard at rest, so the eyes can follow the pointer
+            // and the character can twitch between Turns. Quiet, not
+            // active: the ticker runs only for a moment after a change and
+            // stops again, which is what keeps an open chat from redrawing
+            // the window sixty times a second. The artboard takes no
+            // pointer and no focus, so the field below it keeps its
+            // keystrokes (errors.e2e, skill-menu.e2e).
+            motion: CharacterMotion.quiet,
+            activity: CharacterActivity.idle,
+            semanticsLabel: 'Bot is ready',
+          );
+    return KeyedSubtree(key: _companionKey, child: avatar);
   }
 
   Widget _composer(ChatController c) => Composer(
@@ -554,8 +505,6 @@ class _ChatPaneState extends State<ChatPane> {
     onStop: c.stop,
     onChanged: (value) {
       unawaited(c.saveDraft(value));
-      final drafting = value.isNotEmpty;
-      if (drafting != _drafting) setState(() => _drafting = drafting);
     },
     skills: skills,
     onDictate: widget.onDictate,
@@ -576,7 +525,6 @@ class _ChatPaneState extends State<ChatPane> {
     focus.dispose();
     gaze.dispose();
     _holdTimer?.cancel();
-    _dictationHoldTimer?.cancel();
     hold.dispose();
     super.dispose();
   }
@@ -627,6 +575,9 @@ class ConversationView extends StatefulWidget {
   final String? background;
   final String? primary;
 
+  /// Conversation chrome laid over the thread. See [ChatPane.overlay].
+  final Widget Function(Widget companion)? overlay;
+
   /// Whether this is General, whose empty thread offers starter suggestions.
   final bool general;
   final int featuresRevision;
@@ -660,6 +611,7 @@ class ConversationView extends StatefulWidget {
     this.dictationLevel,
     this.background,
     this.primary,
+    this.overlay,
     this.general = false,
     this.featuresRevision = 0,
   });
@@ -761,6 +713,7 @@ class _ConversationViewState extends State<ConversationView>
         child: ChatPane(
           background: widget.background,
           primary: widget.primary,
+          overlay: widget.overlay,
           starters: starters,
           controller: session.controller,
           onReconnect: session.channel.connect,

@@ -29,9 +29,10 @@ still need to be established.
   characters plus curated colours.
 - The persisted `AvatarAppearanceV1` contains `characterId` and `primary`.
   Registration, templates, Bot-created Bots and identity updates share it.
-- Product surfaces include sidebar rows and groups, the persistent composer
-  companion, settings, search, recovery and sign-in. The chat header names the
-  Bot without drawing it, and the thread has no working row: the composer
+- Product surfaces include sidebar rows and groups, the conversation companion
+  in the header overlay, settings, search, recovery and sign-in. The header
+  draws the character cropped to ink over a fade, with frosted name, Computer
+  and panel pills on the right, and the thread has no working row: the
   companion is the working indicator and wears the typing badge.
 - Realtime voice sends `asked`, `answering` and `finished` delegation events.
   The consulted Bot rises into the voice footer, changes activity while its
@@ -46,8 +47,8 @@ still need to be established.
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bot list        | Mostly still; independently timed twitch every 7–18 seconds                                                                                           |
 | Bot row hover   | The whole row triggers one restrained hello on desktop/web                                                                                            |
-| Bottom of chat  | A quiet live artboard at rest; the working pose and typing badge while a Turn runs                                                                    |
-| Mobile chat     | Same activity without pointer tracking; sits above the system's bottom inset                                                                          |
+| Chat header     | A quiet live artboard at rest, cropped to ink; the working pose and typing badge while a Turn runs. Existing Rive motion, not a bounce. |
+| Mobile chat     | Same activity without pointer tracking; sits at the top of the thread under the status bar                                            |
 | Chat gaze       | The eyes follow the pointer anywhere over the conversation pane, held still for 900 ms after a pointer down so the composer keeps its first keystroke |
 | Picker/settings | Animated preview of character and selected colour                                                                                                     |
 | Voice footer    | The delegated Bot by its character alone: rise/fade/scale handoff, thinking while asked, content while answering, success on finish                   |

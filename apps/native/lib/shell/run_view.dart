@@ -180,7 +180,7 @@ Duration workingBadgePeriod(WorkingPacePlan plan) {
 
 /// The tempo of a running Turn, read off its line: fast while tokens stream,
 /// slow while the model is quiet, stopped once the Turn ends. Whatever wears
-/// the typing badge — the companion beside the composer — takes its period
+/// the typing badge — the companion in the conversation header — takes its period
 /// from here, so the badge's pace is the Turn's and not a metronome.
 class WorkingPace extends StatefulWidget {
   /// The running Turn's line, or nothing while the submission is still being
@@ -262,7 +262,7 @@ class _WorkingPaceState extends State<WorkingPace> {
 }
 
 /// The words a running Turn earns in the thread — and only those. A plain
-/// running Turn draws nothing here: the companion beside the composer wears
+/// running Turn draws nothing here: the companion in the conversation header wears
 /// the typing badge and the working pose. Two states still need a line of
 /// text above the composer: a Stop the person asked for and is waiting on, and
 /// a Turn waiting behind the one it displaced.

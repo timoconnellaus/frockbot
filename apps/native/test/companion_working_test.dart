@@ -230,7 +230,7 @@ void main() {
     addTearDown(mouse.removePointer);
     // Up and to the right of the character: the eyes turn that way, and a
     // point well short of the pane's far corner is not yet a full turn.
-    await mouse.moveTo(companion + const Offset(200, -120));
+    await mouse.moveTo(companion + const Offset(200, -40));
     await tester.pump();
     expect(gaze.value, isNotNull);
     expect(gaze.value!.dx, greaterThan(0));
@@ -239,7 +239,9 @@ void main() {
     // The far corner is a full turn, clamped rather than beyond it.
     await mouse.moveTo(const Offset(1279, 1));
     await tester.pump();
-    expect(gaze.value, const Offset(1, -1));
+    expect(gaze.value, isNotNull);
+    expect(gaze.value!.dx, 1);
+    expect(gaze.value!.dy, lessThan(0));
     // Off the pane, nowhere to look.
     await mouse.moveTo(const Offset(-10, -10));
     await tester.pump();

@@ -713,11 +713,14 @@ compaction bounds model context; there is no conversation creation or switching
 API. Older extra conversations are no longer exposed. The owner accepted their
 removal without migration on 2026-09-08.
 
-The native header is one row and three things at every tier: the way back to
-the Bot list (a phone's), the Bot's name, and the Computer — plus the panel's
-own switch where there is a panel to hide. The name is the door to the Bot page,
-drawn as a pill on a phone and as a text button that fills on hover and focus at
-a desk; the Computer icon takes a cooler blue while the Bot is driving one.
+The native conversation chrome is an overlay, not a bar: a fade down from the
+top of the thread, the Bot's companion cropped to ink at the top-left, and
+frosted pills on the far right — the Bot's name, the Computer, and the panel's
+own switch where there is a panel to hide. A phone keeps Back as a pill on the
+left at the same inset. The name is the door to the Bot page; the Computer icon
+takes a cooler blue while the Bot is driving one. A call still uses a solid bar:
+the thread is gone, and the bar is the name, a mark that says why, and the
+Computer.
 Routines, Plugins, Settings, Applets and the doors a Bot's Packages declare are
 rows on the Bot page rather than icons here: five doors in a bar was the same
 five doors the panel could have named, and a Package adding a sixth made the bar
@@ -729,14 +732,14 @@ what it is showing, and the close empties the stack. A Bot switch empties it too
 On a phone the same keys push routes instead, which is the same idea drawn
 twice.
 Bot messages have no avatar or tool-count row, and the thread draws no working
-row: the Bot's companion beside the composer takes the working pose and wears
+row: the Bot's companion in the conversation header takes the working pose and wears
 the typing badge while a Turn runs, and the thread only says something when a
 Stop is being waited on or a Turn is queued behind the one it displaced.
 A message that crossed to or from a counterpart — another of the User's Bots,
 or the voice session — is one centred marker in the thread, "Messaged Codex
 Watch" or "Message from Xero Books", wearing the counterpart's own character
 and, while queued, stopped or unanswered, its status; a running exchange says
-nothing there, because the Bot's companion beside the composer already says it.
+nothing there, because the Bot's companion in the header already says it.
 The words are never in the thread: the marker opens a view-only chat,
 "General ⇄ Xero Books", that lists every exchange between the two in both
 directions, each request under the name that sent it and each answer under
@@ -769,7 +772,7 @@ projected by `projectAnnouncements` and ordered by their recorded timestamps.
 `avatar.dart` is `CharacterAvatar`, one animated Rive artboard per Bot drawn
 from the cast `apps/native/assets/characters/` bundles, and the same character
 is drawn wherever a Bot is: the sidebar row, its pinned tile, the thread, the
-composer companion and Bot settings, each from the `characterId` and `primary`
+conversation companion and Bot settings, each from the `characterId` and `primary`
 the directory already returns. The cast and the motion contract are
 [the character integration note](design/character-app-integration.md).
 

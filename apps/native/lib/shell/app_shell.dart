@@ -2322,6 +2322,32 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         bot != null &&
         voiceBotId == bot.botId.value;
     final rightPanel = _rightPanel();
+    ChatHeader conversationHeader({Widget? companion}) => ChatHeader(
+      name: _name(bot!),
+      companion: companion,
+      connection: selectedConnection,
+      textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
+      // A phone's bar is GrokBot's three things; the wider tiers
+      // name each entry of the right panel beside the title.
+      //
+      // In voice mode there is no Back (ADR 0029): the
+      // way out of the Bot you are talking to is to end
+      // the call, and a control that left the page with
+      // the call still running would be a trap.
+      voiceMode: voiceHere,
+      onBack: single && !voiceHere ? _openBack : null,
+      phone: single,
+      onOpenBot: () => _openPanel('bot-page'),
+      computerRunning:
+          computer?.available == true &&
+          (computer!.state.running || _botComputerRunning),
+      onComputer: computer?.available == true
+          ? () => unawaited(_openComputerViewer())
+          : null,
+      onTogglePanel: single || rightPanel == null ? null : _togglePanel,
+      panelShown: tier == ShellTier.triple ? !panelCollapsed : panelOpen,
+    );
+
     // Every input the badge reads — the fan-out, the directory, and focus —
     // repaints the shell, so the icon is reconciled on the same build that
     // redraws the sidebar.
@@ -2353,42 +2379,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 fit: StackFit.expand,
                 children: [
                   ShellLayout(
-                    header: bot == null
+                    header: bot == null || !voiceHere
                         ? null
                         : _maybeThemedPreferred(
                             theme: botTheme,
                             wrap: ownLook,
-                            child: ChatHeader(
-                              name: _name(bot),
-                              connection: selectedConnection,
-                              textScale:
-                                  MediaQuery.textScalerOf(context).scale(14) /
-                                  14,
-                              // A phone's bar is GrokBot's three things; the wider tiers
-                              // name each entry of the right panel beside the title.
-                              //
-                              // In voice mode there is no Back (ADR 0029): the
-                              // way out of the Bot you are talking to is to end
-                              // the call, and a control that left the page with
-                              // the call still running would be a trap.
-                              voiceMode: voiceHere,
-                              onBack: single && !voiceHere ? _openBack : null,
-                              phone: single,
-                              onOpenBot: () => _openPanel('bot-page'),
-                              computerRunning:
-                                  computer?.available == true &&
-                                  (computer!.state.running ||
-                                      _botComputerRunning),
-                              onComputer: computer?.available == true
-                                  ? () => unawaited(_openComputerViewer())
-                                  : null,
-                              onTogglePanel: single || rightPanel == null
-                                  ? null
-                                  : _togglePanel,
-                              panelShown: tier == ShellTier.triple
-                                  ? !panelCollapsed
-                                  : panelOpen,
-                            ),
+                            child: conversationHeader(),
                           ),
                     conversationOpen: bot != null && conversationOpen,
                     onBack: _openBack,
@@ -2507,6 +2503,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                   ?.unreadFromMessageId,
                               background: _background(bot.botId.value),
                               primary: _primary(bot.botId.value),
+                              overlay: (companion) =>
+                                  conversationHeader(companion: companion),
                               onDictate: () => unawaited(_dictate()),
                               onStopDictation: () =>
                                   unawaited(_stopDictation()),

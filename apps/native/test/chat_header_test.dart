@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart'
     show debugDefaultTargetPlatformOverride;
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
+import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_icons.dart';
 import 'package:frockbot_native/shell/desktop_layout.dart';
@@ -12,77 +12,96 @@ import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'shell_layout_test.dart' show byIdentifier;
 
+Widget host(
+  ChatHeader header, {
+  bool voice = false,
+  Size size = const Size(1200, 900),
+  TextScaler scaler = TextScaler.noScaling,
+  bool reducedMotion = false,
+}) => MaterialApp(
+  theme: FrockTheme.theme(Brightness.dark),
+  home: MediaQuery(
+    data: MediaQueryData(
+      size: size,
+      textScaler: scaler,
+      disableAnimations: reducedMotion,
+    ),
+    child: Scaffold(
+      appBar: voice ? header : null,
+      body: voice
+          ? const SizedBox.expand()
+          : Stack(fit: StackFit.expand, children: [header]),
+    ),
+  ),
+);
+
 void main() {
-  testWidgets(
-    'only slow recovery adds an accessible dot to the fixed header avatar',
-    (tester) async {
-      Widget header(ConnectionState connection, {bool reducedMotion = false}) =>
-          MaterialApp(
-            theme: FrockTheme.theme(Brightness.dark),
-            home: MediaQuery(
-              data: MediaQueryData(disableAnimations: reducedMotion),
-              child: Scaffold(
-                appBar: ChatHeader(
-                  name: 'Rosemary',
-                  connection: connection,
-                  onOpenBot: () {},
-                ),
-              ),
-            ),
-          );
+  test('pixel ink at 88 is the silhouette, not the canvas', () {
+    final box = characterCatalogV1['pixel']!.ink.boxForHeight(
+      chatCompanionSize,
+    );
+    expect(box.height, chatCompanionSize);
+    expect(box.width, closeTo(chatCompanionSize * 447 / 585, 0.01));
+  });
 
-      await tester.pumpWidget(header(ConnectionState.initializing));
-      await tester.pump(const Duration(seconds: 2));
-      expect(find.byTooltip('Updating conversation'), findsNothing);
+  testWidgets('only slow recovery adds an accessible dot to the header name', (
+    tester,
+  ) async {
+    Widget header(ConnectionState connection, {bool reducedMotion = false}) =>
+        host(
+          ChatHeader(
+            name: 'Rosemary',
+            connection: connection,
+            onOpenBot: () {},
+          ),
+          reducedMotion: reducedMotion,
+        );
 
-      await tester.pumpWidget(header(ConnectionState.reconnecting));
-      expect(find.byTooltip('Updating conversation'), findsNothing);
-      await tester.pump(const Duration(milliseconds: 1499));
-      expect(find.byTooltip('Updating conversation'), findsNothing);
-      await tester.pump(const Duration(milliseconds: 1));
-      expect(find.byTooltip('Updating conversation'), findsOneWidget);
-      expect(find.bySemanticsLabel('Updating conversation'), findsOneWidget);
-      expect(find.byKey(const ValueKey('conversation-update')), findsOneWidget);
-      expect(find.text('Updating'), findsNothing);
-      expect(find.byType(MaterialBanner), findsNothing);
-      expect(
-        tester.widget<AppBar>(find.byType(AppBar)).preferredSize.height,
-        52,
-      );
+    await tester.pumpWidget(header(ConnectionState.initializing));
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.byTooltip('Updating conversation'), findsNothing);
 
-      await tester.pumpWidget(header(ConnectionState.connected));
-      expect(find.byTooltip('Updating conversation'), findsNothing);
-      expect(find.byKey(const ValueKey('conversation-update')), findsNothing);
+    await tester.pumpWidget(header(ConnectionState.reconnecting));
+    expect(find.byTooltip('Updating conversation'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 1499));
+    expect(find.byTooltip('Updating conversation'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(find.byTooltip('Updating conversation'), findsOneWidget);
+    expect(find.bySemanticsLabel('Updating conversation'), findsOneWidget);
+    expect(find.byKey(const ValueKey('conversation-update')), findsOneWidget);
+    expect(find.text('Updating'), findsNothing);
+    expect(find.byType(MaterialBanner), findsNothing);
+    expect(find.byType(AppBar), findsNothing);
 
-      await tester.pumpWidget(
-        header(ConnectionState.reconnecting, reducedMotion: true),
-      );
-      await tester.pump(const Duration(milliseconds: 1500));
-      final fade = tester.widget<FadeTransition>(
-        find.byKey(const ValueKey('conversation-update')),
-      );
-      expect(fade.opacity.value, 1);
-      await tester.pump(const Duration(milliseconds: 550));
-      expect(fade.opacity.value, 1);
+    await tester.pumpWidget(header(ConnectionState.connected));
+    expect(find.byTooltip('Updating conversation'), findsNothing);
+    expect(find.byKey(const ValueKey('conversation-update')), findsNothing);
 
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+    await tester.pumpWidget(
+      header(ConnectionState.reconnecting, reducedMotion: true),
+    );
+    await tester.pump(const Duration(milliseconds: 1500));
+    final fade = tester.widget<FadeTransition>(
+      find.byKey(const ValueKey('conversation-update')),
+    );
+    expect(fade.opacity.value, 1);
+    await tester.pump(const Duration(milliseconds: 550));
+    expect(fade.opacity.value, 1);
+
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('computer turns blue when running and resets when stopped', (
     tester,
   ) async {
     for (final running in [false, true, false]) {
       await tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: Scaffold(
-            appBar: ChatHeader(
-              name: 'Bot',
-              computerRunning: running,
-              onComputer: () {},
-              onOpenBot: () {},
-            ),
+        host(
+          ChatHeader(
+            name: 'Bot',
+            computerRunning: running,
+            onComputer: () {},
+            onOpenBot: () {},
           ),
         ),
       );
@@ -101,24 +120,21 @@ void main() {
   });
 
   testWidgets(
-    'the panel switch is the last thing in the bar and says which way',
+    'the panel switch is the last thing in the chrome and says which way',
     (tester) async {
       tester.view.physicalSize = const Size(1200, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       var toggles = 0;
-      Widget header({required bool shown}) => MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: Scaffold(
-          appBar: ChatHeader(
-            name: 'Bob',
-            textScale: 1,
-            onOpenBot: () {},
-            onComputer: () {},
-            onTogglePanel: () => toggles++,
-            panelShown: shown,
-          ),
+      Widget header({required bool shown}) => host(
+        ChatHeader(
+          name: 'Bob',
+          textScale: 1,
+          onOpenBot: () {},
+          onComputer: () {},
+          onTogglePanel: () => toggles++,
+          panelShown: shown,
         ),
       );
       await tester.pumpWidget(header(shown: true));
@@ -139,79 +155,117 @@ void main() {
     },
   );
 
-  for (final width in [320.0, 390.0]) {
-    for (final scale in [0.85, 1.0, 2.0, 3.0]) {
-      testWidgets('three things in the bar at $width px and ${scale}x text', (
-        tester,
-      ) async {
-        tester.view.physicalSize = Size(width, 900);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-        final opened = <String>[];
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: FrockTheme.theme(Brightness.dark),
-            home: MediaQuery(
-              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
-              child: Scaffold(
-                appBar: ChatHeader(
-                  name: 'My very long research assistant',
-                  textScale: scale,
-                  connection: ConnectionState.reconnecting,
-                  onOpenBot: () => opened.add('Bot'),
-                  onComputer: () => opened.add('Computer'),
-                  onTogglePanel: () => opened.add('Panel'),
-                ),
-              ),
+  testWidgets(
+    'the overlay fades the thread and puts three pills on the right',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        host(
+          ChatHeader(
+            name: 'Pixel',
+            onOpenBot: () {},
+            onComputer: () {},
+            onTogglePanel: () {},
+            companion: CharacterAvatar(
+              size: chatCompanionSize,
+              cropToInk: true,
+              characterId: 'pixel',
+              motion: CharacterMotion.still,
+              semanticsLabel: 'Bot is ready',
             ),
           ),
-        );
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-        await tester.tap(byIdentifier(ShellIds.botPanelToggle));
-        await tester.tap(find.byTooltip('Computer'));
-        await tester.tap(byIdentifier(ShellIds.rightPanelToggle));
-        expect(opened, ['Bot', 'Computer', 'Panel']);
-        // No strip under the bar, and no overflow menu behind it: the icons
-        // that used to be here are rows on the Bot's page now.
-        expect(tester.widget<AppBar>(find.byType(AppBar)).bottom, isNull);
-        expect(find.byTooltip('Routines'), findsNothing);
-        expect(find.byTooltip('Plugins'), findsNothing);
-        expect(find.byTooltip('Bot settings'), findsNothing);
-        expect(find.byTooltip('Applets'), findsNothing);
-        expect(find.byType(PopupMenuButton<String>), findsNothing);
-      });
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('chat-header-fade')), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('chat-header-fade'))).height,
+        chatHeaderFadeHeight,
+      );
+      final companion = find.bySemanticsLabel('Bot is ready');
+      expect(tester.getTopLeft(companion).dy, chatHeaderChromeTop);
+      expect(tester.getTopLeft(companion).dx, chatHeaderChromeSide);
+      expect(tester.getSize(companion).height, chatCompanionSize);
+      expect(
+        tester.getTopLeft(find.byTooltip('Open Pixel')).dx,
+        greaterThan(tester.getTopRight(companion).dx),
+      );
+      expect(
+        tester.getTopRight(find.byTooltip('Show the panel')).dx,
+        closeTo(1200 - chatHeaderChromeSide, 0.5),
+      );
+      expect(
+        tester.getTopLeft(find.byTooltip('Open Pixel')).dy,
+        chatHeaderChromeTop,
+      );
+      expect(find.byType(AppBar), findsNothing);
+    },
+  );
+
+  for (final width in [320.0, 390.0]) {
+    for (final scale in [0.85, 1.0, 2.0, 3.0]) {
+      testWidgets(
+        'three things in the chrome at $width px and ${scale}x text',
+        (tester) async {
+          tester.view.physicalSize = Size(width, 900);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final opened = <String>[];
+          await tester.pumpWidget(
+            host(
+              ChatHeader(
+                name: 'My very long research assistant',
+                textScale: scale,
+                connection: ConnectionState.reconnecting,
+                onOpenBot: () => opened.add('Bot'),
+                onComputer: () => opened.add('Computer'),
+                onTogglePanel: () => opened.add('Panel'),
+              ),
+              size: Size(width, 900),
+              scaler: TextScaler.linear(scale),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          await tester.tap(byIdentifier(ShellIds.botPanelToggle));
+          await tester.tap(find.byTooltip('Computer'));
+          await tester.tap(byIdentifier(ShellIds.rightPanelToggle));
+          expect(opened, ['Bot', 'Computer', 'Panel']);
+          expect(find.byType(AppBar), findsNothing);
+          expect(find.byTooltip('Routines'), findsNothing);
+          expect(find.byTooltip('Plugins'), findsNothing);
+          expect(find.byTooltip('Bot settings'), findsNothing);
+          expect(find.byTooltip('Applets'), findsNothing);
+          expect(find.byType(PopupMenuButton<String>), findsNothing);
+        },
+      );
     }
   }
 
   for (final scale in [1.0, 2.0]) {
     testWidgets(
-      'on a phone the bar is Back, the Bot, and the Computer at ${scale}x',
+      'on a phone the chrome is Back, the Bot, and the Computer at ${scale}x',
       (tester) async {
-        // GrokBot's bar: three things. Routines, Applets and the Package pages
-        // are rows on the Bot's page, reached from its name.
         tester.view.physicalSize = const Size(390, 900);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         final opened = <String>[];
         await tester.pumpWidget(
-          MaterialApp(
-            theme: FrockTheme.theme(Brightness.dark),
-            home: MediaQuery(
-              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
-              child: Scaffold(
-                appBar: ChatHeader(
-                  name: 'My very long research assistant',
-                  textScale: scale,
-                  phone: true,
-                  onBack: () => opened.add('Bots'),
-                  onOpenBot: () => opened.add('Bot'),
-                  onComputer: () => opened.add('Computer'),
-                ),
-              ),
+          host(
+            ChatHeader(
+              name: 'My very long research assistant',
+              textScale: scale,
+              phone: true,
+              onBack: () => opened.add('Bots'),
+              onOpenBot: () => opened.add('Bot'),
+              onComputer: () => opened.add('Computer'),
             ),
+            size: const Size(390, 900),
+            scaler: TextScaler.linear(scale),
           ),
         );
         await tester.pumpAndSettle();
@@ -223,6 +277,18 @@ void main() {
         await tester.tap(byIdentifier(ShellIds.botPanelToggle));
         await tester.tap(find.byTooltip('Computer'));
         expect(opened, ['Bots', 'Bot', 'Computer']);
+        expect(
+          tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,
+          chatHeaderChromeTop,
+        );
+        expect(
+          tester
+              .getTopLeft(
+                find.byTooltip('Open My very long research assistant'),
+              )
+              .dy,
+          chatHeaderChromeTop,
+        );
       },
     );
   }
@@ -232,12 +298,7 @@ void main() {
   ) async {
     var opened = 0;
     await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: Scaffold(
-          appBar: ChatHeader(name: 'Rosemary', onOpenBot: () => opened += 1),
-        ),
-      ),
+      host(ChatHeader(name: 'Rosemary', onOpenBot: () => opened += 1)),
     );
     await tester.pump();
     expect(find.byTooltip('Open Rosemary'), findsOneWidget);
@@ -251,12 +312,7 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       try {
         await tester.pumpWidget(
-          MaterialApp(
-            theme: FrockTheme.theme(Brightness.dark),
-            home: const Scaffold(
-              appBar: ChatHeader(name: 'Bob', voiceMode: true),
-            ),
-          ),
+          host(const ChatHeader(name: 'Bob', voiceMode: true), voice: true),
         );
         await tester.pump();
         expect(
@@ -281,12 +337,7 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
       await tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: const Scaffold(
-            appBar: ChatHeader(name: 'Bob', voiceMode: true),
-          ),
-        ),
+        host(const ChatHeader(name: 'Bob', voiceMode: true), voice: true),
       );
       await tester.pump();
       expect(tester.getTopLeft(find.text('Bob')).dx, 14);
@@ -301,15 +352,15 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       try {
         await tester.pumpWidget(
-          MaterialApp(
-            theme: FrockTheme.theme(Brightness.dark),
-            home: const Scaffold(appBar: ChatHeader(name: 'Bob')),
-          ),
+          host(ChatHeader(name: 'Bob', onOpenBot: () {})),
         );
         await tester.pump();
-        expect(tester.getTopLeft(find.text('Bob')).dx, 14);
         expect(
-          tester.getTopLeft(find.text('Bob')).dy,
+          tester.getTopLeft(find.byTooltip('Open Bob')).dy,
+          chatHeaderChromeTop,
+        );
+        expect(
+          tester.getTopLeft(find.byTooltip('Open Bob')).dy,
           lessThan(desktopTitleBarBand),
         );
       } finally {
@@ -324,18 +375,26 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       try {
         await tester.pumpWidget(
-          MaterialApp(
-            theme: FrockTheme.theme(Brightness.dark),
-            home: const Scaffold(appBar: ChatHeader(name: 'Bob', phone: true)),
+          host(
+            ChatHeader(
+              name: 'Bob',
+              phone: true,
+              onBack: () {},
+              onOpenBot: () {},
+            ),
           ),
         );
         await tester.pump();
         expect(
-          tester.getTopLeft(find.text('Bob')).dy,
-          greaterThanOrEqualTo(desktopTitleBarBand),
+          tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,
+          chatHeaderChromeTop + desktopTitleBarBand,
         );
         expect(
-          tester.getTopLeft(find.text('Bob')).dx,
+          tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dx,
+          chatHeaderChromeSide,
+        );
+        expect(
+          tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dx,
           lessThan(desktopTrafficLightLeading),
         );
       } finally {
@@ -344,35 +403,31 @@ void main() {
     },
   );
 
-  testWidgets('a phone wears the pill; a desk fills it on hover', (
+  testWidgets('the name is a frosted pill on a phone and at a desk', (
     tester,
   ) async {
-    Widget header({required bool phone}) => MaterialApp(
-      theme: FrockTheme.theme(Brightness.dark),
-      home: Scaffold(
-        appBar: ChatHeader(name: 'Rosemary', phone: phone, onOpenBot: () {}),
-      ),
-    );
-    Color? fill() => tester
-        .widget<TextButton>(find.byType(TextButton))
-        .style
-        ?.backgroundColor
-        ?.resolve(const <WidgetState>{});
+    Widget header({required bool phone}) =>
+        host(ChatHeader(name: 'Rosemary', phone: phone, onOpenBot: () {}));
+    Color? fill() {
+      final material = tester.widget<Material>(
+        find
+            .descendant(
+              of: find.byTooltip('Open Rosemary'),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      return material.color;
+    }
 
     await tester.pumpWidget(header(phone: true));
     await tester.pump();
     expect(fill(), isNot(Colors.transparent));
+    expect(fill()!.a, lessThan(1));
 
     await tester.pumpWidget(header(phone: false));
     await tester.pump();
-    expect(fill(), Colors.transparent);
-
-    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await pointer.addPointer(
-      location: tester.getCenter(find.byType(TextButton)),
-    );
-    addTearDown(pointer.removePointer);
-    await tester.pump();
     expect(fill(), isNot(Colors.transparent));
+    expect(fill()!.a, lessThan(1));
   });
 }
