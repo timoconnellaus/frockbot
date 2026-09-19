@@ -7,9 +7,11 @@
 // builds the frames and decodes the ones that come back, and
 // `apps/cloudflare/src/voice-assistant.ts` does the I/O.
 //
-// Every shape here was observed against the live API on 2026-09-17 and is
-// written down in `docs/voice-gemini-probe.md`. Where the API disagreed with
-// ADR 0031 the API won; the two places it did are commented below.
+// Almost every shape here was observed against the live API on 2026-09-17 and
+// is written down in `docs/voice-gemini-probe.md`; `contextWindowCompression`
+// is the exception, added after that run and not exercised against the live
+// endpoint since. Where the API disagreed with ADR 0031 the API won; the two
+// places it did are commented below.
 
 /** The model one call runs on. Named with the `models/` prefix the API wants. */
 export const GEMINI_LIVE_MODEL_V1 = "models/gemini-3.8-live";
@@ -158,6 +160,9 @@ export function buildGeminiLiveSetupV1(
       sessionResumption: options.resumptionHandle
         ? { handle: options.resumptionHandle }
         : {},
+      // Resumption reconnects the transport; compression lets the resumed
+      // conversation itself outlive Gemini's uncompressed audio window.
+      contextWindowCompression: { slidingWindow: {} },
       ...(tools.length > 0 ? { tools } : {}),
     },
   };

@@ -298,6 +298,52 @@ async function scenarioLanguageCode(): Promise<void> {
   session.close();
 }
 
+/**
+ * The one field production sends that no other scenario does. Every real
+ * call's setup carries it, so a rejection here is every call — and because
+ * `enableAffectiveDialog` was accepted at setup and only failed on the first
+ * content frame, the turn afterwards is part of the check.
+ */
+async function scenarioCompression(): Promise<void> {
+  log("\n=== setup: contextWindowCompression.slidingWindow ===");
+  const session = new ProbeSession();
+  await session.open();
+  session.send({
+    setup: {
+      ...BASE_SETUP_V1,
+      contextWindowCompression: { slidingWindow: {} },
+    },
+  });
+  const complete = await session.wait(
+    (message) => has(message, "setupComplete"),
+    15_000,
+  );
+  log("setupComplete:", complete ? JSON.stringify(complete) : "NONE");
+  log("closed after setup:", JSON.stringify(session.closed ?? "still open"));
+  session.send({
+    clientContent: {
+      turns: [
+        {
+          role: "user",
+          parts: [{ text: "Say the word hello and nothing else." }],
+        },
+      ],
+      turnComplete: true,
+    },
+  });
+  await session.wait(
+    (message) => has(message, "serverContent.turnComplete"),
+    30_000,
+  );
+  await session.settle(2500);
+  const modelAudio = session.received.filter((message) =>
+    has(message, "serverContent.modelTurn"),
+  );
+  log("model audio frames:", modelAudio.length);
+  log("closed:", JSON.stringify(session.closed ?? "still open"));
+  session.close();
+}
+
 async function scenarioText(): Promise<void> {
   log("\n=== clientContent text turn -> audio + transcription + usage ===");
   const session = new ProbeSession();
@@ -800,6 +846,7 @@ const SCENARIOS_V1: Record<string, () => Promise<void>> = {
   setup: scenarioSetup,
   affective: scenarioAffectiveTopLevel,
   language: scenarioLanguageCode,
+  compression: scenarioCompression,
   text: scenarioText,
   audio: scenarioAudio,
   tools: scenarioTools,

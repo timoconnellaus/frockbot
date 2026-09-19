@@ -2,9 +2,10 @@
 ///
 /// The audio policy is the thing under test. An awake upstream gets a frame
 /// every 40 ms — the server's transcriber decides where a turn ends and it
-/// needs the half second of silence after the words to decide it — silent
-/// frames while the reply plays, and the only thing that stops
-/// the audio is twenty continuous seconds of quiet, or the person muting.
+/// needs the half second of silence after the words to decide it — silence in
+/// place of the microphone while the reply plays on a capture that cannot
+/// cancel its own playback, and the only thing that stops the audio is twenty
+/// continuous seconds of quiet, or the person muting.
 library;
 
 import 'dart:async';
@@ -26,14 +27,18 @@ const _speech = 0.08;
 const _frameMs = 40;
 
 class Harness {
-  final FakeVoiceCapture capture = FakeVoiceCapture();
+  late final FakeVoiceCapture capture;
   final FakeVoiceSocket socket = FakeVoiceSocket();
   final FakeVoicePlayer player = FakeVoicePlayer();
   late final AssistantSessionController controller;
   int at = 0;
   int mark = 0;
 
-  Harness({Completer<VoiceSocket>? deferred}) {
+  Harness({
+    Completer<VoiceSocket>? deferred,
+    bool cancelsPlaybackEcho = false,
+  }) {
+    capture = FakeVoiceCapture(cancelsPlaybackEcho: cancelsPlaybackEcho);
     controller = AssistantSessionController(
       openSocket: () => deferred?.future ?? Future.value(socket),
       capture: capture,
@@ -145,14 +150,15 @@ void main() {
     harness.controller.dispose();
   });
 
-  test('a barge-in sends the held audio first, then the live frames', () async {
-    final harness = Harness();
+  test('an AEC capture streams audio and retains local barge-in', () async {
+    final harness = Harness(cancelsPlaybackEcho: true);
     await harness.live();
     await harness.feed(_quiet, 600);
     harness.status('speaking');
     await settle();
-    // Half a second of talking at the strict margin: the first frames go
-    // up as silence while the gate makes up its mind.
+    // Gemini hears the cleaned microphone from the start. The local gate
+    // stops playback only as a latency optimisation; it does not decide
+    // which audio reaches Gemini.
     final before = harness.audioCount;
     await harness.feed(0.3, 400);
     expect(harness.player.interrupts, 1);
@@ -160,14 +166,15 @@ void main() {
       encodeAssistantInterruptV1(),
     );
     expect(interruptAt, greaterThan(0));
-    // Everything before the interrupt was silence; everything after it is
-    // the real audio, the held frames leading and no frame repeated.
+    // Real audio was continuous before and after the local interrupt, with no
+    // held-frame replay and no duplicate frame.
     final frames = harness.socket.sent;
-    final silent = frames
+    final beforeInterrupt = frames
         .sublist(0, interruptAt)
         .whereType<Uint8List>()
         .skip(before);
-    expect(silent, everyElement(everyElement(0)));
+    expect(beforeInterrupt, isNotEmpty);
+    expect(beforeInterrupt, everyElement(isNot(everyElement(0))));
     final real = frames.sublist(interruptAt + 1).whereType<Uint8List>();
     expect(real, isNotEmpty);
     final marks = [for (final frame in real) frame.first];
@@ -175,8 +182,7 @@ void main() {
     for (var i = 1; i < marks.length; i++) {
       expect(marks[i], (marks[i - 1] + 1) % 251, reason: 'frame $i');
     }
-    // The held frames reach back before the interrupt: the whole 400 ms.
-    expect(marks.length, 10);
+    expect(harness.socket.binaries.length - before, 10);
 
     // Once the reply is over, ordinary frames again.
     harness.status('listening');
@@ -187,6 +193,72 @@ void main() {
     expect(harness.socket.audioMarks.sublist(resumed), everyElement(isNot(0)));
     harness.controller.dispose();
   });
+
+  test(
+    'a capture without AEC cannot barge in or send speaker energy upstream',
+    () async {
+      final harness = Harness();
+      await harness.live();
+      await harness.feed(_quiet, 600);
+      harness.status('speaking');
+      await settle();
+
+      final before = harness.audioCount;
+      await harness.feed(0.3, 400);
+
+      expect(harness.player.interrupts, 0);
+      expect(harness.texts, isNot(contains(encodeAssistantInterruptV1())));
+      expect(
+        harness.socket.binaries.sublist(before),
+        everyElement(everyElement(0)),
+      );
+
+      harness.status('listening');
+      await settle();
+      final afterPlayback = harness.audioCount;
+      await harness.feed(_speech, 80);
+      expect(
+        harness.socket.binaries.sublist(afterPlayback),
+        everyElement(isNot(everyElement(0))),
+      );
+      harness.controller.dispose();
+    },
+  );
+
+  test(
+    'a wake while the reply is audible sends no speaker energy upstream',
+    () async {
+      // The state where the pre-roll ring holds the speaker rather than the
+      // person: the reply is playing, the person mutes and unmutes before the
+      // speaker has drained, and the reopened microphone hands the gate the
+      // model's own voice. The onset may wake the upstream, but what it
+      // replays is not the model's words.
+      final harness = Harness();
+      await harness.live();
+      await harness.feed(_quiet, 600);
+      harness.status('speaking');
+      await settle();
+
+      harness.controller.setMuted(true);
+      await settle();
+      harness.controller.setMuted(false);
+      await settle();
+
+      final before = harness.audioCount;
+      await harness.feed(0.3, 200);
+      final wake = harness.socket.sent.indexOf(encodeVoiceWakeV1());
+      expect(wake, greaterThanOrEqualTo(0), reason: 'the onset wakes it');
+      final replayed = harness.socket.sent
+          .sublist(wake + 1)
+          .whereType<Uint8List>();
+      expect(replayed, isNotEmpty);
+      expect(replayed, everyElement(everyElement(0)));
+      // The cadence is unmoved: silence takes the bytes' place, no frame is
+      // dropped and no frame is repeated.
+      expect(harness.audioCount - before, 5);
+      harness.controller.dispose();
+    },
+  );
 
   test(
     'the speaker still playing after the server moved on counts as a reply',
@@ -444,7 +516,7 @@ void main() {
   test(
     'barge-in interrupts only on verified speech, and only while speaking',
     () async {
-      final harness = Harness();
+      final harness = Harness(cancelsPlaybackEcho: true);
       await harness.live();
       // Establish what quiet sounds like, then talk at a level that opens the
       // gate but is not verified speech.

@@ -7,13 +7,12 @@
 /// seconds of quiet and wake it on the next onset.
 ///
 /// An awake upstream gets a frame every 40 ms — speech, pauses and the
-/// silence after a sentence alike. The server's transcriber decides where a
-/// turn ends and it needs that silence — about half a second of it — to
-/// decide it. While the reply is playing the frames sent are silent ones:
-/// the upstream's own detector would otherwise take the speaker's echo for
-/// the person and cut the reply off. The energy gate here is only ever asked
-/// two questions: has someone started talking (wake), and is someone talking
-/// over the reply (barge-in). It is not consulted about individual frames.
+/// silence after a sentence alike. A capture with effective echo cancellation
+/// keeps sending the room while the reply plays, so Gemini's detector owns the
+/// barge-in decision; the local energy gate only stops playback sooner. A
+/// capture without it sends silence while playback is audible and disables
+/// local barge-in, because speaker echo is not evidence that a person spoke.
+/// The energy gate is not consulted about individual frames.
 ///
 /// A per-turn error from the server — a reply that produced no text, a
 /// sentence that never became sound — is a notice on the call's surface for a
@@ -226,9 +225,6 @@ class AssistantSessionController extends ChangeNotifier {
   /// How long a notice about the last reply stays on the call's surface.
   static const noticeDuration = Duration(seconds: 4);
 
-  /// The last half second of real audio while the reply plays, sent ahead of
-  /// the live frames when the person barges in.
-  final ListQueue<Uint8List> _held = ListQueue<Uint8List>();
   Uint8List? _silence;
 
   late SpeechGate _gate = SpeechGate(config: gateConfig);
@@ -351,7 +347,6 @@ class AssistantSessionController extends ChangeNotifier {
     _teardownDone = null;
     _opening.clear();
     _openingBytes = 0;
-    _held.clear();
     _microphoneHeard = false;
     _deafNoticed = false;
     _deafSinceMs = null;
@@ -592,21 +587,18 @@ class AssistantSessionController extends ChangeNotifier {
     _watchForDeafness(frame.atMs);
     final decision = _gate.offer(frame.bytes, frame.level, frame.atMs);
     if (decision.open) diagnostics?.markOnce('microphone.first-speech');
-    // Barge-in is judged before mute and before sleep: it is the one thing
-    // that must reach the server while it is talking.
-    if (decision.bargeIn && _playing && !muted && !_barged) {
+    // A capture with AEC lets Gemini hear the room throughout playback. The
+    // local gate may stop the speaker sooner, but Gemini's VAD remains the
+    // authority on whether the model turn was interrupted. Without AEC,
+    // speaker energy is not evidence of a barge-in and must never trip this.
+    if (capture.cancelsPlaybackEcho &&
+        decision.bargeIn &&
+        _playing &&
+        !muted &&
+        !_barged) {
       _barged = true;
       unawaited(player.interrupt());
-      final socket = _socket;
-      socket?.sendText(encodeAssistantInterruptV1());
-      // What the person said while the reply was still playing went up as
-      // silence; the held audio goes now, ahead of the live frames.
-      if (socket != null && _started && !_asleep) {
-        for (final piece in _held) {
-          socket.sendBinary(piece);
-        }
-      }
-      _held.clear();
+      _socket?.sendText(encodeAssistantInterruptV1());
     }
     _notify();
     if (muted || !active) return;
@@ -631,8 +623,10 @@ class AssistantSessionController extends ChangeNotifier {
       socket.sendText(encodeVoiceWakeV1());
       _asleep = false;
       _upstream = VoiceUpstreamStateV1.starting;
+      // The pre-roll is captured audio like any other and obeys the same
+      // rule as the live frames below.
       for (final piece in decision.emit) {
-        socket.sendBinary(piece);
+        socket.sendBinary(_outbound(piece));
       }
       _notify();
       return;
@@ -653,19 +647,21 @@ class AssistantSessionController extends ChangeNotifier {
     // decides where a turn ends and needs the silence after the words to
     // decide it — about half a second; a client that cut the audio off right
     // after the last syllable would leave the transcript hanging until the
-    // upstream timed out. While the reply plays the frame is a silent one, so
-    // that detector never hears the speaker; the real audio is held for a
-    // barge-in.
-    if (_playing && !_barged) {
-      _held.addLast(frame.bytes);
-      while (_held.length > gateConfig.preRollFrames) {
-        _held.removeFirst();
-      }
-      socket.sendBinary(_silentFrame(frame.bytes.length));
-      return;
-    }
-    socket.sendBinary(frame.bytes);
+    // upstream timed out. What each frame carries is [_outbound]'s rule.
+    socket.sendBinary(_outbound(frame.bytes));
   }
+
+  /// What may go on the wire for one piece of captured audio.
+  ///
+  /// During playback, a device with effective AEC sends the cleaned
+  /// microphone continuously and Gemini's VAD decides whether the person
+  /// interrupted. A device without AEC sends silence until the speaker has
+  /// drained: its own output is indistinguishable from the person, so it can
+  /// neither offer barge-in nor let the model hear the speaker.
+  Uint8List _outbound(Uint8List captured) =>
+      _playing && !capture.cancelsPlaybackEcho
+      ? _silentFrame(captured.length)
+      : captured;
 
   Uint8List _silentFrame(int length) {
     final cached = _silence;
@@ -697,7 +693,6 @@ class AssistantSessionController extends ChangeNotifier {
         _status = status;
         if (status != VoiceStatusV1.speaking) {
           _barged = false;
-          _held.clear();
         }
         if (status == VoiceStatusV1.listening) {
           diagnostics?.markOnce('call.listening');
@@ -972,7 +967,6 @@ class AssistantSessionController extends ChangeNotifier {
     _startTimer = null;
     _clearNotice();
     _clearDelegation();
-    _held.clear();
     await _settled(_closeCapture);
     final inbound = _inbound;
     _inbound = null;

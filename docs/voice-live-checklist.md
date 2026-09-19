@@ -175,8 +175,15 @@ the list stands as it was.
    line; grant and the same checks above hold.
 2. macOS: the microphone prompt appears (usage description present); the
    entitlement admits capture in a release build.
-3. Playback and capture at once on Android with echo cancellation: the session
-   does not interrupt itself with its own voice through the speaker. This is
-   the check most changed by ADR 0031 — the client no longer sends silence
-   while a reply plays, so the device's own cancellation and the model's
-   detector are the only things between the speaker and a false barge-in.
+3. Playback and capture at once on Android, which captures with echo
+   cancellation: the client streams the cleaned microphone throughout a reply,
+   so the device's own cancellation and the model's detector are the only
+   things between the speaker and a false barge-in. Expect: the session does
+   not interrupt itself with its own voice through the speaker, and speaking
+   over the reply still stops it.
+4. Playback and capture at once on macOS, which captures without it (the
+   **Desktop echo boundary** in [`voice.md`](voice.md)): the client sends
+   silence in place of the microphone while a reply plays and offers no local
+   barge-in. Expect: the whole reply is heard once, the session never
+   interrupts itself, and the microphone carries the next words as soon as the
+   speaker has drained.

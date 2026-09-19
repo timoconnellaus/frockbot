@@ -67,6 +67,13 @@ abstract interface class VoiceCapture {
   Future<void> stop();
   bool get active;
 
+  /// Whether playback from this app is removed from captured call audio.
+  ///
+  /// The assistant may stream microphone frames while it speaks only when
+  /// this is true. Without that guarantee, speaker output is indistinguishable
+  /// from a person to both the local energy gate and the model's VAD.
+  bool get cancelsPlaybackEcho;
+
   /// Releases the device. One capture serves the whole app — the microphone
   /// has one owner at a time — so this happens when the shell goes, not when
   /// a call does.
@@ -177,9 +184,10 @@ RecordConfig voiceRecordConfigV1({
 
 /// The microphone through the `record` package.
 ///
-/// Echo cancellation, noise suppression and auto gain are asked for on every
-/// platform that has them: the speaker is inches from the microphone on a
-/// phone, and without cancellation the assistant barges in on itself.
+/// Which platforms are asked for echo cancellation, noise suppression and
+/// auto gain is [voiceCaptureProcessingV1]'s call: the speaker is inches from
+/// the microphone on a phone, and without cancellation the assistant barges
+/// in on itself, while the desk's unit hands over silence.
 class RecordVoiceCapture implements VoiceCapture {
   final AudioRecorder _recorder = AudioRecorder();
 
@@ -194,6 +202,10 @@ class RecordVoiceCapture implements VoiceCapture {
 
   @override
   bool get active => _active;
+
+  @override
+  bool get cancelsPlaybackEcho =>
+      voiceCaptureProcessingV1(defaultTargetPlatform);
 
   @override
   Future<Stream<AudioFrame>> start({

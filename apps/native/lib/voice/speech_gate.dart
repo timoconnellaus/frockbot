@@ -11,15 +11,17 @@
 ///   pre-roll ring is replayed ahead of the live audio so the first syllable
 ///   is not the price of waking up.
 /// * **Barge-in.** Verified speech by a stricter margin, while the assistant
-///   is speaking, is enough to stop it.
+///   is speaking, is offered as a reason to stop it — the controller takes it
+///   only for a capture whose playback echo it can cancel.
 ///
 /// What it must never be used for is deciding whether an individual frame is
 /// worth sending once the upstream is awake. The server's transcriber decides
 /// where a turn ends and needs the silence after the words to decide it —
-/// about half a second — so an awake session gets a frame every 40 ms (a
-/// silent one while the reply plays, which is the controller's rule, not
-/// this gate's). [quietForMs] exists for the one policy that does stop the
-/// audio: twenty continuous seconds of quiet while listening.
+/// about half a second — so an awake session gets a frame every 40 ms (on a
+/// capture that cannot cancel its own playback, silence stands in for the
+/// microphone while the reply plays; that is the controller's rule, not this
+/// gate's). [quietForMs] exists for the one policy that does stop the audio:
+/// twenty continuous seconds of quiet while listening.
 ///
 /// Pure Dart over a level and a timestamp: no audio API, no timers, no clock
 /// of its own. The caller supplies the timestamps, which is what lets a test
