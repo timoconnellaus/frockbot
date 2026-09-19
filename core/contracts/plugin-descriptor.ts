@@ -198,15 +198,6 @@ const MAX_PLUGIN_TRIGGERS_V1 = 16;
 const MAX_PLUGIN_SKILLS_V1 = 8;
 const MAX_PLUGIN_SKILL_REFERENCES_V1 = 32;
 const MAX_PLUGIN_SKILL_BYTES_V1 = 65_536;
-/**
- * Everything one descriptor's Skills may weigh together.
- *
- * A descriptor is not a side artifact: it travels inside a Composition member,
- * and a whole generation is written as one durable storage value. Per-item
- * bounds alone would let one Plugin declare megabytes of prompt text and fail
- * that write with nothing pointing at the Skill that caused it, so the total
- * is bounded here, where every other declared ceiling is refused.
- */
 const MAX_PLUGIN_SETTINGS_SCHEMA_BYTES_V1 = 65_536;
 const MAX_PLUGIN_CARDS_V1 = 16;
 const MAX_PLUGIN_CARD_ACTIONS_V1 = 16;

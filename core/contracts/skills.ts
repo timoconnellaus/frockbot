@@ -38,7 +38,16 @@ export interface SkillRefV1 {
 /** Most Skills one Turn may invoke. */
 export const MAX_INVOKED_SKILLS_V1 = 3;
 
-/** Most Skill text one managed or Plugin artifact group may carry in total. */
+/**
+ * Most Skill text one managed or Plugin artifact group may carry in total.
+ *
+ * Per-item bounds alone would let one group declare megabytes of prompt text.
+ * An artifact is one bounded unit: a Plugin's Skills travel inside a descriptor
+ * that a Composition member carries as one durable value, and the managed set
+ * is bytes of the artifact the Composition pins. Bounding the total alongside
+ * every other declared ceiling refuses the whole group together, instead of
+ * failing a durable write with nothing pointing at the Skill that caused it.
+ */
 export const ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 = 262_144;
 
 /** The file name that marks a directory as a Skill. */
