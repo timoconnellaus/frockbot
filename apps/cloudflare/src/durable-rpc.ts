@@ -5,6 +5,9 @@ import {
 } from "@frockbot/core/contracts";
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
+import { rpcJsonSnapshotV1 } from "@frockbot/app/durable-rpc";
+
+export { rpcJsonSnapshotV1 } from "@frockbot/app/durable-rpc";
 
 type RpcValueDecoder = (value: unknown, label: string) => unknown;
 export type RpcJsonValue =
@@ -30,18 +33,6 @@ function record(value: unknown, label: string): Record<string, unknown> {
  * right to refuse that. Snapshotting first is what turns the answer into the
  * DTO it claims to be, before anything decodes it.
  */
-export function rpcJsonSnapshotV1<T>(value: T): T {
-  try {
-    const serialized = JSON.stringify(value);
-    if (serialized === undefined) {
-      throw new Error("RPC response is not a JSON value");
-    }
-    return JSON.parse(serialized) as T;
-  } catch (error) {
-    throw new Error("RPC response is not valid JSON", { cause: error });
-  }
-}
-
 export function decodeRpcEnvelopeV1(
   input: unknown,
   required: Readonly<Record<string, RpcValueDecoder>>,

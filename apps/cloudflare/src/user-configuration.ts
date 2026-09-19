@@ -168,6 +168,7 @@ import {
   rpcJsonSnapshotV1,
 } from "./durable-rpc.js";
 import { loggedEntryV1 } from "./entry-boundary.js";
+import type { BotUserConfigurationRpcTargetV1 } from "@frockbot/app/shell/durable-rpc-targets";
 
 /** The durable key holding this User's Project catalogue. */
 const MEMORY_PROJECTS_KEY = "memory:projects";
@@ -241,7 +242,10 @@ function appletTransactionStorage(
   };
 }
 
-export class UserConfiguration extends DurableObject<UserConfigurationEnv> {
+export class UserConfiguration
+  extends DurableObject<UserConfigurationEnv>
+  implements BotUserConfigurationRpcTargetV1
+{
   constructor(ctx: DurableObjectState, env: UserConfigurationEnv) {
     super(ctx, env);
     // Before any request or alarm can read an Applet entry of the old shape.

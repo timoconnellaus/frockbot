@@ -30,6 +30,7 @@ import {
   type OwnedBotTurnCommand,
 } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
+import { rpcRecordV1 } from "@frockbot/app/durable-rpc";
 import {
   currentUserCompositionV1,
   proposeUserCompositionV1,
@@ -202,24 +203,17 @@ function appletUserDirectory(
   identity: BotIdentity,
 ): AppletUserDirectoryV1 {
   const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-  // SAFETY: this namespace is bound to UserConfiguration; generated Worker
-  // types do not expose its Applet directory RPC surface.
-  const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
-    listApplets(input: unknown): Promise<unknown>;
-    readApplet(input: unknown): Promise<unknown>;
-    readAppletCompositionInput(input: unknown): Promise<unknown>;
-    readAppletToolNameClashes(input: unknown): Promise<unknown>;
-    createApplet(input: unknown): Promise<unknown>;
-    recordAppletGeneration(input: unknown): Promise<unknown>;
-    deleteApplet(input: unknown): Promise<unknown>;
-    shareApplet(input: unknown): Promise<unknown>;
-    unshareApplet(input: unknown): Promise<unknown>;
-    transferApplet(input: unknown): Promise<unknown>;
-  };
+  const rpc = state.env.USER_CONFIGURATIONS.get(id);
   const userId = identity.userId;
   const botId = identity.botId;
   const access = async (
-    call: (input: unknown) => Promise<unknown>,
+    call: (input: {
+      schemaVersion: 1;
+      userId: string;
+      botId: string;
+      appletId: string;
+      targetBotId: string;
+    }) => Promise<unknown>,
     appletId: string,
     targetBotId: string,
   ) =>
@@ -230,9 +224,12 @@ function appletUserDirectory(
     );
   return {
     async list() {
-      const answer = rpcJsonSnapshotV1(
-        await rpc.listApplets({ schemaVersion: 1, userId, botId }),
-      ) as { revision?: unknown; applets?: unknown };
+      const answer = rpcRecordV1(
+        rpcJsonSnapshotV1(
+          await rpc.listApplets({ schemaVersion: 1, userId, botId }),
+        ),
+        "Applet directory response",
+      );
       return {
         revision: Number(answer.revision ?? 0),
         applets: Array.isArray(answer.applets)
@@ -254,14 +251,17 @@ function appletUserDirectory(
       );
     },
     async compositionInput() {
-      const answer = rpcJsonSnapshotV1(
-        await rpc.readAppletCompositionInput({ schemaVersion: 1, userId }),
-      ) as { revision?: unknown; applets?: unknown };
+      const answer = rpcRecordV1(
+        rpcJsonSnapshotV1(
+          await rpc.readAppletCompositionInput({ schemaVersion: 1, userId }),
+        ),
+        "Applet composition response",
+      );
       return {
         revision: Number(answer.revision ?? 0),
         applets: (Array.isArray(answer.applets) ? answer.applets : []).map(
           (applet) => {
-            const entry = applet as Record<string, unknown>;
+            const entry = rpcRecordV1(applet, "Applet composition entry");
             if (
               typeof entry.ownerBotId !== "string" ||
               !Array.isArray(entry.sharedWithBotIds) ||
@@ -281,7 +281,7 @@ function appletUserDirectory(
               ),
               provenance: decodeAppletProvenanceV1(entry.provenance),
               ownerBotId: entry.ownerBotId,
-              sharedWithBotIds: entry.sharedWithBotIds as string[],
+              sharedWithBotIds: entry.sharedWithBotIds,
             };
           },
         ),
@@ -336,7 +336,7 @@ function appletUserDirectory(
       ) {
         throw new Error("Applet tool name clashes are invalid");
       }
-      return answer as string[];
+      return answer;
     },
     share: (appletId, targetBotId) =>
       access((input) => rpc.shareApplet(input), appletId, targetBotId),

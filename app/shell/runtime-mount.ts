@@ -155,14 +155,21 @@ async function pluginModelHostV1(
 /** Narrow RPC for the User-wide agent-lane concurrency lease. */
 function agentTurnSlots(state: ShellBotStateV1, identity: BotIdentity) {
   const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-  const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
-    reserveAgentTurnSlot(input: unknown): Promise<unknown>;
-    releaseAgentTurnSlot(input: unknown): Promise<unknown>;
-  };
+  const rpc = state.env.USER_CONFIGURATIONS.get(id);
   return {
-    reserve: async (request: unknown) =>
-      decodeAgentTurnSlotReceiptV1(await rpc.reserveAgentTurnSlot(request)),
-    release: async (request: unknown) => {
+    reserve: async (request: {
+      schemaVersion: 1;
+      userId: string;
+      requesterId: string;
+      runId: string;
+      reservedAt: string;
+    }) => decodeAgentTurnSlotReceiptV1(await rpc.reserveAgentTurnSlot(request)),
+    release: async (request: {
+      schemaVersion: 1;
+      userId: string;
+      requesterId: string;
+      runId: string;
+    }) => {
       await rpc.releaseAgentTurnSlot(request);
     },
   };
@@ -410,9 +417,7 @@ export async function agentRuntime(
                 const id = state.env.BOT_STATES.idFromName(
                   `${request.userId}:${request.botId}`,
                 );
-                const rpc = state.env.BOT_STATES.get(id) as unknown as {
-                  runAgent(input: unknown): Promise<unknown>;
-                };
+                const rpc = state.env.BOT_STATES.get(id);
                 const completed = decodeClientTurnV1(
                   structuredClone(await rpc.runAgent(request)),
                 );

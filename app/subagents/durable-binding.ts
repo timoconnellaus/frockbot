@@ -30,6 +30,7 @@ import {
   taskSessionIdV1,
 } from "@frockbot/app/subagents/storage-keys";
 import type { BotIdentity } from "@frockbot/core/durable";
+import { rpcJsonSnapshotV1, rpcRecordV1 } from "@frockbot/app/durable-rpc";
 
 /** The parent Turn that dispatched a task, as the child records it. */
 export interface SubagentParentV1 {
@@ -292,6 +293,42 @@ export interface SubagentDurableBindingV1 {
   ): Promise<readonly { seq: number; message: string }[]>;
 }
 
+/** The Bot Durable Object methods used by the subagent namespace adapter. */
+export interface SubagentDurableObjectRpcTargetV1
+  extends Rpc.DurableObjectBranded {
+  runTask(input: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    request: SubagentRunTaskRequestV1;
+  }): Promise<object>;
+  readSubagentTask(input: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    taskId: string;
+  }): Promise<object | undefined>;
+  settleTask(input: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    taskId: string;
+    outcome: TaskOutcomeV1;
+  }): Promise<object>;
+  stopSubagentTask(input: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    taskId: string;
+  }): Promise<object>;
+  claimTaskMessages(input: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    taskId: string;
+  }): Promise<object>;
+}
+
 /**
  * The exact shape a claim answers with, decoded at the child's door: the
  * parent is trusted, the wire is not, and a message reaches a model.
@@ -299,8 +336,9 @@ export interface SubagentDurableBindingV1 {
 export function decodeClaimedTaskMessagesV1(
   value: unknown,
 ): { seq: number; message: string }[] {
-  const answer = value as { messages?: unknown } | null | undefined;
-  if (!answer || !Array.isArray(answer.messages)) return [];
+  if (!value) return [];
+  const answer = rpcRecordV1(value, "claimed task messages");
+  if (!Array.isArray(answer.messages)) return [];
   return answer.messages.slice(0, CLAIMED_TASK_MESSAGE_LIMIT).map((entry) => {
     const candidate = record(entry, "claimed task message");
     if (!Number.isSafeInteger(candidate.seq) || (candidate.seq as number) < 0) {
@@ -385,28 +423,22 @@ export function subagentOutcomeForRunV1(
  * suffix can only ever be minted here.
  */
 export function createBotSubagentDurableBindingV1(
-  namespace: DurableObjectNamespace,
+  namespace: DurableObjectNamespace<SubagentDurableObjectRpcTargetV1>,
 ): SubagentDurableBindingV1 {
-  const stub = (name: string) =>
-    // SAFETY: this namespace is bound to the Bot Durable Object class;
-    // generated Worker types do not expose its RPC surface.
-    namespace.get(namespace.idFromName(name)) as unknown as {
-      runTask(input: unknown): Promise<unknown>;
-      readSubagentTask(input: unknown): Promise<unknown>;
-      settleTask(input: unknown): Promise<unknown>;
-      stopSubagentTask(input: unknown): Promise<unknown>;
-      claimTaskMessages(input: unknown): Promise<unknown>;
-    };
+  const stub = (name: string) => namespace.get(namespace.idFromName(name));
   return {
     accept: async (identity, anchorTaskId, request) => {
-      const answer = (await stub(
-        subagentDurableObjectNameV1({ ...identity, taskId: anchorTaskId }),
-      ).runTask({
-        schemaVersion: 1,
-        userId: identity.userId,
-        botId: identity.botId,
-        request,
-      })) as { childSessionId?: unknown };
+      const answer = rpcRecordV1(
+        await stub(
+          subagentDurableObjectNameV1({ ...identity, taskId: anchorTaskId }),
+        ).runTask({
+          schemaVersion: 1,
+          userId: identity.userId,
+          botId: identity.botId,
+          request,
+        }),
+        "accepted subagent task",
+      );
       const childSessionId = answer?.childSessionId;
       if (typeof childSessionId !== "string" || childSessionId.length === 0) {
         throw new Error("the Subagent Durable Object accepted no session");
@@ -423,7 +455,7 @@ export function createBotSubagentDurableBindingV1(
         taskId,
       });
       if (answer === undefined || answer === null) return undefined;
-      return decodeSubagentTaskContextV1(JSON.parse(JSON.stringify(answer)));
+      return decodeSubagentTaskContextV1(rpcJsonSnapshotV1(answer));
     },
     stop: async (identity, anchorTaskId, taskId) => {
       await stub(
@@ -436,14 +468,14 @@ export function createBotSubagentDurableBindingV1(
       });
     },
     claimMessagesOnParent: async (parent, taskId) => {
-      const answer = (await stub(
+      const answer = await stub(
         `${parent.userId}:${parent.botId}`,
       ).claimTaskMessages({
         schemaVersion: 1,
         userId: parent.userId,
         botId: parent.botId,
         taskId,
-      })) as { messages?: unknown };
+      });
       return decodeClaimedTaskMessagesV1(answer);
     },
     settleOnParent: async (parent, taskId, outcome) => {

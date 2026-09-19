@@ -28,6 +28,7 @@ import {
   decodeFocusedAppletV1,
   type FocusedAppletV1,
 } from "@frockbot/core/durable";
+import { rpcJsonSnapshotV1 } from "@frockbot/app/durable-rpc";
 import type {
   AppletCapabilityCallScopeV1,
   AppletCapabilityHostV1,
@@ -355,11 +356,7 @@ const TEXT = new TextDecoder();
  * claims to be.
  */
 export function appletRpcSnapshotV1<T>(value: T): T {
-  const serialized = JSON.stringify(value);
-  if (serialized === undefined) {
-    throw new Error("Applet RPC response is not a JSON value");
-  }
-  return JSON.parse(serialized) as T;
+  return rpcJsonSnapshotV1(value, "Applet RPC response");
 }
 
 const sha256Hex = sha256HexTextV1;

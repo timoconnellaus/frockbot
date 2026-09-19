@@ -13,6 +13,7 @@ import {
   decodeOperationReceiptV1,
   decodeInstalledPackageSettingIdsV1,
   decodeInstalledPackageSettingsPatchV1,
+  decodeUserSettingsViewV1,
   initializeBotSettingsV1,
   migrateStoredBotSettingsV1,
   resolveBotExecutionPlanV1,
@@ -554,11 +555,7 @@ export async function userAccountFeaturesV1(
   identity: BotIdentity,
 ): Promise<UserFeaturesV1> {
   const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-  // SAFETY: this namespace is bound to UserConfiguration; generated Worker
-  // types do not expose its account features RPC surface.
-  const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
-    readFeatures(input: unknown): Promise<unknown>;
-  };
+  const rpc = state.env.USER_CONFIGURATIONS.get(id);
   return decodeUserFeaturesV1(
     appletRpcSnapshotV1(
       await rpc.readFeatures({ schemaVersion: 1, userId: identity.userId }),
@@ -571,27 +568,12 @@ export function userConfigurationV1(
   identity: BotIdentity,
 ): UserConfigurationRpcV1 {
   const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-  // SAFETY: this namespace is bound to UserConfiguration; generated Worker types do not expose its RPC surface.
-  const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
-    readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
-    executeConfiguration(input: unknown): Promise<unknown>;
-    leaseModelCredential(input: unknown): Promise<unknown>;
-    settleModelCredential(input: unknown): Promise<void>;
-    leaseToolCredential(input: unknown): Promise<unknown>;
-    settleToolCredential(input: unknown): Promise<void>;
-    listBots(input: unknown): Promise<unknown>;
-    createBot(input: unknown): Promise<unknown>;
-    readBotVoice(input: unknown): Promise<unknown>;
-    updateBotVoice(input: unknown): Promise<unknown>;
-    mirrorBotLook(input: unknown): Promise<unknown>;
-    executeTemplateCommand(input: unknown): Promise<TemplateShareReceiptV1>;
-    listMachines(input: unknown): Promise<unknown>;
-    describeMachineTarget(input: unknown): Promise<unknown>;
-    dispatchMachineCommand(input: unknown): Promise<unknown>;
-    readMachineResult(input: unknown): Promise<unknown>;
-  };
+  const rpc = state.env.USER_CONFIGURATIONS.get(id);
   return {
-    readConfiguration: (input) => rpc.readConfiguration({ ...input, view: 2 }),
+    readConfiguration: async (input) =>
+      decodeUserSettingsViewV1(
+        await rpc.readConfiguration({ ...input, view: 2 }),
+      ),
     executeConfiguration: async (command) =>
       decodeOperationReceiptV1(
         await rpc.executeConfiguration({

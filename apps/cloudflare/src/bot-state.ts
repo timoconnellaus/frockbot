@@ -63,6 +63,7 @@ import type {
   ShellBotBackendContribution,
 } from "@frockbot/app/shell/backend";
 import type { BotStateEnv } from "@frockbot/app/shell/backend-state";
+import type { BotStateRpcTargetV1 } from "@frockbot/app/shell/durable-rpc-targets";
 import { createBindingEmailSenderV1 } from "@frockbot/app/email/sender";
 import {
   acceptSubagentTask,
@@ -477,7 +478,10 @@ function decodeIsolateCallRpcV1(
   });
 }
 
-export class BotState extends DurableObject<BotStateEnv> {
+export class BotState
+  extends DurableObject<BotStateEnv>
+  implements BotStateRpcTargetV1
+{
   private readonly outboundFetch?: typeof fetch;
   /**
    * The environment the Shell Package runs under: the Durable Object's

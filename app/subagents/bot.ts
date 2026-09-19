@@ -76,12 +76,7 @@ function subagentSlots(
   identity: BotIdentity,
 ): SubagentSlotBinding {
   const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
-  // SAFETY: this namespace is bound to UserConfiguration; generated Worker
-  // types do not expose its RPC surface.
-  const rpc = state.env.USER_CONFIGURATIONS.get(id) as unknown as {
-    reserveSubagentSlot(input: unknown): Promise<unknown>;
-    releaseSubagentSlot(input: unknown): Promise<unknown>;
-  };
+  const rpc = state.env.USER_CONFIGURATIONS.get(id);
   return {
     reserve: async (request) =>
       decodeSubagentSlotReceiptV1(await rpc.reserveSubagentSlot(request)),
