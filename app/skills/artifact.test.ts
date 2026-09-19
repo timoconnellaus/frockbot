@@ -228,72 +228,66 @@ describe("artifact Skill adapters", () => {
     }
   });
 
-  test(
-    "measure the aggregate bound in encoded bytes, for either artifact",
-    async () => {
-      // Every document here is far inside the per-document parse bound, so a
-      // total counted in code units would admit the over-boundary artifact
-      // below; the encoded total is the only thing that can refuse it.
-      const half = ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2;
-      const atBoundary = [
-        { slug: "first", text: documentOfEncodedBytes("first", half) },
-        { slug: "second", text: documentOfEncodedBytes("second", half) },
-      ];
-      const overBoundary = [
-        atBoundary[0],
-        { slug: "second", text: documentOfEncodedBytes("second", half + 1) },
-      ];
+  test("measure the aggregate bound in encoded bytes, for either artifact", async () => {
+    // Every document here is far inside the per-document parse bound, so a
+    // total counted in code units would admit the over-boundary artifact
+    // below; the encoded total is the only thing that can refuse it.
+    const half = ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2;
+    const atBoundary = [
+      { slug: "first", text: documentOfEncodedBytes("first", half) },
+      { slug: "second", text: documentOfEncodedBytes("second", half) },
+    ];
+    const overBoundary = [
+      atBoundary[0],
+      { slug: "second", text: documentOfEncodedBytes("second", half + 1) },
+    ];
 
-      for (const adapter of adapters) {
-        const admitted = await adapter.load(atBoundary);
-        expect(admitted.refusals, adapter.source).toEqual([]);
-        expect(admitted.skills, adapter.source).toHaveLength(2);
+    for (const adapter of adapters) {
+      const admitted = await adapter.load(atBoundary);
+      expect(admitted.refusals, adapter.source).toEqual([]);
+      expect(admitted.skills, adapter.source).toHaveLength(2);
 
-        const refused = await adapter.load(overBoundary);
-        expect(refused.skills, adapter.source).toEqual([]);
-        // One Skill of the group is past the bound, so the group goes together.
-        expect(refused.refusals, adapter.source).toHaveLength(2);
-        for (const refusal of refused.refusals) {
-          expect(refusal.kind, adapter.source).toBe("oversized");
-          expect(refusal.reason, adapter.source).toContain(
-            `the bound is ${ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1}`,
-          );
-        }
+      const refused = await adapter.load(overBoundary);
+      expect(refused.skills, adapter.source).toEqual([]);
+      // One Skill of the group is past the bound, so the group goes together.
+      expect(refused.refusals, adapter.source).toHaveLength(2);
+      for (const refusal of refused.refusals) {
+        expect(refusal.kind, adapter.source).toBe("oversized");
+        expect(refusal.reason, adapter.source).toContain(
+          `the bound is ${ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1}`,
+        );
       }
-    },
-  );
+    }
+  });
 
-  test(
-    "bound each Plugin's own artifact, not the catalog it joins",
-    async () => {
-      // Two Skills of half the bound each put one Plugin on the aggregate
-      // bound exactly. Two such Plugins are past it together: the bound is
-      // each artifact's own — a Plugin's Skills travel in its own descriptor —
-      // so neither spends the other's room. A total taken across the catalog
-      // would refuse both.
-      const half = ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2;
-      const contribution = (pluginId: string, prefix: string) => ({
-        pluginId,
-        skills: [1, 2].map((index) => ({
-          slug: `${prefix}-${index}`,
-          text: documentOfEncodedBytes(`${prefix}-${index}`, half),
-        })),
-      });
+  test("bound each Plugin's own artifact, not the catalog it joins", async () => {
+    // Two Skills of half the bound each put one Plugin on the aggregate
+    // bound exactly. Two such Plugins are past it together: the bound is
+    // each artifact's own — a Plugin's Skills travel in its own descriptor —
+    // so neither spends the other's room. A total taken across the catalog
+    // would refuse both.
+    const half = ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2;
+    const contribution = (pluginId: string, prefix: string) => ({
+      pluginId,
+      skills: [1, 2].map((index) => ({
+        slug: `${prefix}-${index}`,
+        text: documentOfEncodedBytes(`${prefix}-${index}`, half),
+      })),
+    });
 
-      const loaded = await loadPluginSkillsV1([
-        contribution("email-card", "drafting"),
-        contribution("calendar-card", "scheduling"),
-      ]);
+    const loaded = await loadPluginSkillsV1([
+      contribution("email-card", "drafting"),
+      contribution("calendar-card", "scheduling"),
+    ]);
 
-      expect(loaded.refusals).toEqual([]);
-      expect(loaded.skills.map((skill) => skill.path)).toEqual([
-        "plugin/email-card/drafting-1/SKILL.md",
-        "plugin/email-card/drafting-2/SKILL.md",
-        "plugin/calendar-card/scheduling-1/SKILL.md",
-        "plugin/calendar-card/scheduling-2/SKILL.md",
-      ]);
-    },
-  );
+    expect(loaded.refusals).toEqual([]);
+    expect(loaded.skills.map((skill) => skill.path)).toEqual([
+      "plugin/email-card/drafting-1/SKILL.md",
+      "plugin/email-card/drafting-2/SKILL.md",
+      "plugin/calendar-card/scheduling-1/SKILL.md",
+      "plugin/calendar-card/scheduling-2/SKILL.md",
+    ]);
+  });
 
   test("keeps the managed built-ins inside the aggregate artifact bound", () => {
     const encoder = new TextEncoder();

@@ -375,42 +375,39 @@ describe("a plugin's services, triggers and settings", () => {
     expect(admitted.skills?.[0]?.references).toHaveLength(1);
   });
 
-  test(
-    "the aggregate bound counts encoded bytes, not UTF-16 code units",
-    () => {
-      /**
-       * A `SKILL.md` of exactly `bytes` UTF-8 bytes whose body is CJK: three
-       * bytes to one UTF-16 code unit, so a total counted in code units
-       * admits text this bound has to refuse. Everything about the document is
-       * well formed and every item is far inside the per-item bound, so the
-       * encoded total is the only thing that can refuse it.
-       */
-      const skillText = (slug: string, bytes: number): string => {
-        const header = `---\nname: ${slug}\ndescription: Use this when bounded.\n---\n\n`;
-        const ascii = (bytes - header.length) % 3;
-        const characters = (bytes - header.length - ascii) / 3;
-        return `${header}${"x".repeat(ascii)}${"字".repeat(characters)}`;
-      };
-      const half = ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2;
-      const atBound = [
-        { slug: "first", text: skillText("first", half) },
-        { slug: "second", text: skillText("second", half) },
-      ];
+  test("the aggregate bound counts encoded bytes, not UTF-16 code units", () => {
+    /**
+     * A `SKILL.md` of exactly `bytes` UTF-8 bytes whose body is CJK: three
+     * bytes to one UTF-16 code unit, so a total counted in code units
+     * admits text this bound has to refuse. Everything about the document is
+     * well formed and every item is far inside the per-item bound, so the
+     * encoded total is the only thing that can refuse it.
+     */
+    const skillText = (slug: string, bytes: number): string => {
+      const header = `---\nname: ${slug}\ndescription: Use this when bounded.\n---\n\n`;
+      const ascii = (bytes - header.length) % 3;
+      const characters = (bytes - header.length - ascii) / 3;
+      return `${header}${"x".repeat(ascii)}${"字".repeat(characters)}`;
+    };
+    const half = ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2;
+    const atBound = [
+      { slug: "first", text: skillText("first", half) },
+      { slug: "second", text: skillText("second", half) },
+    ];
 
-      expect(
-        decodePluginDescriptorV1({ ...base, skills: atBound }).skills,
-      ).toHaveLength(2);
-      expect(() =>
-        decodePluginDescriptorV1({
-          ...base,
-          skills: [
-            atBound[0],
-            { slug: "second", text: skillText("second", half + 1) },
-          ],
-        }),
-      ).toThrow(/bytes of Skill text/);
-    },
-  );
+    expect(
+      decodePluginDescriptorV1({ ...base, skills: atBound }).skills,
+    ).toHaveLength(2);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        skills: [
+          atBound[0],
+          { slug: "second", text: skillText("second", half + 1) },
+        ],
+      }),
+    ).toThrow(/bytes of Skill text/);
+  });
 
   // ADR 0030: a card declares the values the Bot sends and the names the
   // surface may press, and nothing about how it looks.

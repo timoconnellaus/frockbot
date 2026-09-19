@@ -343,50 +343,43 @@ describe("a Skill a Plugin ships, in Workerd", () => {
     expect(withheld.content).toContain(`No Skill "${SKILL_REF}" is loaded`);
   });
 
-  test(
-    "a Skill past the bound in encoded bytes is refused at the Composition, and one on the bound reaches the catalog",
-    async () => {
-      const suffix = crypto.randomUUID().slice(0, 8);
-      const userId = `plugin-bytes-${suffix}`;
-      const identity = { userId, botId: `bytes-${suffix}` };
-      await provisionBot(identity);
-      const plugin: ProbePluginV1 = {
-        pluginId: BYTES_PLUGIN_ID,
-        source: PLUGIN_SOURCE,
-        descriptor: boundedDescriptor(
-          ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2 + 1,
-        ),
-      };
+  test("a Skill past the bound in encoded bytes is refused at the Composition, and one on the bound reaches the catalog", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const userId = `plugin-bytes-${suffix}`;
+    const identity = { userId, botId: `bytes-${suffix}` };
+    await provisionBot(identity);
+    const plugin: ProbePluginV1 = {
+      pluginId: BYTES_PLUGIN_ID,
+      source: PLUGIN_SOURCE,
+      descriptor: boundedDescriptor(ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2 + 1),
+    };
 
-      // One byte of Skill text past the bound, in two Skills whose UTF-16
-      // length is a third of that: the User's Composition refuses the
-      // generation rather than carry it as one durable value.
-      await expect(pinPluginGeneration(userId, plugin)).rejects.toThrow(
-        /bytes of Skill text/,
-      );
+    // One byte of Skill text past the bound, in two Skills whose UTF-16
+    // length is a third of that: the User's Composition refuses the
+    // generation rather than carry it as one durable value.
+    await expect(pinPluginGeneration(userId, plugin)).rejects.toThrow(
+      /bytes of Skill text/,
+    );
 
-      // Refused means not installed: the Bot's own catalog is the bootstrap
-      // one.
-      expect(await listSkillRefs(identity)).not.toContain(
+    // Refused means not installed: the Bot's own catalog is the bootstrap
+    // one.
+    expect(await listSkillRefs(identity)).not.toContain(
+      `plugin/${BYTES_PLUGIN_ID}/first`,
+    );
+
+    // The same two Skills, the longer one a byte shorter, sit exactly on the
+    // bound and are admitted; the Bot that switches the Plugin on is offered
+    // both, so the refusal above was about the bytes and not the shape.
+    await pinPluginGeneration(userId, {
+      ...plugin,
+      descriptor: boundedDescriptor(ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2),
+    });
+    await switchPlugin(identity, BYTES_PLUGIN_ID, true);
+    expect(await listSkillRefs(identity)).toEqual(
+      expect.arrayContaining([
         `plugin/${BYTES_PLUGIN_ID}/first`,
-      );
-
-      // The same two Skills, the longer one a byte shorter, sit exactly on the
-      // bound and are admitted; the Bot that switches the Plugin on is offered
-      // both, so the refusal above was about the bytes and not the shape.
-      await pinPluginGeneration(userId, {
-        ...plugin,
-        descriptor: boundedDescriptor(
-          ARTIFACT_SKILLS_MAX_TOTAL_BYTES_V1 / 2,
-        ),
-      });
-      await switchPlugin(identity, BYTES_PLUGIN_ID, true);
-      expect(await listSkillRefs(identity)).toEqual(
-        expect.arrayContaining([
-          `plugin/${BYTES_PLUGIN_ID}/first`,
-          `plugin/${BYTES_PLUGIN_ID}/second`,
-        ]),
-      );
-    },
-  );
+        `plugin/${BYTES_PLUGIN_ID}/second`,
+      ]),
+    );
+  });
 });
