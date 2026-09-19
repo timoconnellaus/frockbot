@@ -17,6 +17,7 @@ build carries no patch key, so it could never be patched.
 import argparse
 import base64
 import fcntl
+from functools import cache
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -30,10 +31,11 @@ import sys
 import time
 import zipfile
 
+from native_metadata import read_native_metadata
+
 ROOT = Path(__file__).resolve().parent.parent
 STATE = Path(os.environ.get("NATIVE_UPDATE_STATE", ROOT / ".native-build/updates"))
 NATIVE = ROOT / "apps/native"
-HOSTED_PROFILE = ROOT / "deployments/hosted.json"
 PACKAGE = "com.frockbot.mobile"
 SIGNER = "61e6479f9c5755154c1f939cde48e8a757eff3136e54ed1dda5f61e78b3c1e37"
 FLUTTER_VERSION = "3.47.0"
@@ -55,16 +57,14 @@ INTENT_IDENTITY_KEYS = ("versionCode", "package", "appId", "buildName", "buildNu
                         "workingTreeDirty", "intentCreatedAt")
 
 
-def build_name():
-    """The release's version name, read from the app that will carry it.
+@cache
+def source_metadata():
+    return read_native_metadata(ROOT)
 
-    A second copy here silently released the previous version name after a
-    pubspec bump: the APK said one thing and the compatibility gate another.
-    """
-    match = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$", (NATIVE / "pubspec.yaml").read_text(), re.M)
-    if not match:
-        raise RuntimeError("apps/native/pubspec.yaml has no `version: <name>+<code>` line to release.")
-    return match[1]
+
+def build_name():
+    """The release's version name, from the checked native metadata."""
+    return source_metadata().version_name
 
 
 def origin_define():
@@ -74,9 +74,7 @@ def origin_define():
     its own: `deployments/hosted.json` is the one place the hosted origin is written, so a
     release and the patches that follow it cannot disagree about which server they reach.
     """
-    profile = json.loads(HOSTED_PROFILE.read_text())
-    hostname = profile["workers"]["app"]["hostnames"][0]
-    return f"--dart-define=FROCKBOT_ORIGIN=https://{hostname}"
+    return f"--dart-define=FROCKBOT_ORIGIN={source_metadata().hosted_origin}"
 
 
 def app_version_define(release_version):

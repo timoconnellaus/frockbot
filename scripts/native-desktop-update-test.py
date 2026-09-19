@@ -7,6 +7,7 @@ import plistlib
 import re
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,6 +39,36 @@ def dev_info(**overrides):
 
 
 class DesktopUpdateTest(unittest.TestCase):
+    def test_build_identity_and_origin_come_from_checked_metadata(self):
+        desktop.source_metadata.cache_clear()
+        metadata = SimpleNamespace(
+            version_name="9.8.7",
+            build_number=42,
+            client_protocol=3,
+            hosted_origin="https://desktop.example",
+        )
+        try:
+            with mock.patch.object(
+                desktop, "read_native_metadata", return_value=metadata
+            ):
+                self.assertEqual(desktop.source_versions(), ("9.8.7", "42", 3))
+                self.assertEqual(desktop.hosted_origin(), "https://desktop.example")
+        finally:
+            desktop.source_metadata.cache_clear()
+
+    def test_malformed_metadata_stops_before_build_commands_are_made(self):
+        desktop.source_metadata.cache_clear()
+        try:
+            with mock.patch.object(
+                desktop,
+                "read_native_metadata",
+                side_effect=RuntimeError("malformed native metadata"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "malformed native metadata"):
+                    desktop.source_versions()
+        finally:
+            desktop.source_metadata.cache_clear()
+
     def test_targets_the_dev_identity_beside_the_released_app(self):
         self.assertEqual(desktop.BUNDLE_ID, "com.frockbot.mobile.dev")
         self.assertEqual(desktop.INSTALL_APP, Path("/Users/tim/Applications/FrockBot Dev.app"))

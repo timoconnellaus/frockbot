@@ -10,7 +10,7 @@ and so keeps `com.frockbot.mobile`.
 """
 
 import argparse
-import json
+from functools import cache
 import os
 from pathlib import Path
 import plistlib
@@ -20,16 +20,21 @@ import subprocess
 import tempfile
 import time
 
+from native_metadata import read_native_metadata
+
 
 ROOT = Path(__file__).resolve().parent.parent
 NATIVE = ROOT / "apps/native"
-def hosted_origin():
-    """The deployment a hosted client talks to, from `deployments/hosted.json`.
 
-    The client carries no host of its own, so every hosted build names one here.
-    """
-    profile = json.loads((ROOT / "deployments/hosted.json").read_text())
-    return f"https://{profile['workers']['app']['hostnames'][0]}"
+
+@cache
+def source_metadata():
+    return read_native_metadata(ROOT)
+
+
+def hosted_origin():
+    """The deployment a hosted client talks to, from checked metadata."""
+    return source_metadata().hosted_origin
 
 FLUTTER = Path(os.environ.get("FROCKBOT_FLUTTER", "/Users/tim/repos/flutter/bin/flutter"))
 APP_NAME = "FrockBot Dev"
@@ -68,26 +73,8 @@ def run(args, *, capture=False, check=True, **kwargs):
 
 
 def source_versions():
-    pubspec = (NATIVE / "pubspec.yaml").read_text()
-    version = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$", pubspec, re.M)
-    transport = (NATIVE / "lib/client/transport.dart").read_text()
-    protocol = re.search(r"'protocolVersion':\s*(\d+)", transport)
-    compatibility = (ROOT / "core/protocol-schemas/compatibility.generated.ts").read_text()
-    protocol_min = re.search(r"protocolMin:\s*(\d+)", compatibility)
-    protocol_max = re.search(r"protocolMax:\s*(\d+)", compatibility)
-    minimum_native = re.search(r'minimumNativeVersion:\s*"([^"]+)"', compatibility)
-    if not all((version, protocol, protocol_min, protocol_max, minimum_native)):
-        raise RuntimeError("Could not read the native app and protocol versions from source.")
-    name, number = version.groups()
-    client_protocol = int(protocol[1])
-    if not int(protocol_min[1]) <= client_protocol <= int(protocol_max[1]):
-        raise RuntimeError(
-            f"Client protocol {client_protocol} is outside the supported "
-            f"{protocol_min[1]}..{protocol_max[1]} range."
-        )
-    if tuple(map(int, name.split("."))) < tuple(map(int, minimum_native[1].split("."))):
-        raise RuntimeError(f"Native version {name} is below the minimum {minimum_native[1]}.")
-    return name, number, client_protocol
+    metadata = source_metadata()
+    return metadata.version_name, str(metadata.build_number), metadata.client_protocol
 
 
 def inspect_app(app, expected_name, expected_number):

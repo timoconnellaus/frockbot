@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -40,6 +41,34 @@ class UpdatesTest(unittest.TestCase):
         with patch.object(updates.fcntl, "flock", side_effect=BlockingIOError):
             with self.assertRaisesRegex(RuntimeError, "already running"):
                 updates.main(["build"])
+
+    def test_release_identity_comes_from_checked_metadata(self):
+        updates.source_metadata.cache_clear()
+        metadata = SimpleNamespace(
+            version_name="9.8.7", hosted_origin="https://release.example"
+        )
+        try:
+            with patch.object(updates, "read_native_metadata", return_value=metadata):
+                self.assertEqual(updates.build_name(), "9.8.7")
+                self.assertEqual(
+                    updates.origin_define(),
+                    "--dart-define=FROCKBOT_ORIGIN=https://release.example",
+                )
+        finally:
+            updates.source_metadata.cache_clear()
+
+    def test_malformed_metadata_stops_before_release_identity_is_built(self):
+        updates.source_metadata.cache_clear()
+        try:
+            with patch.object(
+                updates,
+                "read_native_metadata",
+                side_effect=RuntimeError("malformed native metadata"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "malformed native metadata"):
+                    updates.build_name()
+        finally:
+            updates.source_metadata.cache_clear()
 
     def test_rejected_release_keeps_previous_download(self):
         previous = {"versionCode": 50, "file": "old.apk"}

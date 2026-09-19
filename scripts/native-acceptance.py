@@ -19,6 +19,8 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 
+from native_metadata import read_native_metadata
+
 ROOT = Path(__file__).resolve().parent.parent
 SERIAL = "adb-54261JEBF09176-BksSLE._adb-tls-connect._tcp"
 PACKAGE = "com.frockbot.mobile"
@@ -27,6 +29,20 @@ SDK = Path(os.environ.get("ANDROID_HOME", "/Users/tim/Library/Android/sdk"))
 ADB = str(SDK / "platform-tools/adb")
 OUT = ROOT / ".native-build/native-acceptance"
 OUT.mkdir(parents=True, exist_ok=True)
+
+
+def build_command(flutter, installed_version):
+    metadata = read_native_metadata(ROOT)
+    return [
+        flutter,
+        "build",
+        "apk",
+        "--release",
+        f"--build-name={metadata.version_name}",
+        f"--build-number={installed_version + 1}",
+        f"--dart-define=FROCKBOT_ORIGIN={metadata.hosted_origin}",
+        "--dart-define=NATIVE_ACCEPTANCE=true",
+    ]
 
 
 def run(args, *, check=True, timeout=60, capture=True, env=None):
@@ -124,11 +140,7 @@ def install(replace_production=False):
     environment["ANDROID_USER_HOME"] = str(ROOT / ".native-build/android-user")
     environment["FROCKBOT_ANDROID_RELEASE_IDENTITY"] = "true"
     flutter = os.environ.get("NATIVE_FLUTTER", "/Users/tim/repos/flutter/bin/flutter")
-    build_name = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$", (ROOT / "apps/native/pubspec.yaml").read_text(), re.M)[1]
-    origin = json.loads((ROOT / "deployments/hosted.json").read_text())["workers"]["app"]["hostnames"][0]
-    subprocess.run([flutter, "build", "apk", "--release", f"--build-name={build_name}",
-                    f"--build-number={version + 1}", f"--dart-define=FROCKBOT_ORIGIN=https://{origin}",
-                    "--dart-define=NATIVE_ACCEPTANCE=true"],
+    subprocess.run(build_command(flutter, version),
                    cwd=ROOT / "apps/native", env=environment, check=True)
     apk = ROOT / "apps/native/build/app/outputs/flutter-apk/app-release.apk"
     signer = cert(apk, "candidate-certificate.txt")
