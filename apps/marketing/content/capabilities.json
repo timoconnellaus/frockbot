@@ -1724,15 +1724,6 @@
       "status": "available"
     },
     {
-      "id": "theme-assembly-handler",
-      "type": "handler",
-      "category": "In the Bot",
-      "name": "Theme assembly",
-      "description": "theme/assemble — shape the Bot’s look outside a Turn.",
-      "scope": "cloud",
-      "status": "available"
-    },
-    {
       "id": "approval-handler",
       "type": "handler",
       "category": "In the Bot",
