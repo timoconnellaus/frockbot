@@ -824,6 +824,12 @@
     white-space: pre;
     tab-size: 2;
   }
+  /* A block that follows the heading directly needs the gap `.open-split`
+     gives the ones inside it, or it collides with the buttons above. */
+  .split-heading + .code-block,
+  .split-heading + .terminal {
+    margin-top: 48px;
+  }
   .code-block .k {
     color: #ff7aa2;
   }
@@ -897,11 +903,101 @@
   .open-page .legal-hero::after {
     display: none;
   }
+  /* Open-source page hero: the homepage's dark register, with the layers the
+     page is about stacked on the right. */
+  .open-hero {
+    overflow: clip;
+    padding-block: 72px 64px;
+    background: var(--ink);
+    color: #fff;
+  }
+  .open-hero-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 48px;
+    align-items: center;
+  }
+  .open-hero .eyebrow {
+    color: #bebbc5;
+  }
+  .open-hero h1 {
+    margin-top: 14px;
+    font-family: "Archivo Black", "Arial Black", sans-serif;
+    font-size: clamp(2.7rem, 5.2vw, 4.6rem);
+    font-weight: 900;
+    letter-spacing: -0.05em;
+    line-height: 0.96;
+    color: #fff;
+  }
+  .open-hero h1 em {
+    letter-spacing: -0.03em;
+  }
+  .open-hero-summary {
+    max-width: 34rem;
+    margin-top: 22px;
+    color: #bebbc5;
+    font-size: 1.1rem;
+    line-height: 1.6;
+  }
+  .open-hero .button-outline {
+    color: #fff;
+    box-shadow: inset 0 0 0 2px rgb(255 255 255 / 45%);
+  }
+  .open-hero .button-outline:hover {
+    box-shadow: inset 0 0 0 2px #fff;
+  }
+  .open-hero-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 26px;
+  }
+  .open-hero-facts b {
+    padding: 6px 11px;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 8%);
+    color: #e9e6ef;
+    font-size: 0.76rem;
+    font-weight: 700;
+  }
+  .open-hero-figure {
+    position: relative;
+    justify-self: center;
+    width: min(100%, 520px);
+  }
+  .open-stack {
+    display: block;
+    width: 100%;
+    height: auto;
+    filter: drop-shadow(0 18px 40px rgb(0 0 0 / 35%));
+  }
+  .open-hero-sheep {
+    position: absolute;
+    top: -6%;
+    left: 44%;
+    width: 29%;
+    height: auto;
+    transform: translateX(-50%);
+    filter: drop-shadow(0 10px 18px rgb(0 0 0 / 40%));
+  }
   .open-page .split-heading,
   .open-page .split-heading-bottom {
     align-items: start;
   }
   @media (max-width: 860px) {
+    .open-hero {
+      padding-block: 44px 40px;
+    }
+    .open-hero-shell {
+      grid-template-columns: 1fr;
+      gap: 36px;
+    }
+    .open-hero h1 {
+      font-size: clamp(2.5rem, 12vw, 3.4rem);
+    }
+    .open-hero-figure {
+      width: min(100%, 440px);
+    }
     .open-split {
       grid-template-columns: 1fr;
     }
@@ -1350,6 +1446,350 @@
   .legal-footer-shell {
     min-height: 125px;
   }
+  /* Open-source page: what a plugin can reach */
+  .reach-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    margin-top: 28px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+  .reach-legend span {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+  }
+  .reach-legend svg {
+    width: 16px;
+    height: 16px;
+  }
+  .reach-legend .is-live svg {
+    color: var(--tick-live);
+  }
+  .reach-legend .is-planned svg {
+    color: var(--tick-plan);
+  }
+  .reach-legend sup {
+    color: var(--pink-dark);
+    font-size: 0.9em;
+  }
+  /* No overflow here on desktop: a scroll container would capture the
+     sticky header, and the page is what scrolls. Phones get one below. */
+  .reach-grid-wrap {
+    margin-top: 20px;
+  }
+  .reach-grid {
+    --tick-live: #1d9a5b;
+    --tick-plan: #c6c1cb;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.86rem;
+    line-height: 1.35;
+  }
+  .reach-legend {
+    --tick-live: #1d9a5b;
+    --tick-plan: #c6c1cb;
+  }
+  .reach-grid th,
+  .reach-grid td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--line);
+    text-align: center;
+    vertical-align: middle;
+  }
+  /* Sticks to the top of the viewport until the table scrolls past. */
+  .reach-grid thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    background: #fff;
+    border-bottom: 2px solid var(--ink);
+    font-family: "Archivo Black", "Arial Black", sans-serif;
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+  }
+  .reach-grid th[scope="row"] {
+    padding-left: 0;
+    text-align: left;
+    font-weight: 600;
+  }
+  .reach-grid th[scope="row"] small {
+    display: block;
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-weight: 500;
+  }
+  .reach-grid th[scope="row"] small code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--pink-dark);
+  }
+  /* A sub-group inside a kind: one quiet uppercase line. */
+  /* The kind row and the sub-group row stack under the platform header, each
+     a fixed height so the offsets below are exact. */
+  .reach-grid {
+    --reach-head: 58px;
+    --reach-group: 44px;
+  }
+  .reach-grid .reach-sub th {
+    position: sticky;
+    top: calc(var(--reach-head) + var(--reach-group));
+    z-index: 2;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 10px 0 4px;
+    border-bottom: 1px solid var(--line);
+    background: #fff;
+    text-align: left;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .reach-grid .reach-group-row th {
+    position: sticky;
+    top: var(--reach-head);
+    z-index: 2;
+    height: var(--reach-group);
+    box-sizing: border-box;
+    padding: 10px 0 8px;
+    border-bottom: 1px solid var(--ink);
+    background: #fff;
+    text-align: left;
+    font-weight: 500;
+    color: var(--muted);
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+  /* Air above each kind, outside the sticky cell so it doesn't ride along. */
+  .reach-grid .reach-group + .reach-group .reach-group-row th {
+    border-top: 18px solid #fff;
+    height: calc(var(--reach-group) + 18px);
+  }
+  .reach-grid .reach-group-row .reach-kind {
+    margin-right: 12px;
+    vertical-align: 1px;
+  }
+  .reach-grid td {
+    width: 8%;
+    min-width: 72px;
+  }
+  .reach-grid thead th {
+    height: var(--reach-head);
+    box-sizing: border-box;
+    line-height: 1.2;
+    vertical-align: bottom;
+  }
+  .reach-grid td svg {
+    width: 18px;
+    height: 18px;
+    vertical-align: middle;
+  }
+  .reach-grid td.y {
+    color: var(--tick-live);
+  }
+  .reach-grid td.p {
+    color: var(--tick-plan);
+  }
+  .reach-grid td.g sup {
+    margin-left: 1px;
+    color: var(--pink-dark);
+    font-size: 0.72rem;
+  }
+  .reach-grid td.n::before {
+    content: "";
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--line);
+  }
+  .reach-grid tbody tr:hover th[scope="row"],
+  .reach-grid tbody tr:hover td {
+    background: var(--cream);
+  }
+  .reach-grid tbody tr.reach-group-row:hover th {
+    background: transparent;
+  }
+  .reach-subhead {
+    margin-top: 40px;
+    font-family: "Archivo Black", "Arial Black", sans-serif;
+    font-size: 1.15rem;
+    letter-spacing: -0.01em;
+  }
+  .reach-chips code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.73rem;
+    color: var(--pink-dark);
+  }
+  .reach-kind {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--cream);
+    color: var(--muted);
+    font-family: "Manrope", system-ui, sans-serif;
+    font-style: normal;
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  /* One colour per kind, shared by the key and every badge. */
+  .k-slot {
+    background: #fce2ea;
+    color: #b33257;
+  }
+  .k-entry {
+    background: #fbeccd;
+    color: #8a5c10;
+  }
+  .k-trigger {
+    background: #d9eee6;
+    color: #1d6a53;
+  }
+  .k-handler {
+    background: #e9e3f7;
+    color: #56469b;
+  }
+  .k-action {
+    background: #dfe9f7;
+    color: #2a5a8f;
+  }
+  .reach-foot {
+    margin-top: 16px;
+    max-width: 78ch;
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.6;
+  }
+  .reach-foot b {
+    color: var(--pink-dark);
+  }
+  .reach-foot-lead {
+    margin-top: 8px;
+  }
+  .reach-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .reach-chips li {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    padding: 6px 11px;
+    border-radius: 999px;
+    background: var(--cream);
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .reach-chips li.is-planned {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--line);
+    color: var(--muted);
+  }
+  .reach-dot {
+    width: 9px;
+    height: 9px;
+    flex: none;
+    border-radius: 50%;
+    border: 2px solid var(--tick-live, #1d9a5b);
+    background: var(--tick-live, #1d9a5b);
+  }
+  .is-planned .reach-dot {
+    border-color: #c6c1cb;
+    background: transparent;
+  }
+  /* Three scenarios drawn as a plugin would run them. */
+  .reach-cases {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 20px;
+  }
+  .reach-case {
+    padding: 22px 22px 24px;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: #fff;
+  }
+  .reach-case h4 {
+    font-family: "Archivo Black", "Arial Black", sans-serif;
+    font-size: 1.02rem;
+    letter-spacing: -0.01em;
+  }
+  .reach-case svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-top: 14px;
+  }
+  .reach-case p {
+    margin-top: 14px;
+    font-size: 0.86rem;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .reach-case p .reach-kind {
+    margin: 0 1px;
+    vertical-align: 1px;
+  }
+  /* The parts list: which rows of the grid build the scenario. */
+  .reach-parts {
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .reach-parts li {
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    gap: 2px 10px;
+    align-items: baseline;
+    padding: 9px 0;
+    border-top: 1px solid var(--line);
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
+  .reach-parts .reach-kind {
+    justify-self: start;
+  }
+  .reach-parts b {
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .reach-parts span {
+    grid-column: 2;
+    color: var(--muted);
+  }
+  .k-grant {
+    background: #ece9e4;
+    color: #5a5560;
+  }
+  .reach-note {
+    margin-top: 28px;
+    padding: 20px 24px;
+    border-radius: 20px;
+    background: var(--blush);
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+  .reach-note b {
+    font-family: "Caveat", cursive;
+    font-size: 1.3rem;
+    color: var(--pink-dark);
+  }
 }
 
 @layer responsive {
@@ -1373,9 +1813,54 @@
       grid-template-columns: 108px minmax(0, 1fr) 104px;
       gap: 7px;
     }
+    .reach-cases {
+      grid-template-columns: 1fr;
+      max-width: 520px;
+    }
   }
 
   @media (max-width: 860px) {
+    .reach-grid-wrap {
+      margin-inline: -16px;
+      padding-inline: 16px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    /* Pin the capability names while the platform columns scroll. */
+    .reach-grid th[scope="row"] {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      min-width: 170px;
+      max-width: 200px;
+      padding-right: 12px;
+      background: #fff;
+      box-shadow: 8px 0 8px -8px rgba(30, 29, 39, 0.18);
+    }
+    .reach-grid thead th:first-child,
+    .reach-grid .reach-group-row th,
+    .reach-grid .reach-sub th {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      background: #fff;
+    }
+    /* The group row spans the whole scrolling table; keep its text on screen. */
+    .reach-grid .reach-group-row th span {
+      display: block;
+      max-width: calc(100vw - 48px);
+      margin-top: 6px;
+    }
+    .reach-grid thead th {
+      position: static;
+    }
+    .reach-grid thead th:first-child {
+      position: sticky;
+    }
+    .reach-grid td {
+      min-width: 64px;
+      padding-inline: 6px;
+    }
     .container {
       width: min(100% - 32px, var(--container));
     }
