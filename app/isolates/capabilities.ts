@@ -20,6 +20,7 @@ import {
 } from "@frockbot/core/contracts";
 import type { BotIsolateArtifactStore } from "@frockbot/frock-compose";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "@frockbot/app/plugins/seeded/artifacts.generated";
+import { boundedPromiseCacheV1 } from "@frockbot/core/promise-cache";
 
 export type { IsolateModelBindingV1 } from "@frockbot/core/contracts";
 
@@ -346,53 +347,36 @@ export function createR2PackageArtifactStore(
   }
   return {
     loadPackageArtifact(contentHash: string): Promise<string> {
-      const held = cache.get(contentHash);
-      if (held) {
-        // Map insertion order is the eviction order. Touch a hit so active
-        // generations survive while old immutable generations fall out.
-        cache.delete(contentHash);
-        cache.set(contentHash, held);
-        return held;
-      }
-      const loading = (async (): Promise<string> => {
-        // A seeded Plugin's artifact ships in the bundle: the deployment built
-        // it from source and there is no publisher to have put it in R2. It is
-        // read by the same content address and verified by the same hash below,
-        // so nothing about mounting one is different.
-        const seeded = SEEDED_PLUGIN_ARTIFACTS_V1.find(
-          (artifact) => artifact.contentHash === contentHash,
-        );
-        let module: string;
-        if (seeded) {
-          module = seeded.module;
-        } else {
-          const key = `packages/${contentHash}.mjs`;
-          const object = await bucket.get(key);
-          if (!object) {
-            throw new Error(`package artifact "${contentHash}" is missing`);
-          }
-          module = await object.text();
-        }
-        if ((await sha256Hex(module)) !== contentHash) {
-          throw new Error(
-            `package artifact "${contentHash}" failed hash verification`,
+      return boundedPromiseCacheV1(
+        cache,
+        contentHash,
+        PACKAGE_ARTIFACT_CACHE_LIMIT_V1,
+        async (): Promise<string> => {
+          // A seeded Plugin's artifact ships in the bundle: the deployment
+          // built it from source and there is no publisher to have put it in
+          // R2. It is read and verified by the same content address.
+          const seeded = SEEDED_PLUGIN_ARTIFACTS_V1.find(
+            (artifact) => artifact.contentHash === contentHash,
           );
-        }
-        return module;
-      })();
-      // Content hashes make successful values immutable and safe to share
-      // across Turns. A failure is never cached: a missing object may finish
-      // uploading, and a transient R2 read must remain retryable.
-      cache.set(contentHash, loading);
-      while (cache.size > PACKAGE_ARTIFACT_CACHE_LIMIT_V1) {
-        const oldest = cache.keys().next().value;
-        if (oldest === undefined) break;
-        cache.delete(oldest);
-      }
-      void loading.catch(() => {
-        if (cache.get(contentHash) === loading) cache.delete(contentHash);
-      });
-      return loading;
+          let module: string;
+          if (seeded) {
+            module = seeded.module;
+          } else {
+            const key = `packages/${contentHash}.mjs`;
+            const object = await bucket.get(key);
+            if (!object) {
+              throw new Error(`package artifact "${contentHash}" is missing`);
+            }
+            module = await object.text();
+          }
+          if ((await sha256Hex(module)) !== contentHash) {
+            throw new Error(
+              `package artifact "${contentHash}" failed hash verification`,
+            );
+          }
+          return module;
+        },
+      );
     },
   };
 }

@@ -299,13 +299,20 @@ interface VoiceCallTargetV1 {
   name: string;
   description?: string;
   voice: BotVoiceAppearanceV1;
-  /** The exact membership/appearance snapshot that admitted this target. */
-  directory: BotDirectoryViewV1;
+  /** A successful membership/appearance snapshot that admitted this target. */
+  directory?: BotDirectoryViewV1;
+  /** The actual identity read reused by prompt assembly. */
+  identityReadDurationMs?: number;
 }
 
-export interface VoiceCurrentHistoryV1 {
+interface VoiceCurrentHistoryV1 {
   thread: VoiceBotHistorySourceV1;
   activity: "idle" | "working";
+}
+
+export interface VoiceBotReuseContextV1 {
+  target: VoiceBotSummaryV1 & { directory?: BotDirectoryViewV1 };
+  history: Promise<{ activity: "idle" | "working" } | undefined>;
 }
 
 interface LiveCall {
@@ -2366,7 +2373,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         botId: "",
         name: "",
         voice: resolveBotVoiceV1({}),
-        directory: { schemaVersion: 1, revision: 0, bots: [] },
       };
     }
     const attempted = new Set<string>();
@@ -2412,6 +2418,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   ): Promise<VoiceCallTargetV1> {
     const entry = directory.bots.find((candidate) => candidate.botId === botId);
     if (!entry) throw new Error("that Bot is not in this account");
+    const identityStarted = performance.now();
     const identity = await this.botIdentity(userId, botId);
     return {
       ...identity,
@@ -2420,6 +2427,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         characterId: entry.avatar.characterId,
       }),
       directory,
+      identityReadDurationMs: Math.max(
+        0,
+        Math.round(performance.now() - identityStarted),
+      ),
     };
   }
 
@@ -3191,7 +3202,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     };
   }
 
-  private async directory(userId: string) {
+  protected async directory(userId: string) {
     return decodeDirectoryViewV1(
       rpcJsonSnapshotV1(
         await this.userRpc(userId).listBots({ schemaVersion: 1, userId }),
@@ -3243,19 +3254,22 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   /** Every Bot, as it is named today, with its live activity preserved. */
   protected async listBots(
     userId: string,
-    snapshot?: BotDirectoryViewV1,
-    known?: VoiceBotSummaryV1,
-    knownHistory?: Promise<VoiceCurrentHistoryV1 | undefined>,
+    reuse?: VoiceBotReuseContextV1,
   ): Promise<VoiceBotSummaryV1[]> {
-    const directory = snapshot ?? (await this.directory(userId));
+    // Only a successful revisioned admission snapshot is reusable. If target
+    // admission could not read membership, retry here so a transient failure
+    // does not erase the Bot directory from the prompt.
+    const directory = reuse?.target.directory ?? (await this.directory(userId));
     return Promise.all(
       directory.bots.map(async (bot): Promise<VoiceBotSummaryV1> => {
-        if (known?.botId === bot.botId) {
-          const history = await knownHistory;
+        if (reuse?.target.botId === bot.botId) {
+          const history = await reuse.history;
           return {
-            botId: known.botId,
-            name: known.name,
-            ...(known.description ? { description: known.description } : {}),
+            botId: reuse.target.botId,
+            name: reuse.target.name,
+            ...(reuse.target.description
+              ? { description: reuse.target.description }
+              : {}),
             ...(history ? { activity: history.activity } : {}),
           };
         }
@@ -3389,12 +3403,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       "prompt-bot-history",
       this.loadCurrentBotHistory(userId, target),
     );
-    const directory = this.listBots(
-      userId,
-      target.directory,
-      target,
-      history,
-    ).catch(() => [] as VoiceBotSummaryV1[]);
+    const directory = this.listBots(userId, { target, history }).catch(
+      () => [] as VoiceBotSummaryV1[],
+    );
     const [bots, memory, timezone, session, bot] = await Promise.all([
       timed(timing, "prompt-directory", directory),
       timed(
@@ -3454,11 +3465,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   ): Promise<VoiceCurrentBotV1 | undefined> {
     const botId = target.botId;
     if (!botId) return undefined;
-    const bot = await timed(
-      timing,
-      "prompt-bot-identity",
-      Promise.resolve(target),
-    );
+    const bot = target;
+    // Identity was read while resolving the call target. Report that actual
+    // cost while reusing the value, rather than measuring an already-resolved
+    // Promise and hiding the read behind `target-resolved`.
+    timing?.("prompt-bot-identity", {
+      durationMs: target.identityReadDurationMs ?? 0,
+    });
     const [memory, loadedHistory] = await Promise.all([
       timed(
         timing,

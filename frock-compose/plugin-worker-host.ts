@@ -59,6 +59,7 @@ import {
   type ToolRegistration,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+import { boundedPromiseCacheV1 } from "@frockbot/core/promise-cache";
 import {
   cardSurfacePrefixV1,
   decodePluginWorkerModelResultV1,
@@ -168,26 +169,15 @@ function pluginWorkerHealthV1(
     cache = new Map();
     pluginWorkerHealthCacheV1.set(loader, cache);
   }
-  const held = cache.get(loaderId);
-  if (held) {
-    cache.delete(loaderId);
-    cache.set(loaderId, held);
-    return held;
-  }
-  const loading = load();
-  cache.set(loaderId, loading);
-  while (cache.size > PLUGIN_WORKER_HEALTH_CACHE_LIMIT_V1) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.delete(oldest);
-  }
   // The loader id addresses immutable modules, identities and bindings, so a
   // successful declaration is stable across Turns. Failures remain retryable:
   // an overloaded worker must not poison that generation for its lifetime.
-  void loading.catch(() => {
-    if (cache.get(loaderId) === loading) cache.delete(loaderId);
-  });
-  return loading;
+  return boundedPromiseCacheV1(
+    cache,
+    loaderId,
+    PLUGIN_WORKER_HEALTH_CACHE_LIMIT_V1,
+    load,
+  );
 }
 
 /** The `WorkerCode` a Plugin worker is loaded from. Structurally the platform's. */

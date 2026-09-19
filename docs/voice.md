@@ -674,7 +674,8 @@ never subtract one side's elapsed from another's.
   `target-resolved`, then the prompt the session is instructed with —
   `prompt-context-start`, one line per constituent read
   (`prompt-directory`, `prompt-user-memory`, `prompt-timezone`,
-  `prompt-voice-memory`, `prompt-bot-identity`, `prompt-bot-memory`,
+  `prompt-voice-memory`, `prompt-bot-identity` (the actual identity-read
+  duration reused from target admission), `prompt-bot-memory`,
   `prompt-bot-history`, each with its `durationMs`),
   `prompt-context-ready`, and `prompt-context-awaited` where the session
   actually waited on it, followed by the fresh `session-voice-memory` read

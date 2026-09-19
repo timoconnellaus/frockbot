@@ -157,9 +157,10 @@ export function openMemoryTurnPositionV1(
 }
 
 /**
- * The Turn-scoped Memory projection. Deep module, small surface: `refresh` is
- * the only way it changes, and `current` is what the prompt and the search
- * tool both read, so those two can never disagree about what this Turn saw.
+ * The Turn-scoped Memory projection. `refresh` captures the exact document
+ * snapshot injected into this Turn's prompt. `ensureIndex` lazily derives the
+ * search index from that same snapshot, so prompt and search never disagree
+ * about what this Turn saw even though embeddings stay off the reply path.
  */
 export class MemoryProjection {
   #host: MemoryRuntimeHostV1;
@@ -360,8 +361,8 @@ export class MemoryProjection {
   }
 
   /**
-   * Returns the derived index only after this Turn's background build has
-   * settled. The first model request never awaits it; `memory_search` does.
+   * Builds and returns this Turn's derived index on the first search. A Turn
+   * that never searches performs no embedding or vector-store work.
    */
   async ensureIndex(): Promise<MemoryIndexV1> {
     if (!this.#indexReady) await this.startIndex();

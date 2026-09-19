@@ -376,6 +376,24 @@ describe("the session the call talks through", () => {
     expect(setup.instruction).toContain(identity.botId);
   });
 
+  test("retries a directory read that failed at admission", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-directory-retry-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ failDirectoryReads: 1 });
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+
+    const setup = (await stub.probeUpstreamFrames()).find(
+      (frame) => frame.kind === "setup",
+    );
+    expect(setup?.instruction).toContain(identity.botId);
+  });
+
   test("bridges binary Live messages both ways and meters what crossed", async () => {
     const userId = `voice-audio-${crypto.randomUUID()}`;
     const stub = assistant(userId);

@@ -8,7 +8,7 @@
 import type { Connection } from "agents";
 import {
   VoiceAssistant,
-  type VoiceCurrentHistoryV1,
+  type VoiceBotReuseContextV1,
 } from "../src/voice-assistant.ts";
 import { GeminiFakeV1, type GeminiFakeFrameV1 } from "./voice-gemini-fake.ts";
 import type { VoiceDelegationRecordV1 } from "@frockbot/app/voice/ledger";
@@ -16,8 +16,6 @@ import type {
   VoiceMemoryJobV1,
   VoiceMemoryRecordV1,
 } from "@frockbot/app/voice/memory";
-import type { VoiceBotSummaryV1 } from "@frockbot/app/voice/assistant";
-import type { BotDirectoryViewV1 } from "@frockbot/app/flock/shared";
 
 /** One scheduled row, with its payload as JSON. */
 export interface VoiceScheduleRow {
@@ -52,6 +50,8 @@ export interface VoiceProbeScript {
   slowUpstreamMs?: number;
   /** The Bot directory takes this long to answer. */
   slowDirectoryMs?: number;
+  /** This many directory reads fail before the authority answers again. */
+  failDirectoryReads?: number;
 }
 
 function sse(events: unknown[]): ReadableStream<Uint8Array> {
@@ -250,13 +250,21 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   /** The directory, as slow as a test asked for. */
   protected override async listBots(
     userId: string,
-    directory?: BotDirectoryViewV1,
-    known?: VoiceBotSummaryV1,
-    knownHistory?: Promise<VoiceCurrentHistoryV1 | undefined>,
+    reuse?: VoiceBotReuseContextV1,
   ) {
     const slow = this.#script.slowDirectoryMs;
     if (slow) await new Promise((resolve) => setTimeout(resolve, slow));
-    return super.listBots(userId, directory, known, knownHistory);
+    return super.listBots(userId, reuse);
+  }
+
+  /** Fails admission reads so prompt preparation can prove it retries. */
+  protected override async directory(userId: string) {
+    const failures = this.#script.failDirectoryReads ?? 0;
+    if (failures > 0) {
+      this.#script.failDirectoryReads = failures - 1;
+      throw new Error("the scripted directory read failed");
+    }
+    return super.directory(userId);
   }
 
   /** Records the memory lines too, so a test reads what an operator would. */
