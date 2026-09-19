@@ -1353,7 +1353,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v9";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v10";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(
