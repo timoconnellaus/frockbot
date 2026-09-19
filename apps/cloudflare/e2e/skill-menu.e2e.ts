@@ -41,6 +41,10 @@ async function openPopover(page: Page): Promise<void> {
   await expect(composer).toBeFocused();
   await expect(async () => {
     await composer.press("ControlOrMeta+a");
+    // The draft may already hold the trigger — Escape leaves it where it is —
+    // and the client reads the text only when an edit tells it to. Clearing
+    // first makes the typing below an edit whatever the field started with.
+    await composer.press("Backspace");
     await composer.pressSequentially("/");
     await expect(sem(page, "skill-menu")).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 60_000 });
@@ -62,6 +66,15 @@ test("the Skill popover keeps the highlight the arrow keys put on it", async ({
   await openPopover(page);
 
   const popover = sem(page, "skill-menu");
+  // Escape closes the popover and leaves the field alone: the trigger is still
+  // in the draft, and the client has only stopped drawing the menu over it.
+  await composer.press("Escape");
+  await expect(popover).toBeHidden();
+  await expect(composer).toHaveValue("/");
+  // The trigger Escape left in the draft opens the menu again: the arrows
+  // below are spent on the list this same journey opened.
+  await openPopover(page);
+
   const options = popover.locator(
     '[flt-semantics-identifier^="skill-option-"]',
   );
@@ -111,7 +124,7 @@ test("the Skill popover keeps the highlight the arrow keys put on it", async ({
   await sem(page, "chat-composer").click();
   await expect(composerInput(page)).toHaveValue("");
 
-  // Reopening after this Dart-side rewrite is covered directly by
-  // `skill_popover_reopen_test.dart`; repeating the whole browser journey here
-  // added no integration boundary to the keyboard-navigation claim above.
+  // This journey ends once selection has attached the Skill and cleared the
+  // trigger. Reopening would exercise Flutter's editing-element replacement,
+  // not the keyboard-navigation contract this test owns.
 });

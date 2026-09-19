@@ -5,7 +5,7 @@ name: Main
 # on the merge commit — a pull request merges without rebasing, so this is
 # the first time the combination exists — and then the slow tier: the
 # Cloudflare app's workerd and integration suites, the real build, and the
-# browser suite across four runners.
+# browser suite across five runners.
 #
 # The slow tier is spread across runners on purpose. `Validate`, the workerd
 # suite and the integration suite share nothing but `bun install`, which is
@@ -318,10 +318,14 @@ jobs:
     needs: scope
     if: needs.scope.outputs.slow-tier != 'false'
     runs-on: ubuntu-latest
-    # Publication may spend seven minutes cold-starting its Applet build
-    # container before Playwright's 27-minute suite budget begins. Leave room
-    # for setup and artifact upload so failures retain their diagnostics.
-    timeout-minutes: 40
+    # Twenty was one crash short: a shard that lost `wrangler dev` twice and
+    # then spent two four-minute test timeouts was cancelled at the limit,
+    # and a cancelled job uploads nothing, so the cause was gone with it.
+    # Publication's Playwright budget is forty-five minutes — the
+    # container-ready startup it allows plus both journeys at fifteen each,
+    # one after the other — so the job has to outlast that with time left for
+    # checkout, install, Flutter setup, reporters and diagnostic uploads.
+    timeout-minutes: 60
 
     # Four runners share the ordinary corpus. The two real publication journeys
     # have a fifth lane because they alone need the Applet build container; the

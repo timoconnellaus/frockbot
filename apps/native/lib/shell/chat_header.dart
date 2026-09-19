@@ -179,6 +179,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                             ShellIds.botPanelToggle,
                             _ChromePill(
                               tooltip: 'Open $name',
+                              exposeButtonSemantics: true,
                               onPressed: onOpenBot,
                               padding: const EdgeInsets.fromLTRB(14, 0, 12, 0),
                               size: Size(0, chatDesktopChrome ? 40 : 44),
@@ -378,12 +379,14 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
 /// control; the fade behind it does not take a tap.
 class _ChromePill extends StatelessWidget {
   final String tooltip;
+  final bool exposeButtonSemantics;
   final VoidCallback? onPressed;
   final Widget child;
   final Size size;
   final EdgeInsetsGeometry padding;
   const _ChromePill({
     required this.tooltip,
+    this.exposeButtonSemantics = false,
     required this.onPressed,
     required this.child,
     required this.size,
@@ -393,8 +396,34 @@ class _ChromePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final contents = ConstrainedBox(
+      constraints: BoxConstraints(
+        minWidth: size.width,
+        minHeight: size.height,
+        maxWidth: size.width == 0 ? double.infinity : size.width,
+        maxHeight: size.width == 0 ? double.infinity : size.height,
+      ),
+      child: Padding(
+        padding: padding,
+        child: Center(child: child),
+      ),
+    );
+    final labelledContents = exposeButtonSemantics
+        ? contents
+        : Semantics(label: tooltip, excludeSemantics: true, child: contents);
+    final control = TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        padding: EdgeInsets.zero,
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        shape: const StadiumBorder(),
+      ),
+      child: labelledContents,
+    );
     return Tooltip(
       message: tooltip,
+      excludeFromSemantics: true,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(999),
         child: BackdropFilter(
@@ -404,22 +433,7 @@ class _ChromePill extends StatelessWidget {
             shape: StadiumBorder(
               side: BorderSide(color: scheme.outline.withValues(alpha: 0.55)),
             ),
-            child: InkWell(
-              onTap: onPressed,
-              customBorder: const StadiumBorder(),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minWidth: size.width,
-                  minHeight: size.height,
-                  maxWidth: size.width == 0 ? double.infinity : size.width,
-                  maxHeight: size.width == 0 ? double.infinity : size.height,
-                ),
-                child: Padding(
-                  padding: padding,
-                  child: Center(child: child),
-                ),
-              ),
-            ),
+            child: control,
           ),
         ),
       ),

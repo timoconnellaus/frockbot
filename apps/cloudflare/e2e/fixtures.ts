@@ -661,16 +661,16 @@ export async function createBot(
   }
   await sem(page, "flock-create-submit").click();
   await expect(sheet).toBeHidden({ timeout: 60_000 });
-  // Closing the sheet precedes bootstrap selecting the new Bot. The button's
-  // accessible name belongs to the product (currently `Open <name>`) and
-  // Flutter may merge the title into that name as well. The stable contract is
-  // the semantic id plus the selected Bot's name, not an exact prose string.
-  await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
-    new RegExp(escapeRegExp(name), "u"),
-    {
-      timeout: 60_000,
-    },
-  );
+  // Closing the sheet precedes bootstrap selecting the new Bot. The pill's
+  // tooltip is out of the accessibility tree, so the button inside the
+  // identifier takes its accessible name from the Bot's title, which belongs to
+  // the product. The stable contract is the semantic id plus the selected Bot's
+  // name, not an exact prose string.
+  await expect(
+    sem(page, "bot-panel-toggle").getByRole("button", {
+      name: new RegExp(escapeRegExp(name), "u"),
+    }),
+  ).toBeVisible({ timeout: 30_000 });
 }
 
 function escapeRegExp(value: string): string {
@@ -1362,10 +1362,11 @@ export async function selectBot(
   const row = sem(page, `sidebar-bot-${botId}`);
   await expect(row).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   await press(row);
-  await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
-    new RegExp(escapeRegExp(name), "u"),
-    { timeout: 60_000 },
-  );
+  await expect(
+    sem(page, "bot-panel-toggle").getByRole("button", {
+      name: new RegExp(escapeRegExp(name), "u"),
+    }),
+  ).toBeVisible({ timeout: 60_000 });
 }
 
 /**

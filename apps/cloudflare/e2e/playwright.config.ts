@@ -10,10 +10,19 @@
 import { defineConfig, devices } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { reserveFreePort } from "./ports.ts";
-import { e2eSuite, e2eTestSelection, suiteNeedsAppletBuild } from "./suite.ts";
+import {
+  e2eSuite,
+  e2eTestSelection,
+  publicationJourneyTimeoutMs,
+  publicationSpecFiles,
+  suiteNeedsAppletBuild,
+} from "./suite.ts";
 import type { E2EOptions } from "./fixtures.ts";
 
 const cloudflareRoot = fileURLToPath(new URL("..", import.meta.url));
+
+/** What the webServer is allowed to come up in, container build included. */
+const webServerStartupMs = 900_000;
 
 /**
  * Playwright loads this file once in the runner process and again in every
@@ -38,6 +47,14 @@ const baseURL = `http://127.0.0.1:${port}`;
 const suite = e2eSuite();
 const appletBuild = suiteNeedsAppletBuild(suite);
 
+// A lane's clock has to reach every stage it sanctions: the webServer's
+// startup, then each of its journeys' own budget. A publication spec file is
+// one journey, and the lane runs them one after another in one process, so
+// every one of them counts.
+const publicationRunMs =
+  publicationSpecFiles.length * publicationJourneyTimeoutMs +
+  webServerStartupMs;
+
 // Specs and the webServer run in separate processes. Record the suite's
 // infrastructure requirement once so both answer the same question.
 process.env.FROCKBOT_E2E_APPLET_BUILD = appletBuild ? "1" : "0";
@@ -60,9 +77,12 @@ export default defineConfig<object, E2EOptions>({
   // rest. What is left in common is the app Worker and the browser, which
   // several files can use at once.
   //
-  // A CI runner has two cores and is already sharded across four of them, so
+  // The core corpus is sharded across four CI runners, each with two cores, so
   // the parallelism there is between runners; locally it is between workers.
-  workers: process.env.CI ? 1 : 4,
+  // Publication owns one real build service, so the lane that holds its two
+  // journeys runs them serially: neither can tear down a content-addressed
+  // image under the other.
+  workers: suite === "publication" || process.env.CI ? 1 : 4,
   forbidOnly: !!process.env.CI,
   // The old blanket retries were for a wrangler crash that is now patched and
   // supervised. They turned deterministic regressions into thirty-minute
@@ -72,12 +92,16 @@ export default defineConfig<object, E2EOptions>({
   // the retained traces are enough to diagnose it. Stopping there prevents a
   // shared helper regression from spending every test's timeout in a shard.
   maxFailures: process.env.CI ? 2 : 0,
-  // Exit through Playwright, not GitHub's thirty-minute SIGTERM, so reporters
-  // can finish their blob and the diagnostic steps can upload it.
-  // Publication also cold-starts the Applet build container, whose own
-  // readiness allowance is seven minutes. Keep that startup outside the core
-  // suite's fail-fast budget without letting it consume the publication tests.
-  globalTimeout: process.env.CI ? (appletBuild ? 27 : 20) * 60_000 : 0,
+  // Exit through Playwright, not GitHub's job SIGTERM, so reporters can finish
+  // their blob and the diagnostic steps can upload it. This clock includes
+  // webServer startup, and the publication lane's is its startup allowance
+  // plus every journey it runs: a run in which each stays inside its own
+  // fifteen minutes is not cut off by a shard-sized budget underneath them.
+  globalTimeout: process.env.CI
+    ? appletBuild
+      ? publicationRunMs
+      : 20 * 60_000
+    : 0,
   // A CI runner is several times slower than a laptop, and the paths here are
   // the product's coldest: an application isolate load, a Durable Object start,
   // a Composition mount. The budget is for that, not for hiding a hang — a
@@ -132,7 +156,7 @@ export default defineConfig<object, E2EOptions>({
     // The Applet build service is a container app, and `wrangler dev` builds
     // its image on start. That is minutes on a cold Docker cache and seconds
     // afterwards, and it happens before the app Worker is up.
-    timeout: 900_000,
+    timeout: webServerStartupMs,
     reuseExistingServer: false,
     // Playwright's default is an immediate SIGKILL of the server's process
     // group, which cannot reach `wrangler dev` — the harness deliberately puts

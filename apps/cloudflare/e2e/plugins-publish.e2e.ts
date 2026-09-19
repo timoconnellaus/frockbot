@@ -30,6 +30,7 @@ import {
   e2eFrockbotToolCallPrompt,
   e2eToolCallPrompt,
 } from "./harness.ts";
+import { publicationJourneyTimeoutMs } from "./suite.ts";
 
 const DESKTOP = { width: 1351, height: 831 } as const;
 
@@ -82,7 +83,7 @@ test("a Bot writes, checks and publishes a Plugin; the User approves it; its too
   ollamaBaseUrl,
 }) => {
   // Two container builds and five scripted Turns.
-  test.setTimeout(900_000);
+  test.setTimeout(publicationJourneyTimeoutMs);
   expect(
     appletBuildAvailableV1(),
     "Docker is not running, so apps/applet-build could not start and no Plugin can be built. Start Docker and run this spec again.",

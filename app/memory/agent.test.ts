@@ -468,6 +468,50 @@ describe("the Turn's Memory read", () => {
     await dispose();
   });
 
+  test("retries a deferred lazy index on the next search", async () => {
+    const files = createTestMemoryFilesV1({ userId: "user-1" });
+    const store = new MemoryStore({ files, owner: OWNER, clock: () => AT });
+    expect(
+      (
+        await store.write({
+          root: userMemoryRootV1(OWNER),
+          tier: "profile",
+          fact: "Tim rides a Brompton to the station.",
+          writer: botWriter("bot-1"),
+        })
+      ).status,
+    ).toBe("ok");
+    let failNextRead = true;
+    const transientRead: WorkspaceFilesV1 = {
+      read: (path) => {
+        if (failNextRead) {
+          failNextRead = false;
+          return Promise.resolve({
+            status: "unavailable" as const,
+            reason: "the bucket briefly went away",
+          });
+        }
+        return files.read(path);
+      },
+      list: (request) => files.list(request),
+      stat: (path) => files.stat(path),
+      write: (request) => files.write(request),
+      delete: (request) => files.delete(request),
+    };
+    const host = hostFor("bot-1", transientRead);
+    const { session, dispose } = await openSession();
+    const projection = new MemoryProjection(host);
+
+    await projection.refresh(4, session);
+    expect((await projection.ensureIndex()).chunks).toHaveLength(0);
+    expect(
+      (await projection.ensureIndex()).chunks.some((chunk) =>
+        chunk.content.includes("Brompton"),
+      ),
+    ).toBe(true);
+    await dispose();
+  });
+
   test("does not keep the first response behind derived embeddings", async () => {
     const files = createTestMemoryFilesV1({ userId: "user-1" });
     const host = hostFor("bot-1", files);
@@ -550,6 +594,8 @@ describe("the Turn's Memory read", () => {
     const started = new Promise<void>((resolve) => {
       embeddingStarted = resolve;
     });
+    let upserts = 0;
+    let recorded = 0;
     const projection = new MemoryProjection({
       ...host,
       embed: async (texts) => {
@@ -558,9 +604,18 @@ describe("the Turn's Memory read", () => {
         return texts.map(() => [1]);
       },
       vectorize: {
-        upsert: () => Promise.resolve(),
+        upsert: () => {
+          upserts += 1;
+          return Promise.resolve();
+        },
         query: () => Promise.resolve({ matches: [] }),
         deleteByIds: () => Promise.resolve(),
+      },
+      chunkIndex: {
+        record: () => {
+          recorded += 1;
+          return Promise.resolve();
+        },
       },
     });
     const { session, dispose } = await openSession();
@@ -586,6 +641,8 @@ describe("the Turn's Memory read", () => {
         chunk.content.includes("Project membership changed"),
       ),
     ).toBe(true);
+    expect(upserts).toBe(1);
+    expect(recorded).toBe(1);
     await dispose();
   });
 
@@ -611,6 +668,8 @@ describe("the Turn's Memory read", () => {
     const started = new Promise<void>((resolve) => {
       embeddingStarted = resolve;
     });
+    let upserts = 0;
+    let recorded = 0;
     const projection = new MemoryProjection({
       ...host,
       embed: async (texts) => {
@@ -619,9 +678,18 @@ describe("the Turn's Memory read", () => {
         return texts.map(() => [1]);
       },
       vectorize: {
-        upsert: () => Promise.resolve(),
+        upsert: () => {
+          upserts += 1;
+          return Promise.resolve();
+        },
         query: () => Promise.resolve({ matches: [] }),
         deleteByIds: () => Promise.resolve(),
+      },
+      chunkIndex: {
+        record: () => {
+          recorded += 1;
+          return Promise.resolve();
+        },
       },
     });
     const { session, dispose } = await openSession();
@@ -650,6 +718,8 @@ describe("the Turn's Memory read", () => {
           chunk.content.includes("Project membership changed"),
         ),
     ).toBe(true);
+    expect(upserts).toBe(1);
+    expect(recorded).toBe(1);
     await dispose();
   });
 });

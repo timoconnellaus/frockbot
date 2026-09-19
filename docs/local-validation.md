@@ -74,8 +74,8 @@ environment rather than the hook’s: `GIT_DIR` and the other per-invocation git
 variables are stripped, so a check that spawns git discovers its repository from
 its own working directory and not from the hook that started the push. Browser
 checks reject focused `.only` tests; their worker count and retries belong to
-`e2e/playwright.config.ts`, which locally runs four workers and no retries so a
-failure stays failed.
+`e2e/playwright.config.ts`, which runs four workers locally and no retries in
+any lane, so a failure stays failed.
 
 An interrupted validation can leave `.local-validation/running`. Once the
 process has stopped, remove that directory and retry. Failed checks remove their
