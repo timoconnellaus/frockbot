@@ -52,7 +52,6 @@ export function initialiseCapabilityReference(reference) {
       ),
     },
   }));
-  let savedOpenGroups = null;
   const value = (name) => form.querySelector(`[name="${name}"]`).value;
   const update = () => {
     const filters = {
@@ -67,8 +66,6 @@ export function initialiseCapabilityReference(reference) {
       [filters.type, filters.category, filters.platform, filters.status].some(
         (filter) => filter !== "all",
       );
-    if (filtering && savedOpenGroups === null)
-      savedOpenGroups = new Set(groups.filter((group) => group.open));
     let visible = 0;
     for (const { element, capability } of entries) {
       element.hidden = !matchesCapability(capability, filters);
@@ -99,11 +96,8 @@ export function initialiseCapabilityReference(reference) {
       group.hidden = total === 0;
       group.querySelector("[data-capability-group-count]").textContent = total;
       if (total > 0) visibleGroups += 1;
-      if (filtering) group.open = total > 0;
-      else if (savedOpenGroups !== null)
-        group.open = savedOpenGroups.has(group);
+      group.open = filtering && total > 0;
     }
-    if (!filtering) savedOpenGroups = null;
     count.textContent = `${visible} ${visible === 1 ? "capability" : "capabilities"} across ${visibleGroups} surface ${visibleGroups === 1 ? "type" : "types"}.${filtering ? " Shared cloud capabilities apply to every platform." : ""}`;
     empty.hidden = visible !== 0;
   };

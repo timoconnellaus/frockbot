@@ -443,7 +443,7 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
 .turn-flow li {
@@ -463,6 +463,17 @@
 .turn-flow p {
   font-size: 0.8rem;
   color: #615b65;
+}
+.turn-repeat {
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+.turn-repeat span {
+  color: var(--pink-dark);
+  font-size: 1.15rem;
+  margin-right: 6px;
 }
 .recovery-note {
   display: flex;
@@ -499,7 +510,7 @@
 }
 .runtime-top {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
 .runtime-node {
@@ -568,6 +579,11 @@
 }
 .runtime-gate small {
   color: #67535f;
+}
+.runtime-endpoints {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
 }
 .code-example {
   margin-block: 30px;
@@ -845,7 +861,14 @@
 }
 .surface-types h3 {
   font-size: 1rem;
-  margin-block: 10px;
+  margin-block: 5px 10px;
+}
+.surface-type-label {
+  display: block;
+  min-height: 2.6em;
+  margin-top: 10px;
+  font-size: 0.75rem;
+  line-height: 1.3;
 }
 .surface-types p {
   font-size: 0.77rem;
@@ -1174,6 +1197,10 @@
   }
   .runtime-gate {
     padding: 22px 16px;
+  }
+  .runtime-endpoints {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
   .plugin-pieces span {
     padding: 8px 16px;
