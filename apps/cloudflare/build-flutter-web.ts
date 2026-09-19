@@ -27,6 +27,7 @@ import {
 } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readNativeMetadata } from "../../scripts/native-metadata.ts";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const nativeRoot = resolve(root, "../native");
@@ -162,23 +163,6 @@ async function stageRiveWasm(expected: string): Promise<string> {
 }
 
 /**
- * The version name from `pubspec.yaml`, handed to the Dart program so the
- * Profile page can say which release it is. The browser build has no build
- * number of its own and no Shorebird patch, so the name alone is the version.
- * The pubspec is already part of the source fingerprint, so a bump rebuilds.
- */
-async function appVersionDefine(): Promise<string> {
-  const pubspec = await readFile(resolve(nativeRoot, "pubspec.yaml"), "utf8");
-  const version = /^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$/m.exec(pubspec);
-  if (!version) {
-    throw new Error(
-      "apps/native/pubspec.yaml has no `version: <name>+<code>` line to build.",
-    );
-  }
-  return `--dart-define=FROCKBOT_APP_VERSION=${version[1]}`;
-}
-
-/**
  * The Dart sources, the assets, and the page template the build reads.
  *
  * `build/` and `.dart_tool/` are the build's own outputs, and the platform
@@ -287,6 +271,7 @@ function flutter(...args: string[]): void {
 // has to be read out of the resolved `rive_native` before the build, because
 // the build is what carries the URL it produces.
 flutter("pub", "get");
+const nativeMetadata = await readNativeMetadata(resolve(root, "../.."));
 const riveVersion = await riveWasmVersion();
 const riveHostDefine = `--dart-define=RIVE_NATIVE_WASM_HOST=/rive/${riveVersion}/`;
 
@@ -305,7 +290,7 @@ flutter(
   "build",
   "web",
   ...BUILD_FLAGS,
-  await appVersionDefine(),
+  `--dart-define=FROCKBOT_APP_VERSION=${nativeMetadata.app.versionName}`,
   riveHostDefine,
 );
 

@@ -32,8 +32,8 @@ extension on String {
 
 const clientHello = <String, Object>{
   'schemaVersion': 1,
-  'protocolVersion': 1,
-  'nativeVersion': '1.6.0',
+  'protocolVersion': wire.clientProtocolVersion,
+  'nativeVersion': wire.minimumNativeVersion,
   'catalogs': <Object>[],
 };
 String randomId() {
