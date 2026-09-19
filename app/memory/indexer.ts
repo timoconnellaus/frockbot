@@ -168,9 +168,15 @@ export async function embedMemoryIndexV1(
   index: MemoryIndexV1,
   embed: EmbedMemory,
   vectorize: MemoryVectorIndex,
+  options: {
+    isCurrent?: () => boolean;
+    beforePublish?: () => Promise<boolean>;
+  } = {},
 ): Promise<number> {
+  const isCurrent = options.isCurrent ?? (() => true);
   if (index.chunks.length === 0) return 0;
   const vectors = await embed(index.chunks.map((chunk) => chunk.content));
+  if (!isCurrent()) return 0;
   if (vectors.length !== index.chunks.length) {
     throw new Error(
       `memory embedder returned ${vectors.length} vectors for ${index.chunks.length} chunks`,
@@ -192,6 +198,9 @@ export async function embedMemoryIndexV1(
       },
     })),
   );
+  if (!isCurrent()) return 0;
+  if (options.beforePublish && !(await options.beforePublish())) return 0;
+  if (!isCurrent()) return 0;
   await remoteCallV1("the memory index", () => vectorize.upsert(upserts));
   return upserts.length;
 }

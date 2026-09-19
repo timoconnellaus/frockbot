@@ -368,13 +368,14 @@ export class MemoryProjection {
     }
     if (this.#indexing) {
       const result = await this.#indexing;
+      if (result.deferred) return result;
       return this.#indexReady ? result : this.startIndex();
     }
     const epoch = this.#indexEpoch;
-    const indexing = this.reindexCurrent().then(
+    const indexing = this.reindexCurrent(epoch).then(
       (result) => {
         if (epoch === this.#indexEpoch) {
-          this.#indexReady = true;
+          this.#indexReady = !result.deferred;
         } else {
           // A Project membership mutation invalidated this snapshot while its
           // embeddings were still being built. It must never republish the
@@ -392,6 +393,7 @@ export class MemoryProjection {
     );
     this.#indexing = indexing;
     const result = await indexing;
+    if (result.deferred) return result;
     return this.#indexReady ? result : this.startIndex();
   }
 
@@ -420,7 +422,7 @@ export class MemoryProjection {
     return this.startIndex();
   }
 
-  private async reindexCurrent(): Promise<{
+  private async reindexCurrent(epoch: number): Promise<{
     documentsChanged: number;
     chunksTotal: number;
     /** True when the files could not be read whole and nothing was applied. */
@@ -435,8 +437,14 @@ export class MemoryProjection {
       };
     }
     const update = await updateMemoryIndexV1(this.#index, listing.documents);
-    this.#index = update.index;
-    await this.embed();
+    if (epoch !== this.#indexEpoch) {
+      return {
+        documentsChanged: update.documentsChanged,
+        chunksTotal: update.chunksTotal,
+      };
+    }
+    const current = await this.embed(update.index, epoch);
+    if (current && epoch === this.#indexEpoch) this.#index = update.index;
     return {
       documentsChanged: update.documentsChanged,
       chunksTotal: update.chunksTotal,
@@ -464,11 +472,14 @@ export class MemoryProjection {
           deferred: true as const,
         };
       }
-      this.#index = await buildMemoryIndexV1(listing.documents);
-      await this.embed();
+      const index = await buildMemoryIndexV1(listing.documents);
+      if (epoch === this.#indexEpoch) {
+        const current = await this.embed(index, epoch);
+        if (current && epoch === this.#indexEpoch) this.#index = index;
+      }
       return {
         documentsChanged: 0,
-        chunksTotal: this.#index.chunks.length,
+        chunksTotal: index.chunks.length,
       };
     })().then(
       (result) => {
@@ -509,29 +520,40 @@ export class MemoryProjection {
     ]);
   }
 
-  private async embed(): Promise<void> {
+  private async embed(index: MemoryIndexV1, epoch: number): Promise<boolean> {
     const embed = memoryEmbedderV1(this.#host);
-    if (!embed || !this.#host.vectorize) return;
+    if (!embed || !this.#host.vectorize) return epoch === this.#indexEpoch;
     try {
-      if (this.#host.chunkIndex) {
-        const ownVectorIds = await Promise.all(
-          this.#index.chunks
-            .filter(
-              (chunk) =>
-                chunk.scope === "bot" && chunk.botId === this.#host.owner.botId,
-            )
-            .map(memoryChunkVectorIdV1),
-        );
-        // Intent before effect: a crash after this write and before/during the
-        // upsert leaves at worst an id whose delete is a harmless no-op.
-        await this.#host.chunkIndex.record(ownVectorIds);
-      }
-      await embedMemoryIndexV1(this.#index, embed, this.#host.vectorize);
+      await embedMemoryIndexV1(index, embed, this.#host.vectorize, {
+        isCurrent: () => epoch === this.#indexEpoch,
+        beforePublish: async () => {
+          if (epoch !== this.#indexEpoch) return false;
+          if (this.#host.chunkIndex) {
+            const ownVectorIds = await Promise.all(
+              index.chunks
+                .filter(
+                  (chunk) =>
+                    chunk.scope === "bot" &&
+                    chunk.botId === this.#host.owner.botId,
+                )
+                .map(memoryChunkVectorIdV1),
+            );
+            if (epoch !== this.#indexEpoch) return false;
+            // Intent before effect: a crash after this write and
+            // before/during the upsert leaves at worst an id whose delete is
+            // a harmless no-op.
+            await this.#host.chunkIndex.record(ownVectorIds);
+          }
+          return epoch === this.#indexEpoch;
+        },
+      });
+      if (epoch !== this.#indexEpoch) return false;
     } catch (error) {
       // Embeddings are derived from the files and rebuildable; losing them
       // costs recall quality, never a fact.
       console.error("[memory] embedding the derived index failed", error);
     }
+    return epoch === this.#indexEpoch;
   }
 
   /** Drops the projection, so the next Turn reloads it rather than reusing it. */
