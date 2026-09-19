@@ -326,6 +326,11 @@ others. `app/voice/shared.ts` is where a frame is spelled once.
    Or `{type:"error",message,code?,retryable?}` followed by `status: idle` when
    the call was refused or failed to start.
 
+The Gemini setup enables both session resumption and sliding-window context
+compression. Resumption carries a call across a closed or replaced socket;
+compression keeps a long audio conversation within Gemini's context window.
+Neither replaces the durable call ledger.
+
 Before `start_call` is accepted the server may send a custom refusal so the
 client can say why:
 
@@ -389,17 +394,20 @@ answers the client with `{type:"playback_interrupt"}` and stops forwarding
 what is left of that turn — audio already queued is for a moment that has
 passed.
 
-The client keeps its local energy gate, and it still stops its own speaker
-immediately on a sustained onset and sends `{type:"interrupt"}`. That frame
-does not cancel anything upstream: the model will reach the same conclusion
-from the audio a moment later. What it does is stop this call forwarding the
-rest of the turn, so the two never disagree about what the person is hearing.
-Background noise below the adapted floor does not trip it; this is an energy
-heuristic, not verified speech detection.
+On a capture path with effective acoustic echo cancellation, the client sends
+the cleaned microphone continuously while playback is audible. Its local
+energy gate may stop the speaker immediately on a sustained onset and send
+`{type:"interrupt"}` as a latency optimisation, but it does not gate the
+audio Gemini hears. Gemini's automatic activity detector is authoritative:
+its `serverContent.interrupted` confirms the interruption upstream.
 
-Unlike the cascade, the client no longer sends silence while a reply plays —
-the session is hearing the room the whole time and handles the speaker's echo
-itself, with the device's own echo cancellation in front of it.
+On a capture path without effective echo cancellation, the client sends
+silence while playback is audible and disables local barge-in. Speaker output
+is otherwise indistinguishable from the person to an energy gate or to
+Gemini, and sending it created self-interrupting reply loops. These surfaces
+therefore require the person to wait until playback finishes. Background
+noise below the adapted floor does not trip the local gate on AEC surfaces;
+the gate remains an energy heuristic, not verified speech detection.
 
 An interrupt never cancels a Bot Turn the session already started with
 `subagent`: that work is durable in the Bot.
@@ -489,11 +497,14 @@ subagent admitted.
 
 - The client runs an energy gate on every frame: an adaptive noise floor, an
   onset that needs several consecutive loud frames, and a 500 ms pre-roll
-  ring. It is an energy gate, not verified speech detection; it decides only
-  when to **wake** a closed session and when to stop its own speaker.
+  ring. It is an energy gate, not verified speech detection; it decides when
+  to **wake** a closed session and, only with effective AEC, when to stop its
+  own speaker early.
 - While the session is open the client sends a frame every 40 ms, speech and
-  silence alike, through pauses inside a sentence and while the model is
-  answering. Turn boundaries are the session's to find.
+  silence alike, through pauses inside a sentence. While the model is
+  answering, AEC surfaces keep sending the cleaned microphone so Gemini owns
+  barge-in; surfaces without AEC preserve cadence with silent frames until
+  playback drains. Turn boundaries are the session's to find.
 - When `status` is `listening` and the gate has been closed for **20 s**
   continuously, the client stops sending frames and sends
   `{type:"voice/sleep",schemaVersion:1}`. The object closes the Live socket and
@@ -1096,6 +1107,17 @@ microphone is the problem — it fires only when the call has never carried
 signal at all rather than after speech stops, a quiet room being signal and so
 never an occasion for it, it is not said while the call is paused or muted,
 where the silence is the person's own choice, and it never ends the call.
+
+**Desktop echo boundary.** The shipped macOS capture and playback paths do
+not share an audio engine: the `record` plugin owns capture, while
+`PcmSpeaker` owns a separate `AVAudioEngine` for output. Enabling the
+recorder's voice-processing unit in that topology produced a silent input,
+because its output side had no playback reference. Until capture and
+`PcmSpeaker` are deliberately replaced by one native voice-processing graph,
+`VoiceCapture.cancelsPlaybackEcho` is false on macOS, Windows and Linux. Those
+clients suppress captured audio during playback and offer no barge-in; web,
+Android and iOS keep processed capture, continuous microphone streaming and
+Gemini-owned interruption.
 
 **The call's audio session (Android).** A realtime call is a call to the
 operating system — communication mode is where Android attaches its echo

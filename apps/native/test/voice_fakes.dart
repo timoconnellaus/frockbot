@@ -65,6 +65,11 @@ class FakeVoiceSocket implements VoiceSocket {
 }
 
 class FakeVoiceCapture implements VoiceCapture {
+  FakeVoiceCapture({this.cancelsPlaybackEcho = true});
+
+  @override
+  final bool cancelsPlaybackEcho;
+
   StreamController<AudioFrame> _frames =
       StreamController<AudioFrame>.broadcast();
   Object? failure;

@@ -158,6 +158,9 @@ export function buildGeminiLiveSetupV1(
       sessionResumption: options.resumptionHandle
         ? { handle: options.resumptionHandle }
         : {},
+      // Resumption reconnects the transport; compression lets the resumed
+      // conversation itself outlive Gemini's uncompressed audio window.
+      contextWindowCompression: { slidingWindow: {} },
       ...(tools.length > 0 ? { tools } : {}),
     },
   };

@@ -41,6 +41,7 @@ describe("the setup frame", () => {
     expect(setup.inputAudioTranscription).toEqual({});
     expect(setup.outputAudioTranscription).toEqual({});
     expect(setup.sessionResumption).toEqual({});
+    expect(setup.contextWindowCompression).toEqual({ slidingWindow: {} });
     expect(setup.tools).toEqual([
       { googleSearch: {} },
       {
@@ -76,6 +77,7 @@ describe("the setup frame", () => {
     expect(setup.sessionResumption).toEqual({
       handle: "2e780bb8-b4e9-42af-a9bc-f3f6aaf37070",
     });
+    expect(setup.contextWindowCompression).toEqual({ slidingWindow: {} });
   });
 
   test("omits the tools array when there are none", () => {
