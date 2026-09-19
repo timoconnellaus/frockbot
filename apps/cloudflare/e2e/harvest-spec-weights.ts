@@ -41,7 +41,7 @@ function walk(files: string[], directory: string): void {
   for (const name of readdirSync(directory)) {
     const path = join(directory, name);
     if (statSync(path).isDirectory()) walk(files, path);
-    else if (name === "report.jsonl" || /^report-\d+\.zip$/u.test(name))
+    else if (name === "report.jsonl" || /^report(?:-\d+)?\.zip$/u.test(name))
       files.push(path);
   }
 }

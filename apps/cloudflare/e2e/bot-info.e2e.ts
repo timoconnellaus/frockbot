@@ -37,17 +37,6 @@ function says(scope: Page | Locator, text: string) {
   return scope.locator(`[aria-label*="${text}"]`).or(scope.getByText(text));
 }
 
-/**
- * One of the chat header's two icons, by its name.
- *
- * The bar keeps the Bot's name, the Computer and the panel's own switch; every
- * other door is a row on the Bot page. An icon button's name is its tooltip,
- * and the header's is the first in the document.
- */
-function door(page: Page, label: string) {
-  return page.getByRole("button", { name: label, exact: true }).first();
-}
-
 test("the panel opens on the Bot page and its rows push onto it", async ({
   page,
   userId,
@@ -68,7 +57,7 @@ test("the panel opens on the Bot page and its rows push onto it", async ({
   await expect(sem(page, "right-panel-back")).toHaveCount(0);
 
   await settle(page);
-  await door(page, "Computer").click();
+  await press(sem(page, "computer-toggle"));
   await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
   // Computer opens a full window; returning restores the Bot page.
   await expect(says(page, "Observed's screen")).toHaveCount(0);

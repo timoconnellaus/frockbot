@@ -23,6 +23,7 @@ import {
   createBot,
   openApplication,
   expectNoHorizontalOverflow,
+  press,
   sem,
   settle,
 } from "./fixtures.ts";
@@ -51,15 +52,12 @@ const NO_HOST = /The Computer host answered|Couldn’t read the computer/u;
 /**
  * Open the desktop from the chat header.
  *
- * The header keeps two icons — the Computer and the panel's own switch — and an
- * icon button's name is its tooltip. The header's Computer is the first in the
- * document, and it opens one thing: the desktop, full window.
+ * The header keeps two icons — the Computer and the panel's own switch. The
+ * Computer identifier is shared by both responsive header layouts, and opens
+ * one thing: the desktop, full window.
  */
 async function openComputerViewer(page: Page): Promise<void> {
-  await page
-    .getByRole("button", { name: "Computer", exact: true })
-    .first()
-    .click();
+  await press(sem(page, "computer-toggle"));
   await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
 }
 

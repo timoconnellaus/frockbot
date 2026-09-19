@@ -19,7 +19,7 @@ import {
   expect,
   press,
   enablePluginAuthoring,
-  provisionThroughUi,
+  provisionThroughApi,
   sem,
   sendMessage,
 } from "./fixtures.ts";
@@ -92,7 +92,7 @@ test("a Bot writes, checks and publishes a Plugin; the User approves it; its too
   // The admin-held master toggle, before the Bot exists: the tools are mounted
   // per Turn behind it, and the Skill goes with them.
   await enablePluginAuthoring(page, userId);
-  await provisionThroughUi(page, {
+  await provisionThroughApi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,

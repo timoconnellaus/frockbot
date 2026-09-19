@@ -41,6 +41,7 @@ import {
   APPLET_BUILD_TOKEN_HEADER,
   encodeAppletBuildRequestV1,
 } from "@frockbot/applets/build-contract";
+import { appletBuildRequested } from "./suite.ts";
 import { reserveFreePort } from "./ports.ts";
 import {
   OutputTail,
@@ -615,6 +616,7 @@ export function e2eComputerConfiguredV1(
  * proves nothing.
  */
 export function appletBuildAvailableV1(): boolean {
+  if (!appletBuildRequested()) return false;
   return (
     spawnSync("docker", ["info"], { stdio: "ignore", timeout: 30_000 })
       .status === 0
@@ -942,7 +944,9 @@ export async function startHarness(
     // Before the app Worker, so the dev service registry already has the
     // service its APPLET_BUILD binding names.
     const appletBuildUrl = `http://127.0.0.1:${options.appletBuildPort}`;
-    if (appletBuildAvailableV1()) {
+    if (!appletBuildRequested()) {
+      note("Applet build service is off for this browser-suite corpus.");
+    } else if (appletBuildAvailableV1()) {
       const supervisedAppletBuild = superviseProcess({
         label: "Applet build wrangler dev",
         spawnChild: spawnAppletBuild,

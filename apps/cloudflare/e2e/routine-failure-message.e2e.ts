@@ -22,7 +22,7 @@ import {
   expectReadyToSend,
   group,
   press,
-  provisionThroughUi,
+  provisionThroughApi,
   revealSidebar,
   sem,
   setFakeOllamaChatMode,
@@ -66,7 +66,7 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
   allowedFailures.requests.push(/\/api\/bots\/[^/]+\/routines/u);
   allowedFailures.console.push(/Failed to load resource.*(40\d|50\d)/u);
 
-  await provisionThroughUi(page, {
+  await provisionThroughApi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,

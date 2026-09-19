@@ -231,7 +231,7 @@ void main() {
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           await tester.tap(byIdentifier(ShellIds.botPanelToggle));
-          await tester.tap(find.byTooltip('Computer'));
+          await tester.tap(byIdentifier(ShellIds.computerToggle));
           await tester.tap(byIdentifier(ShellIds.rightPanelToggle));
           expect(opened, ['Bot', 'Computer', 'Panel']);
           expect(find.byType(AppBar), findsNothing);
@@ -275,7 +275,7 @@ void main() {
         expect(byIdentifier(ShellIds.botPanelToggle), findsOneWidget);
         await tester.tap(byIdentifier(ShellIds.sidebarToggle));
         await tester.tap(byIdentifier(ShellIds.botPanelToggle));
-        await tester.tap(find.byTooltip('Computer'));
+        await tester.tap(byIdentifier(ShellIds.computerToggle));
         expect(opened, ['Bots', 'Bot', 'Computer']);
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,

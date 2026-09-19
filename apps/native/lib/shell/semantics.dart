@@ -28,6 +28,7 @@ abstract final class ShellIds {
   static const rightPanelToggle = 'right-panel-toggle';
   static const scrim = 'shell-scrim';
   static const botPanelToggle = 'bot-panel-toggle';
+  static const computerToggle = 'computer-toggle';
   static const transcript = 'chat-transcript';
   static const transcriptEarlier = 'transcript-earlier';
   static const composer = 'chat-composer';

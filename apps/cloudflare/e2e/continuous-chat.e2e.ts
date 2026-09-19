@@ -4,7 +4,7 @@
 import {
   test,
   expect,
-  provisionThroughUi,
+  provisionThroughApi,
   sem,
   sendMessage,
 } from "./fixtures.ts";
@@ -16,7 +16,7 @@ for (const reload of [false, true]) {
     userId,
     ollamaBaseUrl,
   }) => {
-    await provisionThroughUi(page, {
+    await provisionThroughApi(page, {
       userId,
       apiKey: E2E_OLLAMA_GOOD_API_KEY,
       apiBaseUrl: ollamaBaseUrl,

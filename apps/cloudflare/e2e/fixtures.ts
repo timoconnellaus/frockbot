@@ -27,6 +27,7 @@
 import {
   expect,
   test as base,
+  type APIRequestContext,
   type BrowserContext,
   type Locator,
   type Page,
@@ -35,9 +36,18 @@ import {
 import {
   e2eOllamaEndpointV1,
   E2E_DEBUG_TOKEN,
+  E2E_MODEL_ID,
   E2E_OLLAMA_GOOD_API_KEY,
   type FakeOllamaChatMode,
 } from "./harness.ts";
+import {
+  botIdFromName,
+  chooseModelProviderCommandV1,
+  connectApiKeyCommandV1,
+  createBotCommandV1,
+  enableCustomModelsCommandV1,
+  setAccountModelCommandV1,
+} from "./provisioning.ts";
 
 export interface E2EOptions {
   /** The fake Ollama server the harness started, as its bare origin. */
@@ -230,16 +240,19 @@ export interface SharedApplication {
   userId: string;
   /** That account's Connection endpoint, for `setFakeOllamaChatMode`. */
   ollamaBaseUrl: string;
+  /** The Bot provisioning left selected. */
+  botId: string;
 }
 
 /**
  * Provision one account, in one browser, for a whole spec file.
  *
  * Booting the client is the most expensive thing a test does — a 3 MB CanvasKit
- * bundle downloaded, compiled and painted — and walking `provisionThroughUi` is
- * the second: two Packages, a Connection and a default model, each a press on a
- * surface that has to arrive first. A file whose tests differ in what they do to
- * a Bot, rather than in what account they do it as, pays both once here.
+ * bundle downloaded, compiled and painted — so a file whose tests differ in
+ * what they do to a Bot, rather than in what account they do it as, pays for it
+ * once here. The account itself comes from `provisionThroughApi`: none of these
+ * files is about the Packages page, the connect form or the create sheet, and
+ * the specs that are keep walking the surfaces.
  *
  * The tests then run in declaration order and share the page, so each one
  * starts from whatever the last left behind: a test that wants a conversation
@@ -294,7 +307,7 @@ export function shareProvisionedApplication(options: {
     problems = collectProblems(page);
     const userId = `e2e-${crypto.randomUUID()}`;
     const ollamaBaseUrl = e2eOllamaEndpointV1(ollamaServerUrl, userId);
-    await provisionThroughUi(page, {
+    const account = await provisionThroughApi(page, {
       userId,
       apiKey: E2E_OLLAMA_GOOD_API_KEY,
       apiBaseUrl: ollamaBaseUrl,
@@ -302,7 +315,7 @@ export function shareProvisionedApplication(options: {
       ...(options.perBotModels ? { perBotModels: true } : {}),
     });
     windowSize = page.viewportSize();
-    shared = { page, userId, ollamaBaseUrl };
+    shared = { page, userId, ollamaBaseUrl, botId: account.botId };
   });
 
   test.beforeEach(async () => {
@@ -648,11 +661,20 @@ export async function createBot(
   }
   await sem(page, "flock-create-submit").click();
   await expect(sheet).toBeHidden({ timeout: 60_000 });
-  // Closing the sheet precedes bootstrap selecting the new Bot.
+  // Closing the sheet precedes bootstrap selecting the new Bot. The button's
+  // accessible name belongs to the product (currently `Open <name>`) and
+  // Flutter may merge the title into that name as well. The stable contract is
+  // the semantic id plus the selected Bot's name, not an exact prose string.
   await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
-    new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-    { timeout: 60_000 },
+    new RegExp(escapeRegExp(name), "u"),
+    {
+      timeout: 60_000,
+    },
   );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 /** The sheet the list's own avatar opens: every account surface is in it. */
@@ -1124,6 +1146,226 @@ export async function provisionThroughUi(
   await createBot(page, options.botName);
   if (viewport) await page.setViewportSize(viewport);
   await expectReadyToSend(page);
+}
+
+/*
+ * The same account `provisionThroughUi` builds, built out of the product's own
+ * authenticated commands instead of presses.
+ *
+ * Why this exists: the UI walk is the second most expensive thing a spec does
+ * after booting the client, and almost none of the suite is about it. Every
+ * step of it is a surface that has to arrive, a list that has to hold a row
+ * still, and a canvas that has to accept a press — for a Bot that the spec
+ * then uses to say something else entirely. What is below is the same sequence
+ * of application commands the client posts, over the same routes, against the
+ * same authority, with the durable fences the client keeps: the Connection
+ * receipt, the settings revision each User command is fenced on, and the Flock
+ * directory revision `bot/create` fences on. Nothing writes storage directly,
+ * nothing skips a command, and nothing is admitted that the product would not
+ * admit from a browser — so the invariants that made the UI walk worth trusting
+ * are the ones this is standing on.
+ *
+ * `x-frockbot-user-id` is the deployment's development identity, the same door
+ * `?as_user=` opens for the page and `ALLOW_DEVELOPMENT_AUTH` gates; this is
+ * the shape `apps/cloudflare/test/integration/fixtures.ts` already provisions
+ * through. What is deliberately *not* here is the creation UX itself — a spec
+ * whose subject is first run, the Models page, or the create sheet keeps
+ * walking `provisionThroughUi`.
+ */
+/** What a provisioned account is, for a spec that needs to name its parts. */
+export interface ProvisionedAccount {
+  userId: string;
+  /** The Bot `bot/create` made, under the id the client's rule gives it. */
+  botId: string;
+  botName: string;
+  /** The Connection the account's model is bound to. */
+  connectionId: string;
+}
+
+/**
+ * One authenticated request as `userId`, and its JSON, or a legible failure.
+ *
+ * The body is serialized here rather than handed over as an object, so what
+ * goes out is exactly the bytes the command module produced — and a refusal
+ * comes back as the route's own sentence rather than as a status nobody can
+ * place.
+ */
+async function asUser(
+  request: APIRequestContext,
+  userId: string,
+  path: string,
+  body?: object,
+  expectedStatus = 200,
+): Promise<Record<string, unknown>> {
+  const response = await request.fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: {
+      "x-frockbot-user-id": userId,
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    ...(body === undefined ? {} : { data: JSON.stringify(body) }),
+  });
+  const text = await response.text();
+  expect(
+    response.status(),
+    `${path} answered ${response.status()}: ${text.slice(0, 500)}`,
+  ).toBe(expectedStatus);
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+/**
+ * The revision every User settings command is fenced on, read rather than
+ * counted: the seed owns the first one, and a command may move it by more than
+ * one when it cascades.
+ */
+async function settingsRevision(
+  request: APIRequestContext,
+  userId: string,
+): Promise<number> {
+  return (await asUser(request, userId, "/api/settings")).revision as number;
+}
+
+/** The User's Flock directory revision, which every `bot/create` fences on. */
+async function flockRevision(
+  request: APIRequestContext,
+  userId: string,
+): Promise<number> {
+  return (await asUser(request, userId, "/api/bots")).revision as number;
+}
+
+/**
+ * Build the account, without opening a browser at all.
+ *
+ * Separate from `provisionThroughApi` so a spec that wants the account and not
+ * the shell — a second Bot for the same User, say — pays for nothing else.
+ */
+export async function provisionAccountThroughApi(
+  request: APIRequestContext,
+  options: {
+    userId: string;
+    apiKey: string;
+    apiBaseUrl: string;
+    botName: string;
+    /** As `provisionThroughUi`: the Package behind a per-Bot model override. */
+    perBotModels?: boolean;
+  },
+): Promise<ProvisionedAccount> {
+  const { userId } = options;
+  if (options.perBotModels) {
+    await asUser(
+      request,
+      userId,
+      "/api/settings",
+      enableCustomModelsCommandV1(await settingsRevision(request, userId)),
+    );
+  }
+  await asUser(
+    request,
+    userId,
+    "/api/settings",
+    chooseModelProviderCommandV1(await settingsRevision(request, userId)),
+  );
+  const receipt = await asUser(
+    request,
+    userId,
+    "/api/connections",
+    connectApiKeyCommandV1({
+      label: E2E_CONNECTION_LABEL,
+      apiKey: options.apiKey,
+      apiBaseUrl: options.apiBaseUrl,
+    }),
+  );
+  expect(receipt, "the Connection command was not applied").toMatchObject({
+    status: "applied",
+  });
+  const connectionId = receipt.connectionId as string;
+  // The same readiness the UI walk waited for on Connectors, read off the frame
+  // Connectors itself reads. Asked here rather than left to fail later: an
+  // account that never reached `ready` shows up otherwise as a Bot that will
+  // not answer, three hundred lines into someone else's spec.
+  await expect
+    .poll(
+      async () => {
+        const frame = await asUser(
+          request,
+          userId,
+          "/api/settings/connections",
+        );
+        const accounts = frame.accounts as { id: string; state: string }[];
+        return accounts.find((account) => account.id === connectionId)?.state;
+      },
+      {
+        timeout: 60_000,
+        message: "the provisioned Connection never became ready",
+      },
+    )
+    .toBe("ready");
+  await asUser(
+    request,
+    userId,
+    "/api/settings",
+    setAccountModelCommandV1({
+      expectedRevision: await settingsRevision(request, userId),
+      connectionId,
+      providerModelId: E2E_MODEL_ID,
+    }),
+  );
+  const botId = botIdFromName(options.botName);
+  await asUser(
+    request,
+    userId,
+    "/api/bots",
+    createBotCommandV1({
+      expectedRevision: await flockRevision(request, userId),
+      botId,
+      name: options.botName,
+    }),
+    201,
+  );
+  return { userId, botId, botName: options.botName, connectionId };
+}
+
+/**
+ * Provision the account, open the application on it, and leave the new Bot
+ * selected — `provisionThroughUi`'s post-condition, reached the short way.
+ */
+export async function provisionThroughApi(
+  page: Page,
+  options: {
+    userId: string;
+    apiKey: string;
+    apiBaseUrl: string;
+    botName: string;
+    perBotModels?: boolean;
+  },
+): Promise<ProvisionedAccount> {
+  const account = await provisionAccountThroughApi(page.request, options);
+  await openApplication(page, options.userId);
+  await selectBot(page, account.botId, options.botName);
+  await expectReadyToSend(page);
+  return account;
+}
+
+/**
+ * Select a Bot from the list, by the id it was created under.
+ *
+ * Bootstrap selects a Bot of its own choosing when the shell opens, and which
+ * one that is belongs to the product rather than to a spec, so the Bot a spec
+ * means is the one it presses for.
+ */
+export async function selectBot(
+  page: Page,
+  botId: string,
+  name: string,
+): Promise<void> {
+  await revealSidebar(page);
+  const row = sem(page, `sidebar-bot-${botId}`);
+  await expect(row).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await press(row);
+  await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
+    new RegExp(escapeRegExp(name), "u"),
+    { timeout: 60_000 },
+  );
 }
 
 /**

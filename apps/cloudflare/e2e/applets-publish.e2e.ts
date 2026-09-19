@@ -30,7 +30,7 @@ import {
   builderBotId,
   enableApplets,
   expectNoHorizontalOverflow,
-  provisionThroughUi,
+  provisionThroughApi,
   sem,
   sendMessage,
 } from "./fixtures.ts";
@@ -274,7 +274,7 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
   // when the Bot is opened, and Applets are in it only once the account holds
   // them.
   await enableApplets(page, userId);
-  await provisionThroughUi(page, {
+  await provisionThroughApi(page, {
     userId,
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
     apiBaseUrl: ollamaBaseUrl,
