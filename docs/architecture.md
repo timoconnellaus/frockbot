@@ -458,7 +458,9 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `SignInPage` — `lib/auth/sign_in_page.dart:5`
 - `AppShell` — `lib/shell/app_shell.dart`: the directory, the identities the
   sidebar groups by, the unread fan-out, the right-panel drawer, the slot
-  registry, the Bot's page and the account sheet. Three tiers
+  registry, the Bot's page, the account sheet and the selected Bot's Session,
+  whose controller the chrome's connection, working-Turn and Computer marks are
+  read off rather than mirrored in the shell. Three tiers
   (`lib/shell/desktop_layout.dart`): columns at a desk; below 640 the Bot list
   is the first screen, a conversation is a page over it with Back to the list,
   and the conversation's bar is GrokBot's — Back, the Bot's name as the way to
@@ -652,7 +654,9 @@ shows the wait and no other row looks disabled.
 `lib/view/surface.dart` is what both pages are: `ViewSurfaceController` is the
 read and the dispatch, `ViewSurfacePage` is the chrome, the empty state, the
 pull to refresh and the one `ViewController` per revision. A page is a
-controller and a title.
+controller and a title, and the surface borrows that controller: the page
+creates it, replaces it when the read it is over changes and disposes it, and
+the surface only listens while it is mounted.
 
 **Secrets, through the renderer.** `SettingField` has a `secret` kind. The
 document seeds it null, so a required key refuses by name before anything is
@@ -689,8 +693,8 @@ command fences on one: a Routine is its own durable record, so an unrelated
 edit must not make a Routine write conflict, and an audit page is a projection
 of facts the Bots already hold. Each projection derives a revision from its own
 bytes instead — FNV-1a over what the document says — so `ViewSurfacePage`
-adopts a fresh controller exactly when what it is showing has changed and keeps
-the one it has when nothing did.
+adopts a fresh `ViewController` exactly when what it is showing has changed and
+keeps the one it has when nothing did.
 
 The `right-panel` region shows one entry at a time rather than stacking every
 registered builder: an entry registers with a label, the panel's stack names

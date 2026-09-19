@@ -122,7 +122,7 @@ class AuditController extends ViewSurfaceController {
 
 /// The audit log as a page. On the phone it is where the Bot recovery detail
 /// used to show part of it; at wide widths it is the same page, pushed.
-class AuditPage extends StatelessWidget {
+class AuditPage extends StatefulWidget {
   final NativeApi api;
   final LocalStore store;
   final String userId;
@@ -137,6 +137,40 @@ class AuditPage extends StatelessWidget {
     this.botName,
   });
 
+  @override
+  State<AuditPage> createState() => _AuditPageState();
+}
+
+class _AuditPageState extends State<AuditPage> {
+  late AuditController controller;
+
+  AuditController _createController() => AuditController(
+    widget.api,
+    botId: widget.botId,
+    openRun: (runId, targetBotId) => _openRun(context, runId, targetBotId),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    controller = _createController();
+  }
+
+  @override
+  void didUpdateWidget(AuditPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.api == widget.api && oldWidget.botId == widget.botId) return;
+    final previous = controller;
+    controller = _createController();
+    previous.dispose();
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
   /// The Turn behind an audited effect, drawn on the same Work view a message
   /// in the thread opens. A run the Bot no longer holds says so rather than
   /// opening an empty surface.
@@ -147,7 +181,8 @@ class AuditPage extends StatelessWidget {
   ) async {
     if (targetBotId == null || runId.isEmpty) return;
     try {
-      final run = await BackendChatTransport(api).lookup(targetBotId, runId);
+      final run = await BackendChatTransport(widget.api)
+          .lookup(targetBotId, runId);
       if (!context.mounted) return;
       if (run == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -169,21 +204,18 @@ class AuditPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = AuditController(
-      api,
-      botId: botId,
-      openRun: (runId, targetBotId) => _openRun(context, runId, targetBotId),
-    );
     return ViewSurfacePage(
-      title: botName == null ? 'Activity & history' : 'Activity · $botName',
-      store: store,
-      userId: userId,
+      title: widget.botName == null
+          ? 'Activity & history'
+          : 'Activity · ${widget.botName}',
+      store: widget.store,
+      userId: widget.userId,
       documentId: AuditIds.document,
       refreshId: AuditIds.refresh,
       controller: controller,
       banner: (_) => _AuditBotFilter(
-        api: api,
-        selected: botId,
+        api: widget.api,
+        selected: widget.botId,
         busy: controller.busy,
         onChanged: controller.filterBot,
       ),

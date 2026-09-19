@@ -156,7 +156,28 @@ class MachinesPage extends StatefulWidget {
 }
 
 class _MachinesPageState extends State<MachinesPage> {
-  late final MachinesController controller = MachinesController(widget.api);
+  late MachinesController controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = MachinesController(widget.api);
+  }
+
+  @override
+  void didUpdateWidget(MachinesPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.api == widget.api) return;
+    final previous = controller;
+    controller = MachinesController(widget.api);
+    previous.dispose();
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => ViewSurfacePage(

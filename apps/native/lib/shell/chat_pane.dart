@@ -31,7 +31,6 @@ import 'approvals.dart';
 import 'chat_header.dart';
 import 'composer.dart';
 import 'desktop_layout.dart';
-import 'lifecycle.dart';
 import 'run_view.dart';
 import 'semantics.dart';
 import 'skill_menu.dart';
@@ -58,7 +57,6 @@ class ChatPane extends StatefulWidget {
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
-  final void Function(String? runId)? onWorkingChanged;
 
   /// True when the account cannot pay for a reply: the banner says so before
   /// the person types one, and a failed reply's notice can open Billing.
@@ -115,7 +113,6 @@ class ChatPane extends StatefulWidget {
     this.onMessageActions,
     this.unreadFromMessageId,
     this.onReadLatest,
-    this.onWorkingChanged,
     this.outOfCredit = false,
     this.onOpenBilling,
     this.onDictate,
@@ -205,7 +202,6 @@ class _ChatPaneState extends State<ChatPane> {
       editor.text = controller.draft;
     }
     setState(() {});
-    widget.onWorkingChanged?.call(controller.activeRunId);
     if (controller.ready) AcceptanceMetrics.instance.editableShown();
   }
 
@@ -532,11 +528,8 @@ class _ChatPaneState extends State<ChatPane> {
 
 /// The pane plus the session behind it, which is what the shell mounts.
 class ConversationView extends StatefulWidget {
-  final BotSessions sessions;
-  final NativeApi api;
+  final BotSession session;
   final LocalStore store;
-  final String userId;
-  final String botId;
   final void Function(TranscriptLine line) onOpenRun;
   final void Function(TranscriptLine line)? onOpenExchange;
   final String? Function(String botId)? backgroundOf;
@@ -545,8 +538,6 @@ class ConversationView extends StatefulWidget {
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
   final void Function(String?)? onReadLatest;
-  final void Function(String? runId)? onWorkingChanged;
-  final void Function(String botId, ConnectionState state)? onConnectionChanged;
   final bool outOfCredit;
   final VoidCallback? onOpenBilling;
   final VoidCallback? onDictate;
@@ -583,11 +574,8 @@ class ConversationView extends StatefulWidget {
   final int featuresRevision;
   const ConversationView({
     super.key,
-    required this.sessions,
-    required this.api,
+    required this.session,
     required this.store,
-    required this.userId,
-    required this.botId,
     required this.onOpenRun,
     this.onOpenExchange,
     this.backgroundOf,
@@ -596,8 +584,6 @@ class ConversationView extends StatefulWidget {
     this.onMessageActions,
     this.unreadFromMessageId,
     this.onReadLatest,
-    this.onWorkingChanged,
-    this.onConnectionChanged,
     this.outOfCredit = false,
     this.onOpenBilling,
     this.onDictate,
@@ -620,21 +606,17 @@ class ConversationView extends StatefulWidget {
   State<ConversationView> createState() => _ConversationViewState();
 }
 
-class _ConversationViewState extends State<ConversationView>
-    with WidgetsBindingObserver {
-  late final BotSession session = widget.sessions.open(
-    widget.userId,
-    widget.botId,
-  );
+class _ConversationViewState extends State<ConversationView> {
+  BotSession get session => widget.session;
   late final ApprovalsController approvals = ApprovalsController(
-    api: widget.api,
+    api: session.api,
     store: widget.store,
-    userId: widget.userId,
-    botId: widget.botId,
+    userId: session.userId,
+    botId: session.botId,
   );
   late final SkillMenuController skills = SkillMenuController(
-    api: widget.api,
-    botId: widget.botId,
+    api: session.api,
+    botId: session.botId,
   );
   late List<StarterSuggestionV1> starters = widget.general
       ? startersForV1(null)
@@ -644,11 +626,7 @@ class _ConversationViewState extends State<ConversationView>
   void initState() {
     super.initState();
     if (widget.general) unawaited(_loadStarters());
-    WidgetsBinding.instance.addObserver(this);
     session.controller.addListener(_repaint);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _reportConnection();
-    });
     unawaited(session.start());
     unawaited(approvals.load());
     unawaited(skills.load());
@@ -657,7 +635,6 @@ class _ConversationViewState extends State<ConversationView>
   void _repaint() {
     if (!mounted) return;
     setState(() {});
-    _reportConnection();
   }
 
   @override
@@ -677,33 +654,19 @@ class _ConversationViewState extends State<ConversationView>
 
   Future<void> _loadStarters() async {
     final revision = widget.featuresRevision;
-    final features = await readBotFeaturesV1(widget.api, widget.botId);
+    final features = await readBotFeaturesV1(session.api, session.botId);
     if (mounted && widget.general && revision == widget.featuresRevision) {
       setState(() => starters = startersForV1(features));
     }
   }
 
-  void _reportConnection() => widget.onConnectionChanged?.call(
-    widget.botId,
-    session.controller.connection,
-  );
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (appIsAwayV1(state)) {
-      widget.sessions.pause();
-    } else {
-      widget.sessions.resume();
-    }
-  }
-
   @override
   Widget build(BuildContext context) => AppletChatScope(
-    api: widget.api,
-    botId: widget.botId,
+    api: session.api,
+    botId: session.botId,
     child: CardChatScope(
-      api: widget.api,
-      botId: widget.botId,
+      api: session.api,
+      botId: session.botId,
       invalidations: session.controller.invalidations,
       // What `ApprovalActions` reads to say what was decided. The decision is
       // the kernel's record, not the Card's, so the component that draws it
@@ -726,7 +689,6 @@ class _ConversationViewState extends State<ConversationView>
           onMessageActions: widget.onMessageActions,
           unreadFromMessageId: widget.unreadFromMessageId,
           onReadLatest: widget.onReadLatest,
-          onWorkingChanged: widget.onWorkingChanged,
           outOfCredit: widget.outOfCredit,
           onOpenBilling: widget.onOpenBilling,
           onDictate: widget.onDictate,
@@ -747,7 +709,6 @@ class _ConversationViewState extends State<ConversationView>
   void dispose() {
     // The session outlives this view so that switching back to this Bot is a
     // lookup rather than a reconnection.
-    WidgetsBinding.instance.removeObserver(this);
     session.controller.removeListener(_repaint);
     approvals.dispose();
     skills.dispose();

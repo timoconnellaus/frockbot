@@ -300,13 +300,40 @@ class _RoutinesViewState extends State<RoutinesView> {
     );
   }
 
-  late final RoutinesController controller = RoutinesController(
+  late RoutinesController controller;
+
+  RoutinesController _createController() => RoutinesController(
     widget.api,
     widget.botId,
     openRuns: _openRuns,
     confirmDelete: _confirmDelete,
-    onInbox: widget.onInbox,
+    onInbox: (count) => widget.onInbox?.call(count),
   )..editing = widget.initialRoutineId;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = _createController();
+  }
+
+  @override
+  void didUpdateWidget(RoutinesView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.api == widget.api &&
+        oldWidget.botId == widget.botId &&
+        oldWidget.initialRoutineId == widget.initialRoutineId) {
+      return;
+    }
+    final previous = controller;
+    controller = _createController();
+    previous.dispose();
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => identified(
