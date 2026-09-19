@@ -11,7 +11,8 @@
 ///   pre-roll ring is replayed ahead of the live audio so the first syllable
 ///   is not the price of waking up.
 /// * **Barge-in.** Verified speech by a stricter margin, while the assistant
-///   is speaking, is enough to stop it.
+///   is speaking, is offered as a reason to stop it — the controller takes it
+///   only for a capture whose playback echo it can cancel.
 ///
 /// What it must never be used for is deciding whether an individual frame is
 /// worth sending once the upstream is awake. The server's transcriber decides

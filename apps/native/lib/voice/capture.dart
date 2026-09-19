@@ -184,9 +184,10 @@ RecordConfig voiceRecordConfigV1({
 
 /// The microphone through the `record` package.
 ///
-/// Echo cancellation, noise suppression and auto gain are asked for on every
-/// platform that has them: the speaker is inches from the microphone on a
-/// phone, and without cancellation the assistant barges in on itself.
+/// Which platforms are asked for echo cancellation, noise suppression and
+/// auto gain is [voiceCaptureProcessingV1]'s call: the speaker is inches from
+/// the microphone on a phone, and without cancellation the assistant barges
+/// in on itself, while the desk's unit hands over silence.
 class RecordVoiceCapture implements VoiceCapture {
   final AudioRecorder _recorder = AudioRecorder();
 

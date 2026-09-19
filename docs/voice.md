@@ -511,6 +511,9 @@ subagent admitted.
   keeps its newest resumption handle. Capture continues locally.
 - On the next onset the client sends `{type:"voice/wake",schemaVersion:1}`,
   then the last **500 ms** of audio from its pre-roll ring, then live frames.
+  The pre-roll obeys the same rule as any other frame: on a capture without
+  AEC, a wake that happens while the speaker is still audible replays silence
+  rather than what the microphone heard of the speaker.
   The object reopens the session with the handle, buffers frames until the
   setup is acknowledged, and drains them in order. No syllable is lost, and
   the model remembers the conversation: a resumed session answered a question
@@ -1076,11 +1079,13 @@ minute.
 
 `apps/native/lib/voice/` implements both protocols over the same
 authenticated upgrade `NativeApi.socket()` uses (`connectSocketV1` with the
-bearer header). `record` 7.1.1 captures streaming PCM16 with echo
-cancellation, noise suppression and automatic gain, and requests the
-microphone permission itself; the app's own speaker plays the 24 kHz PCM over
-the `com.frockbot/pcm` channel, acknowledging a chunk only once the device
-reports it played (Android's `AudioTrack` playback head, macOS's
+bearer header). `record` 7.1.1 captures streaming PCM16, asking for echo
+cancellation, noise suppression and automatic gain wherever
+`voiceCaptureProcessingV1` grants them — nowhere on the desktop, whose
+processing unit silences the microphone (see "Desktop echo boundary" below) —
+and requests the microphone permission itself; the app's own speaker plays the
+24 kHz PCM over the `com.frockbot/pcm` channel, acknowledging a chunk only once
+the device reports it played (Android's `AudioTrack` playback head, macOS's
 `dataPlayedBack` completion). One device exists at a time, owned by the epoch
 of the most recent `setup`, and `feed` and `release` both name the epoch they
 serve: a superseded player's delayed close, or a feed from a call that has
