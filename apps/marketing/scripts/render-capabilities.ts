@@ -247,6 +247,11 @@ export function renderCapabilities(input: unknown): string {
           `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`,
       )
       .join("");
+  const categoryId = (type: string, category: string) =>
+    `capability-category-${type}-${category
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")}`;
   return `<!-- prettier-ignore -->
 <div class="capability-reference" data-capability-reference>
 <p class="capability-intro">Explore the full intended range. <strong>Available today</strong> means the capability is implemented; it does not mean every client has been publicly released. <strong>In the plan</strong> is a proposed FrockBot integration. <strong>No equivalent</strong> means this map has no corresponding surface on that platform.</p>
@@ -272,7 +277,7 @@ ${categories
     (
       category,
     ) => `<section class="capability-category" data-capability-category>
-<h4>${escapeHtml(category)}</h4>
+<h4 id="${categoryId(type.id, category)}">${escapeHtml(category)}</h4>
 <div class="capability-rows">${rows
       .filter((row) => row.category === category)
       .map((row) => renderRow(row, data.platforms))

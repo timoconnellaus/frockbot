@@ -427,7 +427,7 @@
                 another.
               </figcaption>
             </figure>
-            <h3>Access is granted, not assumed.</h3>
+            <h3 id="plugin-access">Access is granted, not assumed.</h3>
             <p>
               A descriptor declares what the plugin contributes and what access
               it needs. The Bot calls the plugin worker, and plugins call back
@@ -462,7 +462,7 @@
                 the grant. This minimal descriptor declares no tools or cards.
               </p>
             </div>
-            <h3>Six hooks into the agent loop.</h3>
+            <h3 id="agent-loop-hooks">Six hooks into the agent loop.</h3>
             <p>
               The host exposes specific moments for plugins to participate. For
               hooks that return a patch, the next plugin sees the previous
@@ -502,9 +502,13 @@
               hooks cannot change the admitted provider, model or credential
               binding.
             </p>
+            <p class="inside-small">
+              A seventh hook, <code>theme/assemble</code>, shapes the Bot’s look
+              outside a Turn. It does not run inside the agent loop.
+            </p>
             <div class="code-example">
               <div class="code-heading">
-                <span>Hook example · JavaScript</span><span>Tool exposure</span>
+                <span>Hook excerpt · JavaScript</span><span>Tool exposure</span>
               </div>
               <pre><code>export const hooks = {
   "agent/tool-exposure": ({ tools }) =&gt;
@@ -518,7 +522,7 @@
                 authority.
               </p>
             </div>
-            <h3>Your Bot can write a plugin, too.</h3>
+            <h3 id="bot-authored-plugins">Your Bot can write a plugin, too.</h3>
             <p>
               You can ask for a new capability and have the Bot write the
               plugin. The resulting artifact is immutable and identified by its
@@ -583,7 +587,7 @@
               <div class="render-split">
                 <div class="render-path">
                   <span class="diagram-label">A2UI</span>
-                  <h3>Describe components</h3>
+                  <h3 id="a2ui-components">Describe components</h3>
                   <div class="render-preview">
                     <span class="preview-label">Research notes</span
                     ><strong>3 sources saved</strong
@@ -599,7 +603,7 @@
                 </div>
                 <div class="render-path">
                   <span class="diagram-label">HTML</span>
-                  <h3>Provide a web interface</h3>
+                  <h3 id="contained-html">Provide a web interface</h3>
                   <div class="render-preview html-preview">
                     <span class="preview-label">&lt;html&gt;</span>
                     <div class="preview-bars" aria-hidden="true">
@@ -733,25 +737,25 @@
             <div class="surface-types">
               <article>
                 <span>01</span>
-                <h3>Slot</h3>
+                <h3 id="capability-type-slot">Slot</h3>
                 <p>A place for a plugin’s interface.</p>
                 <small>Cards, panels, widgets</small>
               </article>
               <article>
                 <span>02</span>
-                <h3>Entry</h3>
+                <h3 id="capability-type-entry">Entry</h3>
                 <p>A person starts work or opens a surface.</p>
                 <small>Shortcuts, share sheets</small>
               </article>
               <article>
                 <span>03</span>
-                <h3>Trigger</h3>
+                <h3 id="capability-type-trigger">Trigger</h3>
                 <p>An event starts work in the background.</p>
                 <small>Webhooks, device events</small>
               </article>
               <article>
                 <span>04</span>
-                <h3>Handler</h3>
+                <h3 id="capability-type-handler">Handler</h3>
                 <p>
                   The host asks for a decision or transformation, or sends a
                   lifecycle notification.
@@ -760,7 +764,7 @@
               </article>
               <article>
                 <span>05</span>
-                <h3>Action</h3>
+                <h3 id="capability-type-action">Action</h3>
                 <p>A tool reaches a device or service.</p>
                 <small>Files, network, hardware</small>
               </article>
@@ -784,12 +788,12 @@
 <div class="capability-filter"><label for="capability-status">Status</label><select id="capability-status" name="status"><option value="all">All statuses</option><option value="available">Available today</option><option value="planned">In the plan</option><option value="not-applicable">No equivalent</option></select></div>
 <button class="capability-reset" type="reset">Reset filters</button>
 </form>
-<p class="capability-result-count" data-capability-count role="status" aria-live="polite" aria-atomic="true">148 capabilities across 5 surface types.</p>
+<p class="capability-result-count" data-capability-count role="status" aria-live="polite" aria-atomic="true">149 capabilities across 5 surface types.</p>
 <p class="capability-empty" data-capability-empty hidden>No capabilities match these filters. Try a broader search or reset the filters.</p>
 <details class="capability-group" data-capability-group="slot">
 <summary><span class="capability-group-heading" role="heading" aria-level="3">Slots <span class="capability-group-count" data-capability-group-count>41</span></span><span class="capability-group-description">A place in the interface a plugin contributes to. The host renders its supported description or contained HTML surface.</span></summary>
 <section class="capability-category" data-capability-category>
-<h4>In the conversation</h4>
+<h4 id="capability-category-slot-in-the-conversation">In the conversation</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="conversation-card" data-capability-type="slot" data-capability-category-value="In the conversation" data-scope="device" data-platform-web="available" data-platform-android="available" data-platform-iphone="planned" data-platform-macos="available" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="planned" data-platform-wear-os="planned" data-platform-browser-extension="not-applicable" data-search="conversation card a rich card inside the conversation. in the conversation" aria-labelledby="capability-conversation-card">
 <h5 id="capability-conversation-card">Conversation card</h5>
 <p class="capability-description">A rich card inside the conversation.</p>
@@ -834,7 +838,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>Around the composer</h4>
+<h4 id="capability-category-slot-around-the-composer">Around the composer</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="composer-strip" data-capability-type="slot" data-capability-category-value="Around the composer" data-scope="device" data-platform-web="planned" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="composer strip a panel above or below the input. around the composer" aria-labelledby="capability-composer-strip">
 <h5 id="capability-composer-strip">Composer strip</h5>
 <p class="capability-description">A panel above or below the input.</p>
@@ -861,7 +865,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>Navigation and pages</h4>
+<h4 id="capability-category-slot-navigation-and-pages">Navigation and pages</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="header-action" data-capability-type="slot" data-capability-category-value="Navigation and pages" data-scope="device" data-platform-web="planned" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="header action an action in the app header. navigation and pages" aria-labelledby="capability-header-action">
 <h5 id="capability-header-action">Header action</h5>
 <p class="capability-description">An action in the app header.</p>
@@ -936,7 +940,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>On the device</h4>
+<h4 id="capability-category-slot-on-the-device">On the device</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="home-widget" data-capability-type="slot" data-capability-category-value="On the device" data-scope="device" data-platform-web="not-applicable" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="not-applicable" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="home-screen widget a glanceable surface outside the app. on the device" aria-labelledby="capability-home-widget">
 <h5 id="capability-home-widget">Home-screen widget</h5>
 <p class="capability-description">A glanceable surface outside the app.</p>
@@ -1023,7 +1027,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>In the browser</h4>
+<h4 id="capability-category-slot-in-the-browser">In the browser</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="browser-side-panel" data-capability-type="slot" data-capability-category-value="In the browser" data-scope="device" data-platform-web="not-applicable" data-platform-android="not-applicable" data-platform-iphone="not-applicable" data-platform-macos="not-applicable" data-platform-windows="not-applicable" data-platform-linux="not-applicable" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="planned" data-search="side panel a panel beside the current page. in the browser" aria-labelledby="capability-browser-side-panel">
 <h5 id="capability-browser-side-panel">Side panel</h5>
 <p class="capability-description">A panel beside the current page.</p>
@@ -1053,7 +1057,7 @@
 <details class="capability-group" data-capability-group="entry">
 <summary><span class="capability-group-heading" role="heading" aria-level="3">Entries <span class="capability-group-count" data-capability-group-count>18</span></span><span class="capability-group-description">A person starts a Turn or opens a surface, from the app, device or another app.</span></summary>
 <section class="capability-category" data-capability-category>
-<h4>From the app</h4>
+<h4 id="capability-category-entry-from-the-app">From the app</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="deep-link" data-capability-type="entry" data-capability-category-value="From the app" data-scope="device" data-platform-web="planned" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="deep link open a particular bot or surface. from the app" aria-labelledby="capability-deep-link">
 <h5 id="capability-deep-link">Deep link</h5>
 <p class="capability-description">Open a particular Bot or surface.</p>
@@ -1074,7 +1078,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>From the device</h4>
+<h4 id="capability-category-entry-from-the-device">From the device</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="notification-entry" data-capability-type="entry" data-capability-category-value="From the device" data-scope="device" data-platform-web="planned" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="planned" data-platform-wear-os="planned" data-platform-browser-extension="not-applicable" data-search="notification tap and actions continue from a notification. from the device" aria-labelledby="capability-notification-entry">
 <h5 id="capability-notification-entry">Notification tap and actions</h5>
 <p class="capability-description">Continue from a notification.</p>
@@ -1131,7 +1135,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>From other apps</h4>
+<h4 id="capability-category-entry-from-other-apps">From other apps</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="share-inbound" data-capability-type="entry" data-capability-category-value="From other apps" data-scope="device" data-platform-web="planned" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="not-applicable" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="share sheet, inbound send something from another app to the bot. from other apps" aria-labelledby="capability-share-inbound">
 <h5 id="capability-share-inbound">Share sheet, inbound</h5>
 <p class="capability-description">Send something from another app to the Bot.</p>
@@ -1173,7 +1177,7 @@
 <details class="capability-group" data-capability-group="trigger">
 <summary><span class="capability-group-heading" role="heading" aria-level="3">Triggers <span class="capability-group-count" data-capability-group-count>25</span></span><span class="capability-group-description">An event starts a run with nobody watching.</span></summary>
 <section class="capability-category" data-capability-category>
-<h4>From the cloud</h4>
+<h4 id="capability-category-trigger-from-the-cloud">From the cloud</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="webhook" data-capability-type="trigger" data-capability-category-value="From the cloud" data-scope="cloud" data-runtime-status="available" data-search="webhook an incoming event can start a turn even when every client is closed. from the cloud" aria-labelledby="capability-webhook">
 <h5 id="capability-webhook">Webhook</h5>
 <p class="capability-description">An incoming event can start a Turn even when every client is closed.</p>
@@ -1182,7 +1186,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>Location and presence</h4>
+<h4 id="capability-category-trigger-location-and-presence">Location and presence</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="location-trigger" data-capability-type="trigger" data-capability-category-value="Location and presence" data-scope="device" data-platform-web="not-applicable" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="planned" data-platform-wear-os="planned" data-platform-browser-extension="not-applicable" data-search="location geofences and activity recognition. location and presence android background location is subject to permissions, background limits and store review." aria-labelledby="capability-location-trigger">
 <h5 id="capability-location-trigger">Location</h5>
 <p class="capability-description">Geofences and activity recognition.</p>
@@ -1221,7 +1225,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>Device state</h4>
+<h4 id="capability-category-trigger-device-state">Device state</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="battery-trigger" data-capability-type="trigger" data-capability-category-value="Device state" data-scope="device" data-platform-web="planned" data-platform-android="planned" data-platform-iphone="not-applicable" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="battery and charging battery level or charging changes. device state" aria-labelledby="capability-battery-trigger">
 <h5 id="capability-battery-trigger">Battery and charging</h5>
 <p class="capability-description">Battery level or charging changes.</p>
@@ -1272,7 +1276,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>Content changes</h4>
+<h4 id="capability-category-trigger-content-changes">Content changes</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="notification-trigger" data-capability-type="trigger" data-capability-category-value="Content changes" data-scope="device" data-platform-web="not-applicable" data-platform-android="planned" data-platform-iphone="not-applicable" data-platform-macos="not-applicable" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="notification access what other apps post. content changes android access requires the relevant user permission and is subject to store review." aria-labelledby="capability-notification-trigger">
 <h5 id="capability-notification-trigger">Notification access</h5>
 <p class="capability-description">What other apps post.</p>
@@ -1317,7 +1321,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>In the browser</h4>
+<h4 id="capability-category-trigger-in-the-browser">In the browser</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="page-trigger" data-capability-type="trigger" data-capability-category-value="In the browser" data-scope="device" data-platform-web="not-applicable" data-platform-android="not-applicable" data-platform-iphone="not-applicable" data-platform-macos="not-applicable" data-platform-windows="not-applicable" data-platform-linux="not-applicable" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="planned" data-search="page and tab events a page loads or a tab changes. in the browser" aria-labelledby="capability-page-trigger">
 <h5 id="capability-page-trigger">Page and tab events</h5>
 <p class="capability-description">A page loads or a tab changes.</p>
@@ -1339,9 +1343,9 @@
 </section>
 </details>
 <details class="capability-group" data-capability-group="handler">
-<summary><span class="capability-group-heading" role="heading" aria-level="3">Handlers <span class="capability-group-count" data-capability-group-count>14</span></span><span class="capability-group-description">The host calls a plugin during an operation. Most handlers return a patch or decision; some are notifications.</span></summary>
+<summary><span class="capability-group-heading" role="heading" aria-level="3">Handlers <span class="capability-group-count" data-capability-group-count>15</span></span><span class="capability-group-description">The host calls a plugin during an operation. Most handlers return a patch or decision; some are notifications.</span></summary>
 <section class="capability-category" data-capability-category>
-<h4>In the Bot</h4>
+<h4 id="capability-category-handler-in-the-bot">In the Bot</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="system-prompt-handler" data-capability-type="handler" data-capability-category-value="In the Bot" data-scope="cloud" data-runtime-status="available" data-search="system prompt assembly system-prompt/assemble — contribute to the prompt before a model request. in the bot" aria-labelledby="capability-system-prompt-handler">
 <h5 id="capability-system-prompt-handler">System prompt assembly</h5>
 <p class="capability-description">system-prompt/assemble — contribute to the prompt before a model request.</p>
@@ -1378,6 +1382,12 @@
 <p class="capability-cloud-status capability-status--available"><span>Available today</span> · Shared cloud runtime</p>
 
 </article>
+<article class="capability-row" data-capability-row data-capability-id="theme-assembly-handler" data-capability-type="handler" data-capability-category-value="In the Bot" data-scope="cloud" data-runtime-status="available" data-search="theme assembly theme/assemble — shape the bot’s look outside a turn. in the bot" aria-labelledby="capability-theme-assembly-handler">
+<h5 id="capability-theme-assembly-handler">Theme assembly</h5>
+<p class="capability-description">theme/assemble — shape the Bot’s look outside a Turn.</p>
+<p class="capability-cloud-status capability-status--available"><span>Available today</span> · Shared cloud runtime</p>
+
+</article>
 <article class="capability-row" data-capability-row data-capability-id="approval-handler" data-capability-type="handler" data-capability-category-value="In the Bot" data-scope="cloud" data-runtime-status="planned" data-search="approval decisions participate in the host’s approval flow without creating authority. in the bot" aria-labelledby="capability-approval-handler">
 <h5 id="capability-approval-handler">Approval decisions</h5>
 <p class="capability-description">Participate in the host’s approval flow without creating authority.</p>
@@ -1392,7 +1402,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>On the device</h4>
+<h4 id="capability-category-handler-on-the-device">On the device</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="call-screening" data-capability-type="handler" data-capability-category-value="On the device" data-scope="device" data-platform-web="not-applicable" data-platform-android="planned" data-platform-iphone="not-applicable" data-platform-macos="not-applicable" data-platform-windows="not-applicable" data-platform-linux="not-applicable" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="call screening help the system decide how to handle a call. on the device device handlers have platform-specific time limits and execution rules; the host may need to prepare local data or rules in advance." aria-labelledby="capability-call-screening">
 <h5 id="capability-call-screening">Call screening</h5>
 <p class="capability-description">Help the system decide how to handle a call.</p>
@@ -1425,7 +1435,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>In the browser</h4>
+<h4 id="capability-category-handler-in-the-browser">In the browser</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="request-filter" data-capability-type="handler" data-capability-category-value="In the browser" data-scope="device" data-platform-web="not-applicable" data-platform-android="not-applicable" data-platform-iphone="not-applicable" data-platform-macos="not-applicable" data-platform-windows="not-applicable" data-platform-linux="not-applicable" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="planned" data-search="request filtering provide rules for browser requests. in the browser the browser’s extension apis determine which requests can be filtered and how rules are applied." aria-labelledby="capability-request-filter">
 <h5 id="capability-request-filter">Request filtering</h5>
 <p class="capability-description">Provide rules for browser requests.</p>
@@ -1437,7 +1447,7 @@
 <details class="capability-group" data-capability-group="action">
 <summary><span class="capability-group-heading" role="heading" aria-level="3">Actions <span class="capability-group-count" data-capability-group-count>50</span></span><span class="capability-group-description">A tool the Bot calls to reach the device or the network.</span></summary>
 <section class="capability-category" data-capability-category>
-<h4>Reach out</h4>
+<h4 id="capability-category-action-reach-out">Reach out</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="network-action" data-capability-type="action" data-capability-category-value="Reach out" data-scope="cloud" data-runtime-status="available" data-search="network, with your credentials approved network access through the host. credentials are attached at the network boundary. reach out" aria-labelledby="capability-network-action">
 <h5 id="capability-network-action">Network, with your credentials</h5>
 <p class="capability-description">Approved network access through the host. Credentials are attached at the network boundary.</p>
@@ -1482,7 +1492,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>Personal data</h4>
+<h4 id="capability-category-action-personal-data">Personal data</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="contacts-action" data-capability-type="action" data-capability-category-value="Personal data" data-scope="device" data-platform-web="not-applicable" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="planned" data-platform-browser-extension="not-applicable" data-search="contacts read or update permitted contacts. personal data" aria-labelledby="capability-contacts-action">
 <h5 id="capability-contacts-action">Contacts</h5>
 <p class="capability-description">Read or update permitted contacts.</p>
@@ -1527,7 +1537,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>Hardware</h4>
+<h4 id="capability-category-action-hardware">Hardware</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="location-action" data-capability-type="action" data-capability-category-value="Hardware" data-scope="device" data-platform-web="planned" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="planned" data-platform-wear-os="planned" data-platform-browser-extension="not-applicable" data-search="location read an approved device location. hardware" aria-labelledby="capability-location-action">
 <h5 id="capability-location-action">Location</h5>
 <p class="capability-description">Read an approved device location.</p>
@@ -1656,7 +1666,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>System control</h4>
+<h4 id="capability-category-action-system-control">System control</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="system-settings" data-capability-type="action" data-capability-category-value="System control" data-scope="device" data-platform-web="not-applicable" data-platform-android="planned" data-platform-iphone="not-applicable" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="system settings volume, brightness, do not disturb and wi-fi. system control" aria-labelledby="capability-system-settings">
 <h5 id="capability-system-settings">System settings</h5>
 <p class="capability-description">Volume, brightness, Do Not Disturb and Wi-Fi.</p>
@@ -1719,7 +1729,7 @@
 </article></div>
 </section>
 <section class="capability-category" data-capability-category>
-<h4>In the browser</h4>
+<h4 id="capability-category-action-in-the-browser">In the browser</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="read-page" data-capability-type="action" data-capability-category-value="In the browser" data-scope="device" data-platform-web="not-applicable" data-platform-android="not-applicable" data-platform-iphone="not-applicable" data-platform-macos="not-applicable" data-platform-windows="not-applicable" data-platform-linux="not-applicable" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="planned" data-search="read the current page give the bot permitted page content. in the browser" aria-labelledby="capability-read-page">
 <h5 id="capability-read-page">Read the current page</h5>
 <p class="capability-description">Give the Bot permitted page content.</p>
@@ -2118,6 +2128,10 @@
 <th scope="row"><span>Turn stopping</span><small>In the Bot</small></th>
 <td>handler</td>
 <td colspan="9" class="capability-status--available">Available today · Shared cloud runtime</td>
+</tr><tr data-capability-comparison-row="theme-assembly-handler">
+<th scope="row"><span>Theme assembly</span><small>In the Bot</small></th>
+<td>handler</td>
+<td colspan="9" class="capability-status--available">Available today · Shared cloud runtime</td>
 </tr><tr data-capability-comparison-row="approval-handler">
 <th scope="row"><span>Approval decisions</span><small>In the Bot</small></th>
 <td>handler</td>
@@ -2373,7 +2387,7 @@
             <div class="continuity-cards">
               <article>
                 <span class="diagram-label">Memory</span>
-                <h3>What it knows</h3>
+                <h3 id="memory">What it knows</h3>
                 <p>
                   Durable notes hold useful facts beyond the immediate
                   conversation. Bot, User and Project scopes let information
@@ -2382,7 +2396,7 @@
               </article>
               <article>
                 <span class="diagram-label">Skills</span>
-                <h3>How to do it</h3>
+                <h3 id="skills">How to do it</h3>
                 <p>
                   A Skill is an instruction directory: a SKILL.md file and its
                   references. Plugins can bundle Skills for the Bots that run
@@ -2391,7 +2405,7 @@
               </article>
               <article>
                 <span class="diagram-label">Routines</span>
-                <h3>When to return</h3>
+                <h3 id="routines">When to return</h3>
                 <p>
                   Schedules and events start new Turns without an open app. Each
                   run belongs to the Bot’s continuing record.
@@ -2562,7 +2576,7 @@
             alt=""
           />
           <p class="section-label">Start with one Bot</p>
-          <h2>See what fits.<br /><em>Make it yours.</em></h2>
+          <h2 id="get-started">See what fits.<br /><em>Make it yours.</em></h2>
           <a class="button" href="https://bot.frockbot.com"
             >Meet your first Bot →</a
           ><a href="/download/mac" class="inside-text-link">Download for Mac</a>

@@ -309,6 +309,20 @@ describe("Inside FrockBot examples", () => {
     const descriptor = decodePluginDescriptorV1(JSON.parse(descriptorJson));
     expect(descriptor.contractVersion).toBe(ISOLATE_CONTRACT_VERSION);
   });
+
+  test("gives every published article heading a unique link target", async () => {
+    const headings: string[] = [];
+    await drain(
+      new HTMLRewriter().on("main h2, main h3, main h4, main h5", {
+        element(element) {
+          headings.push(element.getAttribute("id") ?? "");
+        },
+      }),
+      await publicFile("how-it-works/index.html"),
+    );
+    expect(headings.every(Boolean)).toBe(true);
+    expect(new Set(headings).size).toBe(headings.length);
+  });
 });
 
 describe("homepage product depictions", () => {

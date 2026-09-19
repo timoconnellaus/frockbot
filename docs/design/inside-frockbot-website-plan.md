@@ -195,10 +195,10 @@ preload all nine.
 
 ## Diagrams and infographics
 
-Use source-controlled SVG for technical diagrams, with live labels and a text
-description beside each. Give narrow screens a vertical layout or alternate
-export. The existing `.open-figure svg { min-width: 900px; }` mobile treatment
-must not become the default for new diagrams.
+Use source-controlled semantic HTML/CSS for technical diagrams so labels remain
+selectable and the figures can reflow at narrow widths. Keep a text description
+beside each. The dedicated social-sharing image remains source-controlled SVG
+with a generated PNG fallback.
 
 | Asset                         | Placement                          | What it must make clear                                                                                                                                                                             |
 | ----------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -269,8 +269,9 @@ Source groups to preserve:
   changes; battery/session/idle/active-app/device events; notifications,
   clipboard/calendar/contacts/media/home changes; page/tab/download/bookmark
   and history events.
-- Handlers: the six loop hooks, approvals and routing; platform call/SMS/identity,
-  mail/focus and browser-request handlers.
+- Handlers: the six agent-loop hooks, the separate `theme/assemble` hook that
+  runs outside a Turn, approvals and routing; platform call/SMS/identity,
+  mail/focus and browser-request handlers. The reference contains 149 entries.
 - Actions: authenticated network and notifications; outbound share/compose,
   calls/maps/opening; personal data/files/clipboard/search; sensors, camera,
   media, speech, Bluetooth/USB/NFC, discovery/home/wallet/payment/biometrics,
