@@ -16,6 +16,7 @@ import {
   BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1,
   ISOLATE_CONTRACT_VERSION,
   MAX_FAILURE_REASON_V1,
+  PLUGIN_CARD_ACTION_NAME_PATTERN_V1,
   type BotPackageContextV1,
 } from "@frockbot/core/contracts";
 
@@ -49,6 +50,7 @@ var PROVIDER_ID = /^[a-z][a-z0-9-]{0,63}$/;
 var TRIGGER_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 var SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 var CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
+var CARD_ACTION_NAME = new RegExp(${JSON.stringify(PLUGIN_CARD_ACTION_NAME_PATTERN_V1)});
 var HOOK_EVENTS = ${JSON.stringify(BOT_ISOLATE_HOOK_EVENTS_V1)};
 var IDENTITY_KEYS = ["botId", "sessionId", "runId", "turnId", "generationId"];
 function isRecord(value) {
@@ -257,7 +259,7 @@ function decodeCardActionInvocation(value) {
   if (typeof value.surfaceId !== "string" || !SURFACE_ID.test(value.surfaceId)) {
     throw new Error("plugin worker card action invocation surfaceId is invalid");
   }
-  if (typeof value.action !== "string" || !SURFACE_ID.test(value.action)) {
+  if (typeof value.action !== "string" || !CARD_ACTION_NAME.test(value.action)) {
     throw new Error("plugin worker card action invocation action is invalid");
   }
   if (value.context !== undefined && !isRecord(value.context)) {

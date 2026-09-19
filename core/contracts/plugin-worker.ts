@@ -28,6 +28,7 @@ import {
 } from "./isolate.js";
 import type { BotIsolateHookEventNameV1 } from "./loop-events.js";
 import {
+  PLUGIN_CARD_ACTION_NAME_PATTERN_V1,
   servedPluginContractVersionsV1,
   type PluginServiceV1,
 } from "./plugin-descriptor.js";
@@ -52,7 +53,7 @@ const PLUGIN_PROVIDER_ID = /^[a-z][a-z0-9-]{0,63}$/;
 /** A card id, as the descriptor bounds it. */
 const PLUGIN_CARD_ID = /^[a-z][a-z0-9_]{0,31}$/;
 /** A card action name, as the descriptor bounds it. */
-const PLUGIN_CARD_ACTION_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+const PLUGIN_CARD_ACTION_NAME = new RegExp(PLUGIN_CARD_ACTION_NAME_PATTERN_V1);
 /** Actions one card may declare, matching the descriptor's bound. */
 const MAX_PLUGIN_CARD_ACTIONS_V1 = 16;
 /** A rendered view, serialized. A card, not a page. */
