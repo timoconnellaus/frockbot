@@ -26,10 +26,12 @@ import type {
 import { createDurableWorkspaceFilesV1 } from "../src/workspace.ts";
 import { SessionStore } from "@frockbot/core/contracts";
 import {
+  createMemorySearchTool,
   createMemoryWriteTool,
   MemoryProjection,
 } from "@frockbot/app/memory/agent";
 import { memoryChunkIndexEntriesV1 } from "@frockbot/app/memory/chunk-index";
+import { MemoryStore } from "@frockbot/app/memory/store";
 import { createBotMemoryHost } from "@frockbot/app/shell/backend-memory";
 import { createBotSkillsReads } from "@frockbot/app/skills/bot";
 import { loadFullSkillCatalogV1 } from "@frockbot/app/skills/catalog";
@@ -463,6 +465,84 @@ export class WorkerdBotState extends BotState {
     const events = [...session.events];
     sessions.dispose();
     return { ...result, events };
+  }
+
+  /**
+   * Two `memory_search` calls in one Turn, with the first Memory read failing.
+   *
+   * The render takes the Turn's document snapshot exactly once and the lazy
+   * index is derived from it, so a bucket that goes away for one read leaves
+   * that snapshot incomplete. Everything below the failure is production: the
+   * Memory surface `bindSurfaces` built over real R2, the production
+   * `MemoryStore`, the real `MemoryProjection`, the real `memory_search` tool.
+   * Only the one failed read is synthetic — the same `unavailable` outcome a
+   * bucket that briefly went away answers with.
+   *
+   * Both contents and the chunk count after each call come back, because the
+   * difference between "this Turn saw an empty index" and "this Turn retried
+   * and built one" is the whole claim.
+   */
+  async memorySearchAfterTransientReadFailure(input: {
+    userId: string;
+    botId: string;
+    query: string;
+  }): Promise<{ first: string; second: string; chunks: number[] }> {
+    const identity = { userId: input.userId, botId: input.botId };
+    this.bindSurfaces(identity);
+    const files = this.backendEnv.MEMORY_WORKSPACE_FILES;
+    const host = createBotMemoryHost(
+      identity,
+      {
+        runId: "memory-probe-run",
+        turnId: "memory-probe-turn",
+        sessionId: `${identity.userId}:${identity.botId}`,
+      },
+      this.backendEnv,
+    );
+    if (!files || !host) throw new Error("no Memory surface is bound");
+    let failed = false;
+    const blip: WorkspaceFilesV1 = {
+      read: (path) => {
+        if (failed) return files.read(path);
+        failed = true;
+        return Promise.resolve({
+          status: "unavailable" as const,
+          reason: "the bucket briefly went away",
+        });
+      },
+      list: (request) => files.list(request),
+      stat: (path) => files.stat(path),
+      write: (request) => files.write(request),
+      delete: (request) => files.delete(request),
+    };
+    const projection = new MemoryProjection({
+      ...host,
+      store: new MemoryStore({ files: blip, owner: identity }),
+    });
+    const sessions = new SessionStore();
+    const sessionId = `${identity.userId}:${identity.botId}`;
+    const session = sessions.create(sessionId);
+    session.appendBatch([
+      { type: "turn/start", turn: 1 },
+      { type: "step/start", turn: 1, step: 1 },
+    ]);
+    await projection.refresh(1, session);
+    const tool = createMemorySearchTool(host, projection);
+    const context = {
+      botId: identity.botId,
+      agentId: identity.botId,
+      sessionId,
+      compositionGenerationId: "probe",
+      turnType: "chat" as const,
+      effectId: "tool:1:1:0",
+      signal: new AbortController().signal,
+    };
+    const first = await tool.execute({ query: input.query }, context);
+    const chunks = [projection.index().chunks.length];
+    const second = await tool.execute({ query: input.query }, context);
+    chunks.push(projection.index().chunks.length);
+    sessions.dispose();
+    return { first: first.content, second: second.content, chunks };
   }
 
   /**

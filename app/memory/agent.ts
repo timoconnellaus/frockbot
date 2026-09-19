@@ -144,7 +144,10 @@ export function openMemoryTurnPositionV1(
  * The Turn-scoped Memory projection. `refresh` captures the exact document
  * snapshot injected into this Turn's prompt. `ensureIndex` lazily derives the
  * search index from that same snapshot, so prompt and search never disagree
- * about what this Turn saw even though embeddings stay off the reply path.
+ * about what this Turn saw even though embeddings stay off the reply path —
+ * with one exception: a snapshot that could not be read whole is never applied
+ * as this Turn's index, so it is deferred, and the search after it reads the
+ * files again.
  */
 export class MemoryProjection {
   #host: MemoryRuntimeHostV1;
@@ -334,9 +337,8 @@ export class MemoryProjection {
 
     // The index is derived from the same documents the render just read. Keep
     // that exact snapshot for `memory_search`, but do not spend embedding or
-    // vector-store work on a Turn that never searches. `ensureIndex` builds it
-    // on first use, so prompt and search still see one Turn snapshot rather
-    // than independently reading Memory.
+    // vector-store work on a Turn that never searches: `ensureIndex` builds the
+    // index on first use.
     const tiers = [ownTier, userTier, ...projectTiers.map((it) => it.tier)];
     this.#rendered = {
       documents: tiers.flatMap((tier) => tier.documents),
@@ -347,8 +349,9 @@ export class MemoryProjection {
   }
 
   /**
-   * Builds and returns this Turn's derived index on the first search. A Turn
-   * that never searches performs no embedding or vector-store work.
+   * Builds and returns this Turn's derived index on the first search that can
+   * build one. A Turn that never searches performs no embedding or
+   * vector-store work.
    */
   async ensureIndex(): Promise<MemoryIndexV1> {
     if (!this.#indexReady) await this.startIndex();
@@ -520,6 +523,13 @@ export class MemoryProjection {
     ]);
   }
 
+  /**
+   * Mirrors a built index into the vector store, when one is configured, and
+   * answers whether the epoch it was built for is still current. An index
+   * invalidated while it was embedding records no vector id in the chunk
+   * ledger and upserts nothing, so a superseded build never reaches the store;
+   * the caller publishes the in-memory index on the same answer.
+   */
   private async embed(index: MemoryIndexV1, epoch: number): Promise<boolean> {
     const embed = memoryEmbedderV1(this.#host);
     if (!embed || !this.#host.vectorize) return epoch === this.#indexEpoch;

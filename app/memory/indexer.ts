@@ -163,6 +163,14 @@ export function memoryVectorNamespaceV1(chunk: MemoryIndexChunkV1): string {
  * Mirrors an index into a vector store, when one is configured. Optional by
  * design: the index above is complete without it, and a Bot with no embedding
  * binding still searches its Memory lexically.
+ *
+ * `options` lets the caller abandon a build that has been invalidated.
+ * `isCurrent` is consulted once the embedder has answered and again before the
+ * upsert, so nothing already superseded is published; `beforePublish` runs the
+ * caller's durable intent — the chunk ledger's record — immediately before the
+ * upsert that intent describes, and vetoes it by answering false. An abandoned
+ * build publishes nothing and answers 0, exactly as a build whose index held
+ * no chunks does.
  */
 export async function embedMemoryIndexV1(
   index: MemoryIndexV1,
