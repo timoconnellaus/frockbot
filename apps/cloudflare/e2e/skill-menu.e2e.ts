@@ -111,7 +111,7 @@ test("the Skill popover keeps the highlight the arrow keys put on it", async ({
   await sem(page, "chat-composer").click();
   await expect(composerInput(page)).toHaveValue("");
 
-  // Reopening after this Dart-side rewrite is covered directly by
-  // `skill_popover_reopen_test.dart`; repeating the whole browser journey here
-  // added no integration boundary to the keyboard-navigation claim above.
+  // This journey ends once selection has attached the Skill and cleared the
+  // trigger. Reopening would exercise Flutter's editing-element replacement,
+  // not the keyboard-navigation contract this test owns.
 });
