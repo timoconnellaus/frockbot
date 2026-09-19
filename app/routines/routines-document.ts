@@ -80,6 +80,11 @@ export const ROUTINE_EDITOR_FIELDS_V1 = {
   editorId: "routine.editorId",
   name: "routine.name",
   prompt: "routine.prompt",
+  /**
+   * What starts the Routine, as the host answers it: `schedule`, `webhook`, or
+   * `plugin:<pluginId>:<trigger>` — one value, because a Routine fires on
+   * exactly one of them, and the host names the Plugin and the trigger in it.
+   */
   timing: "routine.timing",
   schedule: "routine.schedule",
   scheduleDescription: "routine.scheduleDescription",

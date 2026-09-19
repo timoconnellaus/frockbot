@@ -163,7 +163,12 @@ export function normalizeRoutineScheduleV1(
   return { kind: "cron", pattern: body, timezone: zone };
 }
 
-/** A one-line summary of a schedule for a list row. */
+/**
+ * A one-line, human summary of a schedule: the words a list row says it in, and
+ * the sentence the Routine editor falls back to for a pattern its own controls
+ * cannot express. A person reads it, so a pattern it cannot describe comes back
+ * as "Custom schedule" rather than as the cron itself.
+ */
 export function describeRoutineScheduleV1(schedule: string): string {
   const value = schedule.trim().toLowerCase();
   const aliases: Record<string, string> = {
