@@ -617,10 +617,20 @@ export async function createBot(
   }
   await sem(page, "flock-create-submit").click();
   await expect(sheet).toBeHidden({ timeout: 60_000 });
-  // Closing the sheet precedes bootstrap selecting the new Bot.
-  await expect(
-    sem(page, "bot-panel-toggle").getByRole("button", { name, exact: true }),
-  ).toBeVisible({ timeout: 60_000 });
+  // Closing the sheet precedes bootstrap selecting the new Bot. The button's
+  // accessible name belongs to the product (currently `Open <name>`) and
+  // Flutter may merge the title into that name as well. The stable contract is
+  // the semantic id plus the selected Bot's name, not an exact prose string.
+  await expect(sem(page, "bot-panel-toggle")).toHaveAccessibleName(
+    new RegExp(escapeRegExp(name), "u"),
+    {
+      timeout: 30_000,
+    },
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 /** The sheet the list's own avatar opens: every account surface is in it. */

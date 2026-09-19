@@ -308,7 +308,7 @@ jobs:
         run: bun run build:cloudflare
 
   e2e:
-    name: Browser end-to-end (${{ matrix.shard }}/${{ strategy.job-total }})
+    name: Browser end-to-end (${{ matrix.label }})
     # `scope` and nothing else. This job shares nothing with the rest of the
     # tier — it installs its own dependencies and the harness builds the
     # artifact itself — so gating it behind them only made a long job wait
@@ -323,17 +323,34 @@ jobs:
     # and a cancelled job uploads nothing, so the cause was gone with it.
     timeout-minutes: 30
 
-    # The specs may overlap now — every test takes a fresh identity and its own
-    # scoped provider endpoint — but a runner has two cores, so the parallelism
-    # that pays here is still across runners rather than across workers within
-    # one. Each shard is a whole runner with its own harness:
-    # its own ports, its own `--persist-to` directory, its own artifact build.
-    # Playwright keeps a spec file whole within a shard, since `fullyParallel`
-    # is off and the file is therefore one indivisible group.
+    # Four runners share the ordinary corpus. The two real publication journeys
+    # have a fifth lane because they alone need the Applet build container; the
+    # core runners no longer cold-start a real build they never call. Every lane
+    # still has its own ports, persist directory and production-path harness.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        include:
+          - id: core-1
+            label: core 1/4
+            suite: core
+            shard: --shard=1/4
+          - id: core-2
+            label: core 2/4
+            suite: core
+            shard: --shard=2/4
+          - id: core-3
+            label: core 3/4
+            suite: core
+            shard: --shard=3/4
+          - id: core-4
+            label: core 4/4
+            suite: core
+            shard: --shard=4/4
+          - id: publication
+            label: publication
+            suite: publication
+            shard: ""
 
     steps:
       - name: Check out repository
@@ -378,12 +395,14 @@ jobs:
         # local bucket and starts a fake Ollama server on loopback, so this
         # needs no Cloudflare credential and no provider key.
         working-directory: apps/cloudflare
+        env:
+          FROCKBOT_E2E_SUITE: ${{ matrix.suite }}
         # `E2E_WRANGLER_LOG_LEVEL: debug` here is how to hear workerd itself
         # (see `workerLogLevel` in `e2e/harness.ts`); it floods the job log,
         # so it stays off unless a crash needs diagnosing.
         run: >-
           bun run test:e2e
-          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          ${{ matrix.shard }}
 
       - name: Upload shard report
         # Unconditional, unlike the failure diagnostics below: the merged report
@@ -392,7 +411,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-blob-report-${{ matrix.shard }}
+          name: playwright-blob-report-${{ matrix.id }}
           path: apps/cloudflare/e2e/blob-report
           retention-days: 1
           if-no-files-found: error
@@ -404,7 +423,7 @@ jobs:
         if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-test-results-${{ matrix.shard }}
+          name: playwright-test-results-${{ matrix.id }}
           path: apps/cloudflare/e2e/test-results
           retention-days: 7
 
@@ -467,7 +486,7 @@ jobs:
         if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: wrangler-logs-${{ matrix.shard }}
+          name: wrangler-logs-${{ matrix.id }}
           path: apps/cloudflare/e2e/wrangler-logs
           retention-days: 7
           if-no-files-found: warn

@@ -10,6 +10,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { reserveFreePort } from "./ports.ts";
+import { e2eSuite, e2eTestSelection, suiteNeedsAppletBuild } from "./suite.ts";
 import type { E2EOptions } from "./fixtures.ts";
 
 const cloudflareRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -34,6 +35,12 @@ const ollamaPort = await stablePort("FROCKBOT_E2E_OLLAMA_PORT");
 const frockAiPort = await stablePort("FROCKBOT_E2E_FROCK_AI_PORT");
 const appletBuildPort = await stablePort("FROCKBOT_E2E_APPLET_BUILD_PORT");
 const baseURL = `http://127.0.0.1:${port}`;
+const suite = e2eSuite();
+const appletBuild = suiteNeedsAppletBuild(suite);
+
+// Specs and the webServer run in separate processes. Record the suite's
+// infrastructure requirement once so both answer the same question.
+process.env.FROCKBOT_E2E_APPLET_BUILD = appletBuild ? "1" : "0";
 
 export default defineConfig<object, E2EOptions>({
   testDir: ".",
@@ -41,7 +48,7 @@ export default defineConfig<object, E2EOptions>({
   // matches `*.spec.ts` as well as `*.test.ts`, and a Playwright spec loaded by
   // Bun's runner throws. `*.e2e.ts` keeps this layer out by construction, the
   // way `*.integration.ts` and `*.workerd.ts` already do.
-  testMatch: "**/*.e2e.ts",
+  ...e2eTestSelection(suite),
   // A file is one indivisible group: the specs inside a file share a page and
   // an account where they say so, and Playwright would otherwise hand two of
   // them to different workers.
@@ -57,13 +64,17 @@ export default defineConfig<object, E2EOptions>({
   // the parallelism there is between runners; locally it is between workers.
   workers: process.env.CI ? 1 : 4,
   forbidOnly: !!process.env.CI,
-  // Retries in CI distinguish a real regression from a flaky start-up;
-  // locally a failure should stay failed. Two rather than one from the days
-  // wrangler dev itself exited mid-spec on a 2-core runner
-  // (cloudflare/workers-sdk#15317, now patched in `patches/`; the harness
-  // supervisor remains as the backstop, and a spec in flight across a
-  // restart is still lost).
-  retries: process.env.CI ? 2 : 0,
+  // The old blanket retries were for a wrangler crash that is now patched and
+  // supervised. They turned deterministic regressions into thirty-minute
+  // runs and let genuine flakes report green. A failure stays failed.
+  retries: 0,
+  // Once two independent claims are red the release is already blocked and
+  // the retained traces are enough to diagnose it. Stopping there prevents a
+  // shared helper regression from spending every test's timeout in a shard.
+  maxFailures: process.env.CI ? 2 : 0,
+  // Exit through Playwright, not GitHub's thirty-minute SIGTERM, so reporters
+  // can finish their blob and the diagnostic steps can upload it.
+  globalTimeout: process.env.CI ? 20 * 60_000 : 0,
   // A CI runner is several times slower than a laptop, and the paths here are
   // the product's coldest: an application isolate load, a Durable Object start,
   // a Composition mount. The budget is for that, not for hiding a hang — a
@@ -134,6 +145,7 @@ export default defineConfig<object, E2EOptions>({
       FROCKBOT_E2E_OLLAMA_PORT: String(ollamaPort),
       FROCKBOT_E2E_FROCK_AI_PORT: String(frockAiPort),
       FROCKBOT_E2E_APPLET_BUILD_PORT: String(appletBuildPort),
+      FROCKBOT_E2E_APPLET_BUILD: appletBuild ? "1" : "0",
     },
   },
 });

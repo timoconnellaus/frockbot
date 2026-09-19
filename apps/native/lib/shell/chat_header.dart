@@ -205,11 +205,14 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 ],
                 if (onComputer != null) ...[
                   const SizedBox(width: 8),
-                  _glyphPill(
-                    'Computer',
-                    ChatIconKind.computer,
-                    onComputer,
-                    color: computerRunning ? computerRunningColor : null,
+                  identified(
+                    ShellIds.computerToggle,
+                    _glyphPill(
+                      'Computer',
+                      ChatIconKind.computer,
+                      onComputer,
+                      color: computerRunning ? computerRunningColor : null,
+                    ),
                   ),
                 ],
                 if (onTogglePanel != null) ...[
@@ -329,11 +332,14 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
         title: title,
         actions: [
           if (onComputer != null)
-            _destination(
-              'Computer',
-              ChatIconKind.computer,
-              onComputer,
-              color: computerRunning ? computerRunningColor : null,
+            identified(
+              ShellIds.computerToggle,
+              _destination(
+                'Computer',
+                ChatIconKind.computer,
+                onComputer,
+                color: computerRunning ? computerRunningColor : null,
+              ),
             ),
           const SizedBox(width: 4),
         ],
