@@ -33,6 +33,7 @@ import {
   sentAutomationRunKeyV1,
 } from "../notifications/storage-keys.js";
 import { createShellBotBackendContribution } from "./backend.js";
+import { botAnnouncementKey } from "./reads.js";
 import {
   botTurnCommandFingerprintV1,
   type StoredRun,
@@ -2057,5 +2058,80 @@ describe("Bot recovery", () => {
           second.runs[index - 1]!.admittedAt.localeCompare(run.admittedAt) <= 0,
       ),
     ).toBe(true);
+  });
+
+  test("budgets newest-page announcements before selecting transcript runs", async () => {
+    const storage = new MemoryStorage();
+    const baseTime = Date.parse("2026-09-01T00:00:00.000Z");
+    for (let index = 0; index < 3; index += 1) {
+      const runId = `run-${index}`;
+      const acceptedAt = new Date(baseTime + index * 1_000).toISOString();
+      const text = "📦".repeat(16_000);
+      const sessionId = `user:${runId}`;
+      await new SessionEventLog(storage).rewrite(sessionId, [
+        {
+          type: "send/to-user",
+          seq: 0,
+          timestamp: acceptedAt,
+          turn: index + 1,
+          step: 1,
+          occurrenceId: `tool:${index + 1}:1:0`,
+          payload: { type: "text", text: "context".repeat(600) },
+        },
+        {
+          type: "send/to-user",
+          seq: 1,
+          timestamp: acceptedAt,
+          turn: index + 1,
+          step: 1,
+          occurrenceId: `tool:${index + 1}:1:1`,
+          payload: { type: "text", text },
+        },
+      ]);
+      const run = {
+        runId,
+        commandFingerprint: `fingerprint-${index}`,
+        sessionId,
+        acceptedAt,
+        input: "🧪".repeat(8_000),
+        events: [],
+        eventRange: { startSeq: 0, endSeq: 2 },
+        effectAdmissions: [],
+        status: "completed",
+        phase: "executing",
+        compositionGenerationId: "test-composition-generation",
+        configurationSnapshot: initializeBotSettingsV1("primary"),
+        previousEventCount: 0,
+        responseText: text,
+      } satisfies StoredRun;
+      await storage.put({
+        [`run:${runId}`]: run,
+        [`run-index:${acceptedAt}:${runId}`]: runId,
+      });
+    }
+    for (let seq = 0; seq < 32; seq += 1) {
+      await storage.put(botAnnouncementKey(seq), {
+        type: "bot/renamed",
+        seq,
+        timestamp: new Date(baseTime + seq).toISOString(),
+        from: "🧭".repeat(100),
+        to: "🗺️".repeat(100),
+        namedBy: "bot",
+      } satisfies SessionEvent);
+    }
+    const contribution = createShellBotBackendContribution({
+      ...shellTestApplicationV1(),
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+
+    const page = await contribution.listRuns({ schemaVersion: 1 });
+
+    expect(page.announcements).toHaveLength(32);
+    expect(page.runs.length).toBeLessThan(3);
+    expect(page.page).toMatchObject({ truncated: true });
+    expect(clientRunListWireBytes(page)).toBeLessThanOrEqual(
+      CLIENT_RUN_LIST_MAX_BYTES,
+    );
   });
 });
