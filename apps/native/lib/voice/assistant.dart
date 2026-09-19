@@ -623,8 +623,10 @@ class AssistantSessionController extends ChangeNotifier {
       socket.sendText(encodeVoiceWakeV1());
       _asleep = false;
       _upstream = VoiceUpstreamStateV1.starting;
+      // The pre-roll is captured audio like any other and obeys the same
+      // rule as the live frames below.
       for (final piece in decision.emit) {
-        socket.sendBinary(piece);
+        socket.sendBinary(_outbound(piece));
       }
       _notify();
       return;
@@ -645,17 +647,21 @@ class AssistantSessionController extends ChangeNotifier {
     // decides where a turn ends and needs the silence after the words to
     // decide it — about half a second; a client that cut the audio off right
     // after the last syllable would leave the transcript hanging until the
-    // upstream timed out. During playback, a device with effective AEC sends
-    // the cleaned microphone continuously and Gemini's VAD decides whether
-    // the person interrupted. A device without AEC sends silence until the
-    // speaker has drained; it cannot safely offer barge-in because its own
-    // output is indistinguishable from the person.
-    if (_playing && !capture.cancelsPlaybackEcho) {
-      socket.sendBinary(_silentFrame(frame.bytes.length));
-      return;
-    }
-    socket.sendBinary(frame.bytes);
+    // upstream timed out. What each frame carries is [_outbound]'s rule.
+    socket.sendBinary(_outbound(frame.bytes));
   }
+
+  /// What may go on the wire for one piece of captured audio.
+  ///
+  /// During playback, a device with effective AEC sends the cleaned
+  /// microphone continuously and Gemini's VAD decides whether the person
+  /// interrupted. A device without AEC sends silence until the speaker has
+  /// drained: its own output is indistinguishable from the person, so it can
+  /// neither offer barge-in nor let the model hear the speaker.
+  Uint8List _outbound(Uint8List captured) =>
+      _playing && !capture.cancelsPlaybackEcho
+      ? _silentFrame(captured.length)
+      : captured;
 
   Uint8List _silentFrame(int length) {
     final cached = _silence;

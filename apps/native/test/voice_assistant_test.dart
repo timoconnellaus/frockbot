@@ -2,9 +2,10 @@
 ///
 /// The audio policy is the thing under test. An awake upstream gets a frame
 /// every 40 ms — the server's transcriber decides where a turn ends and it
-/// needs the half second of silence after the words to decide it — silent
-/// frames while the reply plays, and the only thing that stops
-/// the audio is twenty continuous seconds of quiet, or the person muting.
+/// needs the half second of silence after the words to decide it — silence in
+/// place of the microphone while the reply plays on a capture that cannot
+/// cancel its own playback, and the only thing that stops the audio is twenty
+/// continuous seconds of quiet, or the person muting.
 library;
 
 import 'dart:async';
@@ -220,6 +221,41 @@ void main() {
         harness.socket.binaries.sublist(afterPlayback),
         everyElement(isNot(everyElement(0))),
       );
+      harness.controller.dispose();
+    },
+  );
+
+  test(
+    'a wake while the reply is audible sends no speaker energy upstream',
+    () async {
+      // The state where the pre-roll ring holds the speaker rather than the
+      // person: the reply is playing, the person mutes and unmutes before the
+      // speaker has drained, and the reopened microphone hands the gate the
+      // model's own voice. The onset may wake the upstream, but what it
+      // replays is not the model's words.
+      final harness = Harness();
+      await harness.live();
+      await harness.feed(_quiet, 600);
+      harness.status('speaking');
+      await settle();
+
+      harness.controller.setMuted(true);
+      await settle();
+      harness.controller.setMuted(false);
+      await settle();
+
+      final before = harness.audioCount;
+      await harness.feed(0.3, 200);
+      final wake = harness.socket.sent.indexOf(encodeVoiceWakeV1());
+      expect(wake, greaterThanOrEqualTo(0), reason: 'the onset wakes it');
+      final replayed = harness.socket.sent
+          .sublist(wake + 1)
+          .whereType<Uint8List>();
+      expect(replayed, isNotEmpty);
+      expect(replayed, everyElement(everyElement(0)));
+      // The cadence is unmoved: silence takes the bytes' place, no frame is
+      // dropped and no frame is repeated.
+      expect(harness.audioCount - before, 5);
       harness.controller.dispose();
     },
   );
