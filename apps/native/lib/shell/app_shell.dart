@@ -73,6 +73,7 @@ import 'bot_page.dart';
 import 'chat_pane.dart';
 import 'chat_header.dart';
 import 'desktop_layout.dart';
+import 'hot_panel.dart';
 import 'lifecycle.dart';
 import 'message_actions.dart';
 import 'exchange_view.dart';
@@ -252,6 +253,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// chevron for as long as there is something to go back to. A Bot switch
   /// empties it, because a sub-page of one Bot is not a sub-page of another.
   final List<String> panelStack = [];
+
+  /// Hot doors visited on this Bot, kept mounted so a return is the same
+  /// page. Cleared on a Bot switch. Voice, Look, Audit and framed pages
+  /// are never in here.
+  final Set<String> keptPanels = {};
 
   /// The Package page the `package` entry is showing, which is chosen when the
   /// door is pressed rather than registered per page.
@@ -949,6 +955,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       exchangeListenable = null;
       panelOpen = false;
       panelStack.clear();
+      keptPanels.clear();
       panelPackage = null;
     });
     _adoptBotPanels(botId);
@@ -1590,12 +1597,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     if (bot == null) return null;
     final key = panelStack.isEmpty ? null : panelStack.last;
-    final body = key == null
-        ? _botPageView(bot)
-        : key == 'package'
-        ? _packagePanel(bot)
-        : slots.buildOne(context, ShellSlot.rightPanel, key);
-    if (body == null) return null;
+    final shown = key ?? 'bot-page';
+    final body = HotPanelStack(
+      shown: shown,
+      kept: keptPanels.toList(),
+      builder: (door) =>
+          _panelChild(bot, door == 'bot-page' ? null : door) ??
+          const SizedBox.shrink(),
+    );
     return identified(
       ShellIds.slot(ShellSlot.rightPanel.id),
       Column(
@@ -1607,6 +1616,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  Widget? _panelChild(wire.BotRegistration bot, String? key) {
+    if (key == null) return _botPageView(bot);
+    if (key == 'package') return _packagePanel(bot);
+    return slots.buildOne(context, ShellSlot.rightPanel, key);
+  }
+
+  void _keepPanel(String key) {
+    if (hotPanelDoors.contains(key)) keptPanels.add(key);
   }
 
   /// The panel's own bar: the Bot's face and the gear at the root, a back
@@ -1737,7 +1756,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     if (!mounted) return;
-    setState(panelStack.removeLast);
+    setState(() {
+      panelStack.removeLast();
+      _keepPanel(panelStack.isEmpty ? 'bot-page' : panelStack.last);
+    });
   }
 
   Widget? _packagePanel(wire.BotRegistration bot) {
@@ -1872,6 +1894,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       } else if (panelStack.isEmpty || panelStack.last != key) {
         panelStack.add(key);
       }
+      _keepPanel('bot-page');
+      _keepPanel(key);
       panelOpen = true;
       panelCollapsed = false;
     });
@@ -1888,6 +1912,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         panelCollapsed = !panelCollapsed;
       } else {
         panelOpen = !panelOpen;
+      }
+      if ((triple && !panelCollapsed) || (!triple && panelOpen)) {
+        _keepPanel(panelStack.isEmpty ? 'bot-page' : panelStack.last);
       }
     });
   }
@@ -2379,6 +2406,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _closeOpenBot() {
     Navigator.of(context).popUntil((route) => route.isFirst);
     panelStack.clear();
+    keptPanels.clear();
     panelPackage = null;
     slots.remove(ShellSlot.rightPanel, 'bot-settings');
     slots.remove(ShellSlot.rightPanel, 'routines');

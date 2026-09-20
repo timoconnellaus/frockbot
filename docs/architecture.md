@@ -710,7 +710,10 @@ and create documents, minted webhook keys and pairing codes are never written
 there. The Bot page prefetches the Routines list so All Routines can open on
 that cache. The host keeps drawing a document it already holds while a refresh
 is out, and shows chrome (New Routine, search) in the tap frame rather than
-hiding the page behind a spinner.
+hiding the page behind a spinner. The Bot page, Routines, Bot Plugins and Bot
+settings stay mounted after the first visit (`lib/shell/hot_panel.dart`); a
+collapsed desktop column keeps those pages too, so closing the panel is not a
+dispose.
 
 The `right-panel` region shows one entry at a time rather than stacking every
 registered builder: an entry registers with a label, the panel's stack names
