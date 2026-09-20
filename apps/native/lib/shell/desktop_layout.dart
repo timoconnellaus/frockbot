@@ -309,12 +309,15 @@ class ShellLayout extends StatelessWidget {
                       child: IgnorePointer(
                         ignoring: panelCollapsed,
                         child: _withPanelTheme(
-                          _Column(
-                            width: shellRightPanelWidth,
-                            border: Border(left: BorderSide(color: divider)),
-                            child: SafeArea(
-                              top: false,
-                              child: identified(ShellIds.rightPanel, panel),
+                          Material(
+                            color: Theme.of(context).colorScheme.surface,
+                            child: _Column(
+                              width: shellRightPanelWidth,
+                              border: Border(left: BorderSide(color: divider)),
+                              child: SafeArea(
+                                top: false,
+                                child: identified(ShellIds.rightPanel, panel),
+                              ),
                             ),
                           ),
                         ),
