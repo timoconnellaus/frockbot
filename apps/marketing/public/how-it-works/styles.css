@@ -82,6 +82,10 @@
 .inside-shape {
   display: grid;
   gap: 0;
+  padding: 18px;
+  background: #f1ede7;
+  border: 1px solid #e5ddd4;
+  border-radius: 28px;
 }
 .inside-shape-layer,
 .inside-shape-bot {
