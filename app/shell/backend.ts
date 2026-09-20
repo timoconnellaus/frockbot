@@ -34,7 +34,7 @@ import { debugSnapshot } from "./debug.js";
 import { type BotDebugSnapshotV1 } from "./debug-protocol.js";
 import { validateIdentity } from "./identity.js";
 import {
-  announcementsFromSession,
+  listAnnouncements,
   listRunEventPage,
   listRuns,
   lookupRun,
@@ -100,11 +100,7 @@ export class ShellBotBackendContribution {
   }
 
   async listAnnouncements(): Promise<SessionEvent[]> {
-    const sessionId = await this.state.authority.readConversationSessionId();
-    const session = sessionId
-      ? await this.state.authority.readSessionEvents(sessionId)
-      : [];
-    return announcementsFromSession(this.state, session);
+    return listAnnouncements(this.state);
   }
 
   async validateIdentity(identity: BotIdentity): Promise<void> {

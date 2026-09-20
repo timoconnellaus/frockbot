@@ -1,6 +1,6 @@
 import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 import { describe, expect, test } from "bun:test";
-import { type SessionEvent } from "@frockbot/core/contracts";
+import { Session, type SessionEvent } from "@frockbot/core/contracts";
 import {
   parseCredentialKeyringV1,
   sealCredentialV1,
@@ -12,6 +12,7 @@ import {
 import {
   SessionEventLog,
   sessionEventLogIndexKeyV1,
+  sessionEventPayloadPrefixV1,
 } from "@frockbot/core/durable";
 import {
   executeUnreadCommand,
@@ -1434,13 +1435,69 @@ describe("Bot recovery", () => {
     expect(page.announcements).toMatchObject([
       { type: "conversation/compacted", throughTurn: 1 },
     ]);
-    // Every full Session-log pass starts at its index. One index read means
-    // marker collection and marker placement shared the same event pass.
+    // Marker collection and marker placement share one bounded type walk.
     expect(
       storage.gets.filter(
         (key) => key === sessionEventLogIndexKeyV1(sessionId),
       ),
     ).toHaveLength(1);
+  });
+
+  test("listRuns does not hydrate exact model-request payloads", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createShellBotBackendContribution({
+      ...shellTestApplicationV1(),
+      state: { storage } as unknown as DurableObjectState,
+      env: {} as never,
+    });
+    await contribution.materializeSettings(
+      { userId: "user-1", botId: "primary" },
+      { name: "Housework" },
+    );
+    const sessionId = "user-1:primary";
+    const session = new Session(sessionId);
+    for (let turn = 1; turn <= 8; turn += 1) {
+      session.appendBatch([
+        { type: "turn/start", turn },
+        {
+          type: "model/request",
+          turn,
+          step: 1,
+          request: {
+            requestId: `request-${turn}`,
+            provider: "fake",
+            model: "large-context",
+            system: "s".repeat(80_000),
+            messages: [],
+            tools: [],
+          },
+        },
+        { type: "turn/end", turn, outcome: "completed" },
+      ]);
+    }
+    session.append({
+      type: "conversation/compacted",
+      effectId: "compaction-1",
+      fromTurn: 1,
+      throughTurn: 8,
+      summary: "## Summary\nEight Turns.",
+      identifiers: [],
+      provider: "fake",
+      model: "large-context",
+    });
+    await new SessionEventLog(storage).rewrite(sessionId, [...session.events]);
+    storage.gets.length = 0;
+
+    const page = await contribution.listRuns({ schemaVersion: 1 });
+
+    expect(page.announcements).toMatchObject([
+      { type: "conversation/compacted", throughTurn: 8 },
+    ]);
+    expect(
+      storage.gets.filter((key) =>
+        key.startsWith(sessionEventPayloadPrefixV1(sessionId)),
+      ),
+    ).toEqual([]);
   });
 
   /**

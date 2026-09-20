@@ -48,6 +48,9 @@ import {
   repairedSessionLogV1,
 } from "./run-recovery.js";
 import { runLivenessV1, STALE_RUNNING_RUN_FAILURE_V1 } from "./run-liveness.js";
+
+/** Liveness only asks whether a `turn/end` already closed the opened Turn. */
+const SESSION_TURN_END_TYPES = new Set<string>(["turn/end"]);
 import {
   SessionEventLog,
   type SessionEventLogStorage,
@@ -1132,6 +1135,24 @@ export class BotDurableAuthority<Snapshot> {
   }
 
   /**
+   * Inline Session events of the given types, without hydrating cut payloads.
+   *
+   * Announcements and liveness only need a type, a seq, and a timestamp.
+   * The exact model-request bytes stay on the audit path.
+   */
+  async readSessionInlineEventsOfTypes(
+    sessionId: string,
+    types: ReadonlySet<string>,
+    startSeq = 0,
+  ): Promise<SessionEvent[]> {
+    return new SessionEventLog(this.ctx.storage).readInlineEventsOfTypes(
+      sessionId,
+      types,
+      startSeq,
+    );
+  }
+
+  /**
    * The bounded durable event projections for a run. This is the inspection
    * path: recovery, compaction and audit use `readStoredRun` and therefore
    * receive exact events, the transcript uses `readStoredRunForDisplay`, and a
@@ -1208,9 +1229,9 @@ export class BotDurableAuthority<Snapshot> {
     if (runId === this.executingRunId) return true;
     const run = await this.readRun(runId);
     if (!run || run.status !== "running") return false;
-    const sessionEvents = await new SessionEventLog(this.ctx.storage).read(
-      run.sessionId,
-    );
+    const sessionEvents = await new SessionEventLog(
+      this.ctx.storage,
+    ).readInlineEventsOfTypes(run.sessionId, SESSION_TURN_END_TYPES);
     if (runLivenessV1({ run, sessionEvents }).working) return true;
     await this.settleStaleRun(runId);
     return false;
@@ -1229,14 +1250,23 @@ export class BotDurableAuthority<Snapshot> {
       if (runId === this.executingRunId) return;
       const run = await this.readRunFrom(transaction, runId);
       if (!run || run.runId !== runId || run.status !== "running") return;
-      const latest = await new SessionEventLog(transaction).read(run.sessionId);
-      if (runLivenessV1({ run, sessionEvents: latest }).working) return;
+      const eventLog = new SessionEventLog(transaction);
+      const sessionEvents = await eventLog.readInlineEventsOfTypes(
+        run.sessionId,
+        SESSION_TURN_END_TYPES,
+      );
+      if (runLivenessV1({ run, sessionEvents }).working) return;
+      const previous = await eventLog.readRange(
+        run.sessionId,
+        0,
+        run.previousEventCount,
+      );
       await failStoredRun(
         this.codec,
         transaction,
         this.terminalKeys(runId),
         runId,
-        latest.slice(0, run.previousEventCount),
+        previous,
         run.events,
         STALE_RUNNING_RUN_FAILURE_V1,
         this.supersededPackageRecords(),
@@ -1915,7 +1945,15 @@ export class BotDurableAuthority<Snapshot> {
         return undefined;
       }
       const eventLog = new SessionEventLog(transaction);
-      const latest = await eventLog.read(run.sessionId);
+      // The prefix the Turn started from, not the whole conversation. `read`
+      // hydrates every exact model request the Session has ever retained, and
+      // chrome polls plus the recovery alarm were doing that on a 128 MB
+      // isolate. Planning only needs this prefix plus `run.events`.
+      const previous = await eventLog.readRange(
+        run.sessionId,
+        0,
+        run.previousEventCount,
+      );
       // A Turn the User stopped, or one a later message replaced, is terminal
       // in intent before recovery ever looks at it. There is nothing to
       // recover: no answer is owed, and the provider outcome cannot change what
@@ -1932,7 +1970,7 @@ export class BotDurableAuthority<Snapshot> {
           transaction,
           this.terminalKeys(run.runId),
           run.runId,
-          latest.slice(0, run.previousEventCount),
+          previous,
           run.events,
           DISCARDED_RUN_RECOVERY_FAILURE_V1,
           this.supersededPackageRecords(),
@@ -1940,7 +1978,7 @@ export class BotDurableAuthority<Snapshot> {
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
-      const plan = planBotRunRecovery(run, latest, this.codec);
+      const plan = planBotRunRecovery(run, previous, this.codec);
       if (plan.kind === "complete") {
         const result = {
           runId: run.runId,
@@ -1956,7 +1994,7 @@ export class BotDurableAuthority<Snapshot> {
           transaction,
           this.terminalKeys(run.runId),
           run.runId,
-          latest.slice(0, run.previousEventCount),
+          previous,
           completed,
           this.terminalPackageRecords(run.configurationSnapshot),
           this.supersededPackageRecords(),
@@ -1970,7 +2008,7 @@ export class BotDurableAuthority<Snapshot> {
           transaction,
           this.terminalKeys(run.runId),
           run.runId,
-          latest.slice(0, run.previousEventCount),
+          previous,
           run.events,
           plan.failure,
           this.supersededPackageRecords(),
@@ -2012,7 +2050,12 @@ export class BotDurableAuthority<Snapshot> {
         } satisfies StoredRunV1<Snapshot>),
       );
       await this.refreshRecoveryAlarm(transaction);
-      return { kind: "resume" as const, run, latest, settings };
+      return {
+        kind: "resume" as const,
+        run,
+        latest: [...previous, ...run.events],
+        settings,
+      };
     });
     if (!recovery) return;
     if (!durableIdentity) throw new Error("Bot identity is unavailable");
