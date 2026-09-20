@@ -95,6 +95,8 @@ Widget _surface(
 );
 
 void main() {
+  setUp(clearViewDocumentCacheMemory);
+
   testWidgets(
     'a surface transfers its listener without taking controller ownership',
     (tester) async {
@@ -139,8 +141,6 @@ void main() {
     await tester.pumpWidget(
       _surface(controller, store: store, cacheScope: 'bot-1'),
     );
-    await tester.pump();
-    await tester.pump();
     expect(find.text('Last known'), findsWidgets);
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(find.text('From the network'), findsNothing);

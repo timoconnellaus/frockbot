@@ -702,8 +702,9 @@ adopts a fresh `ViewController` exactly when what it is showing has changed and
 keeps the one it has when nothing did.
 
 The last list `ViewDocument` for Routines, Plugins, Machines and Settings is
-kept on disk the way a conversation page is (`lib/client/document_cache.dart`):
-the host paints it as last known, then the live read replaces it if the
+kept the way a conversation page is (`lib/client/document_cache.dart`):
+memory is what a remount paints from in the tap frame, disk is what a later
+process finds, and the host then lets the live read replace it if the
 revision moved. A shape this build cannot read is discarded wholesale. Editor
 and create documents, minted webhook keys and pairing codes are never written
 there. The Bot page prefetches the Routines list so All Routines can open on

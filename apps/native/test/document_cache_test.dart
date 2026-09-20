@@ -31,6 +31,8 @@ Map<String, Object?> listDocument({
 };
 
 void main() {
+  setUp(clearViewDocumentCacheMemory);
+
   test('a list document round-trips and a wrong version is discarded', () {
     final document = wire.ViewDocument.fromJson(listDocument());
     final encoded = encodeViewDocumentCache(document);
@@ -47,6 +49,7 @@ void main() {
     store.fail = true;
     await writeViewDocumentCache(store, 'tim', 'routines', 'bot-1', document);
     expect(store.values, isEmpty);
+    expect(peekViewDocumentCache('tim', 'routines', 'bot-1')?.revision, 1);
 
     store.fail = false;
     await writeViewDocumentCache(store, 'tim', 'routines', 'bot-1', document);

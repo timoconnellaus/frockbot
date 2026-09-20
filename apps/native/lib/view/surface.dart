@@ -152,6 +152,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _seedFromMemory();
     widget.controller.addListener(_adopt);
     unawaited(_open());
   }
@@ -168,7 +169,60 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     reading = false;
     reloadWanted = false;
     widget.controller.addListener(_adopt);
+    _seedFromMemory();
     unawaited(_open());
+  }
+
+  /// Last known still in this process, before the first frame. Disk is asked
+  /// on [_open] only when this process has not seen the list yet.
+  void _seedFromMemory() {
+    final scope = widget.cacheScope;
+    if (scope == null) return;
+    if (widget.controller.document == null) {
+      final cached = peekViewDocumentCache(
+        widget.userId,
+        widget.controller.surfaceId,
+        scope,
+      );
+      if (cached == null ||
+          cached.surfaceId.value != widget.controller.surfaceId) {
+        return;
+      }
+      widget.controller.adoptCachedDocument(cached);
+    }
+    final document = widget.controller.document;
+    if (document == null || view != null) return;
+    _bindDocument(document);
+    reading = widget.controller.busy;
+  }
+
+  void _bindDocument(wire.ViewDocument document) {
+    view?.removeListener(_afterAction);
+    view?.dispose();
+    final next = ViewController(
+      store: widget.store,
+      userId: widget.userId,
+      surfaceId: widget.controller.surfaceId,
+      revision: document.revision,
+      dispatch: _dispatch,
+    );
+    next.addListener(_afterAction);
+    shown = document.revision;
+    view = next;
+    widget.onView?.call(next);
+    unawaited(next.restore());
+    final scope = widget.cacheScope;
+    if (scope != null && !widget.controller.busy) {
+      unawaited(
+        writeViewDocumentCache(
+          widget.store,
+          widget.userId,
+          widget.controller.surfaceId,
+          scope,
+          document,
+        ),
+      );
+    }
   }
 
   /// Restore last known, then refresh. The cache is last known, not live: a
@@ -227,34 +281,8 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
       setState(() {});
       return;
     }
-    view?.removeListener(_afterAction);
-    view?.dispose();
-    final next = ViewController(
-      store: widget.store,
-      userId: widget.userId,
-      surfaceId: widget.controller.surfaceId,
-      revision: document.revision,
-      dispatch: _dispatch,
-    );
-    next.addListener(_afterAction);
-    setState(() {
-      shown = document.revision;
-      view = next;
-    });
-    widget.onView?.call(next);
-    unawaited(next.restore());
-    final scope = widget.cacheScope;
-    if (scope != null && !widget.controller.busy) {
-      unawaited(
-        writeViewDocumentCache(
-          widget.store,
-          widget.userId,
-          widget.controller.surfaceId,
-          scope,
-          document,
-        ),
-      );
-    }
+    _bindDocument(document);
+    setState(() {});
   }
 
   /// A change the owner accepted moves the revision, so the document is read

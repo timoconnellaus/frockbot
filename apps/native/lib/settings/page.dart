@@ -66,8 +66,32 @@ class _SettingsPageState extends State<SettingsPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _seedFromMemory();
     state.addListener(_adopt);
     unawaited(_open());
+  }
+
+  void _seedFromMemory() {
+    if (state.document != null) return;
+    final cached = peekViewDocumentCache(
+      widget.userId,
+      state.surfaceId,
+      widget.section ?? widget.home,
+    );
+    if (cached == null) return;
+    state.adoptCachedDocument(cached);
+    final document = state.document;
+    if (document == null || view != null) return;
+    view = ViewController(
+      store: widget.store,
+      userId: widget.userId,
+      surfaceId: state.surfaceId,
+      revision: document.revision,
+      dispatch: _dispatch,
+    );
+    view!.addListener(_afterAction);
+    shown = document.revision;
+    unawaited(view!.restore());
   }
 
   Future<void> _open() async {
