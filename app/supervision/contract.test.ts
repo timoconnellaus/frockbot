@@ -195,6 +195,26 @@ describe("TurnSupervisor adapter contract", () => {
     ).rejects.toBeInstanceOf(SupervisionUnavailableError);
   });
 
+  test("Jev reviewStep rethrows abort instead of reporting an outage", async () => {
+    const controller = new AbortController();
+    const fetch: Fetch = async () => {
+      controller.abort();
+      throw controller.signal.reason;
+    };
+    const supervisor = createJevTurnSupervisorV1({
+      client: new TypeSafeClient({
+        apiKey: "sk-test-do-not-leak-4f3a",
+        defaultModel: TOOL_APPROVAL_MODEL_V1,
+        retry: { maxRetries: 0 },
+        logLevel: "off",
+        fetch,
+      }),
+    });
+    await expect(
+      supervisor.reviewStep(stepEvidence([mutate]), controller.signal),
+    ).rejects.toMatchObject({ name: "APIUserAbortError" });
+  });
+
   test("the hosted chooser is unavailable when no credential is configured", async () => {
     const supervisor = createHostedTurnSupervisorV1({});
     await expect(supervisor.startTurn(startEvidence)).rejects.toMatchObject({

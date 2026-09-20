@@ -1,5 +1,6 @@
 import {
   APIError,
+  APIUserAbortError,
   TypeSafeClient,
   TypeSafeError,
   type Fetch,
@@ -63,6 +64,12 @@ function toolApprovalEvidenceV1(
 
 function classifyJevFailure(error: unknown): SupervisionUnavailableError {
   if (error instanceof SupervisionUnavailableError) return error;
+  if (
+    error instanceof APIUserAbortError ||
+    (error instanceof Error && error.name === "AbortError")
+  ) {
+    throw error;
+  }
   if (error instanceof DOMException && error.name === "TimeoutError") {
     return new SupervisionUnavailableError(
       "timeout",
