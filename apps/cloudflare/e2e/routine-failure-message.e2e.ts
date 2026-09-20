@@ -105,7 +105,15 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
     // armed and the switch that pauses it.
     await card.click({ position: { x: 24, y: 20 } });
     await expect(sem(page, "routine-editor")).toBeVisible();
+    // The click is not the command. Popping the editor disposes the
+    // controller that would send it, so wait until the run is admitted.
+    const ran = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        /\/api\/bots\/[^/]+\/routines$/u.test(new URL(response.url()).pathname),
+    );
     await press(action(page, "run-routine"));
+    await ran;
     // Run now lives on the editor page. Leave it — the form is unchanged —
     // so the shell's sidebar is reachable again.
     await press(sem(page, "routine-editor-back"));
