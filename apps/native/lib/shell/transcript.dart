@@ -343,7 +343,7 @@ class _TranscriptViewState extends State<TranscriptView> {
           id: 'pending',
           mine: true,
           pending: true,
-          child: SelectableText(pendingText!),
+          child: Text(pendingText!),
         ),
       );
     }
@@ -357,41 +357,53 @@ class _TranscriptViewState extends State<TranscriptView> {
     }
     return identified(
       ShellIds.transcript,
-      RefreshIndicator(
-        onRefresh: onRefresh,
-        child: ListView(
-          controller: scroll,
-          // The thread starts at the latest row. Earlier pages extend the
-          // far end, so prepending history keeps the viewport where it was.
-          reverse: true,
-          padding: const EdgeInsets.fromLTRB(0, chatHeaderThreadPadding, 0, 12),
-          physics: const AlwaysScrollableScrollPhysics(),
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          key: PageStorageKey(storageKey),
-          children: [
-            if (hasEarlier)
-              KeyedSubtree(
-                key: const ValueKey('row:earlier'),
-                child: identified(
-                  ShellIds.transcriptEarlier,
-                  Center(
-                    child: TextButton(
-                      onPressed: loading ? null : () => onRefresh(older: true),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Theme.of(context)
-                            .colorScheme
-                            .onSurfaceVariant,
-                        textStyle: Theme.of(context).textTheme.labelMedium,
-                        minimumSize: const Size(0, 32),
+      // Highlight-and-copy is the ordinary way to take words out of a
+      // conversation. The row still has its own long-press and secondary
+      // click for whole-message actions; those do not replace selection.
+      SelectionArea(
+        child: RefreshIndicator(
+          onRefresh: onRefresh,
+          child: ListView(
+            controller: scroll,
+            // The thread starts at the latest row. Earlier pages extend the
+            // far end, so prepending history keeps the viewport where it was.
+            reverse: true,
+            padding: const EdgeInsets.fromLTRB(
+              0,
+              chatHeaderThreadPadding,
+              0,
+              12,
+            ),
+            physics: const AlwaysScrollableScrollPhysics(),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            key: PageStorageKey(storageKey),
+            children: [
+              if (hasEarlier)
+                KeyedSubtree(
+                  key: const ValueKey('row:earlier'),
+                  child: identified(
+                    ShellIds.transcriptEarlier,
+                    Center(
+                      child: TextButton(
+                        onPressed: loading
+                            ? null
+                            : () => onRefresh(older: true),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
+                          textStyle: Theme.of(context).textTheme.labelMedium,
+                          minimumSize: const Size(0, 32),
+                        ),
+                        child: const Text('Earlier messages'),
                       ),
-                      child: const Text('Earlier messages'),
                     ),
                   ),
                 ),
-              ),
-            ...rows,
-            if (widget.bottomSpace != null) widget.bottomSpace!,
-          ].reversed.toList(),
+              ...rows,
+              if (widget.bottomSpace != null) widget.bottomSpace!,
+            ].reversed.toList(),
+          ),
         ),
       ),
     );
