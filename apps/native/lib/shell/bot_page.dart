@@ -15,7 +15,7 @@ import '../applets/canvas.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
 import '../routines/page.dart';
-import '../theme/frock_theme.dart';
+import '../routines/runs_row.dart';
 import '../theme/rows.dart';
 import 'semantics.dart';
 
@@ -178,9 +178,6 @@ class BotPageView extends StatelessWidget {
                   FrockRow(
                     icon: Icons.history_rounded,
                     title: 'All Routines',
-                    trailing: held == null || held.unacknowledged == 0
-                        ? null
-                        : Badge(label: Text(held.badge)),
                     onTap: onOpenRoutines,
                   ),
                 ),
@@ -229,106 +226,5 @@ class BotPageView extends StatelessWidget {
         );
       },
     );
-  }
-}
-
-/// One recent firing: the name, the time, and how it ended, on a single line.
-///
-/// The time sits on the right, just before the mark, so the name is what you
-/// read first and a long name ellipsises without taking the clock with it.
-class RoutineRunRow extends StatelessWidget {
-  final RoutineRunSummary run;
-  final DateTime now;
-  final VoidCallback? onTap;
-  const RoutineRunRow({
-    super.key,
-    required this.run,
-    required this.now,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
-    // Paper's muted rung is inkMuted; the dark theme's third rung is subtle.
-    // ColorScheme.onSurfaceVariant is fine on ink and too faint on cream if
-    // a look has remapped muted toward the window.
-    final nameColor = dark ? FrockTheme.text : FrockTheme.ink;
-    final timeColor = dark ? FrockTheme.muted : FrockTheme.inkMuted;
-    return InkWell(
-      onTap: onTap,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 46),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  run.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: -0.1,
-                    color: nameColor,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                routineRunWhenV1(run.at, now),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontSize: 12.5,
-                  color: timeColor,
-                ),
-              ),
-              const SizedBox(width: 8),
-              RoutineRunMark(mark: run.mark),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The trailing mark on a recent-run row: a spinner, a check, or an x.
-class RoutineRunMark extends StatelessWidget {
-  final RoutineRunMarkV1 mark;
-  const RoutineRunMark({super.key, required this.mark});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
-    final (label, child) = switch (mark) {
-      RoutineRunMarkV1.running => (
-        'Running',
-        SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ),
-      RoutineRunMarkV1.finished => (
-        'Finished',
-        Icon(
-          Icons.check_rounded,
-          size: 18,
-          color: dark ? FrockTheme.success : FrockTheme.successInk,
-        ),
-      ),
-      RoutineRunMarkV1.failed => (
-        'Failed',
-        Icon(Icons.close_rounded, size: 18, color: theme.colorScheme.error),
-      ),
-    };
-    return Semantics(label: label, child: child);
   }
 }

@@ -74,6 +74,20 @@ class ViewSurfacePage extends StatefulWidget {
   /// The identifier on the back control [confirmLeave] installs.
   final String? backId;
 
+  /// When set, a confirmed leave calls this instead of popping the route.
+  /// The editor lives inside the same surface as the list, so back closes
+  /// the form and does not leave Routines.
+  final Future<void> Function()? onLeave;
+
+  /// Draws the document's root as a host list rather than the shared
+  /// switch-row cards. Used by Routines so a row is a door and its
+  /// completions sit under it.
+  final Widget Function(Map<String, Object?> root)? rootView;
+
+  /// The controller the surface is showing, so a host that owns the back
+  /// — the right-panel header — can ask it about a dirty leave.
+  final ValueChanged<ViewController?>? onView;
+
   /// Drawn above the document, by the host, out of what the host knows and the
   /// document does not.
   ///
@@ -102,6 +116,9 @@ class ViewSurfacePage extends StatefulWidget {
     this.confirmLeave,
     this.allowPop,
     this.backId,
+    this.onLeave,
+    this.rootView,
+    this.onView,
   });
 
   @override
@@ -147,6 +164,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     widget.controller.removeListener(_adopt);
     view?.removeListener(_afterAction);
     view?.dispose();
+    widget.onView?.call(null);
     super.dispose();
   }
 
@@ -188,6 +206,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
       shown = document.revision;
       view = next;
     });
+    widget.onView?.call(next);
     unawaited(next.restore());
   }
 
@@ -222,6 +241,11 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
       if (!await widget.confirmLeave!(view)) return;
     }
     if (!mounted) return;
+    final leave = widget.onLeave;
+    if (leave != null) {
+      await leave();
+      return;
+    }
     setState(() => _allowPop = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && Navigator.of(context).canPop()) {
@@ -255,6 +279,18 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
                 children: [
+                  if (!widget.chrome && widget.confirmLeave != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: identified(
+                        widget.backId ?? 'view-back',
+                        IconButton(
+                          tooltip: 'Back',
+                          onPressed: _requestLeave,
+                          icon: const Icon(Icons.arrow_back),
+                        ),
+                      ),
+                    ),
                   if (widget.banner case final WidgetBuilder draw)
                     Center(
                       child: ConstrainedBox(
@@ -277,6 +313,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                           cardGroups: widget.cardGroups,
                           gridGroups: widget.gridGroups,
                           switchRows: widget.switchRows,
+                          rootView: widget.rootView,
                         ),
                       ),
                     ),

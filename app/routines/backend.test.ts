@@ -170,9 +170,7 @@ describe("Routines gateway routes", () => {
       actions: { id: string }[];
     };
     expect(document.surfaceId).toBe("routines");
-    expect(document.actions.map((action) => action.id)).toContain(
-      "acknowledge-inbox",
-    );
+    expect(document.actions.map((action) => action.id)).toContain("open-run");
     // The list read is unchanged for a client that wants a list.
     expect(
       await (await call(route, "/api/bots/scout/routines"))!.json(),
@@ -220,8 +218,8 @@ describe("Routines gateway routes", () => {
       root: { children: unknown[] };
     };
     expect(document.surfaceId).toBe("routines");
-    expect(JSON.stringify(document)).toContain("Didn’t work");
-    expect(JSON.stringify(document)).toContain("Happened 2 times");
+    expect(JSON.stringify(document)).toContain("failed");
+    expect(JSON.stringify(document)).toContain("open-run");
   });
 
   test("`as=document` takes `edit` and `new`, and nothing else", async () => {

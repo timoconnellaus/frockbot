@@ -227,8 +227,7 @@ abstract final class SettingsIds {
   /// The Computer section's "Open" on the Bot page.
   static const botPageComputer = 'bot-page-computer';
 
-  /// The row under the recent runs, which opens the whole Routines surface
-  /// and carries the unacknowledged badge.
+  /// The row under the recent runs, which opens the whole Routines surface.
   static const botPageRoutinesAll = 'bot-page-routines-all';
 
   /// One recent Routine run on the Bot page, which opens its run log.
@@ -303,17 +302,16 @@ abstract final class PluginIds {
 /// Routines: what a Bot does on its own, and what it left behind.
 ///
 /// The names follow what `routines.e2e.ts` selects on — the section, a
-/// Routine's card, its controls and the delete confirmation — so that spec can
+/// Routine's row, its controls and the delete confirmation — so that spec can
 /// be rewritten against Flutter Web with the same intent. The one door to the
 /// surface is the All Routines row on the Bot page
-/// ([SettingsIds.botPageRoutinesAll]) at every tier, and the drawer is one
-/// acknowledgement per entry.
+/// ([SettingsIds.botPageRoutinesAll]) at every tier.
 abstract final class RoutineIds {
   static const document = 'routines-document';
   static const refresh = 'routines-refresh';
   static const panel = 'routines-panel';
 
-  /// The list's New Routine button, which opens the editor as its own page.
+  /// The list's New Routine button, which opens the editor in this surface.
   static const create = 'routine-create';
   static const editor = 'routine-editor';
   static const sourceSchedule = 'routine-source-schedule';
@@ -346,6 +344,7 @@ abstract final class RoutineIds {
   static const webhookDismiss = 'routine-webhook-dismiss';
 
   static String run(String runId) => 'routine-run-$runId';
+  static String completion(String entryId) => 'routine-completion-$entryId';
   static String action(String actionId) => viewActionIdentifierV1(actionId);
 }
 

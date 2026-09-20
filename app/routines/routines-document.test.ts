@@ -128,14 +128,13 @@ test("every control names the command it means", () => {
   ).toEqual([
     "edit-routine",
     "set-routine-enabled",
-    "acknowledge-inbox",
-    "acknowledge-inbox",
+    "open-run",
   ]);
   expect(document.actions.map((action) => action.id).sort()).toEqual([
-    "acknowledge-inbox",
     "cancel-edit",
     "delete-routine",
     "edit-routine",
+    "open-run",
     "open-runs",
     "revoke-key",
     "rotate-key",
@@ -165,25 +164,33 @@ test("a paused Routine offers Resume and promises no next firing", () => {
   ).toBe(true);
 });
 
-test("Mark all read carries no entry, and an acknowledged entry offers nothing", () => {
+test("a completion sits under the Routine that left it, and is not a read status", () => {
   const document = routinesDocumentV1(
     frame({
       inbox: [completion, { ...completion, entryId: "e2", acknowledged: true }],
     }),
   );
-  const acknowledgements = walk(document.root).filter(
-    (node) => node.type === "action" && node.actionId === "acknowledge-inbox",
+  const scheduled = document.root.type === "group" ? document.root.children[0] : undefined;
+  expect(scheduled?.type === "group" && scheduled.title).toBe("Scheduled");
+  const routine =
+    scheduled?.type === "group" ? scheduled.children[0] : undefined;
+  expect(routine?.type === "group" && routine.title).toBe("Morning brief");
+  const runs = walk(routine!).filter(
+    (node) => node.type === "action" && node.actionId === "open-run",
   );
+  expect(runs).toHaveLength(2);
+  expect(runs[0]?.type === "action" && runs[0].input?.entryId).toBe("e1");
   expect(
-    acknowledgements.map((node) =>
-      node.type === "action" ? node.input?.entryId : "",
+    walk(document.root).some(
+      (node) =>
+        node.type === "action" && node.actionId === "acknowledge-inbox",
     ),
-  ).toEqual(["e1", undefined]);
-  // The "all" action declares no entry, so the host acknowledges what it read.
+  ).toBe(false);
   expect(
-    document.actions.find((action) => action.id === "acknowledge-inbox")?.schema
-      .required,
-  ).toEqual(["kind"]);
+    walk(document.root).some(
+      (node) => node.type === "group" && node.title === "Completions",
+    ),
+  ).toBe(false);
 });
 
 test("an empty Bot says so on both halves rather than drawing nothing", () => {
@@ -200,11 +207,9 @@ test("an empty Bot says so on both halves rather than drawing nothing", () => {
   // as a named row rather than as a "0" or a sentence loose on the page.
   expect(text.some((line) => line.startsWith("0 Routines"))).toBe(false);
   expect(titles).toContain("No Routines yet");
-  expect(titles).toContain("Nothing here yet");
+  expect(titles).not.toContain("Nothing here yet");
+  expect(titles).not.toContain("Completions");
   expect(text.some((line) => line.startsWith("A Routine runs this Bot"))).toBe(
-    true,
-  );
-  expect(text.some((line) => line.startsWith("Finished Routines leave"))).toBe(
     true,
   );
 });
@@ -273,7 +278,7 @@ test("the list is not a form, and creating is its own document", () => {
   ).toBe(false);
   expect(
     walk(created.root).some(
-      (node) => node.type === "group" && node.title === "Completions",
+      (node) => node.type === "action" && node.actionId === "open-run",
     ),
   ).toBe(false);
 });
@@ -394,25 +399,30 @@ test("a Routine is filed under what fires it, and an empty half is not drawn", (
   expect(only).not.toContain("Webhooks");
 });
 
-test("a completion is a named row with its own way to mark it read", () => {
+test("a completion is the same loose row the Bot page draws, under its Routine", () => {
   const document = routinesDocumentV1(frame());
-  // The completions card is the last thing on the surface, under its own
-  // label, and every one of its children is a row.
-  const root = document.root;
-  const last = root.type === "group" ? root.children.at(-1) : undefined;
-  expect(last?.type === "group" && last.title).toBe("Completions");
-  const entry = walk(last!).find(
-    (node) => node.type === "group" && node.title === "Morning brief",
+  const scheduled = document.root.type === "group" ? document.root.children[0] : undefined;
+  const routine =
+    scheduled?.type === "group" ? scheduled.children[0] : undefined;
+  expect(routine?.type === "group" && routine.title).toBe("Morning brief");
+  const entry = walk(routine!).find(
+    (node) =>
+      node.type === "group" &&
+      node.title === "Morning brief" &&
+      node !== routine,
   );
   expect(entry).toBeDefined();
+  expect(
+    walk(entry!).some(
+      (node) => node.type === "text" && node.text === completion.createdAt,
+    ),
+  ).toBe(true);
+  expect(
+    walk(entry!).some((node) => node.type === "text" && node.text === "finished"),
+  ).toBe(true);
   const press = walk(entry!).find(
-    (node) => node.type === "action" && node.actionId === "acknowledge-inbox",
+    (node) => node.type === "action" && node.actionId === "open-run",
   );
   expect(press?.type === "action" && press.input?.entryId).toBe("e1");
-  expect(
-    last?.type === "group" &&
-      last.children.every(
-        (child) => child.type === "group" && child.title !== undefined,
-      ),
-  ).toBe(true);
+  expect(press?.type === "action" && press.input?.routineId).toBe("r1");
 });

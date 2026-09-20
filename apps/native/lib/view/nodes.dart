@@ -286,7 +286,7 @@ const _rowToggleIds = {
   'install-package',
   'set-routine-enabled',
 };
-const _rowOpenIds = {'edit-routine', 'open-home', 'acknowledge-inbox'};
+const _rowOpenIds = {'edit-routine', 'open-home', 'open-run'};
 
 /// The declared actions of [children] that a row draws as its own controls.
 List<Map<String, Object?>> _rowActions(List<Map<String, Object?>> children) => [
@@ -371,7 +371,7 @@ class _ViewSwitchRow extends StatelessWidget {
       FrockRow(
         title: title,
         subtitle: said.isEmpty ? null : said.join(' · '),
-        chevron: toggle == null,
+        chevron: open != null || toggle == null,
         onTap: open != null && openSchema != null
             ? () => scope.controller.submit(open, openSchema)
             : toggle == null || locked
