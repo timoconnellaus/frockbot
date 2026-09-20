@@ -4,6 +4,7 @@ import { RoutineStore, RoutineNotFoundError } from "./store.js";
 import { RoutineInboxStore } from "./inbox-store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
 import { decodeRoutineCommandV1 } from "./shared.js";
+import { routineInboxEntryViewV1 } from "./bot.js";
 
 const CONTEXT = { userId: "tim", client: "browser" as const };
 
@@ -36,16 +37,7 @@ function contribution(options: { ownedBots?: string[] } = {}) {
     return {
       schemaVersion: 1 as const,
       botId,
-      entries: entries.map((entry) => ({
-        schemaVersion: 1 as const,
-        entryId: entry.entryId,
-        runId: entry.runId,
-        routineId: entry.routineId,
-        text: entry.text,
-        attribution: entry.attribution,
-        createdAt: entry.createdAt,
-        acknowledged: entry.acknowledged,
-      })),
+      entries: entries.map(routineInboxEntryViewV1),
       unacknowledged: entries.filter((entry) => !entry.acknowledged).length,
     };
   };
@@ -185,6 +177,51 @@ describe("Routines gateway routes", () => {
     expect(
       await (await call(route, "/api/bots/scout/routines"))!.json(),
     ).toMatchObject({ botId: "scout" });
+  });
+
+  test("`as=document` still answers when a completion failed", async () => {
+    const route = createRoutinesBackendContribution({
+      deliverRoutineHook: () =>
+        Promise.reject(new Error("no webhook in this fixture")),
+      listRoutines: () =>
+        Promise.resolve({ schemaVersion: 1, botId: "scout", routines: [] }),
+      executeRoutineCommand: () =>
+        Promise.reject(new Error("no command in this fixture")),
+      listRoutineRuns: () =>
+        Promise.reject(new Error("no runs in this fixture")),
+      readRoutineRun: () => Promise.reject(new Error("no run in this fixture")),
+      listRoutineInbox: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          botId: "scout",
+          entries: [
+            routineInboxEntryViewV1({
+              schemaVersion: 1,
+              entryId: "ri-run-1",
+              runId: "run-1",
+              routineId: "brief",
+              text: "It stopped without saying why.",
+              attribution: "Automation: Morning brief",
+              createdAt: "2026-09-02T23:00:10.000Z",
+              acknowledged: false,
+              failure: true,
+              repeatCount: 2,
+            }),
+          ],
+          unacknowledged: 1,
+        }),
+      executeRoutineInboxCommand: () =>
+        Promise.reject(new Error("no inbox command in this fixture")),
+    });
+    const response = await call(route, "/api/bots/scout/routines?as=document");
+    expect(response?.status).toBe(200);
+    const document = (await response!.json()) as {
+      surfaceId: string;
+      root: { children: unknown[] };
+    };
+    expect(document.surfaceId).toBe("routines");
+    expect(JSON.stringify(document)).toContain("Didn’t work");
+    expect(JSON.stringify(document)).toContain("Happened 2 times");
   });
 
   test("`as=document` is the only parameter, and only on the list read", async () => {
