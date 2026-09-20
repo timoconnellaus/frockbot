@@ -48,6 +48,6 @@ await output(
 await output(
   "core/protocol-schemas/compatibility.generated.ts",
   banner +
-    `export const CLIENT_COMPATIBILITY = ${JSON.stringify({ schemaVersion: 1, ...source["x-frockbot-compatibility"] })} as const;\nexport const SUPPORTED_PROTOCOL_MIN = CLIENT_COMPATIBILITY.protocolMin;\nexport const SUPPORTED_PROTOCOL_MAX = CLIENT_COMPATIBILITY.protocolMax;\nexport const MINIMUM_NATIVE_VERSION = CLIENT_COMPATIBILITY.minimumNativeVersion;\n`,
+    `export const CLIENT_COMPATIBILITY = ${JSON.stringify({ schemaVersion: 1, ...source["x-frockbot-compatibility"] })} as const;\nexport const SUPPORTED_PROTOCOL_MIN = CLIENT_COMPATIBILITY.protocolMin;\nexport const SUPPORTED_PROTOCOL_MAX = CLIENT_COMPATIBILITY.protocolMax;\nexport const CLIENT_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_MAX;\nexport const MINIMUM_NATIVE_VERSION = CLIENT_COMPATIBILITY.minimumNativeVersion;\n`,
   "typescript",
 );

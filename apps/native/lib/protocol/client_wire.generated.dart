@@ -5,6 +5,8 @@ final Map<String, dynamic> _definitions = jsonDecode("{\"Identifier\":{\"type\":
 const clientCompatibility = {"schemaVersion":1,"protocolMin":1,"protocolMax":1,"minimumNativeVersion":"1.6.0","catalogs":[]};
 const supportedProtocolMin = 1;
 const supportedProtocolMax = 1;
+const clientProtocolVersion = supportedProtocolMax;
+const nativeAppVersion = '1.6.0';
 const minimumNativeVersion = '1.6.0';
 
 // JSON Schema 2020-12 subset used by the source. Unsupported keywords are

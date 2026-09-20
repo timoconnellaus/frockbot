@@ -30,12 +30,16 @@ extension on String {
   String ifEmpty(String Function() fallback) => isEmpty ? fallback() : this;
 }
 
-const clientHello = <String, Object>{
-  'schemaVersion': 1,
-  'protocolVersion': 1,
-  'nativeVersion': '1.6.0',
-  'catalogs': <Object>[],
-};
+Map<String, Object> clientHelloForVersion(String nativeVersion) =>
+    Map<String, Object>.unmodifiable(<String, Object>{
+      'schemaVersion': 1,
+      'protocolVersion': wire.clientProtocolVersion,
+      'nativeVersion': nativeVersion,
+      'catalogs': const <Object>[],
+    });
+
+final clientHello = clientHelloForVersion(wire.nativeAppVersion);
+
 String randomId() {
   final bytes = List<int>.generate(24, (_) => Random.secure().nextInt(256));
   return 'n${base64Url.encode(bytes).replaceAll('=', '')}';
