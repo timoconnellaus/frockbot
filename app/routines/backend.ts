@@ -356,13 +356,21 @@ export function createRoutinesBackendContribution(
           );
         }
         if (request.method === "GET") {
-          const view = decodeRoutineListViewV1(
-            await host.listRoutines(context.userId, botId),
-          );
-          if (!asDocument) return Response.json(view);
-          const inboxView = decodeRoutineInboxViewV1(
-            await host.listRoutineInbox(context.userId, botId),
-          );
+          if (!asDocument) {
+            return Response.json(
+              decodeRoutineListViewV1(
+                await host.listRoutines(context.userId, botId),
+              ),
+            );
+          }
+          // One document, two reads — started together so the Worker is not
+          // paying a second hop after the first has already come back.
+          const [view, inboxView] = await Promise.all([
+            host.listRoutines(context.userId, botId).then(decodeRoutineListViewV1),
+            host
+              .listRoutineInbox(context.userId, botId)
+              .then(decodeRoutineInboxViewV1),
+          ]);
           // A Routine the reader named but that is no longer here — deleted
           // from another device — seeds nothing rather than an empty form
           // claiming to edit it.

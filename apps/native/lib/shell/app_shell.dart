@@ -19,6 +19,7 @@ import '../applets/canvas.dart';
 import '../applets/list.dart';
 import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
+import '../client/document_cache.dart';
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart' show ChatController, ConnectionState;
 import '../client/exchange_controller.dart';
@@ -1071,6 +1072,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     slots.remove(ShellSlot.rightPanel, 'applet');
     unawaited(controller.load());
     unawaited(inbox.load());
+    unawaited(
+      prefetchViewDocumentCache(
+        api: widget.api,
+        store: widget.store,
+        userId: widget.userId,
+        surfaceId: 'routines',
+        scope: botId,
+        path: '/api/bots/${Uri.encodeComponent(botId)}/routines?as=document',
+      ),
+    );
     unawaited(_adoptComposition(botId));
   }
 

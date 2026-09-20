@@ -318,6 +318,11 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
           children: [
+            if (loading)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: LinearProgressIndicator(minHeight: 2),
+              ),
             if (banner case final String line)
               _Notice(
                 line: line,
