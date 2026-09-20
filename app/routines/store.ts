@@ -36,6 +36,7 @@ import {
   type RoutineTriggerV1,
   type RoutineWriterV1,
 } from "./records.js";
+import { projectRoutineEventBodyV1 } from "./event-judge.js";
 import {
   constantTimeEqualsV1,
   decodeRoutineHookKeyV1,
@@ -489,10 +490,7 @@ export class RoutineStore {
           ? { status: "duplicate" as const, fireId: seen.fireId }
           : { status: "dropped" as const, reason: seen.dropped ?? "dropped" };
       }
-      const body =
-        typeof input.payload === "string"
-          ? input.payload
-          : JSON.stringify(input.payload ?? {});
+      const body = JSON.stringify(projectRoutineEventBodyV1(input.payload));
       const { fireId } = await this.#firings!.enqueueWithin(transaction, {
         routineId: input.routineId,
         trigger: "connection",

@@ -105,6 +105,13 @@ function labelsOf(value: unknown): string[] | undefined {
   return labels.length === 0 ? undefined : labels;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
 function pickFrom(row: Record<string, unknown>): RoutineEventPayloadV1 {
   const subject = textField(row.subject ?? row.Subject);
   const sender = textField(
@@ -126,6 +133,23 @@ function pickFrom(row: Record<string, unknown>): RoutineEventPayloadV1 {
     ...(snippet === undefined ? {} : { snippet }),
     ...(labels === undefined ? {} : { labels }),
   };
+}
+
+/** The standalone fields, taken from the raw event before any cue wrap. */
+export function projectRoutineEventBodyV1(
+  payload: unknown,
+): RoutineEventPayloadV1 {
+  if (typeof payload === "string") {
+    try {
+      const row = asRecord(JSON.parse(payload) as unknown);
+      if (row) return pickFrom(row);
+    } catch {}
+    return payload.length === 0
+      ? {}
+      : { snippet: payload.slice(0, PAYLOAD_SNIPPET_MAX) };
+  }
+  const row = asRecord(payload);
+  return row ? pickFrom(row) : {};
 }
 
 const DELIVERED_PAYLOAD_LINE = "Delivered payload:";
@@ -153,16 +177,7 @@ function unwrapRoutineDeliveryCueV1(raw: string): string {
 export function projectRoutineEventPayloadV1(cue: string): RoutineEventPayloadV1 {
   const delivered = deliveredBodyFromCueV1(cue);
   if (delivered === undefined) return {};
-  const raw = unwrapRoutineDeliveryCueV1(delivered);
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return { snippet: raw.slice(0, PAYLOAD_SNIPPET_MAX) };
-    }
-    return pickFrom(parsed as Record<string, unknown>);
-  } catch {
-    return raw.length === 0 ? {} : { snippet: raw.slice(0, PAYLOAD_SNIPPET_MAX) };
-  }
+  return projectRoutineEventBodyV1(unwrapRoutineDeliveryCueV1(delivered));
 }
 
 export function routineEventEvidenceV1(input: {

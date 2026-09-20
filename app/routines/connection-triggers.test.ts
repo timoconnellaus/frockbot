@@ -5,6 +5,7 @@ import {
   type RoutineConnectionTriggerSeamV1,
 } from "./bot.js";
 import { routineEventEvidenceV1 } from "./event-judge.js";
+import { ROUTINE_HOOK_CUE_MAX_BYTES } from "./hook.js";
 import { RoutineScheduler } from "./scheduler.js";
 import { RoutineStore } from "./store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
@@ -133,9 +134,9 @@ describe("a connected-app Routine firing", () => {
     const payload = {
       payload: {
         mimeType: "multipart/alternative",
-        parts: Array.from({ length: 12 }, (_, index) => ({
+        parts: Array.from({ length: 80 }, (_, index) => ({
           mimeType: "text/plain",
-          body: `part-${index}-${"x".repeat(40)}`,
+          body: `part-${index}-${"x".repeat(80)}`,
         })),
       },
       subject: "Your Amazon order has shipped",
@@ -143,6 +144,9 @@ describe("a connected-app Routine firing", () => {
       snippet: "Track your package.",
       labels: ["INBOX"],
     };
+    expect(JSON.stringify(payload).length).toBeGreaterThan(
+      ROUTINE_HOOK_CUE_MAX_BYTES,
+    );
     expect(
       await store.deliverConnectEvent({
         routineId: "inbox",
