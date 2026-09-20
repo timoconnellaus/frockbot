@@ -393,6 +393,7 @@ class _DesktopUpdateFrameState extends State<DesktopUpdateFrame>
 class DesktopUpdateButton extends StatelessWidget {
   static const blue = Color(0xff075fce);
   static const _labelStyle = TextStyle(
+    fontFamily: 'Inter',
     fontSize: 13,
     fontWeight: FontWeight.w600,
     height: 1,
