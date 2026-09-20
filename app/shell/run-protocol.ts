@@ -89,7 +89,7 @@ export interface ClientTurnEvent {
   }[];
 }
 
-/** Wire notification. Derived from `client-wire.schema.json` `$defs.Notification`. */
+/** Wire notification DTOs. Derived from `client-wire.schema.json` `$defs`. */
 export type ClientNotificationIntent = Notification;
 export type ClientNotificationListV1 = NotificationList;
 export type ClientNotificationAcknowledgementV1 = Acknowledgement;
