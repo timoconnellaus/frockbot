@@ -3,7 +3,7 @@
 /// meaning "open this Bot's Applets" sat over the list of every Bot and changed
 /// under the reader as the selection moved; then as an icon in the Bot's bar,
 /// where it was one of seven. The Bot page is where the doors are now, at every
-/// tier, and the bar keeps the name, the Computer and the panel switch.
+/// tier, and the bar keeps the panel switch.
 library;
 
 import 'dart:convert';

@@ -168,8 +168,6 @@ void main() {
         ChatHeader(
           name: 'Bob',
           textScale: 1,
-          onOpenBot: () {},
-          onComputer: () {},
           onTogglePanel: () => toggles++,
           panelShown: shown,
         ),
@@ -179,10 +177,12 @@ void main() {
       final toggle = byIdentifier(ShellIds.rightPanelToggle);
       expect(toggle, findsOneWidget);
       expect(find.byTooltip('Hide the panel'), findsOneWidget);
+      expect(find.byTooltip('Open Bob'), findsNothing);
+      expect(find.byTooltip('Computer'), findsNothing);
       // Rightmost: against the column it shows and hides.
       expect(
         tester.getTopRight(toggle).dx,
-        greaterThan(tester.getTopRight(find.byTooltip('Computer')).dx),
+        closeTo(1200 - chatHeaderChromeSide, 0.5),
       );
       await tester.tap(find.byTooltip('Hide the panel'));
       expect(toggles, 1);
@@ -193,7 +193,7 @@ void main() {
   );
 
   testWidgets(
-    'the overlay fades the thread and puts three pills on the right',
+    'the overlay fades the thread and puts the panel switch on the right',
     (tester) async {
       tester.view.physicalSize = const Size(1200, 900);
       tester.view.devicePixelRatio = 1;
@@ -202,8 +202,6 @@ void main() {
         host(
           ChatHeader(
             name: 'Pixel',
-            onOpenBot: () {},
-            onComputer: () {},
             onTogglePanel: () {},
             companion: CharacterAvatar(
               size: chatCompanionSize,
@@ -225,16 +223,14 @@ void main() {
       expect(tester.getTopLeft(companion).dy, chatHeaderChromeTop);
       expect(tester.getTopLeft(companion).dx, chatHeaderChromeSide);
       expect(tester.getSize(companion).height, chatCompanionSize);
-      expect(
-        tester.getTopLeft(find.byTooltip('Open Pixel')).dx,
-        greaterThan(tester.getTopRight(companion).dx),
-      );
+      expect(find.byTooltip('Open Pixel'), findsNothing);
+      expect(find.byTooltip('Computer'), findsNothing);
       expect(
         tester.getTopRight(find.byTooltip('Show the panel')).dx,
         closeTo(1200 - chatHeaderChromeSide, 0.5),
       );
       expect(
-        tester.getTopLeft(find.byTooltip('Open Pixel')).dy,
+        tester.getTopLeft(find.byTooltip('Show the panel')).dy,
         chatHeaderChromeTop,
       );
       expect(find.byType(AppBar), findsNothing);
@@ -244,7 +240,7 @@ void main() {
   for (final width in [320.0, 390.0]) {
     for (final scale in [0.85, 1.0, 2.0, 3.0]) {
       testWidgets(
-        'three things in the chrome at $width px and ${scale}x text',
+        'the panel switch is the chrome at $width px and ${scale}x text',
         (tester) async {
           tester.view.physicalSize = Size(width, 900);
           tester.view.devicePixelRatio = 1;
@@ -257,8 +253,6 @@ void main() {
                 name: 'My very long research assistant',
                 textScale: scale,
                 connection: ConnectionState.reconnecting,
-                onOpenBot: () => opened.add('Bot'),
-                onComputer: () => opened.add('Computer'),
                 onTogglePanel: () => opened.add('Panel'),
               ),
               size: Size(width, 900),
@@ -267,10 +261,10 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
-          await tester.tap(byIdentifier(ShellIds.botPanelToggle));
-          await tester.tap(byIdentifier(ShellIds.computerDestination));
+          expect(byIdentifier(ShellIds.botPanelToggle), findsNothing);
+          expect(byIdentifier(ShellIds.computerDestination), findsNothing);
           await tester.tap(byIdentifier(ShellIds.rightPanelToggle));
-          expect(opened, ['Bot', 'Computer', 'Panel']);
+          expect(opened, ['Panel']);
           expect(find.byType(AppBar), findsNothing);
           expect(find.byTooltip('Routines'), findsNothing);
           expect(find.byTooltip('Plugins'), findsNothing);
@@ -389,15 +383,15 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       try {
         await tester.pumpWidget(
-          host(ChatHeader(name: 'Bob', onOpenBot: () {})),
+          host(ChatHeader(name: 'Bob', onTogglePanel: () {})),
         );
         await tester.pump();
         expect(
-          tester.getTopLeft(find.byTooltip('Open Bob')).dy,
+          tester.getTopLeft(find.byTooltip('Show the panel')).dy,
           chatHeaderChromeTop,
         );
         expect(
-          tester.getTopLeft(find.byTooltip('Open Bob')).dy,
+          tester.getTopLeft(find.byTooltip('Show the panel')).dy,
           lessThan(desktopTitleBarBand),
         );
       } finally {
@@ -440,31 +434,35 @@ void main() {
     },
   );
 
-  testWidgets('the name is a frosted pill on a phone and at a desk', (
-    tester,
-  ) async {
-    Widget header({required bool phone}) =>
-        host(ChatHeader(name: 'Rosemary', phone: phone, onOpenBot: () {}));
-    Color? fill() {
-      final material = tester.widget<Material>(
-        find
-            .descendant(
-              of: find.byTooltip('Open Rosemary'),
-              matching: find.byType(Material),
-            )
-            .first,
-      );
-      return material.color;
-    }
-
-    await tester.pumpWidget(header(phone: true));
+  testWidgets('the name is a frosted pill on a phone', (tester) async {
+    await tester.pumpWidget(
+      host(ChatHeader(name: 'Rosemary', phone: true, onOpenBot: () {})),
+    );
     await tester.pump();
-    expect(fill(), isNot(Colors.transparent));
-    expect(fill()!.a, lessThan(1));
+    final material = tester.widget<Material>(
+      find
+          .descendant(
+            of: find.byTooltip('Open Rosemary'),
+            matching: find.byType(Material),
+          )
+          .first,
+    );
+    expect(material.color, isNot(Colors.transparent));
+    expect(material.color!.a, lessThan(1));
+  });
 
-    await tester.pumpWidget(header(phone: false));
+  testWidgets('the panel switch has no stadium around it', (tester) async {
+    await tester.pumpWidget(
+      host(ChatHeader(name: 'Bob', onTogglePanel: () {})),
+    );
     await tester.pump();
-    expect(fill(), isNot(Colors.transparent));
-    expect(fill()!.a, lessThan(1));
+    expect(
+      find.descendant(
+        of: find.byTooltip('Show the panel'),
+        matching: find.byType(BackdropFilter),
+      ),
+      findsNothing,
+    );
+    expect(find.byType(IconButton), findsOneWidget);
   });
 }

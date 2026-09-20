@@ -1,4 +1,5 @@
-/// How one Bot looks: the page under its settings.
+/// How one Bot looks: the page under its settings, and the panel beside
+/// the conversation on a desk.
 ///
 /// Built-in looks are a list that grows; Custom is this Bot's own tokens, which
 /// a person can edit by hand. Inherit is not a skin — the thread and right
@@ -20,12 +21,18 @@ import '../theme/rows.dart';
 import 'bot_settings.dart';
 
 /// The Capabilities row that opens this page.
+///
+/// [onOpen] is the host's door: on a desk that is the panel beside the
+/// conversation, so a chosen look paints the thread while it is being
+/// picked. Absent, the row pushes the page itself — tests, and a phone
+/// host that has not wired a slot.
 Widget botLookRow(
   BuildContext context, {
   required BotSettingsController controller,
   String? characterId,
   String? primary,
   Future<void> Function()? onSaved,
+  VoidCallback? onOpen,
 }) {
   return identified(
     SettingsIds.botLook,
@@ -33,16 +40,18 @@ Widget botLookRow(
       icon: Icons.palette_outlined,
       title: 'Look',
       subtitle: botLookSummary(controller.look),
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => BotLookPage(
-            controller: controller,
-            characterId: characterId,
-            primary: primary,
-            onSaved: onSaved,
+      onTap:
+          onOpen ??
+          () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => BotLookPage(
+                controller: controller,
+                characterId: characterId,
+                primary: primary,
+                onSaved: onSaved,
+              ),
+            ),
           ),
-        ),
-      ),
     ),
   );
 }
@@ -52,12 +61,16 @@ class BotLookPage extends StatefulWidget {
   final String? characterId;
   final String? primary;
   final Future<void> Function()? onSaved;
+
+  /// Off inside the panel beside the conversation, which names it already.
+  final bool chrome;
   const BotLookPage({
     super.key,
     required this.controller,
     this.characterId,
     this.primary,
     this.onSaved,
+    this.chrome = true,
   });
 
   @override
@@ -177,9 +190,8 @@ class _BotLookPageState extends State<BotLookPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: DesktopHeader(child: AppBar(title: const Text('Look'))),
-    body: AnimatedBuilder(
+  Widget build(BuildContext context) {
+    final body = AnimatedBuilder(
       animation: state,
       builder: (context, _) {
         final theme = Theme.of(context);
@@ -283,8 +295,13 @@ class _BotLookPageState extends State<BotLookPage> {
           ),
         );
       },
-    ),
-  );
+    );
+    if (!widget.chrome) return body;
+    return Scaffold(
+      appBar: DesktopHeader(child: AppBar(title: const Text('Look'))),
+      body: body,
+    );
+  }
 
   Widget _editor(ThemeDocument document, ThemeData theme) {
     final tokens = document.tokens;

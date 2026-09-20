@@ -542,8 +542,10 @@ void main() {
         await tester.pumpAndSettle();
         expect((calls.last.arguments as Map)['label'], '2');
 
-        await tester.tap(identifiedBy(ShellIds.botPanelToggle));
-        await tester.pumpAndSettle();
+        if (open.width < 1200) {
+          await tester.tap(identifiedBy(ShellIds.rightPanelToggle));
+          await tester.pumpAndSettle();
+        }
         expect((calls.last.arguments as Map)['label'], open.label);
 
         await tester.pumpWidget(const SizedBox());
@@ -715,7 +717,7 @@ void main() {
       expect((calls.last.arguments as Map)['label'], '2');
 
       // The drawer, which does cover the conversation at this width.
-      await tester.tap(identifiedBy(ShellIds.botPanelToggle));
+      await tester.tap(identifiedBy(ShellIds.rightPanelToggle));
       await tester.pumpAndSettle();
       expect((calls.last.arguments as Map)['label'], '5');
 

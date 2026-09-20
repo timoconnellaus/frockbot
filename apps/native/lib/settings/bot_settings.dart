@@ -625,6 +625,10 @@ class BotSettingsView extends StatefulWidget {
   /// itself — tests, and any host that has not wired a slot.
   final VoidCallback? onOpenVoice;
 
+  /// Opens this Bot's Look settings. Same door as Voice: the panel beside
+  /// the conversation on a desk, so a chosen look paints the thread.
+  final VoidCallback? onOpenLook;
+
   /// Archiving, restoring and deleting belong to the Flock, whose directory
   /// they change, so the card is handed in rather than rebuilt here. It is
   /// built in `lib/flock/lifecycle.dart`, which owns that seam.
@@ -639,6 +643,7 @@ class BotSettingsView extends StatefulWidget {
     this.onEditAvatar,
     this.onOpenPlugins,
     this.onOpenVoice,
+    this.onOpenLook,
     this.dangerZone,
     this.sections = const [],
   });
@@ -970,6 +975,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     characterId: widget.background,
                     primary: widget.primary,
                     onSaved: widget.onSaved,
+                    onOpen: widget.onOpenLook,
                   ),
                   if (state.modelAvailable) _model(context),
                 ],

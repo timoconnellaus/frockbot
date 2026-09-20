@@ -321,6 +321,8 @@ void main() {
       expect(rect.left, greaterThanOrEqualTo(profile.right - 1));
       expect(rect.left - profile.right, lessThan(16));
       expect((rect.center.dy - profile.center.dy).abs(), lessThan(1));
+      final label = tester.getRect(find.text('Update'));
+      expect((label.center.dy - rect.center.dy).abs(), lessThan(1.5));
       final button = tester.widget<FilledButton>(
         find.descendant(of: control, matching: find.byType(FilledButton)),
       );

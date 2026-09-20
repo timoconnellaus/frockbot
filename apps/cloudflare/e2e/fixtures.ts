@@ -661,16 +661,8 @@ export async function createBot(
   }
   await sem(page, "flock-create-submit").click();
   await expect(sheet).toBeHidden({ timeout: 60_000 });
-  // Closing the sheet precedes bootstrap selecting the new Bot. The pill's
-  // tooltip is out of the accessibility tree, so the button inside the
-  // identifier takes its accessible name from the Bot's title, which belongs to
-  // the product. The stable contract is the semantic id plus the selected Bot's
-  // name, not an exact prose string.
-  await expect(
-    sem(page, "bot-panel-toggle").getByRole("button", {
-      name: new RegExp(escapeRegExp(name), "u"),
-    }),
-  ).toBeVisible({ timeout: 30_000 });
+  // Closing the sheet precedes bootstrap selecting the new Bot.
+  await expectBotOpen(page, name);
 }
 
 function escapeRegExp(value: string): string {
@@ -905,15 +897,38 @@ export async function press(scope: Locator): Promise<void> {
  * Open the Bot page: what the selected Bot is doing, and the doors to the rest
  * of it.
  *
- * The Bot's name in the conversation bar is the one way in at every tier — the
- * right panel's root on a desktop, a pushed page on a phone — so this is how
- * every spec reaches anything the Bot owns outside its thread.
+ * A desk already shows that page in the column beside the thread — or one
+ * back from a sub-page, or the panel switch if the column is closed. A phone
+ * still opens it from the Bot's name in the conversation bar.
  */
 export async function openBotPage(page: Page): Promise<void> {
-  await press(sem(page, "bot-panel-toggle").first());
-  await expect(sem(page, "bot-page").first()).toBeVisible({
+  const botPage = sem(page, "bot-page").first();
+  if ((await botPage.count()) > 0 && (await botPage.isVisible())) return;
+  const pill = sem(page, "bot-panel-toggle");
+  if ((await pill.count()) > 0) {
+    await press(pill.first());
+  } else if ((await sem(page, "right-panel-back").count()) > 0) {
+    await press(sem(page, "right-panel-back"));
+  } else {
+    await press(sem(page, "right-panel-toggle"));
+  }
+  await expect(botPage).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
+}
+
+/**
+ * The selected Bot is the one on screen: its conversation is up, and its
+ * name is either the phone's pill or the panel's heading.
+ */
+export async function expectBotOpen(page: Page, name: string): Promise<void> {
+  await expect(composerInput(page)).toBeVisible({ timeout: 30_000 });
+  const titled = new RegExp(escapeRegExp(name), "u");
+  const pill = sem(page, "bot-panel-toggle").getByRole("button", {
+    name: titled,
+  });
+  const heading = sem(page, "shell-right-panel").getByText(name).first();
+  await expect(pill.or(heading)).toBeVisible({ timeout: 30_000 });
 }
 
 /** Open the Bot's Settings, which is behind the gear on its page. */
@@ -1362,11 +1377,7 @@ export async function selectBot(
   const row = sem(page, `sidebar-bot-${botId}`);
   await expect(row).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   await press(row);
-  await expect(
-    sem(page, "bot-panel-toggle").getByRole("button", {
-      name: new RegExp(escapeRegExp(name), "u"),
-    }),
-  ).toBeVisible({ timeout: 60_000 });
+  await expectBotOpen(page, name);
 }
 
 /**

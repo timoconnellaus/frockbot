@@ -44,6 +44,7 @@ import '../settings/billing.dart';
 import '../settings/credit.dart';
 import '../settings/bot_quick_writes.dart';
 import '../settings/bot_settings.dart';
+import '../settings/look_settings.dart';
 import '../settings/page.dart';
 import '../settings/voice_settings.dart';
 import '../templates/page.dart';
@@ -341,6 +342,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _repaint() {
     if (mounted) setState(() {});
     unawaited(push.syncRead());
+  }
+
+  /// Settings writes that should paint now — a Look chosen beside the
+  /// thread — without treating the conversation as unread-sync work.
+  void _paintFromSettings() {
+    if (mounted) setState(() {});
   }
 
   ChatController? get _selectedChat => _selectedSession?.controller;
@@ -965,6 +972,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final name =
         bots.where((bot) => bot.botId.value == botId).map(_name).firstOrNull ??
         botId;
+    botSettings?.removeListener(_paintFromSettings);
     botSettings?.dispose();
     routineInbox?.dispose();
     _selectedChat?.removeListener(_selectedChatChanged);
@@ -976,6 +984,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final controller = BotSettingsController(widget.api, botId);
     final inbox = RoutineInboxController(widget.api, botId);
     botSettings = controller;
+    controller.addListener(_paintFromSettings);
     routineInbox = inbox;
     inbox.addListener(_repaint);
     slots.register(
@@ -1031,6 +1040,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ),
       ),
       label: 'Voice',
+    );
+    slots.register(
+      ShellSlot.rightPanel,
+      'look',
+      (context) => ListenableBuilder(
+        listenable: avatarRevision,
+        builder: (context, _) => BotLookPage(
+          controller: controller,
+          characterId: _background(botId),
+          primary: _primary(botId),
+          chrome: false,
+          onSaved: _readBackBotSettings,
+        ),
+      ),
+      label: 'Look',
     );
     appletCanvas?.dispose();
     computer?.dispose();
@@ -1244,23 +1268,38 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     timezone: accountTimezone,
   );
 
-  ThemeData _botThemeOf(BuildContext context, wire.BotRegistration bot) =>
-      FrockTheme.fromDocument(
-        paintDocumentFor(
-          look: parseBotLook(bot.look),
-          document: bot.document?.toJson(),
-          account: accountLook,
-          platform: MediaQuery.platformBrightnessOf(context),
-        ),
-        timezone: accountTimezone,
-      );
+  /// The look the thread should paint: the settings controller's, once it
+  /// has loaded, so a choice on the Look page lands in the same frame.
+  ({BotLook look, Map<String, Object?>? document}) _resolvedLook(
+    wire.BotRegistration bot,
+  ) {
+    final settings = botSettings;
+    if (settings != null &&
+        settings.botId == bot.botId.value &&
+        settings.loaded) {
+      return (look: settings.look, document: settings.lookDocument?.toJson());
+    }
+    return (look: parseBotLook(bot.look), document: bot.document?.toJson());
+  }
 
-  bool _botHasOwnLook(wire.BotRegistration? bot) =>
-      bot != null &&
-      botHasOwnLook(
-        look: parseBotLook(bot.look),
-        document: bot.document?.toJson(),
-      );
+  ThemeData _botThemeOf(BuildContext context, wire.BotRegistration bot) {
+    final resolved = _resolvedLook(bot);
+    return FrockTheme.fromDocument(
+      paintDocumentFor(
+        look: resolved.look,
+        document: resolved.document,
+        account: accountLook,
+        platform: MediaQuery.platformBrightnessOf(context),
+      ),
+      timezone: accountTimezone,
+    );
+  }
+
+  bool _botHasOwnLook(wire.BotRegistration? bot) {
+    if (bot == null) return false;
+    final resolved = _resolvedLook(bot);
+    return botHasOwnLook(look: resolved.look, document: resolved.document);
+  }
 
   Widget _botLookScope({
     required String key,
@@ -1736,6 +1775,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   onEditAvatar: () => unawaited(_editAvatar(botId, name)),
                   onOpenPlugins: () => _openPanel('plugins', push: true),
                   onOpenVoice: () => _openPanel('voice', push: true),
+                  onOpenLook: () => _openPanel('look', push: true),
                   dangerZone: _dangerZone(botId, name),
                   sections: _packageSettings(botId),
                 ),
@@ -2117,6 +2157,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       );
       return;
     }
+    if (key == 'look') {
+      _push(
+        _panelPage(
+          BotLookPage(
+            controller: controller,
+            characterId: _background(bot.botId.value),
+            primary: _primary(bot.botId.value),
+            onSaved: _readBackBotSettings,
+          ),
+        ),
+      );
+      return;
+    }
     if (key == 'bot-settings') {
       _push(
         _panelPage(
@@ -2283,7 +2336,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     slots.remove(ShellSlot.rightPanel, 'bot-settings');
     slots.remove(ShellSlot.rightPanel, 'routines');
     slots.remove(ShellSlot.rightPanel, 'plugins');
+    slots.remove(ShellSlot.rightPanel, 'voice');
+    slots.remove(ShellSlot.rightPanel, 'look');
     slots.remove(ShellSlot.rightPanel, 'applet');
+    botSettings?.removeListener(_paintFromSettings);
     botSettings?.dispose();
     routineInbox?.dispose();
     appletCanvas?.dispose();
@@ -2357,8 +2413,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       companion: companion,
       connection: _selectedConnection,
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
-      // A phone's bar is GrokBot's three things; the wider tiers
-      // name each entry of the right panel beside the title.
+      // A phone's bar is the way back, the Bot, and the Computer. A desk
+      // opens those from the panel beside the thread, so the overlay keeps
+      // only the switch that shows or hides that column.
       //
       // In voice mode there is no Back (ADR 0029): the
       // way out of the Bot you are talking to is to end
@@ -2367,11 +2424,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       voiceMode: voiceHere,
       onBack: single && !voiceHere ? _openBack : null,
       phone: single,
-      onOpenBot: () => _openPanel('bot-page'),
+      onOpenBot: single ? () => _openPanel('bot-page') : null,
       computerRunning:
           computer?.available == true &&
           (computer!.state.running || _botComputerRunning),
-      onComputer: computer?.available == true
+      onComputer: computer?.available == true && (single || voiceHere)
           ? () => unawaited(_openComputerViewer())
           : null,
       onTogglePanel: single || rightPanel == null ? null : _togglePanel,
@@ -3135,6 +3192,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     activity.dispose();
     lifecycle.dispose();
     push.dispose();
+    botSettings?.removeListener(_paintFromSettings);
     botSettings?.dispose();
     routineInbox?.dispose();
     appletCanvas?.dispose();
