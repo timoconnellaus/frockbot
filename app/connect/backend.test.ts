@@ -261,7 +261,8 @@ describe("Connected-app trigger routes", () => {
     const url = new URL("https://bot.frockbot.com/api/connect/triggers");
     const response = await backend.route(new Request(url), url, CONTEXT);
     expect(response?.status).toBe(200);
-    expect(await response!.json()).toEqual({
+    const listed: unknown = await response!.json();
+    expect(listed).toEqual({
       schemaVersion: 1,
       triggers: offers,
     });
@@ -300,7 +301,8 @@ describe("Connected-app trigger routes", () => {
       {},
     );
     expect(accepted?.status).toBe(202);
-    expect(await accepted!.json()).toEqual({
+    const receipt: unknown = await accepted!.json();
+    expect(receipt).toEqual({
       schemaVersion: 1,
       status: "accepted",
       fireId: "fire-1",
