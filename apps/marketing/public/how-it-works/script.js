@@ -11,6 +11,38 @@ if (contents) {
   });
 }
 
+const architectureHost = document.querySelector("[data-architecture-diagram]");
+if (architectureHost) {
+  fetch("/open/")
+    .then((response) => {
+      if (!response.ok) throw new Error("The system map could not be loaded");
+      return response.text();
+    })
+    .then((html) => {
+      const documentFromOpenPage = new DOMParser().parseFromString(
+        html,
+        "text/html",
+      );
+      const diagram = documentFromOpenPage.querySelector(".open-figure");
+      if (!diagram) throw new Error("The system map is missing");
+      diagram.classList.add("inside-architecture-figure");
+      const caption = diagram.querySelector("#arch-caption");
+      if (caption) caption.id = "inside-architecture-caption";
+      diagram.setAttribute("aria-labelledby", "inside-architecture-caption");
+      diagram
+        .querySelector("svg")
+        ?.setAttribute("aria-labelledby", "inside-architecture-caption");
+      architectureHost.replaceChildren(diagram);
+    })
+    .catch(() => {
+      const link = document.createElement("a");
+      link.className = "inside-text-link";
+      link.href = "/open/#shape";
+      link.textContent = "Explore the full system map →";
+      architectureHost.replaceChildren(link);
+    });
+}
+
 for (const example of document.querySelectorAll(".code-example")) {
   const heading = example.querySelector(".code-heading");
   const code = example.querySelector("pre code");
