@@ -310,6 +310,25 @@ describe("Inside FrockBot examples", () => {
     expect(descriptor.contractVersion).toBe(ISOLATE_CONTRACT_VERSION);
   });
 
+  test("places the Inside FrockBot hero beside its overview on desktop", async () => {
+    const rules = parseStyleRules(await publicFile("how-it-works/styles.css"));
+    const desktopGrid = rules.find((rule) =>
+      rule.selectors.includes(".inside-hero-grid"),
+    )?.declarations;
+
+    expect(desktopGrid?.["grid-template-columns"]).toBe("1.05fr 1fr");
+    expect(desktopGrid?.gap).toBe("72px");
+
+    const page = await publicFile("how-it-works/index.html");
+    const hero = page.slice(
+      page.indexOf('<section class="inside-hero"'),
+      page.indexOf('<div class="container inside-architecture"'),
+    );
+    expect(hero).toContain('class="inside-overview"');
+    expect(hero).toContain("Always on, in the cloud");
+    expect(hero).toContain('src="/assets/characters/goat.png"');
+  });
+
   test("gives every published article heading a unique link target", async () => {
     const headings: string[] = [];
     await drain(

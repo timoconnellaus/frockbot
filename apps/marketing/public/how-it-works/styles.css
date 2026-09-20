@@ -30,9 +30,9 @@
 }
 .inside-hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 780px);
+  grid-template-columns: 1.05fr 1fr;
   align-items: center;
-  justify-content: center;
+  gap: 72px;
 }
 .inside-hero h1 {
   font-family: "Archivo Black", sans-serif;
@@ -75,6 +75,113 @@
 }
 .inside-hero-copy > a {
   margin-top: 12px;
+}
+.inside-overview {
+  margin: 0;
+  padding: 30px;
+  background: #f1ede7;
+  border: 1px solid #e5ddd4;
+  border-radius: 32px;
+}
+.overview-orbit {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: -16px;
+  position: relative;
+  z-index: 1;
+}
+.overview-orbit span {
+  padding: 9px 16px;
+  border: 1px solid var(--ink);
+  border-radius: 9px;
+  background: var(--blush);
+  font-size: 0.8rem;
+  font-weight: 700;
+  transform: rotate(-4deg);
+}
+.overview-orbit span:nth-child(2) {
+  transform: rotate(3deg);
+  background: white;
+}
+.overview-cloud {
+  border-radius: 22px;
+  padding: 40px 14px 28px;
+  background: var(--ink);
+  color: white;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.overview-cloud .diagram-label {
+  color: #d7d0dc;
+}
+.overview-cloud img {
+  margin: 0 0 -8px;
+  object-fit: contain;
+}
+.overview-cloud strong {
+  font-size: 1.6rem;
+}
+.overview-cloud > span {
+  color: #d7d0dc;
+  font-size: 0.8rem;
+  margin-top: 5px;
+}
+.overview-connector {
+  text-align: center;
+  font-size: 2.4rem;
+  color: var(--pink-dark);
+  line-height: 1.2;
+}
+.overview-devices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+}
+.overview-devices > div {
+  background: white;
+  border: 1px solid #e2d9cf;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  font-size: 0.8rem;
+}
+.device-outline {
+  display: block;
+  flex-shrink: 0;
+  border: 2px solid var(--ink);
+  position: relative;
+}
+.device-desktop {
+  width: 40px;
+  height: 28px;
+  border-radius: 4px;
+  border-bottom-width: 5px;
+}
+.device-desktop::after {
+  content: "";
+  width: 18px;
+  border-bottom: 2px solid var(--ink);
+  position: absolute;
+  bottom: -10px;
+  left: 9px;
+}
+.device-phone {
+  width: 19px;
+  height: 33px;
+  border-radius: 5px;
+  margin-inline: 8px;
+}
+.inside-overview figcaption {
+  margin-top: 22px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
 }
 .inside-architecture {
   min-height: 420px;
@@ -940,6 +1047,10 @@
     gap: 40px;
     grid-template-columns: 180px minmax(0, 1fr);
   }
+  .overview-devices > div {
+    padding: 14px 10px;
+    gap: 9px;
+  }
   .continuity-cards {
     gap: 10px;
   }
@@ -968,6 +1079,28 @@
   }
   .inside-hero-copy > p:not(.section-label) {
     font-size: 0.9rem;
+  }
+  .inside-overview {
+    padding: 20px;
+  }
+  .overview-orbit {
+    gap: 5px;
+  }
+  .overview-orbit span {
+    padding: 8px 10px;
+    font-size: 0.65rem;
+  }
+  .overview-cloud img {
+    width: 150px;
+    height: 150px;
+  }
+  .overview-cloud > span {
+    font-size: 0.65rem;
+  }
+  .overview-devices > div {
+    flex-direction: column;
+    gap: 16px;
+    font-size: 0.68rem;
   }
   .inside-principles {
     flex-wrap: wrap;
@@ -1027,6 +1160,18 @@
     gap: 12px;
     font-size: 0.78rem;
     margin-top: 35px;
+  }
+  .inside-overview {
+    padding: 24px;
+  }
+  .overview-cloud img {
+    width: 165px;
+    height: 165px;
+  }
+  .overview-devices > div {
+    flex-direction: row;
+    font-size: 0.68rem;
+    gap: 10px;
   }
   .inside-section h2 {
     font-size: 2.35rem;
