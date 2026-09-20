@@ -19,14 +19,14 @@ import {
 class ToolApprovalSetupError extends Error {}
 
 /**
- * `TYPESAFE_API_KEY` wins where both are set, because it is also what the SDK
- * would read by itself. The key is passed explicitly and never printed.
+ * Production names the credential `JEV_API_KEY`. `TYPESAFE_API_KEY` remains a
+ * local alias. The key is passed explicitly and never printed.
  */
 function toolApprovalClientV1(env: Record<string, string | undefined>) {
-  const apiKey = (env.TYPESAFE_API_KEY ?? env.JEV_API_KEY ?? "").trim();
+  const apiKey = (env.JEV_API_KEY ?? env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey)
     throw new ToolApprovalSetupError(
-      "Set TYPESAFE_API_KEY, or JEV_API_KEY, in the main checkout's .dev.vars",
+      "Set JEV_API_KEY, or TYPESAFE_API_KEY, in the main checkout's .dev.vars",
     );
   try {
     return new TypeSafeClient({

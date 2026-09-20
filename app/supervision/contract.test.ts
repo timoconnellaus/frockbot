@@ -246,15 +246,15 @@ describe("TurnSupervisor adapter contract", () => {
     expect(createUnavailableTurnSupervisorV1()).toBeTruthy();
   });
 
-  test("the hosted chooser ignores JEV_API_KEY and requires TYPESAFE_API_KEY", async () => {
+  test("the hosted chooser reads JEV_API_KEY and ignores TYPESAFE_API_KEY", async () => {
     await expect(
       createHostedTurnSupervisorV1({
-        JEV_API_KEY: "sk-test-do-not-leak-4f3a",
+        TYPESAFE_API_KEY: "sk-test-do-not-leak-4f3a",
       }).startTurn(startEvidence),
     ).rejects.toMatchObject({ kind: "unavailable" });
     await expect(
       createHostedTurnSupervisorV1({
-        TYPESAFE_API_KEY: "sk-test-do-not-leak-4f3a",
+        JEV_API_KEY: "sk-test-do-not-leak-4f3a",
       }).startTurn(startEvidence),
     ).resolves.toEqual(defaultTurnDirectiveV1());
   });

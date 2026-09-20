@@ -62,7 +62,7 @@ Plugins may separately receive a metered judgment binding when granted one.
 That binding lets Plugin authors ask bounded semantic questions, but it cannot
 approve the Plugin's own effects, change locked policy or bypass mandatory Turn
 supervision. The TypeSafe credential remains server-side. The hosted adapter
-reads `TYPESAFE_API_KEY` only; the key never leaves the chooser.
+reads `JEV_API_KEY` only; the key never leaves the chooser.
 
 The app owns the interface:
 
@@ -353,10 +353,10 @@ conversation or policy content is not needed for diagnosis.
 
 Build on `app/evals/tool-approval.ts` and keep live evaluation separate from unit
 tests. Pin the calibrated Jev version. Run the labeled suite with
-`bun run eval:tool-approval`; it reads `TYPESAFE_API_KEY` from the main
-checkout's `.dev.vars` (the runner still accepts `JEV_API_KEY` as an alias)
-and writes traces to `.eval-results/`. It is never part of ordinary tests or
-the pre-push gate.
+`bun run eval:tool-approval`; it reads `JEV_API_KEY` from the main
+checkout's `.dev.vars` (the runner still accepts `TYPESAFE_API_KEY` as a
+local alias) and writes traces to `.eval-results/`. It is never part of
+ordinary tests or the pre-push gate.
 
 Evaluation suites cover:
 
