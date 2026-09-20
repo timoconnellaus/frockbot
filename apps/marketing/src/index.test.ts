@@ -324,9 +324,11 @@ describe("Inside FrockBot examples", () => {
       page.indexOf('<section class="inside-hero"'),
       page.indexOf('<div class="container inside-architecture"'),
     );
-    expect(hero).toContain('class="inside-overview"');
-    expect(hero).toContain("Always on, in the cloud");
+    expect(hero).toContain('class="inside-hero-art"');
+    expect(hero).toContain('class="bot-builder"');
+    expect(hero).toContain("Build your Bot");
     expect(hero).toContain('src="/assets/characters/pixel.png"');
+    expect(page).not.toContain("/assets/characters/goat.png");
   });
 
   test("gives every published article heading a unique link target", async () => {
