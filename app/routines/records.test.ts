@@ -68,6 +68,35 @@ describe("RoutineRecordV1", () => {
     ).toThrow(/triggerType is invalid/);
   });
 
+  test("a connected-app Routine accepts only a Gmail query on trigger config", () => {
+    const { schedule: _schedule, ...rest } = base;
+    const trigger = {
+      kind: "connection" as const,
+      connectionId: "conn-gmail",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    };
+    expect(
+      decodeRoutineRecordV1({
+        ...rest,
+        trigger: { ...trigger, config: { query: "from:stripe.com" } },
+      }).trigger,
+    ).toEqual({
+      ...trigger,
+      config: { query: "from:stripe.com" },
+    });
+    for (const config of [
+      { labelIds: "INBOX" },
+      { userId: "someone" },
+      { interval: 15 },
+      { query: "from:stripe.com", labelIds: "INBOX" },
+      { q: "from:stripe.com" },
+    ]) {
+      expect(() =>
+        decodeRoutineRecordV1({ ...rest, trigger: { ...trigger, config } }),
+      ).toThrow(/unknown field/);
+    }
+  });
+
   test("decodes a Plugin-triggered Routine, naming the Plugin and its trigger", () => {
     const { schedule: _schedule, ...rest } = base;
     const decoded = decodeRoutineRecordV1({

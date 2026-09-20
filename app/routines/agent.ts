@@ -25,6 +25,7 @@ import {
   ROUTINE_PROMPT_MAX_LENGTH,
   decodeRoutineTriggerConfigV1,
   RoutineDecodeError,
+  type RoutineTriggerConfigV1,
   type RoutineTriggerV1,
   type RoutineWriterV1,
 } from "./records.js";
@@ -127,8 +128,16 @@ const ROUTINE_MANAGE_INPUT_SCHEMA = {
         config: {
           type: "object",
           description:
-            "Optional coarse filter the event type takes, such as Gmail query. Omit it unless you can write a search that narrows the event. Never set labelIds, userId, or interval.",
-          additionalProperties: true,
+            "Optional Gmail search that narrows which events fire. Only query is allowed.",
+          properties: {
+            query: {
+              type: "string",
+              description:
+                "A Gmail search, e.g. from:stripe.com. Omit config unless this search narrows the event.",
+            },
+          },
+          required: ["query"],
+          additionalProperties: false,
         },
       },
       required: ["connectionId", "triggerType"],
@@ -177,7 +186,7 @@ interface RoutineManageInputV1 {
   connectionTrigger?: {
     connectionId: string;
     triggerType: string;
-    config?: Record<string, string | number | boolean>;
+    config?: RoutineTriggerConfigV1;
   };
   userAsked?: boolean;
 }

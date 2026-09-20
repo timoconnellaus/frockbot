@@ -223,12 +223,10 @@ function routineFacts(routine: RoutineViewV1): string {
 }
 
 function triggerConfigTextV1(
-  config: Record<string, string | number | boolean> | undefined,
+  config: { query: string } | undefined,
 ): string | undefined {
   if (!config) return undefined;
-  const keys = Object.keys(config);
-  if (keys.length === 0) return undefined;
-  return keys.map((key) => `${key}: ${String(config[key])}`).join("\n");
+  return `query: ${config.query}`;
 }
 
 /**

@@ -55,6 +55,11 @@ export type RoutineWriterV1 =
  * `connection` fires on an event from a connected app; the instance lives at
  * the provider and the delivery arrives at the deployment-wide events door.
  */
+/** The only connection-trigger config the Bot may set: a Gmail search. */
+export type RoutineTriggerConfigV1 = {
+  query: string;
+};
+
 export type RoutineTriggerV1 =
   | { kind: "webhook" }
   | { kind: "plugin"; pluginId: string; trigger: string }
@@ -62,16 +67,14 @@ export type RoutineTriggerV1 =
       kind: "connection";
       connectionId: string;
       triggerType: string;
-      config?: Record<string, string | number | boolean>;
+      config?: RoutineTriggerConfigV1;
     };
 
 const ROUTINE_PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const ROUTINE_PLUGIN_TRIGGER = /^[a-z][a-z0-9_-]{0,63}$/;
 const ROUTINE_CONNECTION_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const ROUTINE_CONNECTION_TRIGGER = /^[A-Z][A-Z0-9_]{0,127}$/;
-const ROUTINE_CONNECTION_CONFIG_KEYS = 16;
-const ROUTINE_CONNECTION_CONFIG_KEY = 64;
-const ROUTINE_CONNECTION_CONFIG_VALUE = 256;
+const ROUTINE_CONNECTION_QUERY_MAX = 256;
 
 /** Whether this trigger mints a per-Routine webhook key. */
 export function routineTriggerNeedsHookKeyV1(
@@ -83,41 +86,16 @@ export function routineTriggerNeedsHookKeyV1(
 export function decodeRoutineTriggerConfigV1(
   value: unknown,
   label = "Routine trigger config",
-): Record<string, string | number | boolean> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new RoutineDecodeError(`${label} must be an object`);
-  }
-  const candidate = value as Record<string, unknown>;
-  const keys = Object.keys(candidate);
-  if (keys.length > ROUTINE_CONNECTION_CONFIG_KEYS) {
-    throw new RoutineDecodeError(
-      `${label} may hold at most ${ROUTINE_CONNECTION_CONFIG_KEYS} fields`,
-    );
-  }
-  const config: Record<string, string | number | boolean> = {};
-  for (const key of keys) {
-    if (key.length > ROUTINE_CONNECTION_CONFIG_KEY) {
-      throw new RoutineDecodeError(`${label} field "${key}" is too long`);
-    }
-    const field = candidate[key];
-    if (typeof field === "string") {
-      if (field.length > ROUTINE_CONNECTION_CONFIG_VALUE) {
-        throw new RoutineDecodeError(`${label}.${key} is too long`);
-      }
-      config[key] = field;
-      continue;
-    }
-    if (typeof field === "number" && Number.isFinite(field)) {
-      config[key] = field;
-      continue;
-    }
-    if (typeof field === "boolean") {
-      config[key] = field;
-      continue;
-    }
-    throw new RoutineDecodeError(`${label}.${key} must be a string, number, or boolean`);
-  }
-  return config;
+): RoutineTriggerConfigV1 {
+  const candidate = record(value, label);
+  routineExactKeys(candidate, ["query"], [], label);
+  return {
+    query: routineText(
+      candidate.query,
+      ROUTINE_CONNECTION_QUERY_MAX,
+      `${label}.query`,
+    ),
+  };
 }
 
 /** The words a page or a cue use for what a Routine fires on. */

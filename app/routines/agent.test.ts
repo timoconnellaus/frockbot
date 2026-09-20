@@ -319,6 +319,47 @@ describe("routineManageCommandV1", () => {
     });
   });
 
+  test("refuses connectionTrigger.config keys other than query", async () => {
+    const seam = host();
+    const tool = createRoutineManageTool({ ...seam, writer: WRITER });
+    const refused = await tool.execute(
+      {
+        action: "create",
+        name: "Inbox",
+        prompt: "Read shipping mail.",
+        connectionTrigger: {
+          connectionId: "conn-gmail",
+          triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+          config: { labelIds: "INBOX", userId: "someone", interval: 15 },
+        },
+      },
+      CONTEXT,
+    );
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toMatch(/unknown field/);
+    const accepted = await tool.execute(
+      {
+        action: "create",
+        name: "Inbox",
+        prompt: "Read shipping mail.",
+        connectionTrigger: {
+          connectionId: "conn-gmail",
+          triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+          config: { query: "from:stripe.com" },
+        },
+      },
+      CONTEXT,
+    );
+    expect(accepted.isError).toBe(false);
+    const listed = await seam.list();
+    expect(listed.routines[0]?.trigger).toEqual({
+      kind: "connection",
+      connectionId: "conn-gmail",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+      config: { query: "from:stripe.com" },
+    });
+  });
+
   test("refuses a webhook and a connected-app trigger on the same call", async () => {
     const tool = createRoutineManageTool({ ...host(), writer: WRITER });
     const result = await tool.execute(
