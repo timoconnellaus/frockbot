@@ -11,6 +11,7 @@ import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/view/action.dart';
 import 'package:frockbot_native/view/document.dart';
+import 'package:frockbot_native/view/surface.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'shell_layout_test.dart' show byIdentifier;
@@ -685,6 +686,22 @@ void main() {
     expect(panel.editorTitle, 'New Routine');
     expect(find.text('New Routine'), findsWidgets);
     expect(find.text('What should this Bot do?'), findsOneWidget);
+    expect(find.byType(RefreshIndicator), findsNothing);
+    final title = tester.getTopLeft(find.text('New Routine').first);
+    final surface = tester.getTopLeft(find.byType(ViewSurfacePage));
+    expect(title.dy - surface.dy, lessThan(4));
+  });
+
+  testWidgets('the list still pulls to refresh', (tester) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      return routinesDocumentForPath(path);
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    expect(find.byType(RefreshIndicator), findsOneWidget);
   });
 
   testWidgets('completions sit under their Routine as the Bot page rows', (

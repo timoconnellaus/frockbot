@@ -384,11 +384,7 @@ class _ViewSwitchRow extends StatelessWidget {
         subtitle: said.isEmpty ? null : said.join(' · '),
         chevron: open != null || toggle == null,
         onTap: open != null && openSchema != null
-            ? () => scope.controller.submit(
-                open,
-                openSchema,
-                persist: false,
-              )
+            ? () => scope.controller.submit(open, openSchema, persist: false)
             : toggle == null || locked
             ? null
             : flip,
@@ -712,6 +708,14 @@ bool viewNodeGoneV1(Map<String, Object?> node, Map<String, Object?> predicted) {
   return holdsDelete(node);
 }
 
+/// A seed field the host draws as nothing: its value still loads into the
+/// controller, but it has no surface of its own.
+bool _viewFieldIsHiddenSeedV1(Map<String, Object?> node) {
+  if (node['type'] != 'field') return false;
+  final field = node['field'];
+  return field is Map && field['choiceSource'] == 'routine-editor-hidden';
+}
+
 class ViewGroupNode extends StatefulWidget {
   final Map<String, Object?> node;
   const ViewGroupNode({super.key, required this.node});
@@ -727,14 +731,24 @@ class _ViewGroupNodeState extends State<ViewGroupNode> {
   Widget build(BuildContext context) {
     final title = widget.node['title'] as String?;
     final predicted = ViewScope.of(context).controller.predicted;
-    final children = [
-      for (final child in (widget.node['children']! as List).cast<Map>())
-        if (!viewNodeGoneV1(child.cast<String, Object?>(), predicted))
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 5),
-            child: ViewNodeView(node: child.cast<String, Object?>()),
-          ),
-    ];
+    final children = <Widget>[];
+    var firstVisible = true;
+    for (final raw in (widget.node['children']! as List).cast<Map>()) {
+      final child = raw.cast<String, Object?>();
+      if (viewNodeGoneV1(child, predicted)) continue;
+      // Hidden seeds stay in the tree so their values load, but they must
+      // not push the form they seed away from the top.
+      final hidden = _viewFieldIsHiddenSeedV1(child);
+      children.add(
+        Padding(
+          padding: hidden
+              ? EdgeInsets.zero
+              : EdgeInsets.only(top: firstVisible ? 0 : 5, bottom: 5),
+          child: ViewNodeView(node: child),
+        ),
+      );
+      if (!hidden) firstVisible = false;
+    }
     final body = widget.node['orientation'] == 'row'
         ? Wrap(spacing: 12, runSpacing: 8, children: children)
         : Column(

@@ -526,6 +526,7 @@ class _RoutinesViewState extends State<RoutinesView> {
             : null,
         onLeave: editing ? _leaveEditor : null,
         onView: (view) => _view = view,
+        refreshable: !editing,
         rootView: editing ? null : (root) => ViewRoutineList(node: root),
         banner: (context) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

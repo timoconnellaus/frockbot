@@ -97,6 +97,10 @@ class ViewSurfacePage extends StatefulWidget {
   /// here for as long as the person is looking at it and nowhere else.
   final WidgetBuilder? banner;
 
+  /// Whether the surface answers a pull-to-refresh. Off on a form: pulling
+  /// would drag the title off the top and reload seeds the person is editing.
+  final bool refreshable;
+
   const ViewSurfacePage({
     super.key,
     required this.title,
@@ -119,6 +123,7 @@ class ViewSurfacePage extends StatefulWidget {
     this.onLeave,
     this.rootView,
     this.onView,
+    this.refreshable = true,
   });
 
   @override
@@ -254,73 +259,85 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     });
   }
 
+  Widget _documentList(wire.ViewDocument document, ViewController view) {
+    return ListView(
+      physics: widget.refreshable
+          ? const AlwaysScrollableScrollPhysics()
+          : const ClampingScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(20, widget.refreshable ? 12 : 0, 20, 32),
+      children: [
+        if (!widget.chrome && widget.confirmLeave != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: identified(
+              widget.backId ?? 'view-back',
+              IconButton(
+                tooltip: 'Back',
+                onPressed: _requestLeave,
+                icon: const Icon(Icons.arrow_back),
+              ),
+            ),
+          ),
+        if (widget.banner case final WidgetBuilder draw)
+          Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: widget.maxWidth),
+              child: draw(context),
+            ),
+          ),
+        Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: widget.maxWidth),
+            child: identified(
+              widget.documentId,
+              ViewDocumentView(
+                key: ValueKey(
+                  '${widget.controller.surfaceId}.${document.revision}',
+                ),
+                document: document,
+                controller: view,
+                fields: widget.fields,
+                cardGroups: widget.cardGroups,
+                gridGroups: widget.gridGroups,
+                switchRows: widget.switchRows,
+                rootView: widget.rootView,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final document = controller.document;
     final view = this.view;
+    final loaded = document != null && view != null;
+    final scrolled = loaded
+        ? widget.refreshable
+              ? RefreshIndicator(
+                  onRefresh: controller.load,
+                  child: _documentList(document, view),
+                )
+              : _documentList(document, view)
+        : null;
     final body = SafeArea(
       top: false,
-      child: document == null || view == null
-          ? controller.busy
-                ? FrockLoading(label: 'Loading ${widget.title.toLowerCase()}')
-                : FrockEmptyState(
-                    icon: Icons.cloud_off_rounded,
-                    title: '${widget.title} couldn’t load',
-                    detail:
-                        controller.message ??
-                        'Check your connection and try again.',
-                    action: 'Try again',
-                    onAction: controller.load,
-                  )
-          : RefreshIndicator(
-              onRefresh: controller.load,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-                children: [
-                  if (!widget.chrome && widget.confirmLeave != null)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: identified(
-                        widget.backId ?? 'view-back',
-                        IconButton(
-                          tooltip: 'Back',
-                          onPressed: _requestLeave,
-                          icon: const Icon(Icons.arrow_back),
-                        ),
-                      ),
-                    ),
-                  if (widget.banner case final WidgetBuilder draw)
-                    Center(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: widget.maxWidth),
-                        child: draw(context),
-                      ),
-                    ),
-                  Center(
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: widget.maxWidth),
-                      child: identified(
-                        widget.documentId,
-                        ViewDocumentView(
-                          key: ValueKey(
-                            '${controller.surfaceId}.${document.revision}',
-                          ),
-                          document: document,
-                          controller: view,
-                          fields: widget.fields,
-                          cardGroups: widget.cardGroups,
-                          gridGroups: widget.gridGroups,
-                          switchRows: widget.switchRows,
-                          rootView: widget.rootView,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      child:
+          scrolled ??
+          (controller.busy
+              ? FrockLoading(label: 'Loading ${widget.title.toLowerCase()}')
+              : FrockEmptyState(
+                  icon: Icons.cloud_off_rounded,
+                  title: '${widget.title} couldn’t load',
+                  detail:
+                      controller.message ??
+                      'Check your connection and try again.',
+                  action: 'Try again',
+                  onAction: controller.load,
+                )),
     );
     if (!widget.chrome) return body;
     final back = widget.confirmLeave != null
@@ -355,14 +372,15 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
             automaticallyImplyLeading: back == null && widget.onClose == null,
             leading: back,
             actions: [
-              identified(
-                widget.refreshId,
-                IconButton(
-                  tooltip: 'Refresh ${widget.title.toLowerCase()}',
-                  onPressed: controller.busy ? null : controller.load,
-                  icon: const Icon(Icons.refresh_rounded),
+              if (widget.refreshable)
+                identified(
+                  widget.refreshId,
+                  IconButton(
+                    tooltip: 'Refresh ${widget.title.toLowerCase()}',
+                    onPressed: controller.busy ? null : controller.load,
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
                 ),
-              ),
             ],
           ),
         ),
