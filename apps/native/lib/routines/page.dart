@@ -87,6 +87,11 @@ class RoutinesController extends ViewSurfaceController {
   /// it — and the newer read's catalog is the one that counts.
   int _reads = 0;
 
+  /// Callers that hit [load] while a read is out wait here, and the out
+  /// read loops until [creating] and [editing] are what they asked for.
+  Completer<void>? _loading;
+  bool _reload = false;
+
   RoutinesController(
     this.api,
     this.botId, {
@@ -124,39 +129,68 @@ class RoutinesController extends ViewSurfaceController {
     if (!_closed) notifyListeners();
   }
 
+  String get _documentPath =>
+      '$_path?as=document${creating
+          ? '&new=1'
+          : editing == null
+          ? ''
+          : '&edit=${Uri.encodeQueryComponent(editing!)}'}';
+
   @override
   Future<void> load() async {
-    if (_busy) return;
+    // A save closes the editor and the surface then reads the list. Those two
+    // loads overlap: the first was asked for while the form was still open.
+    // Dropping the second used to keep the empty create document on screen.
+    if (_loading != null) {
+      _reload = true;
+      return _loading!.future;
+    }
+    final loading = Completer<void>();
+    _loading = loading;
     _busy = true;
     _message = null;
-    final read = ++_reads;
-    pluginCatalogPending = true;
     _changed();
-    // The catalog widens what the editor offers and nothing else, so it is
-    // asked for beside the document and read whenever it lands: a slow Plugin
-    // route must not hold back Routines that are otherwise available.
-    final plugins = _loadPluginFrame();
     try {
-      final next = wire.ViewDocument.fromJson(
-        await api.request(
-          '$_path?as=document${creating
-              ? '&new=1'
-              : editing == null
-              ? ''
-              : '&edit=${Uri.encodeQueryComponent(editing!)}'}',
-        ),
-      );
-      if (next.surfaceId.value != surfaceId) {
-        throw const FormatException('Routines surface mismatch');
-      }
-      _document = next;
-    } catch (_) {
-      _message = 'Couldn’t load this Bot’s Routines. Check your connection and try again.';
+      do {
+        _reload = false;
+        final read = ++_reads;
+        pluginCatalogPending = true;
+        // The catalog widens what the editor offers and nothing else, so it is
+        // asked for beside the document and read whenever it lands: a slow
+        // Plugin route must not hold back Routines that are otherwise
+        // available.
+        final plugins = _loadPluginFrame();
+        final wantCreate = creating;
+        final wantEdit = editing;
+        try {
+          final next = wire.ViewDocument.fromJson(
+            await api.request(_documentPath),
+          );
+          if (_closed) return;
+          if (creating != wantCreate || editing != wantEdit) {
+            _reload = true;
+            continue;
+          }
+          if (next.surfaceId.value != surfaceId) {
+            throw const FormatException('Routines surface mismatch');
+          }
+          _document = next;
+        } catch (_) {
+          if (_closed) return;
+          if (creating != wantCreate || editing != wantEdit) {
+            _reload = true;
+            continue;
+          }
+          _message = 'Couldn’t load this Bot’s Routines. Check your connection and try again.';
+        }
+        unawaited(_adoptPluginSources(read, plugins));
+      } while (_reload && !_closed);
     } finally {
       _busy = false;
-      _changed();
+      _loading = null;
+      if (!loading.isCompleted) loading.complete();
+      if (!_closed) _changed();
     }
-    unawaited(_adoptPluginSources(read, plugins));
   }
 
   /// The catalog the read that asked for it was owed, applied on arrival.
@@ -226,10 +260,8 @@ class RoutinesController extends ViewSurfaceController {
   void _closeEditor() {
     if (closing) return;
     closing = true;
-    // The next read is the list. `_afterAction` reloads as soon as save
-    // returns, before the post-frame leave, and `load()` names the page
-    // these flags still describe — `&new=1` while creating — then drops
-    // the leave's list read because it is busy.
+    // Drop the form now so a read the surface starts as this command
+    // returns is the list, not another empty create document.
     creating = false;
     editing = null;
     _changed();
@@ -355,7 +387,7 @@ class _RoutinesViewState extends State<RoutinesView> {
       ..editing = null
       ..closing = false
       ..mintedKey = null;
-    unawaited(controller.load());
+    await controller.load();
     _syncPanel();
     if (mounted) setState(() {});
   }
@@ -429,16 +461,18 @@ class _RoutinesViewState extends State<RoutinesView> {
 
   late RoutinesController controller;
 
-  RoutinesController _createController() => RoutinesController(
-    widget.api,
-    widget.botId,
-    openRuns: _openRuns,
-    confirmDelete: _confirmDelete,
-    onInbox: (count) => widget.onInbox?.call(count),
-    onOpenEditor: _openEditor,
-    onCloseEditor: _leaveEditor,
-  )..creating = widget.openNew && widget.initialRoutineId == null
-    ..editing = widget.initialRoutineId;
+  RoutinesController _createController() =>
+      RoutinesController(
+          widget.api,
+          widget.botId,
+          openRuns: _openRuns,
+          confirmDelete: _confirmDelete,
+          onInbox: (count) => widget.onInbox?.call(count),
+          onOpenEditor: _openEditor,
+          onCloseEditor: _leaveEditor,
+        )
+        ..creating = widget.openNew && widget.initialRoutineId == null
+        ..editing = widget.initialRoutineId;
 
   @override
   void initState() {

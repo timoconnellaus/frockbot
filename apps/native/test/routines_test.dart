@@ -35,20 +35,23 @@ Map<String, Object?> routinesDocument({
         'orientation': 'column',
         'title': 'Scheduled',
         'children': [
-          routineRow({
-            'routineId': 'r1',
-            'name': 'Morning brief',
-            'schedule': '0 9 * * *',
-            'enabled': enabled,
-          }, runs: [
+          routineRow(
             {
-              'entryId': 'e1',
               'routineId': 'r1',
               'name': 'Morning brief',
-              'createdAt': '2026-09-02T23:00:10.000Z',
-              'mark': 'finished',
+              'schedule': '0 9 * * *',
+              'enabled': enabled,
             },
-          ]),
+            runs: [
+              {
+                'entryId': 'e1',
+                'routineId': 'r1',
+                'name': 'Morning brief',
+                'createdAt': '2026-09-02T23:00:10.000Z',
+                'mark': 'finished',
+              },
+            ],
+          ),
         ],
       },
     ],
@@ -255,11 +258,7 @@ Map<String, Object?> routineRow(
           'orientation': 'column',
           'title': run['name'] ?? routine['name'],
           'children': [
-            {
-              'type': 'text',
-              'text': run['createdAt'],
-              'style': 'status',
-            },
+            {'type': 'text', 'text': run['createdAt'], 'style': 'status'},
             {'type': 'text', 'text': run['mark'] ?? 'finished'},
             {
               'type': 'group',
@@ -580,6 +579,64 @@ void main() {
     expect(byIdentifier(RoutineIds.editorBack), findsOneWidget);
   });
 
+  testWidgets('Create Routine returns to the list that now holds it', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final routines = <Map<String, Object?>>[];
+    final paths = <String>[];
+    Completer<void>? holdRead;
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      if (body != null) {
+        final command = (body as Map).cast<String, Object?>();
+        routines.add({
+          'routineId': 'r-new',
+          'name': command['name'],
+          'prompt': command['prompt'],
+          'schedule': command['schedule'] ?? '0 9 * * *',
+          'enabled': true,
+        });
+        // Hold the next document read so it is still out when the editor
+        // closes — the overlap a browser always hits, and a sync mock hides.
+        holdRead = Completer<void>();
+        return {
+          'schemaVersion': 1,
+          'commandId': command['commandId'],
+          'status': 'applied',
+        };
+      }
+      paths.add(path);
+      final held = holdRead;
+      if (held != null && !held.isCompleted) await held.future;
+      return routinesDocumentThatSaves(
+        routinesDocumentForPath(path, routines: List.of(routines)),
+      );
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, 'Morning brief');
+    await tester.enterText(
+      find.byType(TextFormField).at(1),
+      'Summarise overnight email.',
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.text('Create Routine'));
+    await tester.tap(find.text('Create Routine'));
+    await tester.pump();
+    expect(holdRead, isNotNull);
+    expect(holdRead!.isCompleted, isFalse);
+    holdRead!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Create Routine'), findsNothing);
+    expect(find.text('Morning brief'), findsOneWidget);
+    expect(paths.where((path) => path.contains('new=1')), hasLength(1));
+    expect(paths.last.contains('new=1'), isFalse);
+  });
+
   testWidgets('the panel’s new Routine page names itself at the top', (
     tester,
   ) async {
@@ -792,71 +849,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Save changes'), findsNothing);
     expect(find.text('Morning brief'), findsOneWidget);
-  });
-
-  testWidgets('saving a new Routine closes the editor onto the list', (
-    tester,
-  ) async {
-    useTallSurface(tester);
-    final store = MemoryStore();
-    final created = <Map<String, Object?>>[];
-    var revision = 1;
-    Completer<void>? holdRead;
-    final api = SettingsApi(store, (path, body) async {
-      if (path.endsWith('/plugins')) return {'plugins': []};
-      if (body != null) {
-        final command = (body as Map).cast<String, Object?>();
-        created.add(command);
-        revision += 1;
-        return {
-          'schemaVersion': 1,
-          'commandId': command['commandId'],
-          'status': 'applied',
-        };
-      }
-      // The post-save read stays out across a frame — the same race as a
-      // network GET still in flight when the leave's list read would run.
-      if (created.isNotEmpty) {
-        holdRead ??= Completer<void>();
-        await holdRead!.future;
-      }
-      if (path.contains('new=1')) {
-        return routinesDocumentThatSaves(routinesDocumentWithEditor());
-      }
-      return {
-        ...routinesListDocument(
-          routines: [
-            for (final command in created)
-              {
-                'routineId': 'r-new',
-                'name': command['name'],
-                'schedule': command['schedule'] ?? '0 9 * * *',
-                'enabled': true,
-              },
-          ],
-        ),
-        'revision': revision,
-      };
-    });
-    await tester.pumpWidget(routinesPage(api, store));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('New Routine'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextFormField).first, 'Morning brief');
-    await tester.enterText(
-      find.byType(TextFormField).at(1),
-      'Summarise overnight email.',
-    );
-    await tester.pump();
-    await tester.tap(find.text('Create Routine'));
-    await tester.pump();
-    await tester.pump();
-    holdRead!.complete();
-    await tester.pumpAndSettle();
-    expect(created.single['type'], 'routine/create');
-    expect(find.text('Create Routine'), findsNothing);
-    expect(find.text('Morning brief'), findsOneWidget);
-    expect(find.text('New Routine'), findsOneWidget);
   });
 
   testWidgets('Cancel leaves a dirty form without asking', (tester) async {
@@ -1320,7 +1312,6 @@ void main() {
       expect(routineRunMomentV1('not a moment'), 'not a moment');
       expect(routineRunMomentV1(null), '');
     });
-
   });
 
   testWidgets('pausing a Routine sends one command and reads back', (
