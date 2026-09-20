@@ -45,6 +45,11 @@ shadow mode until their evaluations support enforcement.
   existing step and Turn deadlines.
 - Continuation state contains bounded candidates and evidence references, not
   prose invented by Jev.
+- A mutating call is allowed only when review finds User authorization and
+  `argumentsMatch.noul` is at least the labeled yes cutoff
+  (`TOOL_APPROVAL_NOUL_YES_V1`). A value between the no and yes cutoffs is not
+  a yes. The adapter passes authorization evidence through as-is and never
+  invents a User message from the Turn objective.
 
 ## Ownership and extension shape
 
@@ -56,7 +61,8 @@ changing the agent loop.
 Plugins may separately receive a metered judgment binding when granted one.
 That binding lets Plugin authors ask bounded semantic questions, but it cannot
 approve the Plugin's own effects, change locked policy or bypass mandatory Turn
-supervision. The TypeSafe credential remains server-side.
+supervision. The TypeSafe credential remains server-side. The hosted adapter
+reads `TYPESAFE_API_KEY` only; the key never leaves the chooser.
 
 The app owns the interface:
 
@@ -346,7 +352,11 @@ conversation or policy content is not needed for diagnosis.
 ## Evaluation
 
 Build on `app/evals/tool-approval.ts` and keep live evaluation separate from unit
-tests. Pin the calibrated Jev version.
+tests. Pin the calibrated Jev version. Run the labeled suite with
+`bun run eval:tool-approval`; it reads `TYPESAFE_API_KEY` from the main
+checkout's `.dev.vars` (the runner still accepts `JEV_API_KEY` as an alias)
+and writes traces to `.eval-results/`. It is never part of ordinary tests or
+the pre-push gate.
 
 Evaluation suites cover:
 
@@ -375,11 +385,20 @@ Each change leaves production Bots able to reply when Jev is healthy.
 
 ### 1. Contracts, adapter and journal
 
-- Add `TurnSupervisor`, its domain types, a fake adapter and the Jev adapter.
+_In progress._ The seam exists; the agent loop is not wired, so production Bots
+still reply.
+
+- _Done._ `TurnSupervisor`, its domain types, a fake adapter, a hard-unavailable
+  adapter and the hosted Jev adapter (`core/contracts/turn-supervisor.ts`,
+  `app/supervision/`). `startTurn` returns the conservative typed default until
+  a labeled start-of-Turn suite exists. `reviewStep` reuses the tool-approval
+  questions for each mutating call and allows reads without a judgment.
+- _Done._ The labeled tool-approval eval and adapter contract tests. The Node
+  report runner lives in `app/evals/tool-approval-run.ts` so the Worker does
+  not import it.
 - Add durable supervision effects and usage records.
 - Buffer private model proposals until review.
-- Implement the hard unavailable state and recovery behavior.
-- Extend the existing eval harness and add adapter contract tests.
+- Implement the hard unavailable state and recovery behavior in the loop.
 
 ### 2. Tool classification and policy storage
 

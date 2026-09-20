@@ -221,6 +221,7 @@
     "./skills/skill-md": "./skills/skill-md.ts",
     "./skills/testing": "./skills/testing.ts",
     "./skills/write": "./skills/write.ts",
+    "./supervision": "./supervision/index.ts",
     "./subagents": "./subagents/index.ts",
     "./subagents/agent": "./subagents/agent.ts",
     "./subagents/backend": "./subagents/backend.ts",
@@ -266,13 +267,13 @@
     "@frockbot/computer": "workspace:*",
     "@frockbot/core": "workspace:*",
     "@frockbot/providers": "workspace:*",
+    "@typesafe-ai/sdk": "0.6.0",
     "better-auth": "1.7.3",
     "croner": "10.0.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260907.1",
     "@types/bun": "1.4.1",
-    "@typesafe-ai/sdk": "0.6.0",
     "@types/node": "26.4.1",
     "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2"
   }
