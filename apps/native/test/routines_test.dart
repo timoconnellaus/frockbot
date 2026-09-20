@@ -570,12 +570,49 @@ void main() {
     await tester.tap(find.text('New Routine'));
     await tester.pumpAndSettle();
     expect(find.text('Continue'), findsNothing);
+    expect(find.widgetWithText(AppBar, 'New Routine'), findsOneWidget);
+    expect(find.text('New Routine'), findsWidgets);
     expect(find.text('Routine name'), findsOneWidget);
     expect(find.text('Schedule'), findsOneWidget);
     expect(find.text('Daily'), findsOneWidget);
     expect(find.text('Create Routine'), findsOneWidget);
     expect(find.text('Cancel'), findsOneWidget);
     expect(byIdentifier(RoutineIds.editorBack), findsOneWidget);
+  });
+
+  testWidgets('the panel’s new Routine page names itself at the top', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final panel = RoutinesPanelHandle();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      return routinesDocumentForPath(path);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: RoutinesView(
+            api: api,
+            store: store,
+            userId: 'tim',
+            botId: 'bot-1',
+            botName: 'Scout',
+            chrome: false,
+            panel: panel,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(panel.editorTitle, isNull);
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    expect(panel.editorTitle, 'New Routine');
+    expect(find.text('New Routine'), findsWidgets);
+    expect(find.text('What should this Bot do?'), findsOneWidget);
   });
 
   testWidgets('completions sit under their Routine as the Bot page rows', (
@@ -638,6 +675,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Morning brief'));
     await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Edit Routine'), findsOneWidget);
     expect(find.text('Save changes'), findsOneWidget);
     expect(sent, isEmpty);
     await tester.tap(byIdentifier(RoutineIds.editorBack));

@@ -373,6 +373,13 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Text(
+          widget.routineId == null ? 'New Routine' : 'Edit Routine',
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 22),
         Text('What should this Bot do?', style: theme.textTheme.titleLarge),
         const SizedBox(height: 14),
         _actionFields(context),
