@@ -932,7 +932,10 @@ export async function expectBotOpen(page: Page, name: string): Promise<void> {
     .or(sem(page, "shell-right-panel").getByText(name));
   if (
     (await pill.isVisible().catch(() => false)) ||
-    (await heading.first().isVisible().catch(() => false))
+    (await heading
+      .first()
+      .isVisible()
+      .catch(() => false))
   ) {
     return;
   }
