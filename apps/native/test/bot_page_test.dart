@@ -183,6 +183,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(Brightness.light),
+        themeMode: ThemeMode.light,
         home: Scaffold(
           body: BotPageView(
             botName: 'Scout',
