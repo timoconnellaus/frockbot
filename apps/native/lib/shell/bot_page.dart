@@ -15,7 +15,6 @@ import '../applets/canvas.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
 import '../routines/page.dart';
-import '../routines/runs_row.dart';
 import '../theme/rows.dart';
 import 'semantics.dart';
 

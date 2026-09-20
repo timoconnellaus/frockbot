@@ -125,11 +125,7 @@ test("every control names the command it means", () => {
   // declares every action schema, while rows carry their own controls.
   expect(
     actions.map((node) => (node.type === "action" ? node.input?.kind : "")),
-  ).toEqual([
-    "edit-routine",
-    "set-routine-enabled",
-    "open-run",
-  ]);
+  ).toEqual(["edit-routine", "set-routine-enabled", "open-run"]);
   expect(document.actions.map((action) => action.id).sort()).toEqual([
     "cancel-edit",
     "delete-routine",
@@ -170,7 +166,8 @@ test("a completion sits under the Routine that left it, and is not a read status
       inbox: [completion, { ...completion, entryId: "e2", acknowledged: true }],
     }),
   );
-  const scheduled = document.root.type === "group" ? document.root.children[0] : undefined;
+  const scheduled =
+    document.root.type === "group" ? document.root.children[0] : undefined;
   expect(scheduled?.type === "group" && scheduled.title).toBe("Scheduled");
   const routine =
     scheduled?.type === "group" ? scheduled.children[0] : undefined;
@@ -182,8 +179,7 @@ test("a completion sits under the Routine that left it, and is not a read status
   expect(runs[0]?.type === "action" && runs[0].input?.entryId).toBe("e1");
   expect(
     walk(document.root).some(
-      (node) =>
-        node.type === "action" && node.actionId === "acknowledge-inbox",
+      (node) => node.type === "action" && node.actionId === "acknowledge-inbox",
     ),
   ).toBe(false);
   expect(
@@ -401,7 +397,8 @@ test("a Routine is filed under what fires it, and an empty half is not drawn", (
 
 test("a completion is the same loose row the Bot page draws, under its Routine", () => {
   const document = routinesDocumentV1(frame());
-  const scheduled = document.root.type === "group" ? document.root.children[0] : undefined;
+  const scheduled =
+    document.root.type === "group" ? document.root.children[0] : undefined;
   const routine =
     scheduled?.type === "group" ? scheduled.children[0] : undefined;
   expect(routine?.type === "group" && routine.title).toBe("Morning brief");
@@ -418,7 +415,9 @@ test("a completion is the same loose row the Bot page draws, under its Routine",
     ),
   ).toBe(true);
   expect(
-    walk(entry!).some((node) => node.type === "text" && node.text === "finished"),
+    walk(entry!).some(
+      (node) => node.type === "text" && node.text === "finished",
+    ),
   ).toBe(true);
   const press = walk(entry!).find(
     (node) => node.type === "action" && node.actionId === "open-run",

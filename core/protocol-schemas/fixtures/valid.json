@@ -1244,11 +1244,7 @@
                 "type": "boolean"
               }
             },
-            "required": [
-              "kind",
-              "routineId",
-              "enabled"
-            ],
+            "required": ["kind", "routineId", "enabled"],
             "additionalProperties": false
           }
         },
@@ -1277,10 +1273,7 @@
                 "maxLength": 128
               }
             },
-            "required": [
-              "kind",
-              "routineId"
-            ],
+            "required": ["kind", "routineId"],
             "additionalProperties": false
           }
         },
@@ -1309,10 +1302,7 @@
                 "maxLength": 128
               }
             },
-            "required": [
-              "kind",
-              "routineId"
-            ],
+            "required": ["kind", "routineId"],
             "additionalProperties": false
           }
         },
@@ -1341,10 +1331,7 @@
                 "maxLength": 128
               }
             },
-            "required": [
-              "kind",
-              "routineId"
-            ],
+            "required": ["kind", "routineId"],
             "additionalProperties": false
           }
         },
@@ -1377,11 +1364,7 @@
                 "maxLength": 128
               }
             },
-            "required": [
-              "kind",
-              "routineId",
-              "entryId"
-            ],
+            "required": ["kind", "routineId", "entryId"],
             "additionalProperties": false
           }
         },
@@ -1410,10 +1393,7 @@
                 "maxLength": 128
               }
             },
-            "required": [
-              "kind",
-              "routineId"
-            ],
+            "required": ["kind", "routineId"],
             "additionalProperties": false
           }
         },
@@ -1438,9 +1418,7 @@
                 ]
               }
             },
-            "required": [
-              "kind"
-            ],
+            "required": ["kind"],
             "additionalProperties": false
           }
         },
@@ -1519,10 +1497,7 @@
                 "maxLength": 128
               }
             },
-            "required": [
-              "kind",
-              "routineId"
-            ],
+            "required": ["kind", "routineId"],
             "additionalProperties": false
           }
         },
@@ -1551,10 +1526,7 @@
                 "maxLength": 128
               }
             },
-            "required": [
-              "kind",
-              "routineId"
-            ],
+            "required": ["kind", "routineId"],
             "additionalProperties": false
           }
         }
