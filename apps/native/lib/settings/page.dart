@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../client/document_cache.dart';
 import '../client/transport.dart';
 import '../connections/page.dart';
 import '../plugins/page.dart';
@@ -65,8 +66,47 @@ class _SettingsPageState extends State<SettingsPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _seedFromMemory();
     state.addListener(_adopt);
-    unawaited(state.load());
+    unawaited(_open());
+  }
+
+  void _seedFromMemory() {
+    if (state.document != null) return;
+    final cached = peekViewDocumentCache(
+      widget.userId,
+      state.surfaceId,
+      widget.section ?? widget.home,
+    );
+    if (cached == null) return;
+    state.adoptCachedDocument(cached);
+    final document = state.document;
+    if (document == null || view != null) return;
+    view = ViewController(
+      store: widget.store,
+      userId: widget.userId,
+      surfaceId: state.surfaceId,
+      revision: document.revision,
+      dispatch: _dispatch,
+    );
+    view!.addListener(_afterAction);
+    shown = document.revision;
+    unawaited(view!.restore());
+  }
+
+  Future<void> _open() async {
+    if (state.document == null) {
+      final cached = await readViewDocumentCache(
+        widget.store,
+        widget.userId,
+        state.surfaceId,
+        widget.section ?? widget.home,
+      );
+      if (cached != null && mounted && state.document == null) {
+        state.adoptCachedDocument(cached);
+      }
+    }
+    if (mounted) await state.load();
   }
 
   @override
@@ -108,6 +148,17 @@ class _SettingsPageState extends State<SettingsPage>
       view = next;
     });
     unawaited(next.restore());
+    if (!state.busy) {
+      unawaited(
+        writeViewDocumentCache(
+          widget.store,
+          widget.userId,
+          state.surfaceId,
+          widget.section ?? widget.home,
+          document,
+        ),
+      );
+    }
   }
 
   /// A change the owner accepted moves the revision, so the document is read
@@ -256,6 +307,11 @@ class _SettingsPageState extends State<SettingsPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            if (state.busy)
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 12),
+                                child: LinearProgressIndicator(minHeight: 2),
+                              ),
                             if (saved != null)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),

@@ -62,6 +62,14 @@ class MachinesController extends ViewSurfaceController {
   Map<String, Object?>? offer;
 
   @override
+  void adoptCachedDocument(wire.ViewDocument cached) {
+    if (_closed || _document != null) return;
+    if (cached.surfaceId.value != surfaceId) return;
+    _document = cached;
+    _changed();
+  }
+
+  @override
   wire.ViewDocument? get document => _document;
   @override
   bool get busy => _busy;
@@ -193,6 +201,7 @@ class _MachinesPageState extends State<MachinesPage> {
         PairingCodeCard(controller: controller),
       ],
     ),
+    cacheScope: 'account',
   );
 }
 

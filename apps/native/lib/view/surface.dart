@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../client/document_cache.dart';
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/desktop_layout.dart';
+import '../shell/hot_panel.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 import 'action.dart';
@@ -24,6 +26,10 @@ abstract class ViewSurfaceController extends ChangeNotifier {
   String get surfaceId;
   Future<void> load();
   Future<Map<String, Object?>> dispatch(Map<String, Object?> command);
+
+  /// Last known document from disk. The host paints it as last known, then
+  /// [load] replaces it if the revision moved. Default ignores.
+  void adoptCachedDocument(wire.ViewDocument cached) {}
 }
 
 /// A host over `ViewDocumentView`, with the surface's own chrome.
@@ -95,7 +101,14 @@ class ViewSurfacePage extends StatefulWidget {
   /// minted once, on a receipt — a webhook key, a pairing code. A document can
   /// be read twice, so a value that exists once cannot be in one; it lives
   /// here for as long as the person is looking at it and nowhere else.
+  ///
+  /// Shown in the tap frame, including while the list is still loading.
   final WidgetBuilder? banner;
+
+  /// When set, the last list document is restored before the network answers
+  /// and written after a successful read. Editor and create documents stay
+  /// off this path: a form is navigation, not a list someone can return to.
+  final String? cacheScope;
 
   const ViewSurfacePage({
     super.key,
@@ -119,6 +132,7 @@ class ViewSurfacePage extends StatefulWidget {
     this.onLeave,
     this.rootView,
     this.onView,
+    this.cacheScope,
   });
 
   @override
@@ -135,12 +149,17 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
   /// Whether a read was in flight when this page was last told something.
   bool reading = false;
 
+  /// Last [PanelVisibility] we saw. A hidden page that becomes visible
+  /// again refreshes; the first mount already has [_open].
+  bool visible = true;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _seedFromMemory();
     widget.controller.addListener(_adopt);
-    unawaited(widget.controller.load());
+    unawaited(_open());
   }
 
   @override
@@ -155,7 +174,90 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     reading = false;
     reloadWanted = false;
     widget.controller.addListener(_adopt);
-    unawaited(widget.controller.load());
+    _seedFromMemory();
+    unawaited(_open());
+  }
+
+  /// Last known still in this process, before the first frame. Disk is asked
+  /// on [_open] only when this process has not seen the list yet.
+  void _seedFromMemory() {
+    final scope = widget.cacheScope;
+    if (scope == null) return;
+    if (widget.controller.document == null) {
+      final cached = peekViewDocumentCache(
+        widget.userId,
+        widget.controller.surfaceId,
+        scope,
+      );
+      if (cached == null ||
+          cached.surfaceId.value != widget.controller.surfaceId) {
+        return;
+      }
+      widget.controller.adoptCachedDocument(cached);
+    }
+    final document = widget.controller.document;
+    if (document == null || view != null) return;
+    _bindDocument(document);
+    reading = widget.controller.busy;
+  }
+
+  void _bindDocument(wire.ViewDocument document) {
+    view?.removeListener(_afterAction);
+    view?.dispose();
+    final next = ViewController(
+      store: widget.store,
+      userId: widget.userId,
+      surfaceId: widget.controller.surfaceId,
+      revision: document.revision,
+      dispatch: _dispatch,
+    );
+    next.addListener(_afterAction);
+    shown = document.revision;
+    view = next;
+    widget.onView?.call(next);
+    unawaited(next.restore());
+    final scope = widget.cacheScope;
+    if (scope != null && !widget.controller.busy) {
+      unawaited(
+        writeViewDocumentCache(
+          widget.store,
+          widget.userId,
+          widget.controller.surfaceId,
+          scope,
+          document,
+        ),
+      );
+    }
+  }
+
+  /// Restore last known, then refresh. The cache is last known, not live: a
+  /// switch drawn from it may move when the read lands.
+  Future<void> _open() async {
+    final scope = widget.cacheScope;
+    if (scope != null && widget.controller.document == null) {
+      final cached = await readViewDocumentCache(
+        widget.store,
+        widget.userId,
+        widget.controller.surfaceId,
+        scope,
+      );
+      if (cached != null &&
+          mounted &&
+          widget.controller.document == null &&
+          cached.surfaceId.value == widget.controller.surfaceId) {
+        widget.controller.adoptCachedDocument(cached);
+      }
+    }
+    if (!mounted) return;
+    await widget.controller.load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = PanelVisibility.of(context);
+    if (next && !visible) unawaited(widget.controller.load());
+    visible = next;
   }
 
   @override
@@ -192,22 +294,8 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
       setState(() {});
       return;
     }
-    view?.removeListener(_afterAction);
-    view?.dispose();
-    final next = ViewController(
-      store: widget.store,
-      userId: widget.userId,
-      surfaceId: widget.controller.surfaceId,
-      revision: document.revision,
-      dispatch: _dispatch,
-    );
-    next.addListener(_afterAction);
-    setState(() {
-      shown = document.revision;
-      view = next;
-    });
-    widget.onView?.call(next);
-    unawaited(next.restore());
+    _bindDocument(document);
+    setState(() {});
   }
 
   /// A change the owner accepted moves the revision, so the document is read
@@ -259,67 +347,90 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     final controller = widget.controller;
     final document = controller.document;
     final view = this.view;
+    final chrome = <Widget>[
+      if (!widget.chrome && widget.confirmLeave != null)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: identified(
+            widget.backId ?? 'view-back',
+            IconButton(
+              tooltip: 'Back',
+              onPressed: _requestLeave,
+              icon: const Icon(Icons.arrow_back),
+            ),
+          ),
+        ),
+      if (widget.banner case final WidgetBuilder draw)
+        Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: widget.maxWidth),
+            child: draw(context),
+          ),
+        ),
+    ];
+    final Widget pane;
+    if (document == null || view == null) {
+      pane = controller.busy
+          ? FrockLoading(label: 'Loading ${widget.title.toLowerCase()}')
+          : FrockEmptyState(
+              icon: Icons.cloud_off_rounded,
+              title: '${widget.title} couldn’t load',
+              detail:
+                  controller.message ?? 'Check your connection and try again.',
+              action: 'Try again',
+              onAction: controller.load,
+            );
+    } else {
+      pane = identified(
+        widget.documentId,
+        ViewDocumentView(
+          key: ValueKey('${controller.surfaceId}.${document.revision}'),
+          document: document,
+          controller: view,
+          fields: widget.fields,
+          cardGroups: widget.cardGroups,
+          gridGroups: widget.gridGroups,
+          switchRows: widget.switchRows,
+          rootView: widget.rootView,
+        ),
+      );
+    }
     final body = SafeArea(
       top: false,
-      child: document == null || view == null
-          ? controller.busy
-                ? FrockLoading(label: 'Loading ${widget.title.toLowerCase()}')
-                : FrockEmptyState(
-                    icon: Icons.cloud_off_rounded,
-                    title: '${widget.title} couldn’t load',
-                    detail:
-                        controller.message ??
-                        'Check your connection and try again.',
-                    action: 'Try again',
-                    onAction: controller.load,
-                  )
-          : RefreshIndicator(
+      child: document != null && view != null
+          ? RefreshIndicator(
               onRefresh: controller.load,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
                 children: [
-                  if (!widget.chrome && widget.confirmLeave != null)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: identified(
-                        widget.backId ?? 'view-back',
-                        IconButton(
-                          tooltip: 'Back',
-                          onPressed: _requestLeave,
-                          icon: const Icon(Icons.arrow_back),
-                        ),
-                      ),
-                    ),
-                  if (widget.banner case final WidgetBuilder draw)
-                    Center(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: widget.maxWidth),
-                        child: draw(context),
-                      ),
+                  ...chrome,
+                  if (controller.busy)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: LinearProgressIndicator(minHeight: 2),
                     ),
                   Center(
                     child: ConstrainedBox(
                       constraints: BoxConstraints(maxWidth: widget.maxWidth),
-                      child: identified(
-                        widget.documentId,
-                        ViewDocumentView(
-                          key: ValueKey(
-                            '${controller.surfaceId}.${document.revision}',
-                          ),
-                          document: document,
-                          controller: view,
-                          fields: widget.fields,
-                          cardGroups: widget.cardGroups,
-                          gridGroups: widget.gridGroups,
-                          switchRows: widget.switchRows,
-                          rootView: widget.rootView,
-                        ),
-                      ),
+                      child: pane,
                     ),
                   ),
                 ],
               ),
+            )
+          : ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+              children: [
+                ...chrome,
+                Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: widget.maxWidth),
+                    child: pane,
+                  ),
+                ),
+              ],
             ),
     );
     if (!widget.chrome) return body;

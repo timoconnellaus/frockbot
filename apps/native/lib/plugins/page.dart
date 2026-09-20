@@ -92,6 +92,14 @@ class PluginsController extends ViewSurfaceController {
   });
 
   @override
+  void adoptCachedDocument(wire.ViewDocument cached) {
+    if (_closed || _document != null) return;
+    if (cached.surfaceId.value != surfaceId) return;
+    _all = cached;
+    search(_query);
+  }
+
+  @override
   wire.ViewDocument? get document => _document;
   @override
   bool get busy => _busy;
@@ -374,6 +382,7 @@ class PluginsPageState extends State<PluginsPage>
           ),
         ),
       ),
+      cacheScope: botId ?? 'account',
     );
   }
 }

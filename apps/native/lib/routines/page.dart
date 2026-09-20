@@ -84,6 +84,14 @@ class RoutinesController extends ViewSurfaceController {
   });
 
   @override
+  void adoptCachedDocument(wire.ViewDocument cached) {
+    if (_closed || _document != null || viewing != null) return;
+    if (cached.surfaceId.value != surfaceId) return;
+    _document = cached;
+    _changed();
+  }
+
+  @override
   wire.ViewDocument? get document => _document;
   @override
   bool get busy => _busy;
@@ -382,6 +390,7 @@ class _RoutinesViewState extends State<RoutinesView> {
         allowPop: () => controller.closing,
         onLeave: detail ? _leaveDetail : null,
         rootView: detail ? null : (root) => ViewRoutineList(node: root),
+        cacheScope: detail ? null : widget.botId,
         banner: (context) => WebhookKeyCard(controller: controller),
       ),
     );

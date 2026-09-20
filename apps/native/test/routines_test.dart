@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/document_cache.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/routines/document.dart';
 import 'package:frockbot_native/routines/page.dart';
@@ -373,6 +374,8 @@ Future<void> pumpRoutines(
 }
 
 void main() {
+  setUp(clearViewDocumentCacheMemory);
+
   test('the panel header back is the detail’s back while it is open', () {
     expect(
       panelBackIdentifierV1(panelKey: 'routines', routinesEditorOpen: true),
