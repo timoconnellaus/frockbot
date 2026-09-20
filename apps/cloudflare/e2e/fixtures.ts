@@ -919,33 +919,17 @@ export async function openBotPage(page: Page): Promise<void> {
 
 /**
  * The selected Bot is the one on screen: its conversation is up, and its
- * name is either the phone's pill or the panel's heading.
+ * name is on the phone pill, the panel heading, or the Bot list.
  */
 export async function expectBotOpen(page: Page, name: string): Promise<void> {
   await expect(composerInput(page)).toBeVisible({ timeout: 30_000 });
-  const pill = sem(page, "bot-panel-toggle");
-  // Flutter may put the panel title on a merged node's accessible name
-  // rather than as a text leaf — the same split `bot-info.e2e.ts` already
-  // accounts for.
-  const heading = sem(page, "shell-right-panel")
-    .locator(`[aria-label*="${name}"]`)
-    .or(sem(page, "shell-right-panel").getByText(name));
-  if (
-    (await pill.isVisible().catch(() => false)) ||
-    (await heading
-      .first()
-      .isVisible()
-      .catch(() => false))
-  ) {
-    return;
-  }
-  // A desk keeps the name on the Bot page, which `_select` leaves closed as
-  // a drawer below the triple tier. Open that column so the heading is there.
-  const toggle = sem(page, "right-panel-toggle");
-  if (await toggle.isVisible().catch(() => false)) {
-    await press(toggle);
-  }
-  await expect(pill.or(heading.first())).toBeVisible({ timeout: 30_000 });
+  const named = (scope: ReturnType<typeof sem>) =>
+    scope.locator(`[aria-label*="${name}"]`).or(scope.getByText(name));
+  await expect(
+    sem(page, "bot-panel-toggle")
+      .or(named(sem(page, "shell-right-panel")).first())
+      .or(named(sem(page, "shell-sidebar")).first()),
+  ).toBeVisible({ timeout: 30_000 });
 }
 
 /** Open the Bot's Settings, which is behind the gear on its page. */
