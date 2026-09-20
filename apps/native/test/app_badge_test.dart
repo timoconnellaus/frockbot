@@ -454,9 +454,9 @@ void main() {
       // empty local map is unknown, not an authoritative zero, so nothing may
       // cross the dock channel and take an existing badge away.
       expect(find.text('Alpha'), findsOneWidget);
-      // The list's row, the conversation's bar, and the Bot page the panel
-      // opens on, which names the Bot it is about.
-      expect(find.text('Beta'), findsNWidgets(3));
+      // The list's row and the Bot page the panel opens on, which names the
+      // Bot it is about. The conversation bar no longer repeats the name.
+      expect(find.text('Beta'), findsNWidgets(2));
       expect(calls, isEmpty);
 
       fanOut.complete({
@@ -542,8 +542,10 @@ void main() {
         await tester.pumpAndSettle();
         expect((calls.last.arguments as Map)['label'], '2');
 
-        await tester.tap(identifiedBy(ShellIds.botPanelToggle));
-        await tester.pumpAndSettle();
+        if (open.width < 1200) {
+          await tester.tap(identifiedBy(ShellIds.rightPanelToggle));
+          await tester.pumpAndSettle();
+        }
         expect((calls.last.arguments as Map)['label'], open.label);
 
         await tester.pumpWidget(const SizedBox());
@@ -715,7 +717,7 @@ void main() {
       expect((calls.last.arguments as Map)['label'], '2');
 
       // The drawer, which does cover the conversation at this width.
-      await tester.tap(identifiedBy(ShellIds.botPanelToggle));
+      await tester.tap(identifiedBy(ShellIds.rightPanelToggle));
       await tester.pumpAndSettle();
       expect((calls.last.arguments as Map)['label'], '5');
 

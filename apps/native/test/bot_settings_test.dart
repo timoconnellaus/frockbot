@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/settings/bot_settings.dart';
+import 'package:frockbot_native/settings/look_settings.dart';
 import 'package:frockbot_native/settings/voice_settings.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
@@ -80,6 +81,7 @@ Future<void> open(
   void Function(SidebarProfile profile)? onPredict,
   VoidCallback? onOpenPlugins,
   VoidCallback? onOpenVoice,
+  VoidCallback? onOpenLook,
 }) async {
   tester.view.physicalSize = const Size(390, 2200);
   tester.view.devicePixelRatio = 1;
@@ -94,6 +96,7 @@ Future<void> open(
             onPredict: onPredict,
             onOpenPlugins: onOpenPlugins,
             onOpenVoice: onOpenVoice,
+            onOpenLook: onOpenLook,
           ),
         ),
       ),
@@ -374,6 +377,22 @@ void main() {
     expect(opened, 1);
     expect(find.byType(BotVoicePage), findsNothing);
     expect(byIdentifier(VoiceIds.settings), findsNothing);
+    state.dispose();
+  });
+
+  testWidgets('the Look row opens the host rather than pushing a page', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final state = BotSettingsController(api(store, []), 'alpha');
+    var opened = 0;
+    await open(tester, state, onOpenLook: () => opened += 1);
+    await tester.ensureVisible(byIdentifier(SettingsIds.botLook));
+    await tester.tap(byIdentifier(SettingsIds.botLook));
+    await tester.pumpAndSettle();
+    expect(opened, 1);
+    expect(find.byType(BotLookPage), findsNothing);
+    expect(byIdentifier(LookIds.settings), findsNothing);
     state.dispose();
   });
 

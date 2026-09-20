@@ -68,8 +68,6 @@ Widget _header() => MaterialApp(
         ChatHeader(
           name: 'Rosemary',
           connection: ConnectionState.connected,
-          onOpenBot: () {},
-          onComputer: () {},
           onTogglePanel: () {},
         ),
       ],
@@ -77,9 +75,9 @@ Widget _header() => MaterialApp(
   ),
 );
 
-/// What is left in the bar: the Computer, and the panel's own switch. The
-/// name beside them is a pill rather than a door of this shape.
-const _headerDoors = ['Computer', 'Show the panel'];
+/// What is left in the bar: the panel's own switch. The Bot and the
+/// Computer live in that column.
+const _headerDoors = ['Show the panel'];
 
 void main() {
   test('a phone\'s glyph is Material\'s own size, a desk\'s compact', () {

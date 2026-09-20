@@ -38,14 +38,13 @@ function says(scope: Page | Locator, text: string) {
 }
 
 /**
- * The Computer destination in the chat header.
+ * The Computer destination on the Bot page.
  *
- * The bar keeps the Bot's name, the Computer and the panel's own switch; every
- * other door is a row on the Bot page. Its identifier distinguishes this
- * full-window destination from the Computer card on the Bot page.
+ * A desk keeps that door in the column beside the thread; the conversation
+ * bar no longer repeats it.
  */
 function computerDestination(page: Page) {
-  return sem(page, "computer-destination");
+  return sem(page, "bot-page-computer");
 }
 
 test("the panel opens on the Bot page and its rows push onto it", async ({
@@ -84,7 +83,8 @@ test("the panel opens on the Bot page and its rows push onto it", async ({
   ).toBeVisible();
   await expect(says(page, "No Routines yet").first()).toBeVisible();
 
-  // The chevron goes back one level; the name in the bar goes all the way.
+  // The chevron goes back one level; opening the Bot page again is the
+  // floor, never Settings still sitting on it.
   await settle(page);
   await press(sem(page, "right-panel-back"));
   await expect(sem(page, "bot-page").first()).toBeVisible();

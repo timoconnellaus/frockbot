@@ -35,9 +35,9 @@ const chatHeaderThreadPadding = 28.0;
 ///
 /// On a call this is still an [AppBar]: the thread is gone, and the bar is
 /// the name, a mark that says why, and the Computer. In a conversation it is
-/// an overlay — a fade, the Bot's companion at the top-left, and frosted
-/// pills on the far right (the name, the Computer, the panel). A phone keeps
-/// Back as a pill on the left, at the same inset as the character.
+/// an overlay — a fade, the Bot's companion at the top-left, and the panel
+/// switch on the far right. A phone keeps Back and the Bot's name as pills,
+/// and the Computer, because there is no column beside the thread.
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
@@ -194,16 +194,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                       ],
                     ),
                   ),
-                ] else ...[
+                ] else
                   const Spacer(),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 8,
-                    ),
-                    child: _title(context, chevron: false),
-                  ),
-                ],
                 if (onComputer != null) ...[
                   const SizedBox(width: 8),
                   identified(
@@ -220,7 +212,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                   const SizedBox(width: 8),
                   identified(
                     ShellIds.rightPanelToggle,
-                    _glyphPill(
+                    _glyphButton(
                       panelShown ? 'Hide the panel' : 'Show the panel',
                       ChatIconKind.panel,
                       onTogglePanel,
@@ -251,6 +243,32 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
         ),
         child: ChatIcon(icon),
       ),
+    ),
+  );
+
+  /// The panel switch sits on the fade with no stadium around it: the Bot
+  /// page and the Computer already live in that column, so this control is
+  /// only "is the column there".
+  Widget _glyphButton(
+    String label,
+    ChatIconKind icon,
+    VoidCallback? open, {
+    Color? color,
+  }) => Builder(
+    builder: (context) => IconButton(
+      tooltip: label,
+      onPressed: open,
+      style: IconButton.styleFrom(
+        foregroundColor:
+            color ?? Theme.of(context).colorScheme.onSurfaceVariant,
+        minimumSize: _glyphTarget,
+        maximumSize: _glyphTarget,
+        fixedSize: _glyphTarget,
+        padding: EdgeInsets.zero,
+        iconSize: chatIconSize,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      icon: ChatIcon(icon),
     ),
   );
 

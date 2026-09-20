@@ -393,8 +393,10 @@ class _DesktopUpdateFrameState extends State<DesktopUpdateFrame>
 class DesktopUpdateButton extends StatelessWidget {
   static const blue = Color(0xff075fce);
   static const _labelStyle = TextStyle(
+    fontFamily: 'Inter',
     fontSize: 13,
     fontWeight: FontWeight.w600,
+    height: 1,
   );
 
   static double _labelWidth(BuildContext context, String label) => (TextPainter(
@@ -478,6 +480,8 @@ class DesktopUpdateButton extends StatelessWidget {
             minimumSize: const Size(0, 32),
             padding: const EdgeInsets.symmetric(horizontal: 12),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+            alignment: Alignment.center,
             shape: const StadiumBorder(),
             textStyle: _labelStyle,
           ),
@@ -504,6 +508,7 @@ class DesktopUpdateButton extends StatelessWidget {
               }
               return Row(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   if (busy) ...[mark, const SizedBox(width: 6)],
                   Flexible(
@@ -512,6 +517,7 @@ class DesktopUpdateButton extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       softWrap: false,
+                      style: _labelStyle,
                     ),
                   ),
                 ],

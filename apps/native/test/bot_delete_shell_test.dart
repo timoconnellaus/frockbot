@@ -138,11 +138,20 @@ class Shell {
   /// Opens Bot settings the way each tier offers it, and asks for the delete.
   /// Returns before the answer when [gate] holds it.
   Future<void> requestDelete(WidgetTester tester) async {
-    await tester.tap(byIdentifier(ShellIds.botPanelToggle).first);
-    await tester.pumpAndSettle();
+    final name = byIdentifier(ShellIds.botPanelToggle);
+    if (name.evaluate().isNotEmpty) {
+      await tester.tap(name.first);
+      await tester.pumpAndSettle();
+    } else if (byIdentifier(SettingsIds.botPageSettings)
+        .hitTestable()
+        .evaluate()
+        .isEmpty) {
+      await tester.tap(byIdentifier(ShellIds.rightPanelToggle));
+      await tester.pumpAndSettle();
+    }
     // The Bot page is the door; Settings is behind its gear, and the danger
     // rows are the last card on it.
-    await tester.tap(byIdentifier(SettingsIds.botPageSettings).first);
+    await tester.tap(byIdentifier(SettingsIds.botPageSettings).hitTestable());
     await tester.pumpAndSettle();
     final delete = byIdentifier(FlockIds.deleteBot);
     await tester.ensureVisible(delete);

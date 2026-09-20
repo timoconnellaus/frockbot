@@ -50,15 +50,19 @@ const OTHER_STATE =
 const NO_HOST = /The Computer host answered|Couldn’t read the computer/u;
 
 /**
- * Open the desktop from the chat header.
+ * Open the desktop.
  *
- * The header keeps two icons — the Computer and the panel's own switch. One
- * identifier, shared by both responsive header layouts, distinguishes its
- * Computer from the card on the Bot page. It opens one thing: the desktop,
- * full window.
+ * A phone still keeps the Computer in the conversation bar. A desk opens it
+ * from the Bot page beside the thread — the same card the header used to
+ * duplicate.
  */
 async function openComputerViewer(page: Page): Promise<void> {
-  await press(sem(page, "computer-destination"));
+  const header = sem(page, "computer-destination");
+  if ((await header.count()) > 0) {
+    await press(header);
+  } else {
+    await press(sem(page, "bot-page-computer"));
+  }
   await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
 }
 
@@ -83,8 +87,8 @@ test("the Bot page card and the header both open the desktop itself", async ({
     path: testInfo.outputPath("computer-presence-desktop.png"),
   });
 
-  // The header's icon opens the desktop itself. There is no page between the
-  // two carrying a smaller copy of the same frame: one press, one window.
+  // The Bot page's card opens the desktop itself. There is no page between
+  // the two carrying a smaller copy of the same frame: one press, one window.
   await openComputerViewer(page);
   const viewer = sem(page, "computer-viewer");
   // With no desktop to frame it says so, in the words of whatever refused, and

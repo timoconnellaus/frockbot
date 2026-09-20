@@ -13,6 +13,7 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/shell/app_shell.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
+import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/starters.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -452,6 +453,17 @@ void main() {
       harness.api.close();
     }
 
+    /// A phone still names the Bot in the overlay. A desk opens that page
+    /// from the panel, so the conversation being up is the composer.
+    void expectConversation(String name, Size size) {
+      if (size.width <= shellSinglePaneWidth) {
+        expect(find.widgetWithText(ChatHeader, name), findsOneWidget);
+      } else {
+        expect(find.widgetWithText(ChatHeader, name), findsNothing);
+        expect(identifiedBy(ShellIds.composer), findsOneWidget);
+      }
+    }
+
     testWidgets('a first sign-in on a phone lands in General', (tester) async {
       final harness = await shell(tester, size: const Size(360, 800));
       harness.api.features = {'web'};
@@ -459,7 +471,7 @@ void main() {
         directoryOf([registration(generalId, 'General')]),
       );
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(ChatHeader, 'General'), findsOneWidget);
+      expectConversation('General', const Size(360, 800));
       expect(harness.store.values['selection.test-user'], generalId);
       expect(identifiedBy(StarterIds.suggestion('research')), findsOneWidget);
       expect(identifiedBy(StarterIds.suggestion('recurring')), findsNothing);
@@ -643,7 +655,7 @@ void main() {
               ]),
             );
             await tester.pumpAndSettle();
-            expect(find.widgetWithText(ChatHeader, 'Rosemary'), findsOneWidget);
+            expectConversation('Rosemary', size);
             expect(find.widgetWithText(ChatHeader, 'General'), findsNothing);
             expect(harness.store.values['selection.test-user'], 'bot-one');
             expect(links.value, isNull);
@@ -668,7 +680,7 @@ void main() {
         ]),
       );
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(ChatHeader, 'Rosemary'), findsOneWidget);
+      expectConversation('Rosemary', const Size(1200, 900));
       expect(find.widgetWithText(ChatHeader, 'General'), findsNothing);
       expect(harness.store.values['selection.test-user'], 'bot-one');
       await close(tester, harness);
