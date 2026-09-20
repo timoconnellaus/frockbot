@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { RoutineStore, RoutineNotFoundError } from "./store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
-import { ROUTINE_RUN_LOG_LIMIT } from "./storage-keys.js";
+import {
+  ROUTINE_RUN_LOG_LIMIT,
+  routineHookKeyRecordV1,
+  routineKeyV1,
+} from "./storage-keys.js";
 import type { RoutineCommandV1 } from "./shared.js";
 import type { RoutineRunEntryV1, RoutineWriterV1 } from "./records.js";
 
@@ -228,6 +232,30 @@ describe("RoutineStore.execute", () => {
         ZONE,
       ),
     ).rejects.toThrow(RoutineNotFoundError);
+  });
+
+  test("lists readable Routines when another record or hook key is corrupt", async () => {
+    const storage = createMemoryRoutineStorageV1();
+    const routines = new RoutineStore(storage);
+    await routines.execute(create(), USER, ZONE);
+    await storage.put(routineKeyV1("broken"), {
+      schemaVersion: 1,
+      routineId: "broken",
+      unknownFieldFromANewerDeploy: true,
+    });
+    await storage.put(routineHookKeyRecordV1("brief"), {
+      schemaVersion: 1,
+      routineId: "brief",
+      keyVersion: "not-a-number",
+    });
+
+    const listed = await routines.list("scout", undefined, ZONE);
+    expect(listed).toMatchObject({
+      schemaVersion: 1,
+      botId: "scout",
+      routines: [{ routineId: "brief" }],
+    });
+    expect(listed.routines[0]?.hookKeyVersion).toBeUndefined();
   });
 });
 
