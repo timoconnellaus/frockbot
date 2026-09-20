@@ -266,12 +266,16 @@ test("the list is not a form, and creating is its own document", () => {
     ROUTINE_EDITOR_FIELDS_V1.keyVersion,
     ROUTINE_EDITOR_FIELDS_V1.timing,
   ]);
-  expect(walk(created.root).some((node) => node.type === "group" && node.title === "Scheduled")).toBe(
-    false,
-  );
-  expect(walk(created.root).some((node) => node.type === "group" && node.title === "Completions")).toBe(
-    false,
-  );
+  expect(
+    walk(created.root).some(
+      (node) => node.type === "group" && node.title === "Scheduled",
+    ),
+  ).toBe(false);
+  expect(
+    walk(created.root).some(
+      (node) => node.type === "group" && node.title === "Completions",
+    ),
+  ).toBe(false);
 });
 
 test("naming a Routine opens the editor on its own values and moves the revision", () => {
@@ -295,7 +299,9 @@ test("naming a Routine opens the editor on its own values and moves the revision
   ]);
   // The host uses this identity to show edit-only controls such as Cancel,
   // Run now, and Delete; a create form carries no identity.
-  const createdId = walk(routinesDocumentV1(frame({ creating: true })).root).find(
+  const createdId = walk(
+    routinesDocumentV1(frame({ creating: true })).root,
+  ).find(
     (node) =>
       node.type === "field" &&
       node.field.id === ROUTINE_EDITOR_FIELDS_V1.editorId,
