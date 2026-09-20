@@ -331,13 +331,16 @@ export class ConnectUserBackendContribution {
     connectionId: string;
     triggerType: string;
     config?: Record<string, string | number | boolean>;
-  }): Promise<{ instanceId: string }> {
+  }): Promise<{ instanceId: string; routineId: string }> {
     const effectKey = connectTriggerEffectKeyV1(input.commandId);
     const replayed = decodeConnectTriggerEffectReceiptV1(
       await this.host.storage.get<unknown>(effectKey),
     );
     if (replayed?.status === "upserted" && replayed.instanceId) {
-      return { instanceId: replayed.instanceId };
+      return {
+        instanceId: replayed.instanceId,
+        routineId: replayed.routineId,
+      };
     }
     if (!this.client) {
       throw new Error("Connecting apps isn't available right now.");
@@ -390,7 +393,7 @@ export class ConnectUserBackendContribution {
       status: "upserted",
     };
     await this.host.storage.put(effectKey, receipt);
-    return { instanceId: instance.id };
+    return { instanceId: instance.id, routineId: input.routineId };
   }
 
   async deleteTrigger(input: {

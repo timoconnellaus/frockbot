@@ -514,7 +514,7 @@ export interface UserConfigurationRpcV1 {
     connectionId: string;
     triggerType: string;
     config?: Record<string, string | number | boolean>;
-  }): Promise<void>;
+  }): Promise<{ routineId: string }>;
   deleteConnectTrigger(input: {
     commandId: string;
     routineId: string;
@@ -717,12 +717,13 @@ export function userConfigurationV1(
       return Array.isArray(offers) ? offers : [];
     },
     upsertConnectTrigger: async (input) => {
-      await rpc.upsertConnectTrigger({
+      const held = await rpc.upsertConnectTrigger({
         schemaVersion: 1,
         userId: identity.userId,
         botId: identity.botId,
         ...input,
       });
+      return { routineId: held.routineId };
     },
     deleteConnectTrigger: (input) =>
       rpc.deleteConnectTrigger({

@@ -1116,7 +1116,9 @@ export class UserConfiguration
     return (await this.connectContribution()).listTriggers(userId);
   }
 
-  async upsertConnectTrigger(input: unknown): Promise<{ instanceId: string }> {
+  async upsertConnectTrigger(
+    input: unknown,
+  ): Promise<{ instanceId: string; routineId: string }> {
     const request = decodeRpcEnvelopeV1(
       input,
       {

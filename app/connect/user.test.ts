@@ -594,6 +594,17 @@ describe("Connected-app Routine triggers", () => {
       triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
     });
     expect(again.instanceId).toBe(first.instanceId);
+    expect(again.routineId).toBe("inbox");
+    expect(first.routineId).toBe("inbox");
+    const otherName = await f.contribution.upsertTrigger({
+      userId: "tim",
+      commandId: "cmd-1",
+      botId: "scout",
+      routineId: "other",
+      connectionId: connection.connectionId,
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    });
+    expect(otherName.routineId).toBe("inbox");
     expect(f.client.instances.size).toBe(1);
     expect(await f.contribution.resolveTrigger(first.instanceId)).toMatchObject(
       {

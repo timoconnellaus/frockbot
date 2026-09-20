@@ -951,8 +951,21 @@ export interface RoutineConnectionTriggerSeamV1 {
     connectionId: string;
     triggerType: string;
     config?: Record<string, string | number | boolean>;
-  }): Promise<void>;
+  }): Promise<{ routineId: string }>;
   delete(input: { commandId: string; routineId: string }): Promise<void>;
+}
+
+const ROUTINE_ID_CHARACTER = /[^a-zA-Z0-9._-]/g;
+
+/**
+ * The Routine id a create uses when the command did not name one. It is
+ * derived from the command id so a retried tool call upserts and writes the
+ * same Routine the first attempt armed, instead of minting a second id that
+ * the provider instance does not map to.
+ */
+export function routineIdFromCommandV1(commandId: string): string {
+  const sanitized = commandId.replace(ROUTINE_ID_CHARACTER, "-").slice(0, 125);
+  return `rc-${sanitized || "call"}`;
 }
 
 /** The User object's Connected-app trigger seam, as a Routine command sees it. */
@@ -973,7 +986,7 @@ export function connectionTriggersFromUserV1(user: {
     connectionId: string;
     triggerType: string;
     config?: Record<string, string | number | boolean>;
-  }): Promise<void>;
+  }): Promise<{ routineId: string }>;
   deleteConnectTrigger(input: {
     commandId: string;
     routineId: string;
@@ -1025,11 +1038,13 @@ export async function executeRoutineCommand(
     }
     const routineId =
       command.routineId ??
-      (command.type === "routine/create" ? crypto.randomUUID() : undefined);
+      (command.type === "routine/create"
+        ? routineIdFromCommandV1(command.commandId)
+        : undefined);
     if (!routineId) {
       throw new RoutineDecodeError("Routine id is invalid");
     }
-    await connectionTriggers.upsert({
+    const held = await connectionTriggers.upsert({
       commandId: command.commandId,
       routineId,
       connectionId: command.trigger.connectionId,
@@ -1038,7 +1053,7 @@ export async function executeRoutineCommand(
         ? {}
         : { config: command.trigger.config }),
     });
-    next = { ...command, routineId };
+    next = { ...command, routineId: held.routineId };
   }
   if (
     command.type === "routine/resume" &&

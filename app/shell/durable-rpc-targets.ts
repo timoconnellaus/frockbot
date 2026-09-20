@@ -144,7 +144,7 @@ export interface BotUserConfigurationRpcTargetV1
       triggerType: string;
       config?: Record<string, string | number | boolean>;
     }>,
-  ): Promise<{ instanceId: string }>;
+  ): Promise<{ instanceId: string; routineId: string }>;
   deleteConnectTrigger(
     input: UserRpcEnvelopeV1<{
       commandId: string;

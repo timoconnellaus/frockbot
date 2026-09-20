@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import {
   executeRoutineCommand,
+  routineIdFromCommandV1,
   type RoutineConnectionTriggerSeamV1,
 } from "./bot.js";
 import { routineEventEvidenceV1 } from "./event-judge.js";
@@ -43,6 +44,7 @@ function commandHarness() {
     list: async () => [],
     upsert: async (input) => {
       upserts.push(input.routineId);
+      return { routineId: upserts[0] ?? input.routineId };
     },
     delete: async (input) => {
       deletes.push(input.routineId);
@@ -275,5 +277,52 @@ describe("a connected-app Routine leaving that state", () => {
     );
     expect(upserts).toEqual(["inbox", "inbox"]);
     expect(deletes).toEqual(["inbox"]);
+  });
+});
+
+describe("a connected-app create that names no Routine id", () => {
+  test("a retried command writes one Routine and one instance", async () => {
+    const { connectionTriggers, state, upserts } = commandHarness();
+    const unnamed: RoutineCommandV1 = {
+      schemaVersion: 1,
+      type: "routine/create",
+      commandId: "cmd-create",
+      botId: "scout",
+      name: "New mail",
+      prompt: "Tell the User what arrived.",
+      trigger: {
+        kind: "connection",
+        connectionId: "conn-gmail",
+        triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+      },
+    };
+    const first = await executeRoutineCommand(
+      state,
+      IDENTITY,
+      unnamed,
+      USER,
+      connectionTriggers,
+    );
+    const again = await executeRoutineCommand(
+      state,
+      IDENTITY,
+      unnamed,
+      USER,
+      connectionTriggers,
+    );
+    const expected = routineIdFromCommandV1("cmd-create");
+    expect(first).toMatchObject({
+      status: "applied",
+      routine: { routineId: expected },
+    });
+    expect(again).toMatchObject({
+      status: "applied",
+      routine: { routineId: expected },
+    });
+    expect(upserts).toEqual([expected, expected]);
+    expect(
+      (await state.routines.list("scout", undefined, "Australia/Sydney"))
+        .routines,
+    ).toHaveLength(1);
   });
 });
