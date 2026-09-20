@@ -495,23 +495,25 @@ class RoutineInboxController extends ChangeNotifier {
   }
 }
 
-/// One firing, as the Bot page says it: which Routine, when, and whether it
-/// wants anything.
+/// How a recent firing should be marked on the Bot page.
+enum RoutineRunMarkV1 { running, finished, failed }
+
+/// One firing, as the Bot page says it: which Routine, when, and how it ended.
 class RoutineRunSummary {
   final String entryId;
   final String routineId;
   final String name;
   final DateTime at;
 
-  /// The firing did not work, so the row is the thing to press. Everything
-  /// else is a receipt.
-  final bool needsYou;
+  /// The inbox is completions, so a row is finished or failed. `running` is
+  /// here for a status the list is handed — the inbox does not write one.
+  final RoutineRunMarkV1 mark;
   const RoutineRunSummary({
     required this.entryId,
     required this.routineId,
     required this.name,
     required this.at,
-    required this.needsYou,
+    required this.mark,
   });
 }
 
@@ -534,7 +536,11 @@ List<RoutineRunSummary> routineRunSummariesV1(List<Object?> entries) => [
         at:
             DateTime.tryParse(raw['createdAt']! as String)?.toLocal() ??
             DateTime.now(),
-        needsYou: raw['failure'] == true,
+        mark: raw['status'] == 'running'
+            ? RoutineRunMarkV1.running
+            : raw['failure'] == true
+            ? RoutineRunMarkV1.failed
+            : RoutineRunMarkV1.finished,
       ),
 ];
 

@@ -488,8 +488,9 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   is the host editor for the one field whose choices are a paged catalog.
 - `BotPageView` — `lib/shell/bot_page.dart`: what a Bot is _doing_. The right
   panel's root at the wide tiers and a pushed page on the phone, in one scroll:
-  the Computer card when the Bot has one, the last Routine firings with the way
-  to the whole list under them, the Applets it is running, and the doors its
+  the Computer card when the Bot has one, the last Routine firings as loose
+  rows — name, time, and a running / finished / failed mark — with the All
+  Routines door under them, the Applets it is running, and the doors its
   Packages declare. The Bot's name in the conversation bar is the one way in at
   every tier, and the gear in the page's own header is the one way to Settings
 - `BotSettingsView` — `lib/settings/bot_settings.dart`: what a Bot _is_ — its

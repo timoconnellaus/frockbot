@@ -15,6 +15,7 @@ import '../applets/canvas.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
 import '../routines/page.dart';
+import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import 'semantics.dart';
 
@@ -137,8 +138,8 @@ class BotPageView extends StatelessWidget {
 
   /// The last few firings, then the way to the list. A firing is what a
   /// Routine leaves behind, so the rows here are runs rather than schedules:
-  /// what a person checks is whether the morning brief ran, not what time it
-  /// is set for.
+  /// name, when, and whether it is still going, finished, or failed. They are
+  /// loose rows, not a card — a card is for a door, which is All Routines.
   Widget _routines(BuildContext context) {
     final held = inbox;
     return AnimatedBuilder(
@@ -148,38 +149,44 @@ class BotPageView extends StatelessWidget {
             .take(botPageRunsShownV1)
             .toList();
         final now = DateTime.now();
-        return FrockRowGroup(
-          rows: [
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
             if (runs.isEmpty && (held == null || held.loaded))
-              FrockRow(
-                icon: Icons.schedule_rounded,
-                title: 'No runs yet',
-                chevron: false,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
+                child: Text(
+                  'No runs yet',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
             for (final run in runs)
               identified(
                 SettingsIds.botPageRun(run.entryId),
                 FrockRow(
-                  icon: run.needsYou
-                      ? Icons.error_outline_rounded
-                      : Icons.check_circle_outline_rounded,
                   title: run.name,
-                  subtitle:
-                      '${routineRunWhenV1(run.at, now)} · '
-                      '${run.needsYou ? 'Needs you' : 'Done'}',
+                  subtitle: routineRunWhenV1(run.at, now),
+                  trailing: RoutineRunMark(mark: run.mark),
+                  chevron: false,
                   onTap: onOpenRun == null ? null : () => onOpenRun!(run),
                 ),
               ),
-            identified(
-              SettingsIds.botPageRoutinesAll,
-              FrockRow(
-                icon: Icons.history_rounded,
-                title: 'All Routines',
-                trailing: held == null || held.unacknowledged == 0
-                    ? null
-                    : Badge(label: Text(held.badge)),
-                onTap: onOpenRoutines,
-              ),
+            FrockRowGroup(
+              rows: [
+                identified(
+                  SettingsIds.botPageRoutinesAll,
+                  FrockRow(
+                    icon: Icons.history_rounded,
+                    title: 'All Routines',
+                    trailing: held == null || held.unacknowledged == 0
+                        ? null
+                        : Badge(label: Text(held.badge)),
+                    onTap: onOpenRoutines,
+                  ),
+                ),
+              ],
             ),
           ],
         );
@@ -224,5 +231,43 @@ class BotPageView extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+/// The trailing mark on a recent-run row: a spinner, a check, or an x.
+class RoutineRunMark extends StatelessWidget {
+  final RoutineRunMarkV1 mark;
+  const RoutineRunMark({super.key, required this.mark});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final (label, child) = switch (mark) {
+      RoutineRunMarkV1.running => (
+        'Running',
+        SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+      RoutineRunMarkV1.finished => (
+        'Finished',
+        Icon(
+          Icons.check_rounded,
+          size: 18,
+          color: dark ? FrockTheme.success : FrockTheme.successInk,
+        ),
+      ),
+      RoutineRunMarkV1.failed => (
+        'Failed',
+        Icon(Icons.close_rounded, size: 18, color: theme.colorScheme.error),
+      ),
+    };
+    return Semantics(label: label, child: child);
   }
 }
