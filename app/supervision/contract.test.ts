@@ -206,7 +206,9 @@ describe("TurnSupervisor adapter contract", () => {
     });
     client.systemOne = (() => ({
       withResponse: () =>
-        Promise.reject(new APITimeoutError(TOOL_APPROVAL_ATTEMPT_TIMEOUT_MS_V1)),
+        Promise.reject(
+          new APITimeoutError(TOOL_APPROVAL_ATTEMPT_TIMEOUT_MS_V1),
+        ),
     })) as TypeSafeClient["systemOne"];
     await expect(
       createJevTurnSupervisorV1({ client }).reviewStep(stepEvidence([mutate])),
