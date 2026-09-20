@@ -1063,48 +1063,35 @@ export async function enableCustomModels(page: Page): Promise<void> {
 }
 
 /**
- * Install the Ollama Cloud provider, which is done on Models rather than in
- * Plugins: a model provider is not a Plugins row, and Connectors offers its
- * connect form only once the Package is installed.
- *
- * A provider nobody has set up is not a section of its own. Models offers the
- * whole catalog through one "Add a provider" select, and a provider earns its
- * section — with "Manage provider" beside its name — once it has been chosen
- * there. Choosing hands the person to the provider's Connectors page, which is
- * where `connectOllama` picks up; this only comes back to Models to see the
- * section it made.
+ * Install the Ollama Cloud provider from the Marketplace catalog. Models
+ * only lists providers already added; Connectors offers the key form once
+ * the Package is installed. `connectOllama` picks up from Models.
  */
 export async function chooseOllamaProvider(page: Page): Promise<void> {
   await openModels(page);
   const section = group(page, "Ollama Cloud");
-  const adder = group(page, "Add a provider");
-  await expect(section.or(adder).first()).toBeVisible({
-    timeout: SHELL_TIMEOUT_MS,
-  });
-  if (!(await section.getByText("Manage provider").count())) {
-    // The select's id carries the section's index in the document, which a
-    // spec has no business knowing, so it is found by the field it names.
-    await press(
-      adder.locator(
-        '[flt-semantics-identifier^="view-field-j"][flt-semantics-identifier$=".provider"]',
-      ),
-    );
-    await settle(page);
-    const choice = page.locator('[aria-label="Ollama Cloud"]').last();
-    await expect(choice).toBeVisible({ timeout: 30_000 });
-    await choice.click();
-    await settle(page);
-    await press(
-      adder.locator('[flt-semantics-identifier^="view-action-save-"]').first(),
-    );
-    await expect(sem(page, "connections-document")).toBeVisible({
-      timeout: 60_000,
-    });
-    await page.goBack();
-    await expect(section.getByText("Manage provider")).toBeVisible({
-      timeout: 60_000,
-    });
+  if (await section.getByText("Manage provider").count()) {
+    await closeOverlay(page);
+    return;
   }
+  await closeOverlay(page);
+  await openConnectors(page);
+  const search = sem(page, "marketplace-search").locator("input, textarea");
+  await expect(search.first()).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await search.first().fill("Ollama Cloud");
+  await settle(page);
+  const offer = group(page, "Ollama Cloud");
+  await expect(offer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  const add = sem(offer, "view-action-add-provider-ollama-cloud");
+  if (await add.isVisible().catch(() => false)) {
+    await press(add);
+    await settle(page);
+  }
+  await closeOverlay(page);
+  await openModels(page);
+  await expect(section.getByText("Manage provider")).toBeVisible({
+    timeout: 60_000,
+  });
   await closeOverlay(page);
 }
 

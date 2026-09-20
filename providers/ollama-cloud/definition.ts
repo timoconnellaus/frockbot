@@ -41,6 +41,7 @@ export const providerOllamaCloudDefinitionV1: PackageDefinitionV1 = {
     {
       id: "ollama-cloud-account",
       displayName: "Ollama Cloud account",
+      icon: "ollama",
       allowMultiple: true,
       authorization: {
         kind: "api-key",

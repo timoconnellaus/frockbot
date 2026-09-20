@@ -109,12 +109,12 @@ test("a field id names its section, and a select says its value is JSON", () => 
   expect(field.field.choiceSource).toBe("account-models");
 });
 
-test("the add-provider section's save reads as connecting", () => {
+test("a required select section's save names the field", () => {
   const document = settingsDocumentV1(
     frame([
       {
-        id: "add-provider",
-        label: "Add a provider",
+        id: "pick-one",
+        label: "Pick one",
         fields: [
           {
             id: "provider",
@@ -131,7 +131,7 @@ test("the add-provider section's save reads as connecting", () => {
   );
   const save = group(document, 0).children[1]!;
   if (save.type !== "action") throw new Error("expected an action");
-  expect(save.label).toBe("Connect provider");
+  expect(save.label).toBe("Save changes");
   expect(document.actions[0]!.schema.required).toEqual([
     "sectionId",
     "j0.provider",

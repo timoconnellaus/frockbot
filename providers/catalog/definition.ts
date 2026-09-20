@@ -131,6 +131,7 @@ export const catalogProviderDefinitionsV1: PackageDefinitionV1[] =
             {
               id: `${provider.id}-account`,
               displayName: `${provider.name} account`,
+              icon: provider.id,
               allowMultiple: true,
               authorization: {
                 kind: "api-key" as const,
@@ -156,6 +157,7 @@ export const catalogProviderDefinitionsV1: PackageDefinitionV1[] =
             {
               id: `${provider.id}-oauth`,
               displayName: `${provider.name} sign-in`,
+              icon: provider.id,
               allowMultiple: true,
               authorization: { kind: "grant" as const, driverId: provider.id },
               capabilities: [`${provider.id}-models`],

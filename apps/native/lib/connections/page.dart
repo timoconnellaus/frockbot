@@ -7,7 +7,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../client/desktop_build.dart';
 import '../client/transport.dart';
-import '../plugins/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../settings/page.dart';
 import '../shell/desktop_layout.dart';
@@ -16,6 +15,9 @@ import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'document.dart';
+
+/// Which offers the Marketplace list shows.
+enum MarketplaceKindFilter { all, models, connectors }
 
 /// Connectors: the accounts and services a User authorizes once for every Bot
 /// they own — a model provider's key, a hosted grant, a Package's own account.
@@ -46,8 +48,18 @@ class ConnectionsPage extends StatefulWidget {
   /// the way out is then a control the page draws.
   final VoidCallback? onClose;
 
-  /// Off when Marketplace owns the title and the Connectors tab.
+  /// Off when Marketplace owns the title and the search chrome.
   final bool chrome;
+
+  /// The Marketplace storefront: every model and connector, including ones
+  /// nobody has added yet. Manage provider stays on the installed-only read.
+  final bool catalog;
+
+  /// Marketplace search, matched against name and description.
+  final String query;
+
+  /// Marketplace type filter. Ignored when [catalog] is off.
+  final MarketplaceKindFilter filter;
 
   const ConnectionsPage({
     super.key,
@@ -61,6 +73,9 @@ class ConnectionsPage extends StatefulWidget {
     this.grid = false,
     this.onClose,
     this.chrome = true,
+    this.catalog = false,
+    this.query = '',
+    this.filter = MarketplaceKindFilter.all,
   });
 
   /// What the connector half is called wherever it is drawn.
@@ -148,7 +163,11 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         reread = false;
         try {
           final next = wire.ConnectionsFrame.fromJson(
-            await widget.api.request('/api/settings/connections'),
+            await widget.api.request(
+              widget.catalog
+                  ? '/api/settings/connections?catalog=1'
+                  : '/api/settings/connections',
+            ),
           );
           if (!mounted) return;
           setState(() {
@@ -263,14 +282,72 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   List<Map<String, Object?>> get providers {
     final all = frame?.providers ?? const [];
-    return all
-        .where(
-          (provider) =>
-              provider['kind'] == kind &&
-              (widget.packageId == null ||
-                  provider['packageId'] == widget.packageId),
-        )
-        .toList();
+    final needle = widget.query.trim().toLowerCase();
+    return all.where((provider) {
+      if (widget.packageId != null &&
+          provider['packageId'] != widget.packageId) {
+        return false;
+      }
+      if (widget.catalog) {
+        if (widget.filter == MarketplaceKindFilter.models &&
+            provider['kind'] != 'model') {
+          return false;
+        }
+        if (widget.filter == MarketplaceKindFilter.connectors &&
+            provider['kind'] != 'connector') {
+          return false;
+        }
+      } else if (provider['kind'] != kind) {
+        return false;
+      }
+      if (needle.isEmpty) return true;
+      final haystack = [
+        provider['displayName'],
+        provider['description'],
+        provider['kind'],
+        provider['packageId'],
+      ].whereType<String>().join(' ').toLowerCase();
+      return haystack.contains(needle);
+    }).toList();
+  }
+
+  bool _needsAdd(Map<String, Object?> provider) =>
+      widget.catalog &&
+      provider['kind'] == 'model' &&
+      (provider['connected'] as int? ?? 0) == 0 &&
+      provider['mayConnect'] != true;
+
+  Future<void> _addProvider(Map<String, Object?> provider) async {
+    final packageId = provider['packageId'] as String;
+    final row = _rowKey(provider);
+    if (pendingRow != null) return;
+    setState(() {
+      pendingRow = row;
+      notice = null;
+    });
+    try {
+      await widget.api.request(
+        '/api/settings',
+        body: {
+          'schemaVersion': 1,
+          'commandId': _commandId(),
+          'expectedRevision': frame!.revision,
+          'type': 'user/choose-model-provider',
+          'packageId': packageId,
+        },
+      );
+      widget.onFeaturesChanged?.call();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          notice =
+              'That didn’t go through. Check your connection and try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => pendingRow = null);
+      await load();
+    }
   }
 
   String _rowKey(Map<String, Object?> provider) =>
@@ -314,91 +391,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       final rows = providers;
       body = RefreshIndicator(
         onRefresh: load,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-          children: [
-            if (loading)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 12),
-                child: LinearProgressIndicator(minHeight: 2),
-              ),
-            if (banner case final String line)
-              _Notice(
-                line: line,
-                onDismiss: () => setState(() {
-                  notice = null;
-                  loadFailure = null;
-                }),
-              ),
-            if (widget.models && frame.modelInUse != null)
-              _Centered(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
-                  child: Text(
-                    'Model in use: ${frame.modelInUse}',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ),
-            _Centered(
-              maxWidth: widget.grid ? marketplaceDialogWidth : 680,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // Two columns once there is room for two readable rows,
-                  // as on a tablet or the desktop window; one on a phone.
-                  final columns = widget.grid && constraints.maxWidth >= 900
-                      ? 3
-                      : constraints.maxWidth >= 640
-                      ? 2
-                      : 1;
-                  const gap = 8.0;
-                  final width =
-                      (constraints.maxWidth - gap * (columns - 1)) / columns;
-                  return Wrap(
-                    spacing: gap,
-                    runSpacing: gap,
-                    children: [
-                      if (!widget.models && widget.packageId == null)
-                        SizedBox(
-                          width: width,
-                          child: _MacMessagesRow(page: widget),
-                        ),
-                      for (final (index, provider) in rows.indexed)
-                        SizedBox(
-                          width: width,
-                          child: _ProviderRow(
-                            index: index,
-                            provider: provider,
-                            accounts: accountsOf(provider),
-                            models: widget.models,
-                            busy: pendingRow == _rowKey(provider),
-                            send: (command) =>
-                                _send(command, _rowKey(provider)),
-                            commandId: _commandId,
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
-            ),
-            if (rows.isEmpty)
-              _Centered(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    widget.models
-                        ? 'No model providers are turned on. Turn one on under Plugins to add an account.'
-                        : 'Nothing to connect yet.',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
-              ),
-          ],
-        ),
+        child: widget.catalog
+            ? _catalogScroll(theme, frame, rows, banner)
+            : _installedScroll(theme, frame, rows, banner),
       );
     }
     final content = identified(
@@ -434,6 +429,225 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         ),
       ),
       body: content,
+    );
+  }
+
+  Widget _banners(
+    ThemeData theme,
+    wire.ConnectionsFrame frame,
+    String? banner,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (loading)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: LinearProgressIndicator(minHeight: 2),
+          ),
+        if (banner case final String line)
+          _Notice(
+            line: line,
+            onDismiss: () => setState(() {
+              notice = null;
+              loadFailure = null;
+            }),
+          ),
+        if (widget.models && frame.modelInUse != null)
+          _Centered(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+              child: Text(
+                'Model in use: ${frame.modelInUse}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _providerCard(Map<String, Object?> provider, int index) {
+    return _ProviderRow(
+      index: index,
+      provider: provider,
+      accounts: accountsOf(provider),
+      models: widget.catalog || widget.models,
+      catalog: widget.catalog,
+      busy: pendingRow == _rowKey(provider),
+      send: (command) => _send(command, _rowKey(provider)),
+      commandId: _commandId,
+      onAdd: _needsAdd(provider) ? () => _addProvider(provider) : null,
+    );
+  }
+
+  Widget _installedScroll(
+    ThemeData theme,
+    wire.ConnectionsFrame frame,
+    List<Map<String, Object?>> rows,
+    String? banner,
+  ) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      children: [
+        _banners(theme, frame, banner),
+        _Centered(
+          maxWidth: widget.grid ? marketplaceDialogWidth : 680,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = widget.grid && constraints.maxWidth >= 900
+                  ? 3
+                  : constraints.maxWidth >= 640
+                  ? 2
+                  : 1;
+              const gap = 8.0;
+              final width =
+                  (constraints.maxWidth - gap * (columns - 1)) / columns;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: [
+                  if (!widget.models && widget.packageId == null)
+                    SizedBox(
+                      width: width,
+                      child: _MacMessagesRow(page: widget),
+                    ),
+                  for (final (index, provider) in rows.indexed)
+                    SizedBox(
+                      width: width,
+                      child: _providerCard(provider, index),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+        if (rows.isEmpty)
+          _Centered(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                widget.models
+                    ? 'No model providers are turned on. Add one in the Marketplace.'
+                    : 'Nothing to connect yet.',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _catalogScroll(
+    ThemeData theme,
+    wire.ConnectionsFrame frame,
+    List<Map<String, Object?>> rows,
+    String? banner,
+  ) {
+    final showMac =
+        widget.filter != MarketplaceKindFilter.models &&
+        widget.packageId == null &&
+        widget.query.trim().isEmpty;
+    return LayoutBuilder(
+      builder: (context, viewport) {
+        final maxWidth = widget.grid ? marketplaceDialogWidth : 680.0;
+        final columns = widget.grid && viewport.maxWidth >= 932
+            ? 3
+            : viewport.maxWidth >= 672
+            ? 2
+            : 1;
+        const gap = 8.0;
+        final extras = showMac ? 1 : 0;
+        final count = rows.length + extras;
+        return CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              sliver: SliverToBoxAdapter(
+                child: _Centered(
+                  maxWidth: maxWidth,
+                  child: _banners(theme, frame, banner),
+                ),
+              ),
+            ),
+            if (count == 0)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _Centered(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      widget.query.trim().isEmpty
+                          ? 'Nothing matches this filter.'
+                          : 'No matches. Try a different name.',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                sliver: SliverLayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.crossAxisExtent > maxWidth
+                        ? maxWidth
+                        : constraints.crossAxisExtent;
+                    return SliverPadding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal:
+                            ((constraints.crossAxisExtent - width) / 2)
+                                .clamp(0, double.infinity),
+                      ),
+                      sliver: columns == 1
+                          ? SliverList.builder(
+                              itemCount: count,
+                              itemBuilder: (context, index) {
+                                if (showMac && index == 0) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: gap),
+                                    child: _MacMessagesRow(page: widget),
+                                  );
+                                }
+                                final row = rows[index - extras];
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: gap),
+                                  child: _providerCard(row, index - extras),
+                                );
+                              },
+                            )
+                          : SliverGrid(
+                              gridDelegate:
+                                  SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: columns,
+                                    mainAxisExtent: 92,
+                                    crossAxisSpacing: gap,
+                                    mainAxisSpacing: gap,
+                                  ),
+                              delegate: SliverChildBuilderDelegate((
+                                context,
+                                index,
+                              ) {
+                                if (showMac && index == 0) {
+                                  return _MacMessagesRow(page: widget);
+                                }
+                                return _providerCard(
+                                  rows[index - extras],
+                                  index - extras,
+                                );
+                              }, childCount: count),
+                            ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -596,32 +810,57 @@ class _MacMessagesRow extends StatelessWidget {
 }
 
 /// The 40-point mark at the head of a row: the app's own logo when the
-/// deployment bundles one, otherwise a glyph — never a broken image.
+/// deployment bundles one, otherwise a letter tile — never a broken image.
 class _IconTile extends StatelessWidget {
   final String? asset;
+  final String? label;
   final IconData icon;
-  const _IconTile({this.asset, this.icon = Icons.link_rounded});
+  const _IconTile({
+    this.asset,
+    this.label,
+    this.icon = Icons.link_rounded,
+  });
+
+  String get _letter {
+    final source = (label ?? '').trim();
+    if (source.isEmpty) return '?';
+    return String.fromCharCode(source.runes.first).toUpperCase();
+  }
+
+  Widget _letterMark(ColorScheme scheme) {
+    return Text(
+      _letter,
+      style: TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        height: 1,
+        color: scheme.onSurface,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final Widget mark = asset == null
-        ? Icon(icon, size: 22, color: scheme.onSurface)
-        : Image.asset(
+    final hasAsset = asset != null;
+    final Widget mark = hasAsset
+        ? Image.asset(
             'assets/connectors/$asset.png',
             width: 26,
             height: 26,
             filterQuality: FilterQuality.medium,
-            errorBuilder: (_, _, _) =>
-                Icon(icon, size: 22, color: scheme.onSurface),
-          );
+            errorBuilder: (_, _, _) => _letterMark(scheme),
+          )
+        : label != null
+        ? _letterMark(scheme)
+        : Icon(icon, size: 22, color: scheme.onSurface);
     // Brand marks are drawn for a light ground, so the tile is one in both
-    // themes; a glyph of our own takes the surface colour instead.
+    // themes; a letter or glyph of our own takes the surface colour instead.
     return Container(
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: asset == null ? scheme.surfaceContainerHighest : Colors.white,
+        color: hasAsset ? Colors.white : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: scheme.outlineVariant),
       ),
@@ -750,17 +989,21 @@ class _ProviderRow extends StatefulWidget {
   final Map<String, Object?> provider;
   final List<Map<String, Object?>> accounts;
   final bool models;
+  final bool catalog;
   final bool busy;
   final Future<void> Function(Map<String, Object?> command) send;
   final String Function() commandId;
+  final VoidCallback? onAdd;
   const _ProviderRow({
     required this.index,
     required this.provider,
     required this.accounts,
     required this.models,
+    this.catalog = false,
     required this.busy,
     required this.send,
     required this.commandId,
+    this.onAdd,
   });
 
   @override
@@ -864,6 +1107,17 @@ class _ProviderRowState extends State<_ProviderRow> {
         ],
       );
     }
+    if (widget.onAdd != null) {
+      return identified(
+        ConnectorIds.action('add-${provider['packageId']}'),
+        _Pill(
+          label: 'Add',
+          primary: true,
+          busy: widget.busy,
+          onPressed: widget.onAdd,
+        ),
+      );
+    }
     if (!mayConnect) return null;
     // A press on a Connect while another row's command is settling does
     // nothing; the page's send refuses it, and this pill stays as it is.
@@ -878,18 +1132,24 @@ class _ProviderRowState extends State<_ProviderRow> {
   @override
   Widget build(BuildContext context) {
     final description = provider['description'] as String?;
-    final subtitle =
-        description ??
-        (connected == 0
-            ? null
-            : connected == 1
-            ? '1 account connected'
-            : '$connected accounts connected');
+    final kindLabel = provider['kind'] == 'model' ? 'Model' : 'Connector';
+    final subtitle = widget.catalog
+        ? [
+            kindLabel,
+            if (description != null) description,
+          ].join(' · ')
+        : description ??
+              (connected == 0
+                  ? null
+                  : connected == 1
+                  ? '1 account connected'
+                  : '$connected accounts connected');
     return identified(
       ConnectorIds.group(displayName),
       _Row(
         mark: _IconTile(
           asset: provider['icon'] as String?,
+          label: displayName,
           icon: widget.models
               ? Icons.auto_awesome_outlined
               : Icons.link_rounded,
@@ -1306,10 +1566,10 @@ class MarketplaceDialog extends StatelessWidget {
   );
 }
 
-/// The account Marketplace: Connections and installable Plugins share one
-/// destination, but each tab keeps its own authority and document contract.
-/// Connections remain the default tab so existing deep links and the familiar
-/// Marketplace entry continue to open on the services people authorize.
+/// The account Marketplace: one searchable catalog of models and connectors.
+///
+/// Add a model here first; then connect a key and choose it in Models. Filter
+/// is a button, not a second page.
 class MarketplacePage extends StatefulWidget {
   final NativeApi api;
   final LocalStore store;
@@ -1317,6 +1577,7 @@ class MarketplacePage extends StatefulWidget {
   final Future<bool> Function(Uri)? openBrowser;
   final VoidCallback? onFeaturesChanged;
   final VoidCallback? onClose;
+  final MarketplaceKindFilter initialFilter;
 
   const MarketplacePage({
     super.key,
@@ -1326,52 +1587,34 @@ class MarketplacePage extends StatefulWidget {
     this.openBrowser,
     this.onFeaturesChanged,
     this.onClose,
+    this.initialFilter = MarketplaceKindFilter.all,
   });
 
   @override
   State<MarketplacePage> createState() => _MarketplacePageState();
 }
 
-class _MarketplacePageState extends State<MarketplacePage>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabs;
+class _MarketplacePageState extends State<MarketplacePage> {
   final connectorsKey = GlobalKey<_ConnectionsPageState>();
-  final pluginsKey = GlobalKey<PluginsPageState>();
-  int selectedTab = 0;
+  late MarketplaceKindFilter filter = widget.initialFilter;
+  String query = '';
   bool refreshing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabs = TabController(length: 2, vsync: this)..addListener(_tabChanged);
-  }
-
-  void _tabChanged() {
-    if (_tabs.indexIsChanging || selectedTab == _tabs.index) return;
-    setState(() => selectedTab = _tabs.index);
-  }
-
-  @override
-  void dispose() {
-    _tabs
-      ..removeListener(_tabChanged)
-      ..dispose();
-    super.dispose();
-  }
 
   Future<void> _refresh() async {
     if (refreshing) return;
     setState(() => refreshing = true);
     try {
-      if (selectedTab == 0) {
-        await connectorsKey.currentState?.load();
-      } else {
-        await pluginsKey.currentState?.controller.load();
-      }
+      await connectorsKey.currentState?.load();
     } finally {
       if (mounted) setState(() => refreshing = false);
     }
   }
+
+  String get _filterLabel => switch (filter) {
+    MarketplaceKindFilter.all => 'All',
+    MarketplaceKindFilter.models => 'Models',
+    MarketplaceKindFilter.connectors => 'Connectors',
+  };
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -1398,44 +1641,92 @@ class _MarketplacePageState extends State<MarketplacePage>
           ),
         ),
       ],
-      bottom: TabBar(
-        controller: _tabs,
-        onTap: (index) => setState(() => selectedTab = index),
-        tabs: [
-          identified(
-            ConnectorIds.marketplaceConnectorsTab,
-            const Tab(text: 'Connectors'),
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(64),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 8, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: identified(
+                  ConnectorIds.marketplaceSearch,
+                  SteadyCaret(
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Find a model or connector',
+                      ),
+                      onChanged: (value) => setState(() => query = value),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              identified(
+                ConnectorIds.marketplaceFilter,
+                PopupMenuButton<MarketplaceKindFilter>(
+                  tooltip: 'Filter marketplace',
+                  initialValue: filter,
+                  onSelected: (value) => setState(() => filter = value),
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: MarketplaceKindFilter.all,
+                      child: identified(
+                        ConnectorIds.marketplaceFilterAll,
+                        Text(
+                          filter == MarketplaceKindFilter.all
+                              ? 'All · selected'
+                              : 'All',
+                        ),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: MarketplaceKindFilter.models,
+                      child: identified(
+                        ConnectorIds.marketplaceFilterModels,
+                        Text(
+                          filter == MarketplaceKindFilter.models
+                              ? 'Models · selected'
+                              : 'Models',
+                        ),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: MarketplaceKindFilter.connectors,
+                      child: identified(
+                        ConnectorIds.marketplaceFilterConnectors,
+                        Text(
+                          filter == MarketplaceKindFilter.connectors
+                              ? 'Connectors · selected'
+                              : 'Connectors',
+                        ),
+                      ),
+                    ),
+                  ],
+                  icon: Badge(
+                    isLabelVisible: filter != MarketplaceKindFilter.all,
+                    label: Text(_filterLabel),
+                    child: const Icon(Icons.filter_list_rounded),
+                  ),
+                ),
+              ),
+            ],
           ),
-          identified(
-            ConnectorIds.marketplacePluginsTab,
-            const Tab(text: 'Plugins'),
-          ),
-        ],
+        ),
       ),
     ),
-    body: TabBarView(
-      controller: _tabs,
-      children: [
-        ConnectionsPage(
-          key: connectorsKey,
-          api: widget.api,
-          store: widget.store,
-          userId: widget.userId,
-          openBrowser: widget.openBrowser,
-          onFeaturesChanged: widget.onFeaturesChanged,
-          grid: widget.onClose != null,
-          chrome: false,
-        ),
-        PluginsPage(
-          key: pluginsKey,
-          api: widget.api,
-          store: widget.store,
-          userId: widget.userId,
-          marketplace: true,
-          onFeaturesChanged: widget.onFeaturesChanged,
-          chrome: false,
-        ),
-      ],
+    body: ConnectionsPage(
+      key: connectorsKey,
+      api: widget.api,
+      store: widget.store,
+      userId: widget.userId,
+      openBrowser: widget.openBrowser,
+      onFeaturesChanged: widget.onFeaturesChanged,
+      grid: widget.onClose != null,
+      chrome: false,
+      catalog: true,
+      query: query,
+      filter: filter,
     ),
   );
 }

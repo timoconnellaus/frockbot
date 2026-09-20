@@ -557,6 +557,7 @@ export interface UserConfigurationBinding {
   readConnectionsFrame(request: {
     schemaVersion: 1;
     userId: string;
+    catalog?: boolean;
   }): Promise<ConnectionsFrame>;
   readPluginsFrame(request: {
     schemaVersion: 1;

@@ -617,18 +617,19 @@ switched. The Flutter host draws both from one `PluginsController`
 account's list, and the neighbouring account-wide switchboard is titled
 "Account features".
 
-**Marketplace is host chrome over two frames.** `apps/native/lib/connections/page.dart`
-draws `ConnectionsFrame` (`/api/settings/connections`) itself. Its connector
-half is the default Marketplace tab: a page from the storefront icon on a
-phone's Bot list, a dialog (`MarketplaceDialog`) from the foot of the sidebar
-on a desktop, the same page laid out three cards across. A second Plugins tab
-reads the server-owned `PluginsFrame` projection from
-`/api/settings/marketplace/plugins?as=document` and carries only installable
-catalog entries. Either way it is a card per
-provider — its bundled icon (`assets/connectors/<icon>.png`, named by the
-Connection Type's `icon`), what connecting it gives a Bot, the accounts held
-against it with a state line and a menu, and the one way to add another. The
-frame carries what the surface needs and no credential: a provider row per
+**Marketplace is one searchable catalog.** `apps/native/lib/connections/page.dart`
+draws `ConnectionsFrame` (`/api/settings/connections?catalog=1`) as a single
+page: one search box, a filter for All / Models / Connectors, and a builder
+list so cards mount as the person scrolls. The catalog includes every
+non-platform model provider and every connected app, whether or not the
+Package is installed. An uninstalled model row offers **Add**
+(`user/choose-model-provider`); after that, **Connect** is the same key or
+sign-in flow as before. Models settings lists only providers already added,
+with a link back to this catalog. The ordinary `/api/settings/connections`
+read stays installed-only, so Manage provider does not grow a storefront.
+Each card carries a bundled icon (`assets/connectors/<icon>.png`, named by
+the Connection Type's `icon`) or a letter tile when no mark ships. The frame
+carries what the surface needs and no credential: a provider row per
 Connection Type (a Package with several types is a grouping, so the row is
 named by the type), the accounts with the line that says what their state
 means, and the "Model in use" line, written by `modelRuntimeLabel` where the
