@@ -138,8 +138,8 @@ class BotPageView extends StatelessWidget {
 
   /// The last few firings, then the way to the list. A firing is what a
   /// Routine leaves behind, so the rows here are runs rather than schedules:
-  /// name, when, and whether it is still going, finished, or failed. They are
-  /// loose rows, not a card — a card is for a door, which is All Routines.
+  /// name, time and a mark on one row. They are loose rows, not a card — a
+  /// card is for a door, which is All Routines.
   Widget _routines(BuildContext context) {
     final held = inbox;
     return AnimatedBuilder(
@@ -165,11 +165,9 @@ class BotPageView extends StatelessWidget {
             for (final run in runs)
               identified(
                 SettingsIds.botPageRun(run.entryId),
-                FrockRow(
-                  title: run.name,
-                  subtitle: routineRunWhenV1(run.at, now),
-                  trailing: RoutineRunMark(mark: run.mark),
-                  chevron: false,
+                RoutineRunRow(
+                  run: run,
+                  now: now,
                   onTap: onOpenRun == null ? null : () => onOpenRun!(run),
                 ),
               ),
@@ -230,6 +228,69 @@ class BotPageView extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// One recent firing: the name, the time, and how it ended, on a single line.
+///
+/// The time sits on the right, just before the mark, so the name is what you
+/// read first and a long name ellipsises without taking the clock with it.
+class RoutineRunRow extends StatelessWidget {
+  final RoutineRunSummary run;
+  final DateTime now;
+  final VoidCallback? onTap;
+  const RoutineRunRow({
+    super.key,
+    required this.run,
+    required this.now,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    // Paper's muted rung is inkMuted; the dark theme's third rung is subtle.
+    // ColorScheme.onSurfaceVariant is fine on ink and too faint on cream if
+    // a look has remapped muted toward the window.
+    final nameColor = dark ? FrockTheme.text : FrockTheme.ink;
+    final timeColor = dark ? FrockTheme.muted : FrockTheme.inkMuted;
+    return InkWell(
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 46),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  run.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -0.1,
+                    color: nameColor,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                routineRunWhenV1(run.at, now),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontSize: 12.5,
+                  color: timeColor,
+                ),
+              ),
+              const SizedBox(width: 8),
+              RoutineRunMark(mark: run.mark),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

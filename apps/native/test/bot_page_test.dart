@@ -164,4 +164,41 @@ void main() {
     expect(opened?.routineId, 'r1');
     expect(opened?.name, 'Morning brief');
   });
+
+  testWidgets('a light row keeps the name in ink and the time on the line', (
+    tester,
+  ) async {
+    final inbox = inboxWith([
+      {
+        'entryId': 'e1',
+        'routineId': 'r1',
+        'attribution': 'Automation: Morning brief',
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
+      },
+    ]);
+    addTearDown(inbox.dispose);
+    tester.view.physicalSize = const Size(390, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.light),
+        home: Scaffold(
+          body: BotPageView(
+            botName: 'Scout',
+            inbox: inbox,
+            onOpenRoutines: () {},
+          ),
+        ),
+      ),
+    );
+    await inbox.load();
+    await tester.pumpAndSettle();
+    final name = tester.widget<Text>(find.text('Morning brief'));
+    expect(name.style?.color, FrockTheme.ink);
+    final when = tester.widget<Text>(find.textContaining('Today'));
+    expect(when.style?.color, FrockTheme.inkMuted);
+    expect(find.byType(RoutineRunRow), findsOneWidget);
+    expect(tester.getSize(find.byType(RoutineRunRow)).height, lessThan(56));
+  });
 }
