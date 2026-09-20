@@ -1100,6 +1100,38 @@
                         }
                       }
                     ]
+                  },
+                  {
+                    "type": "group",
+                    "orientation": "column",
+                    "title": "Morning brief",
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "2026-09-02T23:00:10.000Z",
+                        "style": "status"
+                      },
+                      {
+                        "type": "text",
+                        "text": "finished"
+                      },
+                      {
+                        "type": "group",
+                        "orientation": "row",
+                        "children": [
+                          {
+                            "type": "action",
+                            "actionId": "open-run",
+                            "label": "Open",
+                            "input": {
+                              "kind": "open-run",
+                              "routineId": "r1",
+                              "entryId": "e1"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
               }
@@ -1144,74 +1176,36 @@
                         }
                       }
                     ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "type": "group",
-            "orientation": "column",
-            "title": "Completions",
-            "children": [
-              {
-                "type": "group",
-                "orientation": "column",
-                "title": "Morning brief",
-                "children": [
-                  {
-                    "type": "text",
-                    "text": "Happened 3 times",
-                    "style": "status"
-                  },
-                  {
-                    "type": "text",
-                    "text": "Nine unread, two need you."
                   },
                   {
                     "type": "group",
-                    "orientation": "row",
+                    "orientation": "column",
+                    "title": "Inbound leads",
                     "children": [
                       {
-                        "type": "action",
-                        "actionId": "acknowledge-inbox",
-                        "label": "Mark read",
-                        "input": {
-                          "kind": "acknowledge-inbox",
-                          "entryId": "e1"
-                        }
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                "type": "group",
-                "orientation": "column",
-                "title": "Inbound leads",
-                "children": [
-                  {
-                    "type": "text",
-                    "text": "Lead triaged."
-                  }
-                ]
-              },
-              {
-                "type": "group",
-                "orientation": "column",
-                "title": "Mark all read",
-                "children": [
-                  {
-                    "type": "group",
-                    "orientation": "row",
-                    "children": [
+                        "type": "text",
+                        "text": "2026-09-02T23:05:00.000Z",
+                        "style": "status"
+                      },
                       {
-                        "type": "action",
-                        "actionId": "acknowledge-inbox",
-                        "label": "Mark all read",
-                        "input": {
-                          "kind": "acknowledge-inbox"
-                        }
+                        "type": "text",
+                        "text": "finished"
+                      },
+                      {
+                        "type": "group",
+                        "orientation": "row",
+                        "children": [
+                          {
+                            "type": "action",
+                            "actionId": "open-run",
+                            "label": "Open",
+                            "input": {
+                              "kind": "open-run",
+                              "routineId": "r2",
+                              "entryId": "e2"
+                            }
+                          }
+                        ]
                       }
                     ]
                   }
@@ -1233,7 +1227,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",
@@ -1265,7 +1259,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",
@@ -1294,7 +1288,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",
@@ -1323,7 +1317,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",
@@ -1342,7 +1336,7 @@
           }
         },
         {
-          "id": "acknowledge-inbox",
+          "id": "open-run",
           "schema": {
             "type": "object",
             "properties": {
@@ -1352,7 +1346,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",
@@ -1361,12 +1355,16 @@
                   "revoke-key"
                 ]
               },
+              "routineId": {
+                "type": "string",
+                "maxLength": 128
+              },
               "entryId": {
                 "type": "string",
                 "maxLength": 128
               }
             },
-            "required": ["kind"],
+            "required": ["kind", "routineId", "entryId"],
             "additionalProperties": false
           }
         },
@@ -1381,7 +1379,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",
@@ -1410,7 +1408,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",
@@ -1435,7 +1433,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",
@@ -1485,7 +1483,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",
@@ -1514,7 +1512,7 @@
                   "set-routine-enabled",
                   "run-routine",
                   "delete-routine",
-                  "acknowledge-inbox",
+                  "open-run",
                   "open-runs",
                   "edit-routine",
                   "cancel-edit",

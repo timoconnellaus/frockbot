@@ -513,9 +513,11 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `RoutinesView` — `lib/routines/page.dart`: what a Bot does on its own and
   what it left behind, reached from the All Routines row on the Bot page — a
   sub-page of the panel on a desktop, a pushed page on the phone. The projection
-  files each Routine under Scheduled or Webhooks and the host draws those as
-  labelled cards of rows, each row a way into the one editor with a pause switch
-  at its end. That editor is the host's own form
+  files each Routine under Scheduled or Webhooks. The host draws each Routine
+  as a door — tap opens the editor, the switch at the end is only the switch —
+  with that Routine's recent completions under it as the same loose rows the
+  Bot page uses. The editor stays inside the right panel (or the phone page),
+  not a second settings screen. That editor is the host's own form
   (`lib/routines/editor.dart`): the name and instruction, then what starts it —
   a schedule, a webhook, or a trigger an enabled Plugin declares, offered by
   the Plugin's and the trigger's own names — with only the chosen source's
@@ -523,7 +525,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   expression, a Plugin id or a trigger slug is never typed. `RoutineRunsPage`
   (`lib/routines/runs.dart`) is one Routine's firings, and one firing opens on
   the Work view. `RoutineInboxController` reads the completion inbox once for
-  both the badge and the recent runs the Bot page lists.
+  the recent runs the Bot page lists.
 - `AuditPage` — `lib/audit/page.dart`: every effect a Bot performed, filtered
   by kind, with an audited effect's Turn opening on the Work view
 - `SearchOverlay` — `lib/search/overlay.dart` over `lib/search/controller.dart`:
@@ -676,15 +678,14 @@ family, both reached with `?as=document`:
 - `app/routines/routines-document.ts` over a `RoutinesFrame`
   (`GET /api/bots/:botId/routines`, the one route in that group that takes a
   query parameter at all). The frame is one read where there were two —
-  the Routines a Bot holds and the completion inbox the All Routines badge
-  counts —
-  because a client that had to ask twice could show a list and a badge that
-  disagreed. Its action kinds are one closed vocabulary
+  the Routines a Bot holds and the completions nested under each of them —
+  because a client that had to ask twice could file a run under the wrong
+  Routine. Its action kinds are one closed vocabulary
   (`ROUTINE_ACTION_KINDS_V1`): the Routine commands the route already takes —
   pause or resume, run, delete, rotate or revoke a key, and the save behind the
-  editor — the acknowledgement, which is the inbox route's, and the navigation
-  no route owns, which is the run log and the editor page — a new Routine, or
-  the one a row named.
+  editor — and the navigation no route owns, which is a completion's run log
+  and the editor — a new Routine, or the one a row named — shown in the same
+  surface as the list.
 - `app/audit/audit-document.ts` over an `AuditFrame` (`GET /api/audit`). Four
   kinds: the filter and the page, which the host owns because the host owns
   the read; the rebuild command; and opening an audited effect's Turn on the
@@ -706,18 +707,12 @@ which one is on screen (see the header and panel stack below), and
 `ViewSurfacePage`'s `chrome` flag is off inside it because the region already
 carries the title. On the phone each entry is a page.
 
-**The rest of PR 8.** The completions count is `RoutineInboxController`, worn
-as a badge by the All Routines row on the Bot page at every tier: a silent
-Routine firing is filtered out of the visible transcript, so a count is the
-only place that completion becomes visible. The same controller's read feeds
-the recent firings listed above that row, so the rows and the badge come from
-one read of the inbox rather than two. A
-firing that spoke — an explicit `send_to_user`, or the message a broken firing
-commits in its place — is an ordinary message in the conversation instead; see
-[notifications](notifications.md). "Mark all read" means the
-entries the document carried — an empty `entryIds` on the wire acknowledges
-everything, including a firing that landed a second ago and has never been on
-screen.
+**The rest of PR 8.** Completions have no read status. `RoutineInboxController`
+feeds the recent firings listed above the All Routines row on the Bot page,
+and the All Routines surface nests those same rows under the Routine that
+left them. A firing that spoke — an explicit `send_to_user`, or the message a
+broken firing commits in its place — is an ordinary message in the
+conversation instead; see [notifications](notifications.md).
 
 Search is `lib/search/`, over `GET /api/search`, and replaces the Bot-list
 `SearchDelegate` the shell cut left, which could only match a name the sidebar

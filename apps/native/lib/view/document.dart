@@ -58,6 +58,11 @@ class ViewDocumentView extends StatefulWidget {
   /// rows — one card per section the document itself names — which is what a
   /// list of things to turn on and off is. See [ViewSwitchRows].
   final bool switchRows;
+
+  /// Draws the root inside the same scope the shared renderers use. The
+  /// Routines list is a host layout over the same document, not a second
+  /// projection.
+  final Widget Function(Map<String, Object?> root)? rootView;
   ViewDocumentView({
     super.key,
     required this.document,
@@ -66,6 +71,7 @@ class ViewDocumentView extends StatefulWidget {
     this.cardGroups = false,
     this.gridGroups = false,
     this.switchRows = false,
+    this.rootView,
     Map<String, ViewFrameBuilder>? frames,
   }) : frames = frames ?? hostViewFramesV1;
 
@@ -135,7 +141,10 @@ class _ViewDocumentViewState extends State<ViewDocumentView> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (widget.switchRows)
+            if (widget.rootView case final Widget Function(Map<String, Object?>)
+                draw)
+              draw((json['root']! as Map).cast<String, Object?>())
+            else if (widget.switchRows)
               ViewSwitchRows(
                 node: (json['root']! as Map).cast<String, Object?>(),
               )

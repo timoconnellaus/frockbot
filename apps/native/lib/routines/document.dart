@@ -1,18 +1,17 @@
 /// The Routine command one action on the Routines document means.
 ///
-/// The server projects a Bot's Routines and its completion inbox as one
-/// `ViewDocument` (`routinesDocumentV1`), and this is the other end of that
-/// projection: every action's declared input names a `kind`, because an action
-/// id is opaque to the renderer. Three kinds are Routine commands the route
-/// already takes, one is the inbox command on a route of its own, and the
-/// fifth is navigation, which no route owns.
+/// The server projects a Bot's Routines and the completions nested under each
+/// of them as one `ViewDocument` (`routinesDocumentV1`), and this is the other
+/// end of that projection: every action's declared input names a `kind`,
+/// because an action id is opaque to the renderer. The Routine commands the
+/// route already takes, and the navigation no route owns.
 library;
 
 const routineActionKindsV1 = <String>{
   'set-routine-enabled',
   'run-routine',
   'delete-routine',
-  'acknowledge-inbox',
+  'open-run',
   'open-runs',
   'edit-routine',
   'cancel-edit',
@@ -40,37 +39,9 @@ String? routineActionKindV1(Map<String, Object?> command) {
 String? routineIdV1(Map<String, Object?> command) =>
     ((command['input'] as Map?)?['routineId']) as String?;
 
-/// The inbox entry an acknowledgement names. Absent is "Mark all read", which
-/// means the entries the reader could see and not every entry the object holds.
+/// The completion a run-row names, or nothing.
 String? routineEntryIdV1(Map<String, Object?> command) =>
     ((command['input'] as Map?)?['entryId']) as String?;
-
-/// The inbox entries a document offers an acknowledgement for — which is
-/// exactly what its reader can see.
-///
-/// "Mark all read" means these and no more: an empty `entryIds` on the wire
-/// acknowledges everything the object holds, including a firing that landed a
-/// second ago and has never been on screen.
-List<String> routineUnacknowledgedOnScreenV1(Object? root) {
-  final entries = <String>[];
-  void walk(Object? value) {
-    if (value is! Map) return;
-    final node = value.cast<String, Object?>();
-    if (node['type'] == 'action' && node['actionId'] == 'acknowledge-inbox') {
-      final entryId = ((node['input'] as Map?)?['entryId']) as String?;
-      if (entryId != null) entries.add(entryId);
-    }
-    for (final child in (node['children'] as List? ?? const [])) {
-      walk(child);
-    }
-    for (final row in (node['rows'] as List? ?? const [])) {
-      walk((row as Map)['node']);
-    }
-  }
-
-  walk(root);
-  return entries;
-}
 
 /// What the editor's fields were seeded with, by field id.
 ///
@@ -240,26 +211,5 @@ Map<String, Object?> _saveCommandV1(
       'trigger': {'kind': 'webhook'}
     else
       'schedule': schedule,
-  };
-}
-
-/// The inbox command an acknowledgement becomes. An empty list acknowledges
-/// every entry, so the host never sends one: `entryIds` is what it read.
-Map<String, Object?> routineInboxCommandV1(
-  Map<String, Object?> command,
-  String botId,
-  List<String> onScreen,
-) {
-  final entryId = routineEntryIdV1(command);
-  final entryIds = entryId == null ? onScreen : <String>[entryId];
-  if (entryIds.isEmpty) {
-    throw const FormatException('There is nothing here to mark read.');
-  }
-  return {
-    'schemaVersion': 1,
-    'commandId': command['commandId'],
-    'botId': botId,
-    'type': 'routine/acknowledge-inbox',
-    'entryIds': entryIds,
   };
 }

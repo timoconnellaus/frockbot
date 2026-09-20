@@ -22,7 +22,6 @@ import 'widget_test.dart' show MemoryStore;
 Map<String, Object?> routinesDocument({
   int revision = 1,
   bool enabled = true,
-  bool acknowledged = false,
 }) => {
   'schemaVersion': 1,
   'surfaceId': 'routines',
@@ -31,84 +30,25 @@ Map<String, Object?> routinesDocument({
     'type': 'group',
     'orientation': 'column',
     'children': [
-      {'type': 'text', 'text': '1 Routine · 1 unread', 'style': 'status'},
       {
         'type': 'group',
         'orientation': 'column',
-        'title': 'Morning brief',
+        'title': 'Scheduled',
         'children': [
-          {
-            'type': 'text',
-            'text':
-                '0 9 * * * · Australia/Sydney · Never run · '
-                '${enabled ? 'No next firing scheduled' : 'Paused'}',
-            'style': 'status',
-          },
-          {'type': 'text', 'text': 'Summarise overnight email.'},
-          {
-            'type': 'group',
-            'orientation': 'row',
-            'children': [
-              {
-                'type': 'action',
-                'actionId': 'set-routine-enabled',
-                'label': enabled ? 'Pause' : 'Resume',
-                'input': {
-                  'kind': 'set-routine-enabled',
-                  'routineId': 'r1',
-                  'enabled': !enabled,
-                },
-              },
-              {
-                'type': 'action',
-                'actionId': 'run-routine',
-                'label': 'Run now',
-                'input': {'kind': 'run-routine', 'routineId': 'r1'},
-              },
-              {
-                'type': 'action',
-                'actionId': 'open-runs',
-                'label': 'Run log',
-                'input': {'kind': 'open-runs', 'routineId': 'r1'},
-              },
-              {
-                'type': 'action',
-                'actionId': 'delete-routine',
-                'label': 'Delete',
-                'style': 'danger',
-                'input': {'kind': 'delete-routine', 'routineId': 'r1'},
-              },
-            ],
-          },
-        ],
-      },
-      {
-        'type': 'group',
-        'orientation': 'column',
-        'title': 'Routine completions',
-        'children': [
-          {
-            'type': 'group',
-            'orientation': 'column',
-            'children': [
-              {'type': 'text', 'text': 'Morning brief', 'style': 'status'},
-              {'type': 'text', 'text': 'Nine unread, two need you.'},
-              if (!acknowledged)
-                {
-                  'type': 'action',
-                  'actionId': 'acknowledge-inbox',
-                  'label': 'Mark read',
-                  'input': {'kind': 'acknowledge-inbox', 'entryId': 'e1'},
-                },
-            ],
-          },
-          if (!acknowledged)
+          routineRow({
+            'routineId': 'r1',
+            'name': 'Morning brief',
+            'schedule': '0 9 * * *',
+            'enabled': enabled,
+          }, runs: [
             {
-              'type': 'action',
-              'actionId': 'acknowledge-inbox',
-              'label': 'Mark all read',
-              'input': {'kind': 'acknowledge-inbox'},
+              'entryId': 'e1',
+              'routineId': 'r1',
+              'name': 'Morning brief',
+              'createdAt': '2026-09-02T23:00:10.000Z',
+              'mark': 'finished',
             },
+          ]),
         ],
       },
     ],
@@ -176,17 +116,18 @@ Map<String, Object?> routinesDocument({
       },
     },
     {
-      'id': 'acknowledge-inbox',
+      'id': 'open-run',
       'schema': {
         'type': 'object',
         'properties': {
           'kind': {
             'type': 'string',
-            'enum': ['acknowledge-inbox'],
+            'enum': ['open-run'],
           },
+          'routineId': {'type': 'string', 'maxLength': 128},
           'entryId': {'type': 'string', 'maxLength': 128},
         },
-        'required': ['kind'],
+        'required': ['kind', 'routineId', 'entryId'],
         'additionalProperties': false,
       },
     },
@@ -266,8 +207,12 @@ Map<String, Object?> routinesEditorGroup(Map<String, Object?>? editing) {
   };
 }
 
-/// One Routine's row: what it fires on, and the two controls a row draws.
-Map<String, Object?> routineRow(Map<String, Object?> routine) {
+/// One Routine's row: what it fires on, the two controls a row draws, and
+/// the completions nested under it.
+Map<String, Object?> routineRow(
+  Map<String, Object?> routine, {
+  List<Map<String, Object?>> runs = const [],
+}) {
   final id = routine['routineId'];
   final enabled = routine['enabled'] == true;
   return {
@@ -304,18 +249,52 @@ Map<String, Object?> routineRow(Map<String, Object?> routine) {
           },
         ],
       },
+      for (final run in runs)
+        {
+          'type': 'group',
+          'orientation': 'column',
+          'title': run['name'] ?? routine['name'],
+          'children': [
+            {
+              'type': 'text',
+              'text': run['createdAt'],
+              'style': 'status',
+            },
+            {'type': 'text', 'text': run['mark'] ?? 'finished'},
+            {
+              'type': 'group',
+              'orientation': 'row',
+              'children': [
+                {
+                  'type': 'action',
+                  'actionId': 'open-run',
+                  'label': 'Open',
+                  'input': {
+                    'kind': 'open-run',
+                    'routineId': run['routineId'] ?? id,
+                    'entryId': run['entryId'],
+                  },
+                },
+              ],
+            },
+          ],
+        },
     ],
   };
 }
 
 /// The editor page: the form alone, not the list with a form on it.
+///
+/// Revision 3 so the host adopts a new controller when the list (revision 2)
+/// becomes this form — a lower number would still differ, but the read that
+/// answers an edit is a newer document, not an older one.
 Map<String, Object?> routinesDocumentWithEditor({
   List<Map<String, Object?>> routines = const [],
   Map<String, Object?>? editing,
 }) => {
   'schemaVersion': 1,
   'surfaceId': 'routines',
-  'revision': 1,
+  'revision': 3,
   'root': {
     'type': 'group',
     'orientation': 'column',
@@ -591,12 +570,120 @@ void main() {
     await tester.tap(find.text('New Routine'));
     await tester.pumpAndSettle();
     expect(find.text('Continue'), findsNothing);
+    expect(find.widgetWithText(AppBar, 'New Routine'), findsOneWidget);
+    expect(find.text('New Routine'), findsWidgets);
     expect(find.text('Routine name'), findsOneWidget);
     expect(find.text('Schedule'), findsOneWidget);
     expect(find.text('Daily'), findsOneWidget);
     expect(find.text('Create Routine'), findsOneWidget);
     expect(find.text('Cancel'), findsOneWidget);
     expect(byIdentifier(RoutineIds.editorBack), findsOneWidget);
+  });
+
+  testWidgets('the panel’s new Routine page names itself at the top', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final panel = RoutinesPanelHandle();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      return routinesDocumentForPath(path);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: RoutinesView(
+            api: api,
+            store: store,
+            userId: 'tim',
+            botId: 'bot-1',
+            botName: 'Scout',
+            chrome: false,
+            panel: panel,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(panel.editorTitle, isNull);
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    expect(panel.editorTitle, 'New Routine');
+    expect(find.text('New Routine'), findsWidgets);
+    expect(find.text('What should this Bot do?'), findsOneWidget);
+  });
+
+  testWidgets('completions sit under their Routine as the Bot page rows', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      return routinesDocument();
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    expect(find.text('Completions'), findsNothing);
+    expect(find.text('Mark read'), findsNothing);
+    expect(find.text('Mark all read'), findsNothing);
+    expect(find.byType(RoutineRunRow), findsOneWidget);
+    expect(find.byType(Switch), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_right_rounded), findsWidgets);
+    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+    expect(find.text('Save changes'), findsNothing);
+  });
+
+  testWidgets('tapping a Routine opens it; the switch is only the switch', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      if (body != null) {
+        sent.add((body as Map).cast<String, Object?>());
+        return {
+          'schemaVersion': 1,
+          'commandId': body['commandId'],
+          'status': 'applied',
+        };
+      }
+      return routinesDocumentForPath(
+        path,
+        routines: [
+          {
+            'routineId': 'r1',
+            'name': 'Morning brief',
+            'schedule': '0 9 * * *',
+            'enabled': true,
+          },
+        ],
+        editing: {
+          'routineId': 'r1',
+          'name': 'Morning brief',
+          'prompt': 'Summarise overnight email.',
+          'schedule': '0 9 * * *',
+          'timing': 'schedule',
+        },
+      );
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Morning brief'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Edit Routine'), findsOneWidget);
+    expect(find.text('Save changes'), findsOneWidget);
+    expect(sent, isEmpty);
+    await tester.tap(byIdentifier(RoutineIds.editorBack));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(sent.single['type'], 'routine/pause');
+    expect(find.text('Save changes'), findsNothing);
   });
 
   testWidgets('back leaves a form nobody changed', (tester) async {
@@ -635,7 +722,7 @@ void main() {
     expect(find.text('Create Routine'), findsNothing);
     expect(find.text('New Routine'), findsOneWidget);
 
-    await tester.tap(find.text('Edit'));
+    await tester.tap(find.text('Morning brief'));
     await tester.pumpAndSettle();
     expect(find.text('Save changes'), findsOneWidget);
     await tester.tap(byIdentifier(RoutineIds.editorBack));
@@ -694,7 +781,7 @@ void main() {
     expect(find.text('Create Routine'), findsNothing);
     expect(find.text('New Routine'), findsOneWidget);
 
-    await tester.tap(find.text('Edit'));
+    await tester.tap(find.text('Morning brief'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).first, 'Evening brief');
     await tester.pump();
@@ -763,7 +850,7 @@ void main() {
     // Only the Plugin read is outstanding, and the document is drawn and
     // answering rather than held behind it.
     expect(find.text('First brief'), findsOneWidget);
-    await tester.tap(find.text('Pause'));
+    await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
     expect(sent.single['type'], 'routine/pause');
 
@@ -880,17 +967,17 @@ void main() {
     await tester.pumpWidget(routinesPage(api, store));
     await tester.pumpAndSettle();
 
-    // A row still pauses the Routine it names while the editor is a page of
-    // its own, not a form sitting on the list.
-    await tester.tap(find.text('Pause'));
+    // The list is on screen, so a switch still names the Routine it pauses.
+    await tester.tap(find.byType(Switch).first);
     await tester.pumpAndSettle();
     expect(sent.single['routineId'], 'r1');
     expect(sent.single['type'], 'routine/pause');
 
-    await tester.tap(find.text('Edit').last);
+    await tester.tap(find.text('Second brief'));
     await tester.pumpAndSettle();
     expect(find.text('Run now'), findsOneWidget);
     expect(find.text('Second brief'), findsWidgets);
+    expect(find.text('First brief'), findsNothing);
   });
 
   testWidgets('the interval control shows the interval the value holds', (
@@ -1158,57 +1245,6 @@ void main() {
       expect(() => routineCommandV1(command, 'bot-1'), throwsFormatException);
     });
 
-    test('Mark all read names the entries the reader could see', () {
-      final onScreen = routineUnacknowledgedOnScreenV1(
-        routinesDocument()['root'],
-      );
-      expect(onScreen, ['e1']);
-      expect(
-        routineInboxCommandV1(
-          {
-            'commandId': 'c5',
-            'input': {'kind': 'acknowledge-inbox'},
-          },
-          'bot-1',
-          onScreen,
-        ),
-        {
-          'schemaVersion': 1,
-          'commandId': 'c5',
-          'botId': 'bot-1',
-          'type': 'routine/acknowledge-inbox',
-          'entryIds': ['e1'],
-        },
-      );
-      // Never an empty list: that is the wire's "acknowledge everything", and
-      // a firing nobody has seen would go with it.
-      expect(
-        () => routineInboxCommandV1(
-          {
-            'commandId': 'c6',
-            'input': {'kind': 'acknowledge-inbox'},
-          },
-          'bot-1',
-          const [],
-        ),
-        throwsFormatException,
-      );
-    });
-
-    test('one entry’s acknowledgement names only that entry', () {
-      expect(
-        routineInboxCommandV1(
-          {
-            'commandId': 'c7',
-            'input': {'kind': 'acknowledge-inbox', 'entryId': 'e2'},
-          },
-          'bot-1',
-          const ['e1', 'e2'],
-        ),
-        containsPair('entryIds', ['e2']),
-      );
-    });
-
     test('a firing reads as a moment, never as the wire', () {
       expect(
         routineRunMomentV1('2026-09-07T20:23:18.818Z'),
@@ -1220,14 +1256,6 @@ void main() {
       expect(routineRunMomentV1(null), '');
     });
 
-    test('an acknowledged inbox offers nothing to acknowledge', () {
-      expect(
-        routineUnacknowledgedOnScreenV1(
-          routinesDocument(acknowledged: true)['root'],
-        ),
-        isEmpty,
-      );
-    });
   });
 
   testWidgets('pausing a Routine sends one command and reads back', (
@@ -1264,20 +1292,41 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Morning brief'), findsWidgets);
-    await tester.tap(find.text('Pause'));
+    await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
     expect(sent.single['type'], 'routine/pause');
     expect(sent.single['botId'], 'bot-1');
-    expect(find.text('Resume'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
   });
 
   testWidgets('deleting asks first, and Cancel keeps the Routine', (
     tester,
   ) async {
+    useTallSurface(tester);
     final store = MemoryStore();
     final sent = <Map<String, Object?>>[];
     final api = SettingsApi(store, (path, body) async {
-      if (body == null) return routinesDocument();
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      if (body == null) {
+        return routinesDocumentForPath(
+          path,
+          routines: [
+            {
+              'routineId': 'r1',
+              'name': 'Morning brief',
+              'schedule': '0 9 * * *',
+              'enabled': true,
+            },
+          ],
+          editing: {
+            'routineId': 'r1',
+            'name': 'Morning brief',
+            'prompt': 'Summarise overnight email.',
+            'schedule': '0 9 * * *',
+            'timing': 'schedule',
+          },
+        );
+      }
       sent.add((body as Map).cast<String, Object?>());
       return {
         'schemaVersion': 1,
@@ -1285,31 +1334,29 @@ void main() {
         'status': 'applied',
       };
     });
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: RoutinesView(
-          api: api,
-          store: store,
-          userId: 'tim',
-          botId: 'bot-1',
-          botName: 'Scout',
-        ),
-      ),
-    );
+    await tester.pumpWidget(routinesPage(api, store));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete'));
+    await tester.tap(find.text('Morning brief').first);
     await tester.pumpAndSettle();
+    expect(find.text('Save changes'), findsOneWidget);
+    expect(find.text('Check that action'), findsNothing);
+    final delete = find.widgetWithText(OutlinedButton, 'Delete');
+    expect(delete, findsOneWidget);
+    expect(tester.widget<OutlinedButton>(delete).onPressed, isNotNull);
+    await tester.ensureVisible(delete);
+    await tester.tap(delete);
+    await tester.pump();
     expect(find.text('Delete this Routine?'), findsOneWidget);
     // The whole run log goes with it, which is what the question says.
     expect(find.textContaining('run log'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
     expect(sent, isEmpty);
     expect(find.text('Morning brief'), findsWidgets);
 
-    await tester.tap(find.text('Delete'));
-    await tester.pumpAndSettle();
+    await tester.ensureVisible(delete);
+    await tester.tap(delete);
+    await tester.pump();
     await tester.tap(find.text('Delete Routine'));
     await tester.pumpAndSettle();
     expect(sent.single['type'], 'routine/delete');
@@ -1339,36 +1386,6 @@ void main() {
     expect(controller.badge, '99+');
     expect(notified, 2);
   });
-
-  test(
-    'acknowledging drops the badge on the receipt, not on the next read',
-    () async {
-      final store = MemoryStore();
-      final counts = <int>[];
-      final controller = RoutinesController(
-        SettingsApi(store, (path, body) async {
-          if (body == null) return routinesDocument();
-          return {
-            'schemaVersion': 1,
-            'commandId': (body as Map)['commandId'],
-            'status': 'applied',
-          };
-        }),
-        'bot-1',
-        onInbox: counts.add,
-      );
-      addTearDown(controller.dispose);
-      await controller.load();
-      expect(counts, [1]);
-      // The entry acknowledged was on screen, so what is left is arithmetic.
-      await controller.dispatch({
-        'commandId': 'c1',
-        'actionId': 'acknowledge-inbox',
-        'input': {'kind': 'acknowledge-inbox', 'entryId': 'e1'},
-      });
-      expect(counts, [1, 0]);
-    },
-  );
 
   testWidgets('Routines recovers from offline without raw backend detail', (
     tester,

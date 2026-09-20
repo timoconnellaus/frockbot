@@ -286,7 +286,18 @@ const _rowToggleIds = {
   'install-package',
   'set-routine-enabled',
 };
-const _rowOpenIds = {'edit-routine', 'open-home', 'acknowledge-inbox'};
+const _rowOpenIds = {'edit-routine', 'open-home', 'open-run'};
+
+/// Presses the host answers itself. They are not retained: a command
+/// envelope written for one of them would be restored onto the document
+/// the press just opened, and every control on it would refuse to work.
+const _hostAnsweredIds = {
+  'edit-routine',
+  'cancel-edit',
+  'open-run',
+  'open-runs',
+  'open-home',
+};
 
 /// The declared actions of [children] that a row draws as its own controls.
 List<Map<String, Object?>> _rowActions(List<Map<String, Object?>> children) => [
@@ -371,9 +382,13 @@ class _ViewSwitchRow extends StatelessWidget {
       FrockRow(
         title: title,
         subtitle: said.isEmpty ? null : said.join(' · '),
-        chevron: toggle == null,
+        chevron: open != null || toggle == null,
         onTap: open != null && openSchema != null
-            ? () => scope.controller.submit(open, openSchema)
+            ? () => scope.controller.submit(
+                open,
+                openSchema,
+                persist: false,
+              )
             : toggle == null || locked
             ? null
             : flip,
@@ -923,6 +938,7 @@ class ViewActionNode extends StatelessWidget {
         : () => scope.controller.submit(
             node,
             schema,
+            persist: !_hostAnsweredIds.contains(node['actionId']),
             predictKey: viewRemovesGroupV1(node)
                 ? viewPredictionKeyV1(node)
                 : null,

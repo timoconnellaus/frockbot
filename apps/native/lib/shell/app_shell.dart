@@ -169,6 +169,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int featuresRevision = 0;
   BotSettingsController? botSettings;
   RoutineInboxController? routineInbox;
+  RoutinesPanelHandle? routinesPanel;
 
   /// The selected Bot's Applet canvas, its Computer, and the Package pages its
   /// Composition declares. All three belong to one Bot and are replaced whole
@@ -975,6 +976,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     botSettings?.removeListener(_paintFromSettings);
     botSettings?.dispose();
     routineInbox?.dispose();
+    routinesPanel?.removeListener(_repaint);
+    routinesPanel?.dispose();
     _selectedChat?.removeListener(_selectedChatChanged);
     _selectedSession = widget.sessions.open(widget.userId, botId);
     _observedWorkingRunId = _selectedChat?.activeRunId;
@@ -983,10 +986,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _selectedChat?.addListener(_selectedChatChanged);
     final controller = BotSettingsController(widget.api, botId);
     final inbox = RoutineInboxController(widget.api, botId);
+    final routines = RoutinesPanelHandle();
     botSettings = controller;
     controller.addListener(_paintFromSettings);
     routineInbox = inbox;
     inbox.addListener(_repaint);
+    routinesPanel = routines;
+    routines.addListener(_repaint);
     slots.register(
       ShellSlot.rightPanel,
       'bot-settings',
@@ -1003,6 +1009,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         botId: botId,
         botName: name,
         chrome: false,
+        panel: routines,
         onOpenRun: _openRun,
         onInbox: inbox.adopt,
       ),
@@ -1619,7 +1626,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     ShellIds.rightPanelBack,
                     IconButton(
                       tooltip: 'Back',
-                      onPressed: () => setState(panelStack.removeLast),
+                      onPressed: () => unawaited(_popPanel()),
                       style: _panelControl(theme),
                       icon: const Icon(Icons.chevron_left_rounded),
                     ),
@@ -1691,9 +1698,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   );
 
   /// What the panel calls the sub-page it is showing.
-  String? _panelTitle(String key) => key == 'package'
-      ? panelPackage?.entry.label
-      : slots.labelOf(ShellSlot.rightPanel, key);
+  String? _panelTitle(String key) {
+    if (key == 'routines' && routinesPanel?.editorTitle != null) {
+      return routinesPanel!.editorTitle;
+    }
+    return key == 'package'
+        ? panelPackage?.entry.label
+        : slots.labelOf(ShellSlot.rightPanel, key);
+  }
+
+  Future<void> _popPanel() async {
+    if (panelStack.isNotEmpty &&
+        panelStack.last == 'routines' &&
+        routinesPanel?.tryLeaveEditor != null) {
+      if (!await routinesPanel!.tryLeaveEditor!()) return;
+      return;
+    }
+    if (!mounted) return;
+    setState(panelStack.removeLast);
+  }
 
   Widget? _packagePanel(wire.BotRegistration bot) {
     final entry = panelPackage;
@@ -2344,11 +2367,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     botSettings?.removeListener(_paintFromSettings);
     botSettings?.dispose();
     routineInbox?.dispose();
+    routinesPanel?.removeListener(_repaint);
+    routinesPanel?.dispose();
     appletCanvas?.dispose();
     computer?.dispose();
     _selectedChat?.removeListener(_selectedChatChanged);
     botSettings = null;
     routineInbox = null;
+    routinesPanel = null;
     appletCanvas = null;
     computer = null;
     _selectedSession = null;
@@ -3197,6 +3223,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     botSettings?.removeListener(_paintFromSettings);
     botSettings?.dispose();
     routineInbox?.dispose();
+    routinesPanel?.removeListener(_repaint);
+    routinesPanel?.dispose();
     appletCanvas?.dispose();
     computer?.dispose();
     _selectedChat?.removeListener(_selectedChatChanged);

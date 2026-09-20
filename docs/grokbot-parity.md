@@ -811,11 +811,10 @@ the rows whose status the code moved:
   landed too: an automation Turn is absent from `GET /api/bots/:id/turns` and
   from the run lookup, reachable only through the run log, and a completed
   firing writes a `RoutineInboxEntryV1` in the transaction that settles it —
-  `attribution: "Automation: <name>"`, `acknowledged: false` — surfaced by the
-  All Routines row's badge on the Bot page and the Completions card at the foot
-  of the Routines surface (`apps/native/lib/routines/page.dart`), and cleared by
-  an explicit
-  acknowledge command. What is still missing is the confirmation **card**:
+  `attribution: "Automation: <name>"` — surfaced as recent-run rows on the Bot
+  page and nested under each Routine on All Routines
+  (`apps/native/lib/routines/page.dart`). Completions have no read status.
+  What is still missing is the confirmation **card**:
   a Routine write answers with a receipt the settings surface re-renders, not
   with a card in the conversation, because a Bot-authored write happens on a
   Turn whose only user-facing channel is `send_to_user`.

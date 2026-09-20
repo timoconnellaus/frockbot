@@ -2,16 +2,15 @@
 // `ViewDocument` the host renders — the same convention as
 // `app/settings/settings-document.ts`, reached with `?as=document`.
 //
-// The frame is two reads in one: the Routines a Bot holds, and the completion
-// inbox the header badge counts. They are one
-// document because they are one surface, and because a client that had to ask
-// twice could show a Routine list and a badge that disagreed.
+// The frame is two reads in one: the Routines a Bot holds, and the completions
+// each Routine left. They are one document because they are one surface, and
+// because a client that had to ask twice could nest a run under the wrong
+// Routine.
 //
 // Every action declares a `kind` from the closed vocabulary below, because an
 // action id is opaque to the renderer and the command a press means is not
-// derivable from the label a person reads. Three kinds are Routine commands
-// the route already takes, one is the inbox command, and the fifth is
-// navigation — which no route owns.
+// derivable from the label a person reads. The Routine commands the route
+// already takes, and the navigation no route owns.
 
 import {
   decodeProtocol,
@@ -27,7 +26,7 @@ export const ROUTINE_ACTION_KINDS_V1 = [
   "set-routine-enabled",
   "run-routine",
   "delete-routine",
-  "acknowledge-inbox",
+  "open-run",
   "open-runs",
   "edit-routine",
   "cancel-edit",
@@ -39,7 +38,7 @@ export const ROUTINE_ACTION_KINDS_V1 = [
 export type RoutineActionKindV1 = (typeof ROUTINE_ACTION_KINDS_V1)[number];
 
 /**
- * One Bot's Routines and its completion inbox, as the surface reads them.
+ * One Bot's Routines and the completions nested under each of them.
  *
  * There is no shared revision counter to carry: a Routine is its own durable
  * record rather than a field of a settings view, which is why the commands
@@ -71,8 +70,8 @@ export interface RoutinesFrameV1 {
 
 /** The renderer's node budget, checked before it builds a widget. */
 const NODE_LIMIT = 512;
-/** Inbox entries one document carries; the rest are read after acknowledging. */
-const INBOX_LIMIT = 20;
+/** Completions one Routine carries on the list; the run log has the rest. */
+const RUNS_PER_ROUTINE = 3;
 
 const IDENTIFIER: ActionValueSchema = { type: "string", maxLength: 128 };
 const TEXT = (maxLength: number): ActionValueSchema => ({
@@ -166,7 +165,6 @@ export const MONTHS = [
 export function routinesRevisionV1(frame: RoutinesFrameV1): number {
   const text = JSON.stringify([
     frame.botId,
-    frame.unacknowledged,
     // The editor's seeds are part of what the document says, so naming a
     // different Routine — or asking for a new one — moves the revision and
     // the host adopts a controller whose field values are answers to the
@@ -187,8 +185,10 @@ export function routinesRevisionV1(frame: RoutinesFrameV1): number {
     ]),
     frame.inbox.map((entry) => [
       entry.entryId,
-      entry.acknowledged,
-      entry.repeatCount,
+      entry.routineId,
+      entry.createdAt,
+      entry.failure === true,
+      entry.repeatCount ?? 1,
     ]),
   ]);
   let hash = 0x811c9dc5;
@@ -247,7 +247,10 @@ function routineFacts(routine: RoutineViewV1): string {
  * place to see what is armed and to turn it off; six controls on each of them
  * was a list nobody could read.
  */
-function routineNode(routine: RoutineViewV1): ViewNode {
+function routineNode(
+  routine: RoutineViewV1,
+  runs: RoutineInboxEntryViewV1[],
+): ViewNode {
   const id = routine.routineId;
   return {
     type: "group",
@@ -270,6 +273,7 @@ function routineNode(routine: RoutineViewV1): ViewNode {
           }),
         ],
       },
+      ...runs.map(completionNode),
     ],
   };
 }
@@ -350,66 +354,76 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
 }
 
 /**
- * One completion, as a row: what left it, what it said, and the press that
- * marks it read.
- *
- * The attribution is the row's name rather than the first of its words,
- * because a row is a named thing — and the press is the row's own, because
- * acknowledging lives nowhere else in the client: a run log is a read.
+ * One completion, as the Bot page says a firing: the name, when, and how it
+ * ended. The host draws the same loose row it draws there. A press opens the
+ * run log — a completion is not a thing to mark read.
  */
-function inboxNode(entry: RoutineInboxEntryViewV1): ViewNode {
-  const repeats = (entry.repeatCount ?? 1) > 1;
-  const said = [
-    entry.failure ? "Didn’t work" : undefined,
-    repeats ? `Happened ${entry.repeatCount} times` : undefined,
-  ].filter((part): part is string => part !== undefined);
+function completionNode(entry: RoutineInboxEntryViewV1): ViewNode {
+  const prefix = "Automation: ";
+  const name = entry.attribution.startsWith(prefix)
+    ? entry.attribution.slice(prefix.length)
+    : entry.attribution;
   return {
     type: "group",
     orientation: "column",
-    title: entry.attribution,
+    title: name.length === 0 ? "Routine" : name,
     children: [
-      ...(said.length > 0 ? [status(said.join(" · "))] : []),
-      { type: "text", text: entry.text.slice(0, 4000) },
-      ...(entry.acknowledged
-        ? []
-        : [
-            {
-              type: "group",
-              orientation: "row",
-              children: [
-                press("acknowledge-inbox", "Mark read", {
-                  kind: "acknowledge-inbox",
-                  entryId: entry.entryId,
-                }),
-              ],
-            } as ViewNode,
-          ]),
+      { type: "text", text: entry.createdAt, style: "status" },
+      { type: "text", text: entry.failure === true ? "failed" : "finished" },
+      {
+        type: "group",
+        orientation: "row",
+        children: [
+          press("open-run", "Open", {
+            kind: "open-run",
+            routineId: entry.routineId,
+            entryId: entry.entryId,
+          }),
+        ],
+      },
     ],
   };
 }
 
-/** The list half: what is armed, and what it left behind. */
+/** Completions filed under the Routine that left them, newest first. */
+function runsByRoutineV1(
+  inbox: RoutineInboxEntryViewV1[],
+): Map<string, RoutineInboxEntryViewV1[]> {
+  const byRoutine = new Map<string, RoutineInboxEntryViewV1[]>();
+  for (const entry of inbox) {
+    const held = byRoutine.get(entry.routineId) ?? [];
+    if (held.length >= RUNS_PER_ROUTINE) continue;
+    held.push(entry);
+    byRoutine.set(entry.routineId, held);
+  }
+  return byRoutine;
+}
+
+/** The list half: what is armed, and what each Routine left behind. */
 function listChildren(frame: RoutinesFrameV1): ViewNode[] {
   const children: ViewNode[] = [];
-  // The root, the two section groups, plus what the tail always costs: the
-  // empty or overflow line, the inbox's own group, its empty line and
-  // "Mark all read". Reserved up front so the last Routine admitted cannot
-  // be the reason the inbox does not fit.
-  let nodes = 16;
+  // The root, the two section groups, and the overflow line. Completions sit
+  // inside the Routine that left them, so they are reserved per Routine.
+  let nodes = 8;
   let complete = true;
-  // The Routine's own group, its line, the controls' row and the two controls
-  // in it.
+  // The Routine's own group, its line, the controls' row and the two
+  // controls in it. Each completion is a group, the stamp, the mark and the
+  // press that opens it.
   const routineCost = 5;
+  const runCost = 5;
+  const runs = runsByRoutineV1(frame.inbox);
   const scheduled: ViewNode[] = [];
   const triggered: ViewNode[] = [];
   for (const routine of frame.routines) {
-    if (nodes + routineCost > NODE_LIMIT) {
+    const shown = runs.get(routine.routineId) ?? [];
+    const cost = routineCost + runCost * shown.length;
+    if (nodes + cost > NODE_LIMIT) {
       complete = false;
       break;
     }
-    nodes += routineCost;
+    nodes += cost;
     (routine.schedule === undefined ? triggered : scheduled).push(
-      routineNode(routine),
+      routineNode(routine, shown),
     );
   }
   // A section is drawn only where it holds something: an empty "Webhooks"
@@ -430,7 +444,23 @@ function listChildren(frame: RoutinesFrameV1): ViewNode[] {
       children: triggered,
     });
   }
-  if (frame.routines.length === 0) {
+  const known = new Set(frame.routines.map((routine) => routine.routineId));
+  const past = frame.inbox
+    .filter((entry) => !known.has(entry.routineId))
+    .slice(0, RUNS_PER_ROUTINE);
+  if (past.length > 0) {
+    const cost = 1 + 5 * past.length;
+    if (nodes + cost <= NODE_LIMIT) {
+      nodes += cost;
+      children.push({
+        type: "group",
+        orientation: "column",
+        title: "Past",
+        children: past.map(completionNode),
+      });
+    }
+  }
+  if (frame.routines.length === 0 && past.length === 0) {
     // A named thing with a line under it, so the empty surface is the same
     // card grammar as the full one rather than a sentence loose on the page.
     children.push({
@@ -452,52 +482,6 @@ function listChildren(frame: RoutinesFrameV1): ViewNode[] {
       ),
     );
   }
-
-  const shown = frame.inbox.slice(0, INBOX_LIMIT);
-  const inbox: ViewNode[] = [];
-  if (shown.length === 0) {
-    inbox.push({
-      type: "group",
-      orientation: "column",
-      title: "Nothing here yet",
-      children: [status("Finished Routines leave their results here.")],
-    });
-  }
-  for (const entry of shown) {
-    const cost = entry.acknowledged ? 4 : 6;
-    if (nodes + cost > NODE_LIMIT) break;
-    nodes += cost;
-    inbox.push(inboxNode(entry));
-  }
-  // "Mark all read" means what is on this document, not every unread entry the
-  // object holds: with a Routine firing every minute, acknowledging everything
-  // marks a completion read that nobody has seen. It is the last row of the
-  // card rather than a button under it, because every other thing on this
-  // surface is a row.
-  if (shown.some((entry) => !entry.acknowledged)) {
-    inbox.push({
-      type: "group",
-      orientation: "column",
-      title: "Mark all read",
-      children: [
-        {
-          type: "group",
-          orientation: "row",
-          children: [
-            press("acknowledge-inbox", "Mark all read", {
-              kind: "acknowledge-inbox",
-            }),
-          ],
-        },
-      ],
-    });
-  }
-  children.push({
-    type: "group",
-    orientation: "column",
-    title: "Completions",
-    children: inbox,
-  });
   return children;
 }
 
@@ -554,14 +538,17 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
         },
       },
       {
-        // `entryId` is optional, and its absence is what "Mark all read"
-        // means: the host acknowledges the entries this document carried,
-        // which is what the reader could see.
-        id: "acknowledge-inbox",
+        // Navigation: the host opens the run log for the Routine this
+        // completion belongs to. No route owns which firing is on screen.
+        id: "open-run",
         schema: {
           type: "object",
-          properties: { kind: KIND, entryId: IDENTIFIER },
-          required: ["kind"],
+          properties: {
+            kind: KIND,
+            routineId: IDENTIFIER,
+            entryId: IDENTIFIER,
+          },
+          required: ["kind", "routineId", "entryId"],
           additionalProperties: false,
         },
       },
