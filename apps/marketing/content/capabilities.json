@@ -1701,7 +1701,7 @@
       "type": "handler",
       "category": "In the Bot",
       "name": "Before a tool runs",
-      "description": "tools/pre-execute — inspect or patch a tool invocation before execution.",
+      "description": "tools/pre-execute — inspect or veto a tool invocation before execution.",
       "scope": "cloud",
       "status": "available"
     },
