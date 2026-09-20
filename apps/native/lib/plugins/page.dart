@@ -102,6 +102,8 @@ class PluginsController extends ViewSurfaceController {
   @override
   wire.ViewDocument? get document => _document;
   @override
+  wire.ViewDocument? get cacheDocument => _all;
+  @override
   bool get busy => _busy;
   @override
   String? get message => _message;

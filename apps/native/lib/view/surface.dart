@@ -29,6 +29,9 @@ abstract class ViewSurfaceController extends ChangeNotifier {
   /// Last known document from disk. The host paints it as last known, then
   /// [load] replaces it if the revision moved. Default ignores.
   void adoptCachedDocument(wire.ViewDocument cached) {}
+
+  /// The list to remember. [document] may be a filtered view of this.
+  wire.ViewDocument? get cacheDocument => document;
 }
 
 /// A host over `ViewDocumentView`, with the surface's own chrome.
@@ -160,7 +163,16 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
   @override
   void didUpdateWidget(ViewSurfacePage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller == widget.controller) return;
+    if (oldWidget.controller == widget.controller) {
+      // The list bound while the editor was open was not written: the scope
+      // is off so a form is not stored. Restoring it has to write what is
+      // already on screen — a same-controller update would otherwise ignore
+      // this.
+      if (oldWidget.cacheScope == null && widget.cacheScope != null) {
+        _writeCachedDocument();
+      }
+      return;
+    }
     oldWidget.controller.removeListener(_adopt);
     view?.removeListener(_afterAction);
     view?.dispose();
@@ -211,18 +223,22 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     view = next;
     widget.onView?.call(next);
     unawaited(next.restore());
+    _writeCachedDocument();
+  }
+
+  void _writeCachedDocument() {
     final scope = widget.cacheScope;
-    if (scope != null && !widget.controller.busy) {
-      unawaited(
-        writeViewDocumentCache(
-          widget.store,
-          widget.userId,
-          widget.controller.surfaceId,
-          scope,
-          document,
-        ),
-      );
-    }
+    final document = widget.controller.cacheDocument;
+    if (scope == null || document == null) return;
+    unawaited(
+      writeViewDocumentCache(
+        widget.store,
+        widget.userId,
+        widget.controller.surfaceId,
+        scope,
+        document,
+      ),
+    );
   }
 
   /// Restore last known, then refresh. The cache is last known, not live: a
@@ -406,15 +422,24 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                 ],
               ),
             )
-          : ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          // The empty pane scrolls itself; a ListView would give it unbounded
+          // height and it could not lay out.
+          : Column(
               children: [
-                ...chrome,
-                Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: widget.maxWidth),
-                    child: pane,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: chrome,
+                  ),
+                ),
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: widget.maxWidth),
+                      child: pane,
+                    ),
                   ),
                 ),
               ],

@@ -15,7 +15,9 @@ class _TrackedSurfaceController extends ViewSurfaceController {
   int loads = 0;
   int disposals = 0;
   Completer<void>? gate;
+  bool fail = false;
   wire.ViewDocument? _document;
+  String? _message;
 
   @override
   void adoptCachedDocument(wire.ViewDocument cached) {
@@ -30,7 +32,7 @@ class _TrackedSurfaceController extends ViewSurfaceController {
   bool get busy => gate != null && !gate!.isCompleted;
 
   @override
-  String? get message => null;
+  String? get message => _message;
 
   @override
   String get surfaceId => 'tracked';
@@ -53,6 +55,11 @@ class _TrackedSurfaceController extends ViewSurfaceController {
     notifyListeners();
     final held = gate;
     if (held != null) await held.future;
+    if (fail) {
+      _message = 'Check your connection and try again.';
+      notifyListeners();
+      return;
+    }
     _document = wire.ViewDocument.fromJson(
       listDocument(
         surfaceId: 'tracked',
@@ -166,6 +173,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('New Routine'), findsOneWidget);
     expect(find.text('From the network'), findsWidgets);
+    controller.dispose();
+  });
+
+  testWidgets('a failed first open shows retry chrome without a layout error', (
+    tester,
+  ) async {
+    final controller = _TrackedSurfaceController()
+      ..fail = true
+      ..gate = Completer<void>();
+    await tester.pumpWidget(
+      _surface(
+        controller,
+        banner: (_) =>
+            const FilledButton(onPressed: null, child: Text('New Routine')),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('New Routine'), findsOneWidget);
+    controller.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('New Routine'), findsOneWidget);
+    expect(find.text('Tracked couldn’t load'), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
+    controller.dispose();
+  });
+
+  testWidgets('restoring cacheScope writes the list already on screen', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final controller = _TrackedSurfaceController();
+    await tester.pumpWidget(_surface(controller, store: store));
+    await tester.pumpAndSettle();
+    expect(peekViewDocumentCache('tim', 'tracked', 'bot-1'), isNull);
+
+    await tester.pumpWidget(
+      _surface(controller, store: store, cacheScope: 'bot-1'),
+    );
+    await tester.pumpAndSettle();
+    expect(peekViewDocumentCache('tim', 'tracked', 'bot-1')?.revision, 1);
     controller.dispose();
   });
 

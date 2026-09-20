@@ -222,51 +222,63 @@ void main() {
       ),
       hasLength(1),
     );
+    expect(
+      controller.cacheDocument!.root.toJson().toString(),
+      contains('Ollama Cloud'),
+    );
+    controller.search('no such plugin');
+    expect(
+      controller.cacheDocument!.root.toJson().toString(),
+      contains('Ollama Cloud'),
+    );
     controller.dispose();
   });
 
-  test('a Bot search matches the plugin inside a kind section, not the kind', () async {
-    final controller = PluginsController(
-      SettingsApi(MemoryStore(), (_, _) async => botPluginsDocument()),
-      'tim',
-      botId: 'bot-1',
-    );
-    await controller.load();
-    controller.search('web');
-    var root = (controller.document!.toJson() as Map)['root'] as Map;
-    var sections = (root['children'] as List)
-        .whereType<Map>()
-        .where((node) => node['type'] == 'group')
-        .toList();
-    expect(sections, hasLength(1));
-    expect(
-      (sections.single['children'] as List)
+  test(
+    'a Bot search matches the plugin inside a kind section, not the kind',
+    () async {
+      final controller = PluginsController(
+        SettingsApi(MemoryStore(), (_, _) async => botPluginsDocument()),
+        'tim',
+        botId: 'bot-1',
+      );
+      await controller.load();
+      controller.search('web');
+      var root = (controller.document!.toJson() as Map)['root'] as Map;
+      var sections = (root['children'] as List)
           .whereType<Map>()
-          .map((row) => row['title']),
-      ['Web'],
-    );
-    controller.search('notes');
-    root = (controller.document!.toJson() as Map)['root'] as Map;
-    sections = (root['children'] as List)
-        .whereType<Map>()
-        .where((node) => node['type'] == 'group')
-        .toList();
-    expect(
-      (sections.single['children'] as List)
+          .where((node) => node['type'] == 'group')
+          .toList();
+      expect(sections, hasLength(1));
+      expect(
+        (sections.single['children'] as List).whereType<Map>().map(
+          (row) => row['title'],
+        ),
+        ['Web'],
+      );
+      controller.search('notes');
+      root = (controller.document!.toJson() as Map)['root'] as Map;
+      sections = (root['children'] as List)
           .whereType<Map>()
-          .map((row) => row['title']),
-      ['Files'],
-    );
-    controller.search('no such plugin');
-    root = (controller.document!.toJson() as Map)['root'] as Map;
-    expect(
-      (root['children'] as List).where(
-        (node) => (node as Map)['type'] == 'group',
-      ),
-      isEmpty,
-    );
-    controller.dispose();
-  });
+          .where((node) => node['type'] == 'group')
+          .toList();
+      expect(
+        (sections.single['children'] as List).whereType<Map>().map(
+          (row) => row['title'],
+        ),
+        ['Files'],
+      );
+      controller.search('no such plugin');
+      root = (controller.document!.toJson() as Map)['root'] as Map;
+      expect(
+        (root['children'] as List).where(
+          (node) => (node as Map)['type'] == 'group',
+        ),
+        isEmpty,
+      );
+      controller.dispose();
+    },
+  );
 
   for (final width in [375.0, 900.0]) {
     for (final scale in [1.0, 2.0]) {
@@ -564,6 +576,36 @@ void main() {
     expect(sent.single['arguments'], '{"by":2}');
     // The page is read again, so the section shows what changed.
     expect(find.text('Count: 2'), findsOneWidget);
+  });
+
+  testWidgets('a search during the first read is not last-known', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final gate = Completer<void>();
+    final api = SettingsApi(store, (_, _) async {
+      await gate.future;
+      return pluginsDocument();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: PluginsPage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'no such plugin');
+    await tester.pump();
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(
+      peekViewDocumentCache(
+        'tim',
+        'plugins',
+        'account',
+      )?.root.toJson().toString(),
+      contains('Ollama Cloud'),
+    );
   });
 
   testWidgets('Plugins recovers from offline without raw backend detail', (
