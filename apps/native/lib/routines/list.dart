@@ -2,7 +2,7 @@
 /// under it as the same loose rows the Bot page draws.
 ///
 /// A Settings-style switch row looks like tapping it would flip the switch.
-/// That is the wrong promise here: the row opens the editor, and the switch
+/// That is the wrong promise here: the row opens the detail, and the switch
 /// is only the switch. The chevron sits with the name; the switch is last.
 library;
 
@@ -115,7 +115,7 @@ class _RoutineBlock extends StatelessWidget {
         .where((action) => action['actionId'] == 'set-routine-enabled')
         .firstOrNull;
     final open = controls
-        .where((action) => action['actionId'] == 'edit-routine')
+        .where((action) => action['actionId'] == 'open-routine')
         .firstOrNull;
     final runs = [
       for (final child in children)
@@ -221,7 +221,7 @@ List<Map<String, Object?>> _routineControls(Map<String, Object?> node) {
     for (final inner in (child['children'] as List? ?? const [])) {
       final action = (inner as Map).cast<String, Object?>();
       if (action['type'] == 'action' &&
-          (action['actionId'] == 'edit-routine' ||
+          (action['actionId'] == 'open-routine' ||
               action['actionId'] == 'set-routine-enabled')) {
         found.add(action);
       }

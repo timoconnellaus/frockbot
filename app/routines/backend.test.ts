@@ -222,7 +222,7 @@ describe("Routines gateway routes", () => {
     expect(JSON.stringify(document)).toContain("open-run");
   });
 
-  test("`as=document` takes `edit` and `new`, and nothing else", async () => {
+  test("`as=document` takes `routine`, and nothing else", async () => {
     const route = contribution();
     expect(
       (await call(route, "/api/bots/scout/routines?as=frame"))?.status,
@@ -236,25 +236,19 @@ describe("Routines gateway routes", () => {
     ).toBe(400);
     expect(
       (await call(route, "/api/bots/scout/routines?as=document&new=1"))?.status,
-    ).toBe(200);
+    ).toBe(400);
     expect(
-      (await call(route, "/api/bots/scout/routines?as=document&edit=missing"))
+      (await call(route, "/api/bots/scout/routines?as=document&routine=missing"))
         ?.status,
     ).toBe(200);
   });
 
-  test("`new=1` is the empty form, not the list with a form on it", async () => {
+  test("`routine` is the detail, not the list with a form on it", async () => {
     const route = contribution();
     await call(route, "/api/bots/scout/routines", {
       method: "POST",
       body: JSON.stringify(CREATE),
     });
-    const created = (await (await call(
-      route,
-      "/api/bots/scout/routines?as=document&new=1",
-    ))!.json()) as { root: { children: { title?: string }[] } };
-    expect(JSON.stringify(created).includes('"id":"routine.name"')).toBe(true);
-    expect(created.root.children.some((child) => child.title)).toBe(false);
     const listed = (await (await call(
       route,
       "/api/bots/scout/routines?as=document",
@@ -262,6 +256,17 @@ describe("Routines gateway routes", () => {
     expect(listed.root.children.map((child) => child.title)).not.toContain(
       "New Routine",
     );
+    const created = (await (await call(
+      route,
+      "/api/bots/scout/routines",
+    ))!.json()) as { routines: { routineId: string }[] };
+    const opened = (await (await call(
+      route,
+      `/api/bots/scout/routines?as=document&routine=${created.routines[0]!.routineId}`,
+    ))!.json()) as { root: { children: { title?: string }[] } };
+    expect(JSON.stringify(opened).includes('"id":"routine.name"')).toBe(true);
+    expect(opened.root.children.some((child) => child.title)).toBe(false);
+    expect(JSON.stringify(opened)).toContain("Run now");
   });
 
   test("answers nothing without an authenticated User", async () => {

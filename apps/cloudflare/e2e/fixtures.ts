@@ -572,13 +572,69 @@ export async function openApplication(
 
 /** Find the Builder Bot provisioned for Applets browser specs. */
 export async function builderBotId(page: Page): Promise<string> {
+  return botIdByName(page, "Builder");
+}
+
+/** Resolve a Bot this account already holds, by the name the person sees. */
+export async function botIdByName(page: Page, name: string): Promise<string> {
   const response = await page.request.get("/api/bots");
   const body = (await response.json()) as {
     bots: Array<{ botId: string; initialName: string }>;
   };
-  const botId = body.bots.find((bot) => bot.initialName === "Builder")?.botId;
-  if (!botId) throw new Error("this account has no Builder Bot");
+  const botId = body.bots.find((bot) => bot.initialName === name)?.botId;
+  if (!botId) throw new Error(`this account has no Bot named ${name}`);
   return botId;
+}
+
+/**
+ * Create a Routine through the command route.
+ *
+ * Conversation is the only product author. A spec that needs a Routine already
+ * there uses this rather than a form the surface no longer has. The Bot id is
+ * resolved from the name unless the caller already holds it — UI create mints
+ * a suffix the client rule cannot reconstruct.
+ */
+export async function createRoutineThroughApi(
+  page: Page,
+  options: {
+    name: string;
+    prompt: string;
+    botName?: string;
+    botId?: string;
+    schedule?: string;
+    trigger?: { kind: "webhook" };
+  },
+): Promise<{ botId: string; routineId: string }> {
+  const botId =
+    options.botId ?? (await botIdByName(page, options.botName ?? ""));
+  const response = await page.request.post(
+    `/api/bots/${encodeURIComponent(botId)}/routines`,
+    {
+      data: {
+        schemaVersion: 1,
+        type: "routine/create",
+        commandId: crypto.randomUUID(),
+        botId,
+        name: options.name,
+        prompt: options.prompt,
+        ...(options.schedule === undefined
+          ? {}
+          : { schedule: options.schedule }),
+        ...(options.trigger === undefined ? {} : { trigger: options.trigger }),
+      },
+    },
+  );
+  const text = await response.text();
+  expect(
+    response.ok(),
+    `routine/create answered ${response.status()}: ${text.slice(0, 500)}`,
+  ).toBe(true);
+  const receipt = JSON.parse(text) as {
+    status: string;
+    routine: { routineId: string };
+  };
+  expect(receipt.status).toBe("applied");
+  return { botId, routineId: receipt.routine.routineId };
 }
 
 /**

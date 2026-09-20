@@ -127,7 +127,7 @@ const ROUTINE_MANAGE_INPUT_SCHEMA = {
         config: {
           type: "object",
           description:
-            "Optional trigger configuration the event type asks for. Omit it unless list_triggers said it is required.",
+            "Optional coarse filter the event type takes, such as Gmail query. Omit it unless you can write a search that narrows the event. Never set labelIds, userId, or interval.",
           additionalProperties: true,
         },
       },
@@ -433,11 +433,15 @@ export function createRoutineManageTool(
     admission: { subagentRoles: ["executor"] },
     description: [
       "Create, edit, pause, resume, delete, or immediately run one of your own Routines.",
+      "You are the only author: the User asks you in conversation, and there is no form.",
+      "Write the prompt so it names the kind of event this Routine is for — a shipping confirmation, an invoice — because a connected-app event that is clearly not that kind is skipped before you run.",
       "list_triggers lists the connected-app events a Routine may fire on.",
       "A Routine is a standing instruction that fires on a schedule, a delivered webhook,",
       "or a connected-app event,",
       `as its own Turn rather than inside this conversation. Names are at most ${ROUTINE_NAME_MAX_LENGTH}`,
       `characters and prompts at most ${ROUTINE_PROMPT_MAX_LENGTH}.`,
+      "One connected-app event is one firing. To sweep an inbox, use a schedule and fetch.",
+      "connectionTrigger.config is only for a coarse search such as Gmail query. Never set labelIds, userId, or interval.",
       "Pausing, editing, or deleting a Routine the User created switches off something they set up,",
       "so do it only when the User asked you to in this conversation, and pass userAsked: true when they did.",
       "If a Routine of theirs is failing or looks wrong, tell them and let them decide — do not switch it off yourself.",
@@ -478,6 +482,8 @@ export function createRoutineManageTool(
                   `- ${offer.toolkitName} (${offer.connectionId} · ${offer.connectionLabel}): ${offer.slug} — ${offer.name}. ${offer.description}`,
               ),
               "Create a Routine with connectionTrigger: { connectionId, triggerType } using the slug as triggerType.",
+              "Write the prompt so it names the kind of mail or event. Set config.query only when a Gmail search can narrow it; never set labelIds, userId, or interval.",
+              "One event is one firing. Inbox sweeps are a schedule.",
             ].join("\n"),
             isError: false,
           };

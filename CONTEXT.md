@@ -247,7 +247,7 @@ The recorded origin of a Package or change: first-party, User, or Bot, and for a
 _Avoid_: Author, source
 
 **Routine**:
-A persisted trigger and instruction that schedules future work for a bot.
+A persisted trigger and instruction that schedules future work for a bot. Conversation authors it; the list is what is armed, and the detail is a read-only look at one Routine ([ADR 0033](docs/adr/0033-conversation-authored-routines.md)).
 _Avoid_: Job, cron
 
 **Firing**:

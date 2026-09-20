@@ -4,7 +4,8 @@
 /// server projects the Bot's Routines and the completions nested under each
 /// of them as one `ViewDocument` and this carries each action to the route
 /// that owns it. The Routine commands land on the command route; navigation
-/// the host answers itself.
+/// the host answers itself. Conversation authors a Routine; this surface is
+/// a list and a read-only detail.
 library;
 
 import 'dart:async';
@@ -19,7 +20,6 @@ import '../shell/transcript_model.dart';
 import '../view/action.dart';
 import '../view/surface.dart';
 import 'document.dart';
-import 'editor.dart';
 import 'list.dart';
 import 'runs.dart';
 import 'runs_row.dart';
@@ -44,53 +44,33 @@ class RoutinesController extends ViewSurfaceController {
   /// source of the list. Completions have no read status.
   final void Function(int unacknowledged)? onInbox;
 
-  /// Which Routine the editor page is seeded from. Navigation, not a command:
-  /// it is asked for on the read and written nowhere. The list page leaves
-  /// this unset.
-  String? editing;
+  /// Which Routine the detail is showing. Navigation, not a command: it is
+  /// asked for on the read and written nowhere. The list page leaves this
+  /// unset.
+  String? viewing;
 
-  /// Whether this controller is the new-Routine page. The list page leaves
-  /// this unset.
-  bool creating = false;
+  /// Asked when a row wants the detail. The list opens it in this surface;
+  /// the detail itself never sees this kind.
+  final void Function(String routineId)? onOpenDetail;
 
-  /// Asked when a row wants the editor. The list opens it in this surface;
-  /// the editor itself never sees this kind.
-  final void Function(String routineId)? onOpenEditor;
-
-  /// Asked when the editor should close — save, cancel, or delete. The list
-  /// page never sees these kinds.
-  final VoidCallback? onCloseEditor;
+  /// Asked when the detail should close — back, or a successful delete.
+  final VoidCallback? onCloseDetail;
 
   /// A webhook key the authority just minted. It came back on a receipt and
   /// exists once, so it is kept here for as long as the person is looking at
   /// it and never asked for again — a rotate is the only way to see one twice.
   Map<String, Object?>? mintedKey;
 
-  /// The editor has decided to leave — save, cancel, or delete — so the next
-  /// pop is not asked about.
+  /// The detail has decided to leave, so the next pop is not asked about.
   bool closing = false;
 
   wire.ViewDocument? _document;
-  List<RoutinePluginSourceV1> pluginSources = const [];
-  List<RoutineConnectionSourceV1> connectionSources = const [];
-
-  /// Whether the read that answers for [pluginSources] is still out. An empty
-  /// list under a read that is still out is not a statement about this Bot's
-  /// Plugins, and the editor draws the difference rather than telling someone
-  /// their Plugin is gone.
-  bool pluginCatalogPending = true;
-  bool connectionCatalogPending = true;
   bool _busy = false;
   bool _closed = false;
   String? _message;
 
-  /// Which read is the current one. A read that publishes its document stops
-  /// being busy while its catalog is still out, so a newer read can start over
-  /// it — and the newer read's catalog is the one that counts.
-  int _reads = 0;
-
   /// Callers that hit [load] while a read is out wait here, and the out
-  /// read loops until [creating] and [editing] are what they asked for.
+  /// read loops until [viewing] is what they asked for.
   Completer<void>? _loading;
   bool _reload = false;
 
@@ -100,8 +80,8 @@ class RoutinesController extends ViewSurfaceController {
     this.openRuns,
     this.confirmDelete,
     this.onInbox,
-    this.onOpenEditor,
-    this.onCloseEditor,
+    this.onOpenDetail,
+    this.onCloseDetail,
   });
 
   @override
@@ -115,42 +95,15 @@ class RoutinesController extends ViewSurfaceController {
 
   String get _path => '/api/bots/${Uri.encodeComponent(botId)}/routines';
 
-  Future<Object?> _loadPluginFrame() async {
-    try {
-      return await api.request(
-        '/api/bots/${Uri.encodeComponent(botId)}/plugins',
-      );
-    } catch (_) {
-      // A Plugin catalog failure must not hide Routines that are otherwise
-      // available. The editor can still offer schedules and webhooks.
-      return null;
-    }
-  }
-
-  Future<Object?> _loadConnectTriggers() async {
-    try {
-      return await api.request('/api/connect/triggers');
-    } catch (_) {
-      return null;
-    }
-  }
-
   void _changed() {
     if (!_closed) notifyListeners();
   }
 
   String get _documentPath =>
-      '$_path?as=document${creating
-          ? '&new=1'
-          : editing == null
-          ? ''
-          : '&edit=${Uri.encodeQueryComponent(editing!)}'}';
+      '$_path?as=document${viewing == null ? '' : '&routine=${Uri.encodeQueryComponent(viewing!)}'}';
 
   @override
   Future<void> load() async {
-    // A save closes the editor and the surface then reads the list. Those two
-    // loads overlap: the first was asked for while the form was still open.
-    // Dropping the second used to keep the empty create document on screen.
     if (_loading != null) {
       _reload = true;
       return _loading!.future;
@@ -163,23 +116,13 @@ class RoutinesController extends ViewSurfaceController {
     try {
       do {
         _reload = false;
-        final read = ++_reads;
-        pluginCatalogPending = true;
-        connectionCatalogPending = true;
-        // The catalog widens what the editor offers and nothing else, so it is
-        // asked for beside the document and read whenever it lands: a slow
-        // Plugin route must not hold back Routines that are otherwise
-        // available.
-        final plugins = _loadPluginFrame();
-        final connections = _loadConnectTriggers();
-        final wantCreate = creating;
-        final wantEdit = editing;
+        final wantView = viewing;
         try {
           final next = wire.ViewDocument.fromJson(
             await api.request(_documentPath),
           );
           if (_closed) return;
-          if (creating != wantCreate || editing != wantEdit) {
+          if (viewing != wantView) {
             _reload = true;
             continue;
           }
@@ -189,14 +132,13 @@ class RoutinesController extends ViewSurfaceController {
           _document = next;
         } catch (_) {
           if (_closed) return;
-          if (creating != wantCreate || editing != wantEdit) {
+          if (viewing != wantView) {
             _reload = true;
             continue;
           }
-          _message = 'Couldn’t load this Bot’s Routines. Check your connection and try again.';
+          _message =
+              'Couldn’t load this Bot’s Routines. Check your connection and try again.';
         }
-        unawaited(_adoptPluginSources(read, plugins));
-        unawaited(_adoptConnectionSources(read, connections));
       } while (_reload && !_closed);
     } finally {
       _busy = false;
@@ -204,26 +146,6 @@ class RoutinesController extends ViewSurfaceController {
       if (!loading.isCompleted) loading.complete();
       if (!_closed) _changed();
     }
-  }
-
-  /// The catalog the read that asked for it was owed, applied on arrival.
-  Future<void> _adoptPluginSources(int read, Future<Object?> plugins) async {
-    final frame = await plugins;
-    if (_closed || read != _reads) return;
-    pluginSources = routinePluginSourcesV1(frame);
-    pluginCatalogPending = false;
-    _changed();
-  }
-
-  Future<void> _adoptConnectionSources(
-    int read,
-    Future<Object?> connections,
-  ) async {
-    final frame = await connections;
-    if (_closed || read != _reads) return;
-    connectionSources = routineConnectionSourcesV1(frame);
-    connectionCatalogPending = false;
-    _changed();
   }
 
   @override
@@ -234,15 +156,8 @@ class RoutinesController extends ViewSurfaceController {
       openRuns?.call(routineIdV1(command) ?? '');
       return applied;
     }
-    // Which page is open is this host's to answer: a row names a Routine and
-    // the list pushes the editor; cancel, a no-op save and a successful save
-    // or delete pop it. Nothing about that is dispatched anywhere.
-    if (kind == 'edit-routine') {
-      onOpenEditor?.call(routineIdV1(command) ?? '');
-      return applied;
-    }
-    if (kind == 'cancel-edit') {
-      _closeEditor();
+    if (kind == 'open-routine') {
+      onOpenDetail?.call(routineIdV1(command) ?? '');
       return applied;
     }
     if (kind == 'delete-routine' && confirmDelete != null) {
@@ -250,30 +165,14 @@ class RoutinesController extends ViewSurfaceController {
         return {'commandId': command['commandId'], 'status': 'refused'};
       }
     }
-    // Saving a form nobody edited would be refused by the route, which is
-    // right of it — an update that changes nothing is not an update. It is not
-    // a failure to the person who pressed Save, though, so the editor closes
-    // on what is already true and nothing is sent.
-    if (kind == 'save-routine' &&
-        routineSaveIsNoOpV1(
-          command,
-          routineEditorSeedsV1(_document?.root.toJson()),
-        )) {
-      _closeEditor();
-      return applied;
-    }
     final answer = await api.request(
       _path,
       body: routineCommandV1(command, botId),
     );
     final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
-    // A save or a delete answers the form: the editor closes and the list
-    // it changed is what the reader is left looking at.
-    if ((kind == 'save-routine' || kind == 'delete-routine') &&
-        receipt['status'] == 'applied') {
-      _closeEditor();
+    if (kind == 'delete-routine' && receipt['status'] == 'applied') {
+      _closeDetail();
     }
-    // The plaintext key is on this receipt and on nothing else, ever.
     if (kind == 'rotate-key') {
       mintedKey = (receipt['hook'] as Map?)?.cast<String, Object?>();
     }
@@ -281,15 +180,12 @@ class RoutinesController extends ViewSurfaceController {
     return receipt;
   }
 
-  void _closeEditor() {
+  void _closeDetail() {
     if (closing) return;
     closing = true;
-    // Drop the form now so a read the surface starts as this command
-    // returns is the list, not another empty create document.
-    creating = false;
-    editing = null;
+    viewing = null;
     _changed();
-    final close = onCloseEditor;
+    final close = onCloseDetail;
     if (close == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_closed) close();
@@ -328,10 +224,6 @@ class RoutinesView extends StatefulWidget {
   final bool chrome;
   final String? initialRoutineId;
 
-  /// Open on the empty form. Distinct from [initialRoutineId]: a null id
-  /// on the list is the list, not a create.
-  final bool openNew;
-
   /// The panel header's title and back, when this surface is the right panel.
   final RoutinesPanelHandle? panel;
   const RoutinesView({
@@ -346,7 +238,6 @@ class RoutinesView extends StatefulWidget {
     this.onClose,
     this.chrome = true,
     this.initialRoutineId,
-    this.openNew = false,
     this.panel,
   });
 
@@ -395,20 +286,18 @@ class _RoutinesViewState extends State<RoutinesView> {
     );
   }
 
-  void _openEditor([String? routineId]) {
+  void _openDetail(String routineId) {
     controller
-      ..creating = routineId == null
-      ..editing = routineId
+      ..viewing = routineId
       ..closing = false;
     unawaited(controller.load());
     _syncPanel();
     setState(() {});
   }
 
-  Future<void> _leaveEditor() async {
+  Future<void> _leaveDetail() async {
     controller
-      ..creating = false
-      ..editing = null
+      ..viewing = null
       ..closing = false
       ..mintedKey = null;
     await controller.load();
@@ -416,68 +305,18 @@ class _RoutinesViewState extends State<RoutinesView> {
     if (mounted) setState(() {});
   }
 
-  Future<bool> _confirmDiscard() async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (dialog) => identified(
-          RoutineIds.confirmDiscard,
-          AlertDialog(
-            title: const Text('Discard changes?'),
-            content: const Text(
-              'You have unsaved changes. Leave without keeping them?',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialog, false),
-                child: const Text('Keep editing'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialog, true),
-                child: const Text('Discard'),
-              ),
-            ],
-          ),
-        ),
-      ) ??
-      false;
+  bool get _detail => controller.viewing != null;
 
-  Future<bool> _canLeave(ViewController view) async {
-    if (controller.closing) return true;
-    if (!routineEditorIsDirtyV1(
-      view.values,
-      routineEditorSeedsV1(controller.document?.root.toJson()),
-    )) {
-      return true;
-    }
-    return _confirmDiscard();
-  }
-
-  ViewController? _view;
-
-  Future<bool> _tryLeaveEditor() async {
-    final view = _view;
-    if (view == null) {
-      _leaveEditor();
-      return true;
-    }
-    if (!await _canLeave(view)) return false;
-    _leaveEditor();
-    return true;
-  }
-
-  bool get _editing => controller.creating || controller.editing != null;
-
-  String get _title => controller.creating
-      ? 'New Routine'
-      : controller.editing != null
-      ? 'Edit Routine'
-      : 'Routines';
+  String get _title => _detail ? 'Routine' : 'Routines';
 
   void _syncPanel() {
     final handle = widget.panel;
     if (handle == null) return;
-    if (_editing) {
-      handle.showEditor(_title, _tryLeaveEditor);
+    if (_detail) {
+      handle.showDetail(_title, () async {
+        await _leaveDetail();
+        return true;
+      });
     } else {
       handle.showList();
     }
@@ -487,16 +326,14 @@ class _RoutinesViewState extends State<RoutinesView> {
 
   RoutinesController _createController() =>
       RoutinesController(
-          widget.api,
-          widget.botId,
-          openRuns: _openRuns,
-          confirmDelete: _confirmDelete,
-          onInbox: (count) => widget.onInbox?.call(count),
-          onOpenEditor: _openEditor,
-          onCloseEditor: _leaveEditor,
-        )
-        ..creating = widget.openNew && widget.initialRoutineId == null
-        ..editing = widget.initialRoutineId;
+        widget.api,
+        widget.botId,
+        openRuns: _openRuns,
+        confirmDelete: _confirmDelete,
+        onInbox: (count) => widget.onInbox?.call(count),
+        onOpenDetail: _openDetail,
+        onCloseDetail: _leaveDetail,
+      )..viewing = widget.initialRoutineId;
 
   @override
   void initState() {
@@ -511,7 +348,6 @@ class _RoutinesViewState extends State<RoutinesView> {
     if (oldWidget.api == widget.api &&
         oldWidget.botId == widget.botId &&
         oldWidget.initialRoutineId == widget.initialRoutineId &&
-        oldWidget.openNew == widget.openNew &&
         oldWidget.panel == widget.panel) {
       _syncPanel();
       return;
@@ -531,7 +367,7 @@ class _RoutinesViewState extends State<RoutinesView> {
 
   @override
   Widget build(BuildContext context) {
-    final editing = _editing;
+    final detail = _detail;
     return identified(
       RoutineIds.panel,
       ViewSurfacePage(
@@ -543,53 +379,30 @@ class _RoutinesViewState extends State<RoutinesView> {
         onClose: widget.onClose,
         chrome: widget.chrome,
         controller: controller,
-        backId: RoutineIds.editorBack,
+        backId: RoutineIds.detailBack,
         allowPop: () => controller.closing,
-        confirmLeave: editing && (widget.chrome || widget.panel == null)
-            ? _canLeave
-            : null,
-        onLeave: editing ? _leaveEditor : null,
-        onView: (view) => _view = view,
-        rootView: editing ? null : (root) => ViewRoutineList(node: root),
-        banner: (context) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (!editing) ...[
-              identified(
-                RoutineIds.create,
-                FilledButton.icon(
-                  onPressed: () => _openEditor(),
-                  icon: const Icon(Icons.add_rounded),
-                  label: const Text('New Routine'),
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            WebhookKeyCard(controller: controller),
-          ],
-        ),
-        fields: routineEditorFieldBuildersV1(
-          () => controller.pluginSources,
-          pluginsPending: () => controller.pluginCatalogPending,
-          connections: () => controller.connectionSources,
-          connectionsPending: () => controller.connectionCatalogPending,
-        ),
+        onLeave: detail ? _leaveDetail : null,
+        rootView: detail ? null : (root) => ViewRoutineList(node: root),
+        banner: (context) => WebhookKeyCard(controller: controller),
       ),
     );
   }
 }
 
-/// The panel header's title and back while the editor is open inside it.
+/// The panel header's title and back while the detail is open inside it.
 class RoutinesPanelHandle extends ChangeNotifier {
   String? editorTitle;
   Future<bool> Function()? tryLeaveEditor;
 
-  void showEditor(String title, Future<bool> Function() tryLeave) {
+  void showDetail(String title, Future<bool> Function() tryLeave) {
     if (editorTitle == title && tryLeaveEditor == tryLeave) return;
     editorTitle = title;
     tryLeaveEditor = tryLeave;
     notifyListeners();
   }
+
+  void showEditor(String title, Future<bool> Function() tryLeave) =>
+      showDetail(title, tryLeave);
 
   void showList() {
     if (editorTitle == null && tryLeaveEditor == null) return;
@@ -597,45 +410,6 @@ class RoutinesPanelHandle extends ChangeNotifier {
     tryLeaveEditor = null;
     notifyListeners();
   }
-}
-
-/// The editor as its own surface: a new Routine, or the one a row named.
-///
-/// It is still [RoutinesView] — the form is a document of the same panel,
-/// not a second route over the app.
-class RoutineEditorPage extends StatelessWidget {
-  final NativeApi api;
-  final LocalStore store;
-  final String userId;
-  final String botId;
-
-  /// Absent is what creating means.
-  final String? routineId;
-  final void Function(TranscriptLine line)? onOpenRun;
-  final void Function(int unacknowledged)? onInbox;
-  const RoutineEditorPage({
-    super.key,
-    required this.api,
-    required this.store,
-    required this.userId,
-    required this.botId,
-    this.routineId,
-    this.onOpenRun,
-    this.onInbox,
-  });
-
-  @override
-  Widget build(BuildContext context) => RoutinesView(
-    api: api,
-    store: store,
-    userId: userId,
-    botId: botId,
-    botName: '',
-    initialRoutineId: routineId,
-    openNew: routineId == null,
-    onOpenRun: onOpenRun,
-    onInbox: onInbox,
-  );
 }
 
 /// The webhook key, the one time it exists.

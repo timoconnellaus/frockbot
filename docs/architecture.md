@@ -597,8 +597,7 @@ A field whose `choiceSource` names something the document cannot draw is drawn
 by the host, not by the document: `ViewScope.fields` maps a `choiceSource` to a
 host editor the way `ViewScope.frames` maps an `embed` name to a host region.
 The settings surface supplies the model picker for the paged catalog
-(`account-models`), and the Routines surface supplies its own editor for
-`routine-editor`.
+(`account-models`).
 
 **Plugins, the same way.** One more projection in that family, reached with
 `?as=document`: `app/settings/plugins-document.ts` over `PluginsFrame`
@@ -683,10 +682,10 @@ family, both reached with `?as=document`:
   because a client that had to ask twice could file a run under the wrong
   Routine. Its action kinds are one closed vocabulary
   (`ROUTINE_ACTION_KINDS_V1`): the Routine commands the route already takes —
-  pause or resume, run, delete, rotate or revoke a key, and the save behind the
-  editor — and the navigation no route owns, which is a completion's run log
-  and the editor — a new Routine, or the one a row named — shown in the same
-  surface as the list.
+  pause or resume, run, delete, rotate or revoke a key — and the navigation
+  no route owns, which is a completion's run log and the detail a row opens.
+  Conversation authors a Routine; the list is not a form
+  ([ADR 0033](adr/0033-conversation-authored-routines.md)).
 - `app/audit/audit-document.ts` over an `AuditFrame` (`GET /api/audit`). Four
   kinds: the filter and the page, which the host owns because the host owns
   the read; the rebuild command; and opening an audited effect's Turn on the
@@ -828,30 +827,18 @@ Three more projections in the settings-document family:
   document — the host is showing one and names it when it turns the press into
   a command, the same way the Routines host does. Import stays two-phase: a
   plan is a pure read whose `commandId` becomes the `importId` the apply names.
-- The Routines list and the Routine editor are two documents. The list is
-  what is armed and what it left behind; the editor is one form, seeded by
-  the read — a new Routine (`?new=1`), or the one `?edit=` names — because a
-  form per Routine would be a second copy of every prompt in the list and the
-  list a person came to read is not a form. Which document is open is
-  navigation, so it is asked for on the read and written nowhere, and naming a
-  different Routine moves the revision so the host adopts a controller whose
-  field values are answers to the form now on screen. The host opens that
-  page from a button and from a row; it does not unfold an accordion on the
-  list. The drawing is the host's either way: the fields that carry the seed
-  values are declared `routine-editor-hidden` and drawn as nothing, and the
-  one the trigger choice lands in is handed to the host by
-  `choiceSource: routine-editor`. A Plugin trigger travels in that one value
-  as `plugin:<pluginId>:<trigger>`, and a schedule also travels with the
-  sentence the projection made of it (`describeRoutineScheduleV1`,
-  `app/routines/cron.ts`), so a row and the form say the same thing about
-  when it fires. The editor's Plugin choices are read from the Bot's Plugins
-  frame (`GET /api/bots/:botId/plugins`) beside this document and may land
-  after it, because a Plugin route that is slow or broken must not hold back
-  the Routines it is not needed for; until it lands the editor says the list
-  is still being read rather than calling a stored Plugin unavailable. A
-  triggered Routine also gets its two key controls, and only a triggered
-  one: the route refuses a key for a scheduled Routine, so the control is
-  absent rather than offered.
+- The Routines list and the Routine detail are two documents. The list is
+  what is armed and what it left behind; the detail is one Routine, named
+  by `?routine=` — name, prompt, trigger in words, optional provider
+  `config`, last and next run — because conversation is the only author and
+  the list a person came to read is not a form. Which document is open is
+  navigation, so it is asked for on the read and written nowhere. The host
+  opens that page from a row; it does not unfold an accordion on the list.
+  A schedule travels with the sentence the projection made of it
+  (`describeRoutineScheduleV1`, `app/routines/cron.ts`), so a row and the
+  detail say the same thing about when it fires. A triggered Routine also
+  gets its two key controls, and only a triggered one: the route refuses a
+  key for a scheduled Routine, so the control is absent rather than offered.
 
 **A secret the authority minted once is never in a document.** A webhook key
 and a pairing code are each signed once, stored only as a digest and answered
