@@ -718,6 +718,15 @@ export interface RoutineRunDetailViewV1 {
   outcome?: string;
 }
 
+function inboxRepeatCountV1(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
+    throw new RoutineDecodeError(
+      "Routine inbox entry view repeatCount is invalid",
+    );
+  }
+  return value as number;
+}
+
 export function decodeRoutineInboxEntryViewV1(
   value: unknown,
 ): RoutineInboxEntryViewV1 {
@@ -734,7 +743,7 @@ export function decodeRoutineInboxEntryViewV1(
       "createdAt",
       "acknowledged",
     ],
-    ["acknowledgedAt"],
+    ["acknowledgedAt", "repeatCount", "failure"],
     "Routine inbox entry view",
   );
   if (candidate.schemaVersion !== 1) {
@@ -745,6 +754,11 @@ export function decodeRoutineInboxEntryViewV1(
   if (typeof candidate.acknowledged !== "boolean") {
     throw new RoutineDecodeError(
       "Routine inbox entry view acknowledged must be a boolean",
+    );
+  }
+  if (candidate.failure !== undefined && candidate.failure !== true) {
+    throw new RoutineDecodeError(
+      "Routine inbox entry view failure must be true",
     );
   }
   return {
@@ -771,6 +785,10 @@ export function decodeRoutineInboxEntryViewV1(
             "Routine inbox acknowledgedAt",
           ),
         }),
+    ...(candidate.repeatCount === undefined
+      ? {}
+      : { repeatCount: inboxRepeatCountV1(candidate.repeatCount) }),
+    ...(candidate.failure === undefined ? {} : { failure: true as const }),
   };
 }
 

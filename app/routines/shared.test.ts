@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeRoutineCommandV1,
   decodeRoutineCommandReceiptV1,
+  decodeRoutineInboxViewV1,
   decodeRoutineListViewV1,
   decodeRoutineRunListViewV1,
   decodeRoutineViewV1,
   routineCommandFingerprintV1,
 } from "./shared.js";
+import { routineInboxEntryViewV1 } from "./bot.js";
 import { RoutineStore, routineViewV1 } from "./store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
 
@@ -174,5 +176,57 @@ describe("RoutineViewV1", () => {
         webhookKey: "secret",
       }),
     ).toThrow(/unknown field "webhookKey"/);
+  });
+});
+
+describe("decodeRoutineInboxViewV1", () => {
+  const failed = {
+    schemaVersion: 1 as const,
+    entryId: "ri-run-1",
+    runId: "run-1",
+    routineId: "brief",
+    text: "It stopped without saying why.",
+    attribution: "Automation: Morning brief",
+    createdAt: "2026-09-02T23:00:10.000Z",
+    acknowledged: false,
+    failure: true as const,
+    repeatCount: 3,
+  };
+
+  test("keeps a failed or repeated completion, which the document read re-decodes", () => {
+    const produced = routineInboxEntryViewV1({
+      schemaVersion: 1,
+      entryId: failed.entryId,
+      runId: failed.runId,
+      routineId: failed.routineId,
+      text: failed.text,
+      attribution: failed.attribution,
+      createdAt: failed.createdAt,
+      acknowledged: false,
+      failure: true,
+      repeatCount: 3,
+    });
+    const view = {
+      schemaVersion: 1 as const,
+      botId: "scout",
+      entries: [produced],
+      unacknowledged: 1,
+    };
+    // The gateway re-decodes the view it just produced. A failed firing used
+    // to throw here — exact keys had never heard of `failure` or `repeatCount`
+    // — and `GET …/routines?as=document` answered 500, which the app draws as
+    // "Routines couldn’t load".
+    expect(decodeRoutineInboxViewV1(view)).toEqual(view);
+  });
+
+  test("refuses a completion view with an unknown field", () => {
+    expect(() =>
+      decodeRoutineInboxViewV1({
+        schemaVersion: 1,
+        botId: "scout",
+        unacknowledged: 0,
+        entries: [{ ...failed, diagnostic: "stack" }],
+      }),
+    ).toThrow(/unknown field "diagnostic"/);
   });
 });
