@@ -134,6 +134,24 @@ export interface BotUserConfigurationRpcTargetV1
   transferApplet(
     input: BotRpcEnvelopeV1<{ appletId: string; targetBotId: string }>,
   ): Promise<object>;
+  listConnectTriggers(input: UserRpcEnvelopeV1): Promise<object>;
+  upsertConnectTrigger(
+    input: UserRpcEnvelopeV1<{
+      commandId: string;
+      botId: string;
+      routineId: string;
+      connectionId: string;
+      triggerType: string;
+      config?: Record<string, string | number | boolean>;
+    }>,
+  ): Promise<{ instanceId: string }>;
+  deleteConnectTrigger(
+    input: UserRpcEnvelopeV1<{
+      commandId: string;
+      botId: string;
+      routineId: string;
+    }>,
+  ): Promise<void>;
 }
 
 export interface BotStateRpcTargetV1 extends SubagentDurableObjectRpcTargetV1 {

@@ -322,9 +322,14 @@ abstract final class RoutineIds {
   /// Where the Plugin choices will be, for as long as the read that answers for
   /// them is still out.
   static const sourcePluginsPending = 'routine-source-plugins-pending';
+  static const sourceConnectionsPending = 'routine-source-connections-pending';
   static String sourcePlugin(String pluginId) => 'routine-source-$pluginId';
+  static String sourceConnection(String connectionId) =>
+      'routine-source-connection-$connectionId';
   static String pluginTrigger(String pluginId, String trigger) =>
       'routine-trigger-$pluginId-$trigger';
+  static String connectionTrigger(String connectionId, String trigger) =>
+      'routine-trigger-connection-$connectionId-$trigger';
   static const inboxDrawer = 'routine-inbox-drawer';
   static const runLog = 'routine-run-log';
   static const confirmDelete = 'routine-delete-confirm';

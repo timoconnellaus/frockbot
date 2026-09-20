@@ -400,7 +400,12 @@ export const COMPOSIO_STUB_ORIGIN = "https://backend.composio.dev";
 export const COMPOSIO_TEST_API_KEY = "workerd-composio-key";
 const composioAuthConfigs = new Map<string, string>();
 const composioAccounts = new Map<string, { toolkit: string; status: string }>();
+const composioTriggers = new Map<
+  string,
+  { slug: string; accountId: string; userId: string }
+>();
 let composioAccountCounter = 0;
+let composioTriggerCounter = 0;
 
 async function composioStub(request: Request, url: URL): Promise<Response> {
   if (request.headers.get("x-api-key") !== COMPOSIO_TEST_API_KEY) {
@@ -485,6 +490,65 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
       auth_config: { id: `ac_${stored.toolkit}`, is_disabled: false },
       is_disabled: false,
     });
+  }
+  if (path === "/triggers_types" && request.method === "GET") {
+    const toolkit = url.searchParams.get("toolkit_slugs") ?? "gmail";
+    const upper = toolkit.toUpperCase();
+    const items =
+      toolkit === "gmail"
+        ? [
+            {
+              slug: "GMAIL_NEW_GMAIL_MESSAGE",
+              name: "New Gmail message received",
+              description: "When a new message arrives in the inbox.",
+              toolkit: { slug: toolkit },
+            },
+            {
+              slug: "GMAIL_EMAIL_SENT",
+              name: "Email sent",
+              description: "When a message is sent from the account.",
+              toolkit: { slug: toolkit },
+            },
+          ]
+        : [
+            {
+              slug: `${upper}_NEW_ITEM`,
+              name: "New item",
+              description: "When something new arrives.",
+              toolkit: { slug: toolkit },
+            },
+          ];
+    return Response.json({ items, next_cursor: null });
+  }
+  const upsert = /^\/trigger_instances\/([^/]+)\/upsert$/.exec(path);
+  if (upsert && request.method === "POST") {
+    const slug = decodeURIComponent(upsert[1]!);
+    const body = (await request.clone().json()) as {
+      user_id?: string;
+      connected_account_id?: string;
+    };
+    const stored = body.connected_account_id
+      ? composioAccounts.get(body.connected_account_id)
+      : undefined;
+    if (!stored || stored.status !== "ACTIVE" || !body.user_id) {
+      return Response.json({ error: "bad request" }, { status: 400 });
+    }
+    const id = `ti_${++composioTriggerCounter}`;
+    composioTriggers.set(id, {
+      slug,
+      accountId: body.connected_account_id!,
+      userId: body.user_id,
+    });
+    return Response.json({ trigger_id: id, trigger_instance: { id } });
+  }
+  const manage = /^\/trigger_instances\/manage\/([^/]+)$/.exec(path);
+  if (manage && request.method === "DELETE") {
+    const id = decodeURIComponent(manage[1]!);
+    if (!composioTriggers.has(id)) {
+      return Response.json({ error: "not found" }, { status: 404 });
+    }
+    composioTriggers.delete(id);
+    return Response.json({ success: true });
   }
   if (path === "/tools" && request.method === "GET") {
     const toolkit = url.searchParams.get("toolkit_slug") ?? "gmail";

@@ -28,12 +28,28 @@ import {
 import { returnPageV1 } from "@frockbot/app/return-page";
 import { connectCallbackPathV1, connectReturnClientV1 } from "./user.js";
 import type { ConnectionReturnClientV1 } from "@frockbot/core/configuration";
+import {
+  CONNECT_EVENT_BODY_MAX_BYTES,
+  ConnectEventError,
+  decodeConnectEventV1,
+  verifyConnectEventSignatureV1,
+} from "./events.js";
+import type { ConnectTriggerOfferV1 } from "./triggers.js";
 
 export interface ConnectGatewayHost {
   executeConnection(
     userId: string,
     command: ConnectionCommandV1,
   ): Promise<ConnectionCommandReceiptV1>;
+  listConnectTriggers?(userId: string): Promise<ConnectTriggerOfferV1[]>;
+  /**
+   * The HMAC secret event deliveries are signed with. Absent closes the door.
+   */
+  connectWebhookSecret?: string;
+  handleConnectEvent?(event: {
+    userId: string;
+    event: ReturnType<typeof decodeConnectEventV1>;
+  }): Promise<{ status: "accepted" | "ignored"; fireId?: string }>;
 }
 
 export interface ConnectBackendRouteContribution {
@@ -54,10 +70,66 @@ const START = `/api/plugins/${CONNECT_PACKAGE_ID}/connections`;
 const REVOKE = new RegExp(
   `^/api/plugins/${CONNECT_PACKAGE_ID}/connections/([^/]+)/revoke$`,
 );
+const TRIGGERS = "/api/connect/triggers";
+const EVENTS = "/api/connect/events";
 const CONNECTION_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 
 function jsonError(status: number, error: string): Response {
   return Response.json({ error }, { status });
+}
+
+/**
+ * One provider event, from the open internet. The signature is checked
+ * before a Durable Object is addressed: an anonymous caller must not decide
+ * which object exists.
+ */
+async function deliverConnectEvent(
+  host: ConnectGatewayHost,
+  request: Request,
+): Promise<Response> {
+  if (request.method !== "POST") return jsonError(405, "method not allowed");
+  const secret = host.connectWebhookSecret;
+  if (!secret || !host.handleConnectEvent) {
+    return jsonError(503, "app events are not configured");
+  }
+  let body: string;
+  try {
+    body = await request.text();
+  } catch {
+    return jsonError(400, "event body could not be read");
+  }
+  if (new TextEncoder().encode(body).length > CONNECT_EVENT_BODY_MAX_BYTES) {
+    return jsonError(413, "event body is too large");
+  }
+  const presented =
+    request.headers.get("webhook-signature") ??
+    request.headers.get("x-composio-signature") ??
+    "";
+  try {
+    await verifyConnectEventSignatureV1(secret, body, presented);
+    const event = decodeConnectEventV1(JSON.parse(body) as unknown);
+    const receipt = await host.handleConnectEvent({
+      userId: event.userId,
+      event,
+    });
+    return Response.json(
+      {
+        schemaVersion: 1,
+        status: receipt.status,
+        ...(receipt.fireId ? { fireId: receipt.fireId } : {}),
+      },
+      { status: 202 },
+    );
+  } catch (error) {
+    if (error instanceof ConnectEventError) {
+      return jsonError(error.status, error.message);
+    }
+    if (error instanceof SyntaxError) {
+      return jsonError(400, "event is invalid");
+    }
+    console.error("Connected app event failed", error);
+    return jsonError(500, "event delivery failed");
+  }
 }
 
 /**
@@ -121,15 +193,26 @@ export function createConnectBackendContribution(
 ): ConnectBackendRouteContribution {
   return {
     packageId: CONNECT_PACKAGE_ID,
-    publicRoute(request, url) {
-      const client = connectReturnClientV1(url.pathname);
-      if (client === null) return Promise.resolve(undefined);
-      if (request.method !== "GET") {
-        return Promise.resolve(jsonError(405, "method not allowed"));
+    async publicRoute(request, url) {
+      if (url.pathname === EVENTS) {
+        return deliverConnectEvent(host, request);
       }
-      return Promise.resolve(connectCallbackPageV1(client, url.origin));
+      const client = connectReturnClientV1(url.pathname);
+      if (client === null) return undefined;
+      if (request.method !== "GET") {
+        return jsonError(405, "method not allowed");
+      }
+      return connectCallbackPageV1(client, url.origin);
     },
     async route(request, url, context) {
+      if (url.pathname === TRIGGERS) {
+        if (!context.userId) return jsonError(401, "authentication required");
+        if (request.method !== "GET") return jsonError(405, "method not allowed");
+        const triggers = host.listConnectTriggers
+          ? await host.listConnectTriggers(context.userId)
+          : [];
+        return Response.json({ schemaVersion: 1, triggers });
+      }
       const revoke = REVOKE.exec(url.pathname);
       if (url.pathname !== START && !revoke) return undefined;
       if (!context.userId) return jsonError(401, "authentication required");

@@ -37,6 +37,10 @@ import {
   decodeConnectionCommandIdV1,
   decodeConnectionCommandV1,
 } from "@frockbot/core/connection";
+import type { ConnectUserBackendContribution } from "@frockbot/app/connect/user";
+import type { ConnectEventV1 } from "@frockbot/app/connect/events";
+import type { ConnectTriggerOfferV1 } from "@frockbot/app/connect/triggers";
+import { decodeRoutineCommandV1 } from "@frockbot/app/routines/shared";
 import {
   decodeBotSettingsViewV1,
   userTimezoneV1,
@@ -667,6 +671,18 @@ export class UserConfiguration
     return contribution;
   }
 
+  private async connectContribution(): Promise<ConnectUserBackendContribution> {
+    return (await this.contributions()).connect;
+  }
+
+  private botRoutinesStub(userId: string, botId: string) {
+    const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+    return this.env.BOT_STATES.get(id) as unknown as {
+      deliverConnectEvent(input: unknown): Promise<unknown>;
+      executeRoutineCommand(input: unknown): Promise<unknown>;
+    };
+  }
+
   private async flockContribution(): Promise<
     MountedFoundationUserBackend["flock"]
   > {
@@ -1092,6 +1108,140 @@ export class UserConfiguration
       accountId,
       command,
     );
+  }
+
+  async listConnectTriggers(input: unknown): Promise<ConnectTriggerOfferV1[]> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    return (await this.connectContribution()).listTriggers(userId);
+  }
+
+  async upsertConnectTrigger(input: unknown): Promise<{ instanceId: string }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      commandId: rpcIdentifier,
+      botId: rpcBotId,
+      routineId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      triggerType: rpcString(128),
+    }, {
+      config: rpcJsonRecord,
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    return (await this.connectContribution()).upsertTrigger({
+      userId,
+      commandId: request.commandId as string,
+      botId: request.botId as string,
+      routineId: request.routineId as string,
+      connectionId: request.connectionId as string,
+      triggerType: request.triggerType as string,
+      ...(request.config === undefined
+        ? {}
+        : { config: request.config as Record<string, string | number | boolean> }),
+    });
+  }
+
+  async deleteConnectTrigger(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      commandId: rpcIdentifier,
+      botId: rpcBotId,
+      routineId: rpcIdentifier,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await (await this.connectContribution()).deleteTrigger({
+      commandId: request.commandId as string,
+      botId: request.botId as string,
+      routineId: request.routineId as string,
+    });
+  }
+
+  /**
+   * One verified provider event. The door already checked the HMAC; this
+   * object maps the instance and either fires or pauses the Routine.
+   *
+   * It does not provision the User: an event for nobody is ignored, not a
+   * reason to create an account.
+   */
+  async handleConnectEvent(input: unknown): Promise<{
+    status: "accepted" | "ignored";
+    fireId?: string;
+  }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      event: rpcDecodedValue,
+    });
+    const userId = request.userId as string;
+    const pinned = await this.addressedUser(userId);
+    if (!pinned) return { status: "ignored" };
+    const event = request.event as ConnectEventV1;
+    if (event.userId !== userId) return { status: "ignored" };
+    const connect = await this.connectContribution();
+    if (event.kind === "connected_account.expired") {
+      if (!event.connectedAccountId) return { status: "ignored" };
+      const failed = await connect.failExpiredAccount(
+        userId,
+        event.connectedAccountId,
+      );
+      if (!failed) return { status: "ignored" };
+      for (const routine of failed.routines) {
+        await this.pauseConnectRoutine(
+          userId,
+          routine.botId,
+          routine.routineId,
+          `connect-expired-${event.eventId}-${routine.routineId}`,
+        );
+      }
+      return { status: "accepted" };
+    }
+    if (!event.triggerInstanceId) return { status: "ignored" };
+    const instance = await connect.resolveTrigger(event.triggerInstanceId);
+    if (!instance) return { status: "ignored" };
+    if (event.kind === "trigger.disabled") {
+      await this.pauseConnectRoutine(
+        userId,
+        instance.botId,
+        instance.routineId,
+        `connect-disabled-${event.eventId}`,
+      );
+      return { status: "accepted" };
+    }
+    const receipt = (await this.botRoutinesStub(
+      userId,
+      instance.botId,
+    ).deliverConnectEvent({
+      schemaVersion: 1,
+      userId,
+      botId: instance.botId,
+      routineId: instance.routineId,
+      eventId: event.eventId,
+      payload: event.payload,
+    })) as { status?: string; fireId?: string };
+    return receipt.status === "accepted" || receipt.status === "duplicate"
+      ? { status: "accepted", ...(receipt.fireId ? { fireId: receipt.fireId } : {}) }
+      : { status: "ignored" };
+  }
+
+  private async pauseConnectRoutine(
+    userId: string,
+    botId: string,
+    routineId: string,
+    commandId: string,
+  ): Promise<void> {
+    await this.botRoutinesStub(userId, botId)
+      .executeRoutineCommand({
+        schemaVersion: 1,
+        userId,
+        botId,
+        command: decodeRoutineCommandV1({
+          schemaVersion: 1,
+          type: "routine/pause",
+          commandId,
+          botId,
+          routineId,
+        }),
+      })
+      .catch(() => undefined);
   }
 
   async lookupConnectionCommand(input: unknown) {

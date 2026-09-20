@@ -295,6 +295,81 @@ describe("routineManageCommandV1", () => {
     ).toMatchObject({ type: "routine/create", trigger: { kind: "webhook" } });
   });
 
+  test("maps a connected-app trigger exclusive with schedule, webhook and plugin", () => {
+    expect(
+      routineManageCommandV1(
+        {
+          action: "create",
+          name: "Inbox",
+          prompt: "Read it",
+          connectionTrigger: {
+            connectionId: "conn-gmail",
+            triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+          },
+        },
+        { botId: "scout", commandId: "cmd-4" },
+      ),
+    ).toMatchObject({
+      type: "routine/create",
+      trigger: {
+        kind: "connection",
+        connectionId: "conn-gmail",
+        triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+      },
+    });
+  });
+
+  test("refuses a webhook and a connected-app trigger on the same call", async () => {
+    const tool = createRoutineManageTool({ ...host(), writer: WRITER });
+    const result = await tool.execute(
+      {
+        action: "create",
+        name: "Inbox",
+        prompt: "Read it",
+        trigger: "webhook",
+        connectionTrigger: {
+          connectionId: "conn-gmail",
+          triggerType: "GMAIL_EMAIL_SENT",
+        },
+      },
+      CONTEXT,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("one of");
+  });
+
+  test("list_triggers names the connected-app events a Routine may fire on", async () => {
+    const seam = host();
+    const tool = createRoutineManageTool({
+      ...seam,
+      writer: WRITER,
+      listTriggers: () =>
+        Promise.resolve([
+          {
+            connectionId: "conn-gmail",
+            connectionLabel: "Gmail",
+            toolkitName: "Gmail",
+            slug: "GMAIL_NEW_GMAIL_MESSAGE",
+            name: "New Gmail message received",
+            description: "When a new message arrives.",
+          },
+          {
+            connectionId: "conn-gmail",
+            connectionLabel: "Gmail",
+            toolkitName: "Gmail",
+            slug: "GMAIL_EMAIL_SENT",
+            name: "Email sent",
+            description: "When a message is sent.",
+          },
+        ]),
+    });
+    const listed = await tool.execute({ action: "list_triggers" }, CONTEXT);
+    expect(listed.isError).toBe(false);
+    expect(listed.content).toContain("GMAIL_NEW_GMAIL_MESSAGE");
+    expect(listed.content).toContain("GMAIL_EMAIL_SENT");
+    expect(listed.content).toContain("connectionTrigger");
+  });
+
   test("maps a Plugin trigger to the Plugin's id and trigger, exclusive with the webhook", () => {
     expect(
       routineManageCommandV1(

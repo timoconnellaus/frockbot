@@ -411,6 +411,43 @@ void useTallSurface(WidgetTester tester) {
 }
 
 void main() {
+  test('ready Connections become Routine sources grouped by connection', () {
+    final sources = routineConnectionSourcesV1({
+      'schemaVersion': 1,
+      'triggers': [
+        {
+          'connectionId': 'conn-gmail',
+          'connectionLabel': 'Gmail',
+          'toolkitName': 'Gmail',
+          'slug': 'GMAIL_NEW_GMAIL_MESSAGE',
+          'name': 'New Gmail message received',
+          'description': 'When a new message arrives.',
+        },
+        {
+          'connectionId': 'conn-gmail',
+          'connectionLabel': 'Gmail',
+          'toolkitName': 'Gmail',
+          'slug': 'GMAIL_EMAIL_SENT',
+          'name': 'Email sent',
+          'description': 'When a message is sent.',
+        },
+        {
+          'connectionId': 'conn-slack',
+          'connectionLabel': 'Slack',
+          'toolkitName': 'Slack',
+          'slug': 'SLACK_NEW_ITEM',
+          'name': 'New item',
+          'description': 'When something new arrives.',
+        },
+      ],
+    });
+    expect(sources, hasLength(2));
+    expect(sources.first.displayName, 'Gmail');
+    expect(sources.first.triggers, hasLength(2));
+    expect(sources.first.triggers.first.displayName, 'New Gmail message received');
+    expect(sources.last.displayName, 'Slack');
+  });
+
   test('only usable trigger-capable Plugins become Routine sources', () {
     final sources = routinePluginSourcesV1({
       'plugins': [
@@ -464,6 +501,23 @@ void main() {
         ),
       ],
     );
+    final gmail = RoutineConnectionSourceV1(
+      connectionId: 'conn-gmail',
+      displayName: 'Gmail',
+      toolkitName: 'Gmail',
+      triggers: const [
+        RoutineConnectionTriggerV1(
+          'GMAIL_NEW_GMAIL_MESSAGE',
+          'New Gmail message received',
+          'When a new message arrives.',
+        ),
+        RoutineConnectionTriggerV1(
+          'GMAIL_EMAIL_SENT',
+          'Email sent',
+          'When a message is sent.',
+        ),
+      ],
+    );
     final controller = ViewController(
       store: MemoryStore(),
       userId: 'u1',
@@ -484,6 +538,8 @@ void main() {
               child: RoutineEditorV1(
                 plugins: [plugin],
                 pluginsPending: false,
+                connections: [gmail],
+                connectionsPending: false,
                 source: 'schedule',
                 routineId: null,
                 name: '',
@@ -503,6 +559,7 @@ void main() {
 
     expect(find.text('Schedule'), findsOneWidget);
     expect(find.text('Webhook'), findsOneWidget);
+    expect(find.text('Gmail'), findsOneWidget);
     expect(find.text('GitHub'), findsOneWidget);
     expect(find.text('github'), findsNothing);
     expect(find.text('Routine name'), findsOneWidget);
@@ -514,9 +571,16 @@ void main() {
     expect(find.text('Daily'), findsNothing);
     expect(find.textContaining('0 9 * * *'), findsNothing);
 
-    await tester.tap(find.text('GitHub'));
+    await tester.tap(find.text('Gmail'));
     await tester.pumpAndSettle();
     expect(find.text('Ready for incoming webhooks'), findsNothing);
+    expect(find.text('New Gmail message received'), findsOneWidget);
+    expect(find.text('Email sent'), findsOneWidget);
+    expect(find.text('GMAIL_NEW_GMAIL_MESSAGE'), findsNothing);
+
+    await tester.tap(find.text('GitHub'));
+    await tester.pumpAndSettle();
+    expect(find.text('New Gmail message received'), findsNothing);
     expect(find.text('Issue Opened'), findsOneWidget);
     expect(find.text('issue-opened'), findsNothing);
   });
@@ -1543,6 +1607,35 @@ void main() {
         'bot-1',
       );
       expect(command['trigger'], {'kind': 'webhook'});
+    });
+
+    test('a connected-app Routine names the Connection and its event', () {
+      final command = routineCommandV1(
+        save({
+          'routine.name': 'Inbox',
+          'routine.prompt': 'Read the message.',
+          'routine.timing': 'connection:conn-gmail:GMAIL_NEW_GMAIL_MESSAGE',
+        }),
+        'bot-1',
+      );
+      expect(command['type'], 'routine/create');
+      expect(command['trigger'], {
+        'kind': 'connection',
+        'connectionId': 'conn-gmail',
+        'triggerType': 'GMAIL_NEW_GMAIL_MESSAGE',
+      });
+      expect(command.containsKey('schedule'), isFalse);
+      expect(
+        () => routineCommandV1(
+          save({
+            'routine.name': 'Inbox',
+            'routine.prompt': 'Read the message.',
+            'routine.timing': 'connection:conn-gmail:',
+          }),
+          'bot-1',
+        ),
+        throwsFormatException,
+      );
     });
 
     test('a Plugin-triggered Routine names the Plugin and its trigger', () {

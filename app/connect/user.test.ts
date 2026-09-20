@@ -35,6 +35,13 @@ class MemoryStorage implements Transaction {
   delete(key: string): Promise<boolean> {
     return Promise.resolve(this.values.delete(key));
   }
+  list<T>(options: { prefix: string }): Promise<Map<string, T>> {
+    const found = new Map<string, T>();
+    for (const [key, value] of this.values) {
+      if (key.startsWith(options.prefix)) found.set(key, value as T);
+    }
+    return Promise.resolve(found);
+  }
   async transaction<T>(callback: (storage: Transaction) => Promise<T>) {
     return callback(this);
   }
@@ -133,6 +140,55 @@ class FakeClient {
   deleteConnectedAccount(id: string) {
     this.deleted.push(id);
     this.accounts.delete(id);
+    return Promise.resolve();
+  }
+  triggerTypes = new Map<
+    string,
+    Array<{ slug: string; name: string; description: string; toolkitSlug: string }>
+  >([
+    [
+      "gmail",
+      [
+        {
+          slug: "GMAIL_NEW_GMAIL_MESSAGE",
+          name: "New Gmail message received",
+          description: "When a new message arrives.",
+          toolkitSlug: "gmail",
+        },
+        {
+          slug: "GMAIL_EMAIL_SENT",
+          name: "Email sent",
+          description: "When a message is sent.",
+          toolkitSlug: "gmail",
+        },
+      ],
+    ],
+  ]);
+  instances = new Map<
+    string,
+    { slug: string; userId: string; connectedAccountId: string }
+  >();
+  deletedTriggers: string[] = [];
+  private triggerCounter = 0;
+  listTriggerTypes(toolkitSlug: string) {
+    return Promise.resolve(this.triggerTypes.get(toolkitSlug) ?? []);
+  }
+  upsertTriggerInstance(input: {
+    slug: string;
+    userId: string;
+    connectedAccountId: string;
+  }) {
+    const id = `ti_${++this.triggerCounter}`;
+    this.instances.set(id, input);
+    return Promise.resolve({
+      id,
+      slug: input.slug,
+      connectedAccountId: input.connectedAccountId,
+    });
+  }
+  deleteTriggerInstance(id: string) {
+    this.deletedTriggers.push(id);
+    this.instances.delete(id);
     return Promise.resolve();
   }
   set(id: string, status: ConnectedAccountStatusV1) {
@@ -486,5 +542,114 @@ describe("changing a connected app", () => {
     });
     expect(receipt.status).toBe("failed");
     expect(f.settings.state.connections[0]?.state).toBe("ready");
+  });
+});
+
+describe("Connected-app Routine triggers", () => {
+  async function ready(f: ReturnType<typeof fixture>) {
+    await f.contribution.executeConnection("tim", start("s1"));
+    f.client.set("ca_1", "ACTIVE");
+    f.clock.now += 5_000;
+    await f.contribution.bootstrap("tim");
+    return f.settings.state.connections[0]!;
+  }
+
+  test("lists Gmail's new-message and email-sent events for a ready account", async () => {
+    const f = fixture();
+    await ready(f);
+    const offers = await f.contribution.listTriggers("tim");
+    expect(offers.map((offer) => offer.slug)).toEqual([
+      "GMAIL_NEW_GMAIL_MESSAGE",
+      "GMAIL_EMAIL_SENT",
+    ]);
+    expect(offers[0]).toMatchObject({
+      connectionLabel: "Gmail",
+      toolkitName: "Gmail",
+      name: "New Gmail message received",
+    });
+  });
+
+  test("upserts an instance once per command and replays the same id", async () => {
+    const f = fixture();
+    const connection = await ready(f);
+    const first = await f.contribution.upsertTrigger({
+      userId: "tim",
+      commandId: "cmd-1",
+      botId: "scout",
+      routineId: "inbox",
+      connectionId: connection.connectionId,
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    });
+    const again = await f.contribution.upsertTrigger({
+      userId: "tim",
+      commandId: "cmd-1",
+      botId: "scout",
+      routineId: "inbox",
+      connectionId: connection.connectionId,
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    });
+    expect(again.instanceId).toBe(first.instanceId);
+    expect(f.client.instances.size).toBe(1);
+    expect(await f.contribution.resolveTrigger(first.instanceId)).toMatchObject({
+      botId: "scout",
+      routineId: "inbox",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    });
+  });
+
+  test("deletes the instance with the Routine and on disconnect", async () => {
+    const f = fixture();
+    const connection = await ready(f);
+    const held = await f.contribution.upsertTrigger({
+      userId: "tim",
+      commandId: "cmd-1",
+      botId: "scout",
+      routineId: "inbox",
+      connectionId: connection.connectionId,
+      triggerType: "GMAIL_EMAIL_SENT",
+    });
+    await f.contribution.deleteTrigger({
+      commandId: "cmd-2",
+      botId: "scout",
+      routineId: "inbox",
+    });
+    expect(f.client.deletedTriggers).toEqual([held.instanceId]);
+    expect(await f.contribution.resolveTrigger(held.instanceId)).toBeUndefined();
+
+    const again = await f.contribution.upsertTrigger({
+      userId: "tim",
+      commandId: "cmd-3",
+      botId: "scout",
+      routineId: "inbox",
+      connectionId: connection.connectionId,
+      triggerType: "GMAIL_EMAIL_SENT",
+    });
+    await f.contribution.executeConnection("tim", {
+      schemaVersion: 1,
+      type: "connection/disconnect",
+      commandId: "gone",
+      connectionId: connection.connectionId,
+      revokeUpstream: false,
+    });
+    expect(f.client.deletedTriggers).toContain(again.instanceId);
+  });
+
+  test("marks an expired account failed and names the Routines that fired on it", async () => {
+    const f = fixture();
+    const connection = await ready(f);
+    await f.contribution.upsertTrigger({
+      userId: "tim",
+      commandId: "cmd-1",
+      botId: "scout",
+      routineId: "inbox",
+      connectionId: connection.connectionId,
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    });
+    const failed = await f.contribution.failExpiredAccount("tim", "ca_1");
+    expect(failed).toMatchObject({
+      connectionId: connection.connectionId,
+      routines: [{ botId: "scout", routineId: "inbox" }],
+    });
+    expect(f.settings.state.connections[0]?.state).toBe("failed");
   });
 });

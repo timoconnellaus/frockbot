@@ -156,11 +156,11 @@ Map<String, Object?> routineCommandV1(
 /// One press, two verbs: a `routineId` names the Routine to update, and its
 /// absence is what creating means.
 ///
-/// A Routine fires on a schedule, on a webhook, or on a Plugin trigger and
-/// never on two of them, so exactly one travels. An update carries every field the form holds, which
-/// is what a form the person just read and pressed Save on means — the route's
-/// partial update is for a Bot changing one thing, not for a person looking at
-/// all of them.
+/// A Routine fires on a schedule, on a webhook, on a Plugin trigger, or on a
+/// connected-app event and never on two of them, so exactly one travels. An
+/// update carries every field the form holds, which is what a form the person
+/// just read and pressed Save on means — the route's partial update is for a
+/// Bot changing one thing, not for a person looking at all of them.
 Map<String, Object?> _saveCommandV1(
   Map<String, Object?> command,
   String botId,
@@ -176,12 +176,13 @@ Map<String, Object?> _saveCommandV1(
   final timing = input[routineEditorFieldsV1.timing];
   final webhook = timing == 'webhook';
   final plugin = timing is String && timing.startsWith('plugin:');
-  if (timing != 'schedule' && !webhook && !plugin) {
+  final connection = timing is String && timing.startsWith('connection:');
+  if (timing != 'schedule' && !webhook && !plugin && !connection) {
     throw const FormatException('Choose what starts this Routine.');
   }
   final schedule = (input[routineEditorFieldsV1.schedule] as String? ?? '')
       .trim();
-  if (!webhook && !plugin && schedule.isEmpty) {
+  if (!webhook && !plugin && !connection && schedule.isEmpty) {
     throw const FormatException('Give this Routine a schedule.');
   }
   final pluginParts = plugin ? timing.split(':') : const <String>[];
@@ -190,6 +191,18 @@ Map<String, Object?> _saveCommandV1(
   if (plugin && (pluginId.isEmpty || pluginTrigger.isEmpty)) {
     throw const FormatException(
       'Name the Plugin and the trigger this Routine fires on.',
+    );
+  }
+  final connectionParts = connection ? timing.split(':') : const <String>[];
+  final connectionId = connectionParts.length == 3
+      ? connectionParts[1].trim()
+      : '';
+  final triggerType = connectionParts.length == 3
+      ? connectionParts[2].trim()
+      : '';
+  if (connection && (connectionId.isEmpty || triggerType.isEmpty)) {
+    throw const FormatException(
+      'Name the app and the event this Routine fires on.',
     );
   }
   final routineId = routineIdV1(command);
@@ -201,7 +214,13 @@ Map<String, Object?> _saveCommandV1(
     'routineId': ?routineId,
     'name': name,
     'prompt': prompt,
-    if (plugin)
+    if (connection)
+      'trigger': {
+        'kind': 'connection',
+        'connectionId': connectionId,
+        'triggerType': triggerType,
+      }
+    else if (plugin)
       'trigger': {
         'kind': 'plugin',
         'pluginId': pluginId,

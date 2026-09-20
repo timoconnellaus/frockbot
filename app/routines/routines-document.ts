@@ -84,9 +84,9 @@ export const ROUTINE_EDITOR_FIELDS_V1 = {
   name: "routine.name",
   prompt: "routine.prompt",
   /**
-   * What starts the Routine, as the host answers it: `schedule`, `webhook`, or
-   * `plugin:<pluginId>:<trigger>` — one value, because a Routine fires on
-   * exactly one of them, and the host names the Plugin and the trigger in it.
+   * What starts the Routine, as the host answers it: `schedule`, `webhook`,
+   * `plugin:<pluginId>:<trigger>`, or `connection:<connectionId>:<triggerType>`
+   * — one value, because a Routine fires on exactly one of them.
    */
   timing: "routine.timing",
   schedule: "routine.schedule",
@@ -299,14 +299,18 @@ function field(
 function editorNode(frame: RoutinesFrameV1): ViewNode {
   const editing = frame.editing;
   const ids = ROUTINE_EDITOR_FIELDS_V1;
-  const webhook = editing !== undefined && editing.schedule === undefined;
+  const connection =
+    editing?.trigger?.kind === "connection" ? editing.trigger : undefined;
   const plugin =
     editing?.trigger?.kind === "plugin" ? editing.trigger : undefined;
-  const timing = plugin
-    ? `plugin:${plugin.pluginId}:${plugin.trigger}`
-    : webhook
-      ? "webhook"
-      : "schedule";
+  const webhook = editing?.trigger?.kind === "webhook";
+  const timing = connection
+    ? `connection:${connection.connectionId}:${connection.triggerType}`
+    : plugin
+      ? `plugin:${plugin.pluginId}:${plugin.trigger}`
+      : webhook
+        ? "webhook"
+        : "schedule";
   const schedule = editing?.schedule ?? "0 9 * * *";
   return {
     type: "group",

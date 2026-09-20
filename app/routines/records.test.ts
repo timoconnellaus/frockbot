@@ -41,6 +41,33 @@ describe("RoutineRecordV1", () => {
     expect(Object.keys(decoded)).not.toContain("key");
   });
 
+  test("decodes a connected-app Routine, naming the Connection and event", () => {
+    const { schedule: _schedule, ...rest } = base;
+    const decoded = decodeRoutineRecordV1({
+      ...rest,
+      trigger: {
+        kind: "connection",
+        connectionId: "conn-gmail",
+        triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+      },
+    });
+    expect(decoded.trigger).toEqual({
+      kind: "connection",
+      connectionId: "conn-gmail",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    });
+    expect(() =>
+      decodeRoutineRecordV1({
+        ...rest,
+        trigger: {
+          kind: "connection",
+          connectionId: "conn-gmail",
+          triggerType: "gmail-new",
+        },
+      }),
+    ).toThrow(/triggerType is invalid/);
+  });
+
   test("decodes a Plugin-triggered Routine, naming the Plugin and its trigger", () => {
     const { schedule: _schedule, ...rest } = base;
     const decoded = decodeRoutineRecordV1({

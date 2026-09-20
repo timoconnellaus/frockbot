@@ -119,6 +119,21 @@ describe("Connected apps", () => {
     )) as { connectionId: string };
     expect(replay.connectionId).toBe(started.connectionId);
     expect(await connections(userId)).toHaveLength(1);
+
+    const listed = (await expectOkJson(
+      await asUser(userId, "/api/connect/triggers"),
+    )) as {
+      schemaVersion: number;
+      triggers: Array<{ slug: string; toolkitName: string }>;
+    };
+    expect(listed.schemaVersion).toBe(1);
+    expect(listed.triggers.map((trigger) => trigger.slug).sort()).toEqual([
+      "GMAIL_EMAIL_SENT",
+      "GMAIL_NEW_GMAIL_MESSAGE",
+    ]);
+    expect(listed.triggers.every((trigger) => trigger.toolkitName === "Gmail")).toBe(
+      true,
+    );
   });
 
   it("sends each app back through its own return page, and serves it", async () => {

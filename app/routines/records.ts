@@ -27,7 +27,12 @@ export const ROUTINE_RUN_STATUSES = [
 export type RoutineRunStatusV1 = (typeof ROUTINE_RUN_STATUSES)[number];
 
 /** What produced a firing. Mirrors `StoredRunOriginV1.trigger` exactly. */
-export const ROUTINE_TRIGGER_KINDS = ["cron", "webhook", "manual"] as const;
+export const ROUTINE_TRIGGER_KINDS = [
+  "cron",
+  "webhook",
+  "manual",
+  "connection",
+] as const;
 
 export type RoutineTriggerKindV1 = (typeof ROUTINE_TRIGGER_KINDS)[number];
 
@@ -47,18 +52,81 @@ export type RoutineWriterV1 =
  * through the same door but hands the delivery to one of the account's
  * Plugins first — the trigger it exports under `trigger` — and fires with what
  * the Plugin answered, or not at all when it dropped the delivery.
+ * `connection` fires on an event from a connected app; the instance lives at
+ * the provider and the delivery arrives at the deployment-wide events door.
  */
 export type RoutineTriggerV1 =
-  { kind: "webhook" } | { kind: "plugin"; pluginId: string; trigger: string };
+  | { kind: "webhook" }
+  | { kind: "plugin"; pluginId: string; trigger: string }
+  | {
+      kind: "connection";
+      connectionId: string;
+      triggerType: string;
+      config?: Record<string, string | number | boolean>;
+    };
 
 const ROUTINE_PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const ROUTINE_PLUGIN_TRIGGER = /^[a-z][a-z0-9_-]{0,63}$/;
+const ROUTINE_CONNECTION_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const ROUTINE_CONNECTION_TRIGGER = /^[A-Z][A-Z0-9_]{0,127}$/;
+const ROUTINE_CONNECTION_CONFIG_KEYS = 16;
+const ROUTINE_CONNECTION_CONFIG_KEY = 64;
+const ROUTINE_CONNECTION_CONFIG_VALUE = 256;
+
+/** Whether this trigger mints a per-Routine webhook key. */
+export function routineTriggerNeedsHookKeyV1(
+  trigger: RoutineTriggerV1,
+): boolean {
+  return trigger.kind === "webhook" || trigger.kind === "plugin";
+}
+
+export function decodeRoutineTriggerConfigV1(
+  value: unknown,
+  label = "Routine trigger config",
+): Record<string, string | number | boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RoutineDecodeError(`${label} must be an object`);
+  }
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate);
+  if (keys.length > ROUTINE_CONNECTION_CONFIG_KEYS) {
+    throw new RoutineDecodeError(
+      `${label} may hold at most ${ROUTINE_CONNECTION_CONFIG_KEYS} fields`,
+    );
+  }
+  const config: Record<string, string | number | boolean> = {};
+  for (const key of keys) {
+    if (key.length > ROUTINE_CONNECTION_CONFIG_KEY) {
+      throw new RoutineDecodeError(`${label} field "${key}" is too long`);
+    }
+    const field = candidate[key];
+    if (typeof field === "string") {
+      if (field.length > ROUTINE_CONNECTION_CONFIG_VALUE) {
+        throw new RoutineDecodeError(`${label}.${key} is too long`);
+      }
+      config[key] = field;
+      continue;
+    }
+    if (typeof field === "number" && Number.isFinite(field)) {
+      config[key] = field;
+      continue;
+    }
+    if (typeof field === "boolean") {
+      config[key] = field;
+      continue;
+    }
+    throw new RoutineDecodeError(`${label}.${key} must be a string, number, or boolean`);
+  }
+  return config;
+}
 
 /** The words a page or a cue use for what a Routine fires on. */
 export function routineTriggerLabelV1(trigger: RoutineTriggerV1): string {
-  return trigger.kind === "webhook"
-    ? "Webhook trigger"
-    : `Plugin trigger · ${trigger.pluginId}/${trigger.trigger}`;
+  if (trigger.kind === "webhook") return "Webhook trigger";
+  if (trigger.kind === "plugin") {
+    return `Plugin trigger · ${trigger.pluginId}/${trigger.trigger}`;
+  }
+  return `App event · ${trigger.triggerType.toLowerCase().replaceAll("_", " ")}`;
 }
 
 /**
@@ -208,9 +276,39 @@ export function decodeRoutineTriggerV1(
       trigger: candidate.trigger,
     };
   }
+  if (candidate.kind === "connection") {
+    routineExactKeys(
+      candidate,
+      ["kind", "connectionId", "triggerType"],
+      ["config"],
+      label,
+    );
+    if (
+      typeof candidate.connectionId !== "string" ||
+      !ROUTINE_CONNECTION_ID.test(candidate.connectionId)
+    ) {
+      throw new RoutineDecodeError(`${label} connectionId is invalid`);
+    }
+    if (
+      typeof candidate.triggerType !== "string" ||
+      !ROUTINE_CONNECTION_TRIGGER.test(candidate.triggerType)
+    ) {
+      throw new RoutineDecodeError(`${label} triggerType is invalid`);
+    }
+    return {
+      kind: "connection",
+      connectionId: candidate.connectionId,
+      triggerType: candidate.triggerType,
+      ...(candidate.config === undefined
+        ? {}
+        : { config: decodeRoutineTriggerConfigV1(candidate.config, `${label} config`) }),
+    };
+  }
   routineExactKeys(candidate, ["kind"], [], label);
   if (candidate.kind !== "webhook") {
-    throw new RoutineDecodeError(`${label} kind must be "webhook" or "plugin"`);
+    throw new RoutineDecodeError(
+      `${label} kind must be "webhook", "plugin", or "connection"`,
+    );
   }
   return { kind: "webhook" };
 }

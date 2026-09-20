@@ -37,6 +37,36 @@ class RoutinePluginSourceV1 {
   });
 }
 
+class RoutineConnectionTriggerV1 {
+  final String slug;
+  final String name;
+  final String description;
+  const RoutineConnectionTriggerV1(this.slug, this.name, this.description);
+
+  String get displayName {
+    final labelled = name.trim();
+    if (labelled.isNotEmpty && labelled != slug) return labelled;
+    return slug
+        .split(RegExp(r'[-_]'))
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}')
+        .join(' ');
+  }
+}
+
+class RoutineConnectionSourceV1 {
+  final String connectionId;
+  final String displayName;
+  final String toolkitName;
+  final List<RoutineConnectionTriggerV1> triggers;
+  const RoutineConnectionSourceV1({
+    required this.connectionId,
+    required this.displayName,
+    required this.toolkitName,
+    required this.triggers,
+  });
+}
+
 /// Trigger-capable Plugins that are installed, available, and on for this Bot.
 List<RoutinePluginSourceV1> routinePluginSourcesV1(Object? value) {
   if (value is! Map || value['plugins'] is! List) return const [];
@@ -80,9 +110,54 @@ List<RoutinePluginSourceV1> routinePluginSourcesV1(Object? value) {
   return sources;
 }
 
+/// Ready Connections that can start a Routine, grouped by connection.
+List<RoutineConnectionSourceV1> routineConnectionSourcesV1(Object? value) {
+  if (value is! Map || value['triggers'] is! List) return const [];
+  final grouped = <String, RoutineConnectionSourceV1>{};
+  for (final raw in value['triggers'] as List) {
+    if (raw is! Map) continue;
+    final connectionId = raw['connectionId'];
+    final connectionLabel = raw['connectionLabel'];
+    final toolkitName = raw['toolkitName'];
+    final slug = raw['slug'];
+    final name = raw['name'];
+    final description = raw['description'];
+    if (connectionId is! String ||
+        connectionId.isEmpty ||
+        connectionLabel is! String ||
+        toolkitName is! String ||
+        slug is! String ||
+        slug.isEmpty ||
+        name is! String ||
+        description is! String) {
+      continue;
+    }
+    final trigger = RoutineConnectionTriggerV1(slug, name, description);
+    final existing = grouped[connectionId];
+    if (existing == null) {
+      grouped[connectionId] = RoutineConnectionSourceV1(
+        connectionId: connectionId,
+        displayName: connectionLabel,
+        toolkitName: toolkitName,
+        triggers: [trigger],
+      );
+    } else {
+      grouped[connectionId] = RoutineConnectionSourceV1(
+        connectionId: existing.connectionId,
+        displayName: existing.displayName,
+        toolkitName: existing.toolkitName,
+        triggers: [...existing.triggers, trigger],
+      );
+    }
+  }
+  return grouped.values.toList();
+}
+
 Map<String, ViewFieldBuilder> routineEditorFieldBuildersV1(
   List<RoutinePluginSourceV1> Function() plugins, {
   required bool Function() pluginsPending,
+  List<RoutineConnectionSourceV1> Function()? connections,
+  bool Function()? connectionsPending,
 }) => {
   'routine-editor-hidden': (_, _, _, _, _) => const SizedBox.shrink(),
   'routine-editor': (context, field, id, value, onChanged) {
@@ -93,6 +168,8 @@ Map<String, ViewFieldBuilder> routineEditorFieldBuildersV1(
         key: ValueKey('routine-editor.${scope.controller.revision}'),
         plugins: plugins(),
         pluginsPending: pluginsPending(),
+        connections: connections?.call() ?? const [],
+        connectionsPending: connectionsPending?.call() ?? false,
         source: value as String? ?? 'schedule',
         routineId: scope.controller.values[_editorId] as String?,
         name: scope.controller.values[_name] as String? ?? '',
@@ -112,7 +189,7 @@ Map<String, ViewFieldBuilder> routineEditorFieldBuildersV1(
   },
 };
 
-enum _RoutineSourceKind { schedule, webhook, plugin }
+enum _RoutineSourceKind { schedule, webhook, connection, plugin }
 
 enum _RoutineCadence { daily, weekdays, weekly, monthly, interval, custom }
 
@@ -273,6 +350,8 @@ class RoutineEditorV1 extends StatefulWidget {
   /// empty because nobody has read it yet is not a list of no Plugins, and a
   /// stored trigger the editor cannot see yet is not a trigger that is gone.
   final bool pluginsPending;
+  final List<RoutineConnectionSourceV1> connections;
+  final bool connectionsPending;
   final String source;
   final String? routineId;
   final String name;
@@ -288,6 +367,8 @@ class RoutineEditorV1 extends StatefulWidget {
     super.key,
     required this.plugins,
     required this.pluginsPending,
+    this.connections = const [],
+    this.connectionsPending = false,
     required this.source,
     required this.routineId,
     required this.name,
@@ -308,12 +389,14 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
   late final _RoutineSourceKind storedSourceKind;
   late _RoutineSourceKind sourceKind;
   String? pluginId;
+  String? connectionId;
   String? trigger;
   late _FriendlySchedule schedule;
 
   static _RoutineSourceKind _sourceKindOf(String source) {
     if (source == 'webhook') return _RoutineSourceKind.webhook;
     if (source.startsWith('plugin:')) return _RoutineSourceKind.plugin;
+    if (source.startsWith('connection:')) return _RoutineSourceKind.connection;
     return _RoutineSourceKind.schedule;
   }
 
@@ -333,16 +416,32 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
         trigger = parts[2];
       }
     }
+    if (storedSourceKind == _RoutineSourceKind.connection) {
+      final parts = widget.source.split(':');
+      if (parts.length == 3) {
+        connectionId = parts[1];
+        trigger = parts[2];
+      }
+    }
   }
 
   RoutinePluginSourceV1? get selectedPlugin =>
       widget.plugins.where((plugin) => plugin.pluginId == pluginId).firstOrNull;
 
-  void chooseSource(_RoutineSourceKind kind, [String? nextPlugin]) {
+  RoutineConnectionSourceV1? get selectedConnection => widget.connections
+      .where((connection) => connection.connectionId == connectionId)
+      .firstOrNull;
+
+  void chooseSource(
+    _RoutineSourceKind kind, [
+    String? nextPlugin,
+    String? nextConnection,
+  ]) {
     if (!widget.enabled) return;
     setState(() {
       sourceKind = kind;
       pluginId = nextPlugin;
+      connectionId = nextConnection;
       trigger = null;
     });
     if (kind == _RoutineSourceKind.schedule) {
@@ -356,6 +455,12 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
     if (!widget.enabled || pluginId == null) return;
     setState(() => trigger = name);
     widget.onSourceChanged?.call('plugin:$pluginId:$name');
+  }
+
+  void chooseConnectionTrigger(String slug) {
+    if (!widget.enabled || connectionId == null) return;
+    setState(() => trigger = slug);
+    widget.onSourceChanged?.call('connection:$connectionId:$slug');
   }
 
   void scheduleChanged() {
@@ -387,7 +492,7 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
         Text('When does it fire?', style: theme.textTheme.titleLarge),
         const SizedBox(height: 4),
         Text(
-          'A time, a webhook, or a Plugin with triggers.',
+          'A time, a webhook, a connected app, or a Plugin with triggers.',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 16),
@@ -430,11 +535,19 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
   /// A Plugin source is not ready to save until a trigger is named. A stored
   /// trigger the catalog has not shown yet still counts — that is the one the
   /// Routine already has.
-  bool get _canSave =>
-      sourceKind != _RoutineSourceKind.plugin ||
-      trigger != null ||
-      (widget.source.startsWith('plugin:') &&
-          widget.source.split(':').length == 3);
+  bool get _canSave {
+    if (sourceKind == _RoutineSourceKind.plugin) {
+      return trigger != null ||
+          (widget.source.startsWith('plugin:') &&
+              widget.source.split(':').length == 3);
+    }
+    if (sourceKind == _RoutineSourceKind.connection) {
+      return trigger != null ||
+          (widget.source.startsWith('connection:') &&
+              widget.source.split(':').length == 3);
+    }
+    return true;
+  }
 
   Widget _sourceChoices(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) => Wrap(
@@ -461,6 +574,53 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
           selected: sourceKind == _RoutineSourceKind.webhook,
           onTap: () => chooseSource(_RoutineSourceKind.webhook),
         ),
+        for (final connection in widget.connections)
+          _sourceChoice(
+            context,
+            identifier: RoutineIds.sourceConnection(connection.connectionId),
+            width: constraints.maxWidth,
+            icon: Icons.inbox_outlined,
+            title: connection.displayName,
+            detail:
+                '${connection.triggers.length} ${connection.triggers.length == 1 ? 'trigger' : 'triggers'}',
+            selected:
+                sourceKind == _RoutineSourceKind.connection &&
+                connectionId == connection.connectionId,
+            onTap: () => chooseSource(
+              _RoutineSourceKind.connection,
+              null,
+              connection.connectionId,
+            ),
+          ),
+        if (sourceKind == _RoutineSourceKind.connection &&
+            selectedConnection == null)
+          _sourceChoice(
+            context,
+            identifier: RoutineIds.sourceConnection(
+              connectionId ?? 'unavailable',
+            ),
+            width: constraints.maxWidth,
+            icon: widget.connectionsPending
+                ? Icons.inbox_outlined
+                : Icons.inbox_rounded,
+            title: 'Current app',
+            detail: widget.connectionsPending
+                ? 'Checking availability…'
+                : 'Unavailable for this Bot',
+            selected: true,
+            onTap: () {},
+          ),
+        if (widget.connectionsPending && widget.connections.isEmpty)
+          _sourceChoice(
+            context,
+            identifier: RoutineIds.sourceConnectionsPending,
+            width: constraints.maxWidth,
+            icon: Icons.inbox_outlined,
+            title: 'Connected apps',
+            detail: 'Checking this account’s apps…',
+            selected: false,
+            onTap: () {},
+          ),
         for (final plugin in widget.plugins)
           _sourceChoice(
             context,
@@ -570,6 +730,7 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
   Widget _configureStep(BuildContext context) => switch (sourceKind) {
     _RoutineSourceKind.schedule => _scheduleEditor(context),
     _RoutineSourceKind.webhook => _webhookEditor(context),
+    _RoutineSourceKind.connection => _connectionEditor(context),
     _RoutineSourceKind.plugin => _pluginEditor(context),
   };
 
@@ -578,6 +739,64 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
     title: 'Ready for incoming webhooks',
     detail: 'After you create this Routine, FrockBot will show its URL and secret once. Copy them into the service that will call it.',
   );
+
+  Widget _connectionEditor(BuildContext context) {
+    final connection = selectedConnection;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (connection == null)
+          widget.connectionsPending
+              ? const _InfoBox(
+                  icon: Icons.inbox_outlined,
+                  title: 'Still loading connected apps',
+                  detail: 'This account’s apps are still being read. The existing trigger will be kept.',
+                )
+              : const _InfoBox(
+                  icon: Icons.inbox_rounded,
+                  title: 'This app is unavailable',
+                  detail: 'The existing trigger will be kept. Choose another source to replace it.',
+                )
+        else
+          RadioGroup<String>(
+            groupValue: trigger,
+            onChanged: widget.enabled
+                ? (next) {
+                    if (next != null) chooseConnectionTrigger(next);
+                  }
+                : (_) {},
+            child: Column(
+              children: [
+                for (final option in connection.triggers)
+                  identified(
+                    RoutineIds.connectionTrigger(
+                      connection.connectionId,
+                      option.slug,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: RadioListTile<String>(
+                        value: option.slug,
+                        enabled: widget.enabled,
+                        title: Text(option.displayName),
+                        subtitle: Text(option.description),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(
+                            color: trigger == option.slug
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.outlineVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 
   Widget _pluginEditor(BuildContext context) {
     final plugin = selectedPlugin;

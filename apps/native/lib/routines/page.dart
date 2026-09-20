@@ -72,12 +72,14 @@ class RoutinesController extends ViewSurfaceController {
 
   wire.ViewDocument? _document;
   List<RoutinePluginSourceV1> pluginSources = const [];
+  List<RoutineConnectionSourceV1> connectionSources = const [];
 
   /// Whether the read that answers for [pluginSources] is still out. An empty
   /// list under a read that is still out is not a statement about this Bot's
   /// Plugins, and the editor draws the difference rather than telling someone
   /// their Plugin is gone.
   bool pluginCatalogPending = true;
+  bool connectionCatalogPending = true;
   bool _busy = false;
   bool _closed = false;
   String? _message;
@@ -125,6 +127,14 @@ class RoutinesController extends ViewSurfaceController {
     }
   }
 
+  Future<Object?> _loadConnectTriggers() async {
+    try {
+      return await api.request('/api/connect/triggers');
+    } catch (_) {
+      return null;
+    }
+  }
+
   void _changed() {
     if (!_closed) notifyListeners();
   }
@@ -155,11 +165,13 @@ class RoutinesController extends ViewSurfaceController {
         _reload = false;
         final read = ++_reads;
         pluginCatalogPending = true;
+        connectionCatalogPending = true;
         // The catalog widens what the editor offers and nothing else, so it is
         // asked for beside the document and read whenever it lands: a slow
         // Plugin route must not hold back Routines that are otherwise
         // available.
         final plugins = _loadPluginFrame();
+        final connections = _loadConnectTriggers();
         final wantCreate = creating;
         final wantEdit = editing;
         try {
@@ -184,6 +196,7 @@ class RoutinesController extends ViewSurfaceController {
           _message = 'Couldn’t load this Bot’s Routines. Check your connection and try again.';
         }
         unawaited(_adoptPluginSources(read, plugins));
+        unawaited(_adoptConnectionSources(read, connections));
       } while (_reload && !_closed);
     } finally {
       _busy = false;
@@ -199,6 +212,17 @@ class RoutinesController extends ViewSurfaceController {
     if (_closed || read != _reads) return;
     pluginSources = routinePluginSourcesV1(frame);
     pluginCatalogPending = false;
+    _changed();
+  }
+
+  Future<void> _adoptConnectionSources(
+    int read,
+    Future<Object?> connections,
+  ) async {
+    final frame = await connections;
+    if (_closed || read != _reads) return;
+    connectionSources = routineConnectionSourcesV1(frame);
+    connectionCatalogPending = false;
     _changed();
   }
 
@@ -547,6 +571,8 @@ class _RoutinesViewState extends State<RoutinesView> {
         fields: routineEditorFieldBuildersV1(
           () => controller.pluginSources,
           pluginsPending: () => controller.pluginCatalogPending,
+          connections: () => controller.connectionSources,
+          connectionsPending: () => controller.connectionCatalogPending,
         ),
       ),
     );

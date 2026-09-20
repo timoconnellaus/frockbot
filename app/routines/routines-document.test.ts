@@ -315,6 +315,25 @@ test("naming a Routine opens the editor on its own values and moves the revision
   ).toBe(false);
 });
 
+test("a connected-app Routine seeds the editor as connection:id:slug", () => {
+  const inbox: RoutineViewV1 = {
+    ...morning,
+    schedule: undefined,
+    trigger: {
+      kind: "connection",
+      connectionId: "conn-gmail",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    },
+    nextRunAt: undefined,
+  };
+  const values = walk(routinesDocumentV1(frame({ editing: inbox })).root)
+    .filter((node) => node.type === "field")
+    .map((node) => (node.type === "field" ? node.field.value : null));
+  expect(values.at(-1)).toBe(
+    "connection:conn-gmail:GMAIL_NEW_GMAIL_MESSAGE",
+  );
+});
+
 test("the host editor is told whether a triggered Routine has a key", () => {
   const fresh: RoutineViewV1 = {
     ...morning,
