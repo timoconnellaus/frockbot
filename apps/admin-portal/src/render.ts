@@ -80,9 +80,9 @@ function when(timestamp: string): string {
 const STYLES = `
 :root {
   color-scheme: dark;
-  --ink: #15141a;
-  --surface: #1f1e24;
-  --raised: #2c2a33;
+  --ink: #0c0c0e;
+  --surface: #121214;
+  --raised: #1e1e22;
   --line: #36333f;
   --line-strong: #4b4756;
   --text: #f4f2f6;

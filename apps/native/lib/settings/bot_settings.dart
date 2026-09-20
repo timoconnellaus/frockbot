@@ -1026,6 +1026,8 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                   fontSize: 12.5,
                   color: widget.onEditAvatar == null
                       ? theme.colorScheme.onSurfaceVariant
+                      : theme.brightness == Brightness.dark
+                      ? FrockTheme.accentSoft
                       : theme.colorScheme.primary,
                 ),
               ),

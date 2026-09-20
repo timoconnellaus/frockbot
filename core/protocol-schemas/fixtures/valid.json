@@ -76,20 +76,20 @@
   {
     "name": "ThemeHex valid",
     "schema": "ThemeHex",
-    "value": "#d03f64"
+    "value": "#c44580"
   },
   {
     "name": "ThemeTokens valid",
     "schema": "ThemeTokens",
     "value": {
       "surfaces": {
-        "window": "#1f1e24",
-        "surface": "#1a191e",
-        "raised": "#2c2a33",
+        "window": "#121214",
+        "surface": "#0c0c0e",
+        "raised": "#1e1e22",
         "text": "#f6f2ee",
         "muted": "#a8a3a6",
-        "line": "#3a3742",
-        "accent": "#d03f64",
+        "line": "#2c2c32",
+        "accent": "#c44580",
         "onAccent": "#ffffff"
       },
       "type": "manrope",
@@ -261,13 +261,13 @@
       "look": "ink",
       "tokens": {
         "surfaces": {
-          "window": "#1f1e24",
-          "surface": "#1a191e",
-          "raised": "#2c2a33",
+          "window": "#121214",
+          "surface": "#0c0c0e",
+          "raised": "#1e1e22",
           "text": "#f6f2ee",
           "muted": "#a8a3a6",
-          "line": "#3a3742",
-          "accent": "#d03f64",
+          "line": "#2c2c32",
+          "accent": "#c44580",
           "onAccent": "#ffffff"
         },
         "type": "manrope",

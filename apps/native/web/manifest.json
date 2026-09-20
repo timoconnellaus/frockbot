@@ -3,8 +3,8 @@
   "short_name": "FrockBot",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#1f1e24",
-  "theme_color": "#1f1e24",
+  "background_color": "#121214",
+  "theme_color": "#121214",
   "description": "Your Bots, with you.",
   "prefer_related_applications": false,
   "icons": [

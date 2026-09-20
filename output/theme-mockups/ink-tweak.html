@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FrockBot — ink tweak</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --lab: #0a0a0c;
+        --lab-raised: #161618;
+        --lab-line: #2a2a2e;
+        --lab-text: #f6f2ee;
+        --lab-muted: #9a9598;
+        --chrome: "Manrope", system-ui, sans-serif;
+      }
+      [data-look="today"] {
+        --window: #1f1e24;
+        --surface: #1a191e;
+        --raised: #2c2a33;
+        --line: #3a3742;
+        --text: #f6f2ee;
+        --muted: #a8a3a6;
+        --accent: #d03f64;
+        --on-accent: #ffffff;
+        --link: #d03f64;
+        --error: #e05a5a;
+        --me: color-mix(in srgb, #d03f64 20%, #2c2a33);
+      }
+      [data-look="charcoal"] {
+        --window: #121214;
+        --surface: #0c0c0e;
+        --raised: #1e1e22;
+        --line: #2c2c32;
+        --text: #f6f2ee;
+        --muted: #a8a3a6;
+        --accent: #d03f64;
+        --on-accent: #ffffff;
+        --link: #d03f64;
+        --error: #e05a5a;
+        --me: color-mix(in srgb, #d03f64 20%, #1e1e22);
+      }
+      [data-look="shipping"] {
+        --window: #121214;
+        --surface: #0c0c0e;
+        --raised: #1e1e22;
+        --line: #2c2c32;
+        --text: #f6f2ee;
+        --muted: #a8a3a6;
+        --accent: #c44580;
+        --on-accent: #ffffff;
+        --link: #f59ab6;
+        --error: #e05a5a;
+        --me: color-mix(in srgb, #c44580 20%, #1e1e22);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--lab);
+        color: var(--lab-text);
+        font-family: var(--chrome);
+      }
+      body {
+        padding: 28px 24px 48px;
+      }
+      header {
+        max-width: 1180px;
+        margin: 0 auto 22px;
+      }
+      header p.eyebrow {
+        margin: 0 0 8px;
+        color: #f59ab6;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+        letter-spacing: -0.04em;
+      }
+      header .lede {
+        max-width: 68ch;
+        margin: 0;
+        color: var(--lab-muted);
+        line-height: 1.55;
+      }
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        max-width: 1180px;
+        margin: 0 auto 22px;
+      }
+      .tabs button {
+        appearance: none;
+        border: 1px solid var(--lab-line);
+        background: var(--lab-raised);
+        color: var(--lab-muted);
+        border-radius: 999px;
+        padding: 8px 14px;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .tabs button[aria-pressed="true"] {
+        background: #f6f2ee;
+        color: #121214;
+        border-color: #f6f2ee;
+      }
+      .note {
+        max-width: 1180px;
+        margin: 0 auto 22px;
+        color: var(--lab-muted);
+        font-size: 13.5px;
+        line-height: 1.5;
+      }
+      .note strong {
+        color: var(--lab-text);
+        font-weight: 600;
+      }
+      .stage {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        max-width: 1180px;
+        margin: 0 auto;
+      }
+      @media (max-width: 980px) {
+        .stage {
+          grid-template-columns: 1fr;
+        }
+      }
+      .phone {
+        background: var(--window);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        overflow: hidden;
+        min-height: 560px;
+        display: flex;
+        flex-direction: column;
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 14px 12px;
+        background: var(--surface);
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+      }
+      .face {
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        background:
+          radial-gradient(circle at 35% 30%, #f6d2db, transparent 42%),
+          linear-gradient(160deg, #3a2229, #1a1216);
+      }
+      .bar b {
+        display: block;
+        font-size: 14.5px;
+        letter-spacing: -0.02em;
+      }
+      .bar small {
+        color: var(--muted);
+        font-size: 11.5px;
+      }
+      .thread {
+        flex: 1;
+        padding: 18px 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: var(--window);
+      }
+      .bubble {
+        max-width: 82%;
+        padding: 10px 13px;
+        border-radius: 18px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .bot {
+        align-self: flex-start;
+        background: var(--raised);
+        border-bottom-left-radius: 4px;
+      }
+      .me {
+        align-self: flex-end;
+        background: var(--me);
+        border-bottom-right-radius: 4px;
+      }
+      .composer {
+        display: flex;
+        gap: 8px;
+        padding: 10px 12px 14px;
+        background: var(--surface);
+        border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+      }
+      .field {
+        flex: 1;
+        height: 40px;
+        border-radius: 12px;
+        background: var(--raised);
+        border: 1px solid var(--line);
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        font-size: 13px;
+      }
+      .send {
+        width: 40px;
+        height: 40px;
+        border: 0;
+        border-radius: 12px;
+        background: var(--accent);
+        color: var(--on-accent);
+        font: inherit;
+        font-weight: 700;
+      }
+      .settings {
+        padding: 22px 16px 18px;
+        background: var(--window);
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+      .avatar {
+        width: 76px;
+        height: 76px;
+        border-radius: 20px;
+        background:
+          radial-gradient(circle at 35% 30%, #f6d2db, transparent 44%),
+          linear-gradient(160deg, #4a2a32, #161014);
+        margin-bottom: 10px;
+      }
+      .change {
+        color: var(--link);
+        font-size: 12.5px;
+        font-weight: 600;
+        margin: 0 0 22px;
+      }
+      .card {
+        width: 100%;
+        text-align: left;
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 12px 14px;
+        margin-bottom: 10px;
+      }
+      .card b {
+        display: block;
+        font-size: 13.5px;
+      }
+      .card span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .danger-label {
+        align-self: flex-start;
+        color: var(--error);
+        font-size: 12px;
+        font-weight: 700;
+        margin: 10px 0 6px;
+      }
+      .danger {
+        width: 100%;
+        text-align: left;
+        background: color-mix(in srgb, var(--error) 10%, var(--raised));
+        border: 1px solid color-mix(in srgb, var(--error) 28%, var(--line));
+        color: var(--error);
+        border-radius: 16px;
+        padding: 12px 14px;
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .caption {
+        margin: 10px 16px 16px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        max-width: 1180px;
+        margin: 28px auto 0;
+      }
+      .swatch {
+        background: var(--lab-raised);
+        border: 1px solid var(--lab-line);
+        border-radius: 14px;
+        padding: 10px;
+        font-size: 12px;
+      }
+      .chip {
+        height: 36px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        border: 1px solid rgb(255 255 255 / 8%);
+      }
+      .swatch code {
+        color: #c9c4c8;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="eyebrow">Theme lab</p>
+      <h1>Ink, closer to black</h1>
+      <p class="lede">
+        Today’s dark look sits on a purple-grey window
+        (<code>#1f1e24</code>). Bot bubbles use the same purple
+        <code>raised</code> slab, and “Change character” is painted in the fill
+        accent — a rose that sits next to the danger red. Shipping is the
+        middle path: near-black charcoal surfaces, cooler bot bubbles, and a
+        berry pink that keeps the brand without reading as delete.
+      </p>
+    </header>
+
+    <div class="tabs" role="tablist">
+      <button type="button" data-look="today" aria-pressed="false">
+        Today
+      </button>
+      <button type="button" data-look="charcoal" aria-pressed="false">
+        Charcoal only
+      </button>
+      <button type="button" data-look="shipping" aria-pressed="true">
+        Shipping — charcoal + berry
+      </button>
+    </div>
+    <p class="note" id="note">
+      <strong>Shipping.</strong> Window
+      <code>#121214</code>, chrome <code>#0c0c0e</code>, bot bubbles
+      <code>#1e1e22</code>. Fill accent becomes berry
+      <code>#c44580</code>; “Change character” uses a soft pink
+      <code>#f59ab6</code> so it cannot be mistaken for Danger.
+    </p>
+
+    <div class="stage" data-look="shipping" id="stage">
+      <section class="phone" aria-label="Conversation">
+        <div class="bar">
+          <div class="face" aria-hidden="true"></div>
+          <div>
+            <b>Ada</b>
+            <small>Online</small>
+          </div>
+        </div>
+        <div class="thread">
+          <div class="bubble bot">
+            The thread used to sit on a purple-grey. This window is nearly
+            black, and my bubble is a cool charcoal instead of maroon.
+          </div>
+          <div class="bubble me">Can you make dark mode closer to black?</div>
+          <div class="bubble bot">
+            Yes. Chrome falls one step below the thread, same ladder as
+            before — just without the purple tinge.
+          </div>
+        </div>
+        <div class="composer">
+          <div class="field">Message Ada</div>
+          <button class="send" type="button" aria-label="Send">↑</button>
+        </div>
+      </section>
+
+      <section class="phone" aria-label="Bot settings">
+        <div class="bar">
+          <div>
+            <b>Bot settings</b>
+            <small>Ada</small>
+          </div>
+        </div>
+        <div class="settings">
+          <div class="avatar" aria-hidden="true"></div>
+          <p class="change">Change character</p>
+          <div class="card">
+            <b>Instructions</b>
+            <span>How Ada should talk</span>
+          </div>
+          <div class="card">
+            <b>Look</b>
+            <span>Inherit · Ink</span>
+          </div>
+          <div class="danger-label">Danger</div>
+          <div class="danger">Delete this Bot</div>
+        </div>
+        <p class="caption">
+          Soft pink for the character action, true red only on the danger
+          row.
+        </p>
+      </section>
+
+      <section class="phone" aria-label="Colour chips">
+        <div class="bar">
+          <div>
+            <b>Tokens</b>
+            <small>Ink surfaces</small>
+          </div>
+        </div>
+        <div class="settings" style="align-items: stretch; text-align: left">
+          <div class="card">
+            <b>Window</b>
+            <span class="token-window">thread / conversation</span>
+          </div>
+          <div class="card">
+            <b>Surface</b>
+            <span>sidebar, app bar, composer</span>
+          </div>
+          <div class="card">
+            <b>Raised</b>
+            <span>bot bubble, cards</span>
+          </div>
+          <div class="card">
+            <b>Accent / link</b>
+            <span class="token-accent">primary fill · character text</span>
+          </div>
+          <button
+            class="send"
+            type="button"
+            style="width: 100%; height: 42px; margin-top: 8px"
+          >
+            Create Bot
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div class="swatches" id="swatches"></div>
+
+    <script>
+      const notes = {
+        today:
+          "<strong>Today.</strong> Window <code>#1f1e24</code> (hue 250°, a purple-grey), bot bubbles <code>#2c2a33</code>, “Change character” in fill accent <code>#d03f64</code> — the same family as Danger <code>#e05a5a</code>.",
+        charcoal:
+          "<strong>Charcoal only.</strong> Same rose accent, but the window drops to near-black <code>#121214</code> and bot bubbles become cool <code>#1e1e22</code>. This is the purple/maroon fix on its own.",
+        shipping:
+          "<strong>Shipping.</strong> Window <code>#121214</code>, chrome <code>#0c0c0e</code>, bot bubbles <code>#1e1e22</code>. Fill accent becomes berry <code>#c44580</code>; “Change character” uses a soft pink <code>#f59ab6</code> so it cannot be mistaken for Danger.",
+      };
+      const swatches = {
+        today: [
+          ["Window", "#1f1e24"],
+          ["Surface", "#1a191e"],
+          ["Raised / bot", "#2c2a33"],
+          ["Accent / link", "#d03f64"],
+        ],
+        charcoal: [
+          ["Window", "#121214"],
+          ["Surface", "#0c0c0e"],
+          ["Raised / bot", "#1e1e22"],
+          ["Accent / link", "#d03f64"],
+        ],
+        shipping: [
+          ["Window", "#121214"],
+          ["Surface", "#0c0c0e"],
+          ["Raised / bot", "#1e1e22"],
+          ["Accent + link", "#c44580 / #f59ab6"],
+        ],
+      };
+
+      const stage = document.getElementById("stage");
+      const note = document.getElementById("note");
+      const swatchBox = document.getElementById("swatches");
+
+      function paintSwatches(look) {
+        const rows = swatches[look];
+        swatchBox.innerHTML = rows
+          .map(([label, value]) => {
+            const chip = value.includes("/")
+              ? `linear-gradient(90deg, #c44580 50%, #f59ab6 50%)`
+              : value;
+            return `<div class="swatch"><div class="chip" style="background:${chip}"></div><div>${label}</div><code>${value}</code></div>`;
+          })
+          .join("");
+      }
+
+      function setLook(look) {
+        stage.dataset.look = look;
+        note.innerHTML = notes[look];
+        paintSwatches(look);
+        for (const button of document.querySelectorAll(".tabs button")) {
+          button.setAttribute(
+            "aria-pressed",
+            String(button.dataset.look === look),
+          );
+        }
+      }
+
+      for (const button of document.querySelectorAll(".tabs button")) {
+        button.addEventListener("click", () => setLook(button.dataset.look));
+      }
+      setLook("shipping");
+    </script>
+  </body>
+</html>
