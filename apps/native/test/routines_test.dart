@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/document_cache.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/routines/document.dart';
 import 'package:frockbot_native/routines/editor.dart';
@@ -411,6 +412,8 @@ void useTallSurface(WidgetTester tester) {
 }
 
 void main() {
+  setUp(clearViewDocumentCacheMemory);
+
   test('only usable trigger-capable Plugins become Routine sources', () {
     final sources = routinePluginSourcesV1({
       'plugins': [

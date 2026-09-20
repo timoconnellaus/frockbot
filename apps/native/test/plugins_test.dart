@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/document_cache.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/plugins/document.dart';
 import 'package:frockbot_native/plugins/page.dart';
@@ -123,6 +124,8 @@ Map<String, Object?> botPluginsDocument() => {
 };
 
 void main() {
+  setUp(clearViewDocumentCacheMemory);
+
   group('the projection read back', () {
     test('enablement becomes the User command the settings route takes', () {
       expect(
