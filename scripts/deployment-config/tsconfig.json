@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "types": ["bun"]
+  },
+  "include": [
+    "./generate.ts",
+    "./jsonc.ts",
+    "./profile.ts",
+    "./profile-schema.generated.ts",
+    "./profile-types.test.ts",
+    "../deployment-config.ts"
+  ]
+}

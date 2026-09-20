@@ -8,7 +8,10 @@
  * drive, because an installer whose decisions can only be checked by deploying
  * is an installer nobody checks.
  */
-import type { DeploymentProfileV1 } from "../deployment-config/profile.ts";
+import type {
+  DeploymentProfileV1,
+  DeploymentRegionV1,
+} from "../deployment-config/profile.ts";
 import { resourceNamesV1 } from "../deployment-config/generate.ts";
 import {
   OPTIONAL_PRODUCTION_SECRETS_V1,
@@ -148,7 +151,7 @@ export interface ProfileAnswersV1 {
   readonly accessTeamDomain: string;
   /** Filled in by the Access step; a placeholder until it is. */
   readonly accessAud?: string;
-  readonly region?: string;
+  readonly region?: DeploymentRegionV1;
   readonly imageTag: string;
 }
 

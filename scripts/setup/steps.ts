@@ -13,6 +13,7 @@ import {
   writeGeneratedConfigsV1,
 } from "../deployment-config/generate.ts";
 import {
+  deploymentRegionV1,
   PROFILE_DIRECTORY_V1,
   REPO_ROOT_V1,
   validateProfileV1,
@@ -252,7 +253,7 @@ export async function writeProfileV1(
     ...(existing?.access?.aud && existing.access.aud !== UNISSUED_ACCESS_AUD_V1
       ? { accessAud: existing.access.aud }
       : {}),
-    region,
+    region: deploymentRegionV1(region),
     imageTag: tag.tag,
   });
   context.runner.say(

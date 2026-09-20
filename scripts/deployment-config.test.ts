@@ -26,6 +26,9 @@ import {
 } from "./deployment-config/generate.ts";
 import { parseJsoncV1 } from "./deployment-config/jsonc.ts";
 import {
+  DEPLOYMENT_PROFILE_SCHEMA_V1,
+  DEPLOYMENT_REGIONS_V1,
+  deploymentRegionV1,
   loadProfileV1,
   REPO_ROOT_V1,
   validateProfileV1,
@@ -318,6 +321,43 @@ describe("the generator", () => {
         "a profile",
       ),
     ).toThrow(/tag/);
+  });
+
+  test("the generated profile type is the schema file", () => {
+    expect(DEPLOYMENT_PROFILE_SCHEMA_V1).toEqual(
+      JSON.parse(
+        readFileSync(
+          join(REPO_ROOT_V1, "deployments/profile.schema.json"),
+          "utf8",
+        ),
+      ),
+    );
+  });
+
+  test("the region enum is the schema's", () => {
+    expect(DEPLOYMENT_REGIONS_V1).toEqual([
+      "wnam",
+      "enam",
+      "weur",
+      "eeur",
+      "apac",
+      "oc",
+    ]);
+    expect(deploymentRegionV1("enam")).toBe("enam");
+    expect(() => deploymentRegionV1("us-east")).toThrow(/region/);
+  });
+
+  test("refuses an Access profile that names no Access application", () => {
+    expect(() =>
+      validateProfileV1(
+        {
+          ...loadProfileV1("hosted"),
+          name: "simple",
+          authPackage: "access",
+        },
+        "a profile",
+      ),
+    ).toThrow(/access/);
   });
 
   test("the Access Package binds no database", () => {
