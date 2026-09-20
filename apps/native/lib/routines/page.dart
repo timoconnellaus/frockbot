@@ -226,6 +226,12 @@ class RoutinesController extends ViewSurfaceController {
   void _closeEditor() {
     if (closing) return;
     closing = true;
+    // The list and the form share this controller, and the surface reloads
+    // as soon as the receipt lands. Leave the editor flags now so that read
+    // is the list — the post-frame leave would otherwise find `_busy` and
+    // drop the one that shows what changed.
+    creating = false;
+    editing = null;
     _changed();
     final close = onCloseEditor;
     if (close == null) return;
@@ -423,16 +429,18 @@ class _RoutinesViewState extends State<RoutinesView> {
 
   late RoutinesController controller;
 
-  RoutinesController _createController() => RoutinesController(
-    widget.api,
-    widget.botId,
-    openRuns: _openRuns,
-    confirmDelete: _confirmDelete,
-    onInbox: (count) => widget.onInbox?.call(count),
-    onOpenEditor: _openEditor,
-    onCloseEditor: _leaveEditor,
-  )..creating = widget.openNew && widget.initialRoutineId == null
-    ..editing = widget.initialRoutineId;
+  RoutinesController _createController() =>
+      RoutinesController(
+          widget.api,
+          widget.botId,
+          openRuns: _openRuns,
+          confirmDelete: _confirmDelete,
+          onInbox: (count) => widget.onInbox?.call(count),
+          onOpenEditor: _openEditor,
+          onCloseEditor: _leaveEditor,
+        )
+        ..creating = widget.openNew && widget.initialRoutineId == null
+        ..editing = widget.initialRoutineId;
 
   @override
   void initState() {

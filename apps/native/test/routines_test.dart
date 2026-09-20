@@ -35,20 +35,23 @@ Map<String, Object?> routinesDocument({
         'orientation': 'column',
         'title': 'Scheduled',
         'children': [
-          routineRow({
-            'routineId': 'r1',
-            'name': 'Morning brief',
-            'schedule': '0 9 * * *',
-            'enabled': enabled,
-          }, runs: [
+          routineRow(
             {
-              'entryId': 'e1',
               'routineId': 'r1',
               'name': 'Morning brief',
-              'createdAt': '2026-09-02T23:00:10.000Z',
-              'mark': 'finished',
+              'schedule': '0 9 * * *',
+              'enabled': enabled,
             },
-          ]),
+            runs: [
+              {
+                'entryId': 'e1',
+                'routineId': 'r1',
+                'name': 'Morning brief',
+                'createdAt': '2026-09-02T23:00:10.000Z',
+                'mark': 'finished',
+              },
+            ],
+          ),
         ],
       },
     ],
@@ -255,11 +258,7 @@ Map<String, Object?> routineRow(
           'orientation': 'column',
           'title': run['name'] ?? routine['name'],
           'children': [
-            {
-              'type': 'text',
-              'text': run['createdAt'],
-              'style': 'status',
-            },
+            {'type': 'text', 'text': run['createdAt'], 'style': 'status'},
             {'type': 'text', 'text': run['mark'] ?? 'finished'},
             {
               'type': 'group',
@@ -794,6 +793,62 @@ void main() {
     expect(find.text('Morning brief'), findsOneWidget);
   });
 
+  testWidgets('leaving the editor reloads the list, not the form', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final paths = <String>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      if (body != null) {
+        return {
+          'schemaVersion': 1,
+          'commandId': (body as Map)['commandId'],
+          'status': 'applied',
+        };
+      }
+      paths.add(path);
+      return routinesDocumentForPath(
+        path,
+        routines: [
+          {
+            'routineId': 'r1',
+            'name': 'Morning brief',
+            'schedule': '0 9 * * *',
+            'enabled': true,
+          },
+        ],
+        editing: {
+          'routineId': 'r1',
+          'name': 'Morning brief',
+          'prompt': 'Summarise overnight email.',
+          'schedule': '0 9 * * *',
+          'timing': 'schedule',
+        },
+      );
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    expect(find.text('Morning brief'), findsOneWidget);
+
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    expect(find.text('Create Routine'), findsOneWidget);
+    expect(find.text('Morning brief'), findsNothing);
+
+    paths.clear();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(paths.where((path) => path.contains('as=document')), isNotEmpty);
+    expect(
+      paths.any((path) => path.contains('new=1') || path.contains('edit=')),
+      isFalse,
+    );
+    expect(find.text('Create Routine'), findsNothing);
+    expect(find.text('Morning brief'), findsOneWidget);
+  });
+
   testWidgets('Cancel leaves a dirty form without asking', (tester) async {
     useTallSurface(tester);
     final store = MemoryStore();
@@ -1255,7 +1310,6 @@ void main() {
       expect(routineRunMomentV1('not a moment'), 'not a moment');
       expect(routineRunMomentV1(null), '');
     });
-
   });
 
   testWidgets('pausing a Routine sends one command and reads back', (
