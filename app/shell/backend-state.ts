@@ -1,5 +1,10 @@
 import type { ModelBilling } from "../billing/model.js";
-import type { TurnTypeV1, WorkspaceFilesV1 } from "@frockbot/core/contracts";
+import {
+  createFakeRoutineEventJudgeV1,
+  type RoutineEventJudgeV1,
+  type TurnTypeV1,
+  type WorkspaceFilesV1,
+} from "@frockbot/core/contracts";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
   BotDurableAuthority,
@@ -153,6 +158,11 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
   /** The clock and the timer, as seams a test replaces. */
   now?(): Date;
   sleep?(milliseconds: number): Promise<void>;
+  /**
+   * Classifies a connected-app event before the conversational model.
+   * Absent, the drain mounts the fake that always keeps the event.
+   */
+  routineEventJudge?: RoutineEventJudgeV1;
 }
 
 /** The Turn currently executing on this object, for durable Stop. */
@@ -326,6 +336,11 @@ export class ShellBotStateV1 {
    * configuration, Composition, and notification policy it needs.
    */
   readonly authority: BotDurableAuthority<BotSettingsViewV1>;
+  /**
+   * Classifies a connected-app event before `admitTurnV1`. Cut 2 records the
+   * verdict and still admits; Cut 4 is what skips.
+   */
+  readonly routineEventJudge: RoutineEventJudgeV1;
 
   constructor(
     host: ShellBotBackendHost,
@@ -352,6 +367,8 @@ export class ShellBotStateV1 {
       defer: host.deferScheduledWork,
       settle: host.settleScheduledWork,
     };
+    this.routineEventJudge =
+      host.routineEventJudge ?? createFakeRoutineEventJudgeV1();
     this.now = host.now ?? (() => new Date());
     this.sleep =
       host.sleep ??

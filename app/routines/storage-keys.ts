@@ -175,6 +175,17 @@ export function routineDeliveryKeyV1(deliveryId: string): string {
 }
 
 /**
+ * One classify receipt for a connected-app firing, keyed by the fire id.
+ * The fire id already names the event; a retry after eviction reuses it
+ * and must not ask Jev again under a new identity.
+ */
+export const ROUTINE_EVENT_JUDGE_PREFIX = "routine-event-judge:";
+
+export function routineEventJudgeKeyV1(fireId: string): string {
+  return `${ROUTINE_EVENT_JUDGE_PREFIX}${fireId}`;
+}
+
+/**
  * One firing whose failure has already been told to the person, keyed by the
  * firing. The alarm may settle the same firing more than once — a retry, a
  * reap — and a broken Routine owes exactly one message per firing, not one per

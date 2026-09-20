@@ -103,6 +103,7 @@ import {
 } from "@frockbot/app/subagents/storage-keys";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { SessionEvent } from "@frockbot/core/contracts";
+import { classifyRoutineFireOnceV1 } from "@frockbot/app/routines/event-judge";
 
 /** The Bot and User whose Routines a caller may reach. */
 export interface BotRoutinesIdentity {
@@ -757,6 +758,17 @@ async function runOneFiring(
   fire: RoutineFireV1,
 ): Promise<RoutineFireOutcomeV1> {
   try {
+    // Connection only. The verdict is recorded; Cut 2 still admits the Turn.
+    if (fire.trigger === "connection") {
+      await classifyRoutineFireOnceV1({
+        fire,
+        routine: await readRoutineRecordV1(state, fire.routineId),
+        judge: state.routineEventJudge,
+        read: (key) => state.ctx.storage.get(key),
+        write: (key, value) => state.ctx.storage.put(key, value),
+        now: state.now,
+      });
+    }
     await admitTurnV1(
       state,
       routineTurnCommandV1(identity, fire, new Date().toISOString()),
