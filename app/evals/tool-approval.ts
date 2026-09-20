@@ -32,9 +32,10 @@ export const TOOL_APPROVAL_ATTEMPT_TIMEOUT_MS_V1 = 30_000;
 export const TOOL_APPROVAL_RUN_TIMEOUT_MS_V1 = 180_000;
 
 /**
- * Noul thresholds for grading only. They are calibrated against these fixtures
- * and this model, and do not transfer to a Choice probability or another
- * wording.
+ * Labeled Noul cutoffs for this model and these questions. `YES` is also the
+ * fail-closed allow threshold in `composeCallDecisionV1`: a mutation is
+ * allowed only when `argumentsMatch` is at least this value. `NO` is grading
+ * only. Neither transfers to a Choice probability or another wording.
  */
 export const TOOL_APPROVAL_NOUL_YES_V1 = 0.6;
 export const TOOL_APPROVAL_NOUL_NO_V1 = 0.4;
