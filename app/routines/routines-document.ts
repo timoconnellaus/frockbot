@@ -412,7 +412,7 @@ function listChildren(frame: RoutinesFrameV1): ViewNode[] {
       routineNode(routine, shown),
     );
   }
-  // A section is drawn only where it holds something: an empty "Webhooks"
+  // A section is drawn only where it holds something: an empty "Triggered"
   // label over nothing is a heading for a thing that does not exist.
   if (scheduled.length > 0) {
     children.push({
@@ -426,7 +426,7 @@ function listChildren(frame: RoutinesFrameV1): ViewNode[] {
     children.push({
       type: "group",
       orientation: "column",
-      title: "Webhooks",
+      title: "Triggered",
       children: triggered,
     });
   }

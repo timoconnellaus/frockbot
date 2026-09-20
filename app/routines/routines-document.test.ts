@@ -368,20 +368,34 @@ test("a key rotation moves the revision, so the host reads the document again", 
 });
 
 test("a Routine is filed under what fires it, and an empty half is not drawn", () => {
+  const gmail: RoutineViewV1 = {
+    ...leads,
+    routineId: "r3",
+    name: "New mail",
+    trigger: {
+      kind: "connection",
+      connectionId: "conn-gmail",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    },
+    hookKeyVersion: undefined,
+  };
   const both = walk(
-    routinesDocumentV1(frame({ routines: [morning, leads] })).root,
+    routinesDocumentV1(frame({ routines: [morning, leads, gmail] })).root,
   );
   const sections = both
     .filter((node) => node.type === "group" && node.title !== undefined)
     .map((node) => (node.type === "group" ? node.title : ""));
   expect(sections).toContain("Scheduled");
-  expect(sections).toContain("Webhooks");
+  expect(sections).toContain("Triggered");
+  expect(sections).not.toContain("Webhooks");
+  expect(sections).toContain("New mail");
+  expect(sections).toContain("Inbound leads");
 
   const only = walk(routinesDocumentV1(frame()).root)
     .filter((node) => node.type === "group" && node.title !== undefined)
     .map((node) => (node.type === "group" ? node.title : ""));
   expect(only).toContain("Scheduled");
-  expect(only).not.toContain("Webhooks");
+  expect(only).not.toContain("Triggered");
 });
 
 test("a completion is the same loose row the Bot page draws, under its Routine", () => {

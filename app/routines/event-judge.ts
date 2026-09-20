@@ -128,12 +128,32 @@ function pickFrom(row: Record<string, unknown>): RoutineEventPayloadV1 {
   };
 }
 
+const DELIVERED_PAYLOAD_LINE = "Delivered payload:";
+const WEBHOOK_CUE_PREFIX = /^Webhook POST(?: \([^\n]*\))?:\n/;
+const WEBHOOK_CUE_TRUNCATION = /\n… truncated at \d+ bytes\.\s*$/;
+
+function deliveredBodyFromCueV1(cue: string): string | undefined {
+  const lines = cue.split("\n");
+  let last = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index] === DELIVERED_PAYLOAD_LINE) last = index;
+  }
+  if (last === -1) return undefined;
+  return lines.slice(last + 1).join("\n").trim();
+}
+
+function unwrapRoutineDeliveryCueV1(raw: string): string {
+  return raw
+    .replace(WEBHOOK_CUE_PREFIX, "")
+    .replace(WEBHOOK_CUE_TRUNCATION, "")
+    .trim();
+}
+
 /** Project the cue's delivered body. Strip the raw Gmail `payload` object. */
 export function projectRoutineEventPayloadV1(cue: string): RoutineEventPayloadV1 {
-  const marker = "Delivered payload:";
-  const at = cue.indexOf(marker);
-  if (at === -1) return {};
-  const raw = cue.slice(at + marker.length).trim();
+  const delivered = deliveredBodyFromCueV1(cue);
+  if (delivered === undefined) return {};
+  const raw = unwrapRoutineDeliveryCueV1(delivered);
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

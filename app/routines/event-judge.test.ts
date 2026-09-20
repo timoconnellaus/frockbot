@@ -8,6 +8,7 @@ import {
   routineFireIdV1,
   type RoutineFireV1,
 } from "./firing.js";
+import { renderRoutineDeliveryV1 } from "./hook.js";
 import type { RoutineRecordV1 } from "./records.js";
 import {
   classifyRoutineFireOnceV1,
@@ -120,6 +121,38 @@ describe("projectRoutineEventPayloadV1", () => {
     expect(projectRoutineEventPayloadV1(cue)).toEqual({
       subject: "Invoice 44",
       snippet: "Please pay.",
+    });
+  });
+
+  test("unwraps the production webhook cue and ignores the marker in the prompt", () => {
+    const mimeJunk = {
+      mimeType: "multipart/alternative",
+      parts: Array.from({ length: 12 }, (_, index) => ({
+        mimeType: "text/plain",
+        body: `part-${index}-${"x".repeat(40)}`,
+      })),
+    };
+    const cue = routineCueV1({
+      name: "Shipping",
+      prompt:
+        "When a shipping confirmation arrives. Never mention Delivered payload: in the reply.",
+      trigger: "connection",
+      delivery: renderRoutineDeliveryV1(
+        JSON.stringify({
+          payload: mimeJunk,
+          subject: "Your Amazon order has shipped",
+          sender: "ship-confirm@amazon.com",
+          snippet: "Track your package.",
+          labels: ["INBOX"],
+        }),
+        "application/json",
+      ),
+    });
+    expect(projectRoutineEventPayloadV1(cue)).toEqual({
+      subject: "Your Amazon order has shipped",
+      sender: "ship-confirm@amazon.com",
+      snippet: "Track your package.",
+      labels: ["INBOX"],
     });
   });
 });

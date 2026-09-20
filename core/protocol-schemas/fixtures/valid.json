@@ -1140,7 +1140,7 @@
           {
             "type": "group",
             "orientation": "column",
-            "title": "Webhooks",
+            "title": "Triggered",
             "children": [
               {
                 "type": "group",

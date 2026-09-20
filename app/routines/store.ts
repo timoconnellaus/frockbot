@@ -468,14 +468,17 @@ export class RoutineStore {
         routineKeyV1(input.routineId),
       );
       if (stored === undefined) {
-        throw new RoutineHookError(404, "Routine not found");
+        return { status: "dropped" as const, reason: "Routine not found" };
       }
       const record = decodeRoutineRecordV1(stored);
-      if (record.trigger?.kind !== "connection") {
-        throw new RoutineHookError(409, "Routine is not an app-event trigger");
-      }
-      if (!record.enabled) {
-        throw new RoutineHookError(409, "Routine is paused");
+      if (record.trigger?.kind !== "connection" || !record.enabled) {
+        return {
+          status: "dropped" as const,
+          reason:
+            record.trigger?.kind !== "connection"
+              ? "Routine is not an app-event trigger"
+              : "Routine is paused",
+        };
       }
       const seen = await transaction.get<RoutineDeliveryReceiptV1>(receiptKey);
       if (

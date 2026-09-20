@@ -1010,7 +1010,8 @@ export async function executeRoutineCommand(
   const current =
     command.type === "routine/delete" ||
     command.type === "routine/update" ||
-    command.type === "routine/resume"
+    command.type === "routine/resume" ||
+    command.type === "routine/pause"
       ? await readRoutineRecordV1(state, command.routineId)
       : undefined;
   if (
@@ -1063,13 +1064,14 @@ export async function executeRoutineCommand(
     writer,
     await routineAccountTimezoneV1(state.ctx.storage),
   );
+  const remaining =
+    receipt.status === "applied" ? receipt.routine : undefined;
+  const stillEnabledConnection =
+    remaining?.trigger?.kind === "connection" && remaining.enabled;
   if (
     connectionTriggers &&
     (receipt.status === "deleted" ||
-      (command.type === "routine/update" &&
-        current?.trigger?.kind === "connection" &&
-        command.trigger?.kind !== "connection" &&
-        command.schedule !== undefined))
+      (current?.trigger?.kind === "connection" && !stillEnabledConnection))
   ) {
     await connectionTriggers
       .delete({
