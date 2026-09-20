@@ -690,6 +690,10 @@ void main() {
     final title = tester.getTopLeft(find.text('New Routine').first);
     final surface = tester.getTopLeft(find.byType(ViewSurfacePage));
     expect(title.dy - surface.dy, lessThan(4));
+    await tester.drag(find.byType(ViewSurfacePage), const Offset(0, 180));
+    await tester.pump();
+    expect(find.byType(RefreshIndicator), findsNothing);
+    expect(tester.getTopLeft(find.text('New Routine').first).dy, title.dy);
   });
 
   testWidgets('the list still pulls to refresh', (tester) async {
