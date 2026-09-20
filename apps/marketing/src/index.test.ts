@@ -324,10 +324,11 @@ describe("Inside FrockBot examples", () => {
       page.indexOf('<section class="inside-hero"'),
       page.indexOf('<div class="container inside-architecture"'),
     );
-    expect(hero).toContain('class="inside-hero-art"');
-    expect(hero).toContain('class="bot-builder"');
-    expect(hero).toContain("Build your Bot");
-    expect(hero).toContain('src="/assets/characters/pixel.png"');
+    expect(hero).toContain('class="inside-shape"');
+    expect(hero).toContain("One persistent Bot");
+    expect(hero).toContain("Authority stays here");
+    expect(hero).not.toContain("bot-builder");
+    expect(hero).not.toContain("Build your Bot");
     expect(page).not.toContain("/assets/characters/goat.png");
   });
 

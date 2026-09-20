@@ -79,8 +79,58 @@
 .inside-hero-art {
   margin: 0;
 }
-.inside-hero-art .bot-builder {
-  box-shadow: 0 24px 70px rgb(30 29 39 / 7%);
+.inside-shape {
+  display: grid;
+  gap: 0;
+}
+.inside-shape-layer,
+.inside-shape-bot {
+  padding: 22px 24px 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+.inside-shape-layer {
+  background: #fff;
+}
+.inside-shape-bot {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+.inside-shape-layer .diagram-label,
+.inside-shape-bot .diagram-label {
+  margin: 0 0 8px;
+}
+.inside-shape-bot .diagram-label {
+  color: #efa2ba;
+}
+.inside-shape-layer strong,
+.inside-shape-bot strong {
+  display: block;
+  font-size: 1.2rem;
+  letter-spacing: -0.03em;
+  margin-bottom: 8px;
+}
+.inside-shape-layer span,
+.inside-shape-bot span {
+  display: block;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  color: #69606e;
+}
+.inside-shape-bot span {
+  color: #d7cbd9;
+}
+.inside-shape-bot span + span {
+  margin-top: 4px;
+}
+.inside-shape-join {
+  margin: 0;
+  padding: 6px 0;
+  color: var(--pink-dark);
+  font-size: 1.35rem;
+  line-height: 1;
+  text-align: center;
 }
 .inside-hero-art figcaption {
   margin-top: 18px;
