@@ -923,9 +923,13 @@ export async function openBotPage(page: Page): Promise<void> {
  */
 export async function expectBotOpen(page: Page, name: string): Promise<void> {
   await expect(composerInput(page)).toBeVisible({ timeout: 30_000 });
-  const titled = new RegExp(`^${escapeRegExp(name)}$`, "u");
   const pill = sem(page, "bot-panel-toggle");
-  const heading = page.getByRole("heading", { name: titled });
+  // Flutter may put the panel title on a merged node's accessible name
+  // rather than as a text leaf — the same split `bot-info.e2e.ts` already
+  // accounts for.
+  const heading = sem(page, "shell-right-panel")
+    .locator(`[aria-label*="${name}"]`)
+    .or(sem(page, "shell-right-panel").getByText(name));
   if (
     (await pill.isVisible().catch(() => false)) ||
     (await heading.first().isVisible().catch(() => false))
