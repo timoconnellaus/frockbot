@@ -144,4 +144,26 @@ describe("composeCallDecisionV1", () => {
       }).reasonCode,
     ).toBe("arguments_changed");
   });
+
+  test("rejects a mutation when argumentsMatch sits in the undecided noul band", () => {
+    const answers = answersFor({});
+    expect(
+      composeCallDecisionV1({
+        ...call,
+        effect: "mutate",
+        answers: {
+          ...answers,
+          argumentsMatchRequest: {
+            ...answers.argumentsMatchRequest,
+            noul: (TOOL_APPROVAL_NOUL_NO_V1 + TOOL_APPROVAL_NOUL_YES_V1) / 2,
+          },
+        },
+      }),
+    ).toEqual({
+      callId: "call-1",
+      decision: "reject",
+      reasonCode: "arguments_changed",
+      policyRefs: ["user.email.confirm-external"],
+    });
+  });
 });

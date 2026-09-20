@@ -45,12 +45,10 @@ function toolApprovalEvidenceV1(
       tool: call.tool,
       arguments: asRecord(call.arguments),
     },
-    conversation: evidence.authorizations.length
-      ? evidence.authorizations.map((message) => ({
-          speaker: message.speaker,
-          text: message.text,
-        }))
-      : [{ speaker: "user", text: evidence.objective }],
+    conversation: evidence.authorizations.map((message) => ({
+      speaker: message.speaker,
+      text: message.text,
+    })),
     effectivePolicies: evidence.policies.rules.map((policy) => ({
       id: policy.id,
       scope: policy.scope,
@@ -185,7 +183,7 @@ export function createHostedTurnSupervisorV1(
   env: Record<string, string | undefined>,
   fetch?: Fetch,
 ): TurnSupervisor {
-  const apiKey = (env.TYPESAFE_API_KEY ?? env.JEV_API_KEY ?? "").trim();
+  const apiKey = (env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey) {
     return createUnavailableTurnSupervisorV1(
       "Turn supervision is unavailable: no TypeSafe credential is configured.",

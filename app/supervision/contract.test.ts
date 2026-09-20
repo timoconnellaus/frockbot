@@ -243,4 +243,42 @@ describe("TurnSupervisor adapter contract", () => {
     });
     expect(createUnavailableTurnSupervisorV1()).toBeTruthy();
   });
+
+  test("the hosted chooser ignores JEV_API_KEY and requires TYPESAFE_API_KEY", async () => {
+    await expect(
+      createHostedTurnSupervisorV1({
+        JEV_API_KEY: "sk-test-do-not-leak-4f3a",
+      }).startTurn(startEvidence),
+    ).rejects.toMatchObject({ kind: "unavailable" });
+    await expect(
+      createHostedTurnSupervisorV1({
+        TYPESAFE_API_KEY: "sk-test-do-not-leak-4f3a",
+      }).startTurn(startEvidence),
+    ).resolves.toEqual(defaultTurnDirectiveV1());
+  });
+
+  test("Jev reviewStep sends empty authorizations through as an empty conversation", async () => {
+    let conversation: unknown;
+    const fetch: Fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        state?: { conversation?: unknown };
+      };
+      conversation = body.state?.conversation;
+      return ok();
+    };
+    const supervisor = createJevTurnSupervisorV1({
+      client: new TypeSafeClient({
+        apiKey: "sk-test-do-not-leak-4f3a",
+        defaultModel: TOOL_APPROVAL_MODEL_V1,
+        retry: { maxRetries: 0 },
+        logLevel: "off",
+        fetch,
+      }),
+    });
+    await supervisor.reviewStep({
+      ...stepEvidence([mutate]),
+      authorizations: [],
+    });
+    expect(conversation).toEqual([]);
+  });
 });

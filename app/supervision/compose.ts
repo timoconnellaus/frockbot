@@ -1,5 +1,5 @@
 import {
-  TOOL_APPROVAL_NOUL_NO_V1,
+  TOOL_APPROVAL_NOUL_YES_V1,
   type ToolApprovalAnswersV1,
 } from "../evals/tool-approval.js";
 import type { StepCallDecision, ToolEffectV1 } from "@frockbot/core/contracts";
@@ -63,7 +63,7 @@ export function composeCallDecisionV1(input: {
 
   if (
     authorization === "materially_different" ||
-    argumentsMatch <= TOOL_APPROVAL_NOUL_NO_V1
+    argumentsMatch < TOOL_APPROVAL_NOUL_YES_V1
   ) {
     return {
       callId: input.callId,
