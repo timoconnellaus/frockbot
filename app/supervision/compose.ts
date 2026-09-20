@@ -38,18 +38,16 @@ export function composeCallDecisionV1(input: {
     };
   }
 
-  if (policy === "requires_user_confirmation") {
-    if (
-      authorization !== "exact_current_request" &&
-      authorization !== "standing_permission"
-    ) {
-      return {
-        callId: input.callId,
-        decision: "reject",
-        reasonCode: "policy_requires_confirmation",
-        policyRefs,
-      };
-    }
+  if (
+    policy === "requires_user_confirmation" &&
+    authorization !== "exact_current_request"
+  ) {
+    return {
+      callId: input.callId,
+      decision: "reject",
+      reasonCode: "policy_requires_confirmation",
+      policyRefs,
+    };
   }
 
   if (authorization === "none") {

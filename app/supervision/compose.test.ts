@@ -132,6 +132,19 @@ describe("composeCallDecisionV1", () => {
     ).toBe("policy_requires_confirmation");
   });
 
+  test("rejects a confirmation policy when only a standing grant is present", () => {
+    expect(
+      composeCallDecisionV1({
+        ...call,
+        effect: "mutate",
+        answers: answersFor({
+          authorization: "standing_permission",
+          policyDisposition: "requires_user_confirmation",
+        }),
+      }).reasonCode,
+    ).toBe("policy_requires_confirmation");
+  });
+
   test("rejects arguments that no longer match what the User authorized", () => {
     expect(
       composeCallDecisionV1({
