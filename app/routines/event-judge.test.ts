@@ -12,6 +12,7 @@ import type { RoutineRecordV1 } from "./records.js";
 import {
   classifyRoutineFireOnceV1,
   connectionEventIdFromFireV1,
+  connectionFireSkipV1,
   projectRoutineEventPayloadV1,
   routineEventEvidenceV1,
 } from "./event-judge.js";
@@ -207,6 +208,63 @@ describe("classifyRoutineFireOnceV1", () => {
     });
     expect(replayed).toBe("clearly_unrelated");
     expect(asked).toBe(1);
+  });
+
+  test("unrelated is skipped; related and Yes. still admit", async () => {
+    const cases = [
+      {
+        name: "newsletter",
+        verdict: "clearly_unrelated" as const,
+        payload: {
+          subject: "This week in design",
+          snippet: "Unsubscribe at any time.",
+        },
+      },
+      {
+        name: "shipping",
+        verdict: "is_or_might_be" as const,
+        payload: {
+          subject: "Your Amazon order has shipped",
+          snippet: "Track your package.",
+        },
+      },
+      {
+        name: "yes-reply",
+        verdict: "is_or_might_be" as const,
+        payload: { subject: "Re: your order", snippet: "Yes." },
+      },
+    ];
+    let admitted = 0;
+    let skipped = 0;
+    for (const row of cases) {
+      const judge = createFakeRoutineEventJudgeV1({
+        classify: async () => row.verdict,
+      });
+      const { read, write } = memory();
+      const connection = fire("connection", {
+        fireId: routineFireIdV1("inbox", `connect-${row.name}`),
+        cue: routineCueV1({
+          name: "Shipping",
+          prompt: routine.prompt,
+          trigger: "connection",
+          delivery: JSON.stringify(row.payload),
+        }),
+      });
+      const verdict = await classifyRoutineFireOnceV1({
+        fire: connection,
+        routine,
+        judge,
+        read,
+        write,
+      });
+      const skip = connectionFireSkipV1(verdict);
+      if (skip) skipped += 1;
+      else admitted += 1;
+    }
+    expect(skipped).toBe(1);
+    expect(admitted).toBe(2);
+    expect(connectionFireSkipV1(undefined)).toBeUndefined();
+    expect(connectionFireSkipV1("is_or_might_be")).toBeUndefined();
   });
 
   test("an unavailable judge still keeps the event", async () => {

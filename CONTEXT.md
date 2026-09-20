@@ -251,7 +251,7 @@ A persisted trigger and instruction that schedules future work for a bot. Conver
 _Avoid_: Job, cron
 
 **Firing**:
-One occurrence of a Routine: a durable record written before the automation Turn it admits, and the same-Routine lock while that Turn is unsettled.
+One occurrence of a Routine: a durable record written before the automation Turn it admits, and the same-Routine lock while that Turn is unsettled. A connected-app firing may skip when the standalone event is clearly not the prompt.
 _Avoid_: Execution, invocation
 
 **Completion inbox**:

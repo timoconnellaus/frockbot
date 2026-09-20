@@ -14,6 +14,7 @@ import {
   routineScheduleKeyV1,
   ROUTINE_FAILURE_PAUSE_AFTER,
   ROUTINE_FIRE_LEASE_MS,
+  ROUTINE_INBOX_PREFIX,
   ROUTINE_QUEUE_LIMIT,
   ROUTINE_RUN_PREFIX,
 } from "./storage-keys.js";
@@ -429,6 +430,52 @@ describe("RoutineScheduler settle", () => {
     expect(
       runs.entries.find((entry) => entry.status === "skipped")?.summary,
     ).toContain("3 scheduled occurrences elapsed");
+  });
+
+  test("a skipped connection firing writes the run log and no inbox", async () => {
+    const { storage, scheduler, store } = harness({
+      start: "2026-09-20T00:00:00.000Z",
+    });
+    await store.execute(
+      {
+        schemaVersion: 1,
+        type: "routine/create",
+        commandId: "cmd-inbox",
+        botId: "scout",
+        routineId: "inbox",
+        name: "Shipping",
+        prompt: "When a shipping confirmation arrives, file the tracking number.",
+        trigger: {
+          kind: "connection",
+          connectionId: "conn-gmail",
+          triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+        },
+      },
+      USER,
+      "UTC",
+    );
+    await store.deliverConnectEvent({
+      routineId: "inbox",
+      eventId: "evt_news",
+      payload: { subject: "This week in design" },
+    });
+    await scheduler.settle(
+      async () => ({
+        status: "skipped",
+        summary:
+          "The standalone event was clearly not what this Routine is for.",
+      }),
+      "UTC",
+    );
+    const runs = await store.listRuns("scout", "inbox");
+    expect(runs.entries[0]).toMatchObject({
+      status: "skipped",
+      summary:
+        "The standalone event was clearly not what this Routine is for.",
+    });
+    expect(
+      (await storage.list({ prefix: ROUTINE_INBOX_PREFIX })).size,
+    ).toBe(0);
   });
 
   test("a firing that is not late records no skipped entry", async () => {

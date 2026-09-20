@@ -270,7 +270,7 @@ a burst. Cut 4 does not land while a reply-style fixture is labeled
 1. Cut 1. Editor gone; Bots still fire every connection event.
 2. Cut 2. Seam only.
 3. Cut 3. Shadow Jev. Read the labels.
-4. Cut 4. Enforce.
+4. Cut 4. Enforce. _Done._
 
 Architecture §6 (Routines surface) and §8 (connected-app triggers) update in
 the cut that changes them. CONTEXT gains a line that conversation authors a

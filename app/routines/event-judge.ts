@@ -13,6 +13,7 @@ import type {
   RoutineEventPayloadV1,
   RoutineEventVerdictV1,
 } from "@frockbot/core/contracts";
+import type { RoutineFireOutcomeV1 } from "./scheduler.js";
 import type { RoutineFireV1 } from "./firing.js";
 import type { RoutineRecordV1 } from "./records.js";
 import { RoutineDecodeError, routineExactKeys, routineText } from "./records.js";
@@ -186,4 +187,18 @@ export async function classifyRoutineFireOnceV1(input: {
     classifiedAt: (input.now ?? (() => new Date()))().toISOString(),
   });
   return verdict;
+}
+
+/**
+ * Only `clearly_unrelated` skips the Turn. Anything else — including a
+ * judge that could not answer — admits as today.
+ */
+export function connectionFireSkipV1(
+  verdict: RoutineEventVerdictV1 | undefined,
+): Extract<RoutineFireOutcomeV1, { status: "skipped" }> | undefined {
+  if (verdict !== "clearly_unrelated") return undefined;
+  return {
+    status: "skipped",
+    summary: "The standalone event was clearly not what this Routine is for.",
+  };
 }

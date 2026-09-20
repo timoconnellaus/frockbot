@@ -103,7 +103,10 @@ import {
 } from "@frockbot/app/subagents/storage-keys";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { SessionEvent } from "@frockbot/core/contracts";
-import { classifyRoutineFireOnceV1 } from "@frockbot/app/routines/event-judge";
+import {
+  classifyRoutineFireOnceV1,
+  connectionFireSkipV1,
+} from "@frockbot/app/routines/event-judge";
 
 /** The Bot and User whose Routines a caller may reach. */
 export interface BotRoutinesIdentity {
@@ -758,9 +761,10 @@ async function runOneFiring(
   fire: RoutineFireV1,
 ): Promise<RoutineFireOutcomeV1> {
   try {
-    // Connection only. The verdict is recorded; Cut 2 still admits the Turn.
+    // Connection only. `clearly_unrelated` settles as skipped: no Turn,
+    // no conversation line, no failure notification.
     if (fire.trigger === "connection") {
-      await classifyRoutineFireOnceV1({
+      const verdict = await classifyRoutineFireOnceV1({
         fire,
         routine: await readRoutineRecordV1(state, fire.routineId),
         judge: state.routineEventJudge,
@@ -768,6 +772,8 @@ async function runOneFiring(
         write: (key, value) => state.ctx.storage.put(key, value),
         now: state.now,
       });
+      const skip = connectionFireSkipV1(verdict);
+      if (skip) return skip;
     }
     await admitTurnV1(
       state,
@@ -832,7 +838,7 @@ async function notifyFailedFiring(
   fire: RoutineFireV1,
   outcome: RoutineFireOutcomeV1,
 ): Promise<void> {
-  if (outcome.status === "ok") return;
+  if (outcome.status === "ok" || outcome.status === "skipped") return;
   const settings = await readBotSettingsV1(state, identity);
   const receiptKey = routineFailureMessageKeyV1(fire.fireId);
   const createdAt = state.now().toISOString();
