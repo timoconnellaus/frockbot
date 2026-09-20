@@ -31,6 +31,11 @@ import {
   CLIENT_VERSION_DEGRADED_MESSAGE_V1,
   runFailureCopyV1,
 } from "./run-failure-copy.js";
+import type {
+  Acknowledgement,
+  Notification,
+  NotificationList,
+} from "@frockbot/core/protocol-schemas";
 
 /**
  * One visible thing that happened inside a Turn.
@@ -84,25 +89,10 @@ export interface ClientTurnEvent {
   }[];
 }
 
-export interface ClientNotificationIntent {
-  notificationId: string;
-  runId: string;
-  createdAt: string;
-  title: string;
-  body: string;
-  /** `critical` for an intent the Bot's notification policy does not gate. */
-  urgency?: "normal" | "critical";
-}
-
-export interface ClientNotificationListV1 {
-  schemaVersion: 1;
-  notifications: ClientNotificationIntent[];
-}
-
-export interface ClientNotificationAcknowledgementV1 {
-  schemaVersion: 1;
-  status: "acknowledged";
-}
+/** Wire notification DTOs. Derived from `client-wire.schema.json` `$defs`. */
+export type ClientNotificationIntent = Notification;
+export type ClientNotificationListV1 = NotificationList;
+export type ClientNotificationAcknowledgementV1 = Acknowledgement;
 
 export interface ClientTurnResponse {
   runId: string;
@@ -249,14 +239,6 @@ export type ClientRunEventV1 =
         input?: ClientDynamicToolCallInputV1;
       };
     }
-  /**
-   * A question this Turn put to another of the User's Bots, projected in
-   * place of the tool call that carried it: the thread marks it, and the
-   * exchange view reads it. The answer, or the refusal, is the `tool/result`
-   * on the same `callId`. The target's name is not carried — the client
-   * holds the directory, and a Bot since renamed or deleted is still named
-   * by what the client knows of it.
-   */
   | {
       type: "message/to-bot";
       callId: string;
@@ -268,45 +250,18 @@ export type ClientRunEventV1 =
       callId: string;
       content: string;
       isError: boolean;
-      /**
-       * Binaries the tool filed in a durable root. References, never bytes:
-       * the client fetches them from the Workspace read route, so a thread
-       * that scrolls past a hundred screenshots carries a hundred paths.
-       */
       attachments?: ClientToolAttachmentV1[];
     }
-  /**
-   * A user-facing send, projected so the client can draw the payload. The
-   * Turn's derived text carries only what the model wrote as an assistant
-   * message, and a widget-ended Turn writes none, so the payload has to reach
-   * the client here or not at all.
-   */
   | {
       type: "send/to-user";
       payload: SendToUserPayloadV1;
-      /**
-       * Which of the Turn's sends this is, counted over the Turn's durable
-       * events. The message the cloud names is `<runId>:send:<ordinal>`, and
-       * truncation drops sends from the projection, so a position in this
-       * list is not that identity — this is.
-       */
       ordinal: number;
     }
-  /**
-   * The Turn's answer to the caller that asked for it. Projected because it
-   * *is* the conversation — the exchange happened in this Bot's thread and the
-   * person can read it back — but it is not a send: it minted no message,
-   * raised no badge, and reached its caller by its own route.
-   */
   | {
       type: "reply/to-caller";
       caller: "voice" | "bot";
       text: string;
     }
-  /**
-   * A child Turn's hand-off to its parent. Projected because it is durable
-   * history of that Turn; delivering it into the parent is a later slice.
-   */
   | {
       type: "wake/parent";
       message: string;
@@ -316,14 +271,6 @@ export type ClientRunEventV1 =
       status: "degraded" | "unavailable" | "refused" | "skipped";
       message: string;
     }
-  /**
-   * A subagent this Turn dispatched. The child's Session never enters the
-   * visible transcript, so this chip is the whole of what the conversation says
-   * about it: what it is, what it was asked to do, and which model it runs on.
-   * Its *live* status and its summary come from the Bot's task list, not from
-   * here — this event is the durable fact that the dispatch happened, and it
-   * never changes after it is written.
-   */
   | {
       type: "task/dispatched";
       taskId: string;
@@ -332,11 +279,6 @@ export type ClientRunEventV1 =
       model: string;
       background: boolean;
     }
-  /**
-   * One model call a Plugin made in this Turn, itemised for the Work view
-   * (ADR 0026): which Plugin, which model, the tokens, and the cost when the
-   * deployment bills. Never the prompt or the answer.
-   */
   | {
       type: "plugin/model-usage";
       pluginId: string;
@@ -357,17 +299,7 @@ export interface ClientDynamicToolCallInputV1 {
 
 export type ClientRunOutcomeV1 =
   | { type: "completed"; text: string }
-  /**
-   * A Turn that broke keeps what it had already said, for the same reason a
-   * stopped one does: the words arrived, the person read them, and replacing
-   * them with a notice would rewrite what they watched happen.
-   */
   | { type: "failed"; message: string; text?: string }
-  /**
-   * A Turn a Stop or a later message ended keeps what it had already said:
-   * `text` is that partial answer, and `message` is the line saying why it
-   * ends where it does.
-   */
   | { type: "cancelled"; message: string; text?: string }
   | { type: "superseded"; message: string; text?: string };
 
@@ -376,42 +308,27 @@ export type ClientRunOutcomeV1 =
  * `wake/parent` events; version 3 adds the bounded `via` marker for agent
  * Turns without exposing the internal origin record. Version 4 gives every
  * execution attempt the stable identity of its original user message.
+ *
+ * Wire `$defs.Run` is the status-discriminated form of this object. The
+ * projection keeps one interface so callers can read `outcome` without
+ * narrowing; `isProtocolValue("Run", …)` is the schema check.
  */
 export interface ClientRunV1 {
   schemaVersion: 1 | 2 | 3 | 4;
   runId: string;
   admittedAt: string;
-  /** Stable user-message identity shared by every execution attempt. */
   messageRunId?: string;
   messageAdmittedAt?: string;
   retryOf?: string;
   retriedBy?: string;
-  /** Authority permits a fresh attempt over this failed user message. */
   canRetry?: boolean;
   input: string;
   status: ClientRunStatusV1;
   events: ClientRunEventV1[];
-  /** Durable Stop intent, projected independently of the run status. */
   stopRequestedAt?: string;
-  /**
-   * True while the Turn is admitted and waiting rather than running. The
-   * thread draws it as an ordinary message the Bot has not reached yet, and
-   * the flag is durable state, so a reload draws the same thing.
-   */
   queued?: true;
-  /**
-   * The answer the Bot has written so far, present only while the run is still
-   * running and has produced text. The thread draws it in the bubble it is
-   * already drawing for the Turn, so a reply appears as it is written instead
-   * of arriving whole at settlement. A settled run carries its answer in
-   * `outcome` instead, and never both.
-   */
   partialText?: string;
   outcome?: ClientRunOutcomeV1;
-  /**
-   * Where an agent-lane question entered this Bot's transcript: another Bot of
-   * the same User, or the account's voice session speaking for the person.
-   */
   via?: { kind: "bot"; name: string; botId: string } | { kind: "voice" };
 }
 
@@ -453,10 +370,6 @@ export interface ClientRunListV1 {
   schemaVersion: 1;
   runs: ClientRunV1[];
   page: ClientRunPageV1;
-  /**
-   * Optional so a stored projection written before announcements existed still
-   * decodes. Absent means the same as an empty list.
-   */
   announcements?: ClientAnnouncementV1[];
 }
 
@@ -555,13 +468,7 @@ export type ClientRunLookup =
       run: ClientRun;
     };
 
-export interface ClientNotificationIntentV1 {
-  notificationId: string;
-  runId: string;
-  createdAt: string;
-  title: string;
-  body: string;
-}
+export type ClientNotificationIntentV1 = Notification;
 
 export interface ClientTurnV1 {
   schemaVersion: 1;
@@ -1308,6 +1215,9 @@ function projectNotificationV1(
     createdAt: truncate(notification.createdAt, MAX_TIMESTAMP_LENGTH),
     title: truncateWireString(notification.title, MAX_NOTIFICATION_TITLE_BYTES),
     body: truncateWireString(notification.body, MAX_NOTIFICATION_BODY_BYTES),
+    ...(notification.urgency === undefined
+      ? {}
+      : { urgency: notification.urgency }),
   };
 }
 
@@ -2122,23 +2032,23 @@ function decodePage(value: unknown): ClientRunPageV1 {
       : decodeRunCursorV1(
           string(page, "nextCursor", MAX_CURSOR_LENGTH, "run list.page"),
         );
-  if (page.truncated && !nextCursor) {
-    throw new Error("truncated run list requires a next cursor");
+  if (page.truncated) {
+    if (!nextCursor) {
+      throw new Error("truncated run list requires a next cursor");
+    }
+    return { truncated: true, nextCursor };
   }
-  if (!page.truncated && nextCursor !== undefined) {
+  if (nextCursor !== undefined) {
     throw new Error("complete run list must not include a next cursor");
   }
-  return {
-    truncated: page.truncated,
-    ...(nextCursor ? { nextCursor } : {}),
-  };
+  return { truncated: false };
 }
 
 function decodeNotificationV1(value: unknown): ClientNotificationIntent {
   const notification = record(value, "turn.notification");
   exactKeys(
     notification,
-    ["notificationId", "runId", "createdAt", "title", "body"],
+    ["notificationId", "runId", "createdAt", "title", "body", "urgency"],
     "turn.notification",
   );
   const createdAt = string(
@@ -2149,6 +2059,10 @@ function decodeNotificationV1(value: unknown): ClientNotificationIntent {
   );
   if (!Number.isFinite(Date.parse(createdAt))) {
     throw new Error("turn.notification.createdAt is invalid");
+  }
+  const urgency = notification.urgency;
+  if (urgency !== undefined && urgency !== "normal" && urgency !== "critical") {
+    throw new Error("turn.notification.urgency is invalid");
   }
   return {
     notificationId: publicEventId(
@@ -2179,6 +2093,7 @@ function decodeNotificationV1(value: unknown): ClientNotificationIntent {
       MAX_NOTIFICATION_BODY_BYTES,
       "turn.notification",
     ),
+    ...(urgency === undefined ? {} : { urgency }),
   };
 }
 

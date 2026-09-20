@@ -8,9 +8,11 @@ import {
   CLIENT_VERSION_DEGRADED_MESSAGE_V1,
   RUN_FAILURE_COPY_V1,
 } from "./run-failure-copy.js";
+import { isProtocolValue } from "@frockbot/core/protocol-schemas";
 import {
   createClientRunStopReceiptV1,
   decodeClientNotificationAcknowledgementCommandV1,
+  decodeClientNotificationListV1,
   decodeClientRunAdmissionFenceCommandV1,
   decodeClientRunLookupQueryV1,
   decodeClientRunStopCommandV1,
@@ -764,6 +766,48 @@ describe("client run protocol v1", () => {
         extra: true,
       }),
     ).toThrow("notification acknowledgement command.extra is not allowed");
+  });
+
+  test("urgency survives notification encode and decode", () => {
+    const notification = {
+      notificationId: "notification-1",
+      runId: "run-turn-1",
+      createdAt: timestamp,
+      title: "Needs you",
+      body: "The Bot asked a question.",
+      urgency: "critical" as const,
+    };
+    const projected = projectClientTurnV1({
+      runId: "run-turn-1",
+      text: "done",
+      events: [],
+      notification,
+    });
+    expect(projected.notification?.urgency).toBe("critical");
+    expect(isProtocolValue("Notification", projected.notification)).toBe(true);
+    expect(isProtocolValue("TurnResponse", projected)).toBe(true);
+    expect(isProtocolValue("Run", projectClientRunV1(storedRun([])))).toBe(
+      true,
+    );
+
+    const encoded = JSON.parse(JSON.stringify(projected)) as unknown;
+    expect(decodeClientTurnV1(encoded).notification?.urgency).toBe("critical");
+    expect(
+      decodeClientNotificationListV1(
+        JSON.parse(
+          JSON.stringify({
+            schemaVersion: 1,
+            notifications: [notification],
+          }),
+        ),
+      )[0]?.urgency,
+    ).toBe("critical");
+    expect(() =>
+      decodeClientNotificationListV1({
+        schemaVersion: 1,
+        notifications: [{ ...notification, urgency: "low" }],
+      }),
+    ).toThrow("turn.notification.urgency is invalid");
   });
 
   test("strictly decodes authoritative admission fence commands", () => {

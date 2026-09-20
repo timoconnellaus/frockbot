@@ -161,6 +161,7 @@ export interface BotNotificationIntent {
   createdAt: string;
   title: string;
   body: string;
+  urgency?: "normal" | "critical";
 }
 
 export type BotTurnResult = ClientTurnV1;
