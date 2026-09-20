@@ -637,6 +637,21 @@ void main() {
     expect(paths.last.contains('new=1'), isFalse);
   });
 
+  test('the panel header back is the editor’s back while it is open', () {
+    expect(
+      panelBackIdentifierV1(panelKey: 'routines', routinesEditorOpen: true),
+      RoutineIds.editorBack,
+    );
+    expect(
+      panelBackIdentifierV1(panelKey: 'routines', routinesEditorOpen: false),
+      ShellIds.rightPanelBack,
+    );
+    expect(
+      panelBackIdentifierV1(panelKey: 'plugins', routinesEditorOpen: true),
+      ShellIds.rightPanelBack,
+    );
+  });
+
   testWidgets('the panel’s new Routine page names itself at the top', (
     tester,
   ) async {

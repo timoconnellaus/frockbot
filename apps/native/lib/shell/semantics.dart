@@ -24,6 +24,8 @@ abstract final class ShellIds {
 
   /// The panel's way back out of a sub-page to the Bot page under it. Only
   /// there while the panel holds a stack; the phone pops a route instead.
+  /// Leaving the Routines editor is not leaving Routines — that press uses
+  /// [panelBackIdentifierV1] so the editor keeps its own id.
   static const rightPanelBack = 'right-panel-back';
   static const rightPanelToggle = 'right-panel-toggle';
   static const scrim = 'shell-scrim';
@@ -328,6 +330,8 @@ abstract final class RoutineIds {
   static const confirmDelete = 'routine-delete-confirm';
 
   /// The editor's way back to the list, and the confirm when the form is dirty.
+  /// On the phone this is the AppBar back. In the right panel it is the
+  /// panel header back while the editor is open.
   static const editorBack = 'routine-editor-back';
   static const confirmDiscard = 'routine-discard-confirm';
 
@@ -347,6 +351,15 @@ abstract final class RoutineIds {
   static String completion(String entryId) => 'routine-completion-$entryId';
   static String action(String actionId) => viewActionIdentifierV1(actionId);
 }
+
+/// The panel header back. Leaving the Routines editor is not leaving
+/// Routines, so that press keeps the editor's own id.
+String panelBackIdentifierV1({
+  required String? panelKey,
+  required bool routinesEditorOpen,
+}) => panelKey == 'routines' && routinesEditorOpen
+    ? RoutineIds.editorBack
+    : ShellIds.rightPanelBack;
 
 /// Flock: adding a Bot, and putting one away.
 ///
