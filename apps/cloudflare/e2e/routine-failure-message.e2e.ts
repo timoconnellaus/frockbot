@@ -115,9 +115,16 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
     await press(action(page, "run-routine"));
     await ran;
     // Run now lives on the editor. Leave it — the form is unchanged —
-    // so the shell's sidebar is reachable again. The press is the same
-    // id on the phone AppBar and on the panel header.
-    await press(sem(page, "routine-editor-back"));
+    // so the shell's sidebar is reachable again. In the panel that is
+    // the header back; on the phone it is the editor's own chevron.
+    const panelBack = sem(page, "right-panel-back");
+    const editorBack = sem(page, "routine-editor-back");
+    await expect(panelBack.or(editorBack).first()).toBeVisible();
+    if (await panelBack.isVisible().catch(() => false)) {
+      await press(panelBack);
+    } else {
+      await press(editorBack);
+    }
     await expect(sem(page, "routine-editor")).toHaveCount(0);
 
     // Away from Sol before the firing settles, so the message lands somewhere
