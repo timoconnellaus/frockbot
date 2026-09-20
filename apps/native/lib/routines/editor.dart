@@ -388,22 +388,29 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
         const SizedBox(height: 16),
         _configureStep(context),
         const SizedBox(height: 18),
-        Align(
-          alignment: Alignment.centerRight,
-          child: widget.enabled && _canSave
-              ? _routineAction(
-                  'save-routine',
-                  widget.routineId == null ? 'Create Routine' : 'Save changes',
-                  style: 'primary',
-                )
-              : FilledButton(
-                  onPressed: null,
-                  child: Text(
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _routineAction('cancel-edit', 'Cancel'),
+            widget.enabled && _canSave
+                ? _routineAction(
+                    'save-routine',
                     widget.routineId == null
                         ? 'Create Routine'
                         : 'Save changes',
+                    style: 'primary',
+                  )
+                : FilledButton(
+                    onPressed: null,
+                    child: Text(
+                      widget.routineId == null
+                          ? 'Create Routine'
+                          : 'Save changes',
+                    ),
                   ),
-                ),
+          ],
         ),
         if (widget.routineId != null) ...[
           const SizedBox(height: 16),
@@ -813,7 +820,6 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
       if (storedSourceKind != _RoutineSourceKind.schedule &&
           widget.hookKeyVersion != null)
         _routineAction('revoke-key', 'Revoke key', style: 'danger'),
-      _routineAction('cancel-edit', 'Cancel'),
       _routineAction('delete-routine', 'Delete', style: 'danger'),
     ],
   );

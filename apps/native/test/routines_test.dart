@@ -593,6 +593,7 @@ void main() {
     expect(find.text('Schedule'), findsOneWidget);
     expect(find.text('Daily'), findsOneWidget);
     expect(find.text('Create Routine'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
   });
 
   testWidgets('Routines answer while the Plugin catalog is still out', (
