@@ -29,12 +29,14 @@ import {
   decodeRoutineRunEntryV1,
   isRoutineIdV1,
   requireScheduleXorTriggerV1,
+  routineTriggerNeedsHookKeyV1,
   RoutineDecodeError,
   type RoutineRecordV1,
   type RoutineRunEntryV1,
   type RoutineTriggerV1,
   type RoutineWriterV1,
 } from "./records.js";
+import { projectRoutineEventBodyV1 } from "./event-judge.js";
 import {
   constantTimeEqualsV1,
   decodeRoutineHookKeyV1,
@@ -140,7 +142,7 @@ export interface RoutineFiringSeamV1 {
     transaction: RoutineStorageWritesV1,
     input: {
       routineId: string;
-      trigger: "manual" | "webhook";
+      trigger: "manual" | "webhook" | "connection";
       discriminator: string;
       delivery?: string;
     },
@@ -429,6 +431,84 @@ export class RoutineStore {
   }
 
   /**
+   * Accept one connected-app event. The User object already proved the
+   * instance belongs to this Routine; this is the firing, keyed by the event
+   * id so a retried delivery is one Turn.
+   */
+  async deliverConnectEvent(input: {
+    routineId: string;
+    eventId: string;
+    payload: unknown;
+  }): Promise<RoutineHookDeliveryReceiptV1> {
+    const joined = this.#inFlight.get(input.eventId);
+    if (joined !== undefined) {
+      const already = await joined;
+      return already.status === "accepted"
+        ? { status: "duplicate", fireId: already.fireId }
+        : already;
+    }
+    const delivering = this.#deliverConnectEvent(input).finally(() => {
+      this.#inFlight.delete(input.eventId);
+    });
+    this.#inFlight.set(input.eventId, delivering);
+    return delivering;
+  }
+
+  async #deliverConnectEvent(input: {
+    routineId: string;
+    eventId: string;
+    payload: unknown;
+  }): Promise<RoutineHookDeliveryReceiptV1> {
+    if (!this.#firings) {
+      throw new RoutineHookError(500, "this Bot cannot accept a delivery");
+    }
+    const receiptKey = routineDeliveryKeyV1(input.eventId);
+    return this.#storage.transaction(async (transaction) => {
+      const now = this.#now();
+      const stored = await transaction.get<unknown>(
+        routineKeyV1(input.routineId),
+      );
+      if (stored === undefined) {
+        return { status: "dropped" as const, reason: "Routine not found" };
+      }
+      const record = decodeRoutineRecordV1(stored);
+      if (record.trigger?.kind !== "connection" || !record.enabled) {
+        return {
+          status: "dropped" as const,
+          reason:
+            record.trigger?.kind !== "connection"
+              ? "Routine is not an app-event trigger"
+              : "Routine is paused",
+        };
+      }
+      const seen = await transaction.get<RoutineDeliveryReceiptV1>(receiptKey);
+      if (
+        seen &&
+        Date.parse(seen.acceptedAt) > now.getTime() - ROUTINE_DELIVERY_TTL_MS
+      ) {
+        return seen.fireId !== undefined
+          ? { status: "duplicate" as const, fireId: seen.fireId }
+          : { status: "dropped" as const, reason: seen.dropped ?? "dropped" };
+      }
+      const body = JSON.stringify(projectRoutineEventBodyV1(input.payload));
+      const { fireId } = await this.#firings!.enqueueWithin(transaction, {
+        routineId: input.routineId,
+        trigger: "connection",
+        discriminator: `connect-${input.eventId.slice(0, 40)}`,
+        delivery: renderRoutineDeliveryV1(body, "application/json"),
+      });
+      await transaction.put(receiptKey, {
+        schemaVersion: 1,
+        routineId: input.routineId,
+        fireId,
+        acceptedAt: now.toISOString(),
+      } satisfies RoutineDeliveryReceiptV1);
+      await this.#trimDeliveries(transaction, now);
+      return { status: "accepted" as const, fireId };
+    });
+  }
+
+  /**
    * The door's checks, all read in the one transaction so a key rotated or a
    * Routine paused between two reads cannot be seen half-way.
    */
@@ -690,9 +770,10 @@ export class RoutineStore {
       // key, so creating one mints it in the same transaction. It is handed
       // back once and never stored.
       const minted =
-        record.trigger === undefined
-          ? undefined
-          : await this.#mint(transaction, record.routineId, at);
+        record.trigger !== undefined &&
+        routineTriggerNeedsHookKeyV1(record.trigger)
+          ? await this.#mint(transaction, record.routineId, at)
+          : undefined;
       return {
         schemaVersion: 1,
         commandId: command.commandId,
@@ -732,7 +813,10 @@ export class RoutineStore {
       command.type === "routine/rotate-key" ||
       command.type === "routine/revoke-key"
     ) {
-      if (current.trigger === undefined) {
+      if (
+        current.trigger === undefined ||
+        !routineTriggerNeedsHookKeyV1(current.trigger)
+      ) {
         throw new RoutineDecodeError(
           `Routine "${command.routineId}" has no trigger to key`,
         );
@@ -836,9 +920,17 @@ export class RoutineStore {
     const held = await transaction.get<unknown>(
       routineHookKeyRecordV1(record.routineId),
     );
-    if (record.trigger !== undefined && held === undefined) {
+    if (
+      record.trigger !== undefined &&
+      routineTriggerNeedsHookKeyV1(record.trigger) &&
+      held === undefined
+    ) {
       minted = await this.#mint(transaction, record.routineId, at);
-    } else if (record.trigger === undefined && held !== undefined) {
+    } else if (
+      (record.trigger === undefined ||
+        !routineTriggerNeedsHookKeyV1(record.trigger)) &&
+      held !== undefined
+    ) {
       await transaction.delete(routineHookKeyRecordV1(record.routineId));
     }
     return {
@@ -850,7 +942,9 @@ export class RoutineStore {
         timezone,
         undefined,
         minted?.keyVersion ??
-          (record.trigger !== undefined && held !== undefined
+          (record.trigger !== undefined &&
+          routineTriggerNeedsHookKeyV1(record.trigger) &&
+          held !== undefined
             ? decodeRoutineHookKeyV1(held).keyVersion
             : undefined),
       ),

@@ -123,6 +123,8 @@ import {
   listNotifications,
 } from "@frockbot/app/notifications/bot";
 import {
+  connectionTriggersFromUserV1,
+  deliverConnectEvent,
   deliverRoutineHook,
   executeRoutineCommand,
   executeRoutineInboxCommand,
@@ -2566,7 +2568,34 @@ export class BotState
       shell.state,
       identity,
       request.command as RoutineCommandV1,
+      { kind: "user" },
+      connectionTriggersFromUserV1(userConfigurationV1(shell.state, identity)),
     );
+  }
+
+  /**
+   * One connected-app event, after the User object resolved the instance to
+   * this Bot and this Routine. Directory membership is not proved here: the
+   * caller is the provider door, and the instance mapping is the credential.
+   */
+  async deliverConnectEvent(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      routineId: rpcIdentifier,
+      eventId: rpcIdentifier,
+      payload: (value) => value,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return deliverConnectEvent(shell.state, {
+      routineId: request.routineId as string,
+      eventId: request.eventId as string,
+      payload: request.payload,
+    });
   }
 
   /** Adopt a Profile timezone pushed by this User's authoritative object. */

@@ -44,6 +44,19 @@ import {
   type ComposioFetch,
   type ConnectedAccountSummaryV1,
 } from "./composio.js";
+import {
+  connectReadyConnectionsV1,
+  connectTriggerByRoutineKeyV1,
+  connectTriggerEffectKeyV1,
+  connectTriggerInstanceKeyV1,
+  CONNECT_TRIGGER_INSTANCE_PREFIX,
+  connectTriggerOffersV1,
+  decodeConnectTriggerEffectReceiptV1,
+  decodeConnectTriggerInstanceRecordV1,
+  type ConnectTriggerEffectReceiptV1,
+  type ConnectTriggerInstanceRecordV1,
+  type ConnectTriggerOfferV1,
+} from "./triggers.js";
 
 const COMMAND_PREFIX = "connect:command:v1:";
 const AUTH_CONFIG_PREFIX = "connect:auth-config:v1:";
@@ -109,7 +122,10 @@ interface StoredAuthConfig {
 }
 
 export interface ConnectUserBackendHost {
-  storage: UserSettingsStorage & { delete(key: string): Promise<boolean> };
+  storage: UserSettingsStorage & {
+    delete(key: string): Promise<boolean>;
+    list<T>(options: { prefix: string }): Promise<Map<string, T>>;
+  };
   settings: UserSettingsBackendContribution;
   /** The deployment's provider key. Absent, nothing can be connected. */
   apiKey?: string;
@@ -282,6 +298,204 @@ export class ConnectUserBackendContribution {
     });
     await Promise.race([Promise.all(settled), deadline]);
     clearTimeout(timer);
+  }
+
+  /**
+   * The events ready Connections of this User can start a Routine on.
+   * Only connected apps' events: an app nobody connected is not offered.
+   */
+  async listTriggers(userId: string): Promise<ConnectTriggerOfferV1[]> {
+    if (!this.client) return [];
+    const snapshot = await this.host.settings.readSnapshot();
+    const ready = connectReadyConnectionsV1(snapshot.connections);
+    const offers: ConnectTriggerOfferV1[] = [];
+    for (const connection of ready) {
+      try {
+        const types = await this.client.listTriggerTypes(
+          connection.toolkitSlug,
+        );
+        offers.push(...connectTriggerOffersV1(connection, types));
+      } catch {
+        // One app that cannot list its events must not hide the others.
+      }
+    }
+    void userId;
+    return offers;
+  }
+
+  async upsertTrigger(input: {
+    userId: string;
+    commandId: string;
+    botId: string;
+    routineId: string;
+    connectionId: string;
+    triggerType: string;
+    config?: Record<string, string | number | boolean>;
+  }): Promise<{ instanceId: string; routineId: string }> {
+    const effectKey = connectTriggerEffectKeyV1(input.commandId);
+    const replayed = decodeConnectTriggerEffectReceiptV1(
+      await this.host.storage.get<unknown>(effectKey),
+    );
+    if (replayed?.status === "upserted" && replayed.instanceId) {
+      return {
+        instanceId: replayed.instanceId,
+        routineId: replayed.routineId,
+      };
+    }
+    if (!this.client) {
+      throw new Error("Connecting apps isn't available right now.");
+    }
+    const connection = await this.host.settings.getConnection(
+      input.userId,
+      input.connectionId,
+    );
+    const metadata = connection && connectSafeMetadataV1(connection);
+    if (!connection || !metadata || connection.state !== "ready") {
+      throw new Error("Connect this app before a Routine can fire on it.");
+    }
+    const types = await this.client.listTriggerTypes(metadata.toolkitSlug);
+    if (!types.some((type) => type.slug === input.triggerType)) {
+      throw new Error("That app does not offer this event.");
+    }
+    const heldKey = connectTriggerByRoutineKeyV1(input.botId, input.routineId);
+    const previousId = await this.host.storage.get<string>(heldKey);
+    const instance = await this.client.upsertTriggerInstance({
+      slug: input.triggerType,
+      userId: input.userId,
+      connectedAccountId: metadata.connectedAccountId,
+      ...(input.config === undefined ? {} : { config: input.config }),
+    });
+    if (previousId && previousId !== instance.id) {
+      await this.client
+        .deleteTriggerInstance(previousId)
+        .catch(() => undefined);
+      await this.host.storage.delete(connectTriggerInstanceKeyV1(previousId));
+    }
+    const record: ConnectTriggerInstanceRecordV1 = {
+      schemaVersion: 1,
+      instanceId: instance.id,
+      botId: input.botId,
+      routineId: input.routineId,
+      connectionId: input.connectionId,
+      triggerType: input.triggerType,
+    };
+    await this.host.storage.put(
+      connectTriggerInstanceKeyV1(instance.id),
+      record,
+    );
+    await this.host.storage.put(heldKey, instance.id);
+    const receipt: ConnectTriggerEffectReceiptV1 = {
+      schemaVersion: 1,
+      commandId: input.commandId,
+      instanceId: instance.id,
+      botId: input.botId,
+      routineId: input.routineId,
+      status: "upserted",
+    };
+    await this.host.storage.put(effectKey, receipt);
+    return { instanceId: instance.id, routineId: input.routineId };
+  }
+
+  async deleteTrigger(input: {
+    commandId: string;
+    botId: string;
+    routineId: string;
+  }): Promise<void> {
+    const effectKey = connectTriggerEffectKeyV1(input.commandId);
+    const replayed = decodeConnectTriggerEffectReceiptV1(
+      await this.host.storage.get<unknown>(effectKey),
+    );
+    if (replayed?.status === "deleted") return;
+    const heldKey = connectTriggerByRoutineKeyV1(input.botId, input.routineId);
+    const instanceId =
+      replayed?.instanceId ?? (await this.host.storage.get<string>(heldKey));
+    if (instanceId && this.client) {
+      await this.client
+        .deleteTriggerInstance(instanceId)
+        .catch(() => undefined);
+      await this.host.storage.delete(connectTriggerInstanceKeyV1(instanceId));
+    }
+    await this.host.storage.delete(heldKey);
+    await this.host.storage.put(effectKey, {
+      schemaVersion: 1,
+      commandId: input.commandId,
+      botId: input.botId,
+      routineId: input.routineId,
+      status: "deleted",
+      ...(instanceId ? { instanceId } : {}),
+    } satisfies ConnectTriggerEffectReceiptV1);
+  }
+
+  async resolveTrigger(
+    instanceId: string,
+  ): Promise<ConnectTriggerInstanceRecordV1 | undefined> {
+    return decodeConnectTriggerInstanceRecordV1(
+      await this.host.storage.get<unknown>(
+        connectTriggerInstanceKeyV1(instanceId),
+      ),
+    );
+  }
+
+  /**
+   * A ready Connection whose grant has expired. The Routines that fired on
+   * it lose their instances; the caller pauses them.
+   */
+  async failExpiredAccount(
+    userId: string,
+    connectedAccountId: string,
+  ): Promise<
+    | {
+        connectionId: string;
+        routines: Array<{ botId: string; routineId: string }>;
+      }
+    | undefined
+  > {
+    const snapshot = await this.host.settings.readSnapshot();
+    const connection = snapshot.connections.find((candidate) => {
+      const metadata = connectSafeMetadataV1(candidate);
+      return metadata?.connectedAccountId === connectedAccountId;
+    });
+    if (!connection || connection.state === "revoked") return undefined;
+    const routines = await this.deleteTriggersForConnection(
+      connection.connectionId,
+    );
+    if (connection.state === "ready" || connection.state === "disabled") {
+      await this.host.settings.replaceConnection(
+        userId,
+        connection.connectionId,
+        connection.generation,
+        {
+          ...connection,
+          state: "failed",
+          failure: connectFailureLineV1({ status: "EXPIRED" }),
+        } as ConnectionView,
+      );
+    }
+    return { connectionId: connection.connectionId, routines };
+  }
+
+  async deleteTriggersForConnection(
+    connectionId: string,
+  ): Promise<Array<{ botId: string; routineId: string }>> {
+    const held = await this.host.storage.list<unknown>({
+      prefix: CONNECT_TRIGGER_INSTANCE_PREFIX,
+    });
+    const routines: Array<{ botId: string; routineId: string }> = [];
+    for (const [key, value] of held) {
+      const record = decodeConnectTriggerInstanceRecordV1(value);
+      if (!record || record.connectionId !== connectionId) continue;
+      if (this.client) {
+        await this.client
+          .deleteTriggerInstance(record.instanceId)
+          .catch(() => undefined);
+      }
+      await this.host.storage.delete(key);
+      await this.host.storage.delete(
+        connectTriggerByRoutineKeyV1(record.botId, record.routineId),
+      );
+      routines.push({ botId: record.botId, routineId: record.routineId });
+    }
+    return routines;
   }
 
   private async execute(
@@ -508,6 +722,7 @@ export class ConnectUserBackendContribution {
     // Disconnect. The person has no surface of their own at the provider, so
     // the upstream grant goes with the account whatever the client asked;
     // a deletion the provider has already done counts as done.
+    await this.deleteTriggersForConnection(command.connectionId);
     if (this.client) {
       await this.client.deleteConnectedAccount(metadata.connectedAccountId);
     }

@@ -148,6 +148,29 @@ export function decodeConnectedAccountSummaryV1(
   };
 }
 
+/** One event type an app can fire, as a Bot will be offered it. */
+export interface ConnectTriggerTypeV1 {
+  slug: string;
+  name: string;
+  description: string;
+  toolkitSlug: string;
+}
+
+/** One live trigger instance at the provider. */
+export interface ConnectTriggerInstanceV1 {
+  id: string;
+  slug: string;
+  connectedAccountId: string;
+}
+
+/** The Bot-facing trigger name: `GMAIL_NEW_GMAIL_MESSAGE` becomes `new_gmail_message`. */
+export function connectTriggerNameV1(
+  slug: string,
+  toolkitSlug: string,
+): string {
+  return connectToolNameV1(slug, toolkitSlug);
+}
+
 /** A tool's input schema as the provider publishes it: a JSON-schema object. */
 function inputSchemaOf(parameters: Record<string, unknown>) {
   if (parameters.type !== "object") {
@@ -287,6 +310,100 @@ export class ComposioClient {
         version: requiredString(tool, "version"),
       };
     });
+  }
+
+  /** The event types one app can fire. */
+  async listTriggerTypes(toolkitSlug: string): Promise<ConnectTriggerTypeV1[]> {
+    const query = new URLSearchParams({
+      toolkit_slugs: toolkitSlug,
+      limit: "50",
+    });
+    const values = await this.pages(`/triggers_types?${query}`);
+    return values.flatMap((value) => {
+      const trigger = asRecord(value);
+      const slug = requiredString(trigger, "slug");
+      const toolkit =
+        typeof trigger.toolkit === "object" && trigger.toolkit !== null
+          ? asRecord(trigger.toolkit)
+          : {};
+      if (typeof toolkit.slug === "string" && toolkit.slug !== toolkitSlug) {
+        return [];
+      }
+      if (!slug.startsWith(`${toolkitSlug.toUpperCase()}_`)) return [];
+      const name =
+        typeof trigger.name === "string" && trigger.name.trim()
+          ? trigger.name.trim()
+          : slug;
+      const description =
+        typeof trigger.description === "string" && trigger.description.trim()
+          ? trigger.description.trim()
+          : name;
+      return [
+        {
+          slug,
+          name: name.slice(0, 200),
+          description: description.slice(0, 2_000),
+          toolkitSlug,
+        },
+      ];
+    });
+  }
+
+  /**
+   * Create or update one trigger instance for one account. The provider
+   * re-enables a matching disabled instance rather than minting a second.
+   */
+  async upsertTriggerInstance(input: {
+    slug: string;
+    userId: string;
+    connectedAccountId: string;
+    config?: Record<string, string | number | boolean>;
+  }): Promise<ConnectTriggerInstanceV1> {
+    const result = asRecord(
+      await this.request(
+        `/trigger_instances/${encodeURIComponent(input.slug)}/upsert`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: input.userId,
+            connected_account_id: input.connectedAccountId,
+            trigger_config: input.config ?? {},
+          }),
+        },
+      ),
+    );
+    const nested =
+      typeof result.trigger_instance === "object" &&
+      result.trigger_instance !== null
+        ? asRecord(result.trigger_instance)
+        : result;
+    const id =
+      (typeof nested.id === "string" && nested.id) ||
+      (typeof nested.trigger_id === "string" && nested.trigger_id) ||
+      (typeof result.trigger_id === "string" && result.trigger_id) ||
+      "";
+    if (!id) throw new Error("The service returned no trigger instance");
+    return {
+      id,
+      slug: input.slug,
+      connectedAccountId: input.connectedAccountId,
+    };
+  }
+
+  /**
+   * Drop one trigger instance. Absent already counts as done: deleting a
+   * Routine that already lost its instance must not fail the command.
+   */
+  async deleteTriggerInstance(instanceId: string): Promise<void> {
+    try {
+      await this.request(
+        `/trigger_instances/manage/${encodeURIComponent(instanceId)}`,
+        { method: "DELETE" },
+      );
+    } catch (error) {
+      if (error instanceof ComposioRequestError && error.status === 404) return;
+      throw error;
+    }
   }
 
   /**

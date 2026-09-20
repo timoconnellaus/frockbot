@@ -226,6 +226,12 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
         "no app can be connected; Connect answers that connecting apps is unavailable, and a Bot has no app tools",
     },
     {
+      name: "COMPOSIO_WEBHOOK_SECRET",
+      why: "HMAC-SHA256 secret that verifies Connected-app event deliveries at POST /api/connect/events.",
+      degraded:
+        "the events door answers 503; Routines cannot fire on a connected-app event",
+    },
+    {
       name: "FROCK_AI_GATEWAY_TOKEN",
       why: "The `cf-aig-authorization` bearer for the AI Gateway.",
       degraded:

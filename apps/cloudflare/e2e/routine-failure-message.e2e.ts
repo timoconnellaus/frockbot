@@ -16,8 +16,8 @@ import {
   test,
   expect,
   action,
-  answerFields,
   createBot,
+  createRoutineThroughApi,
   documentField,
   expectReadyToSend,
   group,
@@ -80,19 +80,17 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
   await botRow(page, "Sol").click();
   await expectReadyToSend(page);
 
-  // The Routine, through the panel a person would use.
+  // The Routine, through the command route — conversation is the author,
+  // and the panel is a list and a read-only detail.
+  await createRoutineThroughApi(page, {
+    botName: "Sol",
+    name: "Morning brief",
+    prompt: "Summarise overnight email.",
+    schedule: "0 9 * * *",
+  });
   await press(sem(page, "bot-page-routines-all"));
   const document = sem(page, "routines-document");
   await expect(document).toBeVisible({ timeout: 60_000 });
-  await press(sem(page, "routine-create"));
-  await expect(sem(page, "routine-editor")).toBeVisible();
-  await press(sem(page, "routine-source-schedule"));
-  await expect(documentField(page, "routine.name")).toBeVisible();
-  await answerFields(page, {
-    "routine.name": "Morning brief",
-    "routine.prompt": "Summarise overnight email.",
-  });
-  await press(action(page, "save-routine"));
   const card = group(page, "Morning brief");
   await expect(card).toBeVisible({ timeout: 60_000 });
 
@@ -101,12 +99,12 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
     // The Connection validated; the endpoint then refuses inference, which is
     // what a revoked key looks like to a firing.
     await setFakeOllamaChatMode(page, ollamaBaseUrl, "unauthorized");
-    // Run now is on the editor the row opens, beside Save: a row is what is
-    // armed and the switch that pauses it.
+    // Run now is on the detail the row opens: a row is what is armed and
+    // the switch that pauses it.
     await card.click({ position: { x: 24, y: 20 } });
-    await expect(sem(page, "routine-editor")).toBeVisible();
-    // The click is not the command. Popping the editor disposes the
-    // controller that would send it, so wait until the run is admitted.
+    await expect(documentField(page, "routine.name")).toBeVisible();
+    // The click is not the command. Opening the detail reloads the
+    // document, so wait until the run is admitted.
     const ran = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -114,18 +112,13 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
     );
     await press(action(page, "run-routine"));
     await ran;
-    // Run now lives on the editor. Leave it — the form is unchanged —
-    // so the shell's sidebar is reachable again. In the panel that is
-    // the header back; on the phone it is the editor's own chevron.
-    const panelBack = sem(page, "right-panel-back");
-    const editorBack = sem(page, "routine-editor-back");
-    await expect(panelBack.or(editorBack).first()).toBeVisible();
-    if (await panelBack.isVisible().catch(() => false)) {
-      await press(panelBack);
-    } else {
-      await press(editorBack);
-    }
-    await expect(sem(page, "routine-editor")).toHaveCount(0);
+    // Run now lives on the detail. Leave it so the shell's sidebar is
+    // reachable again. In the panel that is the header back, named as
+    // the detail's own way out; on the phone it is the same id.
+    const detailBack = sem(page, "routine-detail-back");
+    await expect(detailBack).toBeVisible();
+    await press(detailBack);
+    await expect(documentField(page, "routine.name")).toHaveCount(0);
 
     // Away from Sol before the firing settles, so the message lands somewhere
     // nobody is looking. Straight to another Bot from the sidebar, which is beside the

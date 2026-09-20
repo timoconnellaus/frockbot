@@ -110,6 +110,10 @@ _Avoid_: Tier, preinstall flag
 A Routine trigger kind whose event arrives on the app-owned Routine webhook door — the same signed, keyed, replay-guarded route a webhook Routine uses — is verified and shaped by the trigger the Plugin exports under `triggers`, and is enqueued as a firing by the app, or dropped with the Plugin's reason. The Plugin never binds a route and never enqueues a Turn.
 _Avoid_: Webhook plugin, inbound handler
 
+**Connection trigger**:
+A Routine trigger kind whose event arrives from a connected app — a new Gmail message, an email sent — through one deployment-wide events door. The provider holds the instance; the User Durable Object maps it to a Bot and a Routine; the Bot enqueues the firing keyed by the event id.
+_Avoid_: Integration trigger, Composio trigger (the provider is plumbing)
+
 **Computer**:
 A User's working environment: one persistent Workspace with compute attached on demand, shared by all of that User's Bots, each with its own directories and desktop, all sharing the User's browser profile.
 _Avoid_: Sandbox, box, Sprite (a provider)
@@ -243,11 +247,11 @@ The recorded origin of a Package or change: first-party, User, or Bot, and for a
 _Avoid_: Author, source
 
 **Routine**:
-A persisted trigger and instruction that schedules future work for a bot.
+A persisted trigger and instruction that schedules future work for a bot. Conversation authors it; the list is what is armed, and the detail is a read-only look at one Routine ([ADR 0033](docs/adr/0033-conversation-authored-routines.md)).
 _Avoid_: Job, cron
 
 **Firing**:
-One occurrence of a Routine: a durable record written before the automation Turn it admits, and the same-Routine lock while that Turn is unsettled.
+One occurrence of a Routine: a durable record written before the automation Turn it admits, and the same-Routine lock while that Turn is unsettled. A connected-app firing may skip when the standalone event is clearly not the prompt.
 _Avoid_: Execution, invocation
 
 **Completion inbox**:

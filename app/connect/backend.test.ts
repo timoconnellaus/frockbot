@@ -4,6 +4,8 @@ import type {
   ConnectionCommandV1,
 } from "@frockbot/core/connection";
 import { createConnectBackendContribution } from "./backend.js";
+import { connectEventSignatureV1 } from "./events.js";
+import type { ConnectTriggerOfferV1 } from "./triggers.js";
 
 const CONTEXT = { userId: "tim", client: "browser" as const };
 
@@ -234,5 +236,102 @@ describe("the Connected apps gateway routes", () => {
       {},
     );
     expect(other).toBeUndefined();
+  });
+});
+
+describe("Connected-app trigger routes", () => {
+  test("lists the events ready Connections offer", async () => {
+    const offers: ConnectTriggerOfferV1[] = [
+      {
+        connectionId: "conn-gmail",
+        connectionLabel: "Gmail",
+        toolkitSlug: "gmail",
+        toolkitName: "Gmail",
+        slug: "GMAIL_NEW_GMAIL_MESSAGE",
+        name: "New Gmail message received",
+        description: "When a new message arrives.",
+      },
+    ];
+    const backend = createConnectBackendContribution({
+      executeConnection: () => {
+        throw new Error("unused");
+      },
+      listConnectTriggers: () => Promise.resolve(offers),
+    });
+    const url = new URL("https://bot.frockbot.com/api/connect/triggers");
+    const response = await backend.route(new Request(url), url, CONTEXT);
+    expect(response?.status).toBe(200);
+    const listed: unknown = await response!.json();
+    expect(listed).toEqual({
+      schemaVersion: 1,
+      triggers: offers,
+    });
+  });
+
+  test("accepts a signed trigger.message and refuses a miss", async () => {
+    const events: unknown[] = [];
+    const backend = createConnectBackendContribution({
+      executeConnection: () => {
+        throw new Error("unused");
+      },
+      connectWebhookSecret: "secret",
+      handleConnectEvent: (event) => {
+        events.push(event);
+        return Promise.resolve({ status: "accepted", fireId: "fire-1" });
+      },
+    });
+    const body = JSON.stringify({
+      type: "trigger.message",
+      id: "evt_1",
+      data: {
+        user_id: "tim",
+        trigger_id: "ti_1",
+        payload: { subject: "Hello" },
+      },
+    });
+    const signature = await connectEventSignatureV1("secret", body);
+    const url = new URL("https://bot.frockbot.com/api/connect/events");
+    const accepted = await backend.publicRoute!(
+      new Request(url, {
+        method: "POST",
+        headers: { "webhook-signature": signature },
+        body,
+      }),
+      url,
+      {},
+    );
+    expect(accepted?.status).toBe(202);
+    const receipt: unknown = await accepted!.json();
+    expect(receipt).toEqual({
+      schemaVersion: 1,
+      status: "accepted",
+      fireId: "fire-1",
+    });
+    expect(events).toHaveLength(1);
+    const refused = await backend.publicRoute!(
+      new Request(url, {
+        method: "POST",
+        headers: { "webhook-signature": "nope" },
+        body,
+      }),
+      url,
+      {},
+    );
+    expect(refused?.status).toBe(401);
+  });
+
+  test("closes the door when the webhook secret is absent", async () => {
+    const backend = createConnectBackendContribution({
+      executeConnection: () => {
+        throw new Error("unused");
+      },
+    });
+    const url = new URL("https://bot.frockbot.com/api/connect/events");
+    const response = await backend.publicRoute!(
+      new Request(url, { method: "POST", body: "{}" }),
+      url,
+      {},
+    );
+    expect(response?.status).toBe(503);
   });
 });

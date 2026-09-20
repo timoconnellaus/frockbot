@@ -52,6 +52,7 @@ import {
   flockUserContribution,
   machineUserContribution,
   ollamaCloudUserContribution,
+  connectUserContribution,
   searchUserContribution,
   settingsUserContribution,
   type FoundationUserBackendHostV1,
@@ -139,6 +140,8 @@ export interface MountedFoundationUserBackend {
    * is a User asset, so its authority is here rather than on any Bot.
    */
   machines: MachineUserBackendContribution;
+  /** Connected apps: Connections, trigger instances, and event mapping. */
+  connect: ConnectUserBackendContribution;
   dispose(): Promise<void>;
 }
 
@@ -176,6 +179,8 @@ export async function createFoundationUserBackendContributions(host: {
     CredentialStorage &
     FlockUserBackendHost["storage"] &
     MachineStorageV1 & {
+      delete(key: string): Promise<boolean>;
+      list<T>(options: { prefix: string }): Promise<Map<string, T>>;
       getAlarm?(): Promise<number | null>;
       setAlarm(scheduledTime: number | Date): Promise<void>;
     };
@@ -412,6 +417,7 @@ export async function createFoundationUserBackendContributions(host: {
   const search = mounted.get(searchUserContribution);
   const audit = mounted.get(auditUserContribution);
   const machines = mounted.get(machineUserContribution);
+  const connect = mounted.get(connectUserContribution);
   if (
     !settings ||
     !credentials ||
@@ -421,11 +427,12 @@ export async function createFoundationUserBackendContributions(host: {
     !botTemplate ||
     !search ||
     !audit ||
-    !machines
+    !machines ||
+    !connect
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, and Machines User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, Machines, and Connected apps User Contributions",
     );
   }
 
@@ -454,6 +461,7 @@ export async function createFoundationUserBackendContributions(host: {
     search,
     audit,
     machines,
+    connect,
     async dispose() {
       for (const undo of unregister) undo();
       await mounted.dispose();

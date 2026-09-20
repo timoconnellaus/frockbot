@@ -1,16 +1,17 @@
-// The Routines panel, through the browser: trigger-specific setup, friendly
-// schedules, and a destructive action that always asks first.
+// The Routines panel, through the browser: a list and a read-only detail,
+// friendly schedules, and a destructive action that always asks first.
 //
 // Routines is a server-projected document, so every control here is named by
 // the projection's own ids — `view-field-routine.*`, `view-action-*` and the
 // group a Routine's name slugs to — and only the confirmation is host chrome
-// with a name of its own.
+// with a name of its own. Conversation is the only author; a spec that needs a
+// Routine already there creates it through the command route.
 import {
   test,
   expect,
   action,
   createBot,
-  answerFields,
+  createRoutineThroughApi,
   documentField,
   group,
   openApplication,
@@ -29,23 +30,6 @@ import type { Locator, Page } from "@playwright/test";
 test.use({ timezoneId: "Australia/Sydney" });
 
 /**
- * Answer the editor's fields, and leave them answered.
- *
- * `answerFields` types through the editing session rather than filling: a
- * `fill` writes the element's value and not the widget's, so the document's
- * required key could refuse a form this side had read back as answered. The
- * click that helper once made is gone with it — inside the right panel the
- * document's semantics nodes overlap and the node above the field took the
- * pointer — and `focus()` names the element with no geometry at all.
- */
-async function answer(
-  page: Page,
-  values: Record<string, string>,
-): Promise<void> {
-  await answerFields(page, values);
-}
-
-/**
  * Open the Routines surface through the All Routines row on the Bot page —
  * the one door to the list at every tier, so it is the door this spec uses.
  */
@@ -56,46 +40,38 @@ async function openRoutines(page: Page): Promise<Locator> {
   return document;
 }
 
-/**
- * The editor as its own page. The list's New Routine button opens it; a
- * surface someone came to read is not a form.
- */
-async function openEditor(page: Page): Promise<void> {
-  await press(sem(page, "routine-create"));
-  await expect(sem(page, "routine-editor")).toBeVisible();
+/** The detail a row opens. A surface someone came to read is not a form. */
+async function openDetail(page: Page, name: string): Promise<void> {
+  const card = group(page, name);
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  // The press is aimed at the row's words rather than at its centre: the
+  // switch at the end of it is tappable too.
+  await card.click({ position: { x: 24, y: 20 } });
   await expect(documentField(page, "routine.name")).toBeVisible();
 }
 
-test("the trigger choice only shows its own setup, and schedules stay human", async ({
+test("the list is not a form, and schedules stay human", async ({
   page,
   userId,
 }) => {
   await openApplication(page, userId);
   await createBot(page, "Scheduler");
-  const document = await openRoutines(page);
-  await openEditor(page);
-  const editor = sem(page, "routine-editor");
-
-  // Webhook setup contains no schedule editor and never leaks the cron value
-  // that remains behind the friendly schedule controls.
-  await press(sem(page, "routine-source-webhook"));
-  await expect.poll(() => spokenText(editor)).toContain("incoming webhooks");
-  expect(await spokenText(editor)).not.toContain("0 9 * * *");
-
-  // Schedule offers plain-language cadence and time controls on the same form.
-  await press(sem(page, "routine-source-schedule"));
+  const empty = await openRoutines(page);
   await expect
-    .poll(() => spokenText(editor))
-    .toMatch(/Every day at 9:00\s?AM/iu);
-  expect(await spokenText(editor)).not.toContain("0 9 * * *");
+    .poll(() => spokenText(empty))
+    .toContain("Ask this Bot to set up a Routine.");
+  await expect(sem(page, "routine-create")).toHaveCount(0);
 
-  await answer(page, {
-    "routine.name": "Morning brief",
-    "routine.prompt": "Summarise overnight email.",
+  await createRoutineThroughApi(page, {
+    botName: "Scheduler",
+    name: "Morning brief",
+    prompt: "Summarise overnight email.",
+    schedule: "0 9 * * *",
   });
-  await press(action(page, "save-routine"));
+  await press(sem(page, "routines-refresh"));
   const card = group(page, "Morning brief");
   await expect(card).toBeVisible({ timeout: 60_000 });
+  await expect(sem(page, "routine-create")).toHaveCount(0);
 
   // The moment reads as a moment, not as the wire: the house order, in the
   // Routine's own zone rather than the browser's — 9:00am in UTC is 7:00pm in
@@ -113,38 +89,34 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
 }) => {
   await openApplication(page, userId);
   await createBot(page, "Keeper");
-  const document = await openRoutines(page);
-  await openEditor(page);
-
-  await answer(page, {
-    "routine.name": "Morning brief",
-    "routine.prompt": "Summarise overnight email.",
+  await createRoutineThroughApi(page, {
+    botName: "Keeper",
+    name: "Morning brief",
+    prompt: "Summarise overnight email.",
+    schedule: "0 9 * * *",
   });
-  await press(action(page, "save-routine"));
+  const document = await openRoutines(page);
   const card = group(page, "Morning brief");
   await expect(card).toBeVisible({ timeout: 60_000 });
 
-  // Delete is on the editor the row opens: a row is what is armed and the
+  // Delete is on the detail the row opens: a row is what is armed and the
   // switch that pauses it, and everything else one Routine can be asked is
-  // one press further in. The press is aimed at the row's words rather than
-  // at its centre: the switch at the end of it is tappable too.
-  await card.click({ position: { x: 24, y: 20 } });
-  await expect(sem(page, "routine-editor")).toBeVisible();
+  // one press further in.
+  await openDetail(page, "Morning brief");
   await press(action(page, "delete-routine"));
   const confirm = sem(page, "routine-delete-confirm");
   await expect(confirm).toBeVisible();
   await expect(confirm).toContainText("run log");
 
-  // Cancelling keeps the Routine and stays on the editor — the list is one
+  // Cancelling keeps the Routine and stays on the detail — the list is one
   // page back. That it survived is checked here rather than while the
   // confirmation is up: a modal takes the surface behind it out of the
   // accessibility tree, so there is nothing to count until it closes.
   await confirm.getByText("Cancel").click();
   await expect(confirm).toHaveCount(0);
-  await expect(sem(page, "routine-editor")).toBeVisible();
   await expect(documentField(page, "routine.name")).toBeVisible();
 
-  // Confirming is what deletes it, and the editor pops back to the list.
+  // Confirming is what deletes it, and the detail pops back to the list.
   await press(action(page, "delete-routine"));
   await confirm.getByText("Delete Routine").click();
   await expect(card).toHaveCount(0, { timeout: 60_000 });

@@ -10,7 +10,7 @@ import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
-import 'routines_test.dart' show routinesDocument, routinesDocumentWithEditor;
+import 'routines_test.dart' show routinesDocument, routinesDetailDocument;
 import 'shell_layout_test.dart' show byIdentifier;
 import 'voice_shell_harness.dart';
 import 'widget_test.dart' show MemoryStore;
@@ -428,16 +428,8 @@ void main() {
         expect(body, isNull);
         reads.add(path);
         if (path.contains('as=document')) {
-          if (path.contains('edit=r1')) {
-            return routinesDocumentWithEditor(
-              editing: {
-                'routineId': 'r1',
-                'name': 'School brief',
-                'prompt': 'Summarise the morning.',
-                'schedule': '30 7 * * 1-5',
-                'timing': 'schedule',
-              },
-            );
+          if (path.contains('routine=r1')) {
+            return routinesDetailDocument(name: 'School brief');
           }
           return routinesDocument();
         }
@@ -508,7 +500,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         reads,
-        contains('/api/bots/bot-1/routines?as=document&edit=r1'),
+        contains('/api/bots/bot-1/routines?as=document&routine=r1'),
       );
     },
   );

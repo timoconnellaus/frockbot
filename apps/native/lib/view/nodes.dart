@@ -286,14 +286,13 @@ const _rowToggleIds = {
   'install-package',
   'set-routine-enabled',
 };
-const _rowOpenIds = {'edit-routine', 'open-home', 'open-run'};
+const _rowOpenIds = {'open-routine', 'open-home', 'open-run'};
 
 /// Presses the host answers itself. They are not retained: a command
 /// envelope written for one of them would be restored onto the document
 /// the press just opened, and every control on it would refuse to work.
 const _hostAnsweredIds = {
-  'edit-routine',
-  'cancel-edit',
+  'open-routine',
   'open-run',
   'open-runs',
   'open-home',

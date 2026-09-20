@@ -81,8 +81,8 @@ class ViewSurfacePage extends StatefulWidget {
   final String? backId;
 
   /// When set, a confirmed leave calls this instead of popping the route.
-  /// The editor lives inside the same surface as the list, so back closes
-  /// the form and does not leave Routines.
+  /// The detail lives inside the same surface as the list, so back closes
+  /// it and does not leave Routines.
   final Future<void> Function()? onLeave;
 
   /// Draws the document's root as a host list rather than the shared

@@ -505,6 +505,20 @@ export interface UserConfigurationRpcV1 {
     userId: string,
     commandId: string,
   ): Promise<MachineCommandResultV1 | undefined>;
+  listConnectTriggers(): Promise<
+    import("@frockbot/app/connect/triggers").ConnectTriggerOfferV1[]
+  >;
+  upsertConnectTrigger(input: {
+    commandId: string;
+    routineId: string;
+    connectionId: string;
+    triggerType: string;
+    config?: Record<string, string | number | boolean>;
+  }): Promise<{ routineId: string }>;
+  deleteConnectTrigger(input: {
+    commandId: string;
+    routineId: string;
+  }): Promise<void>;
 }
 
 /**
@@ -694,6 +708,29 @@ export function userConfigurationV1(
         connectionId,
         packageId,
         effectId,
+      }),
+    listConnectTriggers: async () => {
+      const offers = await rpc.listConnectTriggers({
+        schemaVersion: 1,
+        userId: identity.userId,
+      });
+      return Array.isArray(offers) ? offers : [];
+    },
+    upsertConnectTrigger: async (input) => {
+      const held = await rpc.upsertConnectTrigger({
+        schemaVersion: 1,
+        userId: identity.userId,
+        botId: identity.botId,
+        ...input,
+      });
+      return { routineId: held.routineId };
+    },
+    deleteConnectTrigger: (input) =>
+      rpc.deleteConnectTrigger({
+        schemaVersion: 1,
+        userId: identity.userId,
+        botId: identity.botId,
+        ...input,
       }),
   };
 }

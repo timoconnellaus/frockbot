@@ -66,9 +66,16 @@ export interface TemplateRoutineCandidateV1 {
   name: string;
   prompt: string;
   schedule?: string;
-  /** A webhook, or a Plugin trigger naming the Plugin's id and trigger. */
+  /** Same trigger shapes `RoutineViewV1` already has. */
   trigger?:
-    { kind: "webhook" } | { kind: "plugin"; pluginId: string; trigger: string };
+    | { kind: "webhook" }
+    | { kind: "plugin"; pluginId: string; trigger: string }
+    | {
+        kind: "connection";
+        connectionId: string;
+        triggerType: string;
+        config?: { query: string };
+      };
   timezone: string;
 }
 
@@ -232,9 +239,9 @@ function scrubRoutines(
   for (const candidate of source.routines) {
     if (routines.length >= MAX_TEMPLATE_ROUTINES_V1) break;
     if (!candidate.prompt) continue;
-    // A Plugin-triggered Routine travels as a webhook one: the Plugin it
-    // names is this account's, and an import lands disabled and unkeyed
-    // either way, so the person re-keys it and points it where they choose.
+    // A Plugin- or connection-triggered Routine travels as a webhook one:
+    // the Plugin or Connection it names is this account's, and an import
+    // lands disabled and unkeyed either way, so the person re-keys it.
     const webhook = candidate.trigger !== undefined;
     routines.push({
       slug: uniqueSlug(templateSlugV1(candidate.name, "routine"), slugs),
