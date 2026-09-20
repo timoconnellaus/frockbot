@@ -97,7 +97,6 @@ test("the projection is the document the shared fixture pins for the app", () =>
         },
       ],
       unacknowledged: 1,
-      editing: morning,
     }),
   );
   expect({ ...document, revision: 0 } as unknown).toEqual(
@@ -243,12 +242,18 @@ test("more Routines than the renderer's budget stop, and the document says so", 
   ).toBe(true);
 });
 
-test("the editor is one collapsed form until a Routine is named", () => {
-  const empty = walk(routinesDocumentV1(frame()).root).find(
-    (node) => node.type === "group" && node.title === "New Routine",
-  );
-  expect(empty?.type === "group" && empty.collapsed).toBe(true);
-  const fields = walk(empty!).filter((node) => node.type === "field");
+test("the list is not a form, and creating is its own document", () => {
+  const list = walk(routinesDocumentV1(frame()).root);
+  expect(
+    list.some((node) => node.type === "group" && node.title === "New Routine"),
+  ).toBe(false);
+  expect(list.some((node) => node.type === "field")).toBe(false);
+
+  const created = routinesDocumentV1(frame({ creating: true }));
+  expect(created.revision).not.toBe(routinesDocumentV1(frame()).revision);
+  const editor = created.root;
+  expect(editor.type === "group" && editor.collapsed).toBeUndefined();
+  const fields = walk(editor).filter((node) => node.type === "field");
   expect(
     fields.map((node) => (node.type === "field" ? node.field.id : "")),
   ).toEqual([
@@ -261,17 +266,25 @@ test("the editor is one collapsed form until a Routine is named", () => {
     ROUTINE_EDITOR_FIELDS_V1.keyVersion,
     ROUTINE_EDITOR_FIELDS_V1.timing,
   ]);
+  expect(
+    walk(created.root).some(
+      (node) => node.type === "group" && node.title === "Scheduled",
+    ),
+  ).toBe(false);
+  expect(
+    walk(created.root).some(
+      (node) => node.type === "group" && node.title === "Completions",
+    ),
+  ).toBe(false);
 });
 
 test("naming a Routine opens the editor on its own values and moves the revision", () => {
-  const closed = routinesDocumentV1(frame());
+  const list = routinesDocumentV1(frame());
   const open = routinesDocumentV1(frame({ editing: morning }));
-  expect(open.revision).not.toBe(closed.revision);
-  const editor = walk(open.root).find(
-    (node) => node.type === "group" && node.title === "Edit Morning brief",
-  );
-  expect(editor?.type === "group" && editor.collapsed).toBe(false);
-  const values = walk(editor!)
+  expect(open.revision).not.toBe(list.revision);
+  const editor = open.root;
+  expect(editor.type === "group" && editor.collapsed).toBeUndefined();
+  const values = walk(editor)
     .filter((node) => node.type === "field")
     .map((node) => (node.type === "field" ? node.field.value : null));
   expect(values).toEqual([
@@ -286,12 +299,19 @@ test("naming a Routine opens the editor on its own values and moves the revision
   ]);
   // The host uses this identity to show edit-only controls such as Cancel,
   // Run now, and Delete; a create form carries no identity.
-  const createdId = walk(closed.root).find(
+  const createdId = walk(
+    routinesDocumentV1(frame({ creating: true })).root,
+  ).find(
     (node) =>
       node.type === "field" &&
       node.field.id === ROUTINE_EDITOR_FIELDS_V1.editorId,
   );
   expect(createdId?.type === "field" && createdId.field.value).toBe(null);
+  expect(
+    walk(open.root).some(
+      (node) => node.type === "group" && node.title === "Scheduled",
+    ),
+  ).toBe(false);
 });
 
 test("the host editor is told whether a triggered Routine has a key", () => {

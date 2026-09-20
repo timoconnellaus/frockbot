@@ -57,23 +57,12 @@ async function openRoutines(page: Page): Promise<Locator> {
 }
 
 /**
- * The one editor, expanded. There is a single form on the surface — a new
- * Routine, or the one the reader asked to edit — and it ships collapsed so a
- * surface someone came to read is not mostly a form.
+ * The editor as its own page. The list's New Routine button opens it; a
+ * surface someone came to read is not a form.
  */
 async function openEditor(page: Page): Promise<void> {
-  await group(page, "New Routine").click();
+  await press(sem(page, "routine-create"));
   await expect(sem(page, "routine-editor")).toBeVisible();
-}
-
-/** Move through a scheduled Routine's two setup steps to its action fields. */
-async function configureSchedule(page: Page): Promise<void> {
-  await press(sem(page, "routine-source-schedule"));
-  await press(sem(page, "routine-editor-continue"));
-  await expect
-    .poll(() => spokenText(sem(page, "routines-document")))
-    .toContain("Configure Schedule");
-  await press(sem(page, "routine-editor-continue"));
   await expect(documentField(page, "routine.name")).toBeVisible();
 }
 
@@ -85,20 +74,18 @@ test("the trigger choice only shows its own setup, and schedules stay human", as
   await createBot(page, "Scheduler");
   const document = await openRoutines(page);
   await openEditor(page);
+  const editor = sem(page, "routine-editor");
 
   // Webhook setup contains no schedule editor and never leaks the cron value
   // that remains behind the friendly schedule controls.
   await press(sem(page, "routine-source-webhook"));
-  await press(sem(page, "routine-editor-continue"));
-  await expect.poll(() => spokenText(document)).toContain("Configure Webhook");
-  expect(await spokenText(document)).not.toContain("Configure Schedule");
-  expect(await spokenText(document)).not.toContain("0 9 * * *");
+  await expect.poll(() => spokenText(editor)).toContain("incoming webhooks");
+  expect(await spokenText(editor)).not.toContain("0 9 * * *");
 
-  // Going back to Schedule offers plain-language cadence and time controls.
-  await press(sem(page, "routine-editor-back"));
-  await configureSchedule(page);
-  expect(await spokenText(document)).toMatch(/Every day at 9:00\s?AM/iu);
-  expect(await spokenText(document)).not.toContain("0 9 * * *");
+  // Schedule offers plain-language cadence and time controls on the same form.
+  await press(sem(page, "routine-source-schedule"));
+  expect(await spokenText(editor)).toMatch(/Every day at 9:00\s?AM/iu);
+  expect(await spokenText(editor)).not.toContain("0 9 * * *");
 
   await answer(page, {
     "routine.name": "Morning brief",
@@ -126,7 +113,6 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
   await createBot(page, "Keeper");
   const document = await openRoutines(page);
   await openEditor(page);
-  await configureSchedule(page);
 
   await answer(page, {
     "routine.name": "Morning brief",
@@ -142,23 +128,21 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
   // at its centre: the switch at the end of it is tappable too.
   await card.click({ position: { x: 24, y: 20 } });
   await expect(sem(page, "routine-editor")).toBeVisible();
-  await press(sem(page, "routine-editor-continue"));
-  await press(sem(page, "routine-editor-continue"));
-  await expect(documentField(page, "routine.name")).toBeVisible();
   await press(action(page, "delete-routine"));
   const confirm = sem(page, "routine-delete-confirm");
   await expect(confirm).toBeVisible();
   await expect(confirm).toContainText("run log");
 
-  // Cancelling keeps it, and leaves the panel exactly as it was. That the
-  // Routine survived the asking is checked here rather than while the
+  // Cancelling keeps the Routine and stays on the editor — the list is one
+  // page back. That it survived is checked here rather than while the
   // confirmation is up: a modal takes the surface behind it out of the
   // accessibility tree, so there is nothing to count until it closes.
   await confirm.getByText("Cancel").click();
   await expect(confirm).toHaveCount(0);
-  await expect(card).toBeVisible();
+  await expect(sem(page, "routine-editor")).toBeVisible();
+  await expect(documentField(page, "routine.name")).toBeVisible();
 
-  // Confirming is what deletes it.
+  // Confirming is what deletes it, and the editor pops back to the list.
   await press(action(page, "delete-routine"));
   await confirm.getByText("Delete Routine").click();
   await expect(card).toHaveCount(0, { timeout: 60_000 });

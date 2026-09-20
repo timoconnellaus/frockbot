@@ -16,6 +16,7 @@ import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../shell/transcript_model.dart';
+import '../view/action.dart';
 import '../view/surface.dart';
 import 'document.dart';
 import 'editor.dart';
@@ -39,14 +40,31 @@ class RoutinesController extends ViewSurfaceController {
   /// the sidebar row say the same number this surface does.
   final void Function(int unacknowledged)? onInbox;
 
-  /// Which Routine the editor is seeded from. Navigation, not a command: it is
-  /// asked for on the read and written nowhere.
+  /// Which Routine the editor page is seeded from. Navigation, not a command:
+  /// it is asked for on the read and written nowhere. The list page leaves
+  /// this unset.
   String? editing;
+
+  /// Whether this controller is the new-Routine page. The list page leaves
+  /// this unset.
+  bool creating = false;
+
+  /// Asked when a row wants the editor. The list page pushes it; the editor
+  /// page never sees this kind.
+  final void Function(String routineId)? onOpenEditor;
+
+  /// Asked when the editor should close — save, cancel, or delete. The list
+  /// page never sees these kinds.
+  final VoidCallback? onCloseEditor;
 
   /// A webhook key the authority just minted. It came back on a receipt and
   /// exists once, so it is kept here for as long as the person is looking at
   /// it and never asked for again — a rotate is the only way to see one twice.
   Map<String, Object?>? mintedKey;
+
+  /// The editor has decided to leave — save, cancel, or delete — so the next
+  /// pop is not asked about.
+  bool closing = false;
 
   wire.ViewDocument? _document;
   List<RoutinePluginSourceV1> pluginSources = const [];
@@ -71,6 +89,8 @@ class RoutinesController extends ViewSurfaceController {
     this.openRuns,
     this.confirmDelete,
     this.onInbox,
+    this.onOpenEditor,
+    this.onCloseEditor,
   });
 
   @override
@@ -115,7 +135,11 @@ class RoutinesController extends ViewSurfaceController {
     try {
       final next = wire.ViewDocument.fromJson(
         await api.request(
-          '$_path?as=document${editing == null ? '' : '&edit=${Uri.encodeQueryComponent(editing!)}'}',
+          '$_path?as=document${creating
+              ? '&new=1'
+              : editing == null
+              ? ''
+              : '&edit=${Uri.encodeQueryComponent(editing!)}'}',
         ),
       );
       if (next.surfaceId.value != surfaceId) {
@@ -152,14 +176,15 @@ class RoutinesController extends ViewSurfaceController {
       openRuns?.call(routineIdV1(command) ?? '');
       return applied;
     }
-    // Which form is open is this host's to answer: the read that follows is
-    // what seeds it, so nothing is dispatched anywhere.
+    // Which page is open is this host's to answer: a row names a Routine and
+    // the list pushes the editor; cancel, a no-op save and a successful save
+    // or delete pop it. Nothing about that is dispatched anywhere.
     if (kind == 'edit-routine') {
-      editing = routineIdV1(command);
+      onOpenEditor?.call(routineIdV1(command) ?? '');
       return applied;
     }
     if (kind == 'cancel-edit') {
-      editing = null;
+      _closeEditor();
       return applied;
     }
     if (kind == 'delete-routine' && confirmDelete != null) {
@@ -176,7 +201,7 @@ class RoutinesController extends ViewSurfaceController {
           command,
           routineEditorSeedsV1(_document?.root.toJson()),
         )) {
-      editing = null;
+      _closeEditor();
       return applied;
     }
     final onScreen = unacknowledgedOnScreen;
@@ -199,10 +224,11 @@ class RoutinesController extends ViewSurfaceController {
         acknowledged >= onScreen.length ? 0 : onScreen.length - acknowledged,
       );
     }
-    // A save answers the form: the editor closes and the list it changed is
-    // what the reader is left looking at.
-    if (kind == 'save-routine' && receipt['status'] == 'applied') {
-      editing = null;
+    // A save or a delete answers the form: the editor closes and the list
+    // it changed is what the reader is left looking at.
+    if ((kind == 'save-routine' || kind == 'delete-routine') &&
+        receipt['status'] == 'applied') {
+      _closeEditor();
     }
     // The plaintext key is on this receipt and on nothing else, ever.
     if (kind == 'rotate-key') {
@@ -210,6 +236,17 @@ class RoutinesController extends ViewSurfaceController {
     }
     if (kind == 'revoke-key') mintedKey = null;
     return receipt;
+  }
+
+  void _closeEditor() {
+    if (closing) return;
+    closing = true;
+    _changed();
+    final close = onCloseEditor;
+    if (close == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_closed) close();
+    });
   }
 
   void forgetKey() {
@@ -300,6 +337,28 @@ class _RoutinesViewState extends State<RoutinesView> {
     );
   }
 
+  void _openEditor([String? routineId]) {
+    unawaited(
+      Navigator.of(context)
+          .push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => RoutineEditorPage(
+                api: widget.api,
+                store: widget.store,
+                userId: widget.userId,
+                botId: widget.botId,
+                routineId: routineId,
+                onOpenRun: widget.onOpenRun,
+                onInbox: widget.onInbox,
+              ),
+            ),
+          )
+          .then((_) {
+            if (mounted) unawaited(controller.load());
+          }),
+    );
+  }
+
   late RoutinesController controller;
 
   RoutinesController _createController() => RoutinesController(
@@ -308,12 +367,19 @@ class _RoutinesViewState extends State<RoutinesView> {
     openRuns: _openRuns,
     confirmDelete: _confirmDelete,
     onInbox: (count) => widget.onInbox?.call(count),
-  )..editing = widget.initialRoutineId;
+    onOpenEditor: _openEditor,
+  );
 
   @override
   void initState() {
     super.initState();
     controller = _createController();
+    final initial = widget.initialRoutineId;
+    if (initial != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openEditor(initial);
+      });
+    }
   }
 
   @override
@@ -348,11 +414,174 @@ class _RoutinesViewState extends State<RoutinesView> {
       onClose: widget.onClose,
       chrome: widget.chrome,
       controller: controller,
-      banner: (context) => WebhookKeyCard(controller: controller),
+      banner: (context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          identified(
+            RoutineIds.create,
+            FilledButton.icon(
+              onPressed: () => _openEditor(),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('New Routine'),
+            ),
+          ),
+          const SizedBox(height: 12),
+          WebhookKeyCard(controller: controller),
+        ],
+      ),
       fields: routineEditorFieldBuildersV1(
         () => controller.pluginSources,
         pluginsPending: () => controller.pluginCatalogPending,
       ),
+    ),
+  );
+}
+
+/// The editor as its own page: a new Routine, or the one a row named.
+///
+/// The list never carries this form. Save, cancel and delete pop back to it.
+class RoutineEditorPage extends StatefulWidget {
+  final NativeApi api;
+  final LocalStore store;
+  final String userId;
+  final String botId;
+
+  /// Absent is what creating means.
+  final String? routineId;
+  final void Function(TranscriptLine line)? onOpenRun;
+  final void Function(int unacknowledged)? onInbox;
+  const RoutineEditorPage({
+    super.key,
+    required this.api,
+    required this.store,
+    required this.userId,
+    required this.botId,
+    this.routineId,
+    this.onOpenRun,
+    this.onInbox,
+  });
+
+  @override
+  State<RoutineEditorPage> createState() => _RoutineEditorPageState();
+}
+
+class _RoutineEditorPageState extends State<RoutineEditorPage> {
+  Future<bool> _confirmDelete(String routineId) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialog) => identified(
+          RoutineIds.confirmDelete,
+          AlertDialog(
+            title: const Text('Delete this Routine?'),
+            content: const Text(
+              'Its schedule, its prompt and its whole run log go with it. This cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('Delete Routine'),
+              ),
+            ],
+          ),
+        ),
+      ) ??
+      false;
+
+  Future<bool> _confirmDiscard() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialog) => identified(
+          RoutineIds.confirmDiscard,
+          AlertDialog(
+            title: const Text('Discard changes?'),
+            content: const Text(
+              'You have unsaved changes. Leave without keeping them?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('Keep editing'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('Discard'),
+              ),
+            ],
+          ),
+        ),
+      ) ??
+      false;
+
+  Future<bool> _canLeave(ViewController view) async {
+    if (controller.closing) return true;
+    if (!routineEditorIsDirtyV1(
+      view.values,
+      routineEditorSeedsV1(controller.document?.root.toJson()),
+    )) {
+      return true;
+    }
+    return _confirmDiscard();
+  }
+
+  void _openRuns(String routineId) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RoutineRunsPage(
+          api: widget.api,
+          botId: widget.botId,
+          routineId: routineId,
+          onOpenRun: widget.onOpenRun,
+        ),
+      ),
+    );
+  }
+
+  late final RoutinesController controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = RoutinesController(
+      widget.api,
+      widget.botId,
+      openRuns: _openRuns,
+      confirmDelete: _confirmDelete,
+      onInbox: widget.onInbox,
+      onCloseEditor: () {
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+      },
+    )
+      ..creating = widget.routineId == null
+      ..editing = widget.routineId;
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ViewSurfacePage(
+    title: widget.routineId == null ? 'New Routine' : 'Edit Routine',
+    store: widget.store,
+    userId: widget.userId,
+    documentId: RoutineIds.document,
+    refreshId: RoutineIds.refresh,
+    controller: controller,
+    backId: RoutineIds.editorBack,
+    allowPop: () => controller.closing,
+    confirmLeave: _canLeave,
+    banner: (context) => WebhookKeyCard(controller: controller),
+    fields: routineEditorFieldBuildersV1(
+      () => controller.pluginSources,
+      pluginsPending: () => controller.pluginCatalogPending,
     ),
   );
 }
@@ -495,23 +724,25 @@ class RoutineInboxController extends ChangeNotifier {
   }
 }
 
-/// One firing, as the Bot page says it: which Routine, when, and whether it
-/// wants anything.
+/// How a recent firing should be marked on the Bot page.
+enum RoutineRunMarkV1 { running, finished, failed }
+
+/// One firing, as the Bot page says it: which Routine, when, and how it ended.
 class RoutineRunSummary {
   final String entryId;
   final String routineId;
   final String name;
   final DateTime at;
 
-  /// The firing did not work, so the row is the thing to press. Everything
-  /// else is a receipt.
-  final bool needsYou;
+  /// The inbox is completions, so a row is finished or failed. `running` is
+  /// here for a status the list is handed — the inbox does not write one.
+  final RoutineRunMarkV1 mark;
   const RoutineRunSummary({
     required this.entryId,
     required this.routineId,
     required this.name,
     required this.at,
-    required this.needsYou,
+    required this.mark,
   });
 }
 
@@ -534,7 +765,11 @@ List<RoutineRunSummary> routineRunSummariesV1(List<Object?> entries) => [
         at:
             DateTime.tryParse(raw['createdAt']! as String)?.toLocal() ??
             DateTime.now(),
-        needsYou: raw['failure'] == true,
+        mark: raw['status'] == 'running'
+            ? RoutineRunMarkV1.running
+            : raw['failure'] == true
+            ? RoutineRunMarkV1.failed
+            : RoutineRunMarkV1.finished,
       ),
 ];
 

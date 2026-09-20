@@ -305,7 +305,6 @@ class RoutineEditorV1 extends StatefulWidget {
 }
 
 class _RoutineEditorV1State extends State<RoutineEditorV1> {
-  var step = 0;
   late final _RoutineSourceKind storedSourceKind;
   late _RoutineSourceKind sourceKind;
   String? pluginId;
@@ -370,161 +369,134 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
 
   @override
   Widget build(BuildContext context) {
-    final titles = ['Trigger', 'Configure', 'Action'];
+    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            for (var index = 0; index < titles.length; index++) ...[
-              Expanded(
-                child: _StepLabel(
-                  number: index + 1,
-                  label: titles[index],
-                  active: index == step,
-                  done: index < step,
-                ),
-              ),
-              if (index < titles.length - 1) const SizedBox(width: 4),
-            ],
-          ],
-        ),
+        Text('What should this Bot do?', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 14),
+        _actionFields(context),
         const SizedBox(height: 22),
-        AnimatedSwitcher(
-          duration: FrockTheme.motion(context),
-          child: KeyedSubtree(
-            key: ValueKey(step),
-            child: switch (step) {
-              0 => _sourceStep(context),
-              1 => _configureStep(context),
-              _ => _actionStep(context),
-            },
-          ),
+        Text('When does it fire?', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 4),
+        Text(
+          'A time, a webhook, or a Plugin with triggers.',
+          style: theme.textTheme.bodySmall,
         ),
+        const SizedBox(height: 16),
+        _sourceChoices(context),
+        const SizedBox(height: 16),
+        _configureStep(context),
         const SizedBox(height: 18),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            if (step > 0)
-              identified(
-                RoutineIds.editorBack,
-                OutlinedButton(
-                  onPressed: widget.enabled
-                      ? () => setState(() => step--)
-                      : null,
-                  child: const Text('Back'),
-                ),
-              ),
-            if (step > 0) const SizedBox(width: 8),
-            if (step < 2)
-              identified(
-                RoutineIds.editorContinue,
-                FilledButton(
-                  onPressed: widget.enabled && _canContinue
-                      ? () => setState(() => step++)
-                      : null,
-                  child: const Text('Continue'),
-                ),
-              )
-            else
-              _routineAction(
-                'save-routine',
-                widget.routineId == null ? 'Create Routine' : 'Save changes',
-                style: 'primary',
-              ),
+            _routineAction('cancel-edit', 'Cancel'),
+            widget.enabled && _canSave
+                ? _routineAction(
+                    'save-routine',
+                    widget.routineId == null
+                        ? 'Create Routine'
+                        : 'Save changes',
+                    style: 'primary',
+                  )
+                : FilledButton(
+                    onPressed: null,
+                    child: Text(
+                      widget.routineId == null
+                          ? 'Create Routine'
+                          : 'Save changes',
+                    ),
+                  ),
           ],
         ),
+        if (widget.routineId != null) ...[
+          const SizedBox(height: 16),
+          _editActions(),
+        ],
       ],
     );
   }
 
-  bool get _canContinue =>
-      step != 1 || sourceKind != _RoutineSourceKind.plugin || trigger != null;
+  /// A Plugin source is not ready to save until a trigger is named. A stored
+  /// trigger the catalog has not shown yet still counts — that is the one the
+  /// Routine already has.
+  bool get _canSave =>
+      sourceKind != _RoutineSourceKind.plugin ||
+      trigger != null ||
+      (widget.source.startsWith('plugin:') &&
+          widget.source.split(':').length == 3);
 
-  Widget _sourceStep(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Text(
-        'What starts this Routine?',
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-      const SizedBox(height: 4),
-      Text(
-        'Choose a time, a webhook, or an installed Plugin with triggers.',
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
-      const SizedBox(height: 16),
-      LayoutBuilder(
-        builder: (context, constraints) => Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _sourceChoice(
-              context,
-              identifier: RoutineIds.sourceSchedule,
-              width: constraints.maxWidth,
-              icon: Icons.schedule_rounded,
-              title: 'Schedule',
-              detail: 'At a time you choose',
-              selected: sourceKind == _RoutineSourceKind.schedule,
-              onTap: () => chooseSource(_RoutineSourceKind.schedule),
-            ),
-            _sourceChoice(
-              context,
-              identifier: RoutineIds.sourceWebhook,
-              width: constraints.maxWidth,
-              icon: Icons.webhook_rounded,
-              title: 'Webhook',
-              detail: 'When another service calls it',
-              selected: sourceKind == _RoutineSourceKind.webhook,
-              onTap: () => chooseSource(_RoutineSourceKind.webhook),
-            ),
-            for (final plugin in widget.plugins)
-              _sourceChoice(
-                context,
-                identifier: RoutineIds.sourcePlugin(plugin.pluginId),
-                width: constraints.maxWidth,
-                icon: Icons.extension_rounded,
-                title: plugin.displayName,
-                detail:
-                    '${plugin.triggers.length} ${plugin.triggers.length == 1 ? 'trigger' : 'triggers'}',
-                selected:
-                    sourceKind == _RoutineSourceKind.plugin &&
-                    pluginId == plugin.pluginId,
-                onTap: () =>
-                    chooseSource(_RoutineSourceKind.plugin, plugin.pluginId),
-              ),
-            if (sourceKind == _RoutineSourceKind.plugin &&
-                selectedPlugin == null)
-              _sourceChoice(
-                context,
-                identifier: RoutineIds.sourcePlugin(pluginId ?? 'unavailable'),
-                width: constraints.maxWidth,
-                icon: widget.pluginsPending
-                    ? Icons.extension_rounded
-                    : Icons.extension_off_rounded,
-                title: 'Current Plugin',
-                detail: widget.pluginsPending
-                    ? 'Checking availability…'
-                    : 'Unavailable for this Bot',
-                selected: true,
-                onTap: () {},
-              ),
-            if (widget.pluginsPending && widget.plugins.isEmpty)
-              _sourceChoice(
-                context,
-                identifier: RoutineIds.sourcePluginsPending,
-                width: constraints.maxWidth,
-                icon: Icons.extension_rounded,
-                title: 'Plugins',
-                detail: 'Checking this Bot’s Plugins…',
-                selected: false,
-                onTap: () {},
-              ),
-          ],
+  Widget _sourceChoices(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _sourceChoice(
+          context,
+          identifier: RoutineIds.sourceSchedule,
+          width: constraints.maxWidth,
+          icon: Icons.schedule_rounded,
+          title: 'Schedule',
+          detail: 'At a time you choose',
+          selected: sourceKind == _RoutineSourceKind.schedule,
+          onTap: () => chooseSource(_RoutineSourceKind.schedule),
         ),
-      ),
-    ],
+        _sourceChoice(
+          context,
+          identifier: RoutineIds.sourceWebhook,
+          width: constraints.maxWidth,
+          icon: Icons.webhook_rounded,
+          title: 'Webhook',
+          detail: 'When another service calls it',
+          selected: sourceKind == _RoutineSourceKind.webhook,
+          onTap: () => chooseSource(_RoutineSourceKind.webhook),
+        ),
+        for (final plugin in widget.plugins)
+          _sourceChoice(
+            context,
+            identifier: RoutineIds.sourcePlugin(plugin.pluginId),
+            width: constraints.maxWidth,
+            icon: Icons.extension_rounded,
+            title: plugin.displayName,
+            detail:
+                '${plugin.triggers.length} ${plugin.triggers.length == 1 ? 'trigger' : 'triggers'}',
+            selected:
+                sourceKind == _RoutineSourceKind.plugin &&
+                pluginId == plugin.pluginId,
+            onTap: () =>
+                chooseSource(_RoutineSourceKind.plugin, plugin.pluginId),
+          ),
+        if (sourceKind == _RoutineSourceKind.plugin && selectedPlugin == null)
+          _sourceChoice(
+            context,
+            identifier: RoutineIds.sourcePlugin(pluginId ?? 'unavailable'),
+            width: constraints.maxWidth,
+            icon: widget.pluginsPending
+                ? Icons.extension_rounded
+                : Icons.extension_off_rounded,
+            title: 'Current Plugin',
+            detail: widget.pluginsPending
+                ? 'Checking availability…'
+                : 'Unavailable for this Bot',
+            selected: true,
+            onTap: () {},
+          ),
+        if (widget.pluginsPending && widget.plugins.isEmpty)
+          _sourceChoice(
+            context,
+            identifier: RoutineIds.sourcePluginsPending,
+            width: constraints.maxWidth,
+            icon: Icons.extension_rounded,
+            title: 'Plugins',
+            detail: 'Checking this Bot’s Plugins…',
+            selected: false,
+            onTap: () {},
+          ),
+      ],
+    ),
   );
 
   Widget _sourceChoice(
@@ -594,17 +566,10 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
     _RoutineSourceKind.plugin => _pluginEditor(context),
   };
 
-  Widget _webhookEditor(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Text('Configure Webhook', style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 14),
-      _InfoBox(
-        icon: Icons.webhook_rounded,
-        title: 'Ready for incoming webhooks',
-        detail: 'After you create this Routine, FrockBot will show its URL and secret once. Copy them into the service that will call it.',
-      ),
-    ],
+  Widget _webhookEditor(BuildContext context) => const _InfoBox(
+    icon: Icons.webhook_rounded,
+    title: 'Ready for incoming webhooks',
+    detail: 'After you create this Routine, FrockBot will show its URL and secret once. Copy them into the service that will call it.',
   );
 
   Widget _pluginEditor(BuildContext context) {
@@ -612,11 +577,6 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          plugin == null ? 'Current Plugin' : 'Configure ${plugin.displayName}',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 14),
         if (plugin == null)
           widget.pluginsPending
               ? const _InfoBox(
@@ -672,11 +632,6 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Configure Schedule',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 14),
         Wrap(
           spacing: 6,
           runSpacing: 6,
@@ -805,28 +760,22 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
             label: Text(localizations.formatTimeOfDay(schedule.time)),
           ),
         ],
-        const SizedBox(height: 14),
-        _InfoBox(
-          icon: Icons.check_circle_outline_rounded,
-          title: schedule.summary(localizations),
-          detail: widget.timezone == null
-              ? 'Uses your Profile timezone'
-              : widget.timezone!,
+        const SizedBox(height: 12),
+        Text(
+          widget.timezone == null
+              ? '${schedule.summary(localizations)} · Profile timezone'
+              : '${schedule.summary(localizations)} · ${widget.timezone}',
+          style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
     );
   }
 
-  Widget _actionStep(BuildContext context) {
+  Widget _actionFields(BuildContext context) {
     final scope = ViewScope.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'What should this Bot do?',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 14),
         identified(
           RoutineIds.editorField('name'),
           TextFormField(
@@ -853,49 +802,27 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
             onChanged: (next) => scope.controller.change(_prompt, next),
           ),
         ),
-        const SizedBox(height: 14),
-        _InfoBox(
-          icon: Icons.bolt_rounded,
-          title: _triggerSummary(context),
-          detail: widget.name.isEmpty ? 'Untitled Routine' : widget.name,
-        ),
-        if (widget.routineId != null) ...[
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _routineAction('run-routine', 'Run now'),
-              _routineAction('open-runs', 'Run log'),
-              if (storedSourceKind != _RoutineSourceKind.schedule)
-                _routineAction(
-                  'rotate-key',
-                  widget.hookKeyVersion == null ? 'Mint key' : 'Rotate key',
-                ),
-              if (storedSourceKind != _RoutineSourceKind.schedule &&
-                  widget.hookKeyVersion != null)
-                _routineAction('revoke-key', 'Revoke key', style: 'danger'),
-              _routineAction('cancel-edit', 'Cancel'),
-              _routineAction('delete-routine', 'Delete', style: 'danger'),
-            ],
-          ),
-        ],
       ],
     );
   }
 
-  String _triggerSummary(BuildContext context) {
-    if (sourceKind == _RoutineSourceKind.schedule) {
-      return schedule.summary(MaterialLocalizations.of(context));
-    }
-    if (sourceKind == _RoutineSourceKind.webhook) {
-      return 'When its webhook is called';
-    }
-    final plugin = selectedPlugin;
-    return plugin == null
-        ? 'Current Plugin trigger'
-        : '${plugin.displayName} · ${trigger ?? 'Choose a trigger'}';
-  }
+  Widget _editActions() => Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    children: [
+      _routineAction('run-routine', 'Run now'),
+      _routineAction('open-runs', 'Run log'),
+      if (storedSourceKind != _RoutineSourceKind.schedule)
+        _routineAction(
+          'rotate-key',
+          widget.hookKeyVersion == null ? 'Mint key' : 'Rotate key',
+        ),
+      if (storedSourceKind != _RoutineSourceKind.schedule &&
+          widget.hookKeyVersion != null)
+        _routineAction('revoke-key', 'Revoke key', style: 'danger'),
+      _routineAction('delete-routine', 'Delete', style: 'danger'),
+    ],
+  );
 
   Widget _routineAction(String actionId, String label, {String? style}) =>
       ViewActionNode(
@@ -910,57 +837,6 @@ class _RoutineEditorV1State extends State<RoutineEditorV1> {
           },
         },
       );
-}
-
-class _StepLabel extends StatelessWidget {
-  final int number;
-  final String label;
-  final bool active;
-  final bool done;
-  const _StepLabel({
-    required this.number,
-    required this.label,
-    required this.active,
-    required this.done,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final selected = active || done;
-    return Row(
-      children: [
-        Container(
-          width: 24,
-          height: 24,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: selected ? scheme.primary : Colors.transparent,
-            border: Border.all(
-              color: selected ? scheme.primary : scheme.outlineVariant,
-            ),
-          ),
-          child: Text(
-            '$number',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Flexible(
-          child: Text(
-            label,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: active ? scheme.onSurface : scheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 class _InfoBox extends StatelessWidget {

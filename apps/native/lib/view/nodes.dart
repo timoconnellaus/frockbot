@@ -185,8 +185,7 @@ class ViewGridGroups extends StatelessWidget {
 ///   the controls a row draws — and a card of its own where it is not, so a
 ///   Plugin that draws a settings form still gets the room for it.
 /// * anything else → a card of its own, drawn by the shared renderer. That is
-///   the editor at the top of Routines: a form is not a row and is not
-///   pretending to be.
+///   a form: a form is not a row and is not pretending to be.
 class ViewSwitchRows extends StatelessWidget {
   final Map<String, Object?> node;
   const ViewSwitchRows({super.key, required this.node});

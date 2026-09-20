@@ -22,7 +22,7 @@ const routineActionKindsV1 = <String>{
 };
 
 /// The editor's field ids, as `ROUTINE_EDITOR_FIELDS_V1` writes them. There is
-/// one form on the surface, so the ids carry no Routine.
+/// one form, so the ids carry no Routine.
 const routineEditorFieldsV1 = (
   name: 'routine.name',
   prompt: 'routine.prompt',
@@ -97,6 +97,31 @@ Map<String, Object?> routineEditorSeedsV1(Object? root) {
   walk(root);
   return seeds;
 }
+
+/// Whether the person has changed the form they were shown.
+///
+/// A field they have not touched is not a change, even when the controller
+/// already holds the seed. Empty and missing are the same answer, so clearing
+/// a create field they had typed is back to a form nobody has written.
+bool routineEditorIsDirtyV1(
+  Map<String, Object?> values,
+  Map<String, Object?> seeds,
+) {
+  for (final id in [
+    routineEditorFieldsV1.name,
+    routineEditorFieldsV1.prompt,
+    routineEditorFieldsV1.timing,
+    routineEditorFieldsV1.schedule,
+  ]) {
+    if (!values.containsKey(id)) continue;
+    if (_routineFieldTextV1(values[id]) != _routineFieldTextV1(seeds[id])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+String _routineFieldTextV1(Object? value) => value == null ? '' : '$value';
 
 /// Whether a save would ask the route to change nothing.
 ///

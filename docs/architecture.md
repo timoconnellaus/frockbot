@@ -488,9 +488,10 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   is the host editor for the one field whose choices are a paged catalog.
 - `BotPageView` — `lib/shell/bot_page.dart`: what a Bot is _doing_. The right
   panel's root at the wide tiers and a pushed page on the phone, in one scroll:
-  the Computer card when the Bot has one, the last Routine firings with the way
-  to the whole list under them, the Applets it is running, and the doors its
-  Packages declare. The Bot's name in the conversation bar is the one way in at
+  the Computer card when the Bot has one, the last Routine firings as loose
+  one-line rows — name, then the time and a running / finished / failed mark
+  at the end — with the All Routines door under them, the Applets it is
+  running, and the doors its Packages declare. The Bot's name in the conversation bar is the one way in at
   every tier, and the gear in the page's own header is the one way to Settings
 - `BotSettingsView` — `lib/settings/bot_settings.dart`: what a Bot _is_ — its
   character, its About fields, its behaviour switches, its Plugins and model,
@@ -514,12 +515,12 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   sub-page of the panel on a desktop, a pushed page on the phone. The projection
   files each Routine under Scheduled or Webhooks and the host draws those as
   labelled cards of rows, each row a way into the one editor with a pause switch
-  at its end. That editor is the host's own guided form
-  (`lib/routines/editor.dart`): what starts the Routine — a schedule, a webhook,
-  or a trigger an enabled Plugin declares, offered by the Plugin's and the
-  trigger's own names — then the controls only the chosen source has, then the
-  instruction. A webhook is never shown a schedule form, and a cron expression,
-  a Plugin id or a trigger slug is never typed. `RoutineRunsPage`
+  at its end. That editor is the host's own form
+  (`lib/routines/editor.dart`): the name and instruction, then what starts it —
+  a schedule, a webhook, or a trigger an enabled Plugin declares, offered by
+  the Plugin's and the trigger's own names — with only the chosen source's
+  controls underneath. A webhook is never shown a schedule form, and a cron
+  expression, a Plugin id or a trigger slug is never typed. `RoutineRunsPage`
   (`lib/routines/runs.dart`) is one Routine's firings, and one firing opens on
   the Work view. `RoutineInboxController` reads the completion inbox once for
   both the badge and the recent runs the Bot page lists.
@@ -656,7 +657,10 @@ read and the dispatch, `ViewSurfacePage` is the chrome, the empty state, the
 pull to refresh and the one `ViewController` per revision. A page is a
 controller and a title, and the surface borrows that controller: the page
 creates it, replaces it when the read it is over changes and disposes it, and
-the surface only listens while it is mounted.
+the surface only listens while it is mounted. An editor that asks before a
+dirty leave installs `confirmLeave` on that chrome: the AppBar back and the
+system back both go through it, and a save or cancel that already decided to
+leave does not.
 
 **Secrets, through the renderer.** `SettingField` has a `secret` kind. The
 document seeds it null, so a required key refuses by name before anything is
@@ -679,8 +683,8 @@ family, both reached with `?as=document`:
   (`ROUTINE_ACTION_KINDS_V1`): the Routine commands the route already takes —
   pause or resume, run, delete, rotate or revoke a key, and the save behind the
   editor — the acknowledgement, which is the inbox route's, and the navigation
-  no route owns, which is the run log and naming, or clearing, the Routine the
-  one form is for.
+  no route owns, which is the run log and the editor page — a new Routine, or
+  the one a row named.
 - `app/audit/audit-document.ts` over an `AuditFrame` (`GET /api/audit`). Four
   kinds: the filter and the page, which the host owns because the host owns
   the read; the rebuild command; and opening an audited effect's Turn on the
@@ -828,27 +832,30 @@ Three more projections in the settings-document family:
   document — the host is showing one and names it when it turns the press into
   a command, the same way the Routines host does. Import stays two-phase: a
   plan is a pure read whose `commandId` becomes the `importId` the apply names.
-- The Routines document grows an editor. One form, seeded by the read — a new
-  Routine, or the one `?edit=` names — because a form per Routine would be a
-  second copy of every prompt in the document and would spend one of the
-  thirty-two declared actions on each of them. Which form is open is
+- The Routines list and the Routine editor are two documents. The list is
+  what is armed and what it left behind; the editor is one form, seeded by
+  the read — a new Routine (`?new=1`), or the one `?edit=` names — because a
+  form per Routine would be a second copy of every prompt in the list and the
+  list a person came to read is not a form. Which document is open is
   navigation, so it is asked for on the read and written nowhere, and naming a
   different Routine moves the revision so the host adopts a controller whose
-  field values are answers to the form now on screen. The drawing is the host's
-  either way: the fields that carry the seed values are declared
-  `routine-editor-hidden` and drawn as nothing, and the one the trigger choice
-  lands in is handed to the host by `choiceSource: routine-editor`. A Plugin
-  trigger travels in that one value as `plugin:<pluginId>:<trigger>`, and a
-  schedule also travels with the sentence the projection made of it
-  (`describeRoutineScheduleV1`, `app/routines/cron.ts`), so a row and the form
-  say the same thing about when it fires. The editor's Plugin choices are read
-  from the Bot's Plugins frame (`GET /api/bots/:botId/plugins`) beside this
-  document and may land after it, because a Plugin route that is slow or broken
-  must not hold back the Routines it is not needed for; until it lands the
-  editor says the list is still being read rather than calling a stored Plugin
-  unavailable. A triggered Routine also
-  gets its two key controls, and only a triggered one: the route refuses a key
-  for a scheduled Routine, so the control is absent rather than offered.
+  field values are answers to the form now on screen. The host opens that
+  page from a button and from a row; it does not unfold an accordion on the
+  list. The drawing is the host's either way: the fields that carry the seed
+  values are declared `routine-editor-hidden` and drawn as nothing, and the
+  one the trigger choice lands in is handed to the host by
+  `choiceSource: routine-editor`. A Plugin trigger travels in that one value
+  as `plugin:<pluginId>:<trigger>`, and a schedule also travels with the
+  sentence the projection made of it (`describeRoutineScheduleV1`,
+  `app/routines/cron.ts`), so a row and the form say the same thing about
+  when it fires. The editor's Plugin choices are read from the Bot's Plugins
+  frame (`GET /api/bots/:botId/plugins`) beside this document and may land
+  after it, because a Plugin route that is slow or broken must not hold back
+  the Routines it is not needed for; until it lands the editor says the list
+  is still being read rather than calling a stored Plugin unavailable. A
+  triggered Routine also gets its two key controls, and only a triggered
+  one: the route refuses a key for a scheduled Routine, so the control is
+  absent rather than offered.
 
 **A secret the authority minted once is never in a document.** A webhook key
 and a pairing code are each signed once, stored only as a digest and answered

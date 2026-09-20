@@ -84,10 +84,9 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
   await press(sem(page, "bot-page-routines-all"));
   const document = sem(page, "routines-document");
   await expect(document).toBeVisible({ timeout: 60_000 });
-  await group(page, "New Routine").click();
+  await press(sem(page, "routine-create"));
+  await expect(sem(page, "routine-editor")).toBeVisible();
   await press(sem(page, "routine-source-schedule"));
-  await press(sem(page, "routine-editor-continue"));
-  await press(sem(page, "routine-editor-continue"));
   await expect(documentField(page, "routine.name")).toBeVisible();
   await answerFields(page, {
     "routine.name": "Morning brief",
@@ -106,10 +105,11 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
     // armed and the switch that pauses it.
     await card.click({ position: { x: 24, y: 20 } });
     await expect(sem(page, "routine-editor")).toBeVisible();
-    await press(sem(page, "routine-editor-continue"));
-    await press(sem(page, "routine-editor-continue"));
-    await expect(documentField(page, "routine.name")).toBeVisible();
     await press(action(page, "run-routine"));
+    // Run now lives on the editor page. Leave it — the form is unchanged —
+    // so the shell's sidebar is reachable again.
+    await press(sem(page, "routine-editor-back"));
+    await expect(sem(page, "routine-editor")).toHaveCount(0);
 
     // Away from Sol before the firing settles, so the message lands somewhere
     // nobody is looking. Straight to another Bot from the sidebar, which is beside the

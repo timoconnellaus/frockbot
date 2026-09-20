@@ -279,21 +279,23 @@ export function createRoutinesBackendContribution(
       const runs = ROUTINE_RUNS.exec(url.pathname);
       const run = ROUTINE_RUN.exec(url.pathname);
       if (!list && !inbox && !runs && !run) return undefined;
-      // Two parameters, on one route: `as=document` asks the list read for the
-      // Routines and the inbox together, in the vocabulary the host renders
-      // every plugin view in, and `edit` names the Routine whose values seed
-      // that document's one editor. Which form is open is navigation, so it is
-      // asked for on the read rather than written anywhere. Everything else is
-      // still refused rather than quietly ignored.
+      // Three parameters, on one route: `as=document` asks for the vocabulary
+      // the host renders every plugin view in; `edit` names the Routine whose
+      // values seed the editor document; `new` asks for the empty form. The
+      // list and the editor are two documents because a surface someone came
+      // to read is not a form. Which one is open is navigation, so it is
+      // asked for on the read rather than written anywhere. Everything else
+      // is still refused rather than quietly ignored.
       const asDocument =
         list !== null &&
         request.method === "GET" &&
         url.searchParams.get("as") === "document";
-      const allowed = asDocument ? ["as", "edit"] : [];
+      const allowed = asDocument ? ["as", "edit", "new"] : [];
       if ([...url.searchParams.keys()].some((key) => !allowed.includes(key))) {
         return jsonError(400, "Routine routes take no query parameters");
       }
       const editing = asDocument ? url.searchParams.get("edit") : null;
+      const creating = asDocument && url.searchParams.has("new") && !editing;
       try {
         const botId = pathSegment((list ?? inbox ?? runs ?? run)![1]!);
         if (run) {
@@ -374,7 +376,11 @@ export function createRoutinesBackendContribution(
               routines: view.routines,
               inbox: inboxView.entries,
               unacknowledged: inboxView.unacknowledged,
-              ...(edited ? { editing: edited } : {}),
+              ...(edited
+                ? { editing: edited }
+                : creating
+                  ? { creating: true }
+                  : {}),
             }),
           );
         }
