@@ -939,7 +939,7 @@ export async function openBotPage(page: Page): Promise<void> {
 /**
  * The selected Bot is the one on screen: its conversation is up, and its
  * name is spoken by chrome that is actually showing — the phone pill, the
- * Bot list, or the panel heading.
+ * Bot list's current row, or the panel heading.
  *
  * Those three are not one Playwright locator. A closed desk drawer still
  * has the heading in the tree, and `.or()` treats that hidden node as the
@@ -948,12 +948,16 @@ export async function openBotPage(page: Page): Promise<void> {
 export async function expectBotOpen(page: Page, name: string): Promise<void> {
   await expect(composerInput(page)).toBeVisible({ timeout: 30_000 });
   await expect(async () => {
-    for (const id of [
-      "bot-panel-toggle",
-      "shell-sidebar",
-      "shell-right-panel",
-    ] as const) {
-      const scope = sem(page, id).first();
+    const current = sem(page, "shell-sidebar")
+      .locator(
+        '[flt-semantics-identifier^="sidebar-bot-"][aria-current="true"]',
+      )
+      .first();
+    for (const scope of [
+      sem(page, "bot-panel-toggle").first(),
+      current,
+      sem(page, "shell-right-panel").first(),
+    ]) {
       if (!(await scope.isVisible().catch(() => false))) continue;
       if ((await spokenText(scope)).includes(name)) return;
     }
