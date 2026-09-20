@@ -57,11 +57,17 @@ const NO_HOST = /The Computer host answered|Couldn’t read the computer/u;
  * duplicate.
  */
 async function openComputerViewer(page: Page): Promise<void> {
-  const header = sem(page, "computer-destination");
-  if ((await header.count()) > 0) {
-    await press(header);
+  const bar = sem(page, "computer-destination");
+  const pageDoor = sem(page, "bot-page-computer");
+  // A width change rebuilds the chrome. The bar icon and the Bot-page card
+  // are never both the way in at once, and neither is in the tree for a
+  // beat after the layout — racing `count()` picked the card that had just
+  // left.
+  await expect(bar.or(pageDoor).first()).toBeVisible({ timeout: 60_000 });
+  if (await bar.isVisible().catch(() => false)) {
+    await press(bar);
   } else {
-    await press(sem(page, "bot-page-computer"));
+    await press(pageDoor);
   }
   await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
 }
@@ -133,6 +139,9 @@ test("the Computer opens to the same window on the mobile shell", async ({
   await openApplication(page, userId);
   await createBot(page, "Pocket");
   await page.setViewportSize(PHONE);
+  // The desk column leaves before the phone bar's Computer icon arrives.
+  await expect(sem(page, "bot-page")).toHaveCount(0);
+  await settle(page);
 
   // At this width the conversation has the screen and the bar's Computer icon
   // is the way in. It opens the desktop itself: there is no page between the
