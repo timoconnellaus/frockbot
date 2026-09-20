@@ -629,10 +629,23 @@ void main() {
     await tester.pump();
     expect(holdRead, isNotNull);
     expect(holdRead!.isCompleted, isFalse);
+    // The form is still on screen while the list read is out. A second
+    // Create must not go out, and back must not ask to discard a save
+    // that already applied.
+    await tester.pump();
+    expect(find.text('Create Routine'), findsOneWidget);
+    await tester.ensureVisible(find.text('Create Routine'));
+    await tester.tap(find.text('Create Routine'));
+    await tester.pump();
+    expect(routines, hasLength(1));
+    await tester.tap(byIdentifier(RoutineIds.editorBack));
+    await tester.pump();
+    expect(find.text('Discard changes?'), findsNothing);
     holdRead!.complete();
     await tester.pumpAndSettle();
     expect(find.text('Create Routine'), findsNothing);
     expect(find.text('Morning brief'), findsOneWidget);
+    expect(routines, hasLength(1));
     expect(paths.where((path) => path.contains('new=1')), hasLength(1));
     expect(paths.last.contains('new=1'), isFalse);
   });

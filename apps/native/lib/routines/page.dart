@@ -221,6 +221,11 @@ class RoutinesController extends ViewSurfaceController {
       _closeEditor();
       return applied;
     }
+    // The form stays mounted until the list read returns. A second Create
+    // would mint another Routine; the leave has already applied.
+    if (kind == 'save-routine' && closing) {
+      return applied;
+    }
     if (kind == 'delete-routine' && confirmDelete != null) {
       if (!await confirmDelete!(routineIdV1(command) ?? '')) {
         return {'commandId': command['commandId'], 'status': 'refused'};
@@ -382,12 +387,15 @@ class _RoutinesViewState extends State<RoutinesView> {
   }
 
   Future<void> _leaveEditor() async {
+    // Stay closing until the list is on screen so the still-mounted form
+    // cannot save again or ask to discard a save that already applied.
     controller
       ..creating = false
       ..editing = null
-      ..closing = false
+      ..closing = true
       ..mintedKey = null;
     await controller.load();
+    controller.closing = false;
     _syncPanel();
     if (mounted) setState(() {});
   }
@@ -520,7 +528,6 @@ class _RoutinesViewState extends State<RoutinesView> {
         chrome: widget.chrome,
         controller: controller,
         backId: RoutineIds.editorBack,
-        allowPop: () => controller.closing,
         confirmLeave: editing && (widget.chrome || widget.panel == null)
             ? _canLeave
             : null,
