@@ -160,7 +160,10 @@ void main() {
       );
       await tester.pumpWidget(layout(collapsed: true));
       await tester.pumpAndSettle();
-      expect(byIdentifier(ShellIds.rightPanel), findsNothing);
+      // The column takes no width and cannot be hit, but the page stays
+      // mounted so a return is the same list, not a remount.
+      expect(find.text('work').hitTestable(), findsNothing);
+      expect(find.text('work', skipOffstage: false), findsOneWidget);
       expect(
         tester.getSize(byIdentifier(ShellIds.conversation)).width,
         1440 - shellSidebarWidth,

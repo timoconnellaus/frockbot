@@ -6,6 +6,7 @@ import '../client/document_cache.dart';
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/desktop_layout.dart';
+import '../shell/hot_panel.dart';
 import '../shell/semantics.dart';
 import '../theme/states.dart';
 import 'action.dart';
@@ -148,6 +149,10 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
   /// Whether a read was in flight when this page was last told something.
   bool reading = false;
 
+  /// Last [PanelVisibility] we saw. A hidden page that becomes visible
+  /// again refreshes; the first mount already has [_open].
+  bool visible = true;
+
   @override
   void initState() {
     super.initState();
@@ -245,6 +250,14 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     }
     if (!mounted) return;
     await widget.controller.load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = PanelVisibility.of(context);
+    if (next && !visible) unawaited(widget.controller.load());
+    visible = next;
   }
 
   @override

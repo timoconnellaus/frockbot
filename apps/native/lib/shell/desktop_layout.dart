@@ -174,9 +174,10 @@ ShellTier shellTierForWidth(double width) => width <= shellSinglePaneWidth
 /// [panelOpen] is the right-panel drawer's state and belongs to the caller,
 /// which is what lets a feature open the right panel from a message. At a tier
 /// where the panel is a column, the flag is ignored: the column is drawn
-/// whenever a feature has filled it, unless the person has [panelCollapsed]
-/// it — the column's own state, so that closing the drawer at one width does
-/// not take the column away at another.
+/// whenever a feature has filled it. [panelCollapsed] takes the column's
+/// width away and leaves its pages mounted, so that closing the drawer at
+/// one width does not take the column away at another, and a return to All
+/// Routines is the same page.
 ///
 /// [conversationOpen] matters only at the single tier, where the Bot list is
 /// the root and the conversation is a page over it. The system Back gesture
@@ -230,11 +231,11 @@ class ShellLayout extends StatelessWidget {
       // At the widest tier the panel is a column, and a column a feature has
       // filled is simply there. The open flag is a drawer's, and only the
       // dual tier has one.
-      final inlinePanel =
-          tier == ShellTier.triple && panel != null && !panelCollapsed;
-      // The drawer, its scrim and its focus trap are the dual tier's alone: a
-      // collapsed column at the widest tier is simply gone, not a drawer
-      // waiting under a scrim.
+      final inlinePanel = tier == ShellTier.triple && panel != null;
+      // The drawer, its scrim and its focus trap are the dual tier's alone.
+      // A collapsed column at the widest tier keeps its pages mounted and
+      // takes no width, so All Routines is still there when the column
+      // comes back.
       final drawnPanel = tier == ShellTier.dual && panelOpen && panel != null;
       final divider = FrockTheme.hairline(
         (panelTheme ?? Theme.of(context)).colorScheme,
@@ -288,23 +289,40 @@ class ShellLayout extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (inlinePanel)
-                          _withPanelTheme(
-                            _Column(
-                              width: shellRightPanelWidth,
-                              border: Border(left: BorderSide(color: divider)),
-                              child: SafeArea(
-                                top: false,
-                                child: identified(ShellIds.rightPanel, panel),
-                              ),
-                            ),
-                          ),
+                        if (inlinePanel && !panelCollapsed)
+                          const SizedBox(width: shellRightPanelWidth),
                       ],
                     ),
                   ),
                 ),
               ),
             ),
+            if (tier == ShellTier.triple && panel != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: Offstage(
+                  offstage: panelCollapsed,
+                  child: TickerMode(
+                    enabled: !panelCollapsed,
+                    child: ExcludeSemantics(
+                      excluding: panelCollapsed,
+                      child: IgnorePointer(
+                        ignoring: panelCollapsed,
+                        child: _withPanelTheme(
+                          _Column(
+                            width: shellRightPanelWidth,
+                            border: Border(left: BorderSide(color: divider)),
+                            child: SafeArea(
+                              top: false,
+                              child: identified(ShellIds.rightPanel, panel),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             Positioned.fill(
               child: _Scrim(open: drawnPanel, onDismiss: onDismiss),
             ),
@@ -328,10 +346,7 @@ class ShellLayout extends StatelessWidget {
     return Theme(
       key: const ValueKey('panel-theme'),
       data: theme,
-      child: ColoredBox(
-        color: theme.scaffoldBackgroundColor,
-        child: child,
-      ),
+      child: ColoredBox(color: theme.scaffoldBackgroundColor, child: child),
     );
   }
 
