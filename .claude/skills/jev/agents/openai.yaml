@@ -1,0 +1,7 @@
+interface:
+  display_name: "Jev"
+  short_description: "Build typed Jev decision workflows"
+  default_prompt: "Use $jev to design and implement this feature with TypeSafe AI's Jev model."
+
+policy:
+  allow_implicit_invocation: true
