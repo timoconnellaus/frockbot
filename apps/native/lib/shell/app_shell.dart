@@ -1607,6 +1607,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       builder: (context) {
         final theme = Theme.of(context);
         final botId = bot.botId.value;
+        final backId = panelBackIdentifierV1(
+          panelKey: key,
+          routinesEditorOpen:
+              key == 'routines' && routinesPanel?.tryLeaveEditor != null,
+        );
         return SizedBox(
           height: 52,
           child: Padding(
@@ -1622,13 +1627,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ),
                   const SizedBox(width: 10),
                 ] else
-                  identified(
-                    ShellIds.rightPanelBack,
-                    IconButton(
-                      tooltip: 'Back',
-                      onPressed: () => unawaited(_popPanel()),
-                      style: _panelControl(theme),
-                      icon: const Icon(Icons.chevron_left_rounded),
+                  KeyedSubtree(
+                    // Flutter Web keeps the first identifier a Semantics
+                    // node published. Remount when the press changes meaning
+                    // so the editor's id is what a spec actually sees.
+                    key: ValueKey(backId),
+                    child: identified(
+                      backId,
+                      IconButton(
+                        tooltip: 'Back',
+                        onPressed: () => unawaited(_popPanel()),
+                        style: _panelControl(theme),
+                        icon: const Icon(Icons.chevron_left_rounded),
+                      ),
                     ),
                   ),
                 Expanded(
