@@ -75,7 +75,11 @@ class ViewRoutineList extends StatelessWidget {
                 final scope = ViewScope.of(context);
                 final actionSchema = scope.actions[action?['actionId']];
                 if (action == null || actionSchema == null) return;
-                scope.controller.submit(action, actionSchema);
+                scope.controller.submit(
+                  action,
+                  actionSchema,
+                  persist: false,
+                );
               },
             ),
           ),
@@ -152,7 +156,11 @@ class _RoutineBlock extends StatelessWidget {
               // a door, and the switch is its own control at the end.
               chevron: false,
               onTap: open != null && openSchema != null
-                  ? () => scope.controller.submit(open, openSchema)
+                  ? () => scope.controller.submit(
+                      open,
+                      openSchema,
+                      persist: false,
+                    )
                   : null,
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -191,7 +199,11 @@ class _RoutineBlock extends StatelessWidget {
                   final action = _openRun(run);
                   final actionSchema = scope.actions[action?['actionId']];
                   if (action == null || actionSchema == null) return;
-                  scope.controller.submit(action, actionSchema);
+                  scope.controller.submit(
+                    action,
+                    actionSchema,
+                    persist: false,
+                  );
                 },
               ),
             ),

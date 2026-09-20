@@ -145,11 +145,17 @@ class ViewController extends ChangeNotifier {
 
   /// Sends an action, optionally drawing its outcome at once: `predictKey` and
   /// `predictValue` are what the caller already knows it is about to send.
+  ///
+  /// [persist] is for a command the route must not lose. Host-answered
+  /// navigation — open this form, close it, open that run — is not one: a
+  /// retained envelope would be restored onto the document the press just
+  /// replaced, and every control on that document would refuse to work.
   Future<void> submit(
     Map<String, Object?> node,
     Map<String, Object?> schema, {
     String? predictKey,
     Object? predictValue,
+    bool persist = true,
   }) async {
     if (busy || pending != null) return;
     try {
@@ -168,19 +174,19 @@ class ViewController extends ChangeNotifier {
     // After the input passed: a refused press changes nothing, so it draws
     // nothing either.
     if (predictKey != null) predicted[predictKey] = predictValue;
-    await check();
+    await check(persist: persist);
   }
 
   /// Dispatches the retained command, under its own id, however many times it
   /// takes to learn what happened to it.
-  Future<void> check() async {
+  Future<void> check({bool persist = true}) async {
     if (busy || pending == null) return;
     busy = true;
     message = null;
     _changed();
     final command = pending!;
     try {
-      await store.write(_key, jsonEncode(command));
+      if (persist) await store.write(_key, jsonEncode(command));
       final receipt = await dispatch(command);
       if (receipt['commandId'] != command['commandId']) {
         throw const FormatException('Wrong receipt');
@@ -188,7 +194,7 @@ class ViewController extends ChangeNotifier {
       if (receipt['status'] == 'pending') {
         message = 'That action is still running. Check it again in a moment.';
       } else {
-        await store.delete(_key);
+        if (persist) await store.delete(_key);
         pending = null;
         for (final id in secrets) {
           values.remove(id);

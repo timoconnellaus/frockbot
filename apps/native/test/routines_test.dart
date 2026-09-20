@@ -1301,6 +1301,7 @@ void main() {
     await tester.tap(find.text('Morning brief').first);
     await tester.pumpAndSettle();
     expect(find.text('Save changes'), findsOneWidget);
+    expect(find.text('Check that action'), findsNothing);
     final delete = find.widgetWithText(OutlinedButton, 'Delete');
     expect(delete, findsOneWidget);
     expect(tester.widget<OutlinedButton>(delete).onPressed, isNotNull);
@@ -1310,7 +1311,7 @@ void main() {
     expect(find.text('Delete this Routine?'), findsOneWidget);
     // The whole run log goes with it, which is what the question says.
     expect(find.textContaining('run log'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
     expect(sent, isEmpty);
     expect(find.text('Morning brief'), findsWidgets);
