@@ -291,22 +291,32 @@ export class RoutineStore {
       prefix: ROUTINE_PREFIX,
       limit: ROUTINE_LIMIT_PER_BOT,
     });
-    const routines = [...stored.values()].map((value) =>
-      decodeRoutineRecordV1(value),
-    );
     const views: RoutineViewV1[] = [];
-    for (const record of routines) {
+    for (const value of stored.values()) {
+      let record: RoutineRecordV1;
+      try {
+        record = decodeRoutineRecordV1(value);
+      } catch (error) {
+        if (error instanceof RoutineDecodeError) continue;
+        throw error;
+      }
       const key = await this.#storage.get<unknown>(
         routineHookKeyRecordV1(record.routineId),
       );
+      let hookKeyVersion: number | undefined;
+      if (key !== undefined) {
+        try {
+          hookKeyVersion = decodeRoutineHookKeyV1(key).keyVersion;
+        } catch (error) {
+          if (!(error instanceof RoutineDecodeError)) throw error;
+        }
+      }
       views.push(
         routineViewV1(
           record,
           timezone,
           nextRuns?.get(record.routineId),
-          key === undefined
-            ? undefined
-            : decodeRoutineHookKeyV1(key).keyVersion,
+          hookKeyVersion,
         ),
       );
     }
