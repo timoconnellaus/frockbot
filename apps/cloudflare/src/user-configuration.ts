@@ -122,6 +122,7 @@ import {
 } from "./applet-directory.js";
 import type { AppletState } from "./applet-state.js";
 import { cleanAppletTestStateV1 } from "./applet-test-state-cleanup.js";
+import { cleanDefaultPackagesMarkerV1 } from "./default-packages-marker-cleanup.js";
 import {
   appletSourcePathV1,
   appletsSourceRootV1,
@@ -248,10 +249,11 @@ export class UserConfiguration
 {
   constructor(ctx: DurableObjectState, env: UserConfigurationEnv) {
     super(ctx, env);
-    // Before any request or alarm can read an Applet entry of the old shape.
+    // Before any request or alarm can read retired stored shapes.
     this.ctx.blockConcurrencyWhile(async () => {
       await cleanAppletTestStateV1(this.ctx.storage);
       await cleanUserAvatarTestState(this.ctx.storage);
+      await cleanDefaultPackagesMarkerV1(this.ctx.storage);
       if (
         (
           await this.ctx.storage.list({

@@ -68,29 +68,23 @@ interface DefaultPackagesMarkerV4 {
   seededPackageIds: readonly string[];
 }
 
-function decodeDefaultPackagesMarker(
-  marker: unknown,
-): { schemaVersion: 1 | 2 | 3 } | DefaultPackagesMarkerV4 {
+function decodeDefaultPackagesMarker(marker: unknown): DefaultPackagesMarkerV4 {
   if (!marker || typeof marker !== "object" || Array.isArray(marker)) {
     throw new Error("Stored default Package bootstrap is invalid");
   }
-  const { schemaVersion } = marker as { schemaVersion?: unknown };
-  const keys = Object.keys(marker);
-  if (schemaVersion === DEFAULT_PACKAGES_BOOTSTRAP_VERSION) {
-    const { seededPackageIds } = marker as { seededPackageIds?: unknown };
-    if (
-      keys.length !== 2 ||
-      !Array.isArray(seededPackageIds) ||
-      !seededPackageIds.every((id) => typeof id === "string")
-    ) {
-      throw new Error("Stored default Package bootstrap is invalid");
-    }
-    return { schemaVersion, seededPackageIds };
-  }
-  if (keys.length !== 1 || ![1, 2, 3].includes(schemaVersion as number)) {
+  const { schemaVersion, seededPackageIds } = marker as {
+    schemaVersion?: unknown;
+    seededPackageIds?: unknown;
+  };
+  if (
+    schemaVersion !== DEFAULT_PACKAGES_BOOTSTRAP_VERSION ||
+    Object.keys(marker).length !== 2 ||
+    !Array.isArray(seededPackageIds) ||
+    !seededPackageIds.every((id) => typeof id === "string")
+  ) {
     throw new Error("Stored default Package bootstrap is invalid");
   }
-  return { schemaVersion: schemaVersion as 1 | 2 | 3 };
+  return { schemaVersion, seededPackageIds };
 }
 const IDENTITY_KEY = "user-id";
 const RECEIPT_PREFIX = "configuration-receipt:";
@@ -391,23 +385,6 @@ export class UserSettingsBackendContribution {
   /** The immutable first-party installation rows written on first read. */
   private readonly defaultPackages: readonly PackageInstallationView[];
 
-  /**
-   * Packages introduced by the default-enablement rollout, plus their
-   * dependency closure. A v1 marker predates those rows, so this is the one
-   * bounded set that marker migration may add without replaying every default.
-   */
-  private readonly enablementRolloutPackages: readonly PackageInstallationView[];
-
-  /**
-   * Default-enabled rows damaged by v0.2.3's v1→v2 migration. The old pass
-   * validated dependencies before it added the rollout's dependency closure,
-   * so it wrote these rows disabled even though the User had made no choice.
-   */
-  private readonly defaultEnabledPackages: ReadonlyMap<
-    string,
-    PackageInstallationView
-  >;
-
   private readonly connectionOwners = new Map<string, ConnectionCommandOwner>();
 
   private readonly readBootstraps = new Map<
@@ -440,28 +417,6 @@ export class UserSettingsBackendContribution {
             },
           ]
         : [],
-    );
-    const rolloutPackageIds = new Set(
-      this.packageCatalog.entries
-        .filter(
-          (pkg) => pkg.installByDefault && pkg.defaultEnablement !== undefined,
-        )
-        .map((pkg) => pkg.packageId),
-    );
-    for (const packageId of rolloutPackageIds) {
-      for (const dependencyId of this.packageCatalog.get(packageId)
-        ?.dependencies ?? []) {
-        if (this.packageCatalog.has(dependencyId))
-          rolloutPackageIds.add(dependencyId);
-      }
-    }
-    this.enablementRolloutPackages = this.defaultPackages.filter((pkg) =>
-      rolloutPackageIds.has(pkg.packageId),
-    );
-    this.defaultEnabledPackages = new Map(
-      this.defaultPackages
-        .filter((pkg) => pkg.state === "installed")
-        .map((pkg) => [pkg.packageId, pkg]),
     );
   }
 
@@ -496,52 +451,6 @@ export class UserSettingsBackendContribution {
         };
   }
 
-  /** Apply the default-disabled choices first introduced by marker v2. */
-  private applyEnablementRolloutDefaults(
-    current: UserSettingsViewV1,
-  ): UserSettingsViewV1 {
-    let changed = false;
-    const rolloutDefaults = new Map(
-      this.enablementRolloutPackages.map((pkg) => [pkg.packageId, pkg]),
-    );
-    const packages = current.packages.map((pkg) => {
-      const defaultPackage = rolloutDefaults.get(pkg.packageId);
-      if (
-        !defaultPackage ||
-        defaultPackage.version !== pkg.version ||
-        defaultPackage.state !== "disabled" ||
-        pkg.state !== "installed" ||
-        pkg.failure !== undefined
-      ) {
-        return pkg;
-      }
-      changed = true;
-      return { ...pkg, state: "disabled" as const };
-    });
-    return changed ? { ...current, packages } : current;
-  }
-
-  /** One-shot repair for rows the v0.2.3 marker-v2 rollout disabled. */
-  private repairEnablementRolloutV2(
-    current: UserSettingsViewV1,
-  ): UserSettingsViewV1 {
-    let changed = false;
-    const packages = current.packages.map((pkg) => {
-      const defaultPackage = this.defaultEnabledPackages.get(pkg.packageId);
-      if (
-        !defaultPackage ||
-        defaultPackage.version !== pkg.version ||
-        pkg.state !== "disabled" ||
-        pkg.failure !== undefined
-      ) {
-        return pkg;
-      }
-      changed = true;
-      return { ...pkg, state: "installed" as const };
-    });
-    return changed ? { ...current, packages } : current;
-  }
-
   /**
    * Seed every first-party Package this account has not been offered yet.
    *
@@ -567,28 +476,14 @@ export class UserSettingsBackendContribution {
       const stored = await transaction.get<unknown>(STATE_KEY);
       if (marker !== undefined) {
         const decodedMarker = decodeDefaultPackagesMarker(marker);
-        const markerVersion = decodedMarker.schemaVersion;
-        // Markers before v4 carry no ledger: every default is treated as
-        // never offered, which is the one back-fill an account gets before
-        // the ledger takes over.
-        const seededPackageIds = new Set(
-          decodedMarker.schemaVersion === DEFAULT_PACKAGES_BOOTSTRAP_VERSION
-            ? decodedMarker.seededPackageIds
-            : [],
-        );
+        const seededPackageIds = new Set(decodedMarker.seededPackageIds);
 
-        // Marker v1 predates default-disabled model Packages and their
-        // dependency closure. Seed that closure before the catalog-relative
-        // fixed point sees it, then validate the complete graph. A later
-        // marker gets only the platform-owned repair on this read: retirement
-        // and dependency validation are one-shot migration steps, never a
-        // read-time rule.
         const rawMigrated =
           stored === undefined
             ? initialState()
             : migrateStoredUserSettingsV1(
                 stored,
-                markerVersion === 1 ? undefined : this.storedSettingsPackages,
+                this.storedSettingsPackages,
                 "repair",
               );
         let settingsChanged = stored !== undefined && rawMigrated !== stored;
@@ -596,22 +491,6 @@ export class UserSettingsBackendContribution {
           decodeUserSettingsViewV1(rawMigrated),
           transaction,
         );
-        if (markerVersion === 1) {
-          const seeded = this.applyEnablementRolloutDefaults(
-            this.addMissingPackages(migrated, this.enablementRolloutPackages),
-          );
-          const validated = migrateStoredUserSettingsV1(
-            seeded,
-            this.storedSettingsPackages,
-          );
-          settingsChanged ||= seeded !== migrated || validated !== seeded;
-          migrated = decodeUserSettingsViewV1(validated);
-        }
-        if (markerVersion === 2) {
-          const repaired = this.repairEnablementRolloutV2(migrated);
-          settingsChanged ||= repaired !== migrated;
-          migrated = repaired;
-        }
 
         const seeded = this.addMissingPackages(
           migrated,
@@ -622,9 +501,7 @@ export class UserSettingsBackendContribution {
         settingsChanged ||= seeded !== migrated;
         migrated = seeded;
         const ledger = this.seededLedger(seededPackageIds);
-        const markerChanged =
-          markerVersion !== DEFAULT_PACKAGES_BOOTSTRAP_VERSION ||
-          ledger.length !== seededPackageIds.size;
+        const markerChanged = ledger.length !== seededPackageIds.size;
         if (!settingsChanged && !markerChanged) {
           return structuredClone(migrated);
         }
