@@ -1623,7 +1623,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   const SizedBox(width: 10),
                 ] else
                   identified(
-                    ShellIds.rightPanelBack,
+                    panelBackIdentifierV1(
+                      panelKey: key,
+                      routinesEditorOpen:
+                          key == 'routines' &&
+                          routinesPanel?.tryLeaveEditor != null,
+                    ),
                     IconButton(
                       tooltip: 'Back',
                       onPressed: () => unawaited(_popPanel()),

@@ -114,8 +114,9 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
     );
     await press(action(page, "run-routine"));
     await ran;
-    // Run now lives on the editor page. Leave it — the form is unchanged —
-    // so the shell's sidebar is reachable again.
+    // Run now lives on the editor. Leave it — the form is unchanged —
+    // so the shell's sidebar is reachable again. The press is the same
+    // id on the phone AppBar and on the panel header.
     await press(sem(page, "routine-editor-back"));
     await expect(sem(page, "routine-editor")).toHaveCount(0);
 
