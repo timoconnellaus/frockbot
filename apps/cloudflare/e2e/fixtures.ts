@@ -919,17 +919,27 @@ export async function openBotPage(page: Page): Promise<void> {
 
 /**
  * The selected Bot is the one on screen: its conversation is up, and its
- * name is on the phone pill, the panel heading, or the Bot list.
+ * name is spoken by chrome that is actually showing — the phone pill, the
+ * Bot list, or the panel heading.
+ *
+ * Those three are not one Playwright locator. A closed desk drawer still
+ * has the heading in the tree, and `.or()` treats that hidden node as the
+ * match, so a visible name on the list never counts.
  */
 export async function expectBotOpen(page: Page, name: string): Promise<void> {
   await expect(composerInput(page)).toBeVisible({ timeout: 30_000 });
-  const named = (scope: ReturnType<typeof sem>) =>
-    scope.locator(`[aria-label*="${name}"]`).or(scope.getByText(name));
-  await expect(
-    sem(page, "bot-panel-toggle")
-      .or(named(sem(page, "shell-right-panel")).first())
-      .or(named(sem(page, "shell-sidebar")).first()),
-  ).toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    for (const id of [
+      "bot-panel-toggle",
+      "shell-sidebar",
+      "shell-right-panel",
+    ] as const) {
+      const scope = sem(page, id).first();
+      if (!(await scope.isVisible().catch(() => false))) continue;
+      if ((await spokenText(scope)).includes(name)) return;
+    }
+    throw new Error(`the selected Bot is not ${name}`);
+  }).toPass({ timeout: 30_000 });
 }
 
 /** Open the Bot's Settings, which is behind the gear on its page. */
