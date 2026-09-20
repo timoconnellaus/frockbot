@@ -123,16 +123,11 @@ test("the command path arrives at the same account, and that Bot answers too", a
   });
 
   // The id the helper reported is the one the sidebar drew a row for, which is
-  // what every migrated spec depends on when it selects its Bot.
+  // what every migrated spec depends on when it selects its Bot. The desk
+  // header no longer repeats the name — the conversation and that row are
+  // the selected Bot.
   await expect(sem(page, `sidebar-bot-${account.botId}`)).toBeVisible();
   await expect(sem(page, "chat-composer")).toBeVisible();
-  await expect(
-    sem(page, "shell-right-panel")
-      .getByText("Rider")
-      .or(
-        sem(page, "bot-panel-toggle").getByRole("button", { name: /Rider/u }),
-      ),
-  ).toBeVisible();
 
   await expectProvisionedAccount(page, userId, "Rider");
 
