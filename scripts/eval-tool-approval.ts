@@ -23,9 +23,9 @@ const worktrees = Bun.spawnSync(
 const envFile = [dirname(commonDir), root, ...worktrees]
   .map((dir) => join(dir, ".dev.vars"))
   .find((candidate) => existsSync(candidate));
-if (!envFile && !(process.env.TYPESAFE_API_KEY ?? process.env.JEV_API_KEY))
+if (!envFile && !(process.env.JEV_API_KEY ?? process.env.TYPESAFE_API_KEY))
   throw new Error(
-    "No .dev.vars beside the Git common directory, and no TYPESAFE_API_KEY or JEV_API_KEY in the environment",
+    "No .dev.vars beside the Git common directory, and no JEV_API_KEY or TYPESAFE_API_KEY in the environment",
   );
 const child = Bun.spawn(
   [

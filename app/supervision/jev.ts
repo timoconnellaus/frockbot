@@ -175,18 +175,17 @@ export function createJevClientV1(input: {
 }
 
 /**
- * The production chooser: a Jev adapter when a TypeSafe credential is
- * present, otherwise the hard-unavailable adapter. The key never leaves this
- * function.
+ * The production chooser: a Jev adapter when `JEV_API_KEY` is present,
+ * otherwise the hard-unavailable adapter. The key never leaves this function.
  */
 export function createHostedTurnSupervisorV1(
   env: Record<string, string | undefined>,
   fetch?: Fetch,
 ): TurnSupervisor {
-  const apiKey = (env.TYPESAFE_API_KEY ?? "").trim();
+  const apiKey = (env.JEV_API_KEY ?? "").trim();
   if (!apiKey) {
     return createUnavailableTurnSupervisorV1(
-      "Turn supervision is unavailable: no TypeSafe credential is configured.",
+      "Turn supervision is unavailable: no JEV_API_KEY is configured.",
     );
   }
   return createJevTurnSupervisorV1({
