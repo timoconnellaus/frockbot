@@ -366,7 +366,9 @@ export function createRoutinesBackendContribution(
           // One document, two reads — started together so the Worker is not
           // paying a second hop after the first has already come back.
           const [view, inboxView] = await Promise.all([
-            host.listRoutines(context.userId, botId).then(decodeRoutineListViewV1),
+            host
+              .listRoutines(context.userId, botId)
+              .then(decodeRoutineListViewV1),
             host
               .listRoutineInbox(context.userId, botId)
               .then(decodeRoutineInboxViewV1),
