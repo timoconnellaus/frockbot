@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { TypeSafeClient, type Fetch } from "@typesafe-ai/sdk";
+import { APITimeoutError, TypeSafeClient, type Fetch } from "@typesafe-ai/sdk";
 import {
   createFakeTurnSupervisorV1,
   createUnavailableTurnSupervisorV1,
@@ -12,6 +12,7 @@ import {
   type TurnSupervisor,
 } from "@frockbot/core/contracts";
 import {
+  TOOL_APPROVAL_ATTEMPT_TIMEOUT_MS_V1,
   TOOL_APPROVAL_MODEL_V1,
   TOOL_APPROVAL_NOUL_YES_V1,
   toolApprovalQuestionsV1,
@@ -193,6 +194,26 @@ describe("TurnSupervisor adapter contract", () => {
     await expect(
       supervisor.reviewStep(stepEvidence([mutate])),
     ).rejects.toBeInstanceOf(SupervisionUnavailableError);
+  });
+
+  test("Jev reviewStep records a request timeout as timeout, not an outage", async () => {
+    const client = new TypeSafeClient({
+      apiKey: "sk-test-do-not-leak-4f3a",
+      defaultModel: TOOL_APPROVAL_MODEL_V1,
+      retry: { maxRetries: 0 },
+      logLevel: "off",
+      fetch: async () => new Response("unused"),
+    });
+    client.systemOne = (() => ({
+      withResponse: () =>
+        Promise.reject(new APITimeoutError(TOOL_APPROVAL_ATTEMPT_TIMEOUT_MS_V1)),
+    })) as TypeSafeClient["systemOne"];
+    await expect(
+      createJevTurnSupervisorV1({ client }).reviewStep(stepEvidence([mutate])),
+    ).rejects.toMatchObject({
+      name: "SupervisionUnavailableError",
+      kind: "timeout",
+    });
   });
 
   test("Jev reviewStep rethrows abort instead of reporting an outage", async () => {

@@ -1,5 +1,6 @@
 import {
   APIError,
+  APITimeoutError,
   APIUserAbortError,
   TypeSafeClient,
   TypeSafeError,
@@ -70,7 +71,10 @@ function classifyJevFailure(error: unknown): SupervisionUnavailableError {
   ) {
     throw error;
   }
-  if (error instanceof DOMException && error.name === "TimeoutError") {
+  if (
+    error instanceof APITimeoutError ||
+    (error instanceof DOMException && error.name === "TimeoutError")
+  ) {
     return new SupervisionUnavailableError(
       "timeout",
       "Jev timed out before a supervision decision landed.",
