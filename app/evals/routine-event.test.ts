@@ -26,7 +26,9 @@ const evidence: RoutineEventEvidenceV1 = {
   payload: { subject: "Your Amazon order has shipped" },
 };
 
-function answersFor(choice: "clearly_unrelated" | "is_or_might_be"): RoutineEventAnswersV1 {
+function answersFor(
+  choice: "clearly_unrelated" | "is_or_might_be",
+): RoutineEventAnswersV1 {
   return {
     fit: {
       type: "choice",
@@ -70,11 +72,15 @@ test("reply-style fixtures are never labeled clearly_unrelated", () => {
 });
 
 test("grades the Choice against the label", () => {
-  expect(gradeRoutineEventV1({ fit: "is_or_might_be" }, answersFor("is_or_might_be")).passed).toBe(
-    true,
-  );
   expect(
-    gradeRoutineEventV1({ fit: "clearly_unrelated" }, answersFor("is_or_might_be")).passed,
+    gradeRoutineEventV1({ fit: "is_or_might_be" }, answersFor("is_or_might_be"))
+      .passed,
+  ).toBe(true);
+  expect(
+    gradeRoutineEventV1(
+      { fit: "clearly_unrelated" },
+      answersFor("is_or_might_be"),
+    ).passed,
   ).toBe(false);
 });
 

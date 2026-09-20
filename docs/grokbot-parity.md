@@ -784,7 +784,7 @@ the rows whose status the code moved:
   tool's `run_now` action, `webhook` as the delivery door. Both enqueue a
   durable firing that the alarm drains, and the run log records which.
   Connected-app events are the integration half: `{ kind: "connection",
-  connectionId, triggerType }` on a Routine, an instance at the provider, and
+connectionId, triggerType }` on a Routine, an instance at the provider, and
   `POST /api/connect/events` firing the owning Bot. Gmail's new-message and
   email-sent events are the first two. `group` does not exist.
 - **18** — landed, including the "fresh subagent" half. A firing is an admitted

@@ -131,9 +131,9 @@ describe("Connected apps", () => {
       "GMAIL_EMAIL_SENT",
       "GMAIL_NEW_GMAIL_MESSAGE",
     ]);
-    expect(listed.triggers.every((trigger) => trigger.toolkitName === "Gmail")).toBe(
-      true,
-    );
+    expect(
+      listed.triggers.every((trigger) => trigger.toolkitName === "Gmail"),
+    ).toBe(true);
   });
 
   it("sends each app back through its own return page, and serves it", async () => {

@@ -43,7 +43,8 @@ export const routineEventFixturesV1: readonly RoutineEventFixtureV1[] = [
       payload: {
         subject: "This week in design: 12 tools we love",
         sender: "hello@sidebar.io",
-        snippet: "Unsubscribe at any time. Here's what the industry is reading.",
+        snippet:
+          "Unsubscribe at any time. Here's what the industry is reading.",
       },
     }),
     expected: { fit: "clearly_unrelated" },

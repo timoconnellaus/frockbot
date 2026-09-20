@@ -326,10 +326,7 @@ export class ComposioClient {
         typeof trigger.toolkit === "object" && trigger.toolkit !== null
           ? asRecord(trigger.toolkit)
           : {};
-      if (
-        typeof toolkit.slug === "string" &&
-        toolkit.slug !== toolkitSlug
-      ) {
+      if (typeof toolkit.slug === "string" && toolkit.slug !== toolkitSlug) {
         return [];
       }
       if (!slug.startsWith(`${toolkitSlug.toUpperCase()}_`)) return [];
@@ -404,8 +401,7 @@ export class ComposioClient {
         { method: "DELETE" },
       );
     } catch (error) {
-      if (error instanceof ComposioRequestError && error.status === 404)
-        return;
+      if (error instanceof ComposioRequestError && error.status === 404) return;
       throw error;
     }
   }

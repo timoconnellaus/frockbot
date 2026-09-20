@@ -305,14 +305,21 @@ function detailNode(routine: RoutineViewV1): ViewNode {
         type: "group",
         orientation: "row",
         children: [
-          press("run-routine", "Run now", { kind: "run-routine", routineId: id }),
+          press("run-routine", "Run now", {
+            kind: "run-routine",
+            routineId: id,
+          }),
           press("open-runs", "Run log", { kind: "open-runs", routineId: id }),
           ...(keyed
             ? [
-                press("rotate-key", routine.hookKeyVersion == null ? "Mint key" : "Rotate key", {
-                  kind: "rotate-key",
-                  routineId: id,
-                }),
+                press(
+                  "rotate-key",
+                  routine.hookKeyVersion == null ? "Mint key" : "Rotate key",
+                  {
+                    kind: "rotate-key",
+                    routineId: id,
+                  },
+                ),
                 ...(routine.hookKeyVersion == null
                   ? []
                   : [

@@ -16,7 +16,11 @@ import type {
 import type { RoutineFireOutcomeV1 } from "./scheduler.js";
 import type { RoutineFireV1 } from "./firing.js";
 import type { RoutineRecordV1 } from "./records.js";
-import { RoutineDecodeError, routineExactKeys, routineText } from "./records.js";
+import {
+  RoutineDecodeError,
+  routineExactKeys,
+  routineText,
+} from "./records.js";
 import { routineEventJudgeKeyV1 } from "./storage-keys.js";
 
 const PAYLOAD_SNIPPET_MAX = 512;
@@ -63,7 +67,9 @@ export function decodeRoutineEventJudgeReceiptV1(
     typeof candidate.verdict !== "string" ||
     !VERDICTS.has(candidate.verdict as RoutineEventVerdictV1)
   ) {
-    throw new RoutineDecodeError("Routine event-judge receipt verdict is invalid");
+    throw new RoutineDecodeError(
+      "Routine event-judge receipt verdict is invalid",
+    );
   }
   return {
     schemaVersion: 1,
@@ -91,7 +97,9 @@ export function connectionEventIdFromFireV1(fire: RoutineFireV1): string {
 function textField(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
-  return trimmed.length === 0 ? undefined : trimmed.slice(0, PAYLOAD_SNIPPET_MAX);
+  return trimmed.length === 0
+    ? undefined
+    : trimmed.slice(0, PAYLOAD_SNIPPET_MAX);
 }
 
 function labelsOf(value: unknown): string[] | undefined {
@@ -119,11 +127,7 @@ function pickFrom(row: Record<string, unknown>): RoutineEventPayloadV1 {
   );
   const to = textField(row.to ?? row.To);
   const snippet = textField(
-    row.snippet ??
-      row.message_text ??
-      row.text ??
-      row.body ??
-      row.preview,
+    row.snippet ?? row.message_text ?? row.text ?? row.body ?? row.preview,
   );
   const labels = labelsOf(row.labels ?? row.labelIds ?? row.label_ids);
   return {
@@ -163,7 +167,10 @@ function deliveredBodyFromCueV1(cue: string): string | undefined {
     if (lines[index] === DELIVERED_PAYLOAD_LINE) last = index;
   }
   if (last === -1) return undefined;
-  return lines.slice(last + 1).join("\n").trim();
+  return lines
+    .slice(last + 1)
+    .join("\n")
+    .trim();
 }
 
 function unwrapRoutineDeliveryCueV1(raw: string): string {
@@ -174,7 +181,9 @@ function unwrapRoutineDeliveryCueV1(raw: string): string {
 }
 
 /** Project the cue's delivered body. Strip the raw Gmail `payload` object. */
-export function projectRoutineEventPayloadV1(cue: string): RoutineEventPayloadV1 {
+export function projectRoutineEventPayloadV1(
+  cue: string,
+): RoutineEventPayloadV1 {
   const delivered = deliveredBodyFromCueV1(cue);
   if (delivered === undefined) return {};
   return projectRoutineEventBodyV1(unwrapRoutineDeliveryCueV1(delivered));

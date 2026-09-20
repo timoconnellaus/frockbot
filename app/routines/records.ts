@@ -279,7 +279,12 @@ export function decodeRoutineTriggerV1(
       triggerType: candidate.triggerType,
       ...(candidate.config === undefined
         ? {}
-        : { config: decodeRoutineTriggerConfigV1(candidate.config, `${label} config`) }),
+        : {
+            config: decodeRoutineTriggerConfigV1(
+              candidate.config,
+              `${label} config`,
+            ),
+          }),
     };
   }
   routineExactKeys(candidate, ["kind"], [], label);

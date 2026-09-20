@@ -37,7 +37,8 @@ export function routineEventStateV1(
 export const routineEventQuestionsV1 = {
   fit: choice(
     {
-      target: "The standalone event in `payload` against the Routine prompt in `prompt`",
+      target:
+        "The standalone event in `payload` against the Routine prompt in `prompt`",
       decision:
         "Is this event clearly not the kind of event the prompt is for?",
       rules: [

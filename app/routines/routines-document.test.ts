@@ -255,7 +255,9 @@ test("the list is not a form, and naming a Routine is a read-only detail", () =>
     ROUTINE_DETAIL_FIELDS_V1.timing,
   ]);
   expect(
-    fields.every((node) => node.type === "field" && node.field.editable === false),
+    fields.every(
+      (node) => node.type === "field" && node.field.editable === false,
+    ),
   ).toBe(true);
   const values = fields.map((node) =>
     node.type === "field" ? node.field.value : null,

@@ -458,7 +458,8 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
     name: "COMPOSIO_WEBHOOK_SECRET",
     enables:
       "Routines that fire on a connected-app event (a new Gmail message, an email sent)",
-    where: "https://app.composio.dev — the webhook secret for this project's event URL",
+    where:
+      "https://app.composio.dev — the webhook secret for this project's event URL",
     workers: ["app"],
   },
   {

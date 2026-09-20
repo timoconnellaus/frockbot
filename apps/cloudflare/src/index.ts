@@ -2322,12 +2322,13 @@ const createGatewayBackendContributions = (env: Env) =>
         command,
       }),
     listConnectTriggers: async (userId) => {
-      const offers = await userConfigurationStub(env, userId).listConnectTriggers(
-        {
-          schemaVersion: 1,
-          userId,
-        },
-      );
+      const offers = await userConfigurationStub(
+        env,
+        userId,
+      ).listConnectTriggers({
+        schemaVersion: 1,
+        userId,
+      });
       return Array.isArray(offers) ? offers : [];
     },
     ...(typeof env.COMPOSIO_WEBHOOK_SECRET === "string"

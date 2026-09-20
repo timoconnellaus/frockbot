@@ -259,11 +259,7 @@ describe("Connected-app trigger routes", () => {
       listConnectTriggers: () => Promise.resolve(offers),
     });
     const url = new URL("https://bot.frockbot.com/api/connect/triggers");
-    const response = await backend.route(
-      new Request(url),
-      url,
-      CONTEXT,
-    );
+    const response = await backend.route(new Request(url), url, CONTEXT);
     expect(response?.status).toBe(200);
     expect(await response!.json()).toEqual({
       schemaVersion: 1,

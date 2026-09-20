@@ -144,7 +144,12 @@ class FakeClient {
   }
   triggerTypes = new Map<
     string,
-    Array<{ slug: string; name: string; description: string; toolkitSlug: string }>
+    Array<{
+      slug: string;
+      name: string;
+      description: string;
+      toolkitSlug: string;
+    }>
   >([
     [
       "gmail",
@@ -590,11 +595,13 @@ describe("Connected-app Routine triggers", () => {
     });
     expect(again.instanceId).toBe(first.instanceId);
     expect(f.client.instances.size).toBe(1);
-    expect(await f.contribution.resolveTrigger(first.instanceId)).toMatchObject({
-      botId: "scout",
-      routineId: "inbox",
-      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
-    });
+    expect(await f.contribution.resolveTrigger(first.instanceId)).toMatchObject(
+      {
+        botId: "scout",
+        routineId: "inbox",
+        triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+      },
+    );
   });
 
   test("deletes the instance with the Routine and on disconnect", async () => {
@@ -614,7 +621,9 @@ describe("Connected-app Routine triggers", () => {
       routineId: "inbox",
     });
     expect(f.client.deletedTriggers).toEqual([held.instanceId]);
-    expect(await f.contribution.resolveTrigger(held.instanceId)).toBeUndefined();
+    expect(
+      await f.contribution.resolveTrigger(held.instanceId),
+    ).toBeUndefined();
 
     const again = await f.contribution.upsertTrigger({
       userId: "tim",

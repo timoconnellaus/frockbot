@@ -444,7 +444,8 @@ describe("RoutineScheduler settle", () => {
         botId: "scout",
         routineId: "inbox",
         name: "Shipping",
-        prompt: "When a shipping confirmation arrives, file the tracking number.",
+        prompt:
+          "When a shipping confirmation arrives, file the tracking number.",
         trigger: {
           kind: "connection",
           connectionId: "conn-gmail",
@@ -470,12 +471,9 @@ describe("RoutineScheduler settle", () => {
     const runs = await store.listRuns("scout", "inbox");
     expect(runs.entries[0]).toMatchObject({
       status: "skipped",
-      summary:
-        "The standalone event was clearly not what this Routine is for.",
+      summary: "The standalone event was clearly not what this Routine is for.",
     });
-    expect(
-      (await storage.list({ prefix: ROUTINE_INBOX_PREFIX })).size,
-    ).toBe(0);
+    expect((await storage.list({ prefix: ROUTINE_INBOX_PREFIX })).size).toBe(0);
   });
 
   test("a firing that is not late records no skipped entry", async () => {

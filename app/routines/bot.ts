@@ -1064,8 +1064,7 @@ export async function executeRoutineCommand(
     writer,
     await routineAccountTimezoneV1(state.ctx.storage),
   );
-  const remaining =
-    receipt.status === "applied" ? receipt.routine : undefined;
+  const remaining = receipt.status === "applied" ? receipt.routine : undefined;
   const stillEnabledConnection =
     remaining?.trigger?.kind === "connection" && remaining.enabled;
   if (

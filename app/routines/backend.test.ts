@@ -238,8 +238,12 @@ describe("Routines gateway routes", () => {
       (await call(route, "/api/bots/scout/routines?as=document&new=1"))?.status,
     ).toBe(400);
     expect(
-      (await call(route, "/api/bots/scout/routines?as=document&routine=missing"))
-        ?.status,
+      (
+        await call(
+          route,
+          "/api/bots/scout/routines?as=document&routine=missing",
+        )
+      )?.status,
     ).toBe(200);
   });
 

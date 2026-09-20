@@ -207,7 +207,8 @@ export function createConnectBackendContribution(
     async route(request, url, context) {
       if (url.pathname === TRIGGERS) {
         if (!context.userId) return jsonError(401, "authentication required");
-        if (request.method !== "GET") return jsonError(405, "method not allowed");
+        if (request.method !== "GET")
+          return jsonError(405, "method not allowed");
         const triggers = host.listConnectTriggers
           ? await host.listConnectTriggers(context.userId)
           : [];

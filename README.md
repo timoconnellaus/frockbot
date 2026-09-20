@@ -20,14 +20,14 @@ FrockBot installs into your own Cloudflare account with one command. That is the
 
 Optional keys. Each is asked for once and each can be skipped with Enter; a skipped key leaves that one thing shut and repairs nothing else.
 
-| Key                        | What it enables                                                    |
-| -------------------------- | ------------------------------------------------------------------ |
-| `OPENAI_API_KEY`           | dictation in the composer                                          |
-| `GEMINI_API_KEY`           | the voice session: hearing you and speaking back                   |
-| `FCM_SERVICE_ACCOUNT`      | push notifications to an Android app you build yourself            |
-| `COMPOSIO_API_KEY`         | Connected apps: a Bot using your Gmail, Slack, Notion and the rest |
-| `COMPOSIO_WEBHOOK_SECRET`  | Routines that fire on a connected-app event                        |
-| `DEBUG_TOKEN`              | the read-only `/api/debug` operator surface                        |
+| Key                       | What it enables                                                    |
+| ------------------------- | ------------------------------------------------------------------ |
+| `OPENAI_API_KEY`          | dictation in the composer                                          |
+| `GEMINI_API_KEY`          | the voice session: hearing you and speaking back                   |
+| `FCM_SERVICE_ACCOUNT`     | push notifications to an Android app you build yourself            |
+| `COMPOSIO_API_KEY`        | Connected apps: a Bot using your Gmail, Slack, Notion and the rest |
+| `COMPOSIO_WEBHOOK_SECRET` | Routines that fire on a connected-app event                        |
+| `DEBUG_TOKEN`             | the read-only `/api/debug` operator surface                        |
 
 No model key is needed. Frock AI runs on the account's own `AI` binding, where Auto resolves to a concrete Workers AI chat model, so a deployment with no configuration at all still picks a model for a User who chose none.
 

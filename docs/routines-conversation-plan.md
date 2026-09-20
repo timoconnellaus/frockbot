@@ -56,7 +56,7 @@ Do not relitigate these without a reason that is new.
    timeout is not `clearly_unrelated`. A timeout is an ambiguous paid outcome:
    record it under the event id and do not retry under a new identity
    ([Jev plan](jev-supervision-plan.md)).
-8. **No provider knobs in chrome.** The detail may *show* a `query` the Bot
+8. **No provider knobs in chrome.** The detail may _show_ a `query` the Bot
    wrote. It never asks for `labelIds`, `userId`, or `interval`. `userId` is
    `me`; the poll interval is the provider default.
 9. **`userAsked` stays for Routines the User already created.** New ones are
@@ -86,7 +86,7 @@ Empty list: "Ask this Bot to set up a Routine." No FAB.
 
 ### Classify is not Turn supervision
 
-`TurnSupervisor.startTurn` runs *after* a Turn is admitted and today returns
+`TurnSupervisor.startTurn` runs _after_ a Turn is admitted and today returns
 the conservative default without calling Jev (`app/supervision/jev.ts`). Using
 it as the inbox filter would still occupy the Bot with a Turn identity, a cue,
 and the one-run lock for work we intend to skip.
@@ -118,7 +118,7 @@ The scheduler's `execute` closure (`settleRoutineFirings` in
    conversation line, no failure notification.
 4. Anything else → `admitTurnV1` as today.
 
-Plugin-trigger drops stay a receipt *before* enqueue, because the Plugin is
+Plugin-trigger drops stay a receipt _before_ enqueue, because the Plugin is
 asked in the door. Jev is slower and paid; putting it on the Composio POST
 would hold the door. Drain is the right time.
 
@@ -130,7 +130,7 @@ enough for "Yes." The earlier messages live on the Gmail thread. Jev cannot
 fetch them, and the kernel must not fetch the thread on every poll hit to help
 it.
 
-So the question is "is this *clearly not* what the prompt is for?", never "is
+So the question is "is this _clearly not_ what the prompt is for?", never "is
 this a match?". Evidence is bounded: Routine name, prompt, trigger slug, and a
 small projection of the payload (subject, sender, to, snippet/text, labels).
 Strip the raw Gmail `payload` object. No FrockBot chat, no thread fetch.
@@ -151,7 +151,7 @@ classify earlier, not a guess we build now.
 ### Authorship
 
 `userAsked` exists because a User-authored Routine must not be silently
-rewritten. After the editor goes, every *new* Routine is Bot-authored from a
+rewritten. After the editor goes, every _new_ Routine is Bot-authored from a
 conversation. Keep the check for records that still say `createdBy.kind ===
 "user"`. Do not migrate them.
 
@@ -188,7 +188,7 @@ Product-visible. Leaves every existing Routine runnable.
 - Keep `mintedKey` on rotate. Keep leave-confirmation only if the detail has
   something to abandon (it should not).
 - `apps/native/test/routines_test.dart` loses editor cases; keep list, pause,
-  delete, webhook-key, connection-source *display*.
+  delete, webhook-key, connection-source _display_.
 
 **Agent**
 
@@ -230,7 +230,7 @@ Jev runs. Drops are recorded, not enforced.
 - Runner beside `tool-approval-run.ts`. `bun run eval:routine-event`. Not in
   the pre-push gate. Reads `JEV_API_KEY`.
 - Hosted adapter implements the judge. Shadow: classify, write a skipped
-  *summary that did not happen* only to logs / a non-user record, still
+  _summary that did not happen_ only to logs / a non-user record, still
   admit the Turn.
 - Calibrate. False `clearly_unrelated` on a reply fixture blocks Cut 4.
 

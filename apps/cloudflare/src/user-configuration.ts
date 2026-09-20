@@ -1117,16 +1117,20 @@ export class UserConfiguration
   }
 
   async upsertConnectTrigger(input: unknown): Promise<{ instanceId: string }> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      commandId: rpcIdentifier,
-      botId: rpcBotId,
-      routineId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-      triggerType: rpcString(128),
-    }, {
-      config: rpcJsonRecord,
-    });
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        commandId: rpcIdentifier,
+        botId: rpcBotId,
+        routineId: rpcIdentifier,
+        connectionId: rpcIdentifier,
+        triggerType: rpcString(128),
+      },
+      {
+        config: rpcJsonRecord,
+      },
+    );
     const userId = await this.assertUserIdentity(request.userId as string);
     return (await this.connectContribution()).upsertTrigger({
       userId,
@@ -1137,7 +1141,9 @@ export class UserConfiguration
       triggerType: request.triggerType as string,
       ...(request.config === undefined
         ? {}
-        : { config: request.config as Record<string, string | number | boolean> }),
+        : {
+            config: request.config as Record<string, string | number | boolean>,
+          }),
     });
   }
 
@@ -1149,7 +1155,9 @@ export class UserConfiguration
       routineId: rpcIdentifier,
     });
     await this.assertUserIdentity(request.userId as string);
-    await (await this.connectContribution()).deleteTrigger({
+    await (
+      await this.connectContribution()
+    ).deleteTrigger({
       commandId: request.commandId as string,
       botId: request.botId as string,
       routineId: request.routineId as string,
@@ -1218,7 +1226,10 @@ export class UserConfiguration
       payload: event.payload,
     })) as { status?: string; fireId?: string };
     return receipt.status === "accepted" || receipt.status === "duplicate"
-      ? { status: "accepted", ...(receipt.fireId ? { fireId: receipt.fireId } : {}) }
+      ? {
+          status: "accepted",
+          ...(receipt.fireId ? { fireId: receipt.fireId } : {}),
+        }
       : { status: "ignored" };
   }
 

@@ -3,11 +3,7 @@ import {
   createFakeRoutineEventJudgeV1,
   createUnavailableRoutineEventJudgeV1,
 } from "@frockbot/core/contracts";
-import {
-  routineCueV1,
-  routineFireIdV1,
-  type RoutineFireV1,
-} from "./firing.js";
+import { routineCueV1, routineFireIdV1, type RoutineFireV1 } from "./firing.js";
 import { renderRoutineDeliveryV1 } from "./hook.js";
 import type { RoutineRecordV1 } from "./records.js";
 import {
@@ -230,7 +226,8 @@ describe("classifyRoutineFireOnceV1", () => {
     // Eviction drops the isolate. The fire is still unsettled; the receipt
     // is what the next drain reads.
     const afterEviction = memory();
-    for (const [key, value] of durable.store) afterEviction.store.set(key, value);
+    for (const [key, value] of durable.store)
+      afterEviction.store.set(key, value);
     const replayed = await classifyRoutineFireOnceV1({
       fire: connection,
       routine,

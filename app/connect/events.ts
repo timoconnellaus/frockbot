@@ -15,9 +15,7 @@ export const CONNECT_EVENT_BODY_MAX_BYTES = 64 * 1024;
 const TEXT = new TextEncoder();
 
 export type ConnectEventKindV1 =
-  | "trigger.message"
-  | "trigger.disabled"
-  | "connected_account.expired";
+  "trigger.message" | "trigger.disabled" | "connected_account.expired";
 
 export interface ConnectEventV1 {
   kind: ConnectEventKindV1;
@@ -116,14 +114,9 @@ export function decodeConnectEventV1(value: unknown): ConnectEventV1 {
   const type = stringField(root, "type", "event_type") ?? "";
   const kind = eventKindV1(type);
   if (!kind) throw new ConnectEventError(400, "event kind is unknown");
-  const eventId = stringField(
-    root,
-    "id",
-    "event_id",
-    "log_id",
-    "logId",
-  );
-  const userId = stringField(data, "user_id", "userId") ??
+  const eventId = stringField(root, "id", "event_id", "log_id", "logId");
+  const userId =
+    stringField(data, "user_id", "userId") ??
     stringField(root, "user_id", "userId");
   if (!eventId || !userId) {
     throw new ConnectEventError(400, "event omitted its id or user");

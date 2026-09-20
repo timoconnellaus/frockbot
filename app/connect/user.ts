@@ -311,7 +311,9 @@ export class ConnectUserBackendContribution {
     const offers: ConnectTriggerOfferV1[] = [];
     for (const connection of ready) {
       try {
-        const types = await this.client.listTriggerTypes(connection.toolkitSlug);
+        const types = await this.client.listTriggerTypes(
+          connection.toolkitSlug,
+        );
         offers.push(...connectTriggerOffersV1(connection, types));
       } catch {
         // One app that cannot list its events must not hide the others.
@@ -361,7 +363,9 @@ export class ConnectUserBackendContribution {
       ...(input.config === undefined ? {} : { config: input.config }),
     });
     if (previousId && previousId !== instance.id) {
-      await this.client.deleteTriggerInstance(previousId).catch(() => undefined);
+      await this.client
+        .deleteTriggerInstance(previousId)
+        .catch(() => undefined);
       await this.host.storage.delete(connectTriggerInstanceKeyV1(previousId));
     }
     const record: ConnectTriggerInstanceRecordV1 = {
@@ -372,7 +376,10 @@ export class ConnectUserBackendContribution {
       connectionId: input.connectionId,
       triggerType: input.triggerType,
     };
-    await this.host.storage.put(connectTriggerInstanceKeyV1(instance.id), record);
+    await this.host.storage.put(
+      connectTriggerInstanceKeyV1(instance.id),
+      record,
+    );
     await this.host.storage.put(heldKey, instance.id);
     const receipt: ConnectTriggerEffectReceiptV1 = {
       schemaVersion: 1,
@@ -398,10 +405,11 @@ export class ConnectUserBackendContribution {
     if (replayed?.status === "deleted") return;
     const heldKey = connectTriggerByRoutineKeyV1(input.botId, input.routineId);
     const instanceId =
-      replayed?.instanceId ??
-      (await this.host.storage.get<string>(heldKey));
+      replayed?.instanceId ?? (await this.host.storage.get<string>(heldKey));
     if (instanceId && this.client) {
-      await this.client.deleteTriggerInstance(instanceId).catch(() => undefined);
+      await this.client
+        .deleteTriggerInstance(instanceId)
+        .catch(() => undefined);
       await this.host.storage.delete(connectTriggerInstanceKeyV1(instanceId));
     }
     await this.host.storage.delete(heldKey);
