@@ -82,7 +82,7 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 - Binding `USER_CONFIGURATIONS`; id `idFromName(userId)`.
 - Authoritative for the User's Composition — the installed Plugin set, its generations, last known good and quarantine — reached through the composition RPCs a Bot calls (§5).
 - Authoritative for the Applet directory: which Bot owns each Applet, which Bots it is shared with, and whether it is available (§9). The Bot lifecycle saga applies each lifecycle's Applet consequence in the same transaction.
-- Its constructor runs the receipted, disposable Applet cleanup (`applet-test-state-cleanup.ts`) under `blockConcurrencyWhile`.
+- Its constructor runs receipted, disposable cleanups under `blockConcurrencyWhile` (`applet-test-state-cleanup.ts`, `avatar-state-cleanup.ts`, `default-packages-marker-cleanup.ts`) before any request or alarm. `cleanDefaultPackagesMarkerV1` (`default-packages-marker-cleanup.ts`) deletes pre-ledger `{ schemaVersion: 1 | 2 | 3 }` bootstrap markers under `maintenance:default-packages-marker:2026-09-20`; the default-Package bootstrap decoder accepts only the v4 ledger.
 - The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to two plugin stores: transcript search FTS5 (`app/search/index-store.ts:143-177`) and audit (`app/audit/store.ts:166-175`). All other state is key-value.
 - One `alarm()` serving credential leases, publisher and template recovery, flock sagas, archived-Bot sweeps and deleted Applets' state and source cleanup.
 - Owns [General bootstrap](../app/flock/README.md#general-bootstrap); the [first-run guidance](../README.md#getting-started) describes how the shared Flutter client opens it and offers editable suggestions.

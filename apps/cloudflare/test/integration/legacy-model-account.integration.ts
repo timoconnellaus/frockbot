@@ -1,10 +1,8 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import {
-  LEGACY_DEFAULT_PACKAGES_MARKER_KEY,
   LEGACY_SETTINGS_STATE_KEY,
   legacyBotSettingsRecordV1,
-  legacyDefaultPackagesMarkerV1,
   legacyUserSettingsRecordV1,
 } from "../legacy-model-account.ts";
 import {
@@ -28,7 +26,6 @@ describe("legacy model account migration through the gateway", () => {
       async (_instance, state) => {
         await state.storage.put({
           [LEGACY_SETTINGS_STATE_KEY]: legacyUserSettingsRecordV1(),
-          [LEGACY_DEFAULT_PACKAGES_MARKER_KEY]: legacyDefaultPackagesMarkerV1(),
         });
       },
     );

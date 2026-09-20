@@ -6,8 +6,6 @@
  */
 
 export const LEGACY_SETTINGS_STATE_KEY = "user-configuration";
-export const LEGACY_DEFAULT_PACKAGES_MARKER_KEY =
-  "user-default-packages-bootstrap:v1";
 
 export const LEGACY_OLLAMA_CONNECTION_ID = "ollama-legacy";
 export const LEGACY_OLLAMA_MODEL_ID = "glm-5.3-flash:cloud";
@@ -149,8 +147,4 @@ export function legacyBotSettingsRecordV1(
       providerModelId: LEGACY_OLLAMA_MODEL_ID,
     },
   };
-}
-
-export function legacyDefaultPackagesMarkerV1(): Record<string, unknown> {
-  return { schemaVersion: 1 };
 }
