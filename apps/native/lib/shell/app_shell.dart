@@ -1270,14 +1270,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// The look the thread should paint: the settings controller's, once it
   /// has loaded, so a choice on the Look page lands in the same frame.
-  ({BotLook look, Map<String, Object?>? document}) _resolvedLook(
-    wire.BotRegistration bot,
-  ) {
+  ({BotLook look, Object? document}) _resolvedLook(wire.BotRegistration bot) {
     final settings = botSettings;
     if (settings != null &&
         settings.botId == bot.botId.value &&
         settings.loaded) {
-      return (look: settings.look, document: settings.lookDocument?.toJson());
+      final stored = settings.lookDocument;
+      return (
+        look: settings.look,
+        document: stored == null ? null : encodeThemeDocument(stored),
+      );
     }
     return (look: parseBotLook(bot.look), document: bot.document?.toJson());
   }

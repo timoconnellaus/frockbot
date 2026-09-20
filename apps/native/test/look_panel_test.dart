@@ -10,8 +10,10 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'navigation_test.dart' show registration;
 import 'shell_layout_test.dart' show byIdentifier;
-import 'theme_paint_test.dart' show threadTheme;
 import 'widget_test.dart' show MemoryStore;
+
+Theme threadTheme(WidgetTester tester, String botId) =>
+    tester.widget<Theme>(find.byKey(ValueKey('thread-theme-$botId')));
 
 class LookHarness extends NativeApi {
   final MemoryStore memory;
@@ -86,10 +88,6 @@ void main() {
       final api = LookHarness(store);
       final sessions = BotSessions(api: api, store: store);
       final links = ValueNotifier<String?>(null);
-      addTearDown(() {
-        sessions.clear();
-        links.dispose();
-      });
       await tester.pumpWidget(
         MaterialApp(
           theme: FrockTheme.theme(Brightness.dark),
@@ -129,6 +127,11 @@ void main() {
         threadTheme(tester, 'alpha').data.scaffoldBackgroundColor,
         FrockTheme.fromDocument(ThemeDocument.studio).scaffoldBackgroundColor,
       );
+
+      await tester.pumpWidget(const SizedBox());
+      sessions.clear();
+      links.dispose();
+      await tester.pump();
     },
   );
 }

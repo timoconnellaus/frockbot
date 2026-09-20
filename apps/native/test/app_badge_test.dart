@@ -454,9 +454,9 @@ void main() {
       // empty local map is unknown, not an authoritative zero, so nothing may
       // cross the dock channel and take an existing badge away.
       expect(find.text('Alpha'), findsOneWidget);
-      // The list's row, the conversation's bar, and the Bot page the panel
-      // opens on, which names the Bot it is about.
-      expect(find.text('Beta'), findsNWidgets(3));
+      // The list's row and the Bot page the panel opens on, which names the
+      // Bot it is about. The conversation bar no longer repeats the name.
+      expect(find.text('Beta'), findsNWidgets(2));
       expect(calls, isEmpty);
 
       fanOut.complete({
