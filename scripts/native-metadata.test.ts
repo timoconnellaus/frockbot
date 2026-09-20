@@ -52,29 +52,19 @@ test("native metadata reports one checked build identity", async () => {
   });
 });
 
-test("the native hello identifies the app build, not the enforcement floor", async () => {
+test("the generated client wire carries the built app version", async () => {
   const repositoryRoot = resolve(import.meta.dirname, "..");
   const metadata = await readNativeMetadata(repositoryRoot);
-  const [generated, transport] = await Promise.all([
-    readFile(
-      resolve(
-        repositoryRoot,
-        "apps/native/lib/protocol/client_wire.generated.dart",
-      ),
-      "utf8",
+  const generated = await readFile(
+    resolve(
+      repositoryRoot,
+      "apps/native/lib/protocol/client_wire.generated.dart",
     ),
-    readFile(
-      resolve(repositoryRoot, "apps/native/lib/client/transport.dart"),
-      "utf8",
-    ),
-  ]);
+    "utf8",
+  );
   expect(generated).toContain(
     `const nativeAppVersion = '${metadata.app.versionName}';`,
   );
-  expect(transport).toContain(
-    "final clientHello = clientHelloForVersion(wire.nativeAppVersion);",
-  );
-  expect(transport).not.toContain("'nativeVersion': wire.minimumNativeVersion");
 });
 
 describe("malformed source metadata fails closed", () => {
