@@ -897,24 +897,43 @@ export async function press(scope: Locator): Promise<void> {
  * Open the Bot page: what the selected Bot is doing, and the doors to the rest
  * of it.
  *
- * A desk already shows that page in the column beside the thread — or one
- * back from a sub-page, or the panel switch if the column is closed. A phone
- * still opens it from the Bot's name in the conversation bar.
+ * A phone still opens it from the Bot's name in the conversation bar. A desk
+ * already shows it in the column beside the thread — or several backs from a
+ * nested page (Settings, then Plugins), or the panel switch if the column is
+ * closed.
+ *
+ * Presence in the tree is not enough. A closed drawer and a phone page that
+ * covered the conversation still leave the pill and the back chevron in the
+ * semantics tree, and pressing those hidden nodes either times out or closes
+ * the column that was already open.
  */
 export async function openBotPage(page: Page): Promise<void> {
   const botPage = sem(page, "bot-page").first();
-  if ((await botPage.count()) > 0 && (await botPage.isVisible())) return;
-  const pill = sem(page, "bot-panel-toggle");
-  if ((await pill.count()) > 0) {
-    await press(pill.first());
-  } else if ((await sem(page, "right-panel-back").count()) > 0) {
-    await press(sem(page, "right-panel-back"));
-  } else {
-    await press(sem(page, "right-panel-toggle"));
+  if (await botPage.isVisible().catch(() => false)) return;
+
+  const pill = sem(page, "bot-panel-toggle").first();
+  if (await pill.isVisible().catch(() => false)) {
+    await press(pill);
+    await expect(botPage).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+    return;
   }
-  await expect(botPage).toBeVisible({
-    timeout: SHELL_TIMEOUT_MS,
-  });
+
+  await expect(async () => {
+    if (await botPage.isVisible().catch(() => false)) return;
+    const back = sem(page, "right-panel-back");
+    if (await back.isVisible().catch(() => false)) {
+      await press(back);
+      await settle(page);
+      return;
+    }
+    const panel = sem(page, "shell-right-panel");
+    if (!(await panel.isVisible().catch(() => false))) {
+      await press(sem(page, "right-panel-toggle"));
+      await settle(page);
+      return;
+    }
+    await expect(botPage).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: SHELL_TIMEOUT_MS });
 }
 
 /**
