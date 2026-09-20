@@ -2438,6 +2438,13 @@
   .inside-teaser-copy > p:not(.section-label) {
     font-size: 0.9rem;
   }
+  /* The shared `.button` rule refuses to wrap, so this CTA would hold the
+     single teaser column at its 295px min-content width — wider than the
+     card's content box below ~375px, and wider than the viewport below
+     ~335px. Let it wrap here. */
+  .inside-teaser .button {
+    white-space: normal;
+  }
   .inside-teaser-section {
     padding: 30px 0 60px;
   }
