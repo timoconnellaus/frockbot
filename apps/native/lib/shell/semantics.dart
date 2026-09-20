@@ -312,6 +312,9 @@ abstract final class RoutineIds {
   static const document = 'routines-document';
   static const refresh = 'routines-refresh';
   static const panel = 'routines-panel';
+
+  /// The list's New Routine button, which opens the editor as its own page.
+  static const create = 'routine-create';
   static const editor = 'routine-editor';
   static const sourceSchedule = 'routine-source-schedule';
   static const sourceWebhook = 'routine-source-webhook';
@@ -327,9 +330,8 @@ abstract final class RoutineIds {
   static const confirmDelete = 'routine-delete-confirm';
 
   /// The editor's fields are the projection's own ids, so a spec names them the
-  /// way it names any other field. There is one form on the surface — a new
-  /// Routine, or the one the reader asked to edit — so the ids do not carry a
-  /// Routine in them.
+  /// way it names any other field. There is one form — a new Routine, or the
+  /// one the reader asked to edit — so the ids do not carry a Routine in them.
   static String editorField(String field) =>
       viewFieldIdentifierV1('routine.$field');
 

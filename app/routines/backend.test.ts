@@ -224,7 +224,7 @@ describe("Routines gateway routes", () => {
     expect(JSON.stringify(document)).toContain("Happened 2 times");
   });
 
-  test("`as=document` is the only parameter, and only on the list read", async () => {
+  test("`as=document` takes `edit` and `new`, and nothing else", async () => {
     const route = contribution();
     expect(
       (await call(route, "/api/bots/scout/routines?as=frame"))?.status,
@@ -236,6 +236,32 @@ describe("Routines gateway routes", () => {
     expect(
       (await call(route, "/api/bots/scout/routines/inbox?as=document"))?.status,
     ).toBe(400);
+    expect(
+      (await call(route, "/api/bots/scout/routines?as=document&new=1"))?.status,
+    ).toBe(200);
+    expect(
+      (await call(route, "/api/bots/scout/routines?as=document&edit=missing"))
+        ?.status,
+    ).toBe(200);
+  });
+
+  test("`new=1` is the empty form, not the list with a form on it", async () => {
+    const route = contribution();
+    await call(route, "/api/bots/scout/routines", {
+      method: "POST",
+      body: JSON.stringify(CREATE),
+    });
+    const created = (await (
+      await call(route, "/api/bots/scout/routines?as=document&new=1")
+    )!.json()) as { root: { children: { title?: string }[] } };
+    const titles = created.root.children.map((child) => child.title);
+    expect(titles).toEqual(["New Routine"]);
+    const listed = (await (
+      await call(route, "/api/bots/scout/routines?as=document")
+    )!.json()) as { root: { children: { title?: string }[] } };
+    expect(listed.root.children.map((child) => child.title)).not.toContain(
+      "New Routine",
+    );
   });
 
   test("answers nothing without an authenticated User", async () => {

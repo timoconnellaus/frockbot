@@ -54,15 +54,19 @@ export interface RoutinesFrameV1 {
   inbox: RoutineInboxEntryViewV1[];
   unacknowledged: number;
   /**
-   * The Routine the reader asked to edit, if any. There is one editor on the
-   * surface, seeded from here, rather than a form per Routine: a form per
-   * Routine would be a second copy of every prompt in the document and would
-   * spend one of the thirty-two declared actions on each of them.
+   * The Routine the reader asked to edit, if any. The editor is its own
+   * document — a form per Routine would be a second copy of every prompt in
+   * the list, and the list a person came to read is not a form.
    *
-   * Which Routine that is is navigation — the host asks for the document
-   * again, naming it — so no route owns the choice.
+   * Which Routine that is is navigation — the host asks for this document
+   * rather than the list, naming it — so no route owns the choice.
    */
   editing?: RoutineViewV1;
+  /**
+   * The reader asked for a new Routine. The document is that empty form, not
+   * the list with a form on it.
+   */
+  creating?: true;
 }
 
 /** The renderer's node budget, checked before it builds a widget. */
@@ -164,8 +168,10 @@ export function routinesRevisionV1(frame: RoutinesFrameV1): number {
     frame.botId,
     frame.unacknowledged,
     // The editor's seeds are part of what the document says, so naming a
-    // different Routine moves the revision and the host adopts a controller
-    // whose field values are answers to the form now on screen.
+    // different Routine — or asking for a new one — moves the revision and
+    // the host adopts a controller whose field values are answers to the
+    // form now on screen.
+    frame.creating === true,
     frame.editing?.routineId ?? "",
     frame.routines.map((routine) => [
       routine.routineId,
@@ -283,9 +289,8 @@ function field(
 /**
  * The one editor: a new Routine, or the one the reader asked to edit.
  *
- * Collapsed when nothing is being edited, so a surface a person came to read
- * is not mostly a form. Expanded the moment a Routine is named, because being
- * named is what asked for it.
+ * This is the whole document when it is shown. The list never carries it,
+ * collapsed or otherwise — a surface someone came to read is not a form.
  */
 function editorNode(frame: RoutinesFrameV1): ViewNode {
   const editing = frame.editing;
@@ -303,7 +308,6 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
     type: "group",
     orientation: "column",
     title: editing ? `Edit ${editing.name}` : "New Routine",
-    collapsed: editing === undefined,
     children: [
       field(ids.editorId, "Routine", editing?.routineId ?? null, {
         choiceSource: "routine-editor-hidden",
@@ -385,15 +389,14 @@ function inboxNode(entry: RoutineInboxEntryViewV1): ViewNode {
   };
 }
 
-/** A `RoutinesFrame` as a `ViewDocument`. */
-export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
-  const children: ViewNode[] = [editorNode(frame)];
-  // The root, the editor's group with its six fields and its controls in their
-  // row, the two section groups, plus what the tail always costs: the empty or
-  // overflow line, the inbox's own group, its empty line and "Mark all read".
-  // Reserved up front so the last Routine admitted cannot be the reason the
-  // editor or the inbox does not fit.
-  let nodes = 24;
+/** The list half: what is armed, and what it left behind. */
+function listChildren(frame: RoutinesFrameV1): ViewNode[] {
+  const children: ViewNode[] = [];
+  // The root, the two section groups, plus what the tail always costs: the
+  // empty or overflow line, the inbox's own group, its empty line and
+  // "Mark all read". Reserved up front so the last Routine admitted cannot
+  // be the reason the inbox does not fit.
+  let nodes = 16;
   let complete = true;
   // The Routine's own group, its line, the controls' row and the two controls
   // in it.
@@ -496,7 +499,15 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
     title: "Completions",
     children: inbox,
   });
+  return children;
+}
 
+/** A `RoutinesFrame` as a `ViewDocument`. */
+export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
+  const children =
+    frame.creating === true || frame.editing !== undefined
+      ? [editorNode(frame)]
+      : listChildren(frame);
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
     surfaceId: "routines",

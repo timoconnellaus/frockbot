@@ -188,12 +188,40 @@ Map<String, Object?> routinesDocument({
         'additionalProperties': false,
       },
     },
+    {
+      'id': 'edit-routine',
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'kind': {
+            'type': 'string',
+            'enum': ['edit-routine'],
+          },
+          'routineId': {'type': 'string', 'maxLength': 128},
+        },
+        'required': ['kind', 'routineId'],
+        'additionalProperties': false,
+      },
+    },
+    {
+      'id': 'cancel-edit',
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'kind': {
+            'type': 'string',
+            'enum': ['cancel-edit'],
+          },
+        },
+        'required': ['kind'],
+        'additionalProperties': false,
+      },
+    },
   ],
 };
 
 /// The editor as `routinesDocumentV1` projects it: the field the host draws,
-/// and the hidden fields that seed it. `collapsed` is what an unnamed Routine
-/// starts as.
+/// and the hidden fields that seed it. The list never carries this group.
 Map<String, Object?> routinesEditorGroup(Map<String, Object?>? editing) {
   final seeds = <String, Object?>{
     'routine.editorId': editing?['routineId'],
@@ -209,7 +237,6 @@ Map<String, Object?> routinesEditorGroup(Map<String, Object?>? editing) {
     'type': 'group',
     'orientation': 'column',
     'title': editing == null ? 'New Routine' : 'Edit ${editing['name']}',
-    'collapsed': editing == null,
     'children': [
       for (final seed in seeds.entries)
         {
@@ -280,7 +307,7 @@ Map<String, Object?> routineRow(Map<String, Object?> routine) {
   };
 }
 
-/// The surface with the editor on it, above the rows it sits above.
+/// The editor page: the form alone, not the list with a form on it.
 Map<String, Object?> routinesDocumentWithEditor({
   List<Map<String, Object?>> routines = const [],
   Map<String, Object?>? editing,
@@ -291,13 +318,38 @@ Map<String, Object?> routinesDocumentWithEditor({
   'root': {
     'type': 'group',
     'orientation': 'column',
-    'children': [
-      routinesEditorGroup(editing),
-      for (final routine in routines) routineRow(routine),
-    ],
+    'children': [routinesEditorGroup(editing)],
   },
   'actions': routinesDocument()['actions'],
 };
+
+/// The list page: what is armed, without the form.
+Map<String, Object?> routinesListDocument({
+  List<Map<String, Object?>> routines = const [],
+}) => {
+  'schemaVersion': 1,
+  'surfaceId': 'routines',
+  'revision': 2,
+  'root': {
+    'type': 'group',
+    'orientation': 'column',
+    'children': [for (final routine in routines) routineRow(routine)],
+  },
+  'actions': routinesDocument()['actions'],
+};
+
+/// The document the path asked for: the empty form, a named form, or the list.
+Map<String, Object?> routinesDocumentForPath(
+  String path, {
+  List<Map<String, Object?>> routines = const [],
+  Map<String, Object?>? editing,
+}) {
+  if (path.contains('new=1')) return routinesDocumentWithEditor();
+  if (path.contains('edit=')) {
+    return routinesDocumentWithEditor(editing: editing, routines: routines);
+  }
+  return routinesListDocument(routines: routines);
+}
 
 /// The surface above, with the action `routinesDocumentV1` declares for Save:
 /// pressing it carries the four field values the form holds, which is what a
@@ -339,8 +391,8 @@ int dayControl(WidgetTester tester) => tester
     .state<FormFieldState<int>>(find.byType(DropdownButtonFormField<int>))
     .value!;
 
-/// The surface as a page, on a display tall enough to hold all of it: a form
-/// and the rows under it are both things these tests press.
+/// The list as a page, on a display tall enough to hold it and the editor it
+/// pushes.
 Widget routinesPage(SettingsApi api, MemoryStore store) {
   return MaterialApp(
     theme: FrockTheme.theme(Brightness.dark),
@@ -350,6 +402,25 @@ Widget routinesPage(SettingsApi api, MemoryStore store) {
       userId: 'tim',
       botId: 'bot-1',
       botName: 'Scout',
+    ),
+  );
+}
+
+/// The editor as its own page, which is how a row and the New Routine
+/// button open it.
+Widget routinesEditorPage(
+  SettingsApi api,
+  MemoryStore store, {
+  String? routineId,
+}) {
+  return MaterialApp(
+    theme: FrockTheme.theme(Brightness.dark),
+    home: RoutineEditorPage(
+      api: api,
+      store: store,
+      userId: 'tim',
+      botId: 'bot-1',
+      routineId: routineId,
     ),
   );
 }
@@ -492,7 +563,7 @@ void main() {
           ],
         };
       }
-      return routinesDocumentWithEditor();
+      return routinesDocumentForPath(path);
     });
     await tester.pumpWidget(routinesPage(api, store));
     await tester.pumpAndSettle();
@@ -510,10 +581,12 @@ void main() {
     final store = MemoryStore();
     final api = SettingsApi(store, (path, body) async {
       if (path.endsWith('/plugins')) return {'plugins': []};
-      return routinesDocumentWithEditor();
+      return routinesDocumentForPath(path);
     });
     await tester.pumpWidget(routinesPage(api, store));
     await tester.pumpAndSettle();
+    expect(find.byType(FilledButton), findsOneWidget);
+    expect(find.text('Routine name'), findsNothing);
     await tester.tap(find.text('New Routine'));
     await tester.pumpAndSettle();
     expect(find.text('Continue'), findsNothing);
@@ -533,7 +606,8 @@ void main() {
     final api = SettingsApi(store, (path, body) async {
       if (path.endsWith('/plugins')) return catalog.future;
       if (body == null) {
-        return routinesDocumentWithEditor(
+        return routinesDocumentForPath(
+          path,
           routines: [
             {
               'routineId': 'r1',
@@ -610,7 +684,7 @@ void main() {
           },
         );
       });
-      await tester.pumpWidget(routinesPage(api, store));
+      await tester.pumpWidget(routinesEditorPage(api, store, routineId: 'r1'));
       await tester.pumpAndSettle();
 
       // The document landed and the catalog did not: the stored trigger is one
@@ -639,7 +713,8 @@ void main() {
     final sent = <Map<String, Object?>>[];
     final api = SettingsApi(store, (path, body) async {
       if (body == null) {
-        return routinesDocumentWithEditor(
+        return routinesDocumentForPath(
+          path,
           routines: [
             {
               'routineId': 'r1',
@@ -674,14 +749,17 @@ void main() {
     await tester.pumpWidget(routinesPage(api, store));
     await tester.pumpAndSettle();
 
-    // The editor is seeded from the Routine it names, so it is the edit form.
-    expect(find.text('Run now'), findsOneWidget);
-
-    // And the control beside it still pauses the Routine whose row it is.
+    // A row still pauses the Routine it names while the editor is a page of
+    // its own, not a form sitting on the list.
     await tester.tap(find.text('Pause'));
     await tester.pumpAndSettle();
     expect(sent.single['routineId'], 'r1');
     expect(sent.single['type'], 'routine/pause');
+
+    await tester.tap(find.text('Edit').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Run now'), findsOneWidget);
+    expect(find.text('Second brief'), findsWidgets);
   });
 
   testWidgets('the interval control shows the interval the value holds', (
@@ -709,7 +787,7 @@ void main() {
         'status': 'applied',
       };
     });
-    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpWidget(routinesEditorPage(api, store, routineId: 'r1'));
     await tester.pumpAndSettle();
     expect(find.text('Interval'), findsOneWidget);
 
@@ -753,7 +831,7 @@ void main() {
         'status': 'applied',
       };
     });
-    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpWidget(routinesEditorPage(api, store, routineId: 'r1'));
     await tester.pumpAndSettle();
 
     // Friday is a day of the week, not a day of the month: the control the
@@ -795,7 +873,7 @@ void main() {
           'status': 'applied',
         };
       });
-      await tester.pumpWidget(routinesPage(api, store));
+      await tester.pumpWidget(routinesEditorPage(api, store, routineId: 'r1'));
       await tester.pumpAndSettle();
 
       // Twenty is not one of the week's seven days, so the control the switch
@@ -840,7 +918,7 @@ void main() {
         'status': 'applied',
       };
     });
-    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpWidget(routinesEditorPage(api, store, routineId: 'r1'));
     await tester.pumpAndSettle();
     // A scheduled Routine has no key to mint, whatever the form is about to
     // save it as.
@@ -883,7 +961,7 @@ void main() {
         'status': 'applied',
       };
     });
-    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpWidget(routinesEditorPage(api, store, routineId: 'r1'));
     await tester.pumpAndSettle();
     expect(find.text('Rotate key'), findsOneWidget);
 
