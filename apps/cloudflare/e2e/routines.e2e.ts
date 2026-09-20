@@ -133,15 +133,16 @@ test("deleting a Routine asks first, and Cancel keeps it", async ({
   await expect(confirm).toBeVisible();
   await expect(confirm).toContainText("run log");
 
-  // Cancelling keeps it, and leaves the panel exactly as it was. That the
-  // Routine survived the asking is checked here rather than while the
+  // Cancelling keeps the Routine and stays on the editor — the list is one
+  // page back. That it survived is checked here rather than while the
   // confirmation is up: a modal takes the surface behind it out of the
   // accessibility tree, so there is nothing to count until it closes.
   await confirm.getByText("Cancel").click();
   await expect(confirm).toHaveCount(0);
-  await expect(card).toBeVisible();
+  await expect(sem(page, "routine-editor")).toBeVisible();
+  await expect(documentField(page, "routine.name")).toBeVisible();
 
-  // Confirming is what deletes it.
+  // Confirming is what deletes it, and the editor pops back to the list.
   await press(action(page, "delete-routine"));
   await confirm.getByText("Delete Routine").click();
   await expect(card).toHaveCount(0, { timeout: 60_000 });
