@@ -79,10 +79,9 @@ function memory() {
 }
 
 describe("routineEventEvidenceV1", () => {
-  test("schedule, webhook, and Plugin firings are not evidence", () => {
+  test("schedule, webhook, and manual firings are not evidence", () => {
     expect(routineEventEvidenceV1({ fire: fire("cron") })).toBeUndefined();
     expect(routineEventEvidenceV1({ fire: fire("webhook") })).toBeUndefined();
-    expect(routineEventEvidenceV1({ fire: fire("plugin") })).toBeUndefined();
     expect(routineEventEvidenceV1({ fire: fire("manual") })).toBeUndefined();
   });
 
@@ -126,7 +125,7 @@ describe("projectRoutineEventPayloadV1", () => {
 });
 
 describe("classifyRoutineFireOnceV1", () => {
-  test("schedule, webhook, and Plugin firings never ask", async () => {
+  test("schedule, webhook, and manual firings never ask", async () => {
     let asked = 0;
     const judge = createFakeRoutineEventJudgeV1({
       classify: async () => {
@@ -135,7 +134,7 @@ describe("classifyRoutineFireOnceV1", () => {
       },
     });
     const { read, write } = memory();
-    for (const trigger of ["cron", "webhook", "plugin", "manual"] as const) {
+    for (const trigger of ["cron", "webhook", "manual"] as const) {
       expect(
         await classifyRoutineFireOnceV1({
           fire: fire(trigger),

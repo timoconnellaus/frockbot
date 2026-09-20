@@ -27,15 +27,15 @@ const evidence: RoutineEventEvidenceV1 = {
 };
 
 function answersFor(choice: "clearly_unrelated" | "is_or_might_be"): RoutineEventAnswersV1 {
-  const labels = Object.keys(routineEventQuestionsV1.fit.criteria);
   return {
     fit: {
       type: "choice",
       choice,
       confidence: 0.8,
-      probabilities: Object.fromEntries(
-        labels.map((label) => [label, label === choice ? 0.85 : 0.15]),
-      ),
+      probabilities: {
+        clearly_unrelated: choice === "clearly_unrelated" ? 0.85 : 0.15,
+        is_or_might_be: choice === "is_or_might_be" ? 0.85 : 0.15,
+      },
     },
   };
 }

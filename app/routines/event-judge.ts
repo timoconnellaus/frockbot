@@ -195,10 +195,11 @@ export async function classifyRoutineFireOnceV1(input: {
  */
 export function connectionFireSkipV1(
   verdict: RoutineEventVerdictV1 | undefined,
-): Extract<RoutineFireOutcomeV1, { status: "skipped" }> | undefined {
+): RoutineFireOutcomeV1 | undefined {
   if (verdict !== "clearly_unrelated") return undefined;
-  return {
+  const outcome: RoutineFireOutcomeV1 = {
     status: "skipped",
     summary: "The standalone event was clearly not what this Routine is for.",
   };
+  return outcome;
 }
