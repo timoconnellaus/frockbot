@@ -210,6 +210,77 @@ describe("Routines in Workerd", () => {
         .routines,
     ).toEqual([]);
   });
+
+  test("a connected-app create accepts only a Gmail query on trigger config", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `routines-query-${suffix}`,
+      botId: `routines-query-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const envelope = { schemaVersion: 1 as const, ...identity };
+    const trigger = {
+      kind: "connection" as const,
+      connectionId: "conn-gmail",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    };
+
+    let forbidden: unknown;
+    try {
+      await routines(identity.userId, identity.botId).executeRoutineCommand({
+        ...envelope,
+        command: {
+          schemaVersion: 1,
+          type: "routine/create",
+          commandId: `forbidden-${suffix}`,
+          botId: identity.botId,
+          routineId: "inbox",
+          name: "Inbox",
+          prompt: "Read shipping mail.",
+          trigger: {
+            ...trigger,
+            config: { labelIds: "INBOX", userId: "someone", interval: 15 },
+          },
+        },
+      });
+    } catch (error) {
+      forbidden = error;
+    }
+    expect(forbidden).toBeInstanceOf(Error);
+    expect((forbidden as Error).message).toMatch(/unknown field/);
+    expect(
+      (await routines(identity.userId, identity.botId).listRoutines(envelope))
+        .routines,
+    ).toEqual([]);
+
+    let queryOnly: unknown;
+    try {
+      await routines(identity.userId, identity.botId).executeRoutineCommand({
+        ...envelope,
+        command: {
+          schemaVersion: 1,
+          type: "routine/create",
+          commandId: `query-${suffix}`,
+          botId: identity.botId,
+          routineId: "inbox",
+          name: "Inbox",
+          prompt: "Read shipping mail.",
+          trigger: { ...trigger, config: { query: "from:stripe.com" } },
+        },
+      });
+    } catch (error) {
+      queryOnly = error;
+    }
+    // Decode accepted the query. This Bot has no Gmail Connection, so the
+    // subscribe is what refuses — not an extra config key.
+    expect(queryOnly).toBeInstanceOf(Error);
+    expect((queryOnly as Error).message).not.toMatch(/unknown field/);
+    expect((queryOnly as Error).message).toMatch(/Connect this app/i);
+    expect(
+      (await routines(identity.userId, identity.botId).listRoutines(envelope))
+        .routines,
+    ).toEqual([]);
+  });
 });
 
 interface StoredRunProbe {

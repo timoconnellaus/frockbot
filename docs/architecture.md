@@ -512,18 +512,14 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   entry is the account's list
 - `RoutinesView` — `lib/routines/page.dart`: what a Bot does on its own and
   what it left behind, reached from the All Routines row on the Bot page — a
-  sub-page of the panel on a desktop, a pushed page on the phone. The projection
-  files each Routine under Scheduled or Webhooks. The host draws each Routine
-  as a door — tap opens the editor, the switch at the end is only the switch —
-  with that Routine's recent completions under it as the same loose rows the
-  Bot page uses. The editor stays inside the right panel (or the phone page),
-  not a second settings screen. That editor is the host's own form
-  (`lib/routines/editor.dart`): the name and instruction, then what starts it —
-  a schedule, a webhook, a connected-app event, or a trigger an enabled
-  Plugin declares, offered by the app's and the Plugin's own names — with
-  only the chosen source's controls underneath. A webhook is never shown a
-  schedule form, and a cron expression, a Plugin id or a trigger slug is
-  never typed. `RoutineRunsPage`
+  sub-page of the panel on a desktop, a pushed page on the phone. The
+  projection files each Routine under Scheduled or Webhooks. The host draws
+  each Routine as a door — tap opens the read-only detail, the switch at the
+  end is only the switch — with that Routine's recent completions under it as
+  the same loose rows the Bot page uses. Conversation authors a Routine
+  ([ADR 0033](adr/0033-conversation-authored-routines.md)); there is no
+  create/edit form. The detail stays inside the right panel (or the phone
+  page), not a second settings screen. `RoutineRunsPage`
   (`lib/routines/runs.dart`) is one Routine's firings, and one firing opens on
   the Work view. `RoutineInboxController` reads the completion inbox once for
   the recent runs the Bot page lists.
@@ -997,7 +993,7 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`app/
 
 **The provider client** (`composio.ts`) is raw `fetch` against the v3.1 REST API with `x-api-key`, verified against the published OpenAPI document on 2026-09-11: auth configs, hosted links, the seven connected-account statuses, `important=true` tool listing, trigger types, trigger-instance upsert and delete, execution, and deletion. Every answer is decoded at that seam.
 
-**Triggers.** A Routine may fire on a connected-app event — `{ kind: "connection", connectionId, triggerType, config? }`. Creating or resuming one upserts a provider instance under the command id; deleting it, or rewriting it onto a schedule, deletes that instance. `GET /api/connect/triggers` lists the events ready Connections offer (Gmail's `GMAIL_NEW_GMAIL_MESSAGE` and `GMAIL_EMAIL_SENT` among them). One deployment-wide `POST /api/connect/events` door HMAC-verifies the raw body with `COMPOSIO_WEBHOOK_SECRET` before any Durable Object is addressed; a `trigger.message` enqueues a firing keyed by the event id, `trigger.disabled` pauses the Routine, and `connected_account.expired` marks the Connection failed and pauses each Routine that fired on it. Disconnect deletes the instances; the Routines may stay enabled. `routine_manage` takes `connectionTrigger` and a `list_triggers` that offers only connected apps' events. Conversation authors the Routine; the prompt names the kind of event. On drain, before the conversational model, Jev classifies the standalone payload against that prompt (`RoutineEventJudgeV1`). Only `clearly_unrelated` skips the Turn — a run-log row, no conversation line, no notification. Unavailable or a timeout is `is_or_might_be` and still admits. Reply-style and empty-ish payloads are not a clear miss: Jev does not have the Gmail thread.
+**Triggers.** A Routine may fire on a connected-app event — `{ kind: "connection", connectionId, triggerType, config? }`. Creating or resuming one upserts a provider instance under the command id; deleting it, or rewriting it onto a schedule, deletes that instance. `GET /api/connect/triggers` lists the events ready Connections offer (Gmail's `GMAIL_NEW_GMAIL_MESSAGE` and `GMAIL_EMAIL_SENT` among them). One deployment-wide `POST /api/connect/events` door HMAC-verifies the raw body with `COMPOSIO_WEBHOOK_SECRET` before any Durable Object is addressed; a `trigger.message` enqueues a firing keyed by the event id, `trigger.disabled` pauses the Routine, and `connected_account.expired` marks the Connection failed and pauses each Routine that fired on it. Disconnect deletes the instances; the Routines may stay enabled. `routine_manage` takes `connectionTrigger` and a `list_triggers` that offers only connected apps' events. Conversation authors the Routine; the prompt names the kind of event. `config` is optional and, when present, only `query` — a Gmail search; the write path refuses `labelIds`, `userId`, `interval`, and any other key. On drain, before the conversational model, Jev classifies the standalone payload against that prompt (`RoutineEventJudgeV1`). Only `clearly_unrelated` skips the Turn — a run-log row, no conversation line, no notification. Unavailable or a timeout is `is_or_might_be` and still admits. Reply-style and empty-ish payloads are not a clear miss: Jev does not have the Gmail thread.
 
 **Secrets.** `COMPOSIO_API_KEY` is the project key (optional in `production-secrets.ts`: absent, no app can be connected and a Bot has no app tools). `COMPOSIO_WEBHOOK_SECRET` verifies event deliveries (optional: absent, the events door answers 503). The harness answers `backend.composio.dev` with `composioStub` (`test/harness/miniflare.ts`), and `connect-apps.integration.ts` walks the row, the sign-in hand-off, the settle, the return page, a Bot's tool call and the disconnect through the gateway.
 

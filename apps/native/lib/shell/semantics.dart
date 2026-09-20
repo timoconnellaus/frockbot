@@ -24,8 +24,8 @@ abstract final class ShellIds {
 
   /// The panel's way back out of a sub-page to the Bot page under it. Only
   /// there while the panel holds a stack; the phone pops a route instead.
-  /// Leaving the Routines editor is not leaving Routines — that press uses
-  /// [panelBackIdentifierV1] so the editor keeps its own id.
+  /// Leaving the Routine detail is not leaving Routines — that press uses
+  /// [panelBackIdentifierV1] so the detail keeps its own id.
   static const rightPanelBack = 'right-panel-back';
   static const rightPanelToggle = 'right-panel-toggle';
   static const scrim = 'shell-scrim';

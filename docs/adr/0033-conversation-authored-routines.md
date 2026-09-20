@@ -28,8 +28,8 @@ already created; new ones are Bot-authored.
 
 ## Consequences
 
-- The Bot writes `config.query` when a Gmail search can narrow the event.
-  Chrome never asks for `labelIds`, `userId`, or `interval`.
+- The write path accepts only `config.query`. Chrome never collects
+  `labelIds`, `userId`, or `interval`.
 - Existing User-authored records keep `createdBy.kind === "user"`. Pause
   and delete in the list remain User chrome and need no `userAsked`.
 - A webhook key is still minted once and shown once, on the receipt.
@@ -37,4 +37,5 @@ already created; new ones are Bot-authored.
   never in a document.
 
 The Jev rejector that may skip a clearly unrelated connected-app event is
-a later cut of the same plan, not this decision.
+a later cut of the same plan, now landed in
+[architecture.md](../architecture.md) §8.

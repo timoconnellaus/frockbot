@@ -1,12 +1,16 @@
 # Conversation-authored Routines
 
-Routines stay a first-party app feature. What changes is who writes them, and
+Landed. Current shape is [architecture.md](architecture.md) §6 and §8; the
+authoring decision is [ADR 0033](adr/0033-conversation-authored-routines.md).
+This page is the cut sequence that got there.
+
+Routines stay a first-party app feature. What changed is who writes them, and
 what happens to a connected-app event before it spends a conversational model
 Turn.
 
-Cut 3 already delivers `{ kind: "connection", connectionId, triggerType, config? }`
-and the deployment-wide events door. This plan is the next slice: the editor
-goes, conversation is the only author, and Jev may drop a clearly unrelated
+Cut 3 already delivered `{ kind: "connection", connectionId, triggerType, config? }`
+and the deployment-wide events door. This plan was the next slice: the editor
+went, conversation is the only author, and Jev may drop a clearly unrelated
 event before the Bot's model runs.
 
 Each cut leaves production Bots able to reply.
@@ -157,10 +161,10 @@ already do.
 
 ## Cuts
 
-Each cut is its own PR. Do not land the rejector in the same change that
-deletes the editor.
+Each cut was its own commit. The rejector did not land in the same commit that
+deleted the editor.
 
-### Cut 1 — List and detail; delete the editor
+### Cut 1 — List and detail; delete the editor — done
 
 Product-visible. Leaves every existing Routine runnable.
 
@@ -198,10 +202,10 @@ Product-visible. Leaves every existing Routine runnable.
 **Out of this cut**
 
 - No Jev call. Events still fire as Cut 3.
-- No stored-shape change. `config?` stays optional and unvalidated against
-  Composio's schema.
+- No stored-shape change in this cut. A later review accepted only `query`
+  on `config`; see [architecture.md](architecture.md) §8.
 
-### Cut 2 — Judge seam, always `is_or_might_be`
+### Cut 2 — Judge seam, always `is_or_might_be` — done
 
 No product change. Proves the drain hook without spending Jev or dropping mail.
 
@@ -214,7 +218,7 @@ No product change. Proves the drain hook without spending Jev or dropping mail.
   ask once per fire id; a replay after eviction does not ask twice for the
   same event id.
 
-### Cut 3 — Labeled Choice question, shadow
+### Cut 3 — Labeled Choice question, shadow — done
 
 Jev runs. Drops are recorded, not enforced.
 
@@ -230,7 +234,7 @@ Jev runs. Drops are recorded, not enforced.
   admit the Turn.
 - Calibrate. False `clearly_unrelated` on a reply fixture blocks Cut 4.
 
-### Cut 4 — Enforce the drop
+### Cut 4 — Enforce the drop — done
 
 - `clearly_unrelated` settles `{ status: "skipped", summary }` and does not
   call `admitTurnV1`.
@@ -267,13 +271,12 @@ a burst. Cut 4 does not land while a reply-style fixture is labeled
 
 ## Delivery sequence
 
-1. Cut 1. Editor gone; Bots still fire every connection event.
-2. Cut 2. Seam only.
-3. Cut 3. Shadow Jev. Read the labels.
+1. Cut 1. Editor gone; Bots still fire every connection event. _Done._
+2. Cut 2. Seam only. _Done._
+3. Cut 3. Shadow Jev. Read the labels. _Done._
 4. Cut 4. Enforce. _Done._
 
-Architecture §6 (Routines surface) and §8 (connected-app triggers) update in
-the cut that changes them. CONTEXT gains a line that conversation authors a
-Routine and that a connection event may skip. No ADR until Cut 1 lands — the
-decision that the editor is not an author is the one worth recording, and it
-is only true once the form is gone.
+Architecture §6 and §8 are the current shape. CONTEXT records that
+conversation authors a Routine and that a connection event may skip.
+[ADR 0033](adr/0033-conversation-authored-routines.md) records that the
+editor is not an author.

@@ -804,11 +804,13 @@ the rows whose status the code moved:
   any turn type (`agent.ts`), and as the Routines surface
   (`apps/native/lib/routines/page.dart`), where "next run" is now the moment the scheduler armed an alarm on, a
   firing appears in the per-Routine run log, and a webhook Routine's delivery URL
-  and key are shown once with rotate and revoke beside them on the one editor a
-  row opens — which is also where Run now, Run log and Delete live, the list
-  itself being rows under Scheduled and Webhooks carrying a pause switch each. The silent half is
-  landed too: an automation Turn is absent from `GET /api/bots/:id/turns` and
-  from the run lookup, reachable only through the run log, and a completed
+  and key are shown once with rotate and revoke beside them on the read-only
+  detail a row opens — which is also where Run now, Run log and Delete live, the
+  list itself being rows under Scheduled and Webhooks carrying a pause switch
+  each. Conversation authors a Routine; there is no create/edit form. The
+  silent half is landed too: an automation Turn is absent from
+  `GET /api/bots/:id/turns` and from the run lookup, reachable only through
+  the run log, and a completed
   firing writes a `RoutineInboxEntryV1` in the transaction that settles it —
   `attribution: "Automation: <name>"` — surfaced as recent-run rows on the Bot
   page and nested under each Routine on All Routines
