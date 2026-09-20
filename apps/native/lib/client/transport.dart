@@ -31,13 +31,15 @@ extension on String {
 }
 
 Map<String, Object> clientHelloForVersion(String nativeVersion) =>
-    <String, Object>{
+    Map<String, Object>.unmodifiable(<String, Object>{
       'schemaVersion': 1,
       'protocolVersion': wire.clientProtocolVersion,
       'nativeVersion': nativeVersion,
-      'catalogs': <Object>[],
-    };
+      'catalogs': const <Object>[],
+    });
+
 final clientHello = clientHelloForVersion(wire.nativeAppVersion);
+
 String randomId() {
   final bytes = List<int>.generate(24, (_) => Random.secure().nextInt(256));
   return 'n${base64Url.encode(bytes).replaceAll('=', '')}';

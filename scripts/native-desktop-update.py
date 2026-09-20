@@ -14,7 +14,6 @@ from functools import cache
 import os
 from pathlib import Path
 import plistlib
-import re
 import shutil
 import subprocess
 import tempfile
