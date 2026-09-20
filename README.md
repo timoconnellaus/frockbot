@@ -506,7 +506,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   custom-models/  Opt-in Bot model override setting, default-disabled
   echo/           Minimal reference feature used by tests and examples
   email/          The deployment's own outbound sender, behind the `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS` bindings, inert until both are set
-  evals/          Development-only model evaluations and their grading, run through `bun run eval:greeting` and `eval:conversation`
+  evals/          Development-only model evaluations and their grading, run through `bun run eval:greeting`, `eval:conversation` and `eval:tool-approval`
   flock/          Durable Bot directory and Bot character avatars
   identity/       The agent runtime's identity system-prompt section
   image/          generate_image through Cloudflare's AI binding, fenced by the Workspace
@@ -522,6 +522,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   shell/          The Bot Durable Object's state, its Turn, the Composition mount, and the hosted geometry
   skills/         Skill catalog, disclosure on demand, managed and Plugin-borne Skills, and the Bot's Workspace seam
   subagents/      Subagent Tasks: the parent Bot's task authority, the Durable Object binding, and their records
+  supervision/    The hosted Jev TurnSupervisor adapter and its decision composition
   testkit/        Shared test doubles and harnesses
   ui-theme/       The Appearance Package definition; it contributes no code
   voice/          Composer dictation and the account-wide voice assistant over the deployment's speech providers
@@ -541,7 +542,7 @@ computer/          The Computer: tools, prompt, state, and the ComputerHostV1 in
   fake/            An in-memory host: the substitution proof, and the suites' fixture
   fly/             The production host implementation: Fly Sprites, its runtime and takeover adapter
 core/
-  contracts/        Session, LLM, prompt, auth Package, and tool execution contracts
+  contracts/        Session, LLM, prompt, auth Package, tool execution, and turn-supervision contracts
   durable/          Bot Durable Object admission, log, cursor, scheduling, and the Composition generation store
   agent-loop/       Concrete event-sourced durable agent loop and Agent registry
   configuration/    Versioned durable User/Bot settings contracts
@@ -573,7 +574,8 @@ docs/
   architecture.md   Current system shape
   grokbot-parity.md The GrokBot capabilities FrockBot must match
   notifications.md  Messages, unread state, notifications and icon badges
-  plan.md           The current plan
+  plan.md           The re-orientation plan
+  jev-supervision-plan.md  Jev turn supervision delivery
   adr/              The decisions, numbered
 ```
 
