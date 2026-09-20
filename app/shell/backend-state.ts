@@ -1,10 +1,10 @@
 import type { ModelBilling } from "../billing/model.js";
 import {
-  createFakeRoutineEventJudgeV1,
   type RoutineEventJudgeV1,
   type TurnTypeV1,
   type WorkspaceFilesV1,
 } from "@frockbot/core/contracts";
+import { createHostedRoutineEventJudgeV1 } from "@frockbot/app/supervision";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
   BotDurableAuthority,
@@ -116,6 +116,11 @@ export interface BotStateEnv {
    * with that reason rather than given an unverifiable one.
    */
   ROUTINE_HOOK_SECRET?: string;
+  /**
+   * The hosted Jev credential. Absent, the routine-event judge never drops.
+   * The key never leaves the chooser.
+   */
+  JEV_API_KEY?: string;
 }
 
 /** Constructs the kernel Bot Durable Object authority this Package runs under. */
@@ -368,7 +373,10 @@ export class ShellBotStateV1 {
       settle: host.settleScheduledWork,
     };
     this.routineEventJudge =
-      host.routineEventJudge ?? createFakeRoutineEventJudgeV1();
+      host.routineEventJudge ??
+      createHostedRoutineEventJudgeV1({
+        JEV_API_KEY: host.env.JEV_API_KEY,
+      });
     this.now = host.now ?? (() => new Date());
     this.sleep =
       host.sleep ??

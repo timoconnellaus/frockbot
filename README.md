@@ -508,7 +508,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   custom-models/  Opt-in Bot model override setting, default-disabled
   echo/           Minimal reference feature used by tests and examples
   email/          The deployment's own outbound sender, behind the `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS` bindings, inert until both are set
-  evals/          Development-only model evaluations and their grading, run through `bun run eval:greeting`, `eval:conversation` and `eval:tool-approval`
+  evals/          Development-only model evaluations and their grading, run through `bun run eval:greeting`, `eval:conversation`, `eval:tool-approval` and `eval:routine-event`
   flock/          Durable Bot directory and Bot character avatars
   identity/       The agent runtime's identity system-prompt section
   image/          generate_image through Cloudflare's AI binding, fenced by the Workspace

@@ -60,7 +60,8 @@
     "validate:build": "bun scripts/validate.ts build",
     "eval:greeting": "bun scripts/eval-greeting.ts",
     "eval:conversation": "bun scripts/eval-conversation.ts",
-    "eval:tool-approval": "bun scripts/eval-tool-approval.ts"
+    "eval:tool-approval": "bun scripts/eval-tool-approval.ts",
+    "eval:routine-event": "bun scripts/eval-routine-event.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.1",

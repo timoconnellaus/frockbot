@@ -142,6 +142,7 @@
     "./routines/bot": "./routines/bot.ts",
     "./routines/cron": "./routines/cron.ts",
     "./routines/definition": "./routines/definition.ts",
+    "./routines/event-judge": "./routines/event-judge.ts",
     "./routines/firing": "./routines/firing.ts",
     "./routines/hook": "./routines/hook.ts",
     "./routines/inbox": "./routines/inbox.ts",
