@@ -396,6 +396,10 @@ still reply.
 - _Done._ The labeled tool-approval eval and adapter contract tests. The Node
   report runner lives in `app/evals/tool-approval-run.ts` so the Worker does
   not import it.
+- _Done._ Production owns `JEV_API_KEY` from the GitHub secret of that name:
+  optional in `production-secrets.ts`, declared on Worker `Env`, and carried
+  by the release and staging deploys. Absent, the chooser is unavailable.
+  The loop is still unwired, so a missing key does not fail the deploy.
 - Add durable supervision effects and usage records.
 - Buffer private model proposals until review.
 - Implement the hard unavailable state and recovery behavior in the loop.
