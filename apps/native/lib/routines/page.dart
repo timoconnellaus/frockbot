@@ -103,6 +103,14 @@ class RoutinesController extends ViewSurfaceController {
   });
 
   @override
+  void adoptCachedDocument(wire.ViewDocument cached) {
+    if (_closed || _document != null || creating || editing != null) return;
+    if (cached.surfaceId.value != surfaceId) return;
+    _document = cached;
+    _changed();
+  }
+
+  @override
   wire.ViewDocument? get document => _document;
   @override
   bool get busy => _busy;
@@ -527,6 +535,7 @@ class _RoutinesViewState extends State<RoutinesView> {
         onLeave: editing ? _leaveEditor : null,
         onView: (view) => _view = view,
         rootView: editing ? null : (root) => ViewRoutineList(node: root),
+        cacheScope: editing ? null : widget.botId,
         banner: (context) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

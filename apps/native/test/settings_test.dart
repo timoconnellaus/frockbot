@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart'
     show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/document_cache.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/settings/controller.dart';
 import 'package:frockbot_native/settings/document.dart';
@@ -107,6 +108,8 @@ Map<String, Object?> document({int revision = 1, Object? model}) => {
 typedef SettingsApi = NativeSessionApi;
 
 void main() {
+  setUp(clearViewDocumentCacheMemory);
+
   group('the projection read back', () {
     test('a save names its section and strips the projected field ids', () {
       expect(

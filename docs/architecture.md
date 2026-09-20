@@ -701,6 +701,17 @@ bytes instead — FNV-1a over what the document says — so `ViewSurfacePage`
 adopts a fresh `ViewController` exactly when what it is showing has changed and
 keeps the one it has when nothing did.
 
+The last list `ViewDocument` for Routines, Plugins, Machines and Settings is
+kept the way a conversation page is (`lib/client/document_cache.dart`):
+memory is what a remount paints from in the tap frame, disk is what a later
+process finds, and the host then lets the live read replace it if the
+revision moved. A shape this build cannot read is discarded wholesale. Editor
+and create documents, minted webhook keys and pairing codes are never written
+there. The Bot page prefetches the Routines list so All Routines can open on
+that cache. The host keeps drawing a document it already holds while a refresh
+is out, and shows chrome (New Routine, search) in the tap frame rather than
+hiding the page behind a spinner.
+
 The `right-panel` region shows one entry at a time rather than stacking every
 registered builder: an entry registers with a label, the panel's stack names
 which one is on screen (see the header and panel stack below), and

@@ -23,6 +23,13 @@ class SettingsController extends ChangeNotifier {
 
   String get surfaceId => 'settings-$home';
 
+  void adoptCachedDocument(wire.ViewDocument cached) {
+    if (_closed || document != null) return;
+    if (cached.surfaceId.value != surfaceId) return;
+    document = cached;
+    _changed();
+  }
+
   void _changed() {
     if (!_closed) notifyListeners();
   }

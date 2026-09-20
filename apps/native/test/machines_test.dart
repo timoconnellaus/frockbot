@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/document_cache.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/machines/page.dart';
 import 'package:frockbot_native/templates/page.dart';
@@ -102,6 +103,8 @@ Map<String, Object?> machinesDocument({bool revoked = false}) => {
 };
 
 void main() {
+  setUp(clearViewDocumentCacheMemory);
+
   testWidgets('the page owns replacement and disposal of its controller', (
     tester,
   ) async {
