@@ -68,7 +68,11 @@ test("the list is not a form, and schedules stay human", async ({
     prompt: "Summarise overnight email.",
     schedule: "0 9 * * *",
   });
-  await press(sem(page, "routines-refresh"));
+  // The panel stays mounted, and its chrome has no refresh. Leaving and
+  // opening All Routines again is how the kept list reads the new Routine.
+  await press(sem(page, "right-panel-back"));
+  await expect(sem(page, "bot-page").first()).toBeVisible();
+  await openRoutines(page);
   const card = group(page, "Morning brief");
   await expect(card).toBeVisible({ timeout: 60_000 });
   await expect(sem(page, "routine-create")).toHaveCount(0);
