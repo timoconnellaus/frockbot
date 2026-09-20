@@ -221,6 +221,7 @@
     "./skills/skill-md": "./skills/skill-md.ts",
     "./skills/testing": "./skills/testing.ts",
     "./skills/write": "./skills/write.ts",
+    "./supervision": "./supervision/index.ts",
     "./subagents": "./subagents/index.ts",
     "./subagents/agent": "./subagents/agent.ts",
     "./subagents/backend": "./subagents/backend.ts",
@@ -266,6 +267,7 @@
     "@frockbot/computer": "workspace:*",
     "@frockbot/core": "workspace:*",
     "@frockbot/providers": "workspace:*",
+    "@typesafe-ai/sdk": "0.6.0",
     "better-auth": "1.7.3",
     "croner": "10.0.1"
   },
