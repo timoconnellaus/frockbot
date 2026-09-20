@@ -735,6 +735,18 @@
     }
   },
   {
+    "name": "Notification with critical urgency",
+    "schema": "Notification",
+    "value": {
+      "notificationId": "1.1.0",
+      "runId": "command-1",
+      "createdAt": "2026-09-05T00:00:00.000Z",
+      "title": "1.1.0",
+      "body": "1.1.0",
+      "urgency": "critical"
+    }
+  },
+  {
     "name": "NotificationList valid",
     "schema": "NotificationList",
     "value": {
