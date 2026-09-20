@@ -224,6 +224,15 @@ void main() {
       expect(tester.getTopLeft(companion).dx, chatHeaderChromeSide);
       expect(tester.getSize(companion).height, chatCompanionSize);
       expect(find.byTooltip('Open Pixel'), findsNothing);
+      expect(find.text('Pixel'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('Pixel')).dx,
+        greaterThan(tester.getTopRight(companion).dx),
+      );
+      expect(
+        tester.getTopLeft(find.text('Pixel')).dy,
+        closeTo(chatHeaderChromeTop + 12, 0.5),
+      );
       expect(find.byTooltip('Computer'), findsNothing);
       expect(
         tester.getTopRight(find.byTooltip('Show the panel')).dx,
@@ -335,6 +344,89 @@ void main() {
     expect(find.byTooltip('Open Rosemary'), findsOneWidget);
     await tester.tap(byIdentifier(ShellIds.botPanelToggle));
     expect(opened, 1);
+  });
+
+  testWidgets('the name sits to the right of the companion on a desk', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      host(
+        ChatHeader(
+          name: 'Rosemary',
+          onTogglePanel: () {},
+          companion: CharacterAvatar(
+            size: chatCompanionSize,
+            cropToInk: true,
+            characterId: 'pixel',
+            motion: CharacterMotion.still,
+            semanticsLabel: 'Bot is ready',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final companion = find.bySemanticsLabel('Bot is ready');
+    final name = find.text('Rosemary');
+    expect(name, findsOneWidget);
+    expect(find.byTooltip('Open Rosemary'), findsNothing);
+    expect(
+      tester.getTopLeft(name).dx,
+      closeTo(tester.getTopRight(companion).dx + 10, 0.5),
+    );
+    expect(
+      tester.getTopLeft(name).dy,
+      greaterThan(tester.getTopLeft(companion).dy),
+    );
+    expect(
+      tester.getTopLeft(name).dy,
+      lessThan(tester.getTopLeft(companion).dy + 24),
+    );
+    expect(
+      tester.getTopRight(name).dx,
+      lessThan(tester.getTopLeft(find.byTooltip('Show the panel')).dx),
+    );
+  });
+
+  testWidgets('on a phone the name pill sits next to the companion', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      host(
+        ChatHeader(
+          name: 'Rosemary',
+          phone: true,
+          onBack: () {},
+          onOpenBot: () {},
+          onComputer: () {},
+          companion: CharacterAvatar(
+            size: chatCompanionSize,
+            cropToInk: true,
+            characterId: 'pixel',
+            motion: CharacterMotion.still,
+            semanticsLabel: 'Bot is ready',
+          ),
+        ),
+        size: const Size(390, 900),
+      ),
+    );
+    await tester.pump();
+    final companion = find.bySemanticsLabel('Bot is ready');
+    final name = find.byTooltip('Open Rosemary');
+    expect(
+      tester.getTopLeft(name).dx,
+      closeTo(tester.getTopRight(companion).dx + 10, 0.5),
+    );
+    expect(tester.getTopLeft(name).dy, chatHeaderChromeTop);
+    expect(
+      tester.getTopLeft(find.byTooltip('Computer')).dx,
+      greaterThan(tester.getTopRight(name).dx),
+    );
   });
 
   testWidgets(
