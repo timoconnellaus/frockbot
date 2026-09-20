@@ -820,6 +820,7 @@ jobs:
             'OPENAI_API_KEY',
             'GEMINI_API_KEY',
             'COMPOSIO_API_KEY',
+            'COMPOSIO_WEBHOOK_SECRET',
             'JEV_API_KEY',
           ].filter((name) => process.env[name]);
           console.log(

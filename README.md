@@ -20,13 +20,14 @@ FrockBot installs into your own Cloudflare account with one command. That is the
 
 Optional keys. Each is asked for once and each can be skipped with Enter; a skipped key leaves that one thing shut and repairs nothing else.
 
-| Key                   | What it enables                                                    |
-| --------------------- | ------------------------------------------------------------------ |
-| `OPENAI_API_KEY`      | dictation in the composer                                          |
-| `GEMINI_API_KEY`      | the voice session: hearing you and speaking back                   |
-| `FCM_SERVICE_ACCOUNT` | push notifications to an Android app you build yourself            |
-| `COMPOSIO_API_KEY`    | Connected apps: a Bot using your Gmail, Slack, Notion and the rest |
-| `DEBUG_TOKEN`         | the read-only `/api/debug` operator surface                        |
+| Key                       | What it enables                                                    |
+| ------------------------- | ------------------------------------------------------------------ |
+| `OPENAI_API_KEY`          | dictation in the composer                                          |
+| `GEMINI_API_KEY`          | the voice session: hearing you and speaking back                   |
+| `FCM_SERVICE_ACCOUNT`     | push notifications to an Android app you build yourself            |
+| `COMPOSIO_API_KEY`        | Connected apps: a Bot using your Gmail, Slack, Notion and the rest |
+| `COMPOSIO_WEBHOOK_SECRET` | Routines that fire on a connected-app event                        |
+| `DEBUG_TOKEN`             | the read-only `/api/debug` operator surface                        |
 
 No model key is needed. Frock AI runs on the account's own `AI` binding, where Auto resolves to a concrete Workers AI chat model, so a deployment with no configuration at all still picks a model for a User who chose none.
 
@@ -507,7 +508,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   custom-models/  Opt-in Bot model override setting, default-disabled
   echo/           Minimal reference feature used by tests and examples
   email/          The deployment's own outbound sender, behind the `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS` bindings, inert until both are set
-  evals/          Development-only model evaluations and their grading, run through `bun run eval:greeting`, `eval:conversation` and `eval:tool-approval`
+  evals/          Development-only model evaluations and their grading, run through `bun run eval:greeting`, `eval:conversation`, `eval:tool-approval` and `eval:routine-event`
   flock/          Durable Bot directory and Bot character avatars
   identity/       The agent runtime's identity system-prompt section
   image/          generate_image through Cloudflare's AI binding, fenced by the Workspace

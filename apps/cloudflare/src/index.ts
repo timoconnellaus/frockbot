@@ -209,6 +209,8 @@ import {
 } from "./deployment-policy.js";
 import { ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE } from "./account-admission.js";
 import { RoutineHookError } from "@frockbot/app/routines/hook";
+import type { ConnectTriggerOfferV1 } from "@frockbot/app/connect/triggers";
+import type { ConnectEventV1 } from "@frockbot/app/connect/events";
 
 import {
   appletStateNameV1,
@@ -333,6 +335,11 @@ interface Env {
   ROUTINE_HOOK_SECRET?: string;
   /** The Connected apps provider key. Absent, no app can be connected. */
   COMPOSIO_API_KEY?: string;
+  /**
+   * HMAC secret for Connected-app event deliveries. Absent closes the
+   * deployment-wide events door.
+   */
+  COMPOSIO_WEBHOOK_SECRET?: string;
   /**
    * Signs every machine token and pairing code. Absent closes the registered
    * machine door: pairing, enrollment and every machine route answer 503
@@ -464,6 +471,17 @@ interface UserScopedProps {
 }
 
 interface BotStateRpc extends BotConfigurationBinding {
+  deliverConnectEvent(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    routineId: string;
+    eventId: string;
+    payload?: unknown;
+  }): Promise<
+    | { status: "accepted" | "duplicate"; fireId: string }
+    | { status: "dropped"; reason: string }
+  >;
   readComputerPresence(): Promise<unknown>;
   executeComputerPresenceCommand(command: ComputerCommandV1): Promise<unknown>;
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
@@ -507,6 +525,15 @@ interface UserConfigurationRpc extends UserConfigurationBinding {
     schemaVersion: 1;
     userId: string;
   }): Promise<FlockBootstrapViewV1>;
+  listConnectTriggers(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<ConnectTriggerOfferV1[]>;
+  handleConnectEvent(request: {
+    schemaVersion: 1;
+    userId: string;
+    event: ConnectEventV1;
+  }): Promise<{ status: "accepted" | "ignored"; fireId?: string }>;
 }
 
 type RpcBoundary<T> = {
@@ -558,6 +585,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     executeRoutineCommand: (request) => rpc.executeRoutineCommand(request),
     listRoutineRuns: (request) => rpc.listRoutineRuns(request),
     deliverRoutineHook: (request) => rpc.deliverRoutineHook(request),
+    deliverConnectEvent: (request) => rpc.deliverConnectEvent(request),
     deliverMachineResult: (request) => rpc.deliverMachineResult(request),
     readRoutineRun: (request) => rpc.readRoutineRun(request),
     listRoutineInbox: (request) => rpc.listRoutineInbox(request),
@@ -682,6 +710,8 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
       rpc.readConfiguration({ ...request, view: request.view ?? 2 }),
     executeConfiguration: (request) => rpc.executeConfiguration(request),
     executeConnection: (request) => rpc.executeConnection(request),
+    listConnectTriggers: (request) => rpc.listConnectTriggers(request),
+    handleConnectEvent: (request) => rpc.handleConnectEvent(request),
     lookupConnectionCommand: (request) => rpc.lookupConnectionCommand(request),
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
@@ -2290,6 +2320,25 @@ const createGatewayBackendContributions = (env: Env) =>
         schemaVersion: 1,
         userId,
         command,
+      }),
+    listConnectTriggers: async (userId) => {
+      const offers = await userConfigurationStub(
+        env,
+        userId,
+      ).listConnectTriggers({
+        schemaVersion: 1,
+        userId,
+      });
+      return Array.isArray(offers) ? offers : [];
+    },
+    ...(typeof env.COMPOSIO_WEBHOOK_SECRET === "string"
+      ? { connectWebhookSecret: env.COMPOSIO_WEBHOOK_SECRET }
+      : {}),
+    handleConnectEvent: (input) =>
+      userConfigurationStub(env, input.userId).handleConnectEvent({
+        schemaVersion: 1,
+        userId: input.userId,
+        event: input.event,
       }),
     lookupConnectionCommand: (userId, packageId, commandId) =>
       userConfigurationStub(env, userId).lookupConnectionCommand({

@@ -24,8 +24,8 @@ abstract final class ShellIds {
 
   /// The panel's way back out of a sub-page to the Bot page under it. Only
   /// there while the panel holds a stack; the phone pops a route instead.
-  /// Leaving the Routines editor is not leaving Routines — that press uses
-  /// [panelBackIdentifierV1] so the editor keeps its own id.
+  /// Leaving the Routine detail is not leaving Routines — that press uses
+  /// [panelBackIdentifierV1] so the detail keeps its own id.
   static const rightPanelBack = 'right-panel-back';
   static const rightPanelToggle = 'right-panel-toggle';
   static const scrim = 'shell-scrim';
@@ -313,32 +313,15 @@ abstract final class RoutineIds {
   static const refresh = 'routines-refresh';
   static const panel = 'routines-panel';
 
-  /// The list's New Routine button, which opens the editor in this surface.
-  static const create = 'routine-create';
-  static const editor = 'routine-editor';
-  static const sourceSchedule = 'routine-source-schedule';
-  static const sourceWebhook = 'routine-source-webhook';
-
-  /// Where the Plugin choices will be, for as long as the read that answers for
-  /// them is still out.
-  static const sourcePluginsPending = 'routine-source-plugins-pending';
-  static String sourcePlugin(String pluginId) => 'routine-source-$pluginId';
-  static String pluginTrigger(String pluginId, String trigger) =>
-      'routine-trigger-$pluginId-$trigger';
   static const inboxDrawer = 'routine-inbox-drawer';
   static const runLog = 'routine-run-log';
   static const confirmDelete = 'routine-delete-confirm';
 
-  /// The editor's way back to the list, and the confirm when the form is dirty.
-  /// On the phone this is the AppBar back. In the right panel it is the
-  /// panel header back while the editor is open.
-  static const editorBack = 'routine-editor-back';
-  static const confirmDiscard = 'routine-discard-confirm';
+  /// The detail's way back to the list. On the phone this is the AppBar back.
+  /// In the right panel it is the panel header back while the detail is open.
+  static const detailBack = 'routine-detail-back';
 
-  /// The editor's fields are the projection's own ids, so a spec names them the
-  /// way it names any other field. There is one form — a new Routine, or the
-  /// one the reader asked to edit — so the ids do not carry a Routine in them.
-  static String editorField(String field) =>
+  static String detailField(String field) =>
       viewFieldIdentifierV1('routine.$field');
 
   /// The minted webhook key, which is host chrome: it comes back on a receipt,
@@ -352,13 +335,13 @@ abstract final class RoutineIds {
   static String action(String actionId) => viewActionIdentifierV1(actionId);
 }
 
-/// The panel header back. Leaving the Routines editor is not leaving
-/// Routines, so that press keeps the editor's own id.
+/// The panel header back. Leaving the Routines detail is not leaving
+/// Routines, so that press keeps the detail's own id.
 String panelBackIdentifierV1({
   required String? panelKey,
   required bool routinesEditorOpen,
 }) => panelKey == 'routines' && routinesEditorOpen
-    ? RoutineIds.editorBack
+    ? RoutineIds.detailBack
     : ShellIds.rightPanelBack;
 
 /// Flock: adding a Bot, and putting one away.

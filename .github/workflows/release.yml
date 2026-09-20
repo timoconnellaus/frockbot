@@ -1522,6 +1522,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          COMPOSIO_WEBHOOK_SECRET: ${{ secrets.COMPOSIO_WEBHOOK_SECRET }}
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
           JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
         shell: bash
@@ -1718,6 +1719,7 @@ jobs:
           # Absent and the deployed Worker simply 404s those routes.
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          COMPOSIO_WEBHOOK_SECRET: ${{ secrets.COMPOSIO_WEBHOOK_SECRET }}
           # Optional: the `cf-aig-authorization` bearer for the AI Gateway.
           # Present, Frock AI takes the compat HTTP transport, the only one
           # that accepts the `dynamic/<route>` Auto model (cloudflare/ai#617).

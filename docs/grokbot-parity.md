@@ -541,7 +541,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 14  | Exactly what memory was injected is recorded per turn; memory mutated only through one tool                                                                                                   | `store.db kv.*PromptSnapshot`; `update_state` (advisory — files stay writable)                                                                                     | §2.5               | kernel session log                                                                                                                                                                                                                                                                         | landed                                              |
 | 15  | **Routines** — per-Bot definition file (name, prompt, trigger, enabled, provenance, timestamps) and durable run log                                                                           | `automations/<slug>/{automation.json,runs.json}`                                                                                                                   | §2.6               | new `plugin-routines`                                                                                                                                                                                                                                                                      | landed                                              |
 | 16  | Cron triggers in the User Profile timezone with `@daily` shorthands; inbound webhook with its own signing-key store                                                                           | `trigger.type=cron`/`webhook`; `webhook-keys.json`                                                                                                                 | §2.6               | `plugin-routines`                                                                                                                                                                                                                                                                          | landed                                              |
-| 17  | Integration triggers (slack, github, origin, teams, linear, sentry, pagerduty), `group`, manual run                                                                                           | typed trigger schemas; `runs.json trigger:"manual"`                                                                                                                | §2.6               | per-integration Packages                                                                                                                                                                                                                                                                   | partial                                             |
+| 17  | Integration triggers (slack, github, origin, teams, linear, sentry, pagerduty), `group`, manual run                                                                                           | typed trigger schemas; `runs.json trigger:"manual"`                                                                                                                | §2.6               | Connected apps (`kind: "connection"`) + `routine/run`                                                                                                                                                                                                                                      | partial                                             |
 | 18  | A firing runs as a fresh subagent turn under the same Bot id; runs of _different_ Bots overlap, same-routine runs are sequential                                                              | "fresh subagent with the same work capabilities as the parent"; overlapping `runs.json` windows, no lock found                                                     | §2.7, §3.1         | kernel Turn admission                                                                                                                                                                                                                                                                      | landed                                              |
 | 19  | A routine run cannot speak to the user, lands silently in a parent inbox; pause/resume/delete/edit with a card                                                                                | `automation_completion_inbox`; `update_state routine`                                                                                                              | §2.5, §2.7         | `plugin-routines`                                                                                                                                                                                                                                                                          | partial                                             |
 | 19b | A run finishing against a sleeping parent queues a pending wake the host replays, rather than dropping the result                                                                             | `host-pending-wakes.json` `kind:"subagent"`, `quietOrigin.automation`, `automationRunUuid`                                                                         | §3.2               | kernel Turn admission                                                                                                                                                                                                                                                                      | landed                                              |
@@ -783,11 +783,10 @@ the rows whose status the code moved:
 - **17** — `manual` and `webhook` are landed; `manual` as `routine/run` and the
   tool's `run_now` action, `webhook` as the delivery door. Both enqueue a
   durable firing that the alarm drains, and the run log records which.
-  `"integration"` is a declared member of `ROUTINE_TRIGGER_KINDS`
-  (`plugin-routines/src/records.ts`) and nothing produces one: no connector
-  raises a firing, no provider (slack, github, origin, teams, linear, sentry,
-  pagerduty) is named anywhere in the Package, and `group` does not exist. The
-  enum slot is room left for the row, not the row.
+  Connected-app events are the integration half: `{ kind: "connection",
+connectionId, triggerType }` on a Routine, an instance at the provider, and
+  `POST /api/connect/events` firing the owning Bot. Gmail's new-message and
+  email-sent events are the first two. `group` does not exist.
 - **18** — landed, including the "fresh subagent" half. A firing is an admitted
   Turn of the same Bot with `turnType: "automation"` and a recorded `origin`,
   run from inside the Bot Durable Object; same-Routine firings are strictly
@@ -805,11 +804,13 @@ the rows whose status the code moved:
   any turn type (`agent.ts`), and as the Routines surface
   (`apps/native/lib/routines/page.dart`), where "next run" is now the moment the scheduler armed an alarm on, a
   firing appears in the per-Routine run log, and a webhook Routine's delivery URL
-  and key are shown once with rotate and revoke beside them on the one editor a
-  row opens — which is also where Run now, Run log and Delete live, the list
-  itself being rows under Scheduled and Webhooks carrying a pause switch each. The silent half is
-  landed too: an automation Turn is absent from `GET /api/bots/:id/turns` and
-  from the run lookup, reachable only through the run log, and a completed
+  and key are shown once with rotate and revoke beside them on the read-only
+  detail a row opens — which is also where Run now, Run log and Delete live, the
+  list itself being rows under Scheduled and Webhooks carrying a pause switch
+  each. Conversation authors a Routine; there is no create/edit form. The
+  silent half is landed too: an automation Turn is absent from
+  `GET /api/bots/:id/turns` and from the run lookup, reachable only through
+  the run log, and a completed
   firing writes a `RoutineInboxEntryV1` in the transaction that settles it —
   `attribution: "Automation: <name>"` — surfaced as recent-run rows on the Bot
   page and nested under each Routine on All Routines

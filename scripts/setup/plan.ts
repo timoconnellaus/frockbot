@@ -455,6 +455,14 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
     workers: ["app"],
   },
   {
+    name: "COMPOSIO_WEBHOOK_SECRET",
+    enables:
+      "Routines that fire on a connected-app event (a new Gmail message, an email sent)",
+    where:
+      "https://app.composio.dev — the webhook secret for this project's event URL",
+    workers: ["app"],
+  },
+  {
     name: "DEBUG_TOKEN",
     enables: "the read-only /api/debug operator surface",
     workers: ["app"],

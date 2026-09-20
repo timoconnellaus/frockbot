@@ -279,23 +279,22 @@ export function createRoutinesBackendContribution(
       const runs = ROUTINE_RUNS.exec(url.pathname);
       const run = ROUTINE_RUN.exec(url.pathname);
       if (!list && !inbox && !runs && !run) return undefined;
-      // Three parameters, on one route: `as=document` asks for the vocabulary
-      // the host renders every plugin view in; `edit` names the Routine whose
-      // values seed the editor document; `new` asks for the empty form. The
-      // list and the editor are two documents because a surface someone came
-      // to read is not a form. Which one is open is navigation, so it is
-      // asked for on the read rather than written anywhere. Everything else
-      // is still refused rather than quietly ignored.
+      // Two parameters, on one route: `as=document` asks for the vocabulary
+      // the host renders every plugin view in; `routine` names the Routine
+      // whose read-only detail is on screen. The list and the detail are two
+      // documents because a surface someone came to read is not a form.
+      // Which one is open is navigation, so it is asked for on the read
+      // rather than written anywhere. Everything else is still refused
+      // rather than quietly ignored.
       const asDocument =
         list !== null &&
         request.method === "GET" &&
         url.searchParams.get("as") === "document";
-      const allowed = asDocument ? ["as", "edit", "new"] : [];
+      const allowed = asDocument ? ["as", "routine"] : [];
       if ([...url.searchParams.keys()].some((key) => !allowed.includes(key))) {
         return jsonError(400, "Routine routes take no query parameters");
       }
-      const editing = asDocument ? url.searchParams.get("edit") : null;
-      const creating = asDocument && url.searchParams.has("new") && !editing;
+      const viewingId = asDocument ? url.searchParams.get("routine") : null;
       try {
         const botId = pathSegment((list ?? inbox ?? runs ?? run)![1]!);
         if (run) {
@@ -374,10 +373,9 @@ export function createRoutinesBackendContribution(
               .then(decodeRoutineInboxViewV1),
           ]);
           // A Routine the reader named but that is no longer here — deleted
-          // from another device — seeds nothing rather than an empty form
-          // claiming to edit it.
-          const edited = view.routines.find(
-            (routine) => routine.routineId === editing,
+          // from another device — is the list, not a detail of nothing.
+          const viewing = view.routines.find(
+            (routine) => routine.routineId === viewingId,
           );
           return Response.json(
             routinesDocumentV1({
@@ -386,11 +384,7 @@ export function createRoutinesBackendContribution(
               routines: view.routines,
               inbox: inboxView.entries,
               unacknowledged: inboxView.unacknowledged,
-              ...(edited
-                ? { editing: edited }
-                : creating
-                  ? { creating: true }
-                  : {}),
+              ...(viewing ? { viewing } : {}),
             }),
           );
         }

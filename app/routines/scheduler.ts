@@ -79,7 +79,10 @@ export const ROUTINE_SETTLE_BATCH = 8;
 
 /** What running one firing produced. The scheduler never decides this itself. */
 export interface RoutineFireOutcomeV1 {
-  status: Extract<RoutineRunStatusV1, "ok" | "failed" | "cancelled">;
+  status: Extract<
+    RoutineRunStatusV1,
+    "ok" | "failed" | "cancelled" | "skipped"
+  >;
   summary?: string;
 }
 
@@ -831,7 +834,7 @@ export class RoutineScheduler {
     } catch {
       return;
     }
-    if (outcome.status === "ok") {
+    if (outcome.status === "ok" || outcome.status === "skipped") {
       if (state.consecutiveFailures === undefined) return;
       const { consecutiveFailures: _cleared, ...cleared } = state;
       await transaction.put(routineScheduleKeyV1(fire.routineId), cleared);
@@ -1017,7 +1020,7 @@ export class RoutineScheduler {
         return;
       }
       await this.#recordOutcomeOnClock(transaction, fire, outcome, at);
-      if (outcome.status !== "ok") {
+      if (outcome.status !== "ok" && outcome.status !== "skipped") {
         await this.#recordFailureInbox(transaction, fire, outcome, finishedAt);
       }
       const startedAt = fire.mintedAt;

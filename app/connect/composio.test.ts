@@ -240,6 +240,76 @@ describe("the provider client", () => {
     await expect(down.client.deleteConnectedAccount("ca_1")).rejects.toThrow();
   });
 
+  test("lists one app's trigger types and drops another app's slugs", async () => {
+    const { client: c, recorded } = client(() =>
+      Response.json({
+        items: [
+          {
+            slug: "GMAIL_NEW_GMAIL_MESSAGE",
+            name: "New Gmail message received",
+            description: "When a new message arrives.",
+            toolkit: { slug: "gmail" },
+          },
+          {
+            slug: "GMAIL_EMAIL_SENT",
+            description: "When a message is sent.",
+            toolkit: { slug: "gmail" },
+          },
+          {
+            slug: "SLACK_NEW_MESSAGE",
+            toolkit: { slug: "slack" },
+          },
+        ],
+        next_cursor: null,
+      }),
+    );
+    expect(await c.listTriggerTypes("gmail")).toEqual([
+      {
+        slug: "GMAIL_NEW_GMAIL_MESSAGE",
+        name: "New Gmail message received",
+        description: "When a new message arrives.",
+        toolkitSlug: "gmail",
+      },
+      {
+        slug: "GMAIL_EMAIL_SENT",
+        name: "GMAIL_EMAIL_SENT",
+        description: "When a message is sent.",
+        toolkitSlug: "gmail",
+      },
+    ]);
+    expect(recorded[0]?.url).toContain("/triggers_types?");
+    expect(recorded[0]?.url).toContain("toolkit_slugs=gmail");
+  });
+
+  test("upserts a trigger instance and treats a missing delete as done", async () => {
+    const { client: c, recorded } = client(() =>
+      Response.json({ trigger_id: "ti_1" }),
+    );
+    expect(
+      await c.upsertTriggerInstance({
+        slug: "GMAIL_NEW_GMAIL_MESSAGE",
+        userId: "tim",
+        connectedAccountId: "ca_1",
+      }),
+    ).toEqual({
+      id: "ti_1",
+      slug: "GMAIL_NEW_GMAIL_MESSAGE",
+      connectedAccountId: "ca_1",
+    });
+    expect(recorded[0]?.url).toContain(
+      "/trigger_instances/GMAIL_NEW_GMAIL_MESSAGE/upsert",
+    );
+    expect(JSON.parse(String(recorded[0]?.init?.body))).toEqual({
+      user_id: "tim",
+      connected_account_id: "ca_1",
+      trigger_config: {},
+    });
+    const gone = client(() => new Response("", { status: 404 }));
+    await expect(gone.client.deleteTriggerInstance("ti_1")).resolves.toBe(
+      undefined,
+    );
+  });
+
   test("bounds a listing by its cursor chain", async () => {
     const { client: c } = client(() =>
       Response.json({ items: [], next_cursor: "same" }),

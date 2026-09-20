@@ -40,6 +40,32 @@ describe("decodeRoutineCommandV1", () => {
     }
   });
 
+  test("a connection create accepts only a Gmail query on trigger config", () => {
+    const { schedule: _schedule, ...rest } = CREATE;
+    const trigger = {
+      kind: "connection" as const,
+      connectionId: "conn-gmail",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    };
+    expect(
+      decodeRoutineCommandV1({
+        ...rest,
+        trigger: { ...trigger, config: { query: "from:stripe.com" } },
+      }),
+    ).toMatchObject({
+      trigger: { ...trigger, config: { query: "from:stripe.com" } },
+    });
+    expect(() =>
+      decodeRoutineCommandV1({
+        ...rest,
+        trigger: {
+          ...trigger,
+          config: { labelIds: "INBOX", userId: "someone", interval: 15 },
+        },
+      }),
+    ).toThrow(/unknown field/);
+  });
+
   test("refuses a create carrying both a schedule and a trigger, or neither", () => {
     expect(() =>
       decodeRoutineCommandV1({ ...CREATE, trigger: { kind: "webhook" } }),

@@ -23,7 +23,9 @@ import type {
 import {
   ROUTINE_NAME_MAX_LENGTH,
   ROUTINE_PROMPT_MAX_LENGTH,
+  decodeRoutineTriggerConfigV1,
   RoutineDecodeError,
+  type RoutineTriggerConfigV1,
   type RoutineTriggerV1,
   type RoutineWriterV1,
 } from "./records.js";
@@ -46,6 +48,15 @@ export interface RoutineWriterIdentityV1 {
  * admitted Turn: without `writer` there is no Turn to attribute a write to, and
  * the tool is then not registered at all.
  */
+export interface RoutineConnectionTriggerOfferV1 {
+  connectionId: string;
+  connectionLabel: string;
+  toolkitName: string;
+  slug: string;
+  name: string;
+  description: string;
+}
+
 export interface RoutinesRuntimeHostV1 {
   botId: string;
   writer?: RoutineWriterIdentityV1;
@@ -54,6 +65,8 @@ export interface RoutinesRuntimeHostV1 {
     command: RoutineCommandV1,
     writer: RoutineWriterV1,
   ): Promise<RoutineCommandReceiptV1>;
+  /** Connected-app events this Bot may start a Routine on. Absent means none. */
+  listTriggers?(): Promise<RoutineConnectionTriggerOfferV1[]>;
 }
 
 export const ROUTINE_MANAGE_ACTIONS = [
@@ -63,6 +76,7 @@ export const ROUTINE_MANAGE_ACTIONS = [
   "resume",
   "delete",
   "run_now",
+  "list_triggers",
 ] as const;
 
 export type RoutineManageActionV1 = (typeof ROUTINE_MANAGE_ACTIONS)[number];
@@ -89,13 +103,45 @@ const ROUTINE_MANAGE_INPUT_SCHEMA = {
     schedule: {
       type: "string",
       description:
-        "A five-field cron expression, or @hourly, @daily, @weekly, @monthly, or @every 15m. It runs in the User's Profile time zone. A Routine has a schedule or a webhook trigger, never both.",
+        "A five-field cron expression, or @hourly, @daily, @weekly, @monthly, or @every 15m. It runs in the User's Profile time zone. A Routine has a schedule or a trigger, never both.",
     },
     trigger: {
       type: "string",
       enum: ["webhook"],
       description:
         "Fire on a delivered webhook rather than on a clock. A Routine has a schedule or a trigger, never both.",
+    },
+    connectionTrigger: {
+      type: "object",
+      description:
+        "Fire on an event from a connected app — a new Gmail message, an email sent, and the rest list_triggers offers. Exclusive with schedule, trigger and pluginTrigger. The User must have connected the app.",
+      properties: {
+        connectionId: {
+          type: "string",
+          description: "The Connection that owns the app account.",
+        },
+        triggerType: {
+          type: "string",
+          description:
+            "The event slug list_triggers returned, e.g. GMAIL_NEW_GMAIL_MESSAGE.",
+        },
+        config: {
+          type: "object",
+          description:
+            "Optional Gmail search that narrows which events fire. Only query is allowed.",
+          properties: {
+            query: {
+              type: "string",
+              description:
+                "A Gmail search, e.g. from:stripe.com. Omit config unless this search narrows the event.",
+            },
+          },
+          required: ["query"],
+          additionalProperties: false,
+        },
+      },
+      required: ["connectionId", "triggerType"],
+      additionalProperties: false,
     },
     pluginTrigger: {
       type: "object",
@@ -137,6 +183,11 @@ interface RoutineManageInputV1 {
   schedule?: string;
   trigger?: "webhook";
   pluginTrigger?: { pluginId: string; trigger: string };
+  connectionTrigger?: {
+    connectionId: string;
+    triggerType: string;
+    config?: RoutineTriggerConfigV1;
+  };
   userAsked?: boolean;
 }
 
@@ -153,6 +204,7 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
     "schedule",
     "trigger",
     "pluginTrigger",
+    "connectionTrigger",
     "userAsked",
   ]);
   for (const key of Object.keys(value)) {
@@ -202,6 +254,43 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
       trigger: (candidate as { trigger: string }).trigger,
     };
   }
+  let connectionTrigger: RoutineManageInputV1["connectionTrigger"];
+  if (value.connectionTrigger !== undefined) {
+    const candidate = value.connectionTrigger;
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      typeof (candidate as Record<string, unknown>).connectionId !== "string" ||
+      typeof (candidate as Record<string, unknown>).triggerType !== "string"
+    ) {
+      throw new RoutineDecodeError(
+        "routine_manage connectionTrigger must name a connectionId and a triggerType",
+      );
+    }
+    if (trigger !== undefined || pluginTrigger !== undefined) {
+      throw new RoutineDecodeError(
+        "routine_manage takes one of trigger, pluginTrigger, or connectionTrigger",
+      );
+    }
+    const named = candidate as {
+      connectionId: string;
+      triggerType: string;
+      config?: unknown;
+    };
+    connectionTrigger = {
+      connectionId: named.connectionId,
+      triggerType: named.triggerType,
+      ...(named.config === undefined
+        ? {}
+        : {
+            config: decodeRoutineTriggerConfigV1(
+              named.config,
+              "routine_manage connectionTrigger config",
+            ),
+          }),
+    };
+  }
   if (value.userAsked !== undefined && typeof value.userAsked !== "boolean") {
     throw new RoutineDecodeError("routine_manage userAsked must be a boolean");
   }
@@ -219,6 +308,7 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
       : { schedule: optional("schedule")! }),
     ...(trigger === undefined ? {} : { trigger }),
     ...(pluginTrigger === undefined ? {} : { pluginTrigger }),
+    ...(connectionTrigger === undefined ? {} : { connectionTrigger }),
     ...(value.userAsked === undefined
       ? {}
       : { userAsked: value.userAsked as boolean }),
@@ -251,6 +341,16 @@ function routineTriggerOfInputV1(
       kind: "plugin",
       pluginId: input.pluginTrigger.pluginId,
       trigger: input.pluginTrigger.trigger,
+    };
+  }
+  if (input.connectionTrigger !== undefined) {
+    return {
+      kind: "connection",
+      connectionId: input.connectionTrigger.connectionId,
+      triggerType: input.connectionTrigger.triggerType,
+      ...(input.connectionTrigger.config === undefined
+        ? {}
+        : { config: input.connectionTrigger.config }),
     };
   }
   return input.trigger === undefined ? undefined : { kind: "webhook" };
@@ -342,9 +442,15 @@ export function createRoutineManageTool(
     admission: { subagentRoles: ["executor"] },
     description: [
       "Create, edit, pause, resume, delete, or immediately run one of your own Routines.",
-      "A Routine is a standing instruction that fires on a schedule or on a delivered webhook,",
+      "You are the only author: the User asks you in conversation, and there is no form.",
+      "Write the prompt so it names the kind of event this Routine is for — a shipping confirmation, an invoice — because a connected-app event that is clearly not that kind is skipped before you run.",
+      "list_triggers lists the connected-app events a Routine may fire on.",
+      "A Routine is a standing instruction that fires on a schedule, a delivered webhook,",
+      "or a connected-app event,",
       `as its own Turn rather than inside this conversation. Names are at most ${ROUTINE_NAME_MAX_LENGTH}`,
       `characters and prompts at most ${ROUTINE_PROMPT_MAX_LENGTH}.`,
+      "One connected-app event is one firing. To sweep an inbox, use a schedule and fetch.",
+      "connectionTrigger.config is only for a coarse search such as Gmail query. Never set labelIds, userId, or interval.",
       "Pausing, editing, or deleting a Routine the User created switches off something they set up,",
       "so do it only when the User asked you to in this conversation, and pass userAsked: true when they did.",
       "If a Routine of theirs is failing or looks wrong, tell them and let them decide — do not switch it off yourself.",
@@ -368,6 +474,29 @@ export function createRoutineManageTool(
       let command: RoutineCommandV1;
       try {
         decoded = decodeRoutineManageInputV1(input);
+        if (decoded.action === "list_triggers") {
+          const offers = host.listTriggers ? await host.listTriggers() : [];
+          if (offers.length === 0) {
+            return {
+              content:
+                "No connected apps offer events yet. Connect Gmail or another app, then ask again.",
+              isError: false,
+            };
+          }
+          return {
+            content: [
+              "Connected-app events a Routine may fire on:",
+              ...offers.map(
+                (offer) =>
+                  `- ${offer.toolkitName} (${offer.connectionId} · ${offer.connectionLabel}): ${offer.slug} — ${offer.name}. ${offer.description}`,
+              ),
+              "Create a Routine with connectionTrigger: { connectionId, triggerType } using the slug as triggerType.",
+              "Write the prompt so it names the kind of mail or event. Set config.query only when a Gmail search can narrow it; never set labelIds, userId, or interval.",
+              "One event is one firing. Inbox sweeps are a schedule.",
+            ].join("\n"),
+            isError: false,
+          };
+        }
         command = routineManageCommandV1(decoded, {
           botId: host.botId,
           commandId: routineToolCommandIdV1(context.effectId),
@@ -420,7 +549,11 @@ export function createRoutineManageTool(
       const routine = receipt.routine;
       const timing = routine.schedule
         ? `schedule ${routine.schedule} (${routine.timezone})`
-        : "webhook trigger";
+        : routine.trigger?.kind === "connection"
+          ? `app event ${routine.trigger.triggerType}`
+          : routine.trigger?.kind === "plugin"
+            ? `plugin trigger ${routine.trigger.pluginId}/${routine.trigger.trigger}`
+            : "webhook trigger";
       return {
         content: [
           `Routine "${routine.name}" (${routine.routineId}) is ${

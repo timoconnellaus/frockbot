@@ -58,6 +58,7 @@ import {
   resolveBotMachineMessagesGateV1,
 } from "@frockbot/app/machine/bot";
 import {
+  connectionTriggersFromUserV1,
   createBotRoutinesHost,
   executeRoutineCommand,
   listRoutines,
@@ -502,7 +503,19 @@ export async function agentRuntime(
               ...createBotRoutinesHost(identity, turn),
               list: () => listRoutines(state, identity),
               execute: (command, writer) =>
-                executeRoutineCommand(state, identity, command, writer),
+                executeRoutineCommand(
+                  state,
+                  identity,
+                  command,
+                  writer,
+                  connectionTriggersFromUserV1(
+                    userConfigurationV1(state, identity),
+                  ),
+                ),
+              listTriggers: () =>
+                connectionTriggersFromUserV1(
+                  userConfigurationV1(state, identity),
+                ).list(),
             },
           }
         : {}),

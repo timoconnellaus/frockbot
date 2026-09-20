@@ -46,7 +46,11 @@ import {
   routineTerminalRecordsV1,
   type RoutineTerminalRecordsV1,
 } from "@frockbot/app/routines/inbox-store";
-import { decodeRoutineRecordV1 } from "@frockbot/app/routines/records";
+import {
+  decodeRoutineRecordV1,
+  RoutineDecodeError,
+  type RoutineRecordV1,
+} from "@frockbot/app/routines/records";
 import {
   ROUTINE_ACCOUNT_TIMEZONE_KEY,
   routineFailureMessageKeyV1,
@@ -65,6 +69,7 @@ import {
 import type { RoutineInboxEntryV1 } from "@frockbot/app/routines/inbox";
 import { routineFailureMessageV1 } from "@frockbot/app/routines/inbox";
 import { RoutineNotFoundError } from "@frockbot/app/routines/store";
+import type { RoutineConnectionTriggerOfferV1 } from "@frockbot/app/routines/agent";
 import type {
   RoutineCommandReceiptV1,
   RoutineCommandV1,
@@ -98,6 +103,10 @@ import {
 } from "@frockbot/app/subagents/storage-keys";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { SessionEvent } from "@frockbot/core/contracts";
+import {
+  classifyRoutineFireOnceV1,
+  connectionFireSkipV1,
+} from "@frockbot/app/routines/event-judge";
 
 /** The Bot and User whose Routines a caller may reach. */
 export interface BotRoutinesIdentity {
@@ -752,6 +761,20 @@ async function runOneFiring(
   fire: RoutineFireV1,
 ): Promise<RoutineFireOutcomeV1> {
   try {
+    // Connection only. `clearly_unrelated` settles as skipped: no Turn,
+    // no conversation line, no failure notification.
+    if (fire.trigger === "connection") {
+      const verdict = await classifyRoutineFireOnceV1({
+        fire,
+        routine: await readRoutineRecordV1(state, fire.routineId),
+        judge: state.routineEventJudge,
+        read: (key) => state.ctx.storage.get(key),
+        write: (key, value) => state.ctx.storage.put(key, value),
+        now: state.now,
+      });
+      const skip = connectionFireSkipV1(verdict);
+      if (skip) return skip;
+    }
     await admitTurnV1(
       state,
       routineTurnCommandV1(identity, fire, new Date().toISOString()),
@@ -815,7 +838,7 @@ async function notifyFailedFiring(
   fire: RoutineFireV1,
   outcome: RoutineFireOutcomeV1,
 ): Promise<void> {
-  if (outcome.status === "ok") return;
+  if (outcome.status === "ok" || outcome.status === "skipped") return;
   const settings = await readBotSettingsV1(state, identity);
   const receiptKey = routineFailureMessageKeyV1(fire.fireId);
   const createdAt = state.now().toISOString();
@@ -877,6 +900,31 @@ async function notifyFailedFiring(
   if (committed) state.messagesCommitted();
 }
 
+async function readRoutineRecordV1(
+  state: ShellBotStateV1,
+  routineId: string,
+): Promise<RoutineRecordV1 | undefined> {
+  const stored = await state.ctx.storage.get<unknown>(routineKeyV1(routineId));
+  if (stored === undefined) return undefined;
+  try {
+    return decodeRoutineRecordV1(stored);
+  } catch {
+    return undefined;
+  }
+}
+
+/** One connected-app event, after the User object resolved the instance. */
+export async function deliverConnectEvent(
+  state: ShellBotStateV1,
+  input: { routineId: string; eventId: string; payload: unknown },
+): Promise<RoutineHookDeliveryReceiptV1> {
+  const accepted = await state.routines.deliverConnectEvent(input);
+  await state.ctx.storage.transaction((transaction) =>
+    state.authority.refreshRecoveryAlarm(transaction),
+  );
+  return accepted;
+}
+
 /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */
 export async function listRoutines(
   state: ShellBotStateV1,
@@ -895,20 +943,157 @@ export async function listRoutines(
  * here; the `routine_manage` tool calls the same store with a Bot writer, so
  * the two paths cannot drift.
  */
+export interface RoutineConnectionTriggerSeamV1 {
+  list(): Promise<RoutineConnectionTriggerOfferV1[]>;
+  upsert(input: {
+    commandId: string;
+    routineId: string;
+    connectionId: string;
+    triggerType: string;
+    config?: Record<string, string | number | boolean>;
+  }): Promise<{ routineId: string }>;
+  delete(input: { commandId: string; routineId: string }): Promise<void>;
+}
+
+const ROUTINE_ID_CHARACTER = /[^a-zA-Z0-9._-]/g;
+
+/**
+ * The Routine id a create uses when the command did not name one. It is
+ * derived from the command id so a retried tool call upserts and writes the
+ * same Routine the first attempt armed, instead of minting a second id that
+ * the provider instance does not map to.
+ */
+export function routineIdFromCommandV1(commandId: string): string {
+  const sanitized = commandId.replace(ROUTINE_ID_CHARACTER, "-").slice(0, 125);
+  return `rc-${sanitized || "call"}`;
+}
+
+/** The User object's Connected-app trigger seam, as a Routine command sees it. */
+export function connectionTriggersFromUserV1(user: {
+  listConnectTriggers(): Promise<
+    Array<{
+      connectionId: string;
+      connectionLabel: string;
+      toolkitName: string;
+      slug: string;
+      name: string;
+      description: string;
+    }>
+  >;
+  upsertConnectTrigger(input: {
+    commandId: string;
+    routineId: string;
+    connectionId: string;
+    triggerType: string;
+    config?: Record<string, string | number | boolean>;
+  }): Promise<{ routineId: string }>;
+  deleteConnectTrigger(input: {
+    commandId: string;
+    routineId: string;
+  }): Promise<void>;
+}): RoutineConnectionTriggerSeamV1 {
+  return {
+    list: async () => {
+      const offers = await user.listConnectTriggers();
+      return offers.map((offer) => ({
+        connectionId: offer.connectionId,
+        connectionLabel: offer.connectionLabel,
+        toolkitName: offer.toolkitName,
+        slug: offer.slug,
+        name: offer.name,
+        description: offer.description,
+      }));
+    },
+    upsert: (input) => user.upsertConnectTrigger(input),
+    delete: (input) => user.deleteConnectTrigger(input),
+  };
+}
+
 export async function executeRoutineCommand(
   state: ShellBotStateV1,
   identity: BotIdentity,
   command: RoutineCommandV1,
   writer: RoutineWriterV1 = { kind: "user" },
+  connectionTriggers?: RoutineConnectionTriggerSeamV1,
 ): Promise<RoutineCommandReceiptV1> {
   if (command.botId !== identity.botId) {
     throw new RoutineNotFoundError(command.routineId ?? command.botId);
   }
+  let next = command;
+  const current =
+    command.type === "routine/delete" ||
+    command.type === "routine/update" ||
+    command.type === "routine/resume" ||
+    command.type === "routine/pause"
+      ? await readRoutineRecordV1(state, command.routineId)
+      : undefined;
+  if (
+    (command.type === "routine/create" || command.type === "routine/update") &&
+    command.trigger?.kind === "connection"
+  ) {
+    if (!connectionTriggers) {
+      throw new RoutineDecodeError(
+        "this Bot cannot subscribe to a connected-app event",
+      );
+    }
+    const routineId =
+      command.routineId ??
+      (command.type === "routine/create"
+        ? routineIdFromCommandV1(command.commandId)
+        : undefined);
+    if (!routineId) {
+      throw new RoutineDecodeError("Routine id is invalid");
+    }
+    const held = await connectionTriggers.upsert({
+      commandId: command.commandId,
+      routineId,
+      connectionId: command.trigger.connectionId,
+      triggerType: command.trigger.triggerType,
+      ...(command.trigger.config === undefined
+        ? {}
+        : { config: command.trigger.config }),
+    });
+    next = { ...command, routineId: held.routineId };
+  }
+  if (
+    command.type === "routine/resume" &&
+    current?.trigger?.kind === "connection"
+  ) {
+    if (!connectionTriggers) {
+      throw new RoutineDecodeError(
+        "this Bot cannot subscribe to a connected-app event",
+      );
+    }
+    await connectionTriggers.upsert({
+      commandId: command.commandId,
+      routineId: command.routineId,
+      connectionId: current.trigger.connectionId,
+      triggerType: current.trigger.triggerType,
+      ...(current.trigger.config === undefined
+        ? {}
+        : { config: current.trigger.config }),
+    });
+  }
   const receipt = await state.routines.execute(
-    command,
+    next,
     writer,
     await routineAccountTimezoneV1(state.ctx.storage),
   );
+  const remaining = receipt.status === "applied" ? receipt.routine : undefined;
+  const stillEnabledConnection =
+    remaining?.trigger?.kind === "connection" && remaining.enabled;
+  if (
+    connectionTriggers &&
+    (receipt.status === "deleted" ||
+      (current?.trigger?.kind === "connection" && !stillEnabledConnection))
+  ) {
+    await connectionTriggers
+      .delete({
+        commandId: command.commandId,
+        routineId: command.routineId ?? current?.routineId ?? "",
+      })
+      .catch(() => undefined);
+  }
   // A created, re-timed, resumed or manually fired Routine changes what the
   // object is owed next, so the alarm is re-armed in the same call that wrote
   // the record rather than waiting for the next one to happen by.

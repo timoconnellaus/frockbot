@@ -1,5 +1,10 @@
 import type { ModelBilling } from "../billing/model.js";
-import type { TurnTypeV1, WorkspaceFilesV1 } from "@frockbot/core/contracts";
+import {
+  type RoutineEventJudgeV1,
+  type TurnTypeV1,
+  type WorkspaceFilesV1,
+} from "@frockbot/core/contracts";
+import { createHostedRoutineEventJudgeV1 } from "@frockbot/app/supervision";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
   BotDurableAuthority,
@@ -111,6 +116,11 @@ export interface BotStateEnv {
    * with that reason rather than given an unverifiable one.
    */
   ROUTINE_HOOK_SECRET?: string;
+  /**
+   * The hosted Jev credential. Absent, the routine-event judge never drops.
+   * The key never leaves the chooser.
+   */
+  JEV_API_KEY?: string;
 }
 
 /** Constructs the kernel Bot Durable Object authority this Package runs under. */
@@ -153,6 +163,11 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
   /** The clock and the timer, as seams a test replaces. */
   now?(): Date;
   sleep?(milliseconds: number): Promise<void>;
+  /**
+   * Classifies a connected-app event before the conversational model.
+   * Absent, the drain mounts the fake that always keeps the event.
+   */
+  routineEventJudge?: RoutineEventJudgeV1;
 }
 
 /** The Turn currently executing on this object, for durable Stop. */
@@ -326,6 +341,11 @@ export class ShellBotStateV1 {
    * configuration, Composition, and notification policy it needs.
    */
   readonly authority: BotDurableAuthority<BotSettingsViewV1>;
+  /**
+   * Classifies a connected-app event before `admitTurnV1`. Cut 2 records the
+   * verdict and still admits; Cut 4 is what skips.
+   */
+  readonly routineEventJudge: RoutineEventJudgeV1;
 
   constructor(
     host: ShellBotBackendHost,
@@ -352,6 +372,11 @@ export class ShellBotStateV1 {
       defer: host.deferScheduledWork,
       settle: host.settleScheduledWork,
     };
+    this.routineEventJudge =
+      host.routineEventJudge ??
+      createHostedRoutineEventJudgeV1({
+        JEV_API_KEY: host.env.JEV_API_KEY,
+      });
     this.now = host.now ?? (() => new Date());
     this.sleep =
       host.sleep ??

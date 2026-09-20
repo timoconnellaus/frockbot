@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { ViewNode } from "@frockbot/core/protocol-schemas";
 import valid from "../../core/protocol-schemas/fixtures/valid.json";
 import {
-  ROUTINE_EDITOR_FIELDS_V1,
+  ROUTINE_DETAIL_FIELDS_V1,
   routineMomentV1,
   routinesDocumentV1,
   routinesRevisionV1,
@@ -121,25 +121,21 @@ test("a Routine says what it fires on and when it last did and next will", () =>
 test("every control names the command it means", () => {
   const document = routinesDocumentV1(frame());
   const actions = walk(document.root).filter((node) => node.type === "action");
-  // The editor's host-owned field draws its controls; the document still
-  // declares every action schema, while rows carry their own controls.
   expect(
     actions.map((node) => (node.type === "action" ? node.input?.kind : "")),
-  ).toEqual(["edit-routine", "set-routine-enabled", "open-run"]);
+  ).toEqual(["open-routine", "set-routine-enabled", "open-run"]);
   expect(document.actions.map((action) => action.id).sort()).toEqual([
-    "cancel-edit",
     "delete-routine",
-    "edit-routine",
+    "open-routine",
     "open-run",
     "open-runs",
     "revoke-key",
     "rotate-key",
     "run-routine",
-    "save-routine",
     "set-routine-enabled",
   ]);
   expect(document.actions.some((action) => action.id === "save-routine")).toBe(
-    true,
+    false,
   );
 });
 
@@ -205,9 +201,7 @@ test("an empty Bot says so on both halves rather than drawing nothing", () => {
   expect(titles).toContain("No Routines yet");
   expect(titles).not.toContain("Nothing here yet");
   expect(titles).not.toContain("Completions");
-  expect(text.some((line) => line.startsWith("A Routine runs this Bot"))).toBe(
-    true,
-  );
+  expect(text).toContain("Ask this Bot to set up a Routine.");
 });
 
 test("the revision moves only when what the document says changes", () => {
@@ -243,79 +237,86 @@ test("more Routines than the renderer's budget stop, and the document says so", 
   ).toBe(true);
 });
 
-test("the list is not a form, and creating is its own document", () => {
+test("the list is not a form, and naming a Routine is a read-only detail", () => {
   const list = walk(routinesDocumentV1(frame()).root);
   expect(
     list.some((node) => node.type === "group" && node.title === "New Routine"),
   ).toBe(false);
   expect(list.some((node) => node.type === "field")).toBe(false);
 
-  const created = routinesDocumentV1(frame({ creating: true }));
-  expect(created.revision).not.toBe(routinesDocumentV1(frame()).revision);
-  const editor = created.root;
-  expect(editor.type === "group" && editor.collapsed).toBeUndefined();
-  const fields = walk(editor).filter((node) => node.type === "field");
+  const open = routinesDocumentV1(frame({ viewing: morning }));
+  expect(open.revision).not.toBe(routinesDocumentV1(frame()).revision);
+  const fields = walk(open.root).filter((node) => node.type === "field");
   expect(
     fields.map((node) => (node.type === "field" ? node.field.id : "")),
   ).toEqual([
-    ROUTINE_EDITOR_FIELDS_V1.editorId,
-    ROUTINE_EDITOR_FIELDS_V1.name,
-    ROUTINE_EDITOR_FIELDS_V1.prompt,
-    ROUTINE_EDITOR_FIELDS_V1.schedule,
-    ROUTINE_EDITOR_FIELDS_V1.scheduleDescription,
-    ROUTINE_EDITOR_FIELDS_V1.timezone,
-    ROUTINE_EDITOR_FIELDS_V1.keyVersion,
-    ROUTINE_EDITOR_FIELDS_V1.timing,
+    ROUTINE_DETAIL_FIELDS_V1.name,
+    ROUTINE_DETAIL_FIELDS_V1.prompt,
+    ROUTINE_DETAIL_FIELDS_V1.timing,
   ]);
   expect(
-    walk(created.root).some(
-      (node) => node.type === "group" && node.title === "Scheduled",
+    fields.every(
+      (node) => node.type === "field" && node.field.editable === false,
     ),
-  ).toBe(false);
-  expect(
-    walk(created.root).some(
-      (node) => node.type === "action" && node.actionId === "open-run",
-    ),
-  ).toBe(false);
-});
-
-test("naming a Routine opens the editor on its own values and moves the revision", () => {
-  const list = routinesDocumentV1(frame());
-  const open = routinesDocumentV1(frame({ editing: morning }));
-  expect(open.revision).not.toBe(list.revision);
-  const editor = open.root;
-  expect(editor.type === "group" && editor.collapsed).toBeUndefined();
-  const values = walk(editor)
-    .filter((node) => node.type === "field")
-    .map((node) => (node.type === "field" ? node.field.value : null));
+  ).toBe(true);
+  const values = fields.map((node) =>
+    node.type === "field" ? node.field.value : null,
+  );
   expect(values).toEqual([
-    "r1",
     "Morning brief",
     "Summarise overnight email.",
-    "0 9 * * *",
-    "Every day at 9:00am",
-    "Australia/Sydney",
-    null,
-    "schedule",
+    "Every day at 9:00am · Australia/Sydney",
   ]);
-  // The host uses this identity to show edit-only controls such as Cancel,
-  // Run now, and Delete; a create form carries no identity.
-  const createdId = walk(
-    routinesDocumentV1(frame({ creating: true })).root,
-  ).find(
-    (node) =>
-      node.type === "field" &&
-      node.field.id === ROUTINE_EDITOR_FIELDS_V1.editorId,
-  );
-  expect(createdId?.type === "field" && createdId.field.value).toBe(null);
   expect(
     walk(open.root).some(
       (node) => node.type === "group" && node.title === "Scheduled",
     ),
   ).toBe(false);
+  expect(
+    walk(open.root).some(
+      (node) => node.type === "action" && node.actionId === "run-routine",
+    ),
+  ).toBe(true);
+  expect(
+    walk(open.root).some(
+      (node) => node.type === "action" && node.actionId === "delete-routine",
+    ),
+  ).toBe(true);
 });
 
-test("the host editor is told whether a triggered Routine has a key", () => {
+test("a connected-app Routine names the event in words and shows config", () => {
+  const inbox: RoutineViewV1 = {
+    ...morning,
+    schedule: undefined,
+    trigger: {
+      kind: "connection",
+      connectionId: "conn-gmail",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+      config: { query: "from:stripe.com" },
+    },
+    nextRunAt: undefined,
+  };
+  const fields = walk(routinesDocumentV1(frame({ viewing: inbox })).root)
+    .filter((node) => node.type === "field")
+    .map((node) =>
+      node.type === "field" ? [node.field.id, node.field.value] : [],
+    );
+  expect(fields).toContainEqual([
+    ROUTINE_DETAIL_FIELDS_V1.timing,
+    "App event · gmail new gmail message",
+  ]);
+  expect(fields).toContainEqual([
+    ROUTINE_DETAIL_FIELDS_V1.config,
+    "query: from:stripe.com",
+  ]);
+  expect(
+    walk(routinesDocumentV1(frame({ viewing: inbox })).root).some(
+      (node) => node.type === "action" && node.actionId === "rotate-key",
+    ),
+  ).toBe(false);
+});
+
+test("a webhook Routine offers mint or rotate on the detail", () => {
   const fresh: RoutineViewV1 = {
     ...morning,
     schedule: undefined,
@@ -323,26 +324,16 @@ test("the host editor is told whether a triggered Routine has a key", () => {
     nextRunAt: undefined,
   };
   const keyedRoutine = { ...fresh, hookKeyVersion: 2 };
-  const version = (routine: RoutineViewV1) =>
-    walk(
-      routinesDocumentV1(frame({ routines: [routine], editing: routine })).root,
-    )
-      .filter((node) => node.type === "field")
-      .find(
-        (node) =>
-          node.type === "field" &&
-          node.field.id === ROUTINE_EDITOR_FIELDS_V1.keyVersion,
-      );
-  expect(
-    version(morning)?.type === "field" && version(morning)?.field.value,
-  ).toBe(null);
-  expect(version(fresh)?.type === "field" && version(fresh)?.field.value).toBe(
-    null,
+  const actions = (routine: RoutineViewV1) =>
+    walk(routinesDocumentV1(frame({ viewing: routine })).root)
+      .filter((node) => node.type === "action")
+      .map((node) => (node.type === "action" ? node.actionId : ""));
+  expect(actions(morning)).not.toContain("rotate-key");
+  expect(actions(fresh)).toContain("rotate-key");
+  expect(actions(fresh)).not.toContain("revoke-key");
+  expect(actions(keyedRoutine)).toEqual(
+    expect.arrayContaining(["rotate-key", "revoke-key", "delete-routine"]),
   );
-  expect(
-    version(keyedRoutine)?.type === "field" &&
-      version(keyedRoutine)?.field.value,
-  ).toBe("2");
 });
 
 test("a minted key is never in the document", () => {
@@ -379,20 +370,34 @@ test("a key rotation moves the revision, so the host reads the document again", 
 });
 
 test("a Routine is filed under what fires it, and an empty half is not drawn", () => {
+  const gmail: RoutineViewV1 = {
+    ...leads,
+    routineId: "r3",
+    name: "New mail",
+    trigger: {
+      kind: "connection",
+      connectionId: "conn-gmail",
+      triggerType: "GMAIL_NEW_GMAIL_MESSAGE",
+    },
+    hookKeyVersion: undefined,
+  };
   const both = walk(
-    routinesDocumentV1(frame({ routines: [morning, leads] })).root,
+    routinesDocumentV1(frame({ routines: [morning, leads, gmail] })).root,
   );
   const sections = both
     .filter((node) => node.type === "group" && node.title !== undefined)
     .map((node) => (node.type === "group" ? node.title : ""));
   expect(sections).toContain("Scheduled");
-  expect(sections).toContain("Webhooks");
+  expect(sections).toContain("Triggered");
+  expect(sections).not.toContain("Webhooks");
+  expect(sections).toContain("New mail");
+  expect(sections).toContain("Inbound leads");
 
   const only = walk(routinesDocumentV1(frame()).root)
     .filter((node) => node.type === "group" && node.title !== undefined)
     .map((node) => (node.type === "group" ? node.title : ""));
   expect(only).toContain("Scheduled");
-  expect(only).not.toContain("Webhooks");
+  expect(only).not.toContain("Triggered");
 });
 
 test("a completion is the same loose row the Bot page draws, under its Routine", () => {

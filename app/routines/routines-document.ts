@@ -7,10 +7,8 @@
 // because a client that had to ask twice could nest a run under the wrong
 // Routine.
 //
-// Every action declares a `kind` from the closed vocabulary below, because an
-// action id is opaque to the renderer and the command a press means is not
-// derivable from the label a person reads. The Routine commands the route
-// already takes, and the navigation no route owns.
+// Conversation authors a Routine. The list is what is armed; a named Routine
+// is a read-only detail. There is no form.
 
 import {
   decodeProtocol,
@@ -19,7 +17,10 @@ import {
   type ViewNode,
 } from "@frockbot/core/protocol-schemas";
 import type { RoutineInboxEntryViewV1, RoutineViewV1 } from "./shared.js";
-import { routineTriggerLabelV1 } from "./records.js";
+import {
+  routineTriggerLabelV1,
+  routineTriggerNeedsHookKeyV1,
+} from "./records.js";
 import { describeRoutineScheduleV1 } from "./cron.js";
 
 export const ROUTINE_ACTION_KINDS_V1 = [
@@ -28,9 +29,7 @@ export const ROUTINE_ACTION_KINDS_V1 = [
   "delete-routine",
   "open-run",
   "open-runs",
-  "edit-routine",
-  "cancel-edit",
-  "save-routine",
+  "open-routine",
   "rotate-key",
   "revoke-key",
 ] as const;
@@ -53,19 +52,14 @@ export interface RoutinesFrameV1 {
   inbox: RoutineInboxEntryViewV1[];
   unacknowledged: number;
   /**
-   * The Routine the reader asked to edit, if any. The editor is its own
-   * document — a form per Routine would be a second copy of every prompt in
-   * the list, and the list a person came to read is not a form.
+   * The Routine the reader asked to see. The detail is its own document —
+   * the list a person came to read is not a form, and conversation is the
+   * only author.
    *
    * Which Routine that is is navigation — the host asks for this document
    * rather than the list, naming it — so no route owns the choice.
    */
-  editing?: RoutineViewV1;
-  /**
-   * The reader asked for a new Routine. The document is that empty form, not
-   * the list with a form on it.
-   */
-  creating?: true;
+  viewing?: RoutineViewV1;
 }
 
 /** The renderer's node budget, checked before it builds a widget. */
@@ -74,25 +68,12 @@ const NODE_LIMIT = 512;
 const RUNS_PER_ROUTINE = 3;
 
 const IDENTIFIER: ActionValueSchema = { type: "string", maxLength: 128 };
-const TEXT = (maxLength: number): ActionValueSchema => ({
-  type: "string",
-  maxLength,
-});
-/** The field ids the editor's one form uses, and the action that reads them. */
-export const ROUTINE_EDITOR_FIELDS_V1 = {
-  editorId: "routine.editorId",
+/** The field ids the detail uses. There is one Routine on screen, so no id. */
+export const ROUTINE_DETAIL_FIELDS_V1 = {
   name: "routine.name",
   prompt: "routine.prompt",
-  /**
-   * What starts the Routine, as the host answers it: `schedule`, `webhook`, or
-   * `plugin:<pluginId>:<trigger>` — one value, because a Routine fires on
-   * exactly one of them, and the host names the Plugin and the trigger in it.
-   */
   timing: "routine.timing",
-  schedule: "routine.schedule",
-  scheduleDescription: "routine.scheduleDescription",
-  timezone: "routine.timezone",
-  keyVersion: "routine.keyVersion",
+  config: "routine.config",
 } as const;
 const KIND: ActionValueSchema = {
   type: "string",
@@ -165,17 +146,13 @@ export const MONTHS = [
 export function routinesRevisionV1(frame: RoutinesFrameV1): number {
   const text = JSON.stringify([
     frame.botId,
-    // The editor's seeds are part of what the document says, so naming a
-    // different Routine — or asking for a new one — moves the revision and
-    // the host adopts a controller whose field values are answers to the
-    // form now on screen.
-    frame.creating === true,
-    frame.editing?.routineId ?? "",
+    frame.viewing?.routineId ?? "",
     frame.routines.map((routine) => [
       routine.routineId,
       routine.name,
       routine.prompt,
       routine.schedule,
+      routine.trigger,
       routine.timezone,
       routine.enabled,
       routine.lastRunAt,
@@ -218,6 +195,13 @@ function status(text: string): ViewNode {
   return { type: "text", text: text.slice(0, 4000), style: "status" };
 }
 
+function field(id: string, label: string, value: string | null): ViewNode {
+  return {
+    type: "field",
+    field: { id, label, kind: "text", value, editable: false },
+  } as ViewNode;
+}
+
 /** What a Routine fires on, and when it last did and next will. */
 function routineFacts(routine: RoutineViewV1): string {
   const timing = routine.schedule
@@ -238,12 +222,19 @@ function routineFacts(routine: RoutineViewV1): string {
   return `${timing} · ${last} · ${next}`;
 }
 
+function triggerConfigTextV1(
+  config: { query: string } | undefined,
+): string | undefined {
+  if (!config) return undefined;
+  return `query: ${config.query}`;
+}
+
 /**
  * One Routine, as a row: what it is called, what it fires on and when it last
  * did, the way in, and the switch that pauses it.
  *
  * Everything else a Routine can be asked — run it now, read its log, mint or
- * revoke its key, delete it — is on the editor the row opens. A row is a
+ * revoke its key, delete it — is on the detail the row opens. A row is a
  * place to see what is armed and to turn it off; six controls on each of them
  * was a list nobody could read.
  */
@@ -262,8 +253,8 @@ function routineNode(
         type: "group",
         orientation: "row",
         children: [
-          press("edit-routine", "Edit", {
-            kind: "edit-routine",
+          press("open-routine", "Open", {
+            kind: "open-routine",
             routineId: id,
           }),
           press("set-routine-enabled", routine.enabled ? "Pause" : "Resume", {
@@ -278,77 +269,77 @@ function routineNode(
   };
 }
 
-function field(
-  id: string,
-  label: string,
-  value: string | null,
-  extra: Record<string, unknown> = {},
-): ViewNode {
-  return {
-    type: "field",
-    field: { id, label, kind: "text", value, editable: true, ...extra },
-  } as ViewNode;
-}
-
 /**
- * The one editor: a new Routine, or the one the reader asked to edit.
- *
- * This is the whole document when it is shown. The list never carries it,
- * collapsed or otherwise — a surface someone came to read is not a form.
+ * One Routine, as a read-only detail. Conversation is the only author, so
+ * nothing here writes name, prompt, or trigger.
  */
-function editorNode(frame: RoutinesFrameV1): ViewNode {
-  const editing = frame.editing;
-  const ids = ROUTINE_EDITOR_FIELDS_V1;
-  const webhook = editing !== undefined && editing.schedule === undefined;
-  const plugin =
-    editing?.trigger?.kind === "plugin" ? editing.trigger : undefined;
-  const timing = plugin
-    ? `plugin:${plugin.pluginId}:${plugin.trigger}`
-    : webhook
-      ? "webhook"
-      : "schedule";
-  const schedule = editing?.schedule ?? "0 9 * * *";
+function detailNode(routine: RoutineViewV1): ViewNode {
+  const ids = ROUTINE_DETAIL_FIELDS_V1;
+  const id = routine.routineId;
+  const keyed =
+    routine.trigger !== undefined &&
+    routineTriggerNeedsHookKeyV1(routine.trigger);
+  const config = triggerConfigTextV1(
+    routine.trigger?.kind === "connection" ? routine.trigger.config : undefined,
+  );
   return {
     type: "group",
     orientation: "column",
     children: [
-      field(ids.editorId, "Routine", editing?.routineId ?? null, {
-        choiceSource: "routine-editor-hidden",
-      }),
-      field(ids.name, "Name", editing?.name ?? null, {
-        maxLength: 100,
-        required: true,
-        choiceSource: "routine-editor-hidden",
-      }),
-      field(ids.prompt, "Prompt", editing?.prompt ?? null, {
-        maxLength: 8000,
-        hint: "What the Routine does when it fires.",
-        choiceSource: "routine-editor-hidden",
-      }),
-      field(ids.schedule, "Schedule", schedule, {
-        maxLength: 256,
-        choiceSource: "routine-editor-hidden",
-      }),
+      field(ids.name, "Name", routine.name),
+      field(ids.prompt, "Instructions", routine.prompt),
       field(
-        ids.scheduleDescription,
-        "Schedule description",
-        describeRoutineScheduleV1(schedule),
-        { choiceSource: "routine-editor-hidden" },
+        ids.timing,
+        "Fires on",
+        routine.schedule
+          ? `${describeRoutineScheduleV1(routine.schedule)} · ${routine.timezone}`
+          : routine.trigger
+            ? routineTriggerLabelV1(routine.trigger)
+            : "Webhook trigger",
       ),
-      field(ids.timezone, "Timezone", editing?.timezone ?? null, {
-        choiceSource: "routine-editor-hidden",
-      }),
-      field(
-        ids.keyVersion,
-        "Webhook key version",
-        editing?.hookKeyVersion == null ? null : String(editing.hookKeyVersion),
-        { choiceSource: "routine-editor-hidden" },
-      ),
-      field(ids.timing, "Fires on", timing, {
-        maxLength: 256,
-        required: true,
-        choiceSource: "routine-editor",
-      }),
+      ...(config === undefined
+        ? []
+        : [field(ids.config, "Trigger config", config)]),
+      status(routineFacts(routine)),
+      {
+        type: "group",
+        orientation: "row",
+        children: [
+          press("run-routine", "Run now", {
+            kind: "run-routine",
+            routineId: id,
+          }),
+          press("open-runs", "Run log", { kind: "open-runs", routineId: id }),
+          ...(keyed
+            ? [
+                press(
+                  "rotate-key",
+                  routine.hookKeyVersion == null ? "Mint key" : "Rotate key",
+                  {
+                    kind: "rotate-key",
+                    routineId: id,
+                  },
+                ),
+                ...(routine.hookKeyVersion == null
+                  ? []
+                  : [
+                      press(
+                        "revoke-key",
+                        "Revoke key",
+                        { kind: "revoke-key", routineId: id },
+                        "danger",
+                      ),
+                    ]),
+              ]
+            : []),
+          press(
+            "delete-routine",
+            "Delete",
+            { kind: "delete-routine", routineId: id },
+            "danger",
+          ),
+        ],
+      },
     ],
   };
 }
@@ -426,7 +417,7 @@ function listChildren(frame: RoutinesFrameV1): ViewNode[] {
       routineNode(routine, shown),
     );
   }
-  // A section is drawn only where it holds something: an empty "Webhooks"
+  // A section is drawn only where it holds something: an empty "Triggered"
   // label over nothing is a heading for a thing that does not exist.
   if (scheduled.length > 0) {
     children.push({
@@ -440,7 +431,7 @@ function listChildren(frame: RoutinesFrameV1): ViewNode[] {
     children.push({
       type: "group",
       orientation: "column",
-      title: "Webhooks",
+      title: "Triggered",
       children: triggered,
     });
   }
@@ -470,7 +461,7 @@ function listChildren(frame: RoutinesFrameV1): ViewNode[] {
       children: [
         {
           type: "text",
-          text: "A Routine runs this Bot on a schedule, or when something calls its webhook.",
+          text: "Ask this Bot to set up a Routine.",
         },
       ],
     });
@@ -488,8 +479,8 @@ function listChildren(frame: RoutinesFrameV1): ViewNode[] {
 /** A `RoutinesFrame` as a `ViewDocument`. */
 export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
   const children =
-    frame.creating === true || frame.editing !== undefined
-      ? [editorNode(frame)]
+    frame.viewing !== undefined
+      ? [detailNode(frame.viewing)]
       : listChildren(frame);
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
@@ -554,46 +545,12 @@ export function routinesDocumentV1(frame: RoutinesFrameV1): ViewDocument {
       },
       {
         // Navigation: the host reads the document again, naming the Routine
-        // whose values seed the editor. No route owns which form is open.
-        id: "edit-routine",
+        // whose detail is on screen. No route owns which one is open.
+        id: "open-routine",
         schema: {
           type: "object",
           properties: { kind: KIND, routineId: IDENTIFIER },
           required: ["kind", "routineId"],
-          additionalProperties: false,
-        },
-      },
-      {
-        id: "cancel-edit",
-        schema: {
-          type: "object",
-          properties: { kind: KIND },
-          required: ["kind"],
-          additionalProperties: false,
-        },
-      },
-      {
-        // One action for both verbs: a `routineId` names the Routine to
-        // update, and its absence is what "create" means. The four field ids
-        // are declared here, which is what lets their current values travel
-        // with the press and nothing else.
-        id: "save-routine",
-        schema: {
-          type: "object",
-          properties: {
-            kind: KIND,
-            routineId: IDENTIFIER,
-            [ROUTINE_EDITOR_FIELDS_V1.name]: TEXT(100),
-            [ROUTINE_EDITOR_FIELDS_V1.prompt]: TEXT(8000),
-            [ROUTINE_EDITOR_FIELDS_V1.timing]: TEXT(256),
-            [ROUTINE_EDITOR_FIELDS_V1.schedule]: TEXT(256),
-          },
-          required: [
-            "kind",
-            ROUTINE_EDITOR_FIELDS_V1.name,
-            ROUTINE_EDITOR_FIELDS_V1.prompt,
-            ROUTINE_EDITOR_FIELDS_V1.timing,
-          ],
           additionalProperties: false,
         },
       },
