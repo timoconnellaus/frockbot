@@ -382,6 +382,67 @@ describe("the paged Session event log", () => {
     expect(await log.readRange(SESSION_ID, 0, events.length)).toEqual(events);
   });
 
+  test("collects named inline events without hydrating model-request payloads", async () => {
+    const storage = new MemoryStorage();
+    const session = new Session(SESSION_ID);
+    for (let turn = 1; turn <= 12; turn += 1) {
+      session.appendBatch([
+        { type: "turn/start", turn },
+        {
+          type: "model/request",
+          turn,
+          step: 1,
+          request: {
+            requestId: `request-${turn}`,
+            provider: "fake",
+            model: "large-context",
+            system: "s".repeat(80_000),
+            messages: [],
+            tools: [],
+          },
+        },
+        { type: "turn/end", turn, outcome: "completed" },
+      ]);
+    }
+    session.append({
+      type: "conversation/compacted",
+      effectId: "compaction-1",
+      fromTurn: 1,
+      throughTurn: 12,
+      summary: "## Summary\nTwelve Turns.",
+      identifiers: [],
+      provider: "fake",
+      model: "large-context",
+    });
+    const log = new SessionEventLog(storage);
+    await log.rewrite(SESSION_ID, [...session.events]);
+
+    const reads: string[] = [];
+    const get = storage.get.bind(storage);
+    storage.get = <T>(key: string): Promise<T | undefined> => {
+      reads.push(key);
+      return get<T>(key);
+    };
+
+    const events = await log.readInlineEventsOfTypes(
+      SESSION_ID,
+      new Set(["conversation/compacted", "turn/end"]),
+    );
+
+    expect(events.map((event) => event.type)).toEqual([
+      ...Array.from({ length: 12 }, () => "turn/end" as const),
+      "conversation/compacted",
+    ]);
+    expect(
+      events.find((event) => event.type === "conversation/compacted"),
+    ).toMatchObject({ throughTurn: 12 });
+    expect(
+      reads.filter((key) =>
+        key.startsWith(sessionEventPayloadPrefixV1(SESSION_ID)),
+      ),
+    ).toEqual([]);
+  });
+
   test("migrates the legacy single value on demand", async () => {
     const storage = new MemoryStorage();
     const events = journal(1_900_000);

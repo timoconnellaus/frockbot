@@ -134,18 +134,42 @@ export async function announcementsFromSession(
     .slice(-BOT_ANNOUNCEMENT_RETENTION);
 }
 
+/** Session events the announcement page needs; exact payloads stay on disk. */
+const CONVERSATION_ANNOUNCEMENT_EVENT_TYPES = new Set<string>([
+  "conversation/compacted",
+  "turn/end",
+]);
+
+async function conversationAnnouncementEvents(
+  state: ShellBotStateV1,
+): Promise<SessionEvent[]> {
+  const sessionId = await state.authority.readConversationSessionId();
+  if (!sessionId) return [];
+  return state.authority.readSessionInlineEventsOfTypes(
+    sessionId,
+    CONVERSATION_ANNOUNCEMENT_EVENT_TYPES,
+  );
+}
+
 /**
  * The announcements as the transcript reads them, each already carrying the
  * timestamp of the place it belongs rather than the moment it was written.
  */
 export async function projectAnnouncementPage(state: ShellBotStateV1) {
-  const sessionId = await state.authority.readConversationSessionId();
-  const session = sessionId
-    ? await state.authority.readSessionEvents(sessionId)
-    : [];
+  const session = await conversationAnnouncementEvents(state);
   return projectClientAnnouncementsV1(
     await announcementsFromSession(state, session),
     session,
+  );
+}
+
+/** The Bot's durable announcement log, including Session compaction markers. */
+export async function listAnnouncements(
+  state: ShellBotStateV1,
+): Promise<SessionEvent[]> {
+  return announcementsFromSession(
+    state,
+    await conversationAnnouncementEvents(state),
   );
 }
 

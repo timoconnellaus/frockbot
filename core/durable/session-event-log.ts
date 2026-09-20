@@ -433,6 +433,84 @@ export class SessionEventLog {
   }
 
   /**
+   * Inline events of the named types, without hydrating cut payloads.
+   *
+   * Chrome polls and liveness checks need a type, a seq, and a timestamp.
+   * Reconstructing every exact model request to find those is how a
+   * transcript poll took the isolate down.
+   */
+  async readInlineEventsOfTypes(
+    sessionId: string,
+    types: ReadonlySet<string>,
+    startSeq = 0,
+    endSeq = Number.MAX_SAFE_INTEGER,
+  ): Promise<SessionEvent[]> {
+    if (
+      !Number.isSafeInteger(startSeq) ||
+      !Number.isSafeInteger(endSeq) ||
+      startSeq < 0 ||
+      endSeq < startSeq
+    ) {
+      throw new Error("Session event range is invalid");
+    }
+    if (types.size === 0) return [];
+    const index = requireIndex(
+      await this.storage.get<SessionEventLogIndexV1>(
+        sessionEventLogIndexKeyV1(sessionId),
+      ),
+      sessionId,
+    );
+    if (!index) {
+      return (await this.read(sessionId)).filter(
+        (event) =>
+          types.has(event.type) && event.seq >= startSeq && event.seq < endSeq,
+      );
+    }
+    const last = Math.min(endSeq, index.eventCount);
+    if (startSeq >= last) return [];
+    const located =
+      startSeq === 0
+        ? {
+            page: 0,
+            stored: requirePage(
+              await this.storage.get<StoredSessionEventPageV1>(
+                sessionEventLogPageKey(sessionId, 0),
+              ),
+              sessionId,
+              0,
+            ),
+          }
+        : await this.pageContaining(sessionId, index, startSeq);
+    if (!located) {
+      throw new Error(
+        `Session event pages for "${sessionId}" are not contiguous`,
+      );
+    }
+    const events: SessionEvent[] = [];
+    for (let page = located.page; page < index.pageCount; page += 1) {
+      const stored =
+        page === located.page
+          ? located.stored
+          : requirePage(
+              await this.storage.get<StoredSessionEventPageV1>(
+                sessionEventLogPageKey(sessionId, page),
+              ),
+              sessionId,
+              page,
+            );
+      for (const entry of stored.entries) {
+        const seq = storedEventSeq(entry);
+        if (seq < startSeq) continue;
+        if (seq >= last) return events;
+        if (entry.storage !== "inline") continue;
+        if (!types.has(entry.event.type)) continue;
+        events.push(decodeSessionEvent(entry.event));
+      }
+    }
+    return events;
+  }
+
+  /**
    * The page holding `seq`, found by bisecting the page keys.
    *
    * Pages carry their own `startSeq` and are written in sequence order, so the

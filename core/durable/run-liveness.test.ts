@@ -14,6 +14,7 @@ import {
   type CompositionGenerationV1,
 } from "./composition/generation.js";
 import {
+  Session,
   type SessionEvent,
   TURN_DEADLINE_MS_V1,
 } from "@frockbot/core/contracts";
@@ -28,7 +29,10 @@ import {
   STALE_RUNNING_RUN_FAILURE_V1,
   STALE_RUNNING_RUN_GRACE_MS_V1,
 } from "./run-liveness.ts";
-import { SessionEventLog } from "./session-event-log.ts";
+import {
+  SessionEventLog,
+  sessionEventPayloadPrefixV1,
+} from "./session-event-log.ts";
 import {
   ACTIVE_RUN_KEY,
   IDENTITY_KEY,
@@ -286,5 +290,64 @@ describe("the read that repairs what it finds", () => {
     });
     expect(await authority.resolveRunWorking(undefined)).toBe(false);
     expect(await authority.resolveRunWorking("run-missing")).toBe(false);
+  });
+
+  test("judges a paged log without hydrating model-request payloads", async () => {
+    const storage = new MemoryStorage();
+    const conversation = new Session("user-1:primary");
+    for (let turn = 1; turn <= 8; turn += 1) {
+      conversation.appendBatch([
+        { type: "turn/start", turn },
+        {
+          type: "model/request",
+          turn,
+          step: 1,
+          request: {
+            requestId: `request-${turn}`,
+            provider: "fake",
+            model: "large-context",
+            system: "s".repeat(80_000),
+            messages: [],
+            tools: [],
+          },
+        },
+        { type: "turn/end", turn, outcome: "completed" },
+      ]);
+    }
+    conversation.appendBatch([
+      { type: "turn/start", turn: 9 },
+      { type: "step/start", turn: 9, step: 1 },
+    ]);
+    const log = [...conversation.events];
+    await new SessionEventLog(storage).rewrite("user-1:primary", log);
+    const stored = run({
+      acceptedAt: new Date().toISOString(),
+      events: log.slice(-2),
+      previousEventCount: log.length - 2,
+    });
+    await storage.put({
+      [`${RUN_PREFIX}${stored.runId}`]: stored,
+      [runIndexKey(stored.acceptedAt, stored.runId)]: stored.runId,
+      [ACTIVE_RUN_KEY]: stored.runId,
+      [IDENTITY_KEY]: { userId: "user-1", botId: "primary" },
+    });
+    const authority = new BotDurableAuthority<undefined>({
+      state: { storage } as unknown as DurableObjectState,
+      codec,
+      hooks,
+    });
+    const reads: string[] = [];
+    const get = storage.get.bind(storage);
+    storage.get = <T>(key: string): Promise<T | undefined> => {
+      reads.push(key);
+      return get<T>(key);
+    };
+
+    expect(await authority.resolveRunWorking("run-1")).toBe(true);
+    expect(
+      reads.filter((key) =>
+        key.startsWith(sessionEventPayloadPrefixV1("user-1:primary")),
+      ),
+    ).toEqual([]);
   });
 });
