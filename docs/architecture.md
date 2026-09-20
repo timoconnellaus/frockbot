@@ -515,12 +515,12 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   sub-page of the panel on a desktop, a pushed page on the phone. The projection
   files each Routine under Scheduled or Webhooks and the host draws those as
   labelled cards of rows, each row a way into the one editor with a pause switch
-  at its end. That editor is the host's own guided form
-  (`lib/routines/editor.dart`): what starts the Routine — a schedule, a webhook,
-  or a trigger an enabled Plugin declares, offered by the Plugin's and the
-  trigger's own names — then the controls only the chosen source has, then the
-  instruction. A webhook is never shown a schedule form, and a cron expression,
-  a Plugin id or a trigger slug is never typed. `RoutineRunsPage`
+  at its end. That editor is the host's own form
+  (`lib/routines/editor.dart`): the name and instruction, then what starts it —
+  a schedule, a webhook, or a trigger an enabled Plugin declares, offered by
+  the Plugin's and the trigger's own names — with only the chosen source's
+  controls underneath. A webhook is never shown a schedule form, and a cron
+  expression, a Plugin id or a trigger slug is never typed. `RoutineRunsPage`
   (`lib/routines/runs.dart`) is one Routine's firings, and one firing opens on
   the Work view. `RoutineInboxController` reads the completion inbox once for
   both the badge and the recent runs the Bot page lists.

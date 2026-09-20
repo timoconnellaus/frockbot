@@ -322,8 +322,6 @@ abstract final class RoutineIds {
   static String sourcePlugin(String pluginId) => 'routine-source-$pluginId';
   static String pluginTrigger(String pluginId, String trigger) =>
       'routine-trigger-$pluginId-$trigger';
-  static const editorBack = 'routine-editor-back';
-  static const editorContinue = 'routine-editor-continue';
   static const inboxDrawer = 'routine-inbox-drawer';
   static const runLog = 'routine-run-log';
   static const confirmDelete = 'routine-delete-confirm';
