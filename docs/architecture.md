@@ -657,7 +657,10 @@ read and the dispatch, `ViewSurfacePage` is the chrome, the empty state, the
 pull to refresh and the one `ViewController` per revision. A page is a
 controller and a title, and the surface borrows that controller: the page
 creates it, replaces it when the read it is over changes and disposes it, and
-the surface only listens while it is mounted.
+the surface only listens while it is mounted. An editor that asks before a
+dirty leave installs `confirmLeave` on that chrome: the AppBar back and the
+system back both go through it, and a save or cancel that already decided to
+leave does not.
 
 **Secrets, through the renderer.** `SettingField` has a `secret` kind. The
 document seeds it null, so a required key refuses by name before anything is

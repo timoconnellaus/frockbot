@@ -329,6 +329,10 @@ abstract final class RoutineIds {
   static const runLog = 'routine-run-log';
   static const confirmDelete = 'routine-delete-confirm';
 
+  /// The editor's way back to the list, and the confirm when the form is dirty.
+  static const editorBack = 'routine-editor-back';
+  static const confirmDiscard = 'routine-discard-confirm';
+
   /// The editor's fields are the projection's own ids, so a spec names them the
   /// way it names any other field. There is one form — a new Routine, or the
   /// one the reader asked to edit — so the ids do not carry a Routine in them.

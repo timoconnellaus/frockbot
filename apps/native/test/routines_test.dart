@@ -7,11 +7,13 @@ import 'package:frockbot_native/routines/document.dart';
 import 'package:frockbot_native/routines/editor.dart';
 import 'package:frockbot_native/routines/page.dart';
 import 'package:frockbot_native/routines/runs.dart';
+import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/view/action.dart';
 import 'package:frockbot_native/view/document.dart';
 
 import 'settings_test.dart' show SettingsApi;
+import 'shell_layout_test.dart' show byIdentifier;
 import 'widget_test.dart' show MemoryStore;
 
 /// The shape `routinesDocumentV1` produces, written by hand so the Flutter
@@ -594,6 +596,135 @@ void main() {
     expect(find.text('Daily'), findsOneWidget);
     expect(find.text('Create Routine'), findsOneWidget);
     expect(find.text('Cancel'), findsOneWidget);
+    expect(byIdentifier(RoutineIds.editorBack), findsOneWidget);
+  });
+
+  testWidgets('back leaves a form nobody changed', (tester) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      return routinesDocumentForPath(
+        path,
+        routines: [
+          {
+            'routineId': 'r1',
+            'name': 'Morning brief',
+            'schedule': '0 9 * * *',
+            'enabled': true,
+          },
+        ],
+        editing: {
+          'routineId': 'r1',
+          'name': 'Morning brief',
+          'prompt': 'Summarise overnight email.',
+          'schedule': '0 9 * * *',
+          'timing': 'schedule',
+        },
+      );
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    expect(find.text('Create Routine'), findsOneWidget);
+    await tester.tap(byIdentifier(RoutineIds.editorBack));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsNothing);
+    expect(find.text('Create Routine'), findsNothing);
+    expect(find.text('New Routine'), findsOneWidget);
+
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    expect(find.text('Save changes'), findsOneWidget);
+    await tester.tap(byIdentifier(RoutineIds.editorBack));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsNothing);
+    expect(find.text('Save changes'), findsNothing);
+    expect(find.text('Morning brief'), findsOneWidget);
+  });
+
+  testWidgets('back asks before discarding a dirty form', (tester) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      return routinesDocumentForPath(
+        path,
+        routines: [
+          {
+            'routineId': 'r1',
+            'name': 'Morning brief',
+            'schedule': '0 9 * * *',
+            'enabled': true,
+          },
+        ],
+        editing: {
+          'routineId': 'r1',
+          'name': 'Morning brief',
+          'prompt': 'Summarise overnight email.',
+          'schedule': '0 9 * * *',
+          'timing': 'schedule',
+        },
+      );
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, 'Evening brief');
+    await tester.pump();
+    await tester.tap(byIdentifier(RoutineIds.editorBack));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsOneWidget);
+    expect(byIdentifier(RoutineIds.confirmDiscard), findsOneWidget);
+
+    await tester.tap(find.text('Keep editing'));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsNothing);
+    expect(find.text('Create Routine'), findsOneWidget);
+    expect(find.text('Evening brief'), findsOneWidget);
+
+    await tester.tap(byIdentifier(RoutineIds.editorBack));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+    expect(find.text('Create Routine'), findsNothing);
+    expect(find.text('New Routine'), findsOneWidget);
+
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, 'Evening brief');
+    await tester.pump();
+    await tester.tap(byIdentifier(RoutineIds.editorBack));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsOneWidget);
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+    expect(find.text('Save changes'), findsNothing);
+    expect(find.text('Morning brief'), findsOneWidget);
+  });
+
+  testWidgets('Cancel leaves a dirty form without asking', (tester) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      return routinesDocumentForPath(path);
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, 'Evening brief');
+    await tester.pump();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsNothing);
+    expect(find.text('Create Routine'), findsNothing);
+    expect(find.text('New Routine'), findsOneWidget);
   });
 
   testWidgets('Routines answer while the Plugin catalog is still out', (
@@ -1439,6 +1570,26 @@ void main() {
         routineSaveIsNoOpV1(save(const {'routine.name': 'x'}), seeds),
         isFalse,
       );
+    });
+
+    test('a form is dirty only after a field leaves what it was shown', () {
+      final seeds = {
+        'routine.name': 'Morning brief',
+        'routine.prompt': 'Summarise overnight email.',
+        'routine.timing': 'schedule',
+        'routine.schedule': '0 9 * * *',
+      };
+      expect(routineEditorIsDirtyV1(const {}, seeds), isFalse);
+      expect(routineEditorIsDirtyV1(seeds, seeds), isFalse);
+      expect(
+        routineEditorIsDirtyV1({
+          ...seeds,
+          'routine.name': 'Evening brief',
+        }, seeds),
+        isTrue,
+      );
+      expect(routineEditorIsDirtyV1({'routine.name': ''}, const {}), isFalse);
+      expect(routineEditorIsDirtyV1({'routine.name': 'x'}, const {}), isTrue);
     });
 
     test('the two key commands the route takes', () {

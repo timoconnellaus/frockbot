@@ -62,6 +62,18 @@ class ViewSurfacePage extends StatefulWidget {
   /// pull-to-refresh is still the way to read again.
   final bool chrome;
 
+  /// Asked before the route pops. Return false to stay. The AppBar back and
+  /// the system back both go through this; a save or cancel that already
+  /// decided to leave does not.
+  final Future<bool> Function(ViewController view)? confirmLeave;
+
+  /// When true, a pop this page did not ask about — a save, a cancel — is
+  /// allowed through. Read on each build, so a flag the owner flips is enough.
+  final bool Function()? allowPop;
+
+  /// The identifier on the back control [confirmLeave] installs.
+  final String? backId;
+
   /// Drawn above the document, by the host, out of what the host knows and the
   /// document does not.
   ///
@@ -87,6 +99,9 @@ class ViewSurfacePage extends StatefulWidget {
     this.onClose,
     this.chrome = true,
     this.banner,
+    this.confirmLeave,
+    this.allowPop,
+    this.backId,
   });
 
   @override
@@ -98,6 +113,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
   ViewController? view;
   int? shown;
   bool reloadWanted = false;
+  bool _allowPop = false;
 
   /// Whether a read was in flight when this page was last told something.
   bool reading = false;
@@ -195,6 +211,25 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     return receipt;
   }
 
+  bool get _canPopNow =>
+      widget.confirmLeave == null ||
+      _allowPop ||
+      (widget.allowPop?.call() ?? false);
+
+  Future<void> _requestLeave() async {
+    final view = this.view;
+    if (view != null && widget.confirmLeave != null) {
+      if (!await widget.confirmLeave!(view)) return;
+    }
+    if (!mounted) return;
+    setState(() => _allowPop = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
@@ -251,34 +286,51 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
             ),
     );
     if (!widget.chrome) return body;
-    return Scaffold(
-      appBar: DesktopHeader(
-        child: AppBar(
-          title: Text(widget.title),
-          automaticallyImplyLeading: widget.onClose == null,
-          leading: widget.onClose == null
-              ? null
-              : identified(
-                  ShellIds.rightPanelClose,
-                  IconButton(
-                    tooltip: 'Close ${widget.title.toLowerCase()}',
-                    onPressed: widget.onClose,
-                    icon: const Icon(Icons.close),
-                  ),
-                ),
-          actions: [
-            identified(
-              widget.refreshId,
-              IconButton(
-                tooltip: 'Refresh ${widget.title.toLowerCase()}',
-                onPressed: controller.busy ? null : controller.load,
-                icon: const Icon(Icons.refresh_rounded),
-              ),
+    final back = widget.confirmLeave != null
+        ? identified(
+            widget.backId ?? 'view-back',
+            IconButton(
+              tooltip: 'Back',
+              onPressed: _requestLeave,
+              icon: const Icon(Icons.arrow_back),
             ),
-          ],
+          )
+        : widget.onClose == null
+        ? null
+        : identified(
+            ShellIds.rightPanelClose,
+            IconButton(
+              tooltip: 'Close ${widget.title.toLowerCase()}',
+              onPressed: widget.onClose,
+              icon: const Icon(Icons.close),
+            ),
+          );
+    return PopScope(
+      canPop: _canPopNow,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        unawaited(_requestLeave());
+      },
+      child: Scaffold(
+        appBar: DesktopHeader(
+          child: AppBar(
+            title: Text(widget.title),
+            automaticallyImplyLeading: back == null && widget.onClose == null,
+            leading: back,
+            actions: [
+              identified(
+                widget.refreshId,
+                IconButton(
+                  tooltip: 'Refresh ${widget.title.toLowerCase()}',
+                  onPressed: controller.busy ? null : controller.load,
+                  icon: const Icon(Icons.refresh_rounded),
+                ),
+              ),
+            ],
+          ),
         ),
+        body: body,
       ),
-      body: body,
     );
   }
 }

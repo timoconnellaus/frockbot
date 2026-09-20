@@ -16,6 +16,7 @@ import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../shell/transcript_model.dart';
+import '../view/action.dart';
 import '../view/surface.dart';
 import 'document.dart';
 import 'editor.dart';
@@ -60,6 +61,10 @@ class RoutinesController extends ViewSurfaceController {
   /// exists once, so it is kept here for as long as the person is looking at
   /// it and never asked for again — a rotate is the only way to see one twice.
   Map<String, Object?>? mintedKey;
+
+  /// The editor has decided to leave — save, cancel, or delete — so the next
+  /// pop is not asked about.
+  bool closing = false;
 
   wire.ViewDocument? _document;
   List<RoutinePluginSourceV1> pluginSources = const [];
@@ -179,7 +184,7 @@ class RoutinesController extends ViewSurfaceController {
       return applied;
     }
     if (kind == 'cancel-edit') {
-      onCloseEditor?.call();
+      _closeEditor();
       return applied;
     }
     if (kind == 'delete-routine' && confirmDelete != null) {
@@ -196,7 +201,7 @@ class RoutinesController extends ViewSurfaceController {
           command,
           routineEditorSeedsV1(_document?.root.toJson()),
         )) {
-      onCloseEditor?.call();
+      _closeEditor();
       return applied;
     }
     final onScreen = unacknowledgedOnScreen;
@@ -223,7 +228,7 @@ class RoutinesController extends ViewSurfaceController {
     // it changed is what the reader is left looking at.
     if ((kind == 'save-routine' || kind == 'delete-routine') &&
         receipt['status'] == 'applied') {
-      onCloseEditor?.call();
+      _closeEditor();
     }
     // The plaintext key is on this receipt and on nothing else, ever.
     if (kind == 'rotate-key') {
@@ -231,6 +236,17 @@ class RoutinesController extends ViewSurfaceController {
     }
     if (kind == 'revoke-key') mintedKey = null;
     return receipt;
+  }
+
+  void _closeEditor() {
+    if (closing) return;
+    closing = true;
+    _changed();
+    final close = onCloseEditor;
+    if (close == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_closed) close();
+    });
   }
 
   void forgetKey() {
@@ -475,6 +491,42 @@ class _RoutineEditorPageState extends State<RoutineEditorPage> {
       ) ??
       false;
 
+  Future<bool> _confirmDiscard() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialog) => identified(
+          RoutineIds.confirmDiscard,
+          AlertDialog(
+            title: const Text('Discard changes?'),
+            content: const Text(
+              'You have unsaved changes. Leave without keeping them?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('Keep editing'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('Discard'),
+              ),
+            ],
+          ),
+        ),
+      ) ??
+      false;
+
+  Future<bool> _canLeave(ViewController view) async {
+    if (controller.closing) return true;
+    if (!routineEditorIsDirtyV1(
+      view.values,
+      routineEditorSeedsV1(controller.document?.root.toJson()),
+    )) {
+      return true;
+    }
+    return _confirmDiscard();
+  }
+
   void _openRuns(String routineId) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -523,6 +575,9 @@ class _RoutineEditorPageState extends State<RoutineEditorPage> {
     documentId: RoutineIds.document,
     refreshId: RoutineIds.refresh,
     controller: controller,
+    backId: RoutineIds.editorBack,
+    allowPop: () => controller.closing,
+    confirmLeave: _canLeave,
     banner: (context) => WebhookKeyCard(controller: controller),
     fields: routineEditorFieldBuildersV1(
       () => controller.pluginSources,
