@@ -310,6 +310,27 @@ describe("Inside FrockBot examples", () => {
     expect(descriptor.contractVersion).toBe(ISOLATE_CONTRACT_VERSION);
   });
 
+  test("puts outcome cards beside the introduction instead of a lone centred column", async () => {
+    const page = await publicFile("how-it-works/index.html");
+    const heroGrid = parseStyleRules(
+      await publicFile("how-it-works/styles.css"),
+    ).find((rule) => rule.selectors.includes(".inside-hero-grid"));
+
+    expect(heroGrid?.declarations["justify-content"]).toBeUndefined();
+    expect(heroGrid?.declarations["grid-template-columns"]).toBe(
+      "minmax(0, 1.05fr) minmax(280px, 0.95fr)",
+    );
+    expect(page).toContain('class="inside-hero-values"');
+    expect(page).toContain(">Customisable</strong>");
+    expect(page).toContain(">On your devices</strong>");
+    expect(page).toContain(">Yours to run</strong>");
+    expect(page).toContain(">Always on</strong>");
+    expect(page).toContain('href="#plugins"');
+    expect(page).toContain('href="#native-apps"');
+    expect(page).toContain('href="#open-source"');
+    expect(page).toContain('href="#persistent-bot"');
+  });
+
   test("gives every published article heading a unique link target", async () => {
     const headings: string[] = [];
     await drain(
