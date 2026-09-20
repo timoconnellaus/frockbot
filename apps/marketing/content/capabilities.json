@@ -1,0 +1,2820 @@
+{
+  "version": 1,
+  "platforms": [
+    {
+      "id": "web",
+      "name": "Web"
+    },
+    {
+      "id": "android",
+      "name": "Android"
+    },
+    {
+      "id": "iphone",
+      "name": "iPhone"
+    },
+    {
+      "id": "macos",
+      "name": "macOS"
+    },
+    {
+      "id": "windows",
+      "name": "Windows"
+    },
+    {
+      "id": "linux",
+      "name": "Linux"
+    },
+    {
+      "id": "apple-watch",
+      "name": "Apple Watch"
+    },
+    {
+      "id": "wear-os",
+      "name": "Wear OS"
+    },
+    {
+      "id": "browser-extension",
+      "name": "Browser extension"
+    }
+  ],
+  "types": [
+    {
+      "id": "slot",
+      "name": "Slot",
+      "plural": "Slots",
+      "description": "A place in the interface a plugin contributes to. The host renders its supported description or contained HTML surface."
+    },
+    {
+      "id": "entry",
+      "name": "Entry",
+      "plural": "Entries",
+      "description": "A person starts a Turn or opens a surface, from the app, device or another app."
+    },
+    {
+      "id": "trigger",
+      "name": "Trigger",
+      "plural": "Triggers",
+      "description": "An event starts a run with nobody watching."
+    },
+    {
+      "id": "handler",
+      "name": "Handler",
+      "plural": "Handlers",
+      "description": "The host calls a plugin during an operation. Most handlers return a patch or decision; some are notifications."
+    },
+    {
+      "id": "action",
+      "name": "Action",
+      "plural": "Actions",
+      "description": "A tool the Bot calls to reach the device or the network."
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "conversation-card",
+      "type": "slot",
+      "category": "In the conversation",
+      "name": "Conversation card",
+      "description": "A rich card inside the conversation.",
+      "scope": "device",
+      "platforms": {
+        "web": "available",
+        "android": "available",
+        "iphone": "planned",
+        "macos": "available",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "message-action",
+      "type": "slot",
+      "category": "In the conversation",
+      "name": "Message action",
+      "description": "An action attached to a message.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "message-decoration",
+      "type": "slot",
+      "category": "In the conversation",
+      "name": "Message decoration",
+      "description": "A badge or label on a message.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "turn-status",
+      "type": "slot",
+      "category": "In the conversation",
+      "name": "Turn status strip",
+      "description": "Status while the Bot works.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "empty-state",
+      "type": "slot",
+      "category": "In the conversation",
+      "name": "Conversation empty state",
+      "description": "An introduction before the first message.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "suggested-prompts",
+      "type": "slot",
+      "category": "In the conversation",
+      "name": "Suggested prompts",
+      "description": "Useful starting points for a conversation.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "approval-prompt",
+      "type": "slot",
+      "category": "In the conversation",
+      "name": "Approval prompt",
+      "description": "A plugin-specific presentation of a host-owned decision.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "composer-strip",
+      "type": "slot",
+      "category": "Around the composer",
+      "name": "Composer strip",
+      "description": "A panel above or below the input.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "composer-button",
+      "type": "slot",
+      "category": "Around the composer",
+      "name": "Composer toolbar button",
+      "description": "A tool beside the composer.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "attachment-type",
+      "type": "slot",
+      "category": "Around the composer",
+      "name": "Attachment type",
+      "description": "An option in the attachment picker.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "voice-overlay",
+      "type": "slot",
+      "category": "Around the composer",
+      "name": "Voice overlay panel",
+      "description": "A panel during a voice call.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "header-action",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Header action",
+      "description": "An action in the app header.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "sidebar-tab",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Sidebar tab",
+      "description": "A destination in the sidebar.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "sidebar-section",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Sidebar section",
+      "description": "A block in the Bot list.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "bot-list-badge",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Bot list badge",
+      "description": "A small status beside a Bot.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "bot-profile-section",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Bot profile section",
+      "description": "Information on a Bot profile.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "bot-page-panel",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Bot page panel",
+      "description": "A panel on a Bot page.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "full-page",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Full page",
+      "description": "A plugin surface with its own route.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "work-view",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Work view panel",
+      "description": "A panel alongside the work.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "settings-section",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Settings section",
+      "description": "Controls inside the Bot’s settings.",
+      "scope": "device",
+      "platforms": {
+        "web": "available",
+        "android": "available",
+        "iphone": "planned",
+        "macos": "available",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "settings-page",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Settings page",
+      "description": "A dedicated settings destination.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "onboarding-step",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Onboarding step",
+      "description": "A step when getting started.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "theme-tokens",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Theme tokens",
+      "description": "Colours and type within the host’s supported theme controls.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "home-widget",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Home-screen widget",
+      "description": "A glanceable surface outside the app.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "lock-widget",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Lock-screen widget",
+      "description": "A compact surface on the lock screen.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "live-activity",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Live activity",
+      "description": "Ongoing status on the lock screen or a wearable.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "complication-tile",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Complication or tile",
+      "description": "A wearable surface you can glance at.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "smart-stack",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Smart Stack widget",
+      "description": "A widget in the watch’s Smart Stack.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "quick-settings-surface",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Quick-settings tile",
+      "description": "A control in the device’s quick controls.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "notification-content",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Notification content",
+      "description": "The app draws the notification body.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "menu-bar-tray",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Menu bar / system tray item",
+      "description": "A persistent desktop status or action.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "dock-badge",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Dock and taskbar badge",
+      "description": "A small badge on the app icon.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "file-provider",
+      "type": "slot",
+      "category": "On the device",
+      "name": "File provider",
+      "description": "The store as a folder in Files, Finder or Explorer.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "file-preview",
+      "type": "slot",
+      "category": "On the device",
+      "name": "File preview",
+      "description": "Quick Look and preview handlers.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "not-applicable",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "keyboard",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Keyboard",
+      "description": "A keyboard surface on the device.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "live-wallpaper",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Live wallpaper",
+      "description": "A changing home-screen background.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "screensaver",
+      "type": "slot",
+      "category": "On the device",
+      "name": "Screensaver",
+      "description": "A desktop screensaver.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "browser-side-panel",
+      "type": "slot",
+      "category": "In the browser",
+      "name": "Side panel",
+      "description": "A panel beside the current page.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "browser-popup",
+      "type": "slot",
+      "category": "In the browser",
+      "name": "Toolbar popup",
+      "description": "A compact surface opened from the browser toolbar.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "new-tab",
+      "type": "slot",
+      "category": "In the browser",
+      "name": "New tab page",
+      "description": "A custom start page.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "page-overlay",
+      "type": "slot",
+      "category": "In the browser",
+      "name": "Page overlay",
+      "description": "An interface over the current page.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "deep-link",
+      "type": "entry",
+      "category": "From the app",
+      "name": "Deep link",
+      "description": "Open a particular Bot or surface.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "command-palette",
+      "type": "entry",
+      "category": "From the app",
+      "name": "Command palette item",
+      "description": "Start an action from the app’s command menu.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "in-app-shortcut",
+      "type": "entry",
+      "category": "From the app",
+      "name": "In-app keyboard shortcut",
+      "description": "Start an action with the keyboard.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "notification-entry",
+      "type": "entry",
+      "category": "From the device",
+      "name": "Notification tap and actions",
+      "description": "Continue from a notification.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "widget-entry",
+      "type": "entry",
+      "category": "From the device",
+      "name": "Widget interaction",
+      "description": "A button inside a widget.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "app-shortcut",
+      "type": "entry",
+      "category": "From the device",
+      "name": "App shortcuts and voice assistant",
+      "description": "Start work through a system shortcut or assistant.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "device-assistant",
+      "type": "entry",
+      "category": "From the device",
+      "name": "Device assistant",
+      "description": "Open the Bot with the device’s assistant gesture.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "quick-settings-entry",
+      "type": "entry",
+      "category": "From the device",
+      "name": "Quick-settings tile tap",
+      "description": "Start work from a quick control.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "complication-entry",
+      "type": "entry",
+      "category": "From the device",
+      "name": "Complication tap",
+      "description": "Open or act from a watch face.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "global-hotkey",
+      "type": "entry",
+      "category": "From the device",
+      "name": "Global hotkey",
+      "description": "Start work without focusing FrockBot.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "nfc-entry",
+      "type": "entry",
+      "category": "From the device",
+      "name": "NFC tag tap",
+      "description": "Start work by tapping a tag.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "lightweight-app-entry",
+      "type": "entry",
+      "category": "From the device",
+      "name": "App Clip / lightweight app entry",
+      "description": "A slice of the app without a full installation.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Android delivery mechanism remains to be chosen; this row describes the intended lightweight entry, not a commitment to a particular platform API."
+      ]
+    },
+    {
+      "id": "share-inbound",
+      "type": "entry",
+      "category": "From other apps",
+      "name": "Share sheet, inbound",
+      "description": "Send something from another app to the Bot.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "open-with",
+      "type": "entry",
+      "category": "From other apps",
+      "name": "Open with",
+      "description": "File types the app claims.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "drag-drop",
+      "type": "entry",
+      "category": "From other apps",
+      "name": "Drag and drop onto the app",
+      "description": "Drop a file or item into FrockBot.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "system-context-menu",
+      "type": "entry",
+      "category": "From other apps",
+      "name": "System context menu",
+      "description": "Right-click in another app.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "browser-toolbar-entry",
+      "type": "entry",
+      "category": "From other apps",
+      "name": "Toolbar button",
+      "description": "Start work from the browser toolbar.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "omnibox",
+      "type": "entry",
+      "category": "From other apps",
+      "name": "Omnibox keyword",
+      "description": "Start work from the browser address bar.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "webhook",
+      "type": "trigger",
+      "category": "From the cloud",
+      "name": "Webhook",
+      "description": "An incoming event can start a Turn even when every client is closed.",
+      "scope": "cloud",
+      "status": "available"
+    },
+    {
+      "id": "location-trigger",
+      "type": "trigger",
+      "category": "Location and presence",
+      "name": "Location",
+      "description": "Geofences and activity recognition.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Android background location is subject to permissions, background limits and store review."
+      ]
+    },
+    {
+      "id": "bluetooth-presence",
+      "type": "trigger",
+      "category": "Location and presence",
+      "name": "Bluetooth device or beacon presence",
+      "description": "A device or beacon arrives or leaves.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "network-trigger",
+      "type": "trigger",
+      "category": "Location and presence",
+      "name": "Network change",
+      "description": "Wi-Fi joined, online or offline.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "usb-trigger",
+      "type": "trigger",
+      "category": "Location and presence",
+      "name": "USB device attached",
+      "description": "A device is plugged in.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "display-trigger",
+      "type": "trigger",
+      "category": "Location and presence",
+      "name": "Display connected",
+      "description": "A monitor is connected or disconnected.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "audio-trigger",
+      "type": "trigger",
+      "category": "Location and presence",
+      "name": "Audio device change",
+      "description": "Headphones or speakers connect or disconnect.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "battery-trigger",
+      "type": "trigger",
+      "category": "Device state",
+      "name": "Battery and charging",
+      "description": "Battery level or charging changes.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "session-trigger",
+      "type": "trigger",
+      "category": "Device state",
+      "name": "Session events",
+      "description": "Wake, unlock or login.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "idle-trigger",
+      "type": "trigger",
+      "category": "Device state",
+      "name": "User idle",
+      "description": "The desktop has been idle.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "active-app-trigger",
+      "type": "trigger",
+      "category": "Device state",
+      "name": "Active app changes",
+      "description": "The focused app or browser context changes.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "dnd-trigger",
+      "type": "trigger",
+      "category": "Device state",
+      "name": "Do Not Disturb change",
+      "description": "The device’s interruption mode changes.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "screenshot-trigger",
+      "type": "trigger",
+      "category": "Device state",
+      "name": "Screenshot taken",
+      "description": "A screenshot is captured.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "app-install-trigger",
+      "type": "trigger",
+      "category": "Device state",
+      "name": "App installed or removed",
+      "description": "The installed application list changes.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "call-trigger",
+      "type": "trigger",
+      "category": "Device state",
+      "name": "Call state",
+      "description": "A call rings or ends.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "notification-trigger",
+      "type": "trigger",
+      "category": "Content changes",
+      "name": "Notification access",
+      "description": "What other apps post.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Android access requires the relevant user permission and is subject to store review."
+      ]
+    },
+    {
+      "id": "clipboard-trigger",
+      "type": "trigger",
+      "category": "Content changes",
+      "name": "Clipboard changes",
+      "description": "The clipboard receives new content.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "calendar-trigger",
+      "type": "trigger",
+      "category": "Content changes",
+      "name": "Calendar changes",
+      "description": "Calendar content changes.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "contacts-trigger",
+      "type": "trigger",
+      "category": "Content changes",
+      "name": "Contacts changes",
+      "description": "Contact information changes.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "media-trigger",
+      "type": "trigger",
+      "category": "Content changes",
+      "name": "Media library change",
+      "description": "A new photo or video.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "now-playing-trigger",
+      "type": "trigger",
+      "category": "Content changes",
+      "name": "Now Playing change",
+      "description": "Media or playback state changes.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Android access requires the relevant user permission and is subject to store review."
+      ]
+    },
+    {
+      "id": "home-trigger",
+      "type": "trigger",
+      "category": "Content changes",
+      "name": "Home accessory events",
+      "description": "Events from HomeKit or Matter devices.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "page-trigger",
+      "type": "trigger",
+      "category": "In the browser",
+      "name": "Page and tab events",
+      "description": "A page loads or a tab changes.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "download-trigger",
+      "type": "trigger",
+      "category": "In the browser",
+      "name": "Download finished",
+      "description": "A browser download completes.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "bookmark-trigger",
+      "type": "trigger",
+      "category": "In the browser",
+      "name": "Bookmark or history change",
+      "description": "The browser’s saved or visited pages change.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "system-prompt-handler",
+      "type": "handler",
+      "category": "In the Bot",
+      "name": "System prompt assembly",
+      "description": "system-prompt/assemble — contribute to the prompt before a model request.",
+      "scope": "cloud",
+      "status": "available"
+    },
+    {
+      "id": "tool-exposure-handler",
+      "type": "handler",
+      "category": "In the Bot",
+      "name": "Tool exposure",
+      "description": "agent/tool-exposure — shape the tools exposed to the model.",
+      "scope": "cloud",
+      "status": "available"
+    },
+    {
+      "id": "model-request-handler",
+      "type": "handler",
+      "category": "In the Bot",
+      "name": "Model request",
+      "description": "agent/request — patch permitted request fields before dispatch.",
+      "scope": "cloud",
+      "status": "available"
+    },
+    {
+      "id": "pre-tool-handler",
+      "type": "handler",
+      "category": "In the Bot",
+      "name": "Before a tool runs",
+      "description": "tools/pre-execute — inspect or veto a tool invocation before execution.",
+      "scope": "cloud",
+      "status": "available"
+    },
+    {
+      "id": "post-tool-handler",
+      "type": "handler",
+      "category": "In the Bot",
+      "name": "After a tool runs",
+      "description": "tools/post-execute — inspect or patch the tool result.",
+      "scope": "cloud",
+      "status": "available"
+    },
+    {
+      "id": "turn-stopping-handler",
+      "type": "handler",
+      "category": "In the Bot",
+      "name": "Turn stopping",
+      "description": "agent/turn-stopping — observe the end of a Turn; the current hook is a notification, not a veto.",
+      "scope": "cloud",
+      "status": "available"
+    },
+    {
+      "id": "approval-handler",
+      "type": "handler",
+      "category": "In the Bot",
+      "name": "Approval decisions",
+      "description": "Participate in the host’s approval flow without creating authority.",
+      "scope": "cloud",
+      "status": "planned"
+    },
+    {
+      "id": "routing-handler",
+      "type": "handler",
+      "category": "In the Bot",
+      "name": "Inbound message routing",
+      "description": "Decide which Bot receives an incoming message.",
+      "scope": "cloud",
+      "status": "planned"
+    },
+    {
+      "id": "call-screening",
+      "type": "handler",
+      "category": "On the device",
+      "name": "Call screening",
+      "description": "Help the system decide how to handle a call.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Device handlers have platform-specific time limits and execution rules; the host may need to prepare local data or rules in advance."
+      ]
+    },
+    {
+      "id": "sms-filter",
+      "type": "handler",
+      "category": "On the device",
+      "name": "SMS filtering",
+      "description": "Classify a message for the system.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Device handlers have platform-specific time limits and execution rules; the host may need to prepare local data or rules in advance."
+      ]
+    },
+    {
+      "id": "caller-id",
+      "type": "handler",
+      "category": "On the device",
+      "name": "Caller ID list",
+      "description": "Provide caller identification data.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Device handlers have platform-specific time limits and execution rules; the host may need to prepare local data or rules in advance."
+      ]
+    },
+    {
+      "id": "mail-extension",
+      "type": "handler",
+      "category": "On the device",
+      "name": "Mail extension",
+      "description": "Participate in supported mail operations.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Device handlers have platform-specific time limits and execution rules; the host may need to prepare local data or rules in advance."
+      ]
+    },
+    {
+      "id": "focus-filter",
+      "type": "handler",
+      "category": "On the device",
+      "name": "Focus filter",
+      "description": "Adjust supported app content for a Focus.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Device handlers have platform-specific time limits and execution rules; the host may need to prepare local data or rules in advance."
+      ]
+    },
+    {
+      "id": "request-filter",
+      "type": "handler",
+      "category": "In the browser",
+      "name": "Request filtering",
+      "description": "Provide rules for browser requests.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      },
+      "notes": [
+        "The browser’s extension APIs determine which requests can be filtered and how rules are applied."
+      ]
+    },
+    {
+      "id": "network-action",
+      "type": "action",
+      "category": "Reach out",
+      "name": "Network, with your credentials",
+      "description": "Approved network access through the host. Credentials are attached at the network boundary.",
+      "scope": "cloud",
+      "status": "available"
+    },
+    {
+      "id": "local-notification",
+      "type": "action",
+      "category": "Reach out",
+      "name": "Local notifications",
+      "description": "Show a notification on a connected device.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "share-outbound",
+      "type": "action",
+      "category": "Reach out",
+      "name": "Share sheet, outbound",
+      "description": "Hand content to another app.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "prefilled-compose",
+      "type": "action",
+      "category": "Reach out",
+      "name": "Prefilled compose",
+      "description": "Prepare a text or email for the person to send.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "place-call",
+      "type": "action",
+      "category": "Reach out",
+      "name": "Place a call",
+      "description": "Open the system’s calling flow.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "directions",
+      "type": "action",
+      "category": "Reach out",
+      "name": "Directions",
+      "description": "Open directions in the system maps app.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "open-url",
+      "type": "action",
+      "category": "Reach out",
+      "name": "Open a URL or another app",
+      "description": "Open a destination on a connected device.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "contacts-action",
+      "type": "action",
+      "category": "Personal data",
+      "name": "Contacts",
+      "description": "Read or update permitted contacts.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "calendar-action",
+      "type": "action",
+      "category": "Personal data",
+      "name": "Calendar and reminders",
+      "description": "Work with calendar events and reminders.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "photo-library",
+      "type": "action",
+      "category": "Personal data",
+      "name": "Photo library",
+      "description": "Work with permitted photos and videos.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "music-library",
+      "type": "action",
+      "category": "Personal data",
+      "name": "Music library",
+      "description": "Access the device’s music library.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "files-action",
+      "type": "action",
+      "category": "Personal data",
+      "name": "Files and folders",
+      "description": "Pickers and user folders.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "clipboard-action",
+      "type": "action",
+      "category": "Personal data",
+      "name": "Clipboard",
+      "description": "Read or write the clipboard where permitted.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "search-index",
+      "type": "action",
+      "category": "Personal data",
+      "name": "System search index",
+      "description": "Publish content into the system’s search.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "location-action",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Location",
+      "description": "Read an approved device location.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "camera-action",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Camera and document scanner",
+      "description": "Capture an image or scan a document.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "image-recognition",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Image text and object recognition",
+      "description": "Recognise content on the device.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "audio-recording",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Audio recording",
+      "description": "Record audio with permission.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "audio-playback",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Audio playback",
+      "description": "Play audio on a connected device.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "text-to-speech",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Text to speech",
+      "description": "Speak with the system’s voices.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "speech-recognition",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Speech recognition",
+      "description": "Transcribe through the system’s recognition service.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "flashlight",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Flashlight",
+      "description": "Control the device’s light.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "haptics",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Haptics",
+      "description": "Provide tactile feedback.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "motion-sensors",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Motion and environment sensors",
+      "description": "Read supported sensor data.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "nfc-action",
+      "type": "action",
+      "category": "Hardware",
+      "name": "NFC",
+      "description": "Read and write supported tags.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "bluetooth-io",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Bluetooth device I/O",
+      "description": "Communicate with supported Bluetooth devices.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "usb-serial",
+      "type": "action",
+      "category": "Hardware",
+      "name": "USB and serial",
+      "description": "Communicate with connected hardware.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "local-discovery",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Local network discovery",
+      "description": "Bonjour and mDNS discovery.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "home-control",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Home accessory control",
+      "description": "Control HomeKit or Matter devices.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "wallet-passes",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Wallet passes",
+      "description": "Add or update supported passes.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "payment-sheet",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Payment sheet",
+      "description": "Present a supported Apple Pay or Google Pay flow.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "not-applicable",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "biometric",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Biometric confirmation",
+      "description": "Ask the device to confirm the user’s presence.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "device-state",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Device state",
+      "description": "Battery, network and storage information.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "planned",
+        "wear-os": "planned",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "print",
+      "type": "action",
+      "category": "Hardware",
+      "name": "Print",
+      "description": "Open the system’s print flow.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "on-device-model",
+      "type": "action",
+      "category": "Hardware",
+      "name": "On-device model",
+      "description": "Use a model available on the device.",
+      "scope": "device",
+      "platforms": {
+        "web": "planned",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "system-settings",
+      "type": "action",
+      "category": "System control",
+      "name": "System settings",
+      "description": "Volume, brightness, Do Not Disturb and Wi-Fi.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "wallpaper",
+      "type": "action",
+      "category": "System control",
+      "name": "Wallpaper",
+      "description": "Set the desktop or home-screen background.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "alarms-timers",
+      "type": "action",
+      "category": "System control",
+      "name": "Alarms and timers",
+      "description": "Create an alarm or timer.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "keep-awake",
+      "type": "action",
+      "category": "System control",
+      "name": "Keep awake",
+      "description": "Request that a device stays awake.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "lock-sleep-shutdown",
+      "type": "action",
+      "category": "System control",
+      "name": "Lock, sleep and shut down",
+      "description": "Request a device power or session action.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "window-management",
+      "type": "action",
+      "category": "System control",
+      "name": "Window management",
+      "description": "Arrange or focus desktop windows.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "now-playing-control",
+      "type": "action",
+      "category": "System control",
+      "name": "Now Playing control",
+      "description": "Control supported media playback.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Android media control requires the relevant access and is subject to store review."
+      ]
+    },
+    {
+      "id": "accessibility-action",
+      "type": "action",
+      "category": "System control",
+      "name": "Accessibility automation",
+      "description": "Act through approved accessibility interfaces.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "local-shell",
+      "type": "action",
+      "category": "System control",
+      "name": "Local shell",
+      "description": "Run an approved command on the desktop.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "automation-handoff",
+      "type": "action",
+      "category": "System control",
+      "name": "Automation app handoff",
+      "description": "Shortcuts, Automate or Power Automate.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "planned",
+        "iphone": "planned",
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      }
+    },
+    {
+      "id": "read-page",
+      "type": "action",
+      "category": "In the browser",
+      "name": "Read the current page",
+      "description": "Give the Bot permitted page content.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "modify-page",
+      "type": "action",
+      "category": "In the browser",
+      "name": "Modify the page",
+      "description": "Make an approved change to page content.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "tabs-windows",
+      "type": "action",
+      "category": "In the browser",
+      "name": "Tabs and windows",
+      "description": "Manage the browser’s tabs and windows.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "downloads-action",
+      "type": "action",
+      "category": "In the browser",
+      "name": "Downloads",
+      "description": "Work with browser downloads.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    },
+    {
+      "id": "history-bookmarks",
+      "type": "action",
+      "category": "In the browser",
+      "name": "History and bookmarks",
+      "description": "Read or update permitted browsing records.",
+      "scope": "device",
+      "platforms": {
+        "web": "not-applicable",
+        "android": "not-applicable",
+        "iphone": "not-applicable",
+        "macos": "not-applicable",
+        "windows": "not-applicable",
+        "linux": "not-applicable",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "planned"
+      }
+    }
+  ]
+}

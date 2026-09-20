@@ -29,8 +29,10 @@ They do not know the AI space and should never need to.
   outcomes over capabilities.
 - Primary CTA: start the hosted product.
 
-**2. AI enthusiasts (`/open/` and the "For the tinkerers" strip).**
-People who know the category and want to own and modify the thing.
+**2. AI enthusiasts (`/how-it-works/`, `/open/`, and the "For the tinkerers"
+strip).** People who know the category and want to own and modify the thing.
+`/how-it-works/` is titled **Inside FrockBot** (nav label **How it works**) and
+carries the architecture and the capability reference.
 
 - Angles: MIT open source; bring your own model (40 providers); everything
   is a plugin (hooks on the loop, tools, storage, declared egress, Bots can
@@ -41,10 +43,14 @@ People who know the category and want to own and modify the thing.
 
 ## The rule that joins them
 
-One product, two doors. The homepage is written for audience 1 end to end;
-audience 2 self-selects through the nav "Open source" link, the GitHub mark,
-and the short tinkerer strip near the bottom. Do not blend the vocabularies
-in one section.
+One product, two doors. The homepage is written for audience 1 end to end,
+with two exceptions that name plugins on purpose: the "Makes its own tools"
+feature card, and the Inside FrockBot card between the feature grid and the
+work example — copy and bot-builder artwork in audience 2's vocabulary,
+linking to `/how-it-works/`. Audience 2 self-selects through the primary
+"How it works" and "Open source" nav links, the GitHub mark, that card, and
+the short tinkerer strip near the bottom. Do not blend the vocabularies
+anywhere else in one section.
 
 ## Competitors: allude, never name
 

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { decodePluginDescriptorV1 } from "../../../core/contracts/plugin-descriptor";
+import { ISOLATE_CONTRACT_VERSION } from "../../../core/contracts/isolate";
 import worker, {
   MAC_DOWNLOAD_URL,
   canonicalUrl,
@@ -289,6 +291,38 @@ describe("marketing worker", () => {
       );
     },
   );
+});
+
+describe("Inside FrockBot examples", () => {
+  test("publishes a descriptor for the current isolate contract", async () => {
+    let descriptorJson = "";
+
+    await drain(
+      new HTMLRewriter().on("#plugin-descriptor-example", {
+        text(chunk) {
+          descriptorJson += chunk.text;
+        },
+      }),
+      await publicFile("how-it-works/index.html"),
+    );
+
+    const descriptor = decodePluginDescriptorV1(JSON.parse(descriptorJson));
+    expect(descriptor.contractVersion).toBe(ISOLATE_CONTRACT_VERSION);
+  });
+
+  test("gives every published article heading a unique link target", async () => {
+    const headings: string[] = [];
+    await drain(
+      new HTMLRewriter().on("main h2, main h3, main h4, main h5", {
+        element(element) {
+          headings.push(element.getAttribute("id") ?? "");
+        },
+      }),
+      await publicFile("how-it-works/index.html"),
+    );
+    expect(headings.every(Boolean)).toBe(true);
+    expect(new Set(headings).size).toBe(headings.length);
+  });
 });
 
 describe("homepage product depictions", () => {

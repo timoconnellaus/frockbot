@@ -76,8 +76,8 @@
         </button>
         <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
           <a href="#why">Why FrockBot</a>
-          <a href="#how">How it works</a>
-          <a href="#uses">What it's good at</a>
+          <a href="/how-it-works/">How it works</a>
+          <a href="#uses">What it is good at</a>
           <a href="#pricing">Pricing</a>
           <a href="/open/">Open source</a>
           <a
@@ -1877,7 +1877,7 @@
           <span>Remembers what you told it</span>
           <span>Works while you're out</span>
           <span>Shows you what it did</span>
-          <span>Asks before it spends</span>
+          <span>Asks before protected actions</span>
           <span>Talks and listens</span>
           <span>Open source</span>
         </div>
@@ -1932,8 +1932,8 @@
               />
               <h3>Makes its own tools</h3>
               <p>
-                If a job needs a little app that doesn't exist, the bot builds
-                one and uses it.
+                Ask your Bot to build a plugin for a job. You approve its access
+                before it becomes part of your Bot.
               </p>
             </article>
             <article class="feature-card feature-card-dark">
@@ -1984,8 +1984,8 @@
               />
               <h3>Asks before it matters</h3>
               <p>
-                It checks with you before it buys, sends or deletes anything.
-                You answer with a tap.
+                Approval cards put decisions in the conversation. Review what a
+                protected action asks to do, then answer with a tap.
               </p>
             </article>
             <article class="feature-card">
@@ -2005,15 +2005,64 @@
         </div>
       </section>
 
+      <section
+        class="inside-teaser-section"
+        aria-labelledby="inside-teaser-title"
+      >
+        <div class="container inside-teaser">
+          <div class="inside-teaser-copy">
+            <p class="section-label">Inside FrockBot</p>
+            <h2 id="inside-teaser-title">
+              Dress your Bot<br /><em>however you want.</em>
+            </h2>
+            <p>
+              A persistent cloud Bot, native apps, and an open-source plugin
+              architecture. See how the pieces fit together and what you could
+              build on top.
+            </p>
+            <a class="button button-white" href="/how-it-works/"
+              >Explore how FrockBot works <span aria-hidden="true">→</span></a
+            >
+          </div>
+          <div class="inside-teaser-art bot-builder" aria-hidden="true">
+            <div class="bot-builder-bar">
+              <span>Build your Bot</span><span>Live preview</span>
+            </div>
+            <div class="bot-builder-stage">
+              <span class="bot-builder-tile tile-model"><b>Model</b>Auto</span>
+              <span class="bot-builder-tile tile-inbox"
+                ><b>Inbox</b>Connected</span
+              >
+              <span class="bot-builder-tile tile-voice"><b>Voice</b>On</span>
+              <span class="bot-builder-tile tile-computer"
+                ><b>Computer</b>Ready</span
+              >
+              <div class="bot-builder-core">
+                <img
+                  src="/assets/characters/pixel.png"
+                  alt=""
+                  width="112"
+                  height="151"
+                />
+                <strong>Pixel</strong><small>4 abilities equipped</small>
+              </div>
+            </div>
+            <div class="bot-builder-footer">
+              <span><i></i> Persistent</span><span>+ Add a plugin</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="work" id="how" aria-labelledby="work-title">
         <div class="container work-grid">
           <div class="work-copy">
             <p class="section-label">Every step on record</p>
             <h2 id="work-title">You can see<br /><em>how it got there.</em></h2>
             <p>
-              Every step a bot takes is written down. It asks before it spends
-              or sends anything. Watch its screen while it works, or take over
-              whenever you like.
+              Every step a bot takes is written down. Protected actions ask for
+              your approval before they run. Watch its screen while it works, or
+              take over whenever you like.
             </p>
           </div>
           <div class="workspace" aria-label="Example bot workspace">
@@ -2077,7 +2126,7 @@
         <div class="container">
           <div class="split-heading split-heading-bottom">
             <div>
-              <p class="section-label">What it's good at</p>
+              <p class="section-label">What it is good at</p>
               <h2 id="uses-title">
                 Start with one thing<br /><em>you keep putting off.</em>
               </h2>
@@ -2223,11 +2272,15 @@
             </div>
             <div>
               <p>
-                The same shape of thing as the always-on bots that cost ten
-                times as much, except MIT licensed. Bring your own model from 40
-                providers, or use ours. Everything a bot does runs as a plugin
-                you can read and change. One command installs the lot into your
-                own Cloudflare account.
+                FrockBot is MIT licensed. Inspect the code, build a plugin,
+                contribute a capability, or run it in your own Cloudflare
+                account. Use the built-in model or configure another provider.
+                The freedom to shape your Bot extends to the platform itself.
+              </p>
+              <p>
+                <a class="tinker-architecture-link" href="/how-it-works/"
+                  >Go inside the architecture →</a
+                >
               </p>
               <p class="tinker-actions">
                 <a class="button button-outline" href="/open/"
@@ -2283,6 +2336,7 @@
           <a href="mailto:hello@frockbot.com">Contact</a>
           <a href="/privacy/">Privacy</a>
           <a href="/terms/">Terms</a>
+          <a href="/how-it-works/">Inside FrockBot</a>
           <a href="/open/">Open source</a>
           <a href="https://bot.frockbot.com">Open app</a>
           <a

@@ -52,6 +52,7 @@
         <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
           <a href="/">Home</a>
           <a href="#shape">The shape</a>
+          <a href="/how-it-works/">How it works</a>
           <a href="#models">Models</a>
           <a href="#plugins">Plugins</a>
           <a href="#run">Run it yourself</a>
@@ -96,12 +97,25 @@
               >
             </p>
           </div>
-          <img
-            src="/assets/characters/guardian.png"
-            alt="Guardian, the black sheep of the FrockBot flock"
-            width="180"
-            height="180"
-          />
+          <div
+            class="open-hero-layers"
+            aria-label="A Bot opened into its parts"
+          >
+            <span class="open-layer open-layer-conversation">Conversation</span>
+            <span class="open-layer open-layer-memory">Memory</span>
+            <span class="open-layer open-layer-plugins">Plugins</span>
+            <span class="open-layer open-layer-computer">Computer</span>
+            <div class="open-layer-core">
+              <img
+                src="/assets/characters/guardian.png"
+                alt="Guardian, the black sheep of the FrockBot flock"
+                width="134"
+                height="180"
+              />
+              <strong>Your Bot</strong>
+              <small>MIT licensed · yours to change</small>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -175,7 +189,7 @@
           </div>
           <figure class="open-figure" aria-labelledby="arch-caption">
             <svg
-              viewBox="0 0 1100 600"
+              viewBox="0 0 1100 680"
               role="img"
               aria-labelledby="arch-caption"
               font-family="Manrope, system-ui, sans-serif"
@@ -205,45 +219,138 @@
                 </marker>
               </defs>
               <!-- clients -->
-              <g fill="#1e1d27" font-size="14" font-weight="700">
+              <rect
+                x="0"
+                y="20"
+                width="190"
+                height="370"
+                rx="16"
+                fill="#fff"
+                stroke="#e6e1da"
+              />
+              <g fill="#1e1d27" font-size="12" font-weight="700">
                 <rect
-                  x="20"
+                  x="10"
                   y="60"
-                  width="130"
-                  height="44"
-                  rx="12"
+                  width="170"
+                  height="36"
+                  rx="10"
                   fill="#faf7f2"
                   stroke="#e6e1da"
                 />
-                <text x="85" y="87" text-anchor="middle" fill="#1e1d27">
-                  Web
+                <text x="24" y="83" fill="#1e1d27">Web</text>
+                <rect
+                  x="10"
+                  y="106"
+                  width="170"
+                  height="36"
+                  rx="10"
+                  fill="#faf7f2"
+                  stroke="#e6e1da"
+                />
+                <text x="24" y="129" fill="#1e1d27">macOS</text>
+                <rect
+                  x="10"
+                  y="152"
+                  width="170"
+                  height="36"
+                  rx="10"
+                  fill="#faf7f2"
+                  stroke="#e6e1da"
+                />
+                <text x="24" y="175" fill="#1e1d27">Windows</text>
+                <text
+                  x="166"
+                  y="175"
+                  text-anchor="end"
+                  font-size="7"
+                  fill="#ec386b"
+                  letter-spacing="0.7"
+                >
+                  COMING SOON
                 </text>
                 <rect
-                  x="20"
-                  y="118"
-                  width="130"
-                  height="44"
-                  rx="12"
+                  x="10"
+                  y="198"
+                  width="170"
+                  height="36"
+                  rx="10"
                   fill="#faf7f2"
                   stroke="#e6e1da"
                 />
-                <text x="85" y="145" text-anchor="middle" fill="#1e1d27">
-                  Mac
+                <text x="24" y="221" fill="#1e1d27">iPhone</text>
+                <text
+                  x="166"
+                  y="221"
+                  text-anchor="end"
+                  font-size="7"
+                  fill="#ec386b"
+                  letter-spacing="0.7"
+                >
+                  COMING SOON
                 </text>
                 <rect
-                  x="20"
-                  y="176"
-                  width="130"
-                  height="44"
-                  rx="12"
+                  x="10"
+                  y="244"
+                  width="170"
+                  height="36"
+                  rx="10"
                   fill="#faf7f2"
                   stroke="#e6e1da"
                 />
-                <text x="85" y="203" text-anchor="middle" fill="#1e1d27">
-                  Phone
+                <text x="24" y="267" fill="#1e1d27">Android</text>
+                <text
+                  x="166"
+                  y="267"
+                  text-anchor="end"
+                  font-size="7"
+                  fill="#ec386b"
+                  letter-spacing="0.7"
+                >
+                  COMING SOON
+                </text>
+                <rect
+                  x="10"
+                  y="290"
+                  width="170"
+                  height="36"
+                  rx="10"
+                  fill="#faf7f2"
+                  stroke="#e6e1da"
+                />
+                <text x="24" y="313" fill="#1e1d27">Apple Watch</text>
+                <text
+                  x="166"
+                  y="313"
+                  text-anchor="end"
+                  font-size="7"
+                  fill="#ec386b"
+                  letter-spacing="0.7"
+                >
+                  COMING SOON
+                </text>
+                <rect
+                  x="10"
+                  y="336"
+                  width="170"
+                  height="36"
+                  rx="10"
+                  fill="#faf7f2"
+                  stroke="#e6e1da"
+                />
+                <text x="24" y="359" fill="#1e1d27">Wear OS</text>
+                <text
+                  x="166"
+                  y="359"
+                  text-anchor="end"
+                  font-size="7"
+                  fill="#ec386b"
+                  letter-spacing="0.7"
+                >
+                  COMING SOON
                 </text>
                 <text
-                  x="85"
+                  x="95"
                   y="42"
                   text-anchor="middle"
                   font-size="12"
@@ -251,88 +358,59 @@
                   font-weight="700"
                   letter-spacing="1.5"
                 >
-                  YOU
+                  YOUR DEVICES
                 </text>
               </g>
               <!-- triggers -->
               <g font-size="13" font-weight="600" fill="#1e1d27">
                 <rect
-                  x="20"
-                  y="300"
-                  width="130"
+                  x="10"
+                  y="410"
+                  width="170"
                   height="90"
                   rx="12"
                   fill="#fff"
                   stroke="#e6e1da"
                   stroke-dasharray="5 4"
                 />
-                <text x="85" y="326" text-anchor="middle">Cron</text>
-                <text x="85" y="348" text-anchor="middle">Webhooks</text>
-                <text x="85" y="370" text-anchor="middle">App events</text>
-                <text
-                  x="85"
-                  y="282"
-                  text-anchor="middle"
-                  font-size="12"
-                  fill="#6d6974"
-                  font-weight="700"
-                  letter-spacing="1.5"
-                >
-                  WHILE YOU'RE OUT
-                </text>
+                <text x="95" y="436" text-anchor="middle">Cron</text>
+                <text x="95" y="458" text-anchor="middle">Webhooks</text>
+                <text x="95" y="480" text-anchor="middle">App events</text>
               </g>
               <!-- gateway -->
               <rect
                 x="205"
                 y="60"
                 width="120"
-                height="330"
+                height="460"
                 rx="16"
                 fill="#1e1d27"
               />
               <text
                 x="265"
-                y="220"
+                y="290"
                 text-anchor="middle"
                 fill="#fff"
                 font-size="14"
                 font-weight="700"
-                transform="rotate(-90 265 220)"
+                transform="rotate(-90 265 290)"
               >
-                Worker gateway
+                Host gateway
               </text>
               <line
-                x1="150"
-                y1="82"
+                x1="190"
+                y1="216"
                 x2="205"
-                y2="120"
+                y2="216"
                 stroke="#6d6974"
                 stroke-width="1.5"
                 marker-end="url(#arr)"
               />
               <line
-                x1="150"
-                y1="140"
+                x1="180"
+                y1="455"
                 x2="205"
-                y2="150"
-                stroke="#6d6974"
-                stroke-width="1.5"
-                marker-end="url(#arr)"
-              />
-              <line
-                x1="150"
-                y1="198"
-                x2="205"
-                y2="180"
-                stroke="#6d6974"
-                stroke-width="1.5"
-                marker-end="url(#arr)"
-              />
-              <line
-                x1="150"
-                y1="345"
-                x2="205"
-                y2="345"
+                y2="455"
                 stroke="#6d6974"
                 stroke-width="1.5"
                 marker-end="url(#arr)"
@@ -464,7 +542,7 @@
                 font-weight="700"
                 fill="#ec386b"
               >
-                6 hooks, every Turn
+                7 hooks across the loop + theme
               </text>
               <rect
                 x="400"
@@ -492,7 +570,7 @@
                 font-weight="500"
                 fill="#cfcbd6"
               >
-                one Dynamic Worker per User · 5 s CPU per hook chain
+                one Dynamic Worker per User · enabled per Bot
               </text>
               <line
                 x1="570"
@@ -511,17 +589,13 @@
                   fill="#ff7aa2"
                   letter-spacing="1.2"
                 >
-                  CAN CHANGE
+                  WRAPS THE LOOP
                 </text>
-                <text x="416" y="416">the system prompt</text>
-                <text x="416" y="436">which tools the model sees</text>
-                <text x="416" y="456">each model request</text>
-                <text x="416" y="476">a tool call, before it runs</text>
-                <text x="416" y="496">a tool result, after it runs</text>
-                <text x="416" y="516">whether the Turn ends</text>
-                <text x="416" y="540" fill="#8d8896">
-                  and add tools of its own
-                </text>
+                <text x="416" y="416">system prompt · tool exposure</text>
+                <text x="416" y="436">each model request</text>
+                <text x="416" y="456">before and after tool calls</text>
+                <text x="416" y="476">whether the Turn ends</text>
+                <text x="416" y="496">theme assembly, outside a Turn</text>
                 <text
                   x="584"
                   y="394"
@@ -530,148 +604,215 @@
                   fill="#ff7aa2"
                   letter-spacing="1.2"
                 >
-                  CAN REACH
+                  ADDS TO THE BOT
                 </text>
-                <text x="584" y="416">its own key-value store</text>
-                <text x="584" y="436">the Bot's memory and files</text>
-                <text x="584" y="456">the model the Bot chose</text>
-                <text x="584" y="476">only the hosts it declared</text>
-                <text x="584" y="496">schedules, connections</text>
-                <text x="584" y="516">its settings section</text>
-                <text x="584" y="540" fill="#8d8896">
-                  nothing it wasn't granted
+                <text x="584" y="416">namespaced tools</text>
+                <text x="584" y="436">cards + declared slots</text>
+                <text x="584" y="456">Skills + trigger handlers</text>
+                <text x="584" y="476">model provider protocols</text>
+                <text x="584" y="496">typed services for Plugins</text>
+                <text x="570" y="536" text-anchor="middle" fill="#8d8896">
+                  external effects cross host-owned loopbacks
                 </text>
               </g>
-              <!-- right column -->
-              <g font-size="14" font-weight="700" fill="#1e1d27">
+              <rect
+                x="780"
+                y="20"
+                width="300"
+                height="570"
+                rx="20"
+                fill="#faf7f2"
+                stroke="#e6e1da"
+              />
+              <text
+                x="800"
+                y="46"
+                font-size="11"
+                fill="#6d6974"
+                font-weight="700"
+                letter-spacing="1.3"
+              >
+                HOST CAPABILITIES · AUTHORITY STAYS HERE
+              </text>
+              <g font-size="13" font-weight="700" fill="#1e1d27">
                 <rect
-                  x="810"
-                  y="40"
-                  width="270"
-                  height="96"
-                  rx="16"
+                  x="800"
+                  y="62"
+                  width="260"
+                  height="78"
+                  rx="14"
                   fill="#fde6ee"
                   stroke="#f7c3d4"
                 />
-                <text x="830" y="70">Computer</text>
+                <text x="818" y="88">Computer host</text>
                 <text
-                  x="830"
-                  y="92"
-                  font-size="12"
+                  x="818"
+                  y="108"
+                  font-size="10.5"
                   font-weight="500"
                   fill="#6d6974"
                 >
-                  Fly Sprite · browser, files, terminal
+                  first-party tools now · Plugin grant later
                 </text>
                 <text
-                  x="830"
-                  y="112"
-                  font-size="12"
+                  x="818"
+                  y="124"
+                  font-size="10.5"
                   font-weight="500"
                   fill="#6d6974"
                 >
-                  a desktop per Bot · watch or take over
+                  browser · files · terminal · desktop
                 </text>
+
                 <rect
-                  x="810"
-                  y="160"
-                  width="270"
-                  height="96"
-                  rx="16"
+                  x="800"
+                  y="154"
+                  width="260"
+                  height="78"
+                  rx="14"
                   fill="#fff"
                   stroke="#e6e1da"
                 />
-                <text x="830" y="190">Model providers</text>
+                <text x="818" y="180">Model transport</text>
                 <text
-                  x="830"
-                  y="212"
-                  font-size="12"
+                  x="818"
+                  y="200"
+                  font-size="10.5"
                   font-weight="500"
                   fill="#6d6974"
                 >
-                  40 in the box · a model per Bot
+                  Frock AI built in · optional provider Plugin
                 </text>
                 <text
-                  x="830"
-                  y="232"
-                  font-size="12"
+                  x="818"
+                  y="216"
+                  font-size="10.5"
                   font-weight="500"
                   fill="#6d6974"
                 >
-                  keys never leave the Worker
+                  the host attaches credentials upstream
                 </text>
+
                 <rect
-                  x="810"
-                  y="280"
-                  width="270"
-                  height="96"
-                  rx="16"
+                  x="800"
+                  y="246"
+                  width="260"
+                  height="78"
+                  rx="14"
                   fill="#fff"
                   stroke="#e6e1da"
                 />
-                <text x="830" y="310">Connected apps</text>
+                <text x="818" y="272">Connected apps + HTTP</text>
                 <text
-                  x="830"
-                  y="332"
-                  font-size="12"
+                  x="818"
+                  y="292"
+                  font-size="10.5"
                   font-weight="500"
                   fill="#6d6974"
                 >
-                  Gmail · Calendar · Drive
+                  Package or Plugin logic · approved hosts
                 </text>
                 <text
-                  x="830"
-                  y="352"
-                  font-size="12"
+                  x="818"
+                  y="308"
+                  font-size="10.5"
                   font-weight="500"
                   fill="#6d6974"
                 >
-                  GitHub · Slack · Notion
+                  Connections and secrets remain host-owned
                 </text>
+
                 <rect
-                  x="810"
+                  x="800"
+                  y="338"
+                  width="260"
+                  height="78"
+                  rx="14"
+                  fill="#fff"
+                  stroke="#e6e1da"
+                />
+                <text x="818" y="364">Data + time</text>
+                <text
+                  x="818"
+                  y="384"
+                  font-size="10.5"
+                  font-weight="500"
+                  fill="#6d6974"
+                >
+                  storage · memory · Workspace
+                </text>
+                <text
+                  x="818"
                   y="400"
-                  width="270"
-                  height="76"
-                  rx="16"
-                  fill="#fff"
-                  stroke="#e6e1da"
-                  stroke-dasharray="5 4"
-                />
-                <text x="830" y="430">Declared hosts</text>
-                <text
-                  x="830"
-                  y="452"
-                  font-size="12"
+                  font-size="10.5"
                   font-weight="500"
                   fill="#6d6974"
                 >
-                  https only · named per plugin
+                  schedules · scoped to this Bot and Turn
+                </text>
+
+                <rect
+                  x="800"
+                  y="430"
+                  width="260"
+                  height="132"
+                  rx="14"
+                  fill="#1e1d27"
+                />
+                <text x="818" y="456" fill="#fff">Device bridge</text>
+                <text
+                  x="1040"
+                  y="456"
+                  text-anchor="end"
+                  font-size="9"
+                  fill="#ff7aa2"
+                  letter-spacing="1"
+                >
+                  TARGET
+                </text>
+                <text
+                  x="818"
+                  y="480"
+                  font-size="10.5"
+                  font-weight="700"
+                  fill="#ff7aa2"
+                >
+                  INTO THE BOT
+                </text>
+                <text
+                  x="818"
+                  y="498"
+                  font-size="10.5"
+                  font-weight="500"
+                  fill="#e9e6ef"
+                >
+                  entries · device triggers
+                </text>
+                <text
+                  x="818"
+                  y="524"
+                  font-size="10.5"
+                  font-weight="700"
+                  fill="#ff7aa2"
+                >
+                  BACK TO THE DEVICE
+                </text>
+                <text
+                  x="818"
+                  y="542"
+                  font-size="10.5"
+                  font-weight="500"
+                  fill="#e9e6ef"
+                >
+                  actions · slots · cards, rendered by the host
                 </text>
               </g>
+
               <line
                 x1="760"
-                y1="110"
-                x2="810"
-                y2="88"
-                stroke="#6d6974"
-                stroke-width="1.5"
-                marker-end="url(#arr)"
-              />
-              <line
-                x1="760"
-                y1="180"
-                x2="810"
-                y2="208"
-                stroke="#6d6974"
-                stroke-width="1.5"
-                marker-end="url(#arr)"
-              />
-              <line
-                x1="760"
-                y1="250"
-                x2="810"
-                y2="328"
+                y1="118"
+                x2="780"
+                y2="118"
                 stroke="#6d6974"
                 stroke-width="1.5"
                 marker-end="url(#arr)"
@@ -679,24 +820,45 @@
               <line
                 x1="740"
                 y1="440"
-                x2="810"
-                y2="438"
+                x2="780"
+                y2="425"
                 stroke="#ec386b"
                 stroke-width="1.5"
                 stroke-dasharray="5 4"
                 marker-end="url(#arr-pink)"
               />
+              <path
+                d="M930 562V626H5V400H95V390"
+                fill="none"
+                stroke="#ec386b"
+                stroke-width="1.5"
+                stroke-dasharray="5 4"
+                marker-start="url(#arr-pink)"
+                marker-end="url(#arr-pink)"
+              />
+              <text
+                x="500"
+                y="650"
+                text-anchor="middle"
+                font-size="11"
+                fill="#ec386b"
+                font-weight="700"
+              >
+                Device bridge ↔ every connected device · triggers in, actions
+                and surfaces out
+              </text>
             </svg>
             <figcaption id="arch-caption">
-              Every request passes one Worker gateway. Each User owns a Durable
-              Object, each Bot owns another, and every plugin the User enabled
-              mounts into one Dynamic Worker beside them. On every Turn the Bot
-              calls that worker once per open hook, so a plugin can rewrite the
-              prompt, hide or add tools, change a model request, veto a tool
-              call or reshape its result, and decide whether the Turn ends. It
-              reaches storage, memory, the model and the network through
-              loopback stubs the Bot mints for that Turn, and only the hosts it
-              declared. A plugin that throws or overruns is skipped and the Turn
+              Every request enters through a host-owned gateway and is admitted
+              durably by the Bot. The Bot calls one Dynamic Worker per User for
+              the enabled Plugins that wrap its loop or provide tools, cards,
+              triggers, Skills and model protocols. Plugin code never carries
+              authority directly: the Bot mints scoped loopbacks for this Bot
+              and Turn, and the host owns the Computer, model transport,
+              Connections, data and device bridge. Device entries and triggers
+              come in through durable admission; actions, slots and cards go
+              back through a host client that owns the surface and its trust
+              chrome. A Plugin that throws or overruns is skipped and the Turn
               carries on.
             </figcaption>
           </figure>
@@ -719,7 +881,8 @@
                 Forty providers ship in the box: Anthropic, OpenAI, Google,
                 DeepSeek, Mistral, Groq, OpenRouter, Bedrock, Vertex, Workers
                 AI, and the rest, including OAuth sign-in where a provider
-                offers it. Pick a model per Bot. Keys never leave the Worker.
+                offers it. Pick a model per Bot. Credentials stay with the host
+                transport.
               </p>
               <p>
                 The hosted deployment also includes metered models on the same
@@ -727,6 +890,21 @@
                 works: Auto resolves to a Workers AI model on the account's own
                 binding.
               </p>
+            </div>
+          </div>
+          <div class="model-studio" aria-label="How a Bot chooses a model">
+            <div class="model-studio-bot">
+              <img src="/assets/characters/sunny.png" alt="" />
+              <span><small>Sunny’s model</small><strong>Auto</strong></span>
+            </div>
+            <span class="model-studio-route" aria-hidden="true">→</span>
+            <div class="model-studio-picker">
+              <span class="model-studio-label">Best fit for this Turn</span>
+              <strong>Claude Sonnet</strong>
+              <small>Credential stays with the host transport</small>
+            </div>
+            <div class="model-studio-options" aria-hidden="true">
+              <span>Fast</span><span>Capable</span><span>Private</span>
             </div>
           </div>
           <div class="provider-wall" aria-label="Model providers included">
@@ -805,6 +983,36 @@
               </p>
             </div>
           </div>
+          <ol class="plugin-flow" aria-label="A plugin's path through a Turn">
+            <li>
+              <b>01</b
+              ><span
+                ><strong>Turn starts</strong
+                ><small>The Bot records the work.</small></span
+              >
+            </li>
+            <li>
+              <b>02</b
+              ><span
+                ><strong>Hook runs</strong
+                ><small>The plugin may reshape one seam.</small></span
+              >
+            </li>
+            <li>
+              <b>03</b
+              ><span
+                ><strong>Grant checked</strong
+                ><small>Only approved reach is admitted.</small></span
+              >
+            </li>
+            <li>
+              <b>04</b
+              ><span
+                ><strong>Turn continues</strong
+                ><small>Failure skips the plugin, not the work.</small></span
+              >
+            </li>
+          </ol>
           <div class="open-split">
             <pre
               class="code-block"
@@ -850,8 +1058,8 @@
               <li>
                 <b>3</b
                 ><span
-                  ><code>agent/request</code> change the model, the messages or
-                  the options on each request</span
+                  ><code>agent/request</code> change the messages or the options
+                  on each request</span
                 >
               </li>
               <li>
@@ -871,8 +1079,8 @@
               <li>
                 <b>6</b
                 ><span
-                  ><code>agent/turn-stopping</code> keep the Turn going, or let
-                  it end</span
+                  ><code>agent/turn-stopping</code> receive the notification
+                  that the Turn is stopping</span
                 >
               </li>
             </ol>
@@ -916,6 +1124,36 @@
               </p>
             </div>
           </div>
+          <ol class="deploy-steps" aria-label="Self-hosting in four steps">
+            <li>
+              <b>01</b
+              ><span
+                ><strong>Clone</strong
+                ><small>Choose a published release.</small></span
+              >
+            </li>
+            <li>
+              <b>02</b
+              ><span
+                ><strong>Connect</strong
+                ><small>Sign in to your Cloudflare account.</small></span
+              >
+            </li>
+            <li>
+              <b>03</b
+              ><span
+                ><strong>Configure</strong
+                ><small>Add only the providers you want.</small></span
+              >
+            </li>
+            <li>
+              <b>04</b
+              ><span
+                ><strong>Deploy</strong
+                ><small>Open your Bot on your own domain.</small></span
+              >
+            </li>
+          </ol>
           <pre
             class="terminal"
             aria-label="The installer"
