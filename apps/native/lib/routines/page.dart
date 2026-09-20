@@ -17,7 +17,6 @@ import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../shell/transcript_model.dart';
-import '../view/action.dart';
 import '../view/surface.dart';
 import 'document.dart';
 import 'list.dart';
