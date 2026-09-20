@@ -326,7 +326,7 @@ describe("Inside FrockBot examples", () => {
     );
     expect(hero).toContain('class="inside-overview"');
     expect(hero).toContain("Always on, in the cloud");
-    expect(hero).toContain('src="/assets/characters/goat.png"');
+    expect(hero).toContain('src="/assets/characters/pixel.png"');
   });
 
   test("gives every published article heading a unique link target", async () => {

@@ -1091,8 +1091,8 @@
     font-size: 0.65rem;
   }
   .overview-cloud img {
-    width: 150px;
-    height: 150px;
+    width: 132px;
+    height: 178px;
   }
   .overview-cloud > span {
     font-size: 0.65rem;
@@ -1165,8 +1165,8 @@
     padding: 24px;
   }
   .overview-cloud img {
-    width: 165px;
-    height: 165px;
+    width: 145px;
+    height: 196px;
   }
   .overview-devices > div {
     flex-direction: row;
