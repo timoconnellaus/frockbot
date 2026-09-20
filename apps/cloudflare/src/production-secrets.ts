@@ -231,6 +231,11 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       degraded:
         "Frock AI falls back to the `AI` binding and the Auto model fails",
     },
+    {
+      name: "JEV_API_KEY",
+      why: "Authorizes the hosted TurnSupervisor against Jev.",
+      degraded: "turn supervision is unavailable",
+    },
   ];
 
 /**

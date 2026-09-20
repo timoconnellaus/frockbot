@@ -456,6 +456,11 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
     enables: "the read-only /api/debug operator surface",
     workers: ["app"],
   },
+  {
+    name: "JEV_API_KEY",
+    enables: "hosted turn supervision against Jev",
+    workers: ["app"],
+  },
 ];
 
 /**

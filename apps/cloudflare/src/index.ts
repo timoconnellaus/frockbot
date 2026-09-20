@@ -349,6 +349,8 @@ interface Env {
   ALLOWED_CLIENT_ORIGINS?: string;
   /** Authorizes `/api/debug/*`. Absent disables the surface entirely. */
   DEBUG_TOKEN?: string;
+  /** The hosted TurnSupervisor credential. Absent, the chooser is unavailable. */
+  JEV_API_KEY?: string;
 }
 
 /**
