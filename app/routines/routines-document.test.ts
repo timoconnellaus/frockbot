@@ -251,11 +251,9 @@ test("the list is not a form, and creating is its own document", () => {
 
   const created = routinesDocumentV1(frame({ creating: true }));
   expect(created.revision).not.toBe(routinesDocumentV1(frame()).revision);
-  const editor = walk(created.root).find(
-    (node) => node.type === "group" && node.title === "New Routine",
-  );
-  expect(editor?.type === "group" && editor.collapsed).toBeUndefined();
-  const fields = walk(editor!).filter((node) => node.type === "field");
+  const editor = created.root;
+  expect(editor.type === "group" && editor.collapsed).toBeUndefined();
+  const fields = walk(editor).filter((node) => node.type === "field");
   expect(
     fields.map((node) => (node.type === "field" ? node.field.id : "")),
   ).toEqual([
@@ -280,11 +278,9 @@ test("naming a Routine opens the editor on its own values and moves the revision
   const list = routinesDocumentV1(frame());
   const open = routinesDocumentV1(frame({ editing: morning }));
   expect(open.revision).not.toBe(list.revision);
-  const editor = walk(open.root).find(
-    (node) => node.type === "group" && node.title === "Edit Morning brief",
-  );
-  expect(editor?.type === "group" && editor.collapsed).toBeUndefined();
-  const values = walk(editor!)
+  const editor = open.root;
+  expect(editor.type === "group" && editor.collapsed).toBeUndefined();
+  const values = walk(editor)
     .filter((node) => node.type === "field")
     .map((node) => (node.type === "field" ? node.field.value : null));
   expect(values).toEqual([

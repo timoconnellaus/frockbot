@@ -307,7 +307,6 @@ function editorNode(frame: RoutinesFrameV1): ViewNode {
   return {
     type: "group",
     orientation: "column",
-    title: editing ? `Edit ${editing.name}` : "New Routine",
     children: [
       field(ids.editorId, "Routine", editing?.routineId ?? null, {
         choiceSource: "routine-editor-hidden",

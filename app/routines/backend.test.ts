@@ -254,8 +254,10 @@ describe("Routines gateway routes", () => {
     const created = (await (
       await call(route, "/api/bots/scout/routines?as=document&new=1")
     )!.json()) as { root: { children: { title?: string }[] } };
-    const titles = created.root.children.map((child) => child.title);
-    expect(titles).toEqual(["New Routine"]);
+    expect(
+      JSON.stringify(created).includes('"id":"routine.name"'),
+    ).toBe(true);
+    expect(created.root.children.some((child) => child.title)).toBe(false);
     const listed = (await (
       await call(route, "/api/bots/scout/routines?as=document")
     )!.json()) as { root: { children: { title?: string }[] } };

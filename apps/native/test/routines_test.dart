@@ -236,7 +236,6 @@ Map<String, Object?> routinesEditorGroup(Map<String, Object?>? editing) {
   return {
     'type': 'group',
     'orientation': 'column',
-    'title': editing == null ? 'New Routine' : 'Edit ${editing['name']}',
     'children': [
       for (final seed in seeds.entries)
         {
