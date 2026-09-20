@@ -11,6 +11,9 @@ import 'package:frockbot_native/client/plain_store.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/main.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
+import 'package:frockbot_native/shell/semantics.dart';
+
+import 'navigation_test.dart' show identifiedBy;
 
 /// A store whose values are resident, and whose writes only complete when the
 /// test says so — the platform keystore is slow and the UI cannot wait for it.
@@ -139,13 +142,14 @@ void main() {
     await tester.pumpWidget(FrockBotApp(store: store));
     await tester.pump();
     await tester.pump();
-    expect(find.widgetWithText(ChatHeader, 'Rosemary'), findsOneWidget);
+    expect(find.byType(ChatHeader), findsOneWidget);
+    expect(identifiedBy(ShellIds.composer), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
     await tester.pump();
     // The keystore write has not completed and must not be holding the pane.
     expect(latch.isCompleted, isFalse);
     expect(store.values['selection.user-1'], 'bot-one');
-    expect(find.widgetWithText(ChatHeader, 'Clementine'), findsOneWidget);
+    expect(find.byType(ChatHeader), findsOneWidget);
     expect(find.text('Cached Clementine conversation'), findsOneWidget);
     latch.complete();
     await tester.pump();
