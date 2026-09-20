@@ -15,9 +15,13 @@ writes `.deployment/<profile>/<worker>/wrangler.jsonc`, which is what every
 `wrangler deploy -c`, `wrangler d1 migrations apply -c` and `wrangler r2 object
 put -c` in `release.yml` and `main.yml` takes. `.deployment/` is git-ignored.
 
-`deployments/profile.schema.json` is the contract; `ajv` refuses a profile that
+`deployments/profile.schema.json` is the contract. `ajv` refuses a profile that
 does not meet it, so a missing account or a malformed hostname fails before a
-config is written rather than during a deploy.
+config is written rather than during a deploy. The TypeScript type is generated
+from the same document: `scripts/generate-deployment-profile-schema.ts` writes
+`profile-schema.generated.ts` as `FromSchema` with `parseIfThenElseKeywords`, so
+an Access profile that names no Access application is invalid at the type as
+well. `bun run typecheck` fails when that file is stale.
 
 Two values are flags rather than profile fields, because whoever deploys resolves
 them in the same run: `--d1-database-id` for a disposable stage that creates its

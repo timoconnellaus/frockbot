@@ -1,52 +1,33 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Ajv from "ajv";
+import {
+  DEPLOYMENT_PROFILE_SCHEMA_V1,
+  type DeploymentProfileV1,
+} from "./profile-schema.generated.ts";
 
 export const REPO_ROOT_V1 = join(import.meta.dirname, "..", "..");
 export const PROFILE_DIRECTORY_V1 = join(REPO_ROOT_V1, "deployments");
 
-export interface DeploymentWorkerV1 {
-  name?: string;
-  hostnames?: readonly string[];
-}
+export { DEPLOYMENT_PROFILE_SCHEMA_V1, type DeploymentProfileV1 };
 
-/**
- * Where the container Workers get their image. Building from the Dockerfile
- * needs Docker on the deploying machine; pulling a published one does not,
- * which is the whole reason `bun run setup` can deploy into an account that has
- * never built an image (ADR 0028 steps 4 and 5).
- */
-export type DeploymentImagesV1 =
-  | { source: "dockerfile" }
-  | { source: "registry"; registry: string; tag: string };
+export type DeploymentWorkerV1 = NonNullable<
+  NonNullable<DeploymentProfileV1["workers"]>["app"]
+>;
 
-export interface DeploymentProfileV1 {
-  schemaVersion: 1;
-  name: string;
-  accountId: string;
-  region?: string;
-  prefix: string;
-  authPackage: "better-auth" | "access";
-  workers?: {
-    app?: DeploymentWorkerV1;
-    computerHost?: DeploymentWorkerV1;
-    appletBuild?: DeploymentWorkerV1;
-    marketing?: DeploymentWorkerV1;
-    adminPortal?: DeploymentWorkerV1;
-  };
-  artifactHostname?: string;
-  images?: DeploymentImagesV1;
-  access?: { teamDomain: string; aud: string };
-  adminEmails?: readonly string[];
-  d1DatabaseId?: string;
-  aiGateway?: { accountId: string; id?: string; autoRoute?: string };
-  nativeAuth?: "android" | "android,macos";
-  resources?: {
-    applicationArtifactsBucket?: string;
-    memoryFilesBucket?: string;
-    memoryIndex?: string;
-    authDatabaseName?: string;
-  };
+export type DeploymentImagesV1 = NonNullable<DeploymentProfileV1["images"]>;
+export type DeploymentRegionV1 = NonNullable<DeploymentProfileV1["region"]>;
+
+export const DEPLOYMENT_REGIONS_V1 =
+  DEPLOYMENT_PROFILE_SCHEMA_V1.properties.region.enum;
+
+export function deploymentRegionV1(value: string): DeploymentRegionV1 {
+  if ((DEPLOYMENT_REGIONS_V1 as readonly string[]).includes(value)) {
+    return value as DeploymentRegionV1;
+  }
+  throw new Error(
+    `"${value}" is not a deployment region (${DEPLOYMENT_REGIONS_V1.join(", ")})`,
+  );
 }
 
 /**

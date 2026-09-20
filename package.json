@@ -36,7 +36,7 @@
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev": "bun run dev:cloudflare",
     "build": "bun run build:cloudflare && bun run build:marketing && bun run build:admin-portal",
-    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/generate-frock-catalog.ts --check && bun scripts/generate-a2ui-skill.ts --check && bun scripts/check-layer-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/check-auth-package-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/generate-card-schema-documents.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/build-seeded-plugins.ts --check && bun scripts/typecheck.ts",
+    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/generate-frock-catalog.ts --check && bun scripts/generate-a2ui-skill.ts --check && bun scripts/check-layer-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/check-auth-package-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/generate-card-schema-documents.ts --check && bun scripts/generate-deployment-profile-schema.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/build-seeded-plugins.ts --check && bun scripts/typecheck.ts && bun x tsc --noEmit -p scripts/deployment-config/tsconfig.json",
     "lint:layer-imports": "bun scripts/check-layer-imports.ts",
     "lint:computer-host-imports": "bun scripts/check-computer-host-imports.ts",
     "lint:auth-package-imports": "bun scripts/check-auth-package-imports.ts",
@@ -63,14 +63,15 @@
   },
   "devDependencies": {
     "@types/bun": "1.4.1",
+    "ajv": "8.20.0",
     "esbuild": "0.28.2",
     "husky": "^9.1.7",
+    "json-schema-to-ts": "^3.1.1",
     "lint-staged": "^17.5.0",
     "playwright": "1.63.0",
     "prettier": "^3.9.6",
     "prettier-plugin-sh": "^0.19.0",
-    "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-    "ajv": "8.20.0"
+    "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2"
   },
   "patchedDependencies": {
     "wrangler@4.129.0": "patches/wrangler@4.129.0.patch"
