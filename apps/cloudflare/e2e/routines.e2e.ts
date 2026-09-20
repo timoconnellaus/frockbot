@@ -84,7 +84,9 @@ test("the trigger choice only shows its own setup, and schedules stay human", as
 
   // Schedule offers plain-language cadence and time controls on the same form.
   await press(sem(page, "routine-source-schedule"));
-  expect(await spokenText(editor)).toMatch(/Every day at 9:00\s?AM/iu);
+  await expect
+    .poll(() => spokenText(editor))
+    .toMatch(/Every day at 9:00\s?AM/iu);
   expect(await spokenText(editor)).not.toContain("0 9 * * *");
 
   await answer(page, {

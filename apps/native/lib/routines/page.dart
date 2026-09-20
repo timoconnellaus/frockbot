@@ -226,6 +226,12 @@ class RoutinesController extends ViewSurfaceController {
   void _closeEditor() {
     if (closing) return;
     closing = true;
+    // The next read is the list. `_afterAction` reloads as soon as save
+    // returns, before the post-frame leave, and `load()` names the page
+    // these flags still describe — `&new=1` while creating — then drops
+    // the leave's list read because it is busy.
+    creating = false;
+    editing = null;
     _changed();
     final close = onCloseEditor;
     if (close == null) return;

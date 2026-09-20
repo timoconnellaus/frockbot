@@ -794,6 +794,71 @@ void main() {
     expect(find.text('Morning brief'), findsOneWidget);
   });
 
+  testWidgets('saving a new Routine closes the editor onto the list', (
+    tester,
+  ) async {
+    useTallSurface(tester);
+    final store = MemoryStore();
+    final created = <Map<String, Object?>>[];
+    var revision = 1;
+    Completer<void>? holdRead;
+    final api = SettingsApi(store, (path, body) async {
+      if (path.endsWith('/plugins')) return {'plugins': []};
+      if (body != null) {
+        final command = (body as Map).cast<String, Object?>();
+        created.add(command);
+        revision += 1;
+        return {
+          'schemaVersion': 1,
+          'commandId': command['commandId'],
+          'status': 'applied',
+        };
+      }
+      // The post-save read stays out across a frame — the same race as a
+      // network GET still in flight when the leave's list read would run.
+      if (created.isNotEmpty) {
+        holdRead ??= Completer<void>();
+        await holdRead!.future;
+      }
+      if (path.contains('new=1')) {
+        return routinesDocumentThatSaves(routinesDocumentWithEditor());
+      }
+      return {
+        ...routinesListDocument(
+          routines: [
+            for (final command in created)
+              {
+                'routineId': 'r-new',
+                'name': command['name'],
+                'schedule': command['schedule'] ?? '0 9 * * *',
+                'enabled': true,
+              },
+          ],
+        ),
+        'revision': revision,
+      };
+    });
+    await tester.pumpWidget(routinesPage(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New Routine'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, 'Morning brief');
+    await tester.enterText(
+      find.byType(TextFormField).at(1),
+      'Summarise overnight email.',
+    );
+    await tester.pump();
+    await tester.tap(find.text('Create Routine'));
+    await tester.pump();
+    await tester.pump();
+    holdRead!.complete();
+    await tester.pumpAndSettle();
+    expect(created.single['type'], 'routine/create');
+    expect(find.text('Create Routine'), findsNothing);
+    expect(find.text('Morning brief'), findsOneWidget);
+    expect(find.text('New Routine'), findsOneWidget);
+  });
+
   testWidgets('Cancel leaves a dirty form without asking', (tester) async {
     useTallSurface(tester);
     final store = MemoryStore();
