@@ -2403,42 +2403,6 @@
 .bot-builder-footer span:last-child {
   color: #efa2ba;
 }
-.teaser-extensions {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-.teaser-extensions span {
-  font-size: 0.74rem;
-  padding: 8px 14px;
-  border: 1px solid #b185a0;
-  border-radius: 7px;
-  background: #564155;
-  transform: rotate(-4deg);
-}
-.teaser-extensions span:nth-child(2) {
-  transform: rotate(4deg);
-}
-.teaser-bot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-block: 12px 24px;
-  font-size: 0.88rem;
-}
-.teaser-bot img {
-  margin-bottom: -8px;
-}
-.teaser-clients {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-  border-top: 1px solid #715572;
-  padding-top: 20px;
-  font-size: 0.78rem;
-  color: #e4cbdc;
-}
 .tinker-architecture-link {
   display: inline-block;
   margin-top: 18px;
@@ -2459,10 +2423,6 @@
   }
   .inside-teaser-art.bot-builder {
     padding: 0;
-  }
-  .teaser-extensions span {
-    padding: 7px 10px;
-    font-size: 0.63rem;
   }
 }
 @media (max-width: 560px) {

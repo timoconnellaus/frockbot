@@ -350,6 +350,11 @@
   grid-template-columns: 112px minmax(0, 1fr);
   min-height: 250px;
 }
+.native-sidebar img,
+.native-thread img,
+.native-phone img {
+  object-fit: contain;
+}
 .native-sidebar {
   background: var(--product-sidebar);
   padding: 18px 12px;
@@ -1022,6 +1027,7 @@
   padding: 80px 0 100px;
 }
 .inside-final img {
+  object-fit: contain;
   margin-inline: auto;
   margin-bottom: 20px;
 }

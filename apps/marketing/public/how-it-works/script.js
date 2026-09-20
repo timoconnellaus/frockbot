@@ -25,7 +25,6 @@ if (architectureHost) {
       );
       const diagram = documentFromOpenPage.querySelector(".open-figure");
       if (!diagram) throw new Error("The system map is missing");
-      diagram.classList.add("inside-architecture-figure");
       const caption = diagram.querySelector("#arch-caption");
       if (caption) caption.id = "inside-architecture-caption";
       diagram.setAttribute("aria-labelledby", "inside-architecture-caption");
