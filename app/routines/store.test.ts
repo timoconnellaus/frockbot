@@ -249,16 +249,13 @@ describe("RoutineStore.execute", () => {
       keyVersion: "not-a-number",
     });
 
-    await expect(routines.list("scout", undefined, ZONE)).resolves.toEqual({
+    const listed = await routines.list("scout", undefined, ZONE);
+    expect(listed).toMatchObject({
       schemaVersion: 1,
       botId: "scout",
-      routines: [
-        expect.objectContaining({
-          routineId: "brief",
-          hookKeyVersion: undefined,
-        }),
-      ],
+      routines: [{ routineId: "brief" }],
     });
+    expect(listed.routines[0]?.hookKeyVersion).toBeUndefined();
   });
 });
 
