@@ -331,6 +331,42 @@ describe("Inside FrockBot examples", () => {
     expect(page).toContain('href="#persistent-bot"');
   });
 
+  test("lists Turn supervision after the persistent Bot", async () => {
+    const hrefs: string[] = [];
+    await drain(
+      new HTMLRewriter().on(".inside-contents nav a", {
+        element(element) {
+          hrefs.push(element.getAttribute("href") ?? "");
+        },
+      }),
+      await publicFile("how-it-works/index.html"),
+    );
+    expect(hrefs).toEqual([
+      "#native-apps",
+      "#persistent-bot",
+      "#supervision",
+      "#plugins",
+      "#interfaces",
+      "#capabilities",
+      "#continuity",
+      "#computer",
+      "#voice-and-models",
+      "#open-source",
+    ]);
+  });
+
+  test("the Turn timeline includes Jev's two judgments without claiming the loop is wired", async () => {
+    const page = await publicFile("how-it-works/index.html");
+    expect(page).toContain("Assess the Turn");
+    expect(page).toContain("Review the proposal");
+    expect(page).toContain('id="supervision"');
+    expect(page).toContain("The Bot talks.");
+    expect(page).toContain(
+      "The adapter is in production. The loop is not wired",
+    );
+    expect(page).not.toContain("Jev is already supervising");
+  });
+
   test("gives every published article heading a unique link target", async () => {
     const headings: string[] = [];
     await drain(
