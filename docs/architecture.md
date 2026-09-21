@@ -628,7 +628,11 @@ sign-in flow as before. Models settings lists only providers already added,
 with a link back to this catalog. The ordinary `/api/settings/connections`
 read stays installed-only, so Manage provider does not grow a storefront.
 Each card carries a bundled icon (`assets/connectors/<icon>.png`, named by
-the Connection Type's `icon`) or a letter tile when no mark ships. The frame
+the Connection Type's `icon`) or a letter tile when no mark ships. Catalog
+model marks are host assets, the same way connected-app marks are — compiled
+providers are Packages, not Plugins, and a Plugin cannot ship an image.
+Refresh the catalog set with `python3 scripts/sync-connector-icons.py`
+(Lobe Icons, MIT). Radius has no mark in that pack and stays a letter tile. The frame
 carries what the surface needs and no credential: a provider row per
 Connection Type (a Package with several types is a grouping, so the row is
 named by the type), the accounts with the line that says what their state
