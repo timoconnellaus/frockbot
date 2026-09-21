@@ -736,6 +736,12 @@ export interface BotConfigurationBinding {
     userId: string;
     botId: string;
   }): Promise<RoutineListViewV1>;
+  /** The list and the inbox, one materialize. */
+  readRoutinesFrame(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<{ list: RoutineListViewV1; inbox: RoutineInboxViewV1 }>;
   /** The Bot's subagent tasks, answered by the parent Bot Durable Object. */
   listTasks(request: {
     schemaVersion: 1;

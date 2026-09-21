@@ -37,6 +37,10 @@ interface RoutineRpc {
       createdBy: { kind: string };
     }>;
   }>;
+  readRoutinesFrame(input: unknown): Promise<{
+    list: { routines: unknown[] };
+    inbox: { entries: unknown[]; unacknowledged: number };
+  }>;
   executeRoutineCommand(input: unknown): Promise<{
     status: string;
     routine?: { routineId: string; enabled: boolean };
@@ -83,6 +87,12 @@ describe("Routines in Workerd", () => {
     const listed = await routines(identity.userId, identity.botId).listRoutines(
       envelope,
     );
+    const frame = await routines(
+      identity.userId,
+      identity.botId,
+    ).readRoutinesFrame(envelope);
+    expect(frame.list.routines).toHaveLength(1);
+    expect(frame.inbox.entries).toEqual([]);
     expect(listed.routines).toHaveLength(1);
     expect(listed.routines[0]).toMatchObject({
       routineId: "brief",

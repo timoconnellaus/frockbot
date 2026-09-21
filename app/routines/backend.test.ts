@@ -46,6 +46,10 @@ function contribution(options: { ownedBots?: string[] } = {}) {
       Promise.reject(new Error("no webhook in this fixture")),
     listRoutines: (_userId, botId) =>
       store(botId).list(botId, undefined, "UTC"),
+    readRoutinesFrame: async (_userId, botId) => ({
+      list: await store(botId).list(botId, undefined, "UTC"),
+      inbox: await inboxView(botId),
+    }),
     executeRoutineCommand: (_userId, botId, command) =>
       store(botId).execute(command, { kind: "user" }, "UTC"),
     listRoutineRuns: (_userId, botId, routineId) =>
@@ -157,6 +161,60 @@ describe("Routines gateway routes", () => {
     ).toBe(400);
   });
 
+  test("`as=document` is one host read, not the list then the inbox", async () => {
+    let frames = 0;
+    let lists = 0;
+    let inboxes = 0;
+    const route = createRoutinesBackendContribution({
+      deliverRoutineHook: () =>
+        Promise.reject(new Error("no webhook in this fixture")),
+      listRoutines: () => {
+        lists += 1;
+        return Promise.resolve({
+          schemaVersion: 1,
+          botId: "scout",
+          routines: [],
+        });
+      },
+      readRoutinesFrame: () => {
+        frames += 1;
+        return Promise.resolve({
+          list: { schemaVersion: 1, botId: "scout", routines: [] },
+          inbox: {
+            schemaVersion: 1 as const,
+            botId: "scout",
+            entries: [],
+            unacknowledged: 0,
+          },
+        });
+      },
+      executeRoutineCommand: () =>
+        Promise.reject(new Error("no command in this fixture")),
+      listRoutineRuns: () =>
+        Promise.reject(new Error("no runs in this fixture")),
+      readRoutineRun: () => Promise.reject(new Error("no run in this fixture")),
+      listRoutineInbox: () => {
+        inboxes += 1;
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          botId: "scout",
+          entries: [],
+          unacknowledged: 0,
+        });
+      },
+      executeRoutineInboxCommand: () =>
+        Promise.reject(new Error("no inbox command in this fixture")),
+    });
+    expect(
+      (await call(route, "/api/bots/scout/routines?as=document"))?.status,
+    ).toBe(200);
+    expect(frames).toBe(1);
+    expect(lists).toBe(0);
+    expect(inboxes).toBe(0);
+    expect((await call(route, "/api/bots/scout/routines"))?.status).toBe(200);
+    expect(lists).toBe(1);
+  });
+
   test("`as=document` answers the Routines and the inbox as one document", async () => {
     const route = contribution();
     await call(route, "/api/bots/scout/routines", {
@@ -183,6 +241,29 @@ describe("Routines gateway routes", () => {
         Promise.reject(new Error("no webhook in this fixture")),
       listRoutines: () =>
         Promise.resolve({ schemaVersion: 1, botId: "scout", routines: [] }),
+      readRoutinesFrame: () =>
+        Promise.resolve({
+          list: { schemaVersion: 1, botId: "scout", routines: [] },
+          inbox: {
+            schemaVersion: 1 as const,
+            botId: "scout",
+            entries: [
+              routineInboxEntryViewV1({
+                schemaVersion: 1,
+                entryId: "ri-run-1",
+                runId: "run-1",
+                routineId: "brief",
+                text: "It stopped without saying why.",
+                attribution: "Automation: Morning brief",
+                createdAt: "2026-09-02T23:00:10.000Z",
+                acknowledged: false,
+                failure: true,
+                repeatCount: 2,
+              }),
+            ],
+            unacknowledged: 1,
+          },
+        }),
       executeRoutineCommand: () =>
         Promise.reject(new Error("no command in this fixture")),
       listRoutineRuns: () =>

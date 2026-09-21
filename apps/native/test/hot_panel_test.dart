@@ -111,4 +111,37 @@ void main() {
     );
     expect(_LeafState.mounts['voice'], 2);
   });
+
+  testWidgets('a hidden kept door cannot take keyboard focus', (tester) async {
+    var shown = 'routines';
+    final routines = FocusNode();
+    final plugins = FocusNode();
+    addTearDown(routines.dispose);
+    addTearDown(plugins.dispose);
+
+    Widget stack() => MaterialApp(
+      home: Scaffold(
+        body: HotPanelStack(
+          shown: shown,
+          kept: const ['routines', 'plugins'],
+          builder: (key) =>
+              TextField(focusNode: key == 'routines' ? routines : plugins),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(stack());
+    routines.requestFocus();
+    await tester.pump();
+    expect(routines.hasFocus, isTrue);
+
+    shown = 'plugins';
+    await tester.pumpWidget(stack());
+    await tester.pump();
+    expect(routines.hasFocus, isFalse);
+    plugins.requestFocus();
+    await tester.pump();
+    expect(plugins.hasFocus, isTrue);
+    expect(routines.hasFocus, isFalse);
+  });
 }

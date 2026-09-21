@@ -30,6 +30,11 @@ abstract class ViewSurfaceController extends ChangeNotifier {
   /// Last known document from disk. The host paints it as last known, then
   /// [load] replaces it if the revision moved. Default ignores.
   void adoptCachedDocument(wire.ViewDocument cached) {}
+
+  /// What a later open should paint. Defaults to [document]. A page that
+  /// filters the tree for search writes the unfiltered one, so a remount
+  /// does not open on a subset with an empty field.
+  wire.ViewDocument? get cacheDocument => document;
 }
 
 /// A host over `ViewDocumentView`, with the surface's own chrome.
@@ -217,6 +222,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     widget.onView?.call(next);
     unawaited(next.restore());
     final scope = widget.cacheScope;
+    final cached = widget.controller.cacheDocument ?? document;
     if (scope != null && !widget.controller.busy) {
       unawaited(
         writeViewDocumentCache(
@@ -224,7 +230,7 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
           widget.userId,
           widget.controller.surfaceId,
           scope,
-          document,
+          cached,
         ),
       );
     }
@@ -419,15 +425,22 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                 ],
               ),
             )
-          : ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                ...chrome,
-                Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: widget.maxWidth),
-                    child: pane,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: chrome,
+                  ),
+                ),
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: widget.maxWidth),
+                      child: pane,
+                    ),
                   ),
                 ),
               ],

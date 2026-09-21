@@ -182,6 +182,43 @@ void main() {
       expect(find.text('thread').hitTestable(), findsOneWidget);
     });
 
+    testWidgets('a Bot panel paints its look, not the account surface', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final panel = FrockTheme.theme(Brightness.light);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: ShellLayout(
+              panelOpen: true,
+              onDismiss: () {},
+              conversationOpen: true,
+              onBack: () {},
+              panelTheme: panel,
+              sidebar: const Text('bots'),
+              conversation: const Text('thread'),
+              rightPanel: const Text('work'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final material = tester.widget<Material>(
+        find
+            .ancestor(
+              of: byIdentifier(ShellIds.rightPanel),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      expect(material.color, panel.colorScheme.surface);
+    });
+
     testWidgets(
       'on a phone Back from the conversation is the list, not the way out',
       (tester) async {

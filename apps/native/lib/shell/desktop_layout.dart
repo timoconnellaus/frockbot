@@ -298,25 +298,39 @@ class ShellLayout extends StatelessWidget {
               ),
             ),
             if (tier == ShellTier.triple && panel != null)
-              Align(
-                alignment: Alignment.centerRight,
-                child: Offstage(
-                  offstage: panelCollapsed,
-                  child: TickerMode(
-                    enabled: !panelCollapsed,
-                    child: ExcludeSemantics(
-                      excluding: panelCollapsed,
-                      child: IgnorePointer(
-                        ignoring: panelCollapsed,
-                        child: _withPanelTheme(
-                          Material(
-                            color: Theme.of(context).colorScheme.surface,
-                            child: _Column(
-                              width: shellRightPanelWidth,
-                              border: Border(left: BorderSide(color: divider)),
-                              child: SafeArea(
-                                top: false,
-                                child: identified(ShellIds.rightPanel, panel),
+              SafeArea(
+                left: false,
+                bottom: false,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Offstage(
+                    offstage: panelCollapsed,
+                    child: TickerMode(
+                      enabled: !panelCollapsed,
+                      child: ExcludeFocus(
+                        excluding: panelCollapsed,
+                        child: ExcludeSemantics(
+                          excluding: panelCollapsed,
+                          child: IgnorePointer(
+                            ignoring: panelCollapsed,
+                            child: _withPanelTheme(
+                              Builder(
+                                builder: (context) => Material(
+                                  color: Theme.of(context).colorScheme.surface,
+                                  child: _Column(
+                                    width: shellRightPanelWidth,
+                                    border: Border(
+                                      left: BorderSide(color: divider),
+                                    ),
+                                    child: SafeArea(
+                                      top: false,
+                                      child: identified(
+                                        ShellIds.rightPanel,
+                                        panel,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),

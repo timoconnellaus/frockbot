@@ -225,48 +225,79 @@ void main() {
     controller.dispose();
   });
 
-  test('a Bot search matches the plugin inside a kind section, not the kind', () async {
-    final controller = PluginsController(
-      SettingsApi(MemoryStore(), (_, _) async => botPluginsDocument()),
-      'tim',
-      botId: 'bot-1',
-    );
-    await controller.load();
-    controller.search('web');
-    var root = (controller.document!.toJson() as Map)['root'] as Map;
-    var sections = (root['children'] as List)
-        .whereType<Map>()
-        .where((node) => node['type'] == 'group')
-        .toList();
-    expect(sections, hasLength(1));
-    expect(
-      (sections.single['children'] as List)
+  test(
+    'a search does not replace the document a remount would paint',
+    () async {
+      final controller = PluginsController(
+        SettingsApi(MemoryStore(), (_, _) async => pluginsDocument()),
+        'tim',
+      );
+      await controller.load();
+      controller.search('no such plugin');
+      final shown = (controller.document!.toJson() as Map)['root'] as Map;
+      expect(
+        (shown['children'] as List).where(
+          (node) => (node as Map)['type'] == 'group',
+        ),
+        isEmpty,
+      );
+      final cached = (controller.cacheDocument!.toJson() as Map)['root'] as Map;
+      expect(
+        (cached['children'] as List)
+            .whereType<Map>()
+            .where((node) => node['type'] == 'group')
+            .map((node) => node['title']),
+        ['Ollama Cloud'],
+      );
+      controller.dispose();
+    },
+  );
+
+  test(
+    'a Bot search matches the plugin inside a kind section, not the kind',
+    () async {
+      final controller = PluginsController(
+        SettingsApi(MemoryStore(), (_, _) async => botPluginsDocument()),
+        'tim',
+        botId: 'bot-1',
+      );
+      await controller.load();
+      controller.search('web');
+      var root = (controller.document!.toJson() as Map)['root'] as Map;
+      var sections = (root['children'] as List)
           .whereType<Map>()
-          .map((row) => row['title']),
-      ['Web'],
-    );
-    controller.search('notes');
-    root = (controller.document!.toJson() as Map)['root'] as Map;
-    sections = (root['children'] as List)
-        .whereType<Map>()
-        .where((node) => node['type'] == 'group')
-        .toList();
-    expect(
-      (sections.single['children'] as List)
+          .where((node) => node['type'] == 'group')
+          .toList();
+      expect(sections, hasLength(1));
+      expect(
+        (sections.single['children'] as List).whereType<Map>().map(
+          (row) => row['title'],
+        ),
+        ['Web'],
+      );
+      controller.search('notes');
+      root = (controller.document!.toJson() as Map)['root'] as Map;
+      sections = (root['children'] as List)
           .whereType<Map>()
-          .map((row) => row['title']),
-      ['Files'],
-    );
-    controller.search('no such plugin');
-    root = (controller.document!.toJson() as Map)['root'] as Map;
-    expect(
-      (root['children'] as List).where(
-        (node) => (node as Map)['type'] == 'group',
-      ),
-      isEmpty,
-    );
-    controller.dispose();
-  });
+          .where((node) => node['type'] == 'group')
+          .toList();
+      expect(
+        (sections.single['children'] as List).whereType<Map>().map(
+          (row) => row['title'],
+        ),
+        ['Files'],
+      );
+      controller.search('no such plugin');
+      root = (controller.document!.toJson() as Map)['root'] as Map;
+      expect(
+        (root['children'] as List).where(
+          (node) => (node as Map)['type'] == 'group',
+        ),
+        isEmpty,
+      );
+      controller.dispose();
+    },
+  );
 
   for (final width in [375.0, 900.0]) {
     for (final scale in [1.0, 2.0]) {

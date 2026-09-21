@@ -270,6 +270,8 @@ describe("foundation application", () => {
       revertComposition: () =>
         Promise.reject(new Error("not used while composing")),
       listRoutines: () => Promise.reject(new Error("not used while composing")),
+      readRoutinesFrame: () =>
+        Promise.reject(new Error("not used while composing")),
       executeRoutineCommand: () =>
         Promise.reject(new Error("not used while composing")),
       deliverRoutineHook: () =>
