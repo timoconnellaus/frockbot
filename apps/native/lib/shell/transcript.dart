@@ -426,6 +426,9 @@ class _TranscriptViewState extends State<TranscriptView> {
         onOpen: widget.onOpenExchange,
       );
     }
+    if (line.voiceCall != null) {
+      return _VoiceCallAccordion(call: line.voiceCall!);
+    }
     if (line.role == LineRole.system) {
       return _Announcement(text: line.text);
     }
@@ -664,6 +667,85 @@ class _Announcement extends StatelessWidget {
       ),
     ),
   );
+}
+
+class _VoiceCallAccordion extends StatefulWidget {
+  final VoiceCallSection call;
+  const _VoiceCallAccordion({required this.call});
+
+  @override
+  State<_VoiceCallAccordion> createState() => _VoiceCallAccordionState();
+}
+
+class _VoiceCallAccordionState extends State<_VoiceCallAccordion> {
+  var expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8);
+    final style = theme.textTheme.bodySmall?.copyWith(color: muted);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            identifier: VoiceIds.callTranscript,
+            button: true,
+            child: InkWell(
+              onTap: () => setState(() => expanded = !expanded),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      voiceCallTitle(widget.call),
+                      textAlign: TextAlign.center,
+                      style: style,
+                    ),
+                  ),
+                  Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                    color: muted,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final turn in widget.call.turns) ...[
+                    if (turn.transcript.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8, left: 24),
+                        child: Text(
+                          turn.transcript,
+                          textAlign: TextAlign.right,
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                    if (turn.answer != null && turn.answer!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8, right: 24),
+                        child: Text(
+                          turn.answer!,
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _EmptyThread extends StatelessWidget {

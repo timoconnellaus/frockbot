@@ -674,6 +674,18 @@
     "value": null
   },
   {
+    "name": "Announcement voice call missing turns",
+    "schema": "Announcement",
+    "value": {
+      "type": "voice/call",
+      "announcementId": "voice-call-1",
+      "at": "2026-09-05T00:00:00.000Z",
+      "callId": "call-1",
+      "startedAt": "2026-09-05T00:00:00.000Z",
+      "endedAt": "2026-09-05T00:03:00.000Z"
+    }
+  },
+  {
     "name": "ConversationProjection wrong shape",
     "schema": "ConversationProjection",
     "value": null

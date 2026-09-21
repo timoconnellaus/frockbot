@@ -487,6 +487,15 @@ export type Announcement =
       announcementId: string;
       at: Instant;
       throughTurn: number;
+    }
+  | {
+      type: "voice/call";
+      announcementId: string;
+      at: Instant;
+      callId: Identifier;
+      startedAt: Instant;
+      endedAt: Instant;
+      turns: Array<{ transcript: string; answer?: string }>;
     };
 export type ConversationProjection = {
   schemaVersion: 1;

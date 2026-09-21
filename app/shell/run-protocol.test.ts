@@ -1869,6 +1869,41 @@ describe("client run protocol v1", () => {
       }),
     ).toThrow("run list.announcement.throughTurn is invalid");
   });
+
+  test("projects a hang-up transcript onto the wire", () => {
+    const announcements = projectClientAnnouncementsV1([
+      {
+        type: "voice/call",
+        seq: 8,
+        timestamp,
+        callId: "call-9",
+        startedAt: timestamp,
+        endedAt: timestamp,
+        turns: [{ transcript: "plan my week", answer: "On it." }],
+      },
+    ]);
+    expect(announcements).toEqual([
+      {
+        type: "voice/call",
+        announcementId: "voice-call-call-9",
+        at: timestamp,
+        callId: "call-9",
+        startedAt: timestamp,
+        endedAt: timestamp,
+        turns: [{ transcript: "plan my week", answer: "On it." }],
+      },
+    ]);
+    const page = createClientRunListV1([], { truncated: false }, announcements);
+    expect(decodeClientRunPageV1(structuredClone(page)).announcements).toEqual(
+      announcements,
+    );
+    expect(() =>
+      decodeClientRunPageV1({
+        ...page,
+        announcements: [{ ...announcements[0], turns: [] }],
+      }),
+    ).toThrow("run list.announcement.turns is invalid");
+  });
 });
 
 describe("a Plugin's model call in the run projection", () => {

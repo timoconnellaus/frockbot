@@ -5,6 +5,11 @@ import {
 } from "@frockbot/core/contracts";
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
+import {
+  VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
+  VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1,
+  type VoiceCallTranscriptTurnV1,
+} from "@frockbot/core/contracts";
 
 export { rpcJsonSnapshotV1 } from "@frockbot/app/durable-rpc";
 
@@ -144,6 +149,27 @@ export const rpcBoolean: RpcValueDecoder = (value, label) => {
   if (typeof value !== "boolean") throw new Error(`${label} must be a boolean`);
   return value;
 };
+
+export function rpcArray(
+  item: RpcValueDecoder,
+  maximum: number,
+): RpcValueDecoder {
+  return (value, label) => {
+    if (!Array.isArray(value) || value.length > maximum) {
+      throw new Error(`${label} must be a bounded array`);
+    }
+    return value.map((entry, index) => item(entry, `${label}[${index}]`));
+  };
+}
+
+export function rpcText(maximum: number): RpcValueDecoder {
+  return (value, label) => {
+    if (typeof value !== "string" || value.length > maximum) {
+      throw new Error(`${label} must be a bounded string`);
+    }
+    return value;
+  };
+}
 
 export function rpcObject(
   required: Readonly<Record<string, RpcValueDecoder>>,
@@ -461,6 +487,62 @@ export function decodeVoiceChatResultRpcV1(
   });
   const command = request.command as DecodedVoiceChatResultRpcV1["command"];
   command.runId = decodeRunIdV1(command.runId);
+  return {
+    schemaVersion: 1,
+    userId: request.userId as string,
+    botId: request.botId as string,
+    command,
+  };
+}
+
+export interface DecodedVoiceCallTranscriptRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+  command: {
+    callId: string;
+    startedAt: string;
+    endedAt: string;
+    turns: VoiceCallTranscriptTurnV1[];
+  };
+}
+
+function rpcInstant(): RpcValueDecoder {
+  return (value, label) => {
+    if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+      throw new Error(`${label} is invalid`);
+    }
+    return value;
+  };
+}
+
+/**
+ * Spoken turns of one ended call, written onto the Bot's thread.
+ * Internal-only: the voice object is the only caller.
+ */
+export function decodeVoiceCallTranscriptRpcV1(
+  input: unknown,
+): DecodedVoiceCallTranscriptRpcV1 {
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    botId: rpcBotId,
+    command: rpcObject({
+      callId: rpcString(128),
+      startedAt: rpcInstant(),
+      endedAt: rpcInstant(),
+      turns: rpcArray(
+        rpcObject(
+          { transcript: rpcText(VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1) },
+          { answer: rpcText(VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1) },
+        ),
+        VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1,
+      ),
+    }),
+  });
+  const command = request.command as DecodedVoiceCallTranscriptRpcV1["command"];
+  if (command.turns.length === 0) {
+    throw new Error("RPC request.command.turns is invalid");
+  }
   return {
     schemaVersion: 1,
     userId: request.userId as string,

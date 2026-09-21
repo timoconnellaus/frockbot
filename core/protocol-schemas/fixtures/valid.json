@@ -670,6 +670,24 @@
     }
   },
   {
+    "name": "Announcement voice call valid",
+    "schema": "Announcement",
+    "value": {
+      "type": "voice/call",
+      "announcementId": "voice-call-1.1.0",
+      "at": "2026-09-05T00:00:00.000Z",
+      "callId": "call-1",
+      "startedAt": "2026-09-05T00:00:00.000Z",
+      "endedAt": "2026-09-05T00:03:00.000Z",
+      "turns": [
+        {
+          "transcript": "plan my week",
+          "answer": "On it."
+        }
+      ]
+    }
+  },
+  {
     "name": "ConversationProjection valid",
     "schema": "ConversationProjection",
     "value": {

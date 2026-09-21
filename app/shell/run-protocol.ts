@@ -4,9 +4,12 @@ import {
   BATCH_TOOL_NAME,
   decodeSendToUserPayloadV1,
   decodeSkillRefsV1,
+  VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
+  VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1,
   type SendToUserPayloadV1,
   type SessionEvent,
   type SkillRefV1,
+  type VoiceCallTranscriptTurnV1,
 } from "@frockbot/core/contracts";
 import {
   isPublicIdentifier,
@@ -364,6 +367,15 @@ export type ClientAnnouncementV1 =
       announcementId: string;
       at: string;
       throughTurn: number;
+    }
+  | {
+      type: "voice/call";
+      announcementId: string;
+      at: string;
+      callId: string;
+      startedAt: string;
+      endedAt: string;
+      turns: VoiceCallTranscriptTurnV1[];
     };
 
 export interface ClientRunListV1 {
@@ -1378,6 +1390,36 @@ export function projectClientAnnouncementsV1(
             MAX_TIMESTAMP_LENGTH,
           ),
           throughTurn: event.throughTurn,
+        },
+      ];
+    }
+    if (event.type === "voice/call") {
+      const turns = event.turns
+        .slice(0, VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1)
+        .map((turn) => ({
+          transcript: truncateWireString(
+            turn.transcript,
+            VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
+          ),
+          ...(turn.answer === undefined
+            ? {}
+            : {
+                answer: truncateWireString(
+                  turn.answer,
+                  VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
+                ),
+              }),
+        }));
+      if (turns.length === 0) return [];
+      return [
+        {
+          type: "voice/call" as const,
+          announcementId: `voice-call-${event.callId}`,
+          at: truncate(event.endedAt, MAX_TIMESTAMP_LENGTH),
+          callId: truncate(event.callId, MAX_EVENT_ID_LENGTH),
+          startedAt: truncate(event.startedAt, MAX_TIMESTAMP_LENGTH),
+          endedAt: truncate(event.endedAt, MAX_TIMESTAMP_LENGTH),
+          turns,
         },
       ];
     }
@@ -2485,29 +2527,58 @@ export function decodeClientRunLookupV1(input: unknown): ClientRunLookup {
   return { state: lookup.state, run };
 }
 
-function decodeAnnouncement(value: unknown): ClientAnnouncementV1 {
-  const announcement = record(value, "run list.announcement");
-  if (
-    announcement.type !== "bot/renamed" &&
-    announcement.type !== "conversation/compacted"
-  ) {
-    throw new Error("run list.announcement.type is invalid");
-  }
-  exactKeys(
-    announcement,
-    announcement.type === "conversation/compacted"
-      ? ["type", "announcementId", "at", "throughTurn"]
-      : ["type", "announcementId", "at", "from", "to", "namedBy"],
-    "run list.announcement",
-  );
+function decodeAnnouncementInstant(
+  announcement: Record<string, unknown>,
+  key: string,
+): string {
   const at = string(
     announcement,
-    "at",
+    key,
     MAX_TIMESTAMP_LENGTH,
     "run list.announcement",
   );
   if (!Number.isFinite(Date.parse(at))) {
-    throw new Error("run list.announcement.at is invalid");
+    throw new Error(`run list.announcement.${key} is invalid`);
+  }
+  return at;
+}
+
+function decodeVoiceCallTurn(
+  value: unknown,
+  index: number,
+): VoiceCallTranscriptTurnV1 {
+  const turn = record(value, `run list.announcement.turns[${index}]`);
+  exactKeys(
+    turn,
+    turn.answer === undefined ? ["transcript"] : ["transcript", "answer"],
+    `run list.announcement.turns[${index}]`,
+  );
+  const transcript = string(
+    turn,
+    "transcript",
+    VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
+    `run list.announcement.turns[${index}]`,
+  );
+  if (turn.answer === undefined) return { transcript };
+  return {
+    transcript,
+    answer: string(
+      turn,
+      "answer",
+      VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
+      `run list.announcement.turns[${index}]`,
+    ),
+  };
+}
+
+function decodeAnnouncement(value: unknown): ClientAnnouncementV1 {
+  const announcement = record(value, "run list.announcement");
+  if (
+    announcement.type !== "bot/renamed" &&
+    announcement.type !== "conversation/compacted" &&
+    announcement.type !== "voice/call"
+  ) {
+    throw new Error("run list.announcement.type is invalid");
   }
   const announcementId = publicEventId(
     string(
@@ -2518,7 +2589,13 @@ function decodeAnnouncement(value: unknown): ClientAnnouncementV1 {
     ),
     "run list.announcement.announcementId",
   );
+  const at = decodeAnnouncementInstant(announcement, "at");
   if (announcement.type === "conversation/compacted") {
+    exactKeys(
+      announcement,
+      ["type", "announcementId", "at", "throughTurn"],
+      "run list.announcement",
+    );
     if (
       !Number.isSafeInteger(announcement.throughTurn) ||
       (announcement.throughTurn as number) < 1
@@ -2532,6 +2609,50 @@ function decodeAnnouncement(value: unknown): ClientAnnouncementV1 {
       throughTurn: announcement.throughTurn as number,
     };
   }
+  if (announcement.type === "voice/call") {
+    exactKeys(
+      announcement,
+      [
+        "type",
+        "announcementId",
+        "at",
+        "callId",
+        "startedAt",
+        "endedAt",
+        "turns",
+      ],
+      "run list.announcement",
+    );
+    if (
+      !Array.isArray(announcement.turns) ||
+      announcement.turns.length === 0 ||
+      announcement.turns.length > VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1
+    ) {
+      throw new Error("run list.announcement.turns is invalid");
+    }
+    return {
+      type: "voice/call",
+      announcementId,
+      at,
+      callId: publicEventId(
+        string(
+          announcement,
+          "callId",
+          MAX_EVENT_ID_LENGTH,
+          "run list.announcement",
+        ),
+        "run list.announcement.callId",
+      ),
+      startedAt: decodeAnnouncementInstant(announcement, "startedAt"),
+      endedAt: decodeAnnouncementInstant(announcement, "endedAt"),
+      turns: announcement.turns.map(decodeVoiceCallTurn),
+    };
+  }
+  exactKeys(
+    announcement,
+    ["type", "announcementId", "at", "from", "to", "namedBy"],
+    "run list.announcement",
+  );
   if (announcement.namedBy !== "user" && announcement.namedBy !== "bot") {
     throw new Error("run list.announcement.namedBy is invalid");
   }

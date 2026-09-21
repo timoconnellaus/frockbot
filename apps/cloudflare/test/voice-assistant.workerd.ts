@@ -1047,6 +1047,55 @@ describe("handing work to the Bot", () => {
       .find((event) => event.type === "send/to-user");
     expect(send?.payload?.text).toBeTruthy();
   });
+
+  test("hanging up writes the spoken turns onto the Bot's thread", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-transcript-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+    await exchange(stub, "plan my week", "On it.");
+    opened.socket.send(JSON.stringify({ type: "end_call" }));
+    await opened.waitFor(status("idle"), "idle");
+    const bot = env.BOT_STATES.getByName(
+      `${identity.userId}:${identity.botId}`,
+    );
+    const botRpc = bot as unknown as {
+      listRuns(input: unknown): Promise<{
+        announcements?: Array<{
+          type: string;
+          callId?: string;
+          turns?: Array<{ transcript?: string; answer?: string }>;
+        }>;
+      }>;
+    };
+    const listed = await eventually(
+      () =>
+        botRpc.listRuns({
+          schemaVersion: 1,
+          ...identity,
+          query: { schemaVersion: 1 },
+        }),
+      (page) =>
+        (page.announcements ?? []).some(
+          (announcement) => announcement.type === "voice/call",
+        ),
+      "the hang-up accordion",
+      30_000,
+    );
+    const call = listed.announcements?.find(
+      (announcement) => announcement.type === "voice/call",
+    );
+    expect(call?.turns).toContainEqual({
+      transcript: "plan my week",
+      answer: "On it.",
+    });
+  });
 });
 
 describe("the day's allowance", () => {
