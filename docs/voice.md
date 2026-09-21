@@ -390,7 +390,10 @@ speaker now. Transcript frames (`transcript`, `transcript_interim`,
 ### Ears
 
 There is no transcriber. The session hears the audio itself, decides where a
-turn ends with its own voice detector, and answers in its own voice; the
+turn ends with its own voice detector, and answers in its own voice. Both
+directions ask for SMART transcription: finals are cleaned, and
+`interimInputTranscription` becomes `transcript_interim` on the client
+wire without touching the ledger. The
 `inputTranscription` and `outputTranscription` it returns are what the client's
 transcript frames carry and what the ledger's turn records are built from.
 Input transcription usually arrives _after_ the model has started answering,

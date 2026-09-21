@@ -38,8 +38,8 @@ describe("the setup frame", () => {
         voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } },
       },
     });
-    expect(setup.inputAudioTranscription).toEqual({});
-    expect(setup.outputAudioTranscription).toEqual({});
+    expect(setup.inputAudioTranscription).toEqual({ mode: "SMART" });
+    expect(setup.outputAudioTranscription).toEqual({ mode: "SMART" });
     expect(setup.sessionResumption).toEqual({});
     expect(setup.contextWindowCompression).toEqual({ slidingWindow: {} });
     expect(setup.tools).toEqual([
@@ -201,6 +201,14 @@ describe("decoding what the server sends", () => {
         '{"serverContent":{"inputTranscription":{"text":"¿Qué?"}}}',
       ),
     ).toEqual([{ kind: "input-transcript", text: "¿Qué?" }]);
+  });
+
+  test("an interim while they are still speaking", () => {
+    expect(
+      decodeGeminiServerFrameV1(
+        '{"serverContent":{"interimInputTranscription":{"text":"check Thurs"}}}',
+      ),
+    ).toEqual([{ kind: "input-transcript-interim", text: "check Thurs" }]);
   });
 
   test("the two turn boundaries, and usage beside the second", () => {

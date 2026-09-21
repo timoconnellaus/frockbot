@@ -534,6 +534,27 @@ describe("the session the call talks through", () => {
     expect(meters[0]!.turns).toBe(1);
   });
 
+  test("an interim is on the wire and not in the ledger", async () => {
+    const userId = `voice-interim-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    expect(await stub.probeHearsInterim("check Thurs")).toBe(true);
+    await eventually(
+      async () => opened.frames,
+      (frames) =>
+        frames.some(
+          (frame) =>
+            frame.type === "transcript_interim" && frame.text === "check Thurs",
+        ),
+      "the interim on the client socket",
+    );
+    await exchange(stub, "check Friday", "Friday 6:40.");
+    const [turn] = await turns(stub);
+    expect(turn.transcript).toBe("check Friday");
+  });
+
   test("the model's own barge-in stops the client's playback", async () => {
     const userId = `voice-interrupt-${crypto.randomUUID()}`;
     const stub = assistant(userId);

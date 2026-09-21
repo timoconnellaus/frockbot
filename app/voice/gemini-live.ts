@@ -151,10 +151,10 @@ export function buildGeminiLiveSetupV1(
           : {}),
       },
       systemInstruction: { parts: [{ text: options.systemInstruction }] },
-      // Both directions transcribed: the client's transcript frames are the
-      // only text a call has, and the ledger's turn records are built from it.
-      inputAudioTranscription: {},
-      outputAudioTranscription: {},
+      // SMART cleans disfluencies on the final; interims stay hypotheses
+      // and never enter the ledger. Empty `{}` is VERBATIM.
+      inputAudioTranscription: { mode: "SMART" },
+      outputAudioTranscription: { mode: "SMART" },
       // Asking for resumption is what makes the server hand out handles at
       // all; a session that never asks cannot be woken.
       sessionResumption: options.resumptionHandle
@@ -254,6 +254,7 @@ export type GeminiServerEventV1 =
   | { kind: "audio"; pcm: Uint8Array; mimeType: string }
   | { kind: "output-transcript"; text: string }
   | { kind: "input-transcript"; text: string }
+  | { kind: "input-transcript-interim"; text: string }
   | { kind: "generation-complete" }
   | { kind: "turn-complete" }
   | { kind: "interrupted" }
@@ -306,6 +307,10 @@ export function decodeGeminiServerFrameV1(raw: string): GeminiServerEventV1[] {
     const input = content.inputTranscription;
     if (isRecord(input) && typeof input.text === "string" && input.text) {
       events.push({ kind: "input-transcript", text: input.text });
+    }
+    const interim = content.interimInputTranscription;
+    if (isRecord(interim) && typeof interim.text === "string" && interim.text) {
+      events.push({ kind: "input-transcript-interim", text: interim.text });
     }
     // `interrupted` before the boundaries: the model was cut off, and the
     // client must drop what it is playing before it is told the turn is over.
