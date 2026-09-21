@@ -29,8 +29,7 @@ const MANAGED_REF = "managed/add-connector";
 /** The managed Skill that follows the account's Applets switch. */
 const APPLETS_REF = "managed/applets";
 /** A line only the managed `add-connector` body carries, not its catalog description. */
-const MANAGED_BODY_MARKER =
-  "self-modification never widens your own authority";
+const MANAGED_BODY_MARKER = "self-modification never widens your own authority";
 
 /** What an admin does before an account's Bots see the Applets surfaces. */
 async function setApplets(userId: string, applets: boolean): Promise<void> {
