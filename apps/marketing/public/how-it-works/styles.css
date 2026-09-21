@@ -803,20 +803,31 @@
 .cross-device-steps {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 22px;
+  grid-template-rows: auto auto;
+  column-gap: 22px;
+  row-gap: 12px;
 }
 .cross-device-step {
-  position: relative;
-  display: grid;
-  gap: 12px;
+  display: contents;
 }
-.cross-device-step:not(:last-child)::after {
+.cross-device-step > span {
+  grid-row: 1;
+  min-width: 0;
+}
+.cross-device-step > strong {
+  grid-row: 2;
+  position: relative;
+  min-width: 0;
+}
+.cross-device-step:not(:last-child) > strong::after {
   position: absolute;
-  top: 50%;
-  right: -17px;
+  top: 0.5lh;
+  left: 100%;
+  margin-left: 11px;
   color: #dc88a4;
   content: "→";
-  transform: translateY(-50%);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
 }
 .cross-device-flow span {
   color: #e6a9be;
@@ -1245,17 +1256,30 @@
   }
   .cross-device-steps {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
     gap: 14px;
   }
+  .cross-device-step {
+    display: grid;
+    position: relative;
+    text-align: center;
+    gap: 6px;
+  }
+  .cross-device-step > span,
+  .cross-device-step > strong {
+    grid-row: auto;
+  }
+  .cross-device-step:not(:last-child) > strong::after {
+    content: none;
+  }
   .cross-device-step:not(:last-child)::after {
+    position: absolute;
     top: auto;
     right: 50%;
     bottom: -17px;
+    color: #dc88a4;
+    content: "→";
     transform: translateX(50%) rotate(90deg);
-  }
-  .cross-device-step {
-    text-align: center;
-    gap: 6px;
   }
   .cross-device-flow figcaption {
     margin-top: 8px;
