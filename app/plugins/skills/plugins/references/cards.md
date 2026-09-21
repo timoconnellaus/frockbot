@@ -5,6 +5,10 @@ a settled state — instead of a wall of text. You declare the card in
 `plugin.json` and export its `render` in `plugin.ts`; the Bot sends the values
 and your code composes the surface.
 
+Components come from the catalogs the client compiled in. You ship no markup.
+Load `managed/a2ui` with `skill_load` for the message model, the families, and
+the budgets; this file is the Plugin seam, not the catalog.
+
 ```json
 "cards": [
   {
