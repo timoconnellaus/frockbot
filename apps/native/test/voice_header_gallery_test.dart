@@ -141,33 +141,50 @@ void main() {
     connecting.dispose();
   });
 
-  testWidgets('the composer voice control goes primary on this Bot', (
-    tester,
-  ) async {
+  testWidgets('idle chat, then connecting, then listening', (tester) async {
     final harness = VoiceShellHarness();
     await harness.mount(tester, width: 1280, brightness: Brightness.dark);
+    expect(find.text('Remind me about the flight on Friday.'), findsOneWidget);
+    expect(find.byType(Composer), findsOneWidget);
+    expect(byIdentifier(VoiceIds.callChrome), findsNothing);
     final idle = _voiceIconColor(tester);
-    expect(idle, isNotNull);
+    await capture(tester, harness.boundary, '10-desktop-idle');
 
     await harness.call.start();
+    harness.showCall(botId: 'voice-bot');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Connecting'), findsOneWidget);
+    expect(find.text('Remind me about the flight on Friday.'), findsOneWidget);
+    expect(find.byType(Composer), findsOneWidget);
+    expect(_voiceIconColor(tester), isNot(idle));
+    await capture(tester, harness.boundary, '11-desktop-connecting');
+
     harness.callSocket.deliver(
       jsonEncode({'type': 'welcome', 'protocol_version': 1}),
     );
     harness.callSocket.deliver(
       jsonEncode({'type': 'status', 'status': 'listening'}),
     );
-    harness.showCall(botId: 'voice-bot');
     await tester.pump();
     await tester.pump();
-
+    expect(find.text('Listening'), findsOneWidget);
     expect(find.byType(Composer), findsOneWidget);
-    expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
     final theme = Theme.of(
       tester.element(find.byKey(const ValueKey('composer-voice'))),
     );
     expect(_voiceIconColor(tester), theme.colorScheme.primary);
-    expect(_voiceIconColor(tester), isNot(idle));
     await capture(tester, harness.boundary, '07-desktop-listening');
+
+    harness.callCapture.emit(AudioFrame(Uint8List(0), 0.8, 40));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 360));
+    await capture(tester, harness.boundary, '13-desktop-talking');
+
+    harness.call.pause();
+    await tester.pump();
+    expect(find.text('Paused'), findsOneWidget);
+    await capture(tester, harness.boundary, '14-desktop-paused');
     await harness.dispose(tester);
   });
 
@@ -195,7 +212,9 @@ void main() {
     await harness.dispose(tester);
   });
 
-  testWidgets('phone listening keeps back and the composer', (tester) async {
+  testWidgets('phone connecting then listening keep back and the composer', (
+    tester,
+  ) async {
     final harness = VoiceShellHarness();
     await harness.mount(
       tester,
@@ -204,16 +223,21 @@ void main() {
       brightness: Brightness.dark,
     );
     await harness.call.start();
+    harness.showCall(botId: 'voice-bot');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Connecting'), findsOneWidget);
+    expect(find.byTooltip('Your Bots'), findsOneWidget);
+    await capture(tester, harness.boundary, '15-phone-connecting');
+
     harness.callSocket.deliver(
       jsonEncode({'type': 'welcome', 'protocol_version': 1}),
     );
     harness.callSocket.deliver(
       jsonEncode({'type': 'status', 'status': 'listening'}),
     );
-    harness.showCall(botId: 'voice-bot');
     await tester.pump();
     await tester.pump();
-
     expect(find.byType(Composer), findsOneWidget);
     expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
     expect(find.byTooltip('Your Bots'), findsOneWidget);

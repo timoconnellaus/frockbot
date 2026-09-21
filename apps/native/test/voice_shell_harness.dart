@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/bot_sessions.dart';
+import 'package:frockbot_native/client/page_cache.dart';
+import 'package:frockbot_native/client/store.dart';
 import 'package:frockbot_native/shell/app_shell.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/dictation.dart';
@@ -12,6 +14,14 @@ import 'navigation_test.dart' show OfflineApi, registration;
 import 'voice_fakes.dart';
 import 'widget_test.dart' show MemoryStore;
 
+class _SnapshotStore extends MemoryStore implements SnapshotStore {
+  @override
+  bool get resident => true;
+
+  @override
+  String? peek(String key) => values[key];
+}
+
 /// Real shell layout and commands, with only network and audio devices faked.
 class VoiceShellHarness {
   final key = GlobalKey<State<AppShell>>();
@@ -19,7 +29,7 @@ class VoiceShellHarness {
   /// The whole window, so a visual test can read the real shell back as an
   /// image rather than photographing a fixture built to look like it.
   final boundary = GlobalKey();
-  final store = MemoryStore();
+  final store = _SnapshotStore();
   final links = ValueNotifier<String?>(null);
   var dictationSocket = FakeVoiceSocket();
   final dictationCapture = FakeVoiceCapture();
@@ -52,6 +62,43 @@ class VoiceShellHarness {
       'revision': 1,
       'bots': [registration('voice-bot', 'Rosemary')],
     });
+    store.values[pageCacheKey('voice-user', 'voice-bot')] = encodePageCache([
+      {
+        'schemaVersion': 1,
+        'runId': 'run-flight',
+        'admittedAt': '2026-09-21T00:00:00.000Z',
+        'input': 'Remind me about the flight on Friday.',
+        'status': 'completed',
+        'events': [
+          {
+            'type': 'send/to-user',
+            'payload': {
+              'type': 'text',
+              'text':
+                  'Friday 6:40pm, terminal 2. I’ll ping you an hour before.',
+            },
+            'ordinal': 0,
+          },
+        ],
+      },
+      {
+        'schemaVersion': 1,
+        'runId': 'run-voice',
+        'admittedAt': '2026-09-21T00:01:00.000Z',
+        'input': 'Call me when you have an update.',
+        'status': 'completed',
+        'events': [
+          {
+            'type': 'send/to-user',
+            'payload': {
+              'type': 'text',
+              'text': 'I will. The thread stays here while we talk.',
+            },
+            'ordinal': 0,
+          },
+        ],
+      },
+    ], null);
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(brightness),
