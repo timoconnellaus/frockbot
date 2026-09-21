@@ -1155,14 +1155,14 @@ export async function connectOllama(
     [provider.locator('input[aria-label="API key"]'), options.apiKey],
   ]);
   await press(action(provider, "connect-0"));
-  // The account's state is read from the row's accessible name, not its text:
-  // the compact Connectors page folds a provider's title, pill and account
-  // lines into one labelled node, so "Ready" is in `aria-label` and never in
-  // the text content a `toContainText` would read. The buttons are the only
-  // text left there.
+  // The compact row folds the provider title, the account count and the
+  // Connected pill into one heading, so the wait is on that heading's name
+  // rather than on a labelled descendant the merge no longer draws.
   await expect(async () => {
     await press(sem(page, "connections-refresh"));
-    await expect(provider.getByLabel(/\bReady\b/u)).toBeVisible({
+    await expect(
+      provider.getByRole("heading", { name: /\bConnected\b/u }),
+    ).toBeVisible({
       timeout: 10_000,
     });
   }).toPass({ timeout: 90_000 });
