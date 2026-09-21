@@ -245,6 +245,25 @@ void main() {
     },
   );
 
+  test('dictation peaks fill the strip at any talking volume', () {
+    final gain = VoicePeakGain();
+    // A whisper's first peak is the ceiling, so it draws at the top.
+    expect(gain.map(0.18), 1);
+    expect(gain.map(0.09), closeTo(0.5, 0.0001));
+    // A louder peak becomes the new ceiling immediately.
+    expect(gain.map(0.72), 1);
+    expect(gain.map(0.18), closeTo(0.25, 0.0001));
+    // Silence is not amplified.
+    expect(gain.map(0), 0);
+    expect(gain.map(double.nan), 0);
+    // After the shout fades, a quiet speaker can fill the strip again.
+    gain.decay(gain.release * 4);
+    expect(gain.map(0.18), 1);
+    gain.reset();
+    expect(gain.ceiling, 0);
+    expect(gain.map(0.4), 1);
+  });
+
   testWidgets(
     'panel enters, reverses mid-flight and removes outgoing controls',
     (tester) async {
