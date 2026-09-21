@@ -4,6 +4,7 @@ import { isProtocolValue } from "@frockbot/core/protocol-schemas";
 import {
   applicationSettingsFrame,
   applicationSettingsCommand,
+  connectionsFrame,
   modelSettingsOptions,
   modelsSettingsFrame,
   modelsSettingsCommand,
@@ -300,33 +301,19 @@ test("provider knobs have one Models home and disappear while disabled", () => {
   ).toMatchObject({ type: "user/set-package-settings", unset: ["limit"] });
 });
 
-test("providers not yet set up are offered through one picker, not one section each", () => {
+test("Models lists only providers already added, not the rest of the catalog", () => {
   const user = settings();
   const together: AvailableUserPackage = {
     ...provider,
     packageId: "provider-together",
     displayName: "Together",
   };
-  const frame = modelsSettingsFrame("tim", user, [provider, together]);
-  expect(frame.sections.map((section) => section.id)).toEqual([
-    "model",
-    "provider.provider",
-    "add-provider",
-  ]);
-  expect(frame.sections[2]).toMatchObject({
-    label: "Add a provider",
-    fields: [
-      {
-        id: "provider",
-        kind: "select",
-        value: null,
-        required: true,
-        choices: [{ label: "Together", value: "provider-together" }],
-      },
-    ],
-  });
-  expect(frame.sections[2]!.actions).toBeUndefined();
   expect(
+    modelsSettingsFrame("tim", user, [provider, together]).sections.map(
+      (section) => section.id,
+    ),
+  ).toEqual(["model", "provider.provider"]);
+  expect(() =>
     modelsSettingsCommand({
       schemaVersion: 1,
       commandId: "add-together",
@@ -335,22 +322,7 @@ test("providers not yet set up are offered through one picker, not one section e
       sectionId: "add-provider",
       values: { provider: "provider-together" },
     }),
-  ).toMatchObject({
-    type: "user/choose-model-provider",
-    packageId: "provider-together",
-  });
-  expect(() =>
-    modelsSettingsCommand({
-      schemaVersion: 1,
-      commandId: "add-nothing",
-      ownerId: "tim",
-      expectedRevision: 8,
-      sectionId: "add-provider",
-      values: {},
-    }),
-  ).toThrow("Choose a provider");
-  // Catalog providers are installed disabled by default; that is still the
-  // picker. Once enabled, Together has its own section and leaves it.
+  ).toThrow("Unknown model section");
   user.packages.push({
     packageId: "provider-together",
     version: "1.0.0",
@@ -360,13 +332,85 @@ test("providers not yet set up are offered through one picker, not one section e
     modelsSettingsFrame("tim", user, [provider, together]).sections.map(
       (section) => section.id,
     ),
-  ).toEqual(["model", "provider.provider", "add-provider"]);
+  ).toEqual(["model", "provider.provider"]);
   user.packages[1]!.state = "installed";
   expect(
     modelsSettingsFrame("tim", user, [provider, together]).sections.map(
       (section) => section.id,
     ),
   ).toEqual(["model", "provider.provider", "provider.provider-together"]);
+});
+
+test("the Marketplace catalog lists uninstalled models and installed connectors", () => {
+  const user = settings();
+  user.packages = [];
+  const gmail: AvailableUserPackage = {
+    packageId: "connect",
+    version: "1.0.0",
+    displayName: "Connected apps",
+    connectionTypes: [
+      {
+        id: "connect-gmail",
+        displayName: "Gmail",
+        description: "Read Gmail.",
+        icon: "gmail",
+        allowMultiple: true,
+        authorization: { kind: "grant" },
+        capabilities: ["gmail-tools"],
+      },
+      {
+        id: "connect-slack",
+        displayName: "Slack",
+        description: "Post to Slack.",
+        icon: "slack",
+        allowMultiple: true,
+        authorization: { kind: "grant" },
+        capabilities: ["slack-tools"],
+      },
+    ],
+  };
+  const together: AvailableUserPackage = {
+    ...provider,
+    packageId: "provider-together",
+    displayName: "Together",
+    connectionTypes: [
+      {
+        id: "together-account",
+        displayName: "Together account",
+        icon: "together",
+        allowMultiple: true,
+        authorization: { kind: "api-key" },
+        capabilities: ["models"],
+      },
+    ],
+  };
+  const installedOnly = connectionsFrame("tim", user, [together, gmail]);
+  expect(installedOnly.providers).toEqual([]);
+  user.packages.push({
+    packageId: "connect",
+    version: "1.0.0",
+    state: "installed",
+  });
+  const catalog = connectionsFrame("tim", user, [together, gmail], {
+    catalog: true,
+  });
+  expect(catalog.providers.map((row) => row.displayName)).toEqual([
+    "Gmail",
+    "Slack",
+    "Together",
+  ]);
+  expect(catalog.providers[0]).toMatchObject({
+    kind: "connector",
+    mayConnect: true,
+    icon: "gmail",
+  });
+  expect(catalog.providers[2]).toMatchObject({
+    kind: "model",
+    mayConnect: false,
+    connected: 0,
+    icon: "together",
+    description: "Use Together models with your own key.",
+  });
 });
 
 test("resetting an Application setting omits the empty patch at the owner seam", () => {

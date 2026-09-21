@@ -371,15 +371,6 @@ export function modelSettingsOptions(
   });
 }
 
-/**
- * The Models section that adds a provider not yet set up. Its one select
- * names a catalog Package, and saving it is the same choose-provider command
- * a per-provider section used to carry — one action for the whole catalog
- * instead of one per provider, which the view's action budget cannot hold.
- */
-export const ADD_PROVIDER_SECTION_V1 = "add-provider";
-export const ADD_PROVIDER_FIELD_V1 = "provider";
-
 export function modelsSettingsFrame(
   userId: string,
   settings: UserSettingsViewV1,
@@ -390,11 +381,10 @@ export function modelsSettingsFrame(
       !pkg.platformOwned &&
       pkg.capabilities?.some((capability) => capability.kind === "model"),
   );
-  // A provider earns its own section once a person has done something with
-  // it: enabled the Package, or connected an account. Catalog providers are
-  // installed disabled for everyone, so a disabled record alone is not that.
-  // The rest of the catalog is offered through one picker, so the surface
-  // stays the size of what is set up rather than the size of what could be.
+  // A provider earns its own section once a person has added it from the
+  // Marketplace, or connected an account. Catalog providers are installed
+  // disabled for everyone, so a disabled record alone is not that. The
+  // Marketplace is the catalog; this page is only what is already set up.
   const providers = modelProviders.filter(
     (pkg) =>
       settings.packages.some(
@@ -408,7 +398,6 @@ export function modelsSettingsFrame(
           connection.state !== "revoked",
       ),
   );
-  const available = modelProviders.filter((pkg) => !providers.includes(pkg));
   const selected = settings.accountModel ? { ...settings.accountModel } : null;
   const choices: SettingChoice[] = [];
   for (const choice of modelChoices(settings, catalog)) {
@@ -506,26 +495,6 @@ export function modelsSettingsFrame(
           }),
     });
   }
-  if (available.length > 0)
-    sections.push({
-      id: ADD_PROVIDER_SECTION_V1,
-      label: "Add a provider",
-      fields: [
-        {
-          id: ADD_PROVIDER_FIELD_V1,
-          label: "Provider",
-          kind: "select",
-          value: null,
-          editable: true,
-          required: true,
-          choices: available.map((pkg) => ({
-            label: (pkg.displayName ?? pkg.packageId).slice(0, 200),
-            value: pkg.packageId,
-          })),
-          hint: "Bring your own API key or sign in. Connecting opens the provider's account page.",
-        },
-      ],
-    });
   return decodeProtocol("SettingsFrame", {
     schemaVersion: 1,
     home: "models",
@@ -554,20 +523,6 @@ export function modelsSettingsCommand(
       type: "user/set-account-model",
       model: command.values["account-model"],
     });
-  if (command.sectionId === ADD_PROVIDER_SECTION_V1) {
-    const packageId = command.values[ADD_PROVIDER_FIELD_V1];
-    if (
-      typeof packageId !== "string" ||
-      command.unset?.length ||
-      Object.keys(command.values).length !== 1
-    )
-      throw new ConfigurationDecodeError("Choose a provider to add");
-    return userCommand({
-      ...meta,
-      type: "user/choose-model-provider",
-      packageId,
-    });
-  }
   if (command.sectionId.startsWith("provider.")) {
     const packageId = command.sectionId.slice(9);
     return Object.keys(command.values).length === 0 && !command.unset?.length
@@ -668,15 +623,24 @@ function modelInUseLineV1(
  * `packageConfigurationHomeV1`; it travels as the row's `kind` so a projection
  * can group by it. Credentials never travel: an account is a name, a state and
  * a line saying what that state means.
+ *
+ * `catalog` is the Marketplace storefront: every model and connector offer,
+ * including Packages nobody has added yet. An uninstalled model row cannot
+ * connect (`mayConnect: false`); Add installs the Package, then Connect
+ * opens. The ordinary connections read stays installed-only, so Manage
+ * provider and older clients do not grow a catalog they cannot add from.
  */
 export function connectionsFrame(
   userId: string,
   settings: UserSettingsViewV1,
   catalog: readonly AvailableUserPackage[],
+  options: { catalog?: boolean } = {},
 ): ConnectionsFrame {
+  const offerCatalog = options.catalog === true;
   const homes = new Map<string, "model" | "connector">();
   const providers: ConnectionsFrame["providers"] = [];
   for (const item of catalog) {
+    if (offerCatalog && item.platformOwned) continue;
     const home = packageConfigurationHomeV1(item);
     if (home !== "models" && home !== "connections") continue;
     const installed = settings.packages.find(
@@ -685,7 +649,7 @@ export function connectionsFrame(
         installation.version === item.version &&
         installation.state === "installed",
     );
-    if (!installed) continue;
+    if (!installed && !offerCatalog) continue;
     const kind = home === "models" ? "model" : "connector";
     homes.set(item.packageId, kind);
     for (const type of item.connectionTypes ?? []) {
@@ -703,34 +667,48 @@ export function connectionsFrame(
       // leaves the row rather than taking the whole surface down with it: the
       // account can still be connected, on the Connection Type's own defaults.
       const fields: SettingField[] = [];
-      for (const definition of (type.settings ?? []).slice(0, 8)) {
-        try {
-          fields.push(field(definition, undefined));
-        } catch {
-          continue;
+      if (installed) {
+        for (const definition of (type.settings ?? []).slice(0, 8)) {
+          try {
+            fields.push(field(definition, undefined));
+          } catch {
+            continue;
+          }
         }
       }
+      const displayName = (
+        (item.connectionTypes?.length ?? 0) > 1
+          ? type.displayName
+          : (item.displayName ?? type.displayName)
+      ).slice(0, 200);
+      const description = (
+        type.description ??
+        (kind === "model"
+          ? `Use ${displayName} models with your own key.`
+          : undefined)
+      )?.slice(0, 300);
       providers.push({
         packageId: item.packageId,
         connectionTypeId: type.id,
         // A Package with one Connection Type is the row; a Package that
         // declares several — one per connectable app — is a grouping, and the
         // type is what a person is connecting.
-        displayName: ((item.connectionTypes?.length ?? 0) > 1
-          ? type.displayName
-          : (item.displayName ?? type.displayName)
-        ).slice(0, 200),
+        displayName,
         kind,
         authorization: type.authorization.kind,
         connected,
-        mayConnect: connected === 0 || type.allowMultiple,
+        mayConnect:
+          Boolean(installed) && (connected === 0 || type.allowMultiple),
         ...(fields.length ? { settings: fields } : {}),
-        ...(type.description
-          ? { description: type.description.slice(0, 300) }
-          : {}),
+        ...(description ? { description } : {}),
         ...(type.icon ? { icon: type.icon } : {}),
       });
     }
+  }
+  if (offerCatalog) {
+    providers.sort((left, right) =>
+      left.displayName.localeCompare(right.displayName),
+    );
   }
 
   const accounts: ConnectionsFrame["accounts"] = [];
@@ -765,7 +743,7 @@ export function connectionsFrame(
     ownerId: userId,
     revision: settings.revision,
     accounts,
-    providers,
+    providers: providers.slice(0, 100),
     modelInUse: modelInUseLineV1(settings, catalog),
   });
 }

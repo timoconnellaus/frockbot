@@ -1,21 +1,17 @@
-import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Page, TestInfo } from "@playwright/test";
 import {
   expect,
   group,
   openApplication,
   openConnectors,
+  openModels,
   press,
   revealSidebar,
   sem,
   sendMessage,
   settle,
-  spokenText,
   test,
 } from "./fixtures.ts";
-
-function action(scope: Page | Locator, actionId: string): Locator {
-  return sem(scope, `view-action-${actionId}`);
-}
 
 async function capture(
   page: Page,
@@ -27,23 +23,7 @@ async function capture(
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-function details(scope: Page | Locator): Locator {
-  return sem(scope, "view-group-details-controls");
-}
-
-async function revealAction(
-  scope: Page | Locator,
-  actionId: string,
-): Promise<void> {
-  const target = action(scope, actionId);
-  if (!(await target.isVisible().catch(() => false))) {
-    await press(details(scope));
-  }
-  await expect(target).toBeVisible();
-}
-
 async function openBotList(page: Page): Promise<void> {
-  // General can replace the initial phone list while the account loads.
   await expect(async () => {
     await revealSidebar(page);
     await expect(sem(page, "sidebar-marketplace")).toBeVisible({
@@ -53,7 +33,14 @@ async function openBotList(page: Page): Promise<void> {
   await settle(page);
 }
 
-test("Marketplace installs, sets up, removes, and leaves a fresh Bot usable", async ({
+async function searchMarketplace(page: Page, query: string): Promise<void> {
+  const search = sem(page, "marketplace-search").locator("input, textarea");
+  await expect(search.first()).toBeVisible();
+  await search.first().fill(query);
+  await settle(page);
+}
+
+test("Marketplace installs a model and leaves a fresh Bot usable", async ({
   page,
   userId,
 }, testInfo) => {
@@ -61,44 +48,30 @@ test("Marketplace installs, sets up, removes, and leaves a fresh Bot usable", as
   await openBotList(page);
 
   await openConnectors(page);
-  await capture(page, testInfo, "marketplace-connectors.png");
-  await press(sem(page, "marketplace-plugins-tab"));
-  await settle(page);
-  const marketplace = sem(page, "marketplace-plugins-document");
-  await expect(marketplace).toBeVisible();
+  await expect(sem(page, "marketplace-search")).toBeVisible();
+  await expect(sem(page, "marketplace-filter")).toBeVisible();
+  await capture(page, testInfo, "marketplace-catalog.png");
+
+  await searchMarketplace(page, "DeepSeek");
   const deepSeek = group(page, "DeepSeek");
   await expect(deepSeek).toBeVisible();
-  await expect.poll(() => spokenText(deepSeek)).toContain("Not installed");
   await capture(page, testInfo, "marketplace-deepseek-not-installed.png");
 
-  await revealAction(deepSeek, "install-package");
-  await press(action(deepSeek, "install-package"));
-  await expect.poll(() => spokenText(deepSeek)).toContain("Installed");
+  await press(sem(deepSeek, "view-action-add-provider-deepseek"));
+  await expect(deepSeek.getByText("Connect", { exact: true })).toBeVisible({
+    timeout: 60_000,
+  });
   await capture(page, testInfo, "marketplace-deepseek-installed.png");
 
   await press(sem(page, "right-panel-close"));
   await expect(sem(page, "shell-conversation")).toBeVisible();
-  await openConnectors(page);
-  await press(sem(page, "marketplace-plugins-tab"));
-  await settle(page);
-  await expect(marketplace).toBeVisible();
-  await expect.poll(() => spokenText(deepSeek)).toContain("Installed");
-
-  await revealAction(deepSeek, "open-home");
-  await press(action(deepSeek, "open-home"));
-  await expect(sem(page, "settings-model-field")).toBeVisible();
+  await openModels(page);
+  await expect(group(page, "DeepSeek")).toBeVisible();
   await capture(page, testInfo, "marketplace-deepseek-model-setup.png");
-  await page.goBack();
-  await expect(marketplace).toBeVisible();
-
-  await revealAction(deepSeek, "uninstall-package");
-  await press(action(deepSeek, "uninstall-package"));
-  await expect.poll(() => spokenText(deepSeek)).toContain("Not installed");
-  await capture(page, testInfo, "marketplace-deepseek-removed.png");
 
   await press(sem(page, "right-panel-close"));
   await expect(sem(page, "shell-conversation")).toBeVisible();
-  await sendMessage(page, "Reply once after the Plugin was removed.", {
+  await sendMessage(page, "Reply once after the model was added.", {
     replies: 1,
   });
   await capture(page, testInfo, "marketplace-fresh-conversation.png");
@@ -107,7 +80,7 @@ test("Marketplace installs, sets up, removes, and leaves a fresh Bot usable", as
 test.describe("phone Marketplace", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("keeps Connectors as the default tab and exposes Plugins", async ({
+  test("is one searchable catalog on a phone", async ({
     page,
     userId,
   }, testInfo) => {
@@ -115,11 +88,10 @@ test.describe("phone Marketplace", () => {
     await openBotList(page);
     await openConnectors(page);
     await expect(sem(page, "connections-document")).toBeVisible();
-    await capture(page, testInfo, "marketplace-phone-connectors.png");
-    await press(sem(page, "marketplace-plugins-tab"));
-    await settle(page);
-    await expect(sem(page, "marketplace-plugins-document")).toBeVisible();
+    await expect(sem(page, "marketplace-search")).toBeVisible();
+    await capture(page, testInfo, "marketplace-phone-catalog.png");
+    await searchMarketplace(page, "DeepSeek");
     await expect(group(page, "DeepSeek")).toBeVisible();
-    await capture(page, testInfo, "marketplace-phone-plugins.png");
+    await capture(page, testInfo, "marketplace-phone-deepseek.png");
   });
 });

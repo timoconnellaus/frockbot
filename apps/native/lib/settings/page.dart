@@ -364,6 +364,28 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   List<Widget> _homeLinks() => [
+    identified(
+      SettingsIds.connectorsLink,
+      ListTile(
+        leading: const Icon(Icons.storefront_outlined),
+        title: const Text('Add connectors in the Marketplace'),
+        subtitle: const Text(
+          'Browse models and connected apps, then come back here to choose one',
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => MarketplacePage(
+              api: widget.api,
+              store: widget.store,
+              userId: widget.userId,
+              onFeaturesChanged: widget.onFeaturesChanged,
+              initialFilter: MarketplaceKindFilter.models,
+            ),
+          ),
+        ),
+      ),
+    ),
     ListTile(
       leading: const Icon(Icons.image_outlined),
       title: const Text('Image generation'),

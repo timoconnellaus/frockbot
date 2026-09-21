@@ -759,10 +759,15 @@ export class UserConfiguration
   }
 
   async readConnectionsFrame(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier },
+      { catalog: rpcBoolean },
+    );
     await this.assertUserIdentity(request.userId as string);
     return (await this.settingsContribution()).readConnectionsFrame(
       request.userId as string,
+      request.catalog === true,
     );
   }
 

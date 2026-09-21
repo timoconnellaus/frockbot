@@ -717,11 +717,12 @@ export class UserSettingsBackendContribution {
     );
   }
 
-  async readConnectionsFrame(userId: string) {
+  async readConnectionsFrame(userId: string, catalog = false) {
     return connectionsFrame(
       userId,
       await this.readConfiguration({ schemaVersion: 1, userId }),
       this.host.availablePackages,
+      { catalog },
     );
   }
 

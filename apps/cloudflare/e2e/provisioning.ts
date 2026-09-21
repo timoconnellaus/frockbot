@@ -10,10 +10,9 @@
 // Every body here is one the product's own client sends:
 //
 // - `user/set-package-enabled` is the Plugins row's switch.
-// - `user/choose-model-provider` is the Models page's "Add a provider" save
-//   (`modelsSettingsCommand` in `app/settings/settings-frame.ts` maps the
-//   section to it). It resolves the Package's version and its dependencies out
-//   of the deployment's own catalogue, which is why no version is named here.
+// - `user/choose-model-provider` is the Marketplace catalog's Add. It
+//   resolves the Package's version and its dependencies out of the
+//   deployment's own catalogue, which is why no version is named here.
 // - `connection/create-api-key` is the provider's connect form, answered on
 //   its "Advanced — custom server" branch: `api-base-url` is a shipped
 //   Connection setting, not a test-only door.

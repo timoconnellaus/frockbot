@@ -267,9 +267,12 @@ abstract final class SettingsIds {
 abstract final class ConnectorIds {
   static const document = 'connections-document';
   static const refresh = 'connections-refresh';
-  static const marketplaceConnectorsTab = 'marketplace-connectors-tab';
-  static const marketplacePluginsTab = 'marketplace-plugins-tab';
   static const marketplaceRefresh = 'marketplace-refresh';
+  static const marketplaceSearch = 'marketplace-search';
+  static const marketplaceFilter = 'marketplace-filter';
+  static const marketplaceFilterAll = 'marketplace-filter-all';
+  static const marketplaceFilterModels = 'marketplace-filter-models';
+  static const marketplaceFilterConnectors = 'marketplace-filter-connectors';
 
   /// The Marketplace dialog a desktop opens from the foot of the sidebar; a
   /// phone pushes the same page, and the page's own id is the marker on both.

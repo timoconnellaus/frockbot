@@ -910,9 +910,13 @@ export function createGateway(
       try {
         const frame = decodeProtocol(
           "ConnectionsFrame",
-          await dependencies
-            .userConfigurationFor(userId)
-            .readConnectionsFrame({ schemaVersion: 1, userId }),
+          await dependencies.userConfigurationFor(userId).readConnectionsFrame({
+            schemaVersion: 1,
+            userId,
+            ...(url.searchParams.get("catalog") === "1"
+              ? { catalog: true }
+              : {}),
+          }),
         );
         return Response.json(frame, {
           headers: { "cache-control": "no-store" },
