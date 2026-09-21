@@ -676,9 +676,10 @@ export function connectionsFrame(
           }
         }
       }
-      const displayName = ((item.connectionTypes?.length ?? 0) > 1
-        ? type.displayName
-        : (item.displayName ?? type.displayName)
+      const displayName = (
+        (item.connectionTypes?.length ?? 0) > 1
+          ? type.displayName
+          : (item.displayName ?? type.displayName)
       ).slice(0, 200);
       const description = (
         type.description ??
@@ -696,7 +697,8 @@ export function connectionsFrame(
         kind,
         authorization: type.authorization.kind,
         connected,
-        mayConnect: Boolean(installed) && (connected === 0 || type.allowMultiple),
+        mayConnect:
+          Boolean(installed) && (connected === 0 || type.allowMultiple),
         ...(fields.length ? { settings: fields } : {}),
         ...(description ? { description } : {}),
         ...(type.icon ? { icon: type.icon } : {}),

@@ -1134,10 +1134,7 @@ class _ProviderRowState extends State<_ProviderRow> {
     final description = provider['description'] as String?;
     final kindLabel = provider['kind'] == 'model' ? 'Model' : 'Connector';
     final subtitle = widget.catalog
-        ? [
-            kindLabel,
-            if (description != null) description,
-          ].join(' · ')
+        ? [kindLabel, ?description].join(' · ')
         : description ??
               (connected == 0
                   ? null
