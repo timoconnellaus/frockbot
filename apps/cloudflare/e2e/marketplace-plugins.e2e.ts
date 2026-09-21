@@ -2,6 +2,7 @@ import type { Page, TestInfo } from "@playwright/test";
 import {
   expect,
   group,
+  closeOverlay,
   openApplication,
   openConnectors,
   openModels,
@@ -69,8 +70,7 @@ test("Marketplace installs a model and leaves a fresh Bot usable", async ({
   await expect(group(page, "DeepSeek")).toBeVisible();
   await capture(page, testInfo, "marketplace-deepseek-model-setup.png");
 
-  await press(sem(page, "right-panel-close"));
-  await expect(sem(page, "shell-conversation")).toBeVisible();
+  await closeOverlay(page);
   await sendMessage(page, "Reply once after the model was added.", {
     replies: 1,
   });
