@@ -66,7 +66,8 @@ class FirstRunApi extends NativeApi {
       await directory.future;
       return {'schemaVersion': 1, 'generalBotId': general};
     }
-    if (path == '/api/settings/connections') {
+    final uri = Uri.parse(path);
+    if (uri.path == '/api/settings/connections') {
       return {
         'schemaVersion': 1,
         'ownerId': 'test-user',
@@ -76,7 +77,6 @@ class FirstRunApi extends NativeApi {
         'providers': <Object>[],
       };
     }
-    final uri = Uri.parse(path);
     if (body == null &&
         [
           '/api/settings/models',
