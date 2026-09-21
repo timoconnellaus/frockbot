@@ -155,22 +155,17 @@ void main() {
     expect(revert, findsNothing);
   });
 
-  // Tidying is a wait the person cannot speak into, exactly like the commit
-  // before it, so it is drawn the same way rather than inventing a second
-  // kind of busy.
-  testWidgets('a capture being tidied reads as finishing, not as recording', (
+  // The raw transcript has already landed. Tidying is a swap in a field
+  // they can already edit, not a second spin they cannot type into.
+  testWidgets('a capture being tidied shows the draft, not a finishing wait', (
     tester,
   ) async {
     await pumpComposer(tester, dictationState: DictationState.cleaning);
-    expect(find.byKey(const ValueKey('finishing')), findsOneWidget);
-    expect(find.byKey(const ValueKey('dictation-stop')), findsOneWidget);
-    final stop = tester.widget<IconButton>(
-      find.byKey(const ValueKey('dictation-stop')),
-    );
-    // Nothing left to stop: the microphone is already off.
-    expect(stop.onPressed, isNull);
-    expect(DictationState.cleaning.active, isTrue);
-    expect(DictationState.cleaning.finishing, isTrue);
+    expect(find.byKey(const ValueKey('finishing')), findsNothing);
+    expect(find.byKey(const ValueKey('dictation-pill')), findsNothing);
+    expect(find.byType(TextField), findsOneWidget);
+    expect(DictationState.cleaning.active, isFalse);
+    expect(DictationState.cleaning.finishing, isFalse);
   });
 
   // The offer is drawn from a live predicate, so it has to be asked again

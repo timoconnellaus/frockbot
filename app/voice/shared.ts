@@ -51,11 +51,11 @@ export const VOICE_DICTATION_RESERVE_SECONDS_V1 = 60;
 export const VOICE_DICTATION_DAILY_SECONDS_V1 = 120 * 60;
 /**
  * How long the tidy-up after a capture may take before the raw transcript
- * stands. Short on purpose: this is time the person spends watching a draft
- * they can already read, so a slow model loses its turn rather than the
- * person's patience.
+ * stands. The draft is already on screen by then — Groq is a blink, Jev is
+ * the review — so a slow answer loses its turn rather than the person's
+ * patience. The bound has to cover both calls.
  */
-export const VOICE_DICTATION_CLEANUP_TIMEOUT_MS_V1 = 8_000;
+export const VOICE_DICTATION_CLEANUP_TIMEOUT_MS_V1 = 12_000;
 /**
  * Tidy-ups one account may spend per UTC day. At most one runs per capture,
  * so this is a second bound rather than the only one — it is what stops a
@@ -130,9 +130,9 @@ export type VoiceDictationServerFrameV1 =
   | { schemaVersion: 1; type: "delta"; text: string }
   | { schemaVersion: 1; type: "segment"; text: string }
   /**
-   * The capture is transcribed and is being tidied. Everything said is
-   * already in the draft; this only asks the client to say so on screen and
-   * to keep waiting a little longer than `final` normally allows.
+   * The capture is transcribed and is being tidied. The committed words are
+   * already in the draft; this only asks the client to keep the socket open
+   * for a `cleaned` that may still arrive.
    */
   | { schemaVersion: 1; type: "cleaning" }
   /**

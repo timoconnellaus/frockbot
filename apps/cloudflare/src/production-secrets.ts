@@ -239,8 +239,9 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
     },
     {
       name: "JEV_API_KEY",
-      why: "Authorizes the hosted TurnSupervisor against Jev.",
-      degraded: "turn supervision is unavailable",
+      why: "Authorizes the hosted TurnSupervisor, the routine-event rejector, and dictation tidy review against Jev.",
+      degraded:
+        "turn supervision, the routine-event rejector and dictation tidy review are unavailable",
     },
   ];
 
@@ -278,7 +279,7 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
     },
     {
       name: "VOICE_DICTATION_CLEANUP_MODEL",
-      why: "An optional `vars` entry pinning the model that tidies a dictated transcript; the default route when unset.",
+      why: "An optional `vars` entry pinning the model that tidies a dictated transcript; Groq's 8B instant class when unset.",
     },
     {
       name: "VOICE_DICTATION_UPSTREAM_URL",

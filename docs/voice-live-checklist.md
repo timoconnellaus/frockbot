@@ -45,11 +45,12 @@ the list stands as it was.
    immediately. Expect: the message field gives way to the recording dock
    (opening audio is buffered while the socket connects), its meter follows
    your voice, no words are shown while you speak, and nothing is sent.
-2. Press Stop mid-sentence. Expect: the dock closes and the capture's
-   transcript is in the draft within ~1 s (bounded at 6 s), the draft stays
-   editable, nothing is sent until you press Send. There is no upstream turn
-   detection, so Stop is the only thing that transcribes. The finishing state
-   then holds a moment longer while the transcript is tidied (bounded at 8 s).
+2. Press Stop mid-sentence. Expect: the dock spins for about half a second,
+   then closes with the capture's transcript in the draft (bounded at 6 s).
+   The draft stays editable; nothing is sent until you press Send. There is
+   no upstream turn detection, so Stop is the only thing that transcribes.
+   Fillers are swapped out in place a moment later (Groq, then Jev, bounded
+   at 12 s).
 3. Dictate a sentence with an "um", a false start and a self-correction
    ("Check Thursday — sorry, Friday's flights"), then Stop. Expect: the raw
    words appear first, are replaced once by the tidied span, and "Use what I

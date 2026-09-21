@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest";
+import { createFakeDictationCleanupJudgeV1 } from "@frockbot/app/supervision";
 import {
   openVoiceDictationRelayV1,
   type VoiceDictationCleanupV1,
   type VoiceDictationLeaseV1,
+  type VoiceDictationRelayOptions,
 } from "../src/voice-dictation.ts";
 
 /**
@@ -239,6 +241,7 @@ function openRelay(
     leaseRenewMs?: number;
     lease?: VoiceDictationLeaseV1;
     cleanup?: VoiceDictationCleanupV1;
+    cleanupJudge?: VoiceDictationRelayOptions["cleanupJudge"];
     cleanupTimeoutMs?: number;
     maxCaptureMs?: number;
     now?: () => number;
@@ -580,6 +583,9 @@ describe("tidying a finished capture", () => {
       { OPENAI_API_KEY: "sk-test" },
       {
         cleanup: model.cleanup,
+        cleanupJudge: createFakeDictationCleanupJudgeV1({
+          verdict: "faithful",
+        }),
       },
     );
     await ready(upstream, opened);
@@ -609,21 +615,34 @@ describe("tidying a finished capture", () => {
   // same way: final, no cleaned frame, and the raw segment standing.
   test.each([
     [
-      "the model answered with something a guard refuses",
+      "Jev refuses the tidy",
       fakeCleanup({ answer: "Check the Friday flights and book them." }),
+      createFakeDictationCleanupJudgeV1({ verdict: "unfaithful" }),
     ],
+    [
+      "Jev is unavailable",
+      fakeCleanup({ answer: TIDY }),
+      createFakeDictationCleanupJudgeV1({ verdict: "unavailable" }),
+    ],
+    ["there is no Jev judge", fakeCleanup({ answer: TIDY }), undefined],
     [
       "the account has no tidy-up allowance left",
       fakeCleanup({ refuse: true }),
+      createFakeDictationCleanupJudgeV1({ verdict: "faithful" }),
     ],
-    ["the gateway failed", fakeCleanup({ fail: true })],
-  ])("keeps the raw transcript when %s", async (_label, model) => {
+    [
+      "the gateway failed",
+      fakeCleanup({ fail: true }),
+      createFakeDictationCleanupJudgeV1({ verdict: "faithful" }),
+    ],
+  ])("keeps the raw transcript when %s", async (_label, model, judge) => {
     const upstream = fakeUpstream({ transcript: RAW });
     const opened = openRelay(
       upstream,
       { OPENAI_API_KEY: "sk-test" },
       {
         cleanup: model.cleanup,
+        cleanupJudge: judge,
       },
     );
     await ready(upstream, opened);
@@ -670,6 +689,9 @@ describe("tidying a finished capture", () => {
       { OPENAI_API_KEY: "sk-test" },
       {
         cleanup: model.cleanup,
+        cleanupJudge: createFakeDictationCleanupJudgeV1({
+          verdict: "faithful",
+        }),
         // Shorter than the tidy-up would ever be, had it stayed armed.
         finalTimeoutMs: 30,
         cleanupTimeoutMs: 5_000,
@@ -731,7 +753,14 @@ describe("tidying a finished capture", () => {
     const opened = openRelay(
       upstream,
       { OPENAI_API_KEY: "sk-test" },
-      { cleanup, lease, now: () => clock },
+      {
+        cleanup,
+        cleanupJudge: createFakeDictationCleanupJudgeV1({
+          verdict: "faithful",
+        }),
+        lease,
+        now: () => clock,
+      },
     );
     await ready(upstream, opened);
     clock += 2_000;

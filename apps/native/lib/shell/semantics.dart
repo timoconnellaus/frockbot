@@ -165,6 +165,7 @@ abstract final class VoiceIds {
   static const composerDictate = 'composer-dictate';
   static const composerDictationStop = 'composer-dictation-stop';
   static const composerDictationLevel = 'composer-dictation-level';
+  static const composerDictationElapsed = 'composer-dictation-elapsed';
   static const composerDictationDiscard = 'composer-dictation-discard';
 }
 
