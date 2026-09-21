@@ -22,8 +22,6 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-from PIL import Image
-
 ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "apps/native/assets/connectors"
 PACKAGE = "@lobehub/icons-static-png"
@@ -103,6 +101,8 @@ def tarball() -> Path:
 
 
 def resize(raw: bytes) -> bytes:
+    from PIL import Image
+
     image = Image.open(io.BytesIO(raw)).convert("RGBA")
     image = image.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
     out = io.BytesIO()
