@@ -795,6 +795,36 @@ describe("SessionStore", () => {
     ).toThrow("session event.writer has invalid fields");
   });
 
+  test("decodes a hang-up transcript and refuses a malformed one", () => {
+    const call = {
+      type: "voice/call" as const,
+      seq: 8,
+      timestamp,
+      callId: "call-1",
+      startedAt: timestamp,
+      endedAt: timestamp,
+      turns: [{ transcript: "plan my week", answer: "On it." }],
+    };
+    expect(decodeSessionEvent(structuredClone(call))).toEqual(call);
+    expect(
+      decodeSessionEvent({
+        ...call,
+        turns: [{ transcript: "just listening" }],
+      }),
+    ).toMatchObject({
+      turns: [{ transcript: "just listening" }],
+    });
+    expect(() => decodeSessionEvent({ ...call, turns: [] })).toThrow(
+      "session event.turns must be a bounded array",
+    );
+    expect(() =>
+      decodeSessionEvent({ ...call, turns: [{ answer: "no transcript" }] }),
+    ).toThrow("session event.turns[0] has invalid fields");
+    expect(() => decodeSessionEvent({ ...call, turn: 1 })).toThrow(
+      "session event has invalid fields",
+    );
+  });
+
   test("composes a failure message from a turn outcome and its reason", () => {
     expect(turnFailureMessage("model-error", "provider said no")).toBe(
       "Bot turn ended with outcome model-error: provider said no",

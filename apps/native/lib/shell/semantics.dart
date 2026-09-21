@@ -154,6 +154,7 @@ abstract final class VoiceIds {
   static const pause = 'voice-pause';
   static const resume = 'voice-resume';
   static const hangUp = 'voice-hang-up';
+  static const callTranscript = 'voice-call-transcript';
   static const modeMeter = 'voice-mode-meter';
   static const headerPill = 'voice-header-pill';
   static String chip(String runId) => 'voice-chip-$runId';

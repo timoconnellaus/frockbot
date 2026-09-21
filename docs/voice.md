@@ -577,7 +577,12 @@ rejoin window so a client back from a network change continues the same
 conversation, and an alarm ends it if nobody comes back (see "Session
 memory"). A Bot Turn the assistant already admitted keeps running; its answer
 is told on this call if the same device rejoins it in time, on a later call
-if one is already up, and written into chat if nobody is listening.
+if one is already up, and written into chat if nobody is listening. Hang-up
+also writes the call's spoken turns onto that Bot's thread as one collapsible
+**Voice chat** section, keyed by the call id so a hang-up and the
+abandoned-call alarm do not write two. A call that never said anything writes
+nothing. The work the call started stays as "Message from Voice" markers; the
+accordion is the spoken dialogue, not those Turns.
 
 The client closes with a code and a reason that name the path that ended the
 call, because the server's log is the only record of it: `1000` with
@@ -743,6 +748,8 @@ lease, because it waits for `onStart` before returning a stub),
   usually arrives while the model is already speaking; its `answer` is the
   session's own output transcription. A turn admitted and never settled (an
   eviction, a session that dropped) is marked `abandoned` on the next start.
+  Hang-up copies those spoken turns onto the Bot's announcement log as a
+  `voice/call` event, drawn in the thread as a collapsible Voice chat section.
 - `delegation:<runId>` — a Bot delegation: target Bot, text, `runId` derived
   as `sha256` over `userId`, `callId`, `turnId`, `botId` and `text` joined by
   NUL (so a retried tool call admits the same Bot Turn once), and state
@@ -1208,13 +1215,14 @@ moves the page to the new Bot, but only when the call was the thing on screen,
 so somebody who walked to another Bot while the call carried on is not dragged
 out of it.
 
-**The voice surface.** Since ADR 0031 a call does not share the thread, so
-voice mode _replaces_ it: `apps/native/lib/voice/voice_mode.dart` is drawn
-where the transcript and the composer would be, and neither is drawn at all.
-There are no captions, for the same reason — the call is spoken, and the
-words of it are not a second record. A call with a Bot other than the one on
-screen keeps the small account-wide footer instead, which is why that footer
-still carries mute, End and the meter.
+**The voice surface.** The thread and composer stay. A live call sits in the
+conversation header as a compact cluster (`apps/native/lib/voice/call_chrome.dart`);
+hang-up is there, and the composer's voice control turns the Bot's primary
+colour while this Bot's session is up. After hang-up the spoken turns land
+in the thread as a collapsible **Voice chat** section — the durable
+`voice/call` announcement on that Bot, not captions during the call. A call
+with a Bot other than the one on screen keeps the small account-wide footer
+instead, which is why that footer still carries mute, End and the meter.
 
 Every band of the surface has a fixed height, so nothing moves as the state
 changes: the character in its ring, the Bot's name, and one word under it —

@@ -12,6 +12,7 @@ List<String> thread(List<TranscriptLine> lines) => [
   for (final line in orderTranscript(lines, '2026-09-05T12:30:00.000Z')) ...[
     for (final send in line.sends)
       '${line.role.name}: ${send.payload?['text']}',
+    if (line.voiceCall != null) 'system: ${voiceCallTitle(line.voiceCall!)}',
     if (line.text.isNotEmpty || line.notice != null)
       '${line.role.name}: ${line.text.isNotEmpty ? line.text : line.notice}',
   ],
@@ -832,6 +833,77 @@ void main() {
       expect(lines.map((line) => line.id), ['announcement-3', 'compaction-9']);
     });
 
+    test('a hang-up becomes a collapsible Voice chat line', () {
+      final lines = projectAnnouncements([
+        {
+          'type': 'voice/call',
+          'announcementId': 'voice-call-call-9',
+          'at': '2026-09-05T12:22:00.000Z',
+          'callId': 'call-9',
+          'startedAt': '2026-09-05T12:19:00.000Z',
+          'endedAt': '2026-09-05T12:22:00.000Z',
+          'turns': [
+            {'transcript': 'plan my week', 'answer': 'On it.'},
+          ],
+        },
+      ]);
+      expect(lines, hasLength(1));
+      expect(lines.single.voiceCall?.turns.single.transcript, 'plan my week');
+      expect(voiceCallTitle(lines.single.voiceCall!), 'Voice chat · 3 min');
+      expect(
+        thread([
+          line(
+            runId: 'run-a',
+            role: LineRole.user,
+            text: 'typed later',
+            at: '2026-09-05T12:23:00.000Z',
+          ),
+          ...lines,
+        ]),
+        ['system: Voice chat · 3 min', 'user: typed later'],
+      );
+    });
+
+    testWidgets('expands a hang-up accordion to the spoken turns', (
+      tester,
+    ) async {
+      final lines = projectAnnouncements([
+        {
+          'type': 'voice/call',
+          'announcementId': 'voice-call-call-9',
+          'at': '2026-09-05T12:22:00.000Z',
+          'callId': 'call-9',
+          'startedAt': '2026-09-05T12:19:00.000Z',
+          'endedAt': '2026-09-05T12:22:00.000Z',
+          'turns': [
+            {'transcript': 'plan my week', 'answer': 'On it.'},
+          ],
+        },
+      ]);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: TranscriptView(
+              lines: lines,
+              loading: false,
+              hasEarlier: false,
+              onRefresh: ({older = false}) async {},
+              onOpenRun: (_) {},
+              storageKey: 'voice-call-test',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Voice chat · 3 min'), findsOneWidget);
+      expect(find.text('plan my week'), findsNothing);
+      await tester.tap(find.text('Voice chat · 3 min'));
+      await tester.pump();
+      expect(find.text('plan my week'), findsOneWidget);
+      expect(find.text('On it.'), findsOneWidget);
+    });
+
     test('a marker is seated among the Turns it happened between', () {
       expect(
         thread([
@@ -865,6 +937,11 @@ void main() {
         projectAnnouncements([
           'nonsense',
           {'type': 'bot/renamed'},
+          {
+            'type': 'future/shape',
+            'announcementId': 'announcement-9',
+            'at': '2026-09-05T12:19:30.000Z',
+          },
         ]),
         isEmpty,
       );

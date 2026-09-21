@@ -3105,6 +3105,63 @@
           },
           "required": ["type", "announcementId", "at", "throughTurn"],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "voice/call"
+            },
+            "announcementId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "at": {
+              "$ref": "#/$defs/Instant"
+            },
+            "callId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "startedAt": {
+              "$ref": "#/$defs/Instant"
+            },
+            "endedAt": {
+              "$ref": "#/$defs/Instant"
+            },
+            "turns": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 40,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "transcript": {
+                    "type": "string",
+                    "minLength": 0,
+                    "maxLength": 2000
+                  },
+                  "answer": {
+                    "type": "string",
+                    "minLength": 0,
+                    "maxLength": 2000
+                  }
+                },
+                "required": ["transcript"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "type",
+            "announcementId",
+            "at",
+            "callId",
+            "startedAt",
+            "endedAt",
+            "turns"
+          ],
+          "additionalProperties": false
         }
       ]
     },

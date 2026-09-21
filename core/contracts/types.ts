@@ -244,6 +244,20 @@ export const COMPACTION_IDENTIFIER_MAX_LENGTH = 400;
 export const COMPACTION_FAILURE_REASON_MAX_LENGTH = 500;
 
 /**
+ * Spoken turns kept on one hang-up accordion. A longer call is clipped from
+ * the tail: the opening greeting is less useful after hang-up than what was
+ * just said.
+ */
+export const VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1 = 40;
+export const VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1 = 2_000;
+
+/** One spoken exchange on a hang-up accordion. */
+export interface VoiceCallTranscriptTurnV1 {
+  transcript: string;
+  answer?: string;
+}
+
+/**
  * Truncates a failure description to what a `turn/end` `reason` accepts.
  * Returns `undefined` when nothing describable remains.
  */
@@ -914,6 +928,20 @@ export interface SessionEventMap {
     requestedBy: "bot" | "user";
   };
   /**
+   * Spoken turns of one voice call, written when that call ends. It carries
+   * no `turn`: hang-up is outside any Bot Turn, so this is the `bot/renamed`
+   * shape — durable Bot history the thread draws as a collapsible section.
+   *
+   * `callId` is the idempotency key. A hang-up and the abandoned-call alarm
+   * that follows a dropped socket must not write two sections for one call.
+   */
+  "voice/call": {
+    callId: string;
+    startedAt: string;
+    endedAt: string;
+    turns: VoiceCallTranscriptTurnV1[];
+  };
+  /**
    * The durable intent to compact this conversation, recorded before the
    * summariser model call it fences. It carries no `turn`: a compaction is
    * evaluated *after* a Turn has ended, so it belongs to the conversation
@@ -1037,6 +1065,39 @@ function memoryProjectAction(value: unknown, label: string): void {
   if (value !== "create" && value !== "join" && value !== "leave") {
     throw new Error(`${label} is invalid`);
   }
+}
+
+function requireVoiceCallTurns(value: unknown): void {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1
+  ) {
+    throw new Error("session event.turns must be a bounded array");
+  }
+  value.forEach((entry, index) => {
+    const label = `session event.turns[${index}]`;
+    const turn = eventRecord(entry, label);
+    requireEventKeys(
+      turn,
+      Object.hasOwn(turn, "answer") ? ["transcript", "answer"] : ["transcript"],
+      label,
+    );
+    const transcript = eventString(
+      turn.transcript,
+      `${label}.transcript`,
+      true,
+    );
+    if (transcript.length > VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1) {
+      throw new Error(`${label}.transcript is too long`);
+    }
+    if (turn.answer !== undefined) {
+      const answer = eventString(turn.answer, `${label}.answer`, true);
+      if (answer.length > VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1) {
+        throw new Error(`${label}.answer is too long`);
+      }
+    }
+  });
 }
 
 function eventTimestamp(value: unknown, label: string): string {
@@ -2444,6 +2505,17 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       if (event.requestedBy !== "bot" && event.requestedBy !== "user") {
         throw new Error("session event.requestedBy is invalid");
       }
+      break;
+    case "voice/call":
+      requireEventKeys(
+        event,
+        keys("callId", "startedAt", "endedAt", "turns"),
+        "session event",
+      );
+      eventString(event.callId, "session event.callId");
+      eventTimestamp(event.startedAt, "session event.startedAt");
+      eventTimestamp(event.endedAt, "session event.endedAt");
+      requireVoiceCallTurns(event.turns);
       break;
     case "computer/process": {
       requireEventKeys(

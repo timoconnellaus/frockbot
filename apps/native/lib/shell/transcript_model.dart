@@ -164,6 +164,7 @@ class TranscriptLine {
   final List<SendPayloadLine> sends;
   final List<PluginModelCall> pluginCalls;
   final Exchange? exchange;
+  final VoiceCallSection? voiceCall;
   const TranscriptLine({
     required this.id,
     required this.runId,
@@ -181,6 +182,7 @@ class TranscriptLine {
     this.sends = const [],
     this.pluginCalls = const [],
     this.exchange,
+    this.voiceCall,
   });
 
   bool get empty =>
@@ -188,7 +190,8 @@ class TranscriptLine {
       notice == null &&
       sends.isEmpty &&
       retry == null &&
-      exchange == null;
+      exchange == null &&
+      voiceCall == null;
 
   /// The same line with fewer sends. Only [dedupeCardSendsV1] needs it: a line
   /// is otherwise never edited once the projection has made it.
@@ -209,7 +212,29 @@ class TranscriptLine {
     sends: sends,
     pluginCalls: pluginCalls,
     exchange: exchange,
+    voiceCall: voiceCall,
   );
+}
+
+/// One spoken exchange inside a hang-up accordion.
+class VoiceCallTurn {
+  final String transcript;
+  final String? answer;
+  const VoiceCallTurn({required this.transcript, this.answer});
+}
+
+/// The spoken turns of one ended call, drawn as a collapsible thread section.
+class VoiceCallSection {
+  final String callId;
+  final String startedAt;
+  final String endedAt;
+  final List<VoiceCallTurn> turns;
+  const VoiceCallSection({
+    required this.callId,
+    required this.startedAt,
+    required this.endedAt,
+    required this.turns,
+  });
 }
 
 /// Where each Turn sits in the conversation: the timestamp of the message the
@@ -947,6 +972,57 @@ String formatExchangeTime(String? at, [DateTime? clock]) {
 const compactedAnnouncementText =
     'Earlier messages are now carried as a summary. They are all still here to read.';
 
+/// The collapsed header of a hang-up accordion.
+String voiceCallTitle(VoiceCallSection call) {
+  final duration = voiceCallDurationLabel(call.startedAt, call.endedAt);
+  return duration.isEmpty ? 'Voice chat' : 'Voice chat · $duration';
+}
+
+String voiceCallDurationLabel(String startedAt, String endedAt) {
+  final start = DateTime.tryParse(startedAt);
+  final end = DateTime.tryParse(endedAt);
+  if (start == null || end == null) return '';
+  final seconds = end.difference(start).inSeconds;
+  if (seconds < 45) return 'under a minute';
+  final minutes = (seconds / 60).round().clamp(1, 24 * 60);
+  return minutes == 1 ? '1 min' : '$minutes min';
+}
+
+VoiceCallSection? _voiceCallOf(Map<String, Object?> announcement) {
+  if (announcement['type'] != 'voice/call') return null;
+  final callId = announcement['callId'];
+  final startedAt = announcement['startedAt'];
+  final endedAt = announcement['endedAt'];
+  final raw = announcement['turns'];
+  if (callId is! String ||
+      startedAt is! String ||
+      endedAt is! String ||
+      raw is! List) {
+    return null;
+  }
+  final turns = <VoiceCallTurn>[];
+  for (final value in raw) {
+    if (value is! Map) continue;
+    final turn = value.cast<String, Object?>();
+    final transcript = turn['transcript'];
+    if (transcript is! String) continue;
+    final answer = turn['answer'];
+    turns.add(
+      VoiceCallTurn(
+        transcript: transcript,
+        answer: answer is String ? answer : null,
+      ),
+    );
+  }
+  if (turns.isEmpty) return null;
+  return VoiceCallSection(
+    callId: callId,
+    startedAt: startedAt,
+    endedAt: endedAt,
+    turns: turns,
+  );
+}
+
 /// Projects the conversation's announcements as system lines.
 ///
 /// They belong to the Session rather than to a Turn, and they carry the
@@ -960,13 +1036,30 @@ List<TranscriptLine> projectAnnouncements(List<Object?> announcements) {
     final announcement = value.cast<String, Object?>();
     final id = announcement['announcementId'];
     if (id is! String) continue;
-    final renamed = announcement['type'] == 'bot/renamed';
+    final type = announcement['type'];
+    if (type == 'voice/call') {
+      final call = _voiceCallOf(announcement);
+      if (call == null) continue;
+      lines.add(
+        TranscriptLine(
+          id: id,
+          runId: id,
+          role: LineRole.system,
+          text: '',
+          at: announcement['at'] as String?,
+          status: LineStatus.completed,
+          voiceCall: call,
+        ),
+      );
+      continue;
+    }
+    if (type != 'bot/renamed' && type != 'conversation/compacted') continue;
     lines.add(
       TranscriptLine(
         id: id,
         runId: id,
         role: LineRole.system,
-        text: renamed
+        text: type == 'bot/renamed'
             ? 'Renamed to ${announcement['to']} by ${announcement['namedBy']}'
             : compactedAnnouncementText,
         at: announcement['at'] as String?,

@@ -244,6 +244,7 @@
     "./user": "./user.ts",
     "./voice/appearance": "./voice/appearance.ts",
     "./voice/assistant": "./voice/assistant.ts",
+    "./voice/call-transcript": "./voice/call-transcript.ts",
     "./voice/definition": "./voice/definition.ts",
     "./voice/diagnostics": "./voice/diagnostics.ts",
     "./voice/dictation-cleanup": "./voice/dictation-cleanup.ts",

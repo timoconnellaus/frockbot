@@ -155,6 +155,7 @@ import {
   revertComposition,
 } from "@frockbot/app/shell/composition-views";
 import { executeUnreadCommand, readUnread } from "@frockbot/app/shell/unread";
+import { appendAnnouncement } from "@frockbot/app/shell/reads";
 import type { FlockBotBackendContribution } from "@frockbot/app/flock/bot";
 import type { ComputerBotBackendContribution } from "@frockbot/computer/bot";
 import { decodeComputerCommandV1 } from "@frockbot/computer/protocol";
@@ -324,6 +325,7 @@ import {
   decodeBotRunRpcV1,
   decodeBotVoiceRunRpcV1,
   decodeVoiceChatResultRpcV1,
+  decodeVoiceCallTranscriptRpcV1,
   decodeRpcEnvelopeV1,
   rpcAppletIdOrNull,
   rpcBoolean,
@@ -1777,6 +1779,43 @@ export class BotState
       committed = true;
     });
     if (committed) this.ctx.waitUntil(this.drainPush());
+    return { status: "accepted" as const };
+  }
+
+  /**
+   * Spoken turns of one ended call, written as a collapsible thread section.
+   *
+   * The voice object is the only caller. The receipt is the call id, so a
+   * hang-up and the abandoned-call alarm that follows a dropped socket write
+   * one section. The observer is told so the thread redraws without a poll.
+   */
+  async deliverVoiceCallTranscript(input: unknown) {
+    const request = decodeVoiceCallTranscriptRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const receiptKey = `voice:call-transcript:${request.command.callId}`;
+    let committed = false;
+    await this.ctx.storage.transaction(async (transaction) => {
+      if (await transaction.get(receiptKey)) return;
+      await appendAnnouncement(transaction, (seq) => ({
+        type: "voice/call",
+        seq,
+        timestamp: request.command.endedAt,
+        callId: request.command.callId,
+        startedAt: request.command.startedAt,
+        endedAt: request.command.endedAt,
+        turns: request.command.turns,
+      }));
+      await transaction.put({
+        [receiptKey]: {
+          schemaVersion: 1,
+          at: request.command.endedAt,
+        },
+      });
+      committed = true;
+    });
+    if (committed) this.stateChannel.noticeRuns();
     return { status: "accepted" as const };
   }
 

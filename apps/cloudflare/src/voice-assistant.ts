@@ -35,6 +35,7 @@ import {
   type VoiceBotSummaryV1,
   type VoiceCurrentBotV1,
 } from "@frockbot/app/voice/assistant";
+import { voiceCallTranscriptTurnsV1 } from "@frockbot/app/voice/call-transcript";
 import {
   voiceTimingForV1,
   type VoiceTimingV1,
@@ -867,6 +868,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     if (current) {
       if (voiceCallIsStaleV1(current, now)) {
         await this.beginMemoryFinalization(current);
+        await this.deliverCallTranscript(current);
         await this.ledger().endStaleCall(now);
       } else {
         await this.scheduleCallAbandon(current.callId);
@@ -955,6 +957,31 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     await this.scheduleMemoryFinalization(call.callId);
   }
 
+  /**
+   * Writes this call's spoken turns onto the Bot's thread as one collapsible
+   * section. Idempotent by call id: hang-up and the abandoned-call alarm
+   * both land here. A call that never said anything writes nothing. A failed
+   * write is traced and the call still ends — the ledger keeps the turns.
+   */
+  private async deliverCallTranscript(call: VoiceCallRecordV1): Promise<void> {
+    if (!call.botId) return;
+    const turns = voiceCallTranscriptTurnsV1(
+      await this.ledger().turnsForCall(call.callId),
+    );
+    if (turns.length === 0) return;
+    try {
+      await this.botDoor(this.name, call.botId).deliverVoiceCallTranscript({
+        callId: call.callId,
+        startedAt: call.startedAt,
+        endedAt: this.now().toISOString(),
+        turns,
+      });
+      this.traceMemory("call-transcript", { call: call.callId });
+    } catch {
+      this.traceMemory("call-transcript-failed", { call: call.callId }, "warn");
+    }
+  }
+
   private liveCallFor(callId: string): LiveCall | undefined {
     for (const call of this.#calls.values()) {
       if (call.callId === callId) return call;
@@ -1010,6 +1037,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     }
     this.traceMemory("call-abandoned", { call: call.callId });
     await this.beginMemoryFinalization(call);
+    await this.deliverCallTranscript(call);
     await this.ledger().endStaleCall(this.now());
   }
 
@@ -1934,6 +1962,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     }
     await this.releaseCallResources(connection.id);
     if (!call || call.connectionId !== connection.id) return;
+    await this.deliverCallTranscript(call);
     // The job was written first, the call record goes second. An eviction
     // between the two leaves a durable intent to finish and a call record
     // that waking will end; the other order leaves a call nobody remembers
@@ -3214,6 +3243,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       stopRun(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<unknown>;
       deliverVoiceChatResult(input: unknown): Promise<unknown>;
+      deliverVoiceCallTranscript(input: unknown): Promise<unknown>;
     };
     return {
       readConfiguration: async () =>
@@ -3238,6 +3268,18 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         ordinal: number;
       }) =>
         rpc.deliverVoiceChatResult({
+          schemaVersion: 1,
+          userId,
+          botId,
+          command,
+        }),
+      deliverVoiceCallTranscript: (command: {
+        callId: string;
+        startedAt: string;
+        endedAt: string;
+        turns: { transcript: string; answer?: string }[];
+      }) =>
+        rpc.deliverVoiceCallTranscript({
           schemaVersion: 1,
           userId,
           botId,
