@@ -367,6 +367,20 @@ describe("Inside FrockBot examples", () => {
     expect(page).not.toContain("Jev is already supervising");
   });
 
+  test("keeps cross-device flow arrows on one description line", async () => {
+    const rules = parseStyleRules(await publicFile("how-it-works/styles.css"));
+    const first = (selector: string) =>
+      rules.find((rule) => rule.selectors.includes(selector))?.declarations;
+
+    expect(first(".cross-device-steps")?.["grid-template-rows"]).toBe(
+      "auto auto",
+    );
+    expect(first(".cross-device-step")?.display).toBe("contents");
+    expect(
+      first(".cross-device-step:not(:last-child) > strong::after")?.top,
+    ).toBe("0.5lh");
+  });
+
   test("gives every published article heading a unique link target", async () => {
     const headings: string[] = [];
     await drain(
