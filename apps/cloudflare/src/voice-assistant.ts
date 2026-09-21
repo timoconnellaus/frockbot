@@ -959,9 +959,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
 
   /**
    * Writes this call's spoken turns onto the Bot's thread as one collapsible
-   * section. Idempotent by call id: hang-up and the abandoned-call alarm
-   * both land here. A call that never said anything writes nothing. A failed
-   * write is traced and the call still ends — the ledger keeps the turns.
+   * section. Idempotent by call id: hang-up, the abandoned-call alarm and a
+   * supersession all land here. A call that never said anything writes
+   * nothing. A failed write is traced and the call still ends — the ledger
+   * keeps the turns.
    */
   private async deliverCallTranscript(call: VoiceCallRecordV1): Promise<void> {
     if (!call.botId) return;
@@ -973,7 +974,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       await this.botDoor(this.name, call.botId).deliverVoiceCallTranscript({
         callId: call.callId,
         startedAt: call.startedAt,
-        endedAt: this.now().toISOString(),
+        // Last activity, not this write: abandon waits a minute for rejoin.
+        endedAt: call.lastSeenAt,
         turns,
       });
       this.traceMemory("call-transcript", { call: call.callId });
@@ -1582,13 +1584,15 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       );
       return;
     }
-    // A call about to be displaced has its memory work recorded *before* the
-    // record naming it is replaced. Written the other way round, an eviction
-    // in between would leave a call nothing remembers it has to finish. The
+    // A call about to be displaced has its memory work and hang-up accordion
+    // recorded *before* the record naming it is replaced. Written the other
+    // way round, an eviction in between would leave a call nothing remembers
+    // it has to finish, and abandon would only see the new current call. The
     // rejoin rule is the ledger's own, asked here rather than repeated.
     const displaced = await ledger.currentCall();
     if (displaced && !(await ledger.rejoins(identity.deviceKey, now))) {
       await this.beginMemoryFinalization(displaced);
+      await this.deliverCallTranscript(displaced);
     }
     this.timing(connection, "ledger-checked", {
       displaced: Boolean(displaced),
@@ -1615,6 +1619,12 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       directory,
     );
     this.timing(connection, "target-resolved");
+    // The live session always has a Bot (General when the client named none).
+    // Hang-up reads the ledger record, so the Bot they actually talked to
+    // has to be on it — otherwise the accordion has nowhere to go.
+    if (target.botId && target.botId !== admission.call.botId) {
+      await ledger.retargetCall(connection.id, target.botId, now);
+    }
     // Whatever this admission displaced — another device's call, or this
     // device's own earlier socket rejoining the same call — is ended now, so
     // one account never holds two live sessions.
