@@ -3069,7 +3069,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onTap: () => unawaited(_openBilling()),
                           ),
                         ),
-                      _profileGroup('Account', [
+                      _profileGroup(null, [
                         identified(
                           SettingsIds.profileWhatsNew,
                           FrockRow(
@@ -3081,6 +3081,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onTap: _openWhatsNew,
                           ),
                         ),
+                      ]),
+                      _profileGroup('Account', [
                         _profileRow(
                           SettingsIds.profileSettings,
                           Icons.settings_outlined,

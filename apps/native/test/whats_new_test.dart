@@ -139,7 +139,7 @@ void main() {
               WhatsNewEntry(
                 id: 'whats-new',
                 title: 'What’s New in the app',
-                summary: 'After an update, open What’s New from your profile.',
+                summary: 'What landed in each release.',
                 kind: 'feature',
                 image: WhatsNewImage(
                   src: '/whats-new/whats-new.webp',

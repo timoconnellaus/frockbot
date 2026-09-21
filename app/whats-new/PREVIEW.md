@@ -6,6 +6,6 @@ Generated from `entries.ts`. Open this file on the pull request to review the co
 
 feature
 
-After an update, open What’s New from your profile to see what shipped. A mark appears when there is something you have not read.
+What landed in each release.
 
 ![The What’s New page, with this feature as its first entry.](media/whats-new.webp)

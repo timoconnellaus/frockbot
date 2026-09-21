@@ -17,7 +17,7 @@ describe("What’s New feed", () => {
       },
     });
     expect(feed.entries[0]?.publishedAt).toBeUndefined();
-    expect(feed.entries[0]?.summary).toContain("from your profile");
+    expect(feed.entries[0]?.summary).toBe("What landed in each release.");
   });
 
   test("a known production day is attached without inventing one", () => {

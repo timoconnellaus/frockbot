@@ -25,8 +25,7 @@ export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
     id: "whats-new",
     title: "What’s New in the app",
-    summary:
-      "After an update, open What’s New from your profile to see what shipped. A mark appears when there is something you have not read.",
+    summary: "What landed in each release.",
     kind: "feature",
     image: {
       file: "whats-new.webp",
