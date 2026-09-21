@@ -9,6 +9,7 @@ import {
 import {
   VoiceLedgerV1,
   VOICE_METER_CAPS_V1,
+  VOICE_DELEGATION_PREFIX_V1,
   voiceMeterDayV1,
   type VoiceDelegationRecordV1,
   type VoiceMeterV1,
@@ -278,6 +279,33 @@ async function callIdOf(stub: ReturnType<typeof assistant>): Promise<string> {
     "the call-admitted trace",
   );
   return line!.call!;
+}
+
+/**
+ * A settled unspoken answer, as if a Bot Turn finished while Gemini slept.
+ */
+async function putSettledDelegation(
+  stub: ReturnType<typeof assistant>,
+  identity: { botId: string },
+  answer: string,
+): Promise<string> {
+  const callId = await callIdOf(stub);
+  const runId = `voice-${crypto.randomUUID().replaceAll("-", "")}`;
+  await stub.probePutStorage(`${VOICE_DELEGATION_PREFIX_V1}${runId}`, {
+    schemaVersion: 1,
+    runId,
+    turnId: `${callId}:1`,
+    callId,
+    botId: identity.botId,
+    botName: "Scout",
+    text: "plan my week",
+    admittedAt: new Date().toISOString(),
+    state: "settled",
+    attempts: 0,
+    answer,
+    settledAt: new Date().toISOString(),
+  } satisfies VoiceDelegationRecordV1);
+  return runId;
 }
 
 /**
@@ -836,6 +864,92 @@ describe("pausing and coming back", () => {
 });
 
 describe("handing work to the Bot", () => {
+  test("a finished task unhibernates a quiet-room sleep and is told", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-unhibernate-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+    await settle(50);
+
+    opened.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/sleep" }),
+    );
+    await opened.waitFor(state("asleep"), "asleep");
+    expect(await stub.probeUpstreamCount()).toBe(1);
+
+    const runId = await putSettledDelegation(
+      stub,
+      identity,
+      "the week is planned",
+    );
+    await stub.probeAnnounceConcurrently([runId]);
+    await eventually(
+      async () => await stub.probeUpstreamCount(),
+      (count) => count === 2,
+      "the session reopened for the finished task",
+    );
+    const told = await eventually(
+      () => delegations(stub),
+      (rows) => rows[0]?.state === "spoken",
+      "the answer handed back after the wake",
+    );
+    expect(told[0]!.spokenAt).toBeTruthy();
+    const late = (await stub.probeUpstreamFrames()).filter(
+      (frame) => frame.kind === "text" || frame.kind === "tool-response",
+    );
+    expect(late.at(-1)?.result ?? late.at(-1)?.text).toContain("your own work");
+    await opened.waitFor(state("awake"), "awake after the task");
+  });
+
+  test("a Pause does not unhibernate when a task finishes", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-paused-task-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+    await settle(50);
+
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/sleep",
+        paused: true,
+      }),
+    );
+    await opened.waitFor(state("asleep"), "asleep");
+
+    const runId = await putSettledDelegation(
+      stub,
+      identity,
+      "the week is planned",
+    );
+    await stub.probeAnnounceConcurrently([runId]);
+    await settle(80);
+    expect(await stub.probeUpstreamCount()).toBe(1);
+    expect((await delegations(stub))[0]!.state).toBe("settled");
+
+    opened.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/wake" }),
+    );
+    await eventually(
+      () => delegations(stub),
+      (rows) => rows[0]?.state === "spoken",
+      "the answer told after Resume",
+    );
+    expect(await stub.probeUpstreamCount()).toBe(2);
+  });
+
   test("subagent admits a Bot Turn and the answer comes back as that call's own response", async () => {
     const suffix = crypto.randomUUID();
     const identity = {

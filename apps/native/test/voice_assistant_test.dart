@@ -440,6 +440,41 @@ void main() {
     final asleepAt = harness.audioCount;
     await harness.feed(_quiet, 2000);
     expect(harness.audioCount, asleepAt, reason: 'a sleeping upstream is free');
+
+    harness.socket.deliver(
+      jsonEncode({
+        'type': 'voice/state',
+        'schemaVersion': 1,
+        'upstream': 'starting',
+        'muted': false,
+      }),
+    );
+    await settle();
+    expect(harness.controller.asleep, isFalse);
+    expect(harness.controller.paused, isFalse);
+    expect(harness.controller.upstream, VoiceUpstreamStateV1.starting);
+    harness.controller.dispose();
+  });
+
+  test('a Pause does not follow a server wake', () async {
+    final harness = Harness();
+    await harness.live();
+    harness.controller.pause();
+    expect(harness.texts, contains(encodeVoiceSleepV1(paused: true)));
+    expect(harness.controller.paused, isTrue);
+    expect(harness.controller.asleep, isTrue);
+
+    harness.socket.deliver(
+      jsonEncode({
+        'type': 'voice/state',
+        'schemaVersion': 1,
+        'upstream': 'starting',
+        'muted': false,
+      }),
+    );
+    await settle();
+    expect(harness.controller.paused, isTrue);
+    expect(harness.controller.asleep, isTrue);
     harness.controller.dispose();
   });
 

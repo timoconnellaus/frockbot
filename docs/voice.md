@@ -482,8 +482,11 @@ listening on.
 
 A `subagent` result that settles while the call is live goes back to the
 session as that function call's own late response, scheduled `WHEN_IDLE`, and
-the model decides what to say with it — one or two sentences, or nothing. It
-is told in one of two shapes. Work the Bot on the call started is its own and
+the model decides what to say with it — one or two sentences, or nothing. If
+Gemini is asleep from quiet, the object wakes it first so the person hears
+the answer without speaking. A Pause the person started does not: that waits
+for Resume, and a muted call waits for unmute. Hang-up still writes the
+answer into chat. It is told in one of two shapes. Work the Bot on the call started is its own and
 comes back with no name and an instruction to speak in the first person —
 "Done, the flights are booked", not "Sunny answered about the flights". An
 answer from a Bot the call has since handed over from keeps its name, because
@@ -519,7 +522,8 @@ subagent admitted.
   continuously, the client stops sending frames and sends
   `{type:"voice/sleep",schemaVersion:1}`. The object closes the Live socket
   (Gemini is gone, no billing) and keeps its newest resumption handle. Capture
-  continues locally.
+  continues locally. A `subagent` that settles in that window wakes Gemini
+  again so the person hears the answer without speaking first.
 - On the next onset the client sends `{type:"voice/wake",schemaVersion:1}`,
   then the last **500 ms** of audio from its pre-roll ring, then live frames.
   The pre-roll obeys the same rule as any other frame: on a capture without
@@ -540,11 +544,12 @@ subagent admitted.
 - The object also sleeps on its own after 30 s without an audio frame, so a
   client that never says `voice/sleep` still stops the meter.
 - **Pause** is the person doing the same thing deliberately: the client sends
-  `voice/sleep`, stops the reply that is playing, and — unlike the gate's own
-  sleep — wakes for nothing but Resume, which sends `voice/wake`. Pause starts
-  nothing and cancels nothing: a `subagent` Turn already admitted is the Bot's
-  work, not this socket's, so it carries on, and what finishes meanwhile is
-  counted on the Resume control.
+  `voice/sleep` with `paused: true`, stops the reply that is playing, and —
+  unlike the gate's own sleep — wakes for nothing but Resume, which sends
+  `voice/wake`. Pause starts nothing and cancels nothing: a `subagent` Turn
+  already admitted is the Bot's work, not this socket's, so it carries on, and
+  what finishes meanwhile is counted on the Resume control rather than
+  unhibernating Gemini.
 - Server reports `{type:"voice/state",schemaVersion:1,upstream:"awake"|"asleep"|"starting",muted:boolean}`.
 
 Between `voice/sleep` and `voice/wake` the client sends no audio. While

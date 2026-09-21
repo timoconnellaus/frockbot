@@ -53,6 +53,11 @@ void main() {
         'schemaVersion': 1,
         'type': 'voice/sleep',
       });
+      expect(decoded(encodeVoiceSleepV1(paused: true)), {
+        'schemaVersion': 1,
+        'type': 'voice/sleep',
+        'paused': true,
+      });
       expect(decoded(encodeVoiceWakeV1()), {
         'schemaVersion': 1,
         'type': 'voice/wake',

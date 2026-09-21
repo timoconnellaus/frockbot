@@ -230,7 +230,7 @@ export type VoiceAssistantStatusV1 =
   "idle" | "listening" | "thinking" | "speaking";
 
 export type VoiceAssistantClientMessageV1 =
-  | { schemaVersion: 1; type: "voice/sleep" }
+  | { schemaVersion: 1; type: "voice/sleep"; paused?: true }
   | { schemaVersion: 1; type: "voice/wake" }
   | { schemaVersion: 1; type: "voice/mute"; muted: boolean }
   /**
@@ -320,7 +320,11 @@ export function decodeVoiceAssistantClientMessageV1(
   const value = input as Record<string, unknown>;
   if (value.schemaVersion !== 1) return undefined;
   if (value.type === "voice/sleep")
-    return { schemaVersion: 1, type: "voice/sleep" };
+    return {
+      schemaVersion: 1,
+      type: "voice/sleep",
+      ...(value.paused === true ? { paused: true as const } : {}),
+    };
   if (value.type === "voice/wake")
     return { schemaVersion: 1, type: "voice/wake" };
   if (value.type === "voice/mute") {
