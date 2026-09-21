@@ -492,7 +492,7 @@ class _ComposerState extends State<Composer> {
     final oneLine = math.max(
       kMinInteractiveDimension,
       composerFieldPadding.vertical +
-          MediaQuery.textScalerOf(context).scale(fieldStyle?.fontSize ?? 15) *
+          MediaQuery.textScalerOf(context).scale(fieldStyle?.fontSize ?? 14) *
               (fieldStyle?.height ?? 1.0) +
           theme.visualDensity.baseSizeAdjustment.dy,
     );
@@ -804,6 +804,7 @@ class _ComposerState extends State<Composer> {
                             enabledBorder: InputBorder.none,
                             focusedBorder: InputBorder.none,
                             contentPadding: composerFieldPadding,
+                            constraints: BoxConstraints(minHeight: oneLine),
                             counterText: '',
                           ),
                           onChanged: (value) {

@@ -56,10 +56,13 @@ void main() {
         );
         await tester.pump();
         expect(tester.takeException(), isNull);
-        expect(tester.widget<TextField>(field).style!.fontSize, 15);
+        final body = FrockTheme.theme(
+          Brightness.dark,
+        ).textTheme.bodyLarge!.fontSize!;
+        expect(tester.widget<TextField>(field).style!.fontSize, body);
         expect(
-          MediaQuery.textScalerOf(tester.element(field)).scale(15),
-          15 * scale,
+          MediaQuery.textScalerOf(tester.element(field)).scale(body),
+          body * scale,
         );
         expect(tester.widget<TextField>(field).decoration!.labelText, isNull);
         await tester.tap(find.byKey(const ValueKey('stop')));
