@@ -134,6 +134,57 @@ void main() {
     },
   );
 
+  testWidgets('chat text lives in a selection area so it can be copied', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: TranscriptView(
+            lines: [
+              line(
+                runId: 'run-a',
+                role: LineRole.user,
+                text: 'Copy this line',
+                at: '2026-09-05T12:19:00.000Z',
+              ),
+              TranscriptLine(
+                id: 'run-a:send:0',
+                runId: 'run-a',
+                role: LineRole.assistant,
+                text: 'And this reply',
+                at: '2026-09-05T12:19:01.000Z',
+                status: LineStatus.completed,
+              ),
+            ],
+            loading: false,
+            hasEarlier: false,
+            onRefresh: ({older = false}) async {},
+            onOpenRun: (_) {},
+            storageKey: 'selection-test',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(SelectionArea),
+        matching: find.text('Copy this line'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(SelectionArea),
+        matching: find.textContaining('And this reply'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   group('the bubbles a thread is drawn in', () {
     /// The fill of the bubble whose content is announced as [speaker].
     Color fill(WidgetTester tester, String speaker) {

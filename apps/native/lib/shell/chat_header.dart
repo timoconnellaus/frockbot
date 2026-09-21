@@ -35,9 +35,10 @@ const chatHeaderThreadPadding = 28.0;
 ///
 /// On a call this is still an [AppBar]: the thread is gone, and the bar is
 /// the name, a mark that says why, and the Computer. In a conversation it is
-/// an overlay — a fade, the Bot's companion at the top-left, and the panel
-/// switch on the far right. A phone keeps Back and the Bot's name as pills,
-/// and the Computer, because there is no column beside the thread.
+/// an overlay — a fade, the Bot's companion at the top-left with the name
+/// immediately to its right, and the panel switch on the far right. A phone
+/// keeps Back and the Bot's name as pills, and the Computer, because there
+/// is no column beside the thread.
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
@@ -117,6 +118,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   Widget _overlay(BuildContext context) {
     final window = Theme.of(context).scaffoldBackgroundColor;
     return Stack(
+      fit: StackFit.expand,
       children: [
         Align(
           alignment: Alignment.topCenter,
@@ -167,35 +169,16 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                   ),
                   const SizedBox(width: 8),
                 ],
-                if (companion != null) IgnorePointer(child: companion!),
-                if (onOpenBot != null) ...[
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        const Spacer(),
-                        Flexible(
-                          child: identified(
-                            ShellIds.botPanelToggle,
-                            _ChromePill(
-                              tooltip: 'Open $name',
-                              exposeButtonSemantics: true,
-                              onPressed: onOpenBot,
-                              padding: const EdgeInsets.fromLTRB(14, 0, 12, 0),
-                              size: Size(0, chatDesktopChrome ? 40 : 44),
-                              child: _title(
-                                context,
-                                chevron: true,
-                                flexible: true,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                if (companion != null) ...[
+                  IgnorePointer(child: companion!),
+                  const SizedBox(width: 10),
+                ],
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: _overlayName(context),
                   ),
-                ] else
-                  const Spacer(),
+                ),
                 if (onComputer != null) ...[
                   const SizedBox(width: 8),
                   identified(
@@ -224,6 +207,29 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// The Bot's name sits immediately to the right of the companion. On a
+  /// phone it is still the frosted door into the Bot's page. At a desk the
+  /// page lives in the column, so the name is only the title.
+  Widget _overlayName(BuildContext context) {
+    if (onOpenBot != null) {
+      return identified(
+        ShellIds.botPanelToggle,
+        _ChromePill(
+          tooltip: 'Open $name',
+          exposeButtonSemantics: true,
+          onPressed: onOpenBot,
+          padding: const EdgeInsets.fromLTRB(14, 0, 12, 0),
+          size: Size(0, chatDesktopChrome ? 40 : 44),
+          child: _title(context, chevron: true, flexible: true),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: _title(context, chevron: false, flexible: true, prominent: true),
     );
   }
 
@@ -276,17 +282,20 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     BuildContext context, {
     required bool chevron,
     bool flexible = false,
+    bool prominent = false,
   }) {
     final scheme = Theme.of(context).colorScheme;
     final text = Text(
       name,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-        letterSpacing: -0.15,
-      ),
+      style: prominent
+          ? Theme.of(context).textTheme.titleLarge
+          : Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.15,
+            ),
     );
     return Row(
       mainAxisSize: MainAxisSize.min,
