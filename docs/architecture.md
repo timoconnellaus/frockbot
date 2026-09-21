@@ -703,13 +703,16 @@ memory is what a remount paints from in the tap frame, disk is what a later
 process finds, and the host then lets the live read replace it if the
 revision moved. A shape this build cannot read is discarded wholesale. Editor
 and create documents, minted webhook keys and pairing codes are never written
-there. The Bot page prefetches the Routines list so All Routines can open on
-that cache. The host keeps drawing a document it already holds while a refresh
+there. The Bot page prefetches the Routines list and that Bot's Plugins so those
+doors can open on cache. `GET …/routines?as=document` is one Bot Durable
+Object read — the list and the inbox together — not two RPCs started in
+parallel. The host keeps drawing a document it already holds while a refresh
 is out, and shows host chrome in the tap frame rather than
 hiding the page behind a spinner. The Bot page, Routines, Bot Plugins and Bot
 settings stay mounted after the first visit (`lib/shell/hot_panel.dart`); a
 collapsed desktop column keeps those pages too, so closing the panel is not a
-dispose.
+dispose. Audit, Templates, Look, Voice and framed WebViews stay out of that
+set: they are not the thing someone flips back to.
 
 The `right-panel` region shows one entry at a time rather than stacking every
 registered builder: an entry registers with a label, the panel's stack names

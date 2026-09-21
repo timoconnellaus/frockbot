@@ -1145,6 +1145,24 @@ export async function listRoutineInbox(
   };
 }
 
+/**
+ * The list and the inbox as one in-object read. `?as=document` used to
+ * address the Durable Object twice; one materialize is the whole frame.
+ */
+export async function readRoutinesFrame(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): Promise<{
+  list: RoutineListViewV1;
+  inbox: RoutineInboxViewV1;
+}> {
+  const [list, inbox] = await Promise.all([
+    listRoutines(state, identity),
+    listRoutineInbox(state, identity),
+  ]);
+  return { list, inbox };
+}
+
 /** Count inputs waiting for the next conversational Turn without draining them. */
 export async function pendingInputCount(
   state: ShellBotStateV1,

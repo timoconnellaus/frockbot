@@ -132,6 +132,7 @@ import {
   listRoutineRuns,
   listRoutines,
   projectRoutineAccountTimezoneV1,
+  readRoutinesFrame,
   readRoutineRun,
 } from "@frockbot/app/routines/bot";
 import {
@@ -2548,6 +2549,25 @@ export class BotState
     await shell.validateIdentity(identity);
     await this.syncRoutineTimezone(identity, shell);
     return listRoutines(shell.state, identity);
+  }
+
+  /**
+   * The Routines list and the inbox as one RPC. The document read is this,
+   * so the Worker is not addressing the object twice for one panel.
+   */
+  async readRoutinesFrame(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    await this.syncRoutineTimezone(identity, shell);
+    return readRoutinesFrame(shell.state, identity);
   }
 
   /** One Routine command, applied durably with the User recorded as writer. */

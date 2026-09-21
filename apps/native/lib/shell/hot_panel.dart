@@ -56,9 +56,18 @@ class HotPanelStack extends StatelessWidget {
             offstage: key != shown,
             child: TickerMode(
               enabled: key == shown,
-              child: PanelVisibility(
-                visible: key == shown,
-                child: KeyedSubtree(key: ValueKey(key), child: builder(key)),
+              child: ExcludeFocus(
+                excluding: key != shown,
+                child: ExcludeSemantics(
+                  excluding: key != shown,
+                  child: PanelVisibility(
+                    visible: key == shown,
+                    child: KeyedSubtree(
+                      key: ValueKey(key),
+                      child: builder(key),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

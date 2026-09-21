@@ -867,6 +867,15 @@ class MemoryConfiguration
     );
   }
 
+  async readRoutinesFrame(
+    request: Parameters<BotConfigurationBinding["readRoutinesFrame"]>[0],
+  ) {
+    return {
+      list: await this.listRoutines(request),
+      inbox: await this.listRoutineInbox(request),
+    };
+  }
+
   listTasks(request: Parameters<BotConfigurationBinding["listTasks"]>[0]) {
     return Promise.resolve({
       schemaVersion: 1 as const,

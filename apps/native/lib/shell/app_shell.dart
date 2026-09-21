@@ -1089,6 +1089,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         path: '/api/bots/${Uri.encodeComponent(botId)}/routines?as=document',
       ),
     );
+    unawaited(
+      prefetchViewDocumentCache(
+        api: widget.api,
+        store: widget.store,
+        userId: widget.userId,
+        surfaceId: 'bot-plugins',
+        scope: botId,
+        path: '/api/bots/${Uri.encodeComponent(botId)}/plugins?as=document',
+      ),
+    );
     unawaited(_adoptComposition(botId));
   }
 

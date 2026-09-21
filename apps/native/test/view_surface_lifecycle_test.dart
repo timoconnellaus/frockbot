@@ -29,8 +29,11 @@ class _TrackedSurfaceController extends ViewSurfaceController {
   @override
   bool get busy => gate != null && !gate!.isCompleted;
 
+  String? failure;
+  bool failLoad = false;
+
   @override
-  String? get message => null;
+  String? get message => failure;
 
   @override
   String get surfaceId => 'tracked';
@@ -51,6 +54,7 @@ class _TrackedSurfaceController extends ViewSurfaceController {
   Future<void> load() async {
     loads += 1;
     notifyListeners();
+    if (failLoad) return;
     final held = gate;
     if (held != null) await held.future;
     _document = wire.ViewDocument.fromJson(
@@ -166,6 +170,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('New Routine'), findsOneWidget);
     expect(find.text('From the network'), findsWidgets);
+    controller.dispose();
+  });
+
+  testWidgets('a failed first load paints retry chrome without overflowing', (
+    tester,
+  ) async {
+    final controller = _TrackedSurfaceController()
+      ..failLoad = true
+      ..failure = 'Check your connection and try again.';
+    await tester.pumpWidget(_surface(controller));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(FrockEmptyState), findsOneWidget);
+    expect(find.text('Tracked couldn’t load'), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
     controller.dispose();
   });
 

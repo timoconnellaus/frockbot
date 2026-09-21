@@ -580,6 +580,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     setBotPluginEnabled: (request) => rpc.setBotPluginEnabled(request),
     executeBotPluginTool: (request) => rpc.executeBotPluginTool(request),
     listRoutines: (request) => rpc.listRoutines(request),
+    readRoutinesFrame: (request) => rpc.readRoutinesFrame(request),
     listTasks: (request) => rpc.listTasks(request),
     readTask: (request) => rpc.readTask(request),
     stopTask: (request) => rpc.stopTask(request),
@@ -2414,6 +2415,17 @@ const createGatewayBackendContributions = (env: Env) =>
           botId,
         }),
       ),
+    readRoutinesFrame: async (userId, botId) => {
+      const frame = await botStateStub(env, userId, botId).readRoutinesFrame({
+        schemaVersion: 1,
+        userId,
+        botId,
+      });
+      return {
+        list: decodeRoutineListViewV1(frame.list),
+        inbox: decodeRoutineInboxViewV1(frame.inbox),
+      };
+    },
     executeRoutineCommand: async (userId, botId, command) =>
       decodeRoutineCommandReceiptV1(
         await botStateStub(env, userId, botId).executeRoutineCommand({

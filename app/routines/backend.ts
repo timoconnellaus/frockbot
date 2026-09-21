@@ -73,6 +73,14 @@ export interface RoutinesGatewayHost {
     },
   ): Promise<RoutineHookDeliveryReceiptV1>;
   listRoutines(userId: string, botId: string): Promise<RoutineListViewV1>;
+  /**
+   * The list and the inbox in one hop. The document read is this, not two
+   * RPCs started together — one materialize, one answer.
+   */
+  readRoutinesFrame(
+    userId: string,
+    botId: string,
+  ): Promise<{ list: RoutineListViewV1; inbox: RoutineInboxViewV1 }>;
   executeRoutineCommand(
     userId: string,
     botId: string,
@@ -362,16 +370,9 @@ export function createRoutinesBackendContribution(
               ),
             );
           }
-          // One document, two reads — started together so the Worker is not
-          // paying a second hop after the first has already come back.
-          const [view, inboxView] = await Promise.all([
-            host
-              .listRoutines(context.userId, botId)
-              .then(decodeRoutineListViewV1),
-            host
-              .listRoutineInbox(context.userId, botId)
-              .then(decodeRoutineInboxViewV1),
-          ]);
+          const frame = await host.readRoutinesFrame(context.userId, botId);
+          const view = decodeRoutineListViewV1(frame.list);
+          const inboxView = decodeRoutineInboxViewV1(frame.inbox);
           // A Routine the reader named but that is no longer here — deleted
           // from another device — is the list, not a detail of nothing.
           const viewing = view.routines.find(
