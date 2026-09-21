@@ -76,10 +76,9 @@ abstract final class FrockTheme {
   static const radiusCard = 16.0;
   static const radiusSheet = 24.0;
 
-  /// Inter ships here at 400 and up, so a desktop cannot read lighter by
-  /// weight. The Mac draws the phone's 15-point regular heavy on a dark
-  /// window, so a message at a desk is a point smaller and its emphasis
-  /// medium. The phone keeps the theme body as it is.
+  /// Inter and Manrope both ship here at 400 and up, so a desktop cannot
+  /// read lighter by weight. Emphasis drops to medium at a desk so a
+  /// semibold does not draw heavier still.
   static bool get _desktopType =>
       !kIsWeb &&
       switch (defaultTargetPlatform) {
@@ -90,13 +89,11 @@ abstract final class FrockTheme {
       };
 
   /// The style a message is read in, the person's and the Bot's.
-  static TextStyle message(ThemeData theme) {
-    final body = theme.textTheme.bodyLarge!.copyWith(
-      fontWeight: FontWeight.w400,
-      height: 1.5,
-    );
-    return _desktopType ? body.copyWith(fontSize: 14) : body;
-  }
+  static TextStyle message(ThemeData theme) =>
+      theme.textTheme.bodyLarge!.copyWith(
+        fontWeight: FontWeight.w400,
+        height: 1.5,
+      );
 
   /// The weight of `**emphasis**` inside a message.
   static FontWeight get messageStrong =>
@@ -202,7 +199,7 @@ abstract final class FrockTheme {
         letterSpacing: -0.1,
       ),
       bodyLarge: type.bodyLarge?.copyWith(
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: FontWeight.w400,
         height: 1.5,
         letterSpacing: -0.1,

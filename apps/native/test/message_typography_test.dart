@@ -1,9 +1,8 @@
 /// How a message reads, by platform.
 ///
-/// Manrope ships here at 400 and up, so a desktop cannot go lighter by weight:
-/// on the Mac the same 15-point regular that reads right on a phone draws
-/// heavy, and a Bot's emphasis at semibold heavier still. The desktop reads
-/// messages a point smaller with emphasis at medium; the phone is untouched.
+/// Body copy is 14 everywhere — Manrope at 15 read heavy on ink. Emphasis
+/// still drops to medium at a desk, because a semibold on that face draws
+/// heavier still and a desktop cannot go lighter than 400.
 library;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
@@ -32,7 +31,7 @@ Map<String, TextStyle> leafStyles(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets('a Bot message is lighter at a desk and unchanged on a phone', (
+  testWidgets('a Bot message is 14 on every platform, lighter emphasis at a desk', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -47,27 +46,23 @@ void main() {
     expect(styles['Plain ']!.fontFamily, 'Manrope');
     expect(styles['Plain ']!.fontWeight, FontWeight.w400);
     expect(styles['Plain ']!.height, 1.5);
-    expect(styles['Plain ']!.fontSize, desktop ? 14 : 15);
-    expect(styles['strong']!.fontSize, desktop ? 14 : 15);
+    expect(styles['Plain ']!.fontSize, 14);
+    expect(styles['strong']!.fontSize, 14);
     expect(
       styles['strong']!.fontWeight,
       desktop ? FontWeight.w500 : FontWeight.w600,
     );
   }, variant: TargetPlatformVariant.all());
 
-  testWidgets(
-    'the message style is the theme body on a phone, a point smaller at a desk',
-    (tester) async {
-      final theme = FrockTheme.theme(Brightness.dark);
-      final style = FrockTheme.message(theme);
-      final body = theme.textTheme.bodyLarge!;
-      final desktop = desktops.contains(defaultTargetPlatform);
+  testWidgets('the message style is the theme body', (tester) async {
+    final theme = FrockTheme.theme(Brightness.dark);
+    final style = FrockTheme.message(theme);
+    final body = theme.textTheme.bodyLarge!;
 
-      expect(style.fontWeight, FontWeight.w400);
-      expect(style.height, 1.5);
-      expect(style.fontSize, desktop ? 14 : body.fontSize);
-      expect(style.letterSpacing, body.letterSpacing);
-    },
-    variant: TargetPlatformVariant.all(),
-  );
+    expect(style.fontWeight, FontWeight.w400);
+    expect(style.height, 1.5);
+    expect(style.fontSize, 14);
+    expect(body.fontSize, 14);
+    expect(style.letterSpacing, body.letterSpacing);
+  }, variant: TargetPlatformVariant.all());
 }
