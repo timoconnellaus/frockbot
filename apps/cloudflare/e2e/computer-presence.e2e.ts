@@ -8,10 +8,10 @@
 // registered, the phase is `idle` — and no desktop behind it.
 //
 // What that leaves provable is the shell, the client state machine and the way
-// out: the card is on the Bot page and says what it knows, one press — the
-// header's icon or the card itself — opens the full window with nothing in
-// between, and the window says there is no desktop in the host's own words
-// instead of framing one. What it does not leave provable is anything
+// out: the card is on the Bot page and says what it knows, one press
+// opens the full window with nothing in between, and the window says there
+// is no desktop in the host's own words instead of framing one. What it does
+// not leave provable is anything
 // downstream of a minted viewer session — the view-only frame, Take control
 // and its confirmation, the live preview and the snapshot it settles back to —
 // because no session is ever minted. Those claims want a Computer, and
@@ -22,6 +22,7 @@ import {
   expect,
   createBot,
   openApplication,
+  openBotPage,
   expectNoHorizontalOverflow,
   press,
   sem,
@@ -52,27 +53,17 @@ const NO_HOST = /The Computer host answered|Couldn’t read the computer/u;
 /**
  * Open the desktop.
  *
- * A phone still keeps the Computer in the conversation bar. A desk opens it
- * from the Bot page beside the thread — the same card the header used to
- * duplicate.
+ * Conversation chrome no longer carries Computer. The Bot page's card is the
+ * way in at every width: already showing in the desk column, or one tap of
+ * the panel switch on a phone.
  */
 async function openComputerViewer(page: Page): Promise<void> {
-  const bar = sem(page, "computer-destination");
-  const pageDoor = sem(page, "bot-page-computer");
-  // A width change rebuilds the chrome. The bar icon and the Bot-page card
-  // are never both the way in at once, and neither is in the tree for a
-  // beat after the layout — racing `count()` picked the card that had just
-  // left.
-  await expect(bar.or(pageDoor).first()).toBeVisible({ timeout: 60_000 });
-  if (await bar.isVisible().catch(() => false)) {
-    await press(bar);
-  } else {
-    await press(pageDoor);
-  }
+  await openBotPage(page);
+  await press(sem(page, "bot-page-computer"));
   await expect(sem(page, "computer-viewer")).toBeVisible({ timeout: 60_000 });
 }
 
-test("the Bot page card and the header both open the desktop itself", async ({
+test("the Bot page card opens the desktop itself", async ({
   page,
   userId,
 }, testInfo: TestInfo) => {
@@ -139,13 +130,11 @@ test("the Computer opens to the same window on the mobile shell", async ({
   await openApplication(page, userId);
   await createBot(page, "Pocket");
   await page.setViewportSize(PHONE);
-  // The desk column leaves before the phone bar's Computer icon arrives.
+  // The desk column leaves; Computer is on the Bot page, opened from the
+  // panel switch.
   await expect(sem(page, "bot-page")).toHaveCount(0);
   await settle(page);
 
-  // At this width the conversation has the screen and the bar's Computer icon
-  // is the way in. It opens the desktop itself: there is no page between the
-  // icon and the window at any width.
   await openComputerViewer(page);
   const viewer = sem(page, "computer-viewer");
   await expect(viewer).toContainText("No computer");

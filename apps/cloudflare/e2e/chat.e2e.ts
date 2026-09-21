@@ -482,9 +482,10 @@ test("the working companion stays in the header and never shifts the bubbles", a
     transcriptTop: number;
   };
 
-  // The working pose occupies the header's fixed top inset, above the bubble
-  // and outside the transcript: the thread has no row to draw or take away.
-  expect(midTurn.companionTop - midTurn.transcriptTop).toBeCloseTo(20, 0);
+  // The working pose sits 8px above the header's 20px chrome inset, above the
+  // bubble and outside the transcript: the thread has no row to draw or take
+  // away.
+  expect(midTurn.companionTop - midTurn.transcriptTop).toBeCloseTo(12, 0);
   expect(midTurn.companionBottom).toBeLessThanOrEqual(midTurn.bubbleTop);
   await expect(
     sem(page, "chat-transcript").locator(
