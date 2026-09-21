@@ -2516,25 +2516,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // composer control goes primary, and the dock stays off. A call with
     // another Bot keeps the small dock, so looking at one Bot while talking
     // to another still works.
-    final voiceHere =
-        footerOpen &&
-        session != null &&
-        bot != null &&
-        voiceBotId == bot.botId.value;
+    final liveSession =
+        footerOpen && bot != null && voiceBotId == bot.botId.value
+        ? session
+        : null;
+    final voiceHere = liveSession != null;
     final rightPanel = _rightPanel();
     ChatHeader conversationHeader({Widget? companion}) => ChatHeader(
       name: _name(bot!),
       companion: voiceHere ? null : companion,
-      voiceChrome: voiceHere && session != null
-          ? VoiceCallChrome(
-              session: session,
+      voiceChrome: liveSession == null
+          ? null
+          : VoiceCallChrome(
+              session: liveSession,
               userInitials: widget.userId,
               botName: _name(bot),
               characterId: bot.avatar.characterId,
               primary: bot.avatar.primary,
               onEnd: () => unawaited(_endVoice(reason: 'end-button')),
-            )
-          : null,
+            ),
       connection: _selectedConnection,
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
       // A phone's bar is the way back, the Bot, and the Computer. A desk

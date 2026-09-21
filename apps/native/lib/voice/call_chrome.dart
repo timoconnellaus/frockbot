@@ -11,7 +11,7 @@ import 'package:flutter/material.dart';
 import '../flock/avatar.dart';
 import '../shell/semantics.dart';
 import 'assistant.dart';
-import 'voice_mode.dart' show VoiceModeState, voiceModeStateOf, voiceModeWordOf;
+import 'voice_mode.dart' show VoiceModeState, voiceModeStateOf;
 import 'waveform.dart';
 
 /// Circle the person's initials sit in.
