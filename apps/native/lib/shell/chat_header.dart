@@ -432,7 +432,7 @@ class _ChromePill extends StatelessWidget {
       ),
       child: Padding(
         padding: padding,
-        child: Center(child: child),
+        child: Center(widthFactor: 1, heightFactor: 1, child: child),
       ),
     );
     final labelledContents = exposeButtonSemantics
