@@ -30,12 +30,13 @@
 //
 //   Tidying. Once every segment is in, and before `final`, the capture's own
 //   words are offered to a model to have the fillers and false starts taken
-//   out. It happens here rather than on the client because the model is
-//   reached with a server-side credential, and it happens after the capture
-//   rather than during it because text that rewrites itself under the cursor
-//   is worse than text that is untidy. Every way this can go wrong — no
-//   model, no allowance, a refusal, a timeout, an answer a guard rejects —
-//   ends in the same place: `final`, with the raw transcript standing.
+//   out. The client has already landed the raw segment by then. It happens
+//   here rather than on the client because the model is reached with a
+//   server-side credential, and it happens after the capture rather than
+//   during it because text that rewrites itself under the cursor is worse
+//   than text that is untidy. Every way this can go wrong — no model, no
+//   allowance, a refusal, a timeout, an answer a guard rejects — ends in
+//   the same place: `final`, with the raw transcript standing.
 import {
   voiceDictationCleanupBodyV1,
   voiceDictationCleanupResultV1,

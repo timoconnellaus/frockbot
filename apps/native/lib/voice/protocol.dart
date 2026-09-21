@@ -38,14 +38,21 @@ const voiceDictationConnectTimeoutV1 = Duration(seconds: 10);
 /// How long `stop` waits for `final` before flushing what it has anyway.
 const voiceDictationFinalTimeoutV1 = Duration(seconds: 6);
 
-/// How long to wait once the server says it is tidying the capture.
+/// How long to wait once the raw transcript has landed and the server is
+/// tidying it. The field is already editable; this only bounds the leftover
+/// socket so a quiet server cannot hold it open.
+const voiceDictationCleanupTimeoutV1 = Duration(seconds: 6);
+
+/// How long a capture has been running, as `mm:ss`.
 ///
-/// Longer than [voiceDictationFinalTimeoutV1] because by this point the words
-/// are already in the draft and nothing is at risk: the server is asking a
-/// model, and the only cost of waiting is a "Finishing" line on screen. It
-/// still ends, because a server that never answers must not leave the
-/// microphone button looking busy forever.
-const voiceDictationCleanupTimeoutV1 = Duration(seconds: 12);
+/// Caps at 99:59 so the pill's reserved width never jumps. A capture that
+/// actually reaches that is already past the server's five-minute stop.
+String formatDictationElapsedV1(Duration elapsed) {
+  final total = elapsed.inSeconds.clamp(0, 99 * 60 + 59);
+  final minutes = (total ~/ 60).toString().padLeft(2, '0');
+  final seconds = (total % 60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
+}
 
 /// Opening audio the client holds while the dictation socket opens: 30 s.
 const voiceDictationOpeningBufferBytesV1 = 30 * voiceDictationSampleRateV1 * 2;

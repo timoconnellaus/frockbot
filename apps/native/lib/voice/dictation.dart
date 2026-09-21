@@ -9,13 +9,20 @@
 /// Stop flushes into the editable draft and never sends. Sending is the
 /// person's, through the ordinary Send.
 ///
-/// After the last word arrives the server may tidy the capture and send the
-/// result back. It is applied through the very same [DictationDraftRange] as
-/// every other write, which is what makes it safe: a span the person has
-/// edited inside is already fenced and takes nothing more, and a draft that
-/// has been sent no longer contains the span at all, so a late tidy-up
-/// finds nothing to replace and writes nothing. [revertCleanup] puts the raw
-/// transcript back through the same path.
+/// Live captions stay off the draft. Deltas accumulate here and the committed
+/// segment is what lands, once, when they press stop — so the field does not
+/// grow a half-sentence under a pill they cannot edit, and stop can spin for
+/// the half-second the provider needs instead of painting words as they
+/// arrive.
+///
+/// After that segment lands the server may tidy the capture and send the
+/// result back. The field is already theirs by then: [cleaning] is not a
+/// second wait they cannot type into. The tidy is applied through the very
+/// same [DictationDraftRange] as every other write, which is what makes it
+/// safe: a span the person has edited inside is already fenced and takes
+/// nothing more, and a draft that has been sent no longer contains the span
+/// at all, so a late tidy-up finds nothing to replace and writes nothing.
+/// [revertCleanup] puts the raw transcript back through the same path.
 library;
 
 import 'dart:async';
@@ -33,28 +40,25 @@ enum DictationState {
   capturing,
   stopping,
 
-  /// Said everything, and the server is tidying it. The words are already in
-  /// the draft and the microphone is off; this is a state the composer shows,
-  /// not one that is still recording.
+  /// The committed words are in the draft and the server is tidying them.
+  /// The microphone is off and the field is theirs; this is not a second
+  /// wait they cannot type into.
   cleaning,
   done,
   error,
 }
 
 extension DictationStateActivity on DictationState {
-  /// Whether a capture is in progress: the one definition every surface asks,
-  /// so a new in-flight state cannot mean one thing here and another there.
+  /// Whether the capture overlay is up: starting, recording, or the brief
+  /// spin after stop. Cleaning is not: the transcript has landed.
   bool get active =>
       this == DictationState.starting ||
       this == DictationState.capturing ||
-      this == DictationState.stopping ||
-      this == DictationState.cleaning;
+      this == DictationState.stopping;
 
-  /// Whether the microphone is off and the capture is being wrapped up.
-  /// Both halves look the same to the person — a brief wait they cannot
-  /// speak into — so every surface draws them the same way.
-  bool get finishing =>
-      this == DictationState.stopping || this == DictationState.cleaning;
+  /// Whether the microphone is off and we are still waiting for the
+  /// committed transcript. Cleaning is already past this.
+  bool get finishing => this == DictationState.stopping;
 }
 
 /// Writes the assembled draft into one composer context.
@@ -179,6 +183,10 @@ class DictationController extends ChangeNotifier {
   /// per audio frame is not a price a drawn waveform is worth.
   final ValueNotifier<double> level = ValueNotifier<double>(0);
 
+  /// How long this capture has been running. Its own notifier so the pill's
+  /// `00:05` can tick without rebuilding the shell.
+  final ValueNotifier<Duration> elapsed = ValueNotifier<Duration>(Duration.zero);
+
   final List<String> _segments = [];
   String _delta = '';
 
@@ -191,7 +199,11 @@ class DictationController extends ChangeNotifier {
   StreamSubscription<Object?>? _frames;
   StreamSubscription<Object?>? _inbound;
   Timer? _finalTimer;
+  Timer? _elapsedTimer;
+  DateTime? _startedAt;
   Completer<void>? _finished;
+  bool _landed = false;
+  bool _released = false;
 
   /// Opening audio held while the socket opens, drained in order on `ready`.
   /// Bounded at 30 s; the oldest goes first, which is what the server's own
@@ -238,12 +250,14 @@ class DictationController extends ChangeNotifier {
     return committed.isEmpty ? delta : '$committed $delta';
   }
 
-  /// Starts a capture for [context] and returns once it is under way.
+  /// Starts a capture for [context] and returns once the microphone is open.
   ///
-  /// Capture starts before the socket does, so the first words are already
-  /// recorded by the time the server is listening.
+  /// The overlay flips the moment [start] is called, and the socket is opened
+  /// the moment the microphone is, with audio held until `ready`. Waiting for
+  /// the handshake to paint the pill is the delay this exists to remove.
   Future<void> start(Object context) async {
     if (active) return;
+    if (_state == DictationState.cleaning) await _teardown();
     final generation = ++_generation;
     _context = context;
     // Everything already in this Bot's composer stays in front of the words
@@ -256,9 +270,18 @@ class DictationController extends ChangeNotifier {
     _notice = null;
     _ready = false;
     _stopRequested = false;
+    _landed = false;
+    _released = false;
     _opening.clear();
     _openingBytes = 0;
     _finished = Completer<void>();
+    _startedAt = DateTime.now();
+    elapsed.value = Duration.zero;
+    _tickElapsed();
+    _elapsedTimer?.cancel();
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _tickElapsed();
+    });
     _set(DictationState.starting);
     try {
       final frames = await capture.start(
@@ -275,6 +298,11 @@ class DictationController extends ChangeNotifier {
         return;
       }
       _frames = frames.listen(_onFrame, onError: (Object _) {});
+      if (_state == DictationState.starting) _set(DictationState.capturing);
+      // The upgrade starts the moment the microphone is open, not after
+      // `ready`. Audio is held until then, so the first words are not spent
+      // waiting for a socket.
+      unawaited(_connect(generation));
     } on MicrophoneDenied catch (denied) {
       if (generation != _generation || _disposed) return;
       await _fail(denied.message);
@@ -284,7 +312,6 @@ class DictationController extends ChangeNotifier {
       await _fail('FrockBot couldn’t start the microphone. Try again.');
       return;
     }
-    unawaited(_connect(generation));
   }
 
   Future<void> _connect(int generation) async {
@@ -305,7 +332,12 @@ class DictationController extends ChangeNotifier {
         onDone: () => unawaited(_finish(null)),
       );
       socket.sendText(encodeDictationStartV1());
-      if (_state == DictationState.starting) _set(DictationState.capturing);
+      // Capturing is the microphone's state, not the socket's. Flipping it
+      // here used to hold the overlay on "Starting" until the upgrade
+      // finished, which is the delay the parallel open exists to remove.
+      if (_state == DictationState.starting && _frames != null) {
+        _set(DictationState.capturing);
+      }
       // A stop that arrived before the socket did still commits: the server
       // buffers everything sent before it is ready, so the audio and the stop
       // go out now, in order.
@@ -358,26 +390,25 @@ class DictationController extends ChangeNotifier {
       case DictationReadyV1():
         _ready = true;
         _drainOpening();
-        if (_state == DictationState.starting) _set(DictationState.capturing);
+        if (_state == DictationState.starting && _frames != null) {
+          _set(DictationState.capturing);
+        }
       case DictationDeltaV1(:final text):
+        // Held, never written. Live captions are the thing this path exists
+        // to not do: the person is watching a waveform, not a transcript.
         _delta = text;
-        _publish();
       case DictationSegmentV1(:final text):
         _segments.add(text);
         _delta = '';
-        _publish();
+        if (_stopRequested) _land();
       case DictationNoticeV1(:final message):
         _notice = message;
         _notify();
       case DictationCleaningV1():
-        // Nothing to write: everything said is already in the draft. The
-        // deadline is re-armed because the one `stop` set covers a capture
-        // the server never finished, and this capture is finished.
-        if (_state == DictationState.stopping) {
-          _set(DictationState.cleaning);
-          _finalTimer?.cancel();
-          _finalTimer = Timer(cleanupTimeout, () => unawaited(_finish(null)));
-        }
+        // The committed words should already be in the draft. If the provider
+        // never sent a segment, land whatever we held so the field is not
+        // empty while we wait for a tidy that may never come.
+        if (_state == DictationState.stopping) _land();
       case DictationCleanedV1(:final text):
         _applyCleaned(text);
       case DictationFinalV1():
@@ -385,6 +416,41 @@ class DictationController extends ChangeNotifier {
       case DictationErrorV1(:final message):
         unawaited(_finish(message));
     }
+  }
+
+  /// Puts the committed words in the draft and drops the overlay.
+  ///
+  /// Called the moment the provider's segment arrives after stop — that is
+  /// the half-second spin — and not before, so a live delta cannot paint a
+  /// caption. The socket stays open for a tidy-up; [stop] itself returns.
+  void _land() {
+    if (_disposed) return;
+    _publish();
+    if (_landed) return;
+    _landed = true;
+    if (_state == DictationState.stopping) {
+      _set(DictationState.cleaning);
+      _finalTimer?.cancel();
+      _finalTimer = Timer(cleanupTimeout, () => unawaited(_finish(null)));
+    }
+    _completeStop();
+    unawaited(_release());
+  }
+
+  Future<void> _release() async {
+    if (_released || _disposed) return;
+    _released = true;
+    await onFinished?.call();
+  }
+
+  void _completeStop() {
+    if (_finished?.isCompleted == false) _finished!.complete();
+  }
+
+  void _tickElapsed() {
+    final started = _startedAt;
+    if (started == null || _disposed) return;
+    elapsed.value = DateTime.now().difference(started);
   }
 
   /// Swaps the capture's own span for the tidied text.
@@ -472,7 +538,7 @@ class DictationController extends ChangeNotifier {
     _generation++;
     await _teardown();
     _set(DictationState.done);
-    await onFinished?.call();
+    await _release();
   }
 
   /// Abandons the capture *and* takes its words back out of the draft.
@@ -501,8 +567,8 @@ class DictationController extends ChangeNotifier {
     // A socket that failed keeps whatever text already arrived.
     _publish();
     _set(DictationState.error);
-    await onFinished?.call();
-    _finished?.complete();
+    await _release();
+    _completeStop();
     _finished = null;
   }
 
@@ -513,14 +579,16 @@ class DictationController extends ChangeNotifier {
     await _teardown();
     _publish();
     _set(failure == null ? DictationState.done : DictationState.error);
-    await onFinished?.call();
-    if (_finished?.isCompleted == false) _finished!.complete();
+    await _release();
+    _completeStop();
     _finished = null;
   }
 
   Future<void> _teardown() async {
     _finalTimer?.cancel();
     _finalTimer = null;
+    _elapsedTimer?.cancel();
+    _elapsedTimer = null;
     await _frames?.cancel();
     _frames = null;
     await _inbound?.cancel();
@@ -552,7 +620,12 @@ class DictationController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _generation++;
-    unawaited(_teardown().whenComplete(level.dispose));
+    unawaited(
+      _teardown().whenComplete(() {
+        level.dispose();
+        elapsed.dispose();
+      }),
+    );
     super.dispose();
   }
 }

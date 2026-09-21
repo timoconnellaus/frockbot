@@ -120,21 +120,38 @@ void main() {
     harness.controller.dispose();
   });
 
-  test('the draft is the segments and then the delta', () async {
+  test('live captions stay off the draft until stop lands a segment', () async {
     final harness = Harness();
     await harness.controller.start('bot-a');
     await settle();
     harness.say('ready');
-    harness.say('segment', {'text': 'first thought'});
     harness.say('delta', {'text': 'and a se'});
-    await settle();
-    expect(harness.controller.text, 'first thought and a se');
-    expect(harness.drafts.draftFor('bot-a'), 'first thought and a se');
-
-    // A delta replaces the previous delta; it never accumulates.
     harness.say('delta', {'text': 'and a second'});
     await settle();
-    expect(harness.drafts.draftFor('bot-a'), 'first thought and a second');
+    // Held internally so a waveform is not also a half-written sentence.
+    expect(harness.controller.text, 'and a second');
+    expect(harness.drafts.draftFor('bot-a'), '');
+
+    final stopped = harness.controller.stop();
+    await settle();
+    expect(harness.drafts.draftFor('bot-a'), isEmpty);
+    expect(harness.controller.state, DictationState.stopping);
+
+    harness.say('segment', {'text': 'and a second thought'});
+    await settle();
+    await stopped;
+    expect(harness.controller.state, DictationState.cleaning);
+    expect(harness.controller.active, isFalse);
+    expect(harness.drafts.draftFor('bot-a'), 'and a second thought');
+    harness.controller.dispose();
+  });
+
+  test('the overlay is capturing as soon as the microphone is open', () async {
+    final harness = Harness(deferSocket: true);
+    await harness.controller.start('bot-a');
+    await settle();
+    expect(harness.controller.state, DictationState.capturing);
+    expect(harness.controller.elapsed.value, Duration.zero);
     harness.controller.dispose();
   });
 
@@ -149,10 +166,12 @@ void main() {
 
       // The person moves to another Bot while the words are still in flight.
       harness.drafts.setDraft('bot-b', 'typed into B');
-      harness.say('segment', {'text': 'said into A'});
-      await settle();
+    unawaited(harness.controller.stop());
+    await settle();
+    harness.say('segment', {'text': 'said into A'});
+    await settle();
 
-      expect(harness.drafts.draftFor('bot-a'), 'said into A');
+    expect(harness.drafts.draftFor('bot-a'), 'said into A');
       expect(harness.drafts.draftFor('bot-b'), 'typed into B');
       expect(harness.controller.context, 'bot-a');
       harness.controller.dispose();
@@ -166,6 +185,7 @@ void main() {
     harness.say('ready');
     harness.say('segment', {'text': 'half a thought'});
     await settle();
+    expect(harness.drafts.draftFor('bot-a'), isEmpty);
 
     harness.say('error', {
       'message': 'the upstream went away',
@@ -174,6 +194,7 @@ void main() {
     await settle();
     expect(harness.controller.state, DictationState.error);
     expect(harness.controller.error, 'the upstream went away');
+    // An error flushes what was held, so a failed stop still keeps the words.
     expect(harness.drafts.draftFor('bot-a'), 'half a thought');
     expect(harness.socket.closed, isTrue);
     harness.controller.dispose();
@@ -189,6 +210,7 @@ void main() {
     harness.say('ready');
     harness.say('segment', {'text': 'never acknowledged'});
     await settle();
+    expect(harness.drafts.draftFor('bot-a'), isEmpty);
 
     await harness.controller.stop();
     expect(harness.controller.state, DictationState.done);
@@ -226,6 +248,8 @@ void main() {
     await harness.controller.start('bot-a');
     await settle();
     harness.say('ready');
+    await settle();
+    unawaited(harness.controller.stop());
     await settle();
     harness.say('segment', {'text': 'and a thought'});
     await settle();
@@ -381,23 +405,25 @@ void main() {
       harness.say('ready');
       harness.say('segment', {'text': 'um so check the Friday flights'});
       await settle();
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'typed first um so check the Friday flights',
-      );
+      expect(harness.drafts.draftFor('bot-a'), 'typed first');
 
       // A `cleaning` that arrives while the person is still speaking is not a
       // capture that has finished, and is ignored.
       harness.say('cleaning');
       await settle();
       expect(harness.controller.state, DictationState.capturing);
+      expect(harness.drafts.draftFor('bot-a'), 'typed first');
 
       unawaited(harness.controller.stop());
       await settle();
       harness.say('cleaning');
       await settle();
       expect(harness.controller.state, DictationState.cleaning);
-      expect(harness.controller.active, isTrue);
+      expect(harness.controller.active, isFalse);
+      expect(
+        harness.drafts.draftFor('bot-a'),
+        'typed first um so check the Friday flights',
+      );
 
       harness.say('cleaned', {'text': 'Check the Friday flights.'});
       harness.say('final');
@@ -573,6 +599,11 @@ void main() {
       harness.say('cleaning');
       await settle();
       expect(harness.controller.state, DictationState.cleaning);
+      expect(harness.controller.active, isFalse);
+      expect(
+        harness.drafts.draftFor('bot-a'),
+        'um so check the Friday flights',
+      );
 
       await Future<void>.delayed(const Duration(milliseconds: 80));
       await settle();
@@ -617,53 +648,55 @@ void main() {
       await harness.controller.start('bot-a');
       await settle();
       harness.say('ready');
+      unawaited(harness.controller.stop());
+      await settle();
       harness.say('segment', {'text': 'and then said'});
       await settle();
       expect(harness.drafts.draftFor('bot-a'), 'typed first and then said');
       harness.controller.dispose();
     });
 
-    test('what is typed during the capture is not written over', () async {
-      final harness = Harness(finalTimeout: const Duration(milliseconds: 20));
+    test('what is typed after the words land is not written over', () async {
+      final harness = Harness();
       harness.drafts.setDraft('bot-a', 'typed first');
       await harness.controller.start('bot-a');
       await settle();
       harness.say('ready');
+      unawaited(harness.controller.stop());
+      await settle();
       harness.say('segment', {'text': 'said'});
       await settle();
       expect(harness.drafts.draftFor('bot-a'), 'typed first said');
 
-      // The person types on the end while the next segment is still coming.
+      // The person types on the end while the tidy-up is still coming.
       harness.drafts.setDraft('bot-a', 'typed first said and typed more');
-      harness.say('segment', {'text': 'aloud'});
+      harness.say('cleaned', {'text': 'Said.'});
+      harness.say('final');
       await settle();
       expect(
         harness.drafts.draftFor('bot-a'),
-        'typed first said aloud and typed more',
-      );
-
-      await harness.controller.stop();
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'typed first said aloud and typed more',
+        'typed first Said. and typed more',
       );
       harness.controller.dispose();
     });
 
     test(
-      'an edit inside the transcript stops it writing, and keeps both',
+      'an edit inside the landed transcript refuses the tidy-up',
       () async {
         final harness = Harness();
         await harness.controller.start('bot-a');
         await settle();
         harness.say('ready');
+        unawaited(harness.controller.stop());
+        await settle();
         harness.say('segment', {'text': 'recognised wrongly'});
         await settle();
 
         // The person corrects the transcription itself. Its span is gone, so
-        // guessing where the next words go would lose their correction.
+        // swapping in the tidy-up would lose their correction.
         harness.drafts.setDraft('bot-a', 'recognised rightly');
-        harness.say('segment', {'text': 'and more'});
+        harness.say('cleaned', {'text': 'Recognised wrongly.'});
+        harness.say('final');
         await settle();
         expect(harness.drafts.draftFor('bot-a'), 'recognised rightly');
         harness.controller.dispose();

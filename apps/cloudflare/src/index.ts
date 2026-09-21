@@ -182,10 +182,7 @@ import {
   type VoiceDictationCleanupV1,
 } from "./voice-dictation.js";
 import { createFrockAiGatewayHostV1 } from "./frock-ai.js";
-import {
-  FROCK_AI_DEFAULT_MODEL,
-  gatewayModelForFrockRequestV1,
-} from "@frockbot/providers/frock-ai/catalog";
+import { VOICE_DICTATION_CLEANUP_MODEL_V1 } from "@frockbot/app/voice/dictation-cleanup";
 import { voiceDictationConfiguredV1 } from "@frockbot/app/voice/dictation-upstream";
 import { voiceAssistantEdgeTimingOfV1 } from "@frockbot/app/voice/diagnostics";
 import type { VoiceGatewayDependencies } from "./contracts.js";
@@ -1945,11 +1942,7 @@ function voiceDictationCleanup(
       });
       const model =
         env.VOICE_DICTATION_CLEANUP_MODEL?.trim() ||
-        gatewayModelForFrockRequestV1(
-          FROCK_AI_DEFAULT_MODEL,
-          false,
-          host.autoRoute,
-        );
+        VOICE_DICTATION_CLEANUP_MODEL_V1;
       const stream = await host.runChatCompletion(model, body, signal);
       return voiceDictationCleanupAnswerV1(await new Response(stream).text());
     },

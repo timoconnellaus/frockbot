@@ -88,6 +88,7 @@ class ChatPane extends StatefulWidget {
   /// Puts the raw transcript back into the draft.
   final VoidCallback? onRevertDictation;
   final ValueListenable<double>? dictationLevel;
+  final ValueListenable<Duration>? dictationElapsed;
 
   /// The Bot's character and chosen colour, shared by every avatar surface.
   final String? background;
@@ -124,6 +125,7 @@ class ChatPane extends StatefulWidget {
     this.canRevertDictation,
     this.onRevertDictation,
     this.dictationLevel,
+    this.dictationElapsed,
     this.background,
     this.primary,
     this.overlay,
@@ -512,6 +514,7 @@ class _ChatPaneState extends State<ChatPane> {
     canRevertDictation: widget.canRevertDictation,
     onRevertDictation: widget.onRevertDictation,
     dictationLevel: widget.dictationLevel,
+    dictationElapsed: widget.dictationElapsed,
   );
 
   @override
@@ -563,6 +566,7 @@ class ConversationView extends StatefulWidget {
   /// Puts the raw transcript back into the draft.
   final VoidCallback? onRevertDictation;
   final ValueListenable<double>? dictationLevel;
+  final ValueListenable<Duration>? dictationElapsed;
   final String? background;
   final String? primary;
 
@@ -595,6 +599,7 @@ class ConversationView extends StatefulWidget {
     this.canRevertDictation,
     this.onRevertDictation,
     this.dictationLevel,
+    this.dictationElapsed,
     this.background,
     this.primary,
     this.overlay,
@@ -700,6 +705,7 @@ class _ConversationViewState extends State<ConversationView> {
           canRevertDictation: widget.canRevertDictation,
           onRevertDictation: widget.onRevertDictation,
           dictationLevel: widget.dictationLevel,
+          dictationElapsed: widget.dictationElapsed,
         ),
       ),
     ),

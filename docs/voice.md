@@ -167,17 +167,24 @@ Server frames:
 | `{schemaVersion:1,type:"ready"}`               | Upstream accepted the session; buffered audio has been forwarded.                               |
 | `{schemaVersion:1,type:"delta",text}`          | Interim text so far, about half a second behind the speaker. Replaces the previous delta.       |
 | `{schemaVersion:1,type:"segment",text}`        | The transcript of a committed item — in practice one per capture, at `stop`.                    |
-| `{schemaVersion:1,type:"cleaning"}`            | Transcribed; the tidy-up is running. Nothing to write — the words are already in the draft.     |
+| `{schemaVersion:1,type:"cleaning"}`            | Transcribed; the tidy-up is running. The client has already landed the raw segment.             |
 | `{schemaVersion:1,type:"cleaned",text}`        | The tidied form of the whole capture, to replace its span. At most once, always before `final`. |
 | `{schemaVersion:1,type:"final"}`               | Everything captured before `stop` has been transcribed. The server closes after it.             |
 | `{schemaVersion:1,type:"notice",message}`      | Non-fatal: opening audio was truncated, and similar.                                            |
 | `{schemaVersion:1,type:"error",message,code?}` | Fatal; the server closes. `code` ∈ `unconfigured`, `upstream`, `timeout`, `limit`.              |
 
-The composer draft is `segments.join(" ") + " " + delta`. Stop flushes into an
-editable draft and never sends. The draft belongs to the Bot the capture started
-on: the client binds the capture to the composer context at start and writes
-only to that context's draft, so switching Bots mid-capture never writes into
-another Bot's draft.
+The client holds `delta` frames and does not write them to the draft — there
+are no live captions. The pill shows a waveform and an `mm:ss` clock. Stop
+spins until the committed `segment` arrives (about half a second), then that
+text lands in an editable draft and never sends. A tidy-up that follows is a
+swap in a field they can already type into. The draft belongs to the Bot the
+capture started on: the client binds the capture to the composer context at
+start and writes only to that context's draft, so switching Bots mid-capture
+never writes into another Bot's draft.
+
+The overlay starts with the press, the socket opens the moment the
+microphone does, and audio captured before `ready` is held on the client as
+well as the server, so the first words are not spent waiting for a handshake.
 
 A capture is one upstream item: deltas accumulate against it while the person
 speaks and the relay's commit at `stop` closes it, so the ordinary capture
@@ -197,8 +204,11 @@ before `final`, the relay offers the whole capture to a model to have those
 taken out, and hands the result back as `cleaned`.
 
 It runs on the server because the model is reached with a server-side
-credential, and it runs after the capture rather than during it because text
-that rewrites itself under the cursor is worse than text that is untidy.
+credential, and it runs after the raw transcript has landed rather than
+during the capture because text that rewrites itself under the cursor is
+worse than text that is untidy. The default model is Groq's
+`llama-3.1-8b-instant` through the deployment's AI Gateway, so the swap is a
+blink rather than another wait.
 
 What is asked for (`app/voice/dictation-cleanup.ts`): remove fillers,
 stutters, repetitions and abandoned false starts; resolve clear
@@ -223,21 +233,21 @@ the same in production.
 
 Every way this can fail ends on `final` with the raw transcript in the draft:
 no gateway configured, no allowance left, a transcript under 24 or over 12,000
-characters, a model that throws, a model that does not answer within 8 s, or
+characters, a model that throws, a model that does not answer within 4 s, or
 an answer a guard refuses. A capture the five-minute cap ended is not tidied
 at all. The spend is one model call per capture, booked against the account's
 own voice object before the model is asked (400 per UTC day, never refunded,
 and deliberately not part of the cap that decides whether a voice call may go
-on). `VOICE_DICTATION_CLEANUP_MODEL` pins the model; unset takes the ordinary
-default route.
+on). `VOICE_DICTATION_CLEANUP_MODEL` pins the model; unset is
+`groq/llama-3.1-8b-instant`.
 
 On the client, `cleaned` is applied through the same `DictationDraftRange`
 that every segment goes through, which is what makes it safe rather than
 carefully-written: a span the person has edited inside is already fenced and
 takes nothing more, and a draft that has been sent no longer contains the span
-at all, so a late tidy-up finds nothing to replace. While `cleaning` runs the
-composer shows the same finishing state as the commit before it, with the
-microphone already off. Afterwards the composer offers "Use what I said",
+at all, so a late tidy-up finds nothing to replace. The field is already
+theirs when `cleaning` runs — the overlay left with the committed segment.
+Afterwards the composer offers "Use what I said",
 which puts the raw transcript back through the same path. That offer is a
 question asked of the draft as it stands, on every composer rebuild, rather
 than a flag set when the tidy-up landed: it is withdrawn the moment the span
@@ -1465,9 +1475,11 @@ provider without streaming left without it), the browser speech gate and
 session (continuous streaming through pauses, sleep
 after 20 s quiet in `listening`, wake with pre-roll in order, mute, barge-in
 only on the stricter detector while speaking, refusal ends the call), the
-dictation controller (opening audio in order after `ready`, stop before
-ready, text after a Bot switch to the original draft, error keeps the draft,
-final timeout), microphone ownership, and the Flutter equivalents of each.
+dictation controller (opening audio in order after `ready`, microphone and
+socket in parallel, live captions held until the committed segment, stop
+before ready, text after a Bot switch to the original draft, error keeps the
+draft, final timeout), microphone ownership, and the Flutter equivalents of
+each.
 
 **Not verified.** Any live ElevenLabs session;
 any real microphone or speaker on any platform; Android runtime permission
@@ -1481,8 +1493,8 @@ no composer rendered). The live steps are in `docs/voice-live-checklist.md`.
 The relay waits for the initial `session.updated` before draining opening audio.
 On Stop it commits directly: turn detection is already off, so there is no
 automatic commit to guard against and no round trip to spend. Incremental
-OpenAI deltas are accumulated per item before publishing the composer's
-cumulative interim text. Regression tests cover configuration acknowledgment,
+OpenAI deltas are accumulated per item so a `stop` can land one committed
+segment rather than a live caption. Regression tests cover configuration acknowledgment,
 repeated deltas, and an upstream that refuses turn detection the way the real
 one does.
 

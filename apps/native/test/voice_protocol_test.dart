@@ -15,6 +15,16 @@ Object? decoded(String raw) => jsonDecode(raw);
 
 void main() {
   group('what the client says', () {
+    test('elapsed time is mm:ss and never jumps a digit', () {
+      expect(formatDictationElapsedV1(Duration.zero), '00:00');
+      expect(formatDictationElapsedV1(const Duration(seconds: 5)), '00:05');
+      expect(formatDictationElapsedV1(const Duration(seconds: 65)), '01:05');
+      expect(
+        formatDictationElapsedV1(const Duration(minutes: 100)),
+        '99:59',
+      );
+    });
+
     test('dictation start declares the one rate the server accepts', () {
       expect(decoded(encodeDictationStartV1()), {
         'schemaVersion': 1,

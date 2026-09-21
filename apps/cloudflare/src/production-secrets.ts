@@ -278,7 +278,7 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
     },
     {
       name: "VOICE_DICTATION_CLEANUP_MODEL",
-      why: "An optional `vars` entry pinning the model that tidies a dictated transcript; the default route when unset.",
+      why: "An optional `vars` entry pinning the model that tidies a dictated transcript; Groq's 8B instant class when unset.",
     },
     {
       name: "VOICE_DICTATION_UPSTREAM_URL",

@@ -2691,6 +2691,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                   ? dictation!.revertCleanup
                                   : null,
                               dictationLevel: dictation?.level,
+                              dictationElapsed: dictation?.elapsed,
                             ),
                     ),
                   ),

@@ -1,10 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   cleanupMaxTokensV1,
+  VOICE_DICTATION_CLEANUP_MODEL_V1,
   voiceDictationCleanupBodyV1,
   voiceDictationCleanupResultV1,
   voiceDictationCleanupWorthwhileV1,
 } from "./dictation-cleanup.js";
+
+describe("which model tidies a capture", () => {
+  test("is Groq's fastest chat model, so the swap after landing is a blink", () => {
+    expect(VOICE_DICTATION_CLEANUP_MODEL_V1).toBe("groq/llama-3.1-8b-instant");
+  });
+});
 
 describe("deciding whether to tidy at all", () => {
   test("a few words are not worth a model call", () => {

@@ -33,10 +33,10 @@ GEMINI_API_KEY=replace-with-a-google-ai-studio-api-key
 # Optional: a gateway model for the end-of-call memory update instead of the
 # platform's Auto route. The call itself has no chat model.
 # VOICE_ASSISTANT_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
-# Optional: the model that tidies a dictated transcript once the person stops
-# recording, instead of the default route. No `AI` binding means no tidying
-# and the raw transcript stands.
-# VOICE_DICTATION_CLEANUP_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+# Optional: the model that tidies a dictated transcript once the raw text
+# has landed, instead of Groq's 8B instant class. No `AI` binding means no
+# tidying and the raw transcript stands.
+# VOICE_DICTATION_CLEANUP_MODEL=groq/llama-3.1-8b-instant
 
 # Connected apps: the provider project key. Absent, no app can be connected
 # and the Connectors rows for apps say so.

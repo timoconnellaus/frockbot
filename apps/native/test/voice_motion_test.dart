@@ -95,6 +95,7 @@ void main() {
         final strip = find.byKey(const ValueKey('dictation-strip'));
         final stop = find.byKey(const ValueKey('dictation-stop'));
         final discard = find.byKey(const ValueKey('dictation-discard'));
+        final clock = find.byKey(const ValueKey('dictation-elapsed'));
         void checkFrame() {
           // The capture happens inside the field's own frame: the composer
           // keeps the room it had, so nothing in the thread above it moves.
@@ -102,11 +103,12 @@ void main() {
           final meter = tester.getRect(strip);
           final button = tester.getRect(stop);
           final bin = tester.getRect(discard);
-          // Throw it away at one end, keep it at the other, and the sound
-          // fills everything between them.
+          final elapsed = tester.getRect(clock);
+          // Throw it away, the clock, the sound, then keep it.
+          expect(bin.right, lessThanOrEqualTo(elapsed.left));
+          expect(elapsed.right, lessThanOrEqualTo(meter.left));
           expect(meter.right, lessThanOrEqualTo(button.left));
-          expect(bin.right, lessThanOrEqualTo(meter.left));
-          expect(meter.width, greaterThan(button.left - bin.right - 4));
+          expect(find.text('00:00'), findsOneWidget);
           expect(button.bottom, lessThanOrEqualTo(composer.bottom));
           expectUnclippedControl(tester, stop);
           expect(tester.takeException(), isNull);
@@ -534,7 +536,8 @@ void main() {
         );
         expect(find.bySemanticsLabel('Starting dictation'), findsOneWidget);
         expect(find.byType(TextField).hitTestable(), findsNothing);
-        expect(find.byType(Text).hitTestable(), findsNothing);
+        expect(find.byKey(const ValueKey('dictation-elapsed')), findsOneWidget);
+        expect(find.text('00:00'), findsOneWidget);
         expect(find.byKey(const ValueKey('dictation-discard')), findsOneWidget);
         // Stop is usable even before microphone permission completes.
         await tester.tap(find.byTooltip('Stop dictation'));

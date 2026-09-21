@@ -8,6 +8,7 @@
 library;
 
 import 'dart:math' as math;
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
 import '../voice/dictation.dart';
 import '../voice/motion.dart';
+import '../voice/protocol.dart';
 import '../voice/waveform.dart';
 import 'semantics.dart';
 import 'chat_icons.dart';
@@ -225,6 +227,9 @@ class Composer extends StatefulWidget {
   /// The capture level, 0..1, which is what the bars are drawn from.
   final ValueListenable<double>? dictationLevel;
 
+  /// How long the capture has been running, drawn as `00:05` on the pill.
+  final ValueListenable<Duration>? dictationElapsed;
+
   /// Whether the draft holds a tidied transcript that can be put back, asked
   /// of the draft as it stands on every build. The offer disappears the moment
   /// they edit inside it, because from then on the words in the field are
@@ -251,6 +256,7 @@ class Composer extends StatefulWidget {
     this.voiceClosing = false,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
+    this.dictationElapsed,
     this.canRevertDictation,
     this.onRevertDictation,
   });
@@ -600,11 +606,12 @@ class _ComposerState extends State<Composer> {
     return SafeArea(top: false, child: draft);
   }
 
-  /// The capture in the field's place: the meter, the way out, and the way to
-  /// throw it away.
+  /// The capture in the field's place: the meter, the elapsed time, the way
+  /// out, and the way to throw it away.
   ///
-  /// The draft is not editable while it runs — the words are still arriving —
-  /// so the field is stood in for rather than disabled in place.
+  /// The draft is not editable while it runs — there are no captions, and the
+  /// words have not landed — so the field is stood in for rather than
+  /// disabled in place.
   Widget _capturePill(BuildContext context, double oneLine) {
     final theme = Theme.of(context);
     final extent = composerControlExtent(oneLine);
@@ -612,6 +619,7 @@ class _ComposerState extends State<Composer> {
       height: oneLine,
       child: Center(child: button),
     );
+    final listening = !widget.dictationState.finishing;
     return Container(
       key: const ValueKey('dictation-pill'),
       decoration: BoxDecoration(
@@ -627,10 +635,12 @@ class _ComposerState extends State<Composer> {
       child: Row(
         children: [
           // The way out of the capture at one end, the way to keep it at the
-          // other, and everything between them is the sound: the strip runs
-          // the width of whatever the row happens to be, so a phone and a
-          // desktop both show as much of the capture as they have room for.
+          // other, and everything between them is the sound and the clock:
+          // the strip runs the width of whatever the row happens to be, so a
+          // phone and a desktop both show as much of the capture as they
+          // have room for.
           corner(_discardButton(context, extent)),
+          _elapsed(context),
           Expanded(
             child: Semantics(
               container: true,
@@ -652,9 +662,7 @@ class _ComposerState extends State<Composer> {
                           VoiceIds.composerDictationLevel,
                           DictationWaveform(
                             level: widget.dictationLevel!,
-                            capturing:
-                                widget.dictationState ==
-                                DictationState.capturing,
+                            capturing: listening,
                           ),
                         ),
                 ),
@@ -671,6 +679,39 @@ class _ComposerState extends State<Composer> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// `00:05`, reserved at a fixed width so the waveform does not jump as
+  /// the seconds roll.
+  Widget _elapsed(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.labelLarge?.copyWith(
+      fontFeatures: const [FontFeature.tabularFigures()],
+      fontWeight: FontWeight.w600,
+      color: theme.colorScheme.onSurface,
+    );
+    final listenable = widget.dictationElapsed;
+    Widget clock(Duration value) => identified(
+      VoiceIds.composerDictationElapsed,
+      Text(
+        formatDictationElapsedV1(value),
+        key: const ValueKey('dictation-elapsed'),
+        style: style,
+        textAlign: TextAlign.center,
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, right: 8),
+      child: SizedBox(
+        width: 48,
+        child: listenable == null
+            ? clock(Duration.zero)
+            : ValueListenableBuilder<Duration>(
+                valueListenable: listenable,
+                builder: (context, value, _) => clock(value),
+              ),
       ),
     );
   }
