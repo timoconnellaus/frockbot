@@ -21,11 +21,11 @@
 /// capture that cannot cancel its own playback, silence stands in for the
 /// microphone while the reply plays; that is the controller's rule, not this
 /// gate's). [quietForMs] exists for the one policy that does stop the audio:
-/// twenty continuous seconds of quiet while listening.
+/// two minutes of quiet while listening.
 ///
 /// Pure Dart over a level and a timestamp: no audio API, no timers, no clock
 /// of its own. The caller supplies the timestamps, which is what lets a test
-/// run twenty seconds of silence in a millisecond.
+/// run two minutes of silence in a millisecond.
 library;
 
 import 'dart:collection';
