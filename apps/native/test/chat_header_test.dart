@@ -290,7 +290,7 @@ void main() {
 
   for (final scale in [1.0, 2.0]) {
     testWidgets(
-      'on a phone the chrome is Back, the Bot, and the Computer at ${scale}x',
+      'on a phone the chrome is Back, the name, and the panel at ${scale}x',
       (tester) async {
         tester.view.physicalSize = const Size(390, 900);
         tester.view.devicePixelRatio = 1;
@@ -304,8 +304,7 @@ void main() {
               textScale: scale,
               phone: true,
               onBack: () => opened.add('Bots'),
-              onOpenBot: () => opened.add('Bot'),
-              onComputer: () => opened.add('Computer'),
+              onTogglePanel: () => opened.add('Panel'),
             ),
             size: const Size(390, 900),
             scaler: TextScaler.linear(scale),
@@ -315,22 +314,19 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(find.byTooltip('Routines'), findsNothing);
         expect(find.byTooltip('Applets'), findsNothing);
-        expect(byIdentifier(ShellIds.botPanelToggle), findsOneWidget);
+        expect(find.byTooltip('Computer'), findsNothing);
+        expect(byIdentifier(ShellIds.botPanelToggle), findsNothing);
+        expect(find.text('My very long research assistant'), findsOneWidget);
         await tester.tap(byIdentifier(ShellIds.sidebarToggle));
-        await tester.tap(byIdentifier(ShellIds.botPanelToggle));
-        await tester.tap(byIdentifier(ShellIds.computerDestination));
-        expect(opened, ['Bots', 'Bot', 'Computer']);
+        await tester.tap(byIdentifier(ShellIds.rightPanelToggle));
+        expect(opened, ['Bots', 'Panel']);
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,
-          chatHeaderChromeTop + chatHeaderChromeDrop,
+          chatHeaderChromeTop,
         );
         expect(
-          tester
-              .getTopLeft(
-                find.byTooltip('Open My very long research assistant'),
-              )
-              .dy,
-          chatHeaderChromeTop + chatHeaderChromeDrop,
+          tester.getTopLeft(find.byTooltip('Show the panel')).dy,
+          chatHeaderChromeTop,
         );
       },
     );
@@ -399,9 +395,7 @@ void main() {
     );
   });
 
-  testWidgets('on a phone the name pill sits next to the companion', (
-    tester,
-  ) async {
+  testWidgets('on a phone the name sits next to the companion', (tester) async {
     tester.view.physicalSize = const Size(390, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -411,8 +405,7 @@ void main() {
           name: 'Rosemary',
           phone: true,
           onBack: () {},
-          onOpenBot: () {},
-          onComputer: () {},
+          onTogglePanel: () {},
           companion: CharacterAvatar(
             size: chatCompanionSize,
             cropToInk: true,
@@ -426,18 +419,24 @@ void main() {
     );
     await tester.pump();
     final companion = find.bySemanticsLabel('Bot is ready');
-    final name = find.byTooltip('Open Rosemary');
+    final name = find.text('Rosemary');
+    expect(find.byTooltip('Open Rosemary'), findsNothing);
+    expect(find.byTooltip('Computer'), findsNothing);
     expect(
       tester.getTopLeft(name).dx,
       closeTo(tester.getTopRight(companion).dx + 10, 0.5),
     );
     expect(
-      tester.getTopLeft(name).dy,
-      chatHeaderChromeTop + chatHeaderChromeDrop,
+      tester.getTopLeft(companion).dy,
+      chatHeaderChromeTop - chatHeaderCompanionLift,
     );
     expect(
-      tester.getTopLeft(find.byTooltip('Computer')).dx,
-      greaterThan(tester.getTopRight(name).dx),
+      tester.getTopLeft(find.byTooltip('Show the panel')).dy,
+      chatHeaderChromeTop,
+    );
+    expect(
+      tester.getTopLeft(find.byTooltip('Your Bots')).dy,
+      chatHeaderChromeTop,
     );
   });
 
@@ -515,14 +514,14 @@ void main() {
               name: 'Bob',
               phone: true,
               onBack: () {},
-              onOpenBot: () {},
+              onTogglePanel: () {},
             ),
           ),
         );
         await tester.pump();
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,
-          chatHeaderChromeTop + chatHeaderChromeDrop + desktopTitleBarBand,
+          chatHeaderChromeTop + desktopTitleBarBand,
         );
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dx,
@@ -538,21 +537,22 @@ void main() {
     },
   );
 
-  testWidgets('the name is a frosted pill on a phone', (tester) async {
+  testWidgets('the panel switch is a frosted pill on a phone', (tester) async {
     await tester.pumpWidget(
-      host(ChatHeader(name: 'Rosemary', phone: true, onOpenBot: () {})),
+      host(ChatHeader(name: 'Rosemary', phone: true, onTogglePanel: () {})),
     );
     await tester.pump();
     final material = tester.widget<Material>(
       find
           .descendant(
-            of: find.byTooltip('Open Rosemary'),
+            of: find.byTooltip('Show the panel'),
             matching: find.byType(Material),
           )
           .first,
     );
     expect(material.color, isNot(Colors.transparent));
     expect(material.color!.a, lessThan(1));
+    expect(find.byTooltip('Open Rosemary'), findsNothing);
   });
 
   testWidgets('the panel switch has no stadium around it', (tester) async {

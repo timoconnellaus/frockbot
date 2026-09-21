@@ -953,7 +953,7 @@ export async function press(scope: Locator): Promise<void> {
  * Open the Bot page: what the selected Bot is doing, and the doors to the rest
  * of it.
  *
- * A phone still opens it from the Bot's name in the conversation bar. A desk
+ * A phone opens it from the panel switch in the conversation bar. A desk
  * already shows it in the column beside the thread — or several backs from a
  * nested page (Settings, then Plugins), or the panel switch if the column is
  * closed.
@@ -1016,6 +1016,15 @@ export async function expectBotOpen(page: Page, name: string): Promise<void> {
     ]) {
       if (!(await scope.isVisible().catch(() => false))) continue;
       if ((await spokenText(scope)).includes(name)) return;
+    }
+    if (
+      await page
+        .getByText(name, { exact: true })
+        .first()
+        .isVisible()
+        .catch(() => false)
+    ) {
+      return;
     }
     throw new Error(`the selected Bot is not ${name}`);
   }).toPass({ timeout: 30_000 });

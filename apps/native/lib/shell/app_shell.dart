@@ -2537,21 +2537,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ),
       connection: _selectedConnection,
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
-      // A phone's bar is the way back, the Bot, and the Computer. A desk
-      // opens those from the panel beside the thread, so the overlay keeps
-      // only the switch that shows or hides that column. Back still leaves
-      // the page: the call stays up in the header, or the dock on another
-      // Bot.
+      // A phone's bar is Back and the panel switch. A desk opens the Bot
+      // page and the Computer from the column beside the thread, so the
+      // overlay keeps only the switch that shows or hides that column.
+      // Back still leaves the page: the call stays up in the header, or
+      // the dock on another Bot.
       onBack: single ? _openBack : null,
       phone: single,
-      onOpenBot: single ? () => _openPanel('bot-page') : null,
+      onOpenBot: null,
       computerRunning:
           computer?.available == true &&
           (computer!.state.running || _botComputerRunning),
-      onComputer: computer?.available == true && single
-          ? () => unawaited(_openComputerViewer())
-          : null,
-      onTogglePanel: single || rightPanel == null ? null : _togglePanel,
+      onComputer: null,
+      onTogglePanel: single
+          ? () => _openPanel('bot-page')
+          : rightPanel == null
+          ? null
+          : _togglePanel,
       panelShown: tier == ShellTier.triple ? !panelCollapsed : panelOpen,
     );
 

@@ -497,9 +497,9 @@ test("the canvas fills a phone window and Back restores the Bot page", async ({
 
   // On a phone nothing opens itself: the Applets are a row on the Bot's page
   // rather than a screen the User did not ask for, and the Bot's page is one
-  // tap from the conversation, on the Bot's name.
+  // tap from the conversation, on the panel switch.
   await expect(sem(page, "applet-canvas")).toHaveCount(0);
-  await press(sem(page, "bot-panel-toggle"));
+  await press(sem(page, "right-panel-toggle"));
   const chip = sem(page, "bot-page-applets-all");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await expectNoHorizontalOverflow(page);

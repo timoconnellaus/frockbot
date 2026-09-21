@@ -21,14 +21,15 @@ const chatCompanionSize = 88.0;
 const chatHeaderFadeHeight = 168.0;
 
 /// Shared inset from the top of the conversation. The companion sits a
-/// little above it and the name plus panel switch a little below, so the
-/// title lines up with the drawing's visual mass rather than its top edge.
+/// little above it. At a desk the name and panel switch sit a little
+/// below so the title meets the drawing's visual mass. On a phone the
+/// pills stay on this inset and the companion rises to them.
 const chatHeaderChromeTop = 20.0;
 
 /// How far the companion sits above [chatHeaderChromeTop].
 const chatHeaderCompanionLift = 8.0;
 
-/// How far the name and chrome pills sit below [chatHeaderChromeTop].
+/// How far the desk name and panel switch sit below [chatHeaderChromeTop].
 const chatHeaderChromeDrop = 8.0;
 
 /// Inset from the conversation's left and right for the companion and pills.
@@ -44,14 +45,14 @@ const chatHeaderThreadPadding = 28.0;
 /// the name, a mark that says why, and the Computer. In a conversation it is
 /// an overlay — a fade, the Bot's companion at the top-left with the name
 /// immediately to its right, and the panel switch on the far right. A phone
-/// keeps Back and the Bot's name as pills, and the Computer, because there
-/// is no column beside the thread.
+/// keeps Back and that same panel switch, because the conversation is a
+/// page over the list.
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
 
-  /// Whether this is a phone's chrome, where the name is always a pill and
-  /// the panel is a page rather than a column.
+  /// Whether this is a phone's chrome, where Back and the panel switch stay
+  /// on the original inset and the panel is a page rather than a column.
   final bool phone;
 
   /// Back to the Bot list. The phone's, where the conversation is a page.
@@ -65,8 +66,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final bool computerRunning;
   final ConnectionState connection;
 
-  /// Shows or hides the panel beside the conversation. Null on a phone, where
-  /// the panel's entries are pages and there is no column to hide.
+  /// Shows or hides the panel beside the conversation. On a phone it opens
+  /// the Bot page, the same door the desk keeps on the far right.
   final VoidCallback? onTogglePanel;
   final bool panelShown;
 
@@ -167,7 +168,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (onBack != null) ...[
-                  _droppedChrome(
+                  _chromeInset(
                     identified(
                       ShellIds.sidebarToggle,
                       _ChromePill(
@@ -186,11 +187,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 ],
                 if (voiceChrome != null)
                   Expanded(
-                    child: _droppedChrome(
-                      Align(
-                        alignment: Alignment.topLeft,
-                        child: voiceChrome!,
-                      ),
+                    child: _chromeInset(
+                      Align(alignment: Alignment.topLeft, child: voiceChrome!),
                     ),
                   )
                 else ...[
@@ -202,7 +200,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                     const SizedBox(width: 10),
                   ],
                   Expanded(
-                    child: _droppedChrome(
+                    child: _chromeInset(
                       Align(
                         alignment: Alignment.topLeft,
                         child: _overlayName(context),
@@ -212,7 +210,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 ],
                 if (onComputer != null) ...[
                   const SizedBox(width: 8),
-                  _droppedChrome(
+                  _chromeInset(
                     identified(
                       ShellIds.computerDestination,
                       _glyphPill(
@@ -226,14 +224,20 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 ],
                 if (onTogglePanel != null) ...[
                   const SizedBox(width: 8),
-                  _droppedChrome(
+                  _chromeInset(
                     identified(
                       ShellIds.rightPanelToggle,
-                      _glyphButton(
-                        panelShown ? 'Hide the panel' : 'Show the panel',
-                        ChatIconKind.panel,
-                        onTogglePanel,
-                      ),
+                      phone
+                          ? _glyphPill(
+                              panelShown ? 'Hide the panel' : 'Show the panel',
+                              ChatIconKind.panel,
+                              onTogglePanel,
+                            )
+                          : _glyphButton(
+                              panelShown ? 'Hide the panel' : 'Show the panel',
+                              ChatIconKind.panel,
+                              onTogglePanel,
+                            ),
                     ),
                   ),
                 ],
@@ -245,14 +249,16 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
-  Widget _droppedChrome(Widget child) => Padding(
-    padding: const EdgeInsets.only(top: chatHeaderChromeDrop),
-    child: child,
-  );
+  Widget _chromeInset(Widget child) => phone
+      ? child
+      : Padding(
+          padding: const EdgeInsets.only(top: chatHeaderChromeDrop),
+          child: child,
+        );
 
   /// The Bot's name sits immediately to the right of the companion. On a
-  /// phone it is still the frosted door into the Bot's page. At a desk the
-  /// page lives in the column, so the name is only the title.
+  /// phone the Bot page is the panel switch on the far right, so the name
+  /// is only the title, as it is at a desk.
   Widget _overlayName(BuildContext context) {
     if (onOpenBot != null) {
       return identified(
