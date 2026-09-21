@@ -76,6 +76,41 @@ class VoiceEnvelope {
   }
 }
 
+/// Peak-hold automatic gain for a scrolling dictation strip.
+///
+/// A new peak becomes the ceiling immediately, so the loudest moment of the
+/// current voice always draws at full height — a whisper and a shout both
+/// bounce to the top of the pill. The ceiling then falls with time constant
+/// [release], so quieter syllables after a shout shrink rather than the
+/// display pumping every gap up to full height, and so a quiet speaker is
+/// not stuck under a ceiling they set by clearing their throat.
+class VoicePeakGain {
+  VoicePeakGain({this.release = 1.6});
+
+  /// Seconds for the ceiling to fall to 1/e of itself.
+  final double release;
+
+  /// The loudest recent envelope. Zero until the first non-zero sample.
+  double ceiling = 0;
+
+  /// Lowers the ceiling by [seconds] of release. Audio-rate samples pass
+  /// 0 and only raise it.
+  void decay(double seconds) {
+    if (seconds <= 0 || ceiling <= 0) return;
+    ceiling *= math.exp(-seconds / release);
+    if (ceiling < 1e-3) ceiling = 0;
+  }
+
+  /// [level] as a fraction of the current talking volume, 0..1.
+  double map(double level) {
+    if (!level.isFinite || level <= 0) return 0;
+    if (level > ceiling) ceiling = level;
+    return math.min(1, level / ceiling);
+  }
+
+  void reset() => ceiling = 0;
+}
+
 const int voiceMeterBars = 5;
 
 /// Everything the painter reads, advanced once per display frame.
@@ -338,6 +373,8 @@ class _MeterPainter extends CustomPainter {
 /// moves whether or not anyone is speaking. Silence is a row of dots
 /// travelling left; a word is a hill travelling left with them. A strip that
 /// stopped moving when nobody spoke would read as a capture that had died.
+/// Peaks are normalised to the recent talking volume, so a whisper and a
+/// shout both bounce to the top of the pill.
 ///
 /// Drawn the same way as [VoiceWaveform]: a [Ticker] pushes one bar into a
 /// ring buffer every [dictationBarPeriod] and the painter repaints off its
@@ -358,7 +395,16 @@ class _DictationTrack extends ChangeNotifier {
   /// whatever happened to be in flight at the moment the ticker fired.
   double peak = 0;
   double _carry = 0;
-  bool capturing = true;
+  final VoicePeakGain gain = VoicePeakGain();
+  bool _capturing = true;
+
+  bool get capturing => _capturing;
+
+  set capturing(bool value) {
+    // A new capture must not inherit the last one's shout as its ceiling.
+    if (value && !_capturing) gain.reset();
+    _capturing = value;
+  }
 
   /// Called by the painter with the width it was given, so it never notifies:
   /// a repaint raised from inside a paint is a framework assertion, and the
@@ -383,6 +429,7 @@ class _DictationTrack extends ChangeNotifier {
   /// the display's refresh rate is.
   void advance(double seconds) {
     if (bars.isEmpty) return;
+    gain.decay(seconds);
     _carry += seconds;
     final period = dictationBarPeriod.inMicroseconds / 1e6;
     var pushed = false;
@@ -392,7 +439,7 @@ class _DictationTrack extends ChangeNotifier {
         bars[i] = bars[i + 1];
       }
       bars[bars.length - 1] = capturing
-          ? math.max(dictationBarFloor, peak)
+          ? math.max(dictationBarFloor, gain.map(peak))
           : dictationBarFloor;
       peak = 0;
       pushed = true;

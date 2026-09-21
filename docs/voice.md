@@ -1314,6 +1314,12 @@ rest and follows Flutter's ticker lifecycle. Reduced motion snaps to the
 level and state without the machine's own motion. Controls keep 48-point
 touch targets in both themes.
 
+The composer's dictation strip is a scrolling history, not those five pills.
+Each bar is the peak of 60 ms, then peak-hold automatic gain
+(`VoicePeakGain`) maps it onto the recent talking volume so a whisper and a
+shout both bounce to the top of the pill. The ceiling attacks instantly and
+falls with a 1.6 s time constant; a new capture resets it.
+
 ### Frames a client must ignore
 
 The Cloudflare voice SDK used to send `cf_agent_identity`,
