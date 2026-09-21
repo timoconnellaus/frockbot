@@ -427,8 +427,8 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
 
   // The phone: the same published Applet, filling the window. A phone
   // opens on the Bot list, a conversation is a page over it, and the
-  // conversation's bar is Back, the Bot's name and the Computer — the Applets
-  // are a row on the Bot's page, which that name opens.
+  // conversation's bar is Back and the panel switch — the Applets
+  // are a row on the Bot's page, which that switch opens.
   await page.setViewportSize(PHONE);
   await page.reload();
   await expect(sem(page, "shell-sidebar")).toBeVisible({ timeout: 120_000 });
@@ -438,7 +438,7 @@ test("a Bot writes, checks and publishes an Applet, and its tool reaches the Bot
       .filter({ hasText: "Builder" })
       .first(),
   );
-  await press(sem(page, "bot-panel-toggle"));
+  await press(sem(page, "right-panel-toggle"));
   const chip = sem(page, "bot-page-applets-all");
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await shot(page, "phone-chip");

@@ -208,7 +208,7 @@ void main() {
     tester,
   ) async {
     final phone = await shell(tester, size: const Size(390, 844));
-    await tester.tap(identifiedBy(ShellIds.botPanelToggle));
+    await tester.tap(identifiedBy(ShellIds.rightPanelToggle));
     await tester.pumpAndSettle();
     await tester.ensureVisible(identifiedBy(SettingsIds.botPageAppletsAll));
     await tester.pumpAndSettle();

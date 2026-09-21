@@ -202,7 +202,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.widgetWithText(ChatHeader, 'Rosemary'), findsOneWidget);
       expect(identifiedBy(ShellIds.sidebarToggle), findsOneWidget);
-      expect(identifiedBy(ShellIds.botPanelToggle), findsOneWidget);
+      expect(identifiedBy(ShellIds.rightPanelToggle), findsOneWidget);
+      expect(identifiedBy(ShellIds.botPanelToggle), findsNothing);
       expect(find.byTooltip('Routines'), findsNothing);
       expect(identifiedBy(ShellIds.sidebar), findsNothing);
 

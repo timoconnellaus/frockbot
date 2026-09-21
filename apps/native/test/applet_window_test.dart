@@ -68,7 +68,7 @@ void main() {
       if (width > 640) {
         await tester.tap(identifiedBy(SettingsIds.botPageAppletsAll));
       } else {
-        await tester.tap(identifiedBy(ShellIds.botPanelToggle));
+        await tester.tap(identifiedBy(ShellIds.rightPanelToggle));
         await tester.pumpAndSettle();
         await tester.ensureVisible(identifiedBy(SettingsIds.botPageAppletsAll));
         await tester.pumpAndSettle();

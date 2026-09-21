@@ -317,7 +317,7 @@ test("the Applets canvas fills the phone window", async ({
       .filter({ hasText: "Builder" })
       .first(),
   );
-  await press(sem(page, "bot-panel-toggle"));
+  await press(sem(page, "right-panel-toggle"));
 
   // On a phone nothing opens itself: the focused Applet is a control in the
   // Bot page, not a screen the User did not ask for.

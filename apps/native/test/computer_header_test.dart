@@ -7,7 +7,6 @@ import 'package:frockbot_native/client/chat_controller.dart'
     show ConnectionState;
 import 'package:frockbot_native/shell/app_shell.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
-import 'package:frockbot_native/shell/chat_icons.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -99,37 +98,15 @@ void main() {
       await tester.pumpAndSettle();
       final chat = sessions.open('test-user', 'bot-1').controller;
       ChatHeader header() => tester.widget(find.byType(ChatHeader).first);
-      final desk = width > 640;
-      Color? iconColor() => IconTheme.of(
-        tester.element(
-          find.descendant(
-            of: find.byTooltip('Computer'),
-            matching: find.byType(ChatIcon),
-          ),
-        ),
-      ).color;
-      void expectComputerMark({required bool running}) {
-        // A desk opens Computer from the Bot page; the overlay keeps no icon.
-        if (desk) {
-          expect(find.byTooltip('Computer'), findsNothing);
-          return;
-        }
-        if (running) {
-          expect(
-            iconColor(),
-            computerRunningColor,
-            reason: 'Bot activity must turn the header blue without opening it',
-          );
-        } else {
-          expect(iconColor(), isNot(computerRunningColor));
-        }
+      void expectComputerMark() {
+        expect(find.byTooltip('Computer'), findsNothing);
       }
 
       chat.connection = ConnectionState.connected;
       chat.changed();
       await tester.pump();
       expect(header().connection, ConnectionState.connected);
-      expectComputerMark(running: false);
+      expectComputerMark();
       api.started = true;
       api.events = [
         {
@@ -155,7 +132,7 @@ void main() {
           'bot-1',
         );
       }
-      expectComputerMark(running: true);
+      expectComputerMark();
       if (width == 390) {
         await tester.tap(identifiedBy(ShellIds.sidebarToggle));
         await tester.pump();
@@ -175,7 +152,7 @@ void main() {
           isNull,
         );
       }
-      expectComputerMark(running: false);
+      expectComputerMark();
       // A cached Session can change while another Bot is selected. Returning
       // reads that controller directly instead of a shell-side mirror.
       chat.connection = ConnectionState.reconnecting;
@@ -197,7 +174,7 @@ void main() {
           'bot-1',
         );
       }
-      expectComputerMark(running: true);
+      expectComputerMark();
       api.completed = true;
       await chat.invalidate();
       await tester.pump();
@@ -208,7 +185,7 @@ void main() {
           isNull,
         );
       }
-      expectComputerMark(running: false);
+      expectComputerMark();
       expect(api.commands, isEmpty);
       await tester.pumpWidget(const SizedBox());
       sessions.clear();

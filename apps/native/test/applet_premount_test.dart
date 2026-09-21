@@ -199,7 +199,7 @@ void main() {
 
       // The Applets row, the Applet list page, the one Applet: the page comes
       // up holding the same frame rather than building another.
-      await tester.tap(identifiedBy(ShellIds.botPanelToggle));
+      await tester.tap(identifiedBy(ShellIds.rightPanelToggle));
       await tester.pumpAndSettle();
       // The row sits under the settings, below the fold on a phone.
       await tester.ensureVisible(identifiedBy(SettingsIds.botPageAppletsAll));
