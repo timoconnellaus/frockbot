@@ -64,7 +64,7 @@ import '../voice/capture.dart';
 import '../voice/diagnostics.dart';
 import '../voice/dictation.dart';
 import '../voice/footer.dart';
-import '../voice/voice_mode.dart';
+import '../voice/call_chrome.dart';
 import '../voice/motion.dart';
 import '../voice/mic_ownership.dart';
 import '../voice/player.dart';
@@ -498,11 +498,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// a live one to it. Since the sidebar's list-root control went it is the
   /// only way in, so a call always names a Bot (ADR 0029).
   ///
-  /// It never ends a call, and cannot: while the call is with this Bot, voice
-  /// mode is drawn where the composer was, so the control is not there to
-  /// press. A call is ended from the surface that is drawing it — and a call
-  /// that is already over is not moved, it is replaced: the person pressed
-  /// the control to talk to this Bot.
+  /// It never ends a call: hang-up is the header chrome. A call that is
+  /// already over is not moved, it is replaced: the person pressed the
+  /// control to talk to this Bot.
   Future<void> _startOrSwitchVoice({required String botId}) {
     final session = voiceSession;
     if (!footerOpen || session == null || !session.active) {
@@ -530,11 +528,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// Opens the call's surface and starts the call in the one gesture.
   ///
-  /// The call's surface is on screen in the same frame as the press — voice
-  /// mode on this Bot's page, the footer below the shell for a call that is
-  /// with another. The capability probe was read at sign-in, so a deployment
-  /// without voice is refused here without a round trip; a probe that never
-  /// answered does not hold the press, and the socket speaks for itself.
+  /// The call's chrome is on screen in the same frame as the press — the
+  /// header pair on this Bot's page, the footer below the shell for a call
+  /// that is with another. The capability probe was read at sign-in, so a
+  /// deployment without voice is refused here without a round trip; a probe
+  /// that never answered does not hold the press, and the socket speaks for
+  /// itself.
   Future<void> _startVoice({required String botId}) async {
     if (voiceProbe.known && !voiceProbe.assistantAvailable) {
       _say(voiceUnavailableMessage);
@@ -1405,12 +1404,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     required Widget child,
   }) => wrap ? _botLookScope(key: key, theme: theme, child: child) : child;
 
-  PreferredSizeWidget _maybeThemedPreferred({
-    required ThemeData theme,
-    required bool wrap,
-    required PreferredSizeWidget child,
-  }) => wrap ? _ThemedPreferred(theme: theme, child: child) : child;
-
   /// Phone pages that stand in for the right panel pick up this Bot's look
   /// when it has one; otherwise they stay on the account Theme `_push` wraps.
   Widget _panelPage(Widget page) {
@@ -1495,23 +1488,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   /// The Work a subagent left behind, from voice mode's activity slot.
-  ///
-  /// The `voice/delegation` frame names the Turn, so that is what opens, and
-  /// nothing else does: a projection that has not caught up with it yet is a
-  /// tap that waits, never somebody else's Work. The call is not ended and
-  /// the page is not left: the run view opens over voice mode, the way it
-  /// opens over a thread.
-  void _openVoiceWork(String botId, String runId) {
-    final lines = projectRuns(
-      widget.sessions.open(widget.userId, botId).controller.runs,
-    );
-    for (final line in lines.reversed) {
-      if (line.runId != runId) continue;
-      _openRun(line);
-      return;
-    }
-  }
-
   void _openRun(TranscriptLine line) {
     if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
         ShellTier.single) {
@@ -2536,37 +2512,43 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final ownLook = _botHasOwnLook(bot);
     final botTheme = ownLook ? _botThemeOf(context, bot!) : accountTheme;
     final session = voiceSession;
-    // Voice mode is this Bot being the one on the call: its thread and its
-    // composer give way to the call itself (ADR 0031). A call with another
-    // Bot keeps the small dock instead, so looking at one Bot while talking
+    // This Bot is the one on the call: the header wears the pair, the
+    // composer control goes primary, and the dock stays off. A call with
+    // another Bot keeps the small dock, so looking at one Bot while talking
     // to another still works.
-    final voiceHere =
-        footerOpen &&
-        session != null &&
-        bot != null &&
-        voiceBotId == bot.botId.value;
+    final liveSession =
+        footerOpen && bot != null && voiceBotId == bot.botId.value
+        ? session
+        : null;
+    final voiceHere = liveSession != null;
     final rightPanel = _rightPanel();
     ChatHeader conversationHeader({Widget? companion}) => ChatHeader(
       name: _name(bot!),
-      companion: companion,
+      companion: voiceHere ? null : companion,
+      voiceChrome: liveSession == null
+          ? null
+          : VoiceCallChrome(
+              session: liveSession,
+              userInitials: widget.userId,
+              botName: _name(bot),
+              characterId: bot.avatar.characterId,
+              primary: bot.avatar.primary,
+              onEnd: () => unawaited(_endVoice(reason: 'end-button')),
+            ),
       connection: _selectedConnection,
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
       // A phone's bar is the way back, the Bot, and the Computer. A desk
       // opens those from the panel beside the thread, so the overlay keeps
-      // only the switch that shows or hides that column.
-      //
-      // In voice mode there is no Back (ADR 0029): the
-      // way out of the Bot you are talking to is to end
-      // the call, and a control that left the page with
-      // the call still running would be a trap.
-      voiceMode: voiceHere,
-      onBack: single && !voiceHere ? _openBack : null,
+      // only the switch that shows or hides that column. Back still leaves
+      // the page: the call stays up in the header, or the dock on another
+      // Bot.
+      onBack: single ? _openBack : null,
       phone: single,
       onOpenBot: single ? () => _openPanel('bot-page') : null,
       computerRunning:
           computer?.available == true &&
           (computer!.state.running || _botComputerRunning),
-      onComputer: computer?.available == true && (single || voiceHere)
+      onComputer: computer?.available == true && single
           ? () => unawaited(_openComputerViewer())
           : null,
       onTogglePanel: single || rightPanel == null ? null : _togglePanel,
@@ -2599,25 +2581,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             // would keep a gesture bar's worth of space above the footer.
             child: MediaQuery.removePadding(
               context: context,
-              removeBottom: footerOpen || footerExiting,
+              removeBottom: !voiceHere && (footerOpen || footerExiting),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   ShellLayout(
-                    header: bot == null || !voiceHere
-                        ? null
-                        : _maybeThemedPreferred(
-                            theme: botTheme,
-                            wrap: ownLook,
-                            child: conversationHeader(),
-                          ),
+                    header: null,
                     conversationOpen: bot != null && conversationOpen,
                     onBack: _openBack,
-                    // Voice mode is this Bot being the one on the call: the
-                    // page belongs to the conversation until it ends.
-                    voiceMode: voiceHere,
-                    onEndVoice: () =>
-                        unawaited(_endVoice(reason: 'system-back')),
                     panelOpen: panelOpen,
                     panelCollapsed: panelCollapsed,
                     onDismiss: () => setState(() => panelOpen = false),
@@ -2682,18 +2653,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       wrap: ownLook,
                       key: 'thread-theme-${bot?.botId.value ?? 'none'}',
                       theme: botTheme,
-                      child: voiceHere
-                          ? VoiceMode(
-                              key: ValueKey('voice-${bot.botId.value}'),
-                              session: session,
-                              botName: _name(bot),
-                              characterId: bot.avatar.characterId,
-                              primary: bot.avatar.primary,
-                              onEnd: () =>
-                                  unawaited(_endVoice(reason: 'end-button')),
-                              onOpenWork: _openVoiceWork,
-                            )
-                          : bot == null
+                      child: bot == null
                           ? NoConversation(
                               empty: bots.isEmpty,
                               failure: bots.isEmpty ? error : null,
@@ -2737,6 +2697,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 _startOrSwitchVoice(botId: bot.botId.value),
                               ),
                               voiceClosing: voiceClosing,
+                              voiceActive: voiceHere,
                               dictationState:
                                   dictation?.context == bot.botId.value
                                   ? dictation!.state
@@ -3430,16 +3391,4 @@ class _ExchangeScreenState extends State<_ExchangeScreen> {
       ),
     ),
   );
-}
-
-class _ThemedPreferred extends StatelessWidget implements PreferredSizeWidget {
-  final ThemeData theme;
-  final PreferredSizeWidget child;
-  const _ThemedPreferred({required this.theme, required this.child});
-
-  @override
-  Size get preferredSize => child.preferredSize;
-
-  @override
-  Widget build(BuildContext context) => Theme(data: theme, child: child);
 }

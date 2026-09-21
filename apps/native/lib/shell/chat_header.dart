@@ -69,8 +69,13 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final bool voiceMode;
 
   /// The Bot's companion, laid in the overlay at the same top inset as the
-  /// pills. Null on a call, and in chrome-only tests.
+  /// pills. Null while [voiceChrome] is up, and in chrome-only tests.
   final Widget? companion;
+
+  /// Compact call pair (you, the wave, the Bot) while this Bot is on a
+  /// call. Takes the companion's slot so the thread stays underneath.
+  /// Sized to its own cluster, never stretched across the header.
+  final Widget? voiceChrome;
 
   const ChatHeader({
     super.key,
@@ -86,6 +91,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.panelShown = false,
     this.voiceMode = false,
     this.companion,
+    this.voiceChrome,
   });
 
   double get _toolbarHeight => 52 * textScale.clamp(1, 3);
@@ -169,16 +175,25 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                   ),
                   const SizedBox(width: 8),
                 ],
-                if (companion != null) ...[
-                  IgnorePointer(child: companion!),
-                  const SizedBox(width: 10),
-                ],
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: _overlayName(context),
+                if (voiceChrome != null)
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: voiceChrome!,
+                    ),
+                  )
+                else ...[
+                  if (companion != null) ...[
+                    IgnorePointer(child: companion!),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: _overlayName(context),
+                    ),
                   ),
-                ),
+                ],
                 if (onComputer != null) ...[
                   const SizedBox(width: 8),
                   identified(

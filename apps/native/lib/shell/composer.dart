@@ -219,6 +219,10 @@ class Composer extends StatefulWidget {
   /// press that goes nowhere.
   final bool voiceClosing;
 
+  /// Whether this Bot is the one on the call. The control stays put and
+  /// wears the Bot's primary so the press that started it is still the mark.
+  final bool voiceActive;
+
   /// Whether this composer's Bot is the one being dictated into.
   final DictationState dictationState;
   bool get dictating => dictationState.active;
@@ -253,6 +257,7 @@ class Composer extends StatefulWidget {
     this.onDiscardDictation,
     this.onVoice,
     this.voiceClosing = false,
+    this.voiceActive = false,
     this.dictationState = DictationState.idle,
     this.dictationLevel,
     this.dictationElapsed,
@@ -337,18 +342,18 @@ class _ComposerState extends State<Composer> {
   /// The voice control: always this one thing, whatever the draft is doing.
   ///
   /// It does not morph with the action beside it (ADR 0029), so the target
-  /// under the thumb never moves. It only ever starts a call with this Bot:
-  /// while the call is with this Bot the whole composer is gone — voice mode
-  /// is drawn in its place — so the way out of a call is not here. While a
-  /// previous call is still closing it is held.
+  /// under the thumb never moves. It starts a call with this Bot, and while
+  /// that call is up it stays here in the Bot's primary. Hang-up is the
+  /// header's. While a previous call is still closing it is held.
   Widget _voiceButton(BuildContext context, double extent) {
     final theme = Theme.of(context);
     final closing = widget.voiceClosing;
+    final active = widget.voiceActive && !closing;
     return identified(
       VoiceIds.composerVoice,
       IconButton(
         key: const ValueKey('composer-voice'),
-        tooltip: 'Talk to this Bot',
+        tooltip: active ? 'Talking to this Bot' : 'Talk to this Bot',
         onPressed: closing ? null : widget.onVoice,
         style: IconButton.styleFrom(
           minimumSize: Size.square(extent),
@@ -358,6 +363,8 @@ class _ComposerState extends State<Composer> {
           shape: const CircleBorder(),
           foregroundColor: closing
               ? theme.disabledColor
+              : active
+              ? theme.colorScheme.primary
               : theme.colorScheme.onSurfaceVariant,
         ),
         icon: const Icon(Icons.graphic_eq_rounded),
