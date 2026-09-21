@@ -28,7 +28,6 @@ export {
   whatsNewMediaBytesV1,
   whatsNewMediaFileV1,
 } from "./media.js";
-export {
-  WHATS_NEW_PREVIEW_PATH_V1,
-  whatsNewPreviewMarkdownV1,
-} from "./preview.js";
+// Preview lives in `preview.ts` and is Node-only: it builds a file URL from
+// `import.meta.url`. Re-exporting it here pulled that into the Worker bundle
+// and workerd died at boot with `Invalid URL string`.
