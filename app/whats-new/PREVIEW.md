@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Installed in the Marketplace
+
+improvement
+
+Configure or remove added models and connectors from Installed. Models and Connectors are checkboxes under search.
+
 ## Easier reading in chat
 
 improvement

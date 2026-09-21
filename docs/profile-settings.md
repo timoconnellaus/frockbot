@@ -16,14 +16,14 @@ account page inside the app. API keys remain write-only. Custom server
 addresses and provider-specific settings are collapsed under Advanced.
 Image generation is a separate Models destination with readable model names.
 
-The Marketplace is the services a Bot can be given and the account-wide
-Plugins available to install. It is not a Profile entry: its door is on the
+The Marketplace is the services a Bot can be given: models and connected
+apps in one searchable catalog. Checkboxes under the search box choose what
+is listed. Installed is the same catalog limited to what the account has
+already added, where a model is configured or removed and a connected app is
+managed. It is not a Profile entry: its door is on the
 Bot list itself, beside the avatar on a phone and a named row at the foot of
 the sidebar on a desktop. A phone opens it as a page and list; a desktop opens
-it as a dialog over the shell. Connectors is the default tab and keeps the
-existing account and Messages flows. Plugins is account-shaped: Add Plugin or
-Remove changes the User's installation, while a provider's setup and model
-selection remain in Models. Installation never silently chooses a model or
+it as a dialog over the shell. Installation never silently chooses a model or
 creates a credential.
 
 A Bot's Plugins are Bot settings, so their door is the Plugins row in that

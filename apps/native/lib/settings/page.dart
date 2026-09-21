@@ -380,7 +380,7 @@ class _SettingsPageState extends State<SettingsPage>
               store: widget.store,
               userId: widget.userId,
               onFeaturesChanged: widget.onFeaturesChanged,
-              initialFilter: MarketplaceKindFilter.models,
+              initialShowConnectors: false,
             ),
           ),
         ),

@@ -628,13 +628,15 @@ account's list, and the neighbouring account-wide switchboard is titled
 
 **Marketplace is one searchable catalog.** `apps/native/lib/connections/page.dart`
 draws `ConnectionsFrame` (`/api/settings/connections?catalog=1`) as a single
-page: one search box, a filter for All / Models / Connectors, and a builder
-list so cards mount as the person scrolls. The catalog includes every
-non-platform model provider and every connected app, whether or not the
-Package is installed. An uninstalled model row offers **Add**
+page: one search box, Models and Connectors checkboxes under it, Catalog and
+Installed halves, and a builder list so cards mount as the person scrolls. The
+catalog includes every non-platform model provider and every connected app,
+whether or not the Package is installed. An uninstalled model row offers **Add**
 (`user/choose-model-provider`); after that, **Connect** is the same key or
-sign-in flow as before. Models settings lists only providers already added,
-with a link back to this catalog. The ordinary `/api/settings/connections`
+sign-in flow as before. Installed lists added models and connected apps so they
+can be configured or removed (`user/uninstall-package`). Models settings lists
+only providers already added, with a link back to this catalog. The ordinary
+`/api/settings/connections`
 read stays installed-only, so Manage provider does not grow a storefront.
 Each card carries a bundled icon (`assets/connectors/<icon>.png`, named by
 the Connection Type's `icon`) or a letter tile when no mark ships. Catalog

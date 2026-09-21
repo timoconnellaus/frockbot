@@ -705,75 +705,151 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Marketplace catalog searches, filters, and adds a model',
-    (tester) async {
-      tester.view.physicalSize = const Size(1280, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final store = MemoryStore();
-      final sent = <Map<String, Object?>>[];
-      var state = 'not-installed';
-      var revision = 1;
-      var catalogReads = 0;
-      final api = SettingsApi(store, (path, body) async {
-        if (body == null) {
-          expect(path, '/api/settings/connections?catalog=1');
-          catalogReads++;
-          return catalogFrame(revision: revision, deepSeekState: state);
-        }
-        expect(path, '/api/settings');
-        final command = (body as Map).cast<String, Object?>();
-        sent.add(command);
-        expect(command['type'], 'user/choose-model-provider');
-        expect(command['packageId'], 'provider-deepseek');
+  testWidgets('Marketplace catalog searches, filters, and adds a model', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    var state = 'not-installed';
+    var revision = 1;
+    var catalogReads = 0;
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        expect(path, '/api/settings/connections?catalog=1');
+        catalogReads++;
+        return catalogFrame(revision: revision, deepSeekState: state);
+      }
+      expect(path, '/api/settings');
+      final command = (body as Map).cast<String, Object?>();
+      sent.add(command);
+      expect(command['type'], 'user/choose-model-provider');
+      expect(command['packageId'], 'provider-deepseek');
+      state = 'installed';
+      revision += 1;
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'revision': revision,
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: MarketplacePage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('DeepSeek'), findsOneWidget);
+    expect(find.text('Gmail'), findsOneWidget);
+    expect(find.text('Add'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'deep');
+    await tester.pump();
+    expect(find.text('DeepSeek'), findsOneWidget);
+    expect(find.text('Gmail'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pump();
+    await tester.tap(find.text('Connectors'));
+    await tester.pumpAndSettle();
+    expect(find.text('DeepSeek'), findsOneWidget);
+    expect(find.text('Gmail'), findsNothing);
+
+    final readsBeforeRefresh = catalogReads;
+    await tester.tap(find.byTooltip('Refresh marketplace'));
+    await tester.pumpAndSettle();
+    expect(catalogReads, greaterThan(readsBeforeRefresh));
+
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+    expect(sent.single['type'], 'user/choose-model-provider');
+    expect(find.text('Connect'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Marketplace installed configures and removes an added model', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    var state = 'not-installed';
+    var revision = 1;
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        expect(path, '/api/settings/connections?catalog=1');
+        return catalogFrame(revision: revision, deepSeekState: state);
+      }
+      expect(path, '/api/settings');
+      final command = (body as Map).cast<String, Object?>();
+      sent.add(command);
+      if (command['type'] == 'user/choose-model-provider') {
         state = 'installed';
-        revision += 1;
-        return {
-          'schemaVersion': 1,
-          'commandId': command['commandId'],
-          'revision': revision,
-          'status': 'applied',
-        };
-      });
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: MarketplacePage(api: api, store: store, userId: 'tim'),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('DeepSeek'), findsOneWidget);
-      expect(find.text('Gmail'), findsOneWidget);
-      expect(find.text('Add'), findsOneWidget);
+      } else {
+        expect(command['type'], 'user/uninstall-package');
+        expect(command['packageId'], 'provider-deepseek');
+        state = 'not-installed';
+      }
+      revision += 1;
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'revision': revision,
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: MarketplacePage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Models'), findsOneWidget);
+    expect(find.text('Connectors'), findsOneWidget);
+    expect(find.text('Catalog'), findsOneWidget);
+    expect(find.text('Installed'), findsOneWidget);
 
-      await tester.enterText(find.byType(TextField), 'deep');
-      await tester.pump();
-      expect(find.text('DeepSeek'), findsOneWidget);
-      expect(find.text('Gmail'), findsNothing);
+    await tester.tap(find.text('Installed'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Nothing installed yet. Add a model or connect an app in Catalog.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('DeepSeek'), findsNothing);
 
-      await tester.enterText(find.byType(TextField), '');
-      await tester.pump();
-      await tester.tap(find.byTooltip('Filter marketplace'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Models'));
-      await tester.pumpAndSettle();
-      expect(find.text('DeepSeek'), findsOneWidget);
-      expect(find.text('Gmail'), findsNothing);
+    await tester.tap(find.text('Catalog'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+    expect(sent.single['type'], 'user/choose-model-provider');
 
-      final readsBeforeRefresh = catalogReads;
-      await tester.tap(find.byTooltip('Refresh marketplace'));
-      await tester.pumpAndSettle();
-      expect(catalogReads, greaterThan(readsBeforeRefresh));
+    await tester.tap(find.text('Installed'));
+    await tester.pumpAndSettle();
+    expect(find.text('DeepSeek'), findsOneWidget);
+    expect(find.text('Gmail'), findsNothing);
 
-      await tester.tap(find.text('Add'));
-      await tester.pumpAndSettle();
-      expect(sent.single['type'], 'user/choose-model-provider');
-      expect(find.text('Connect'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
+    await tester.tap(find.text('DeepSeek'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Remove'));
+    await tester.pumpAndSettle();
+    expect(find.text('Remove DeepSeek?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Remove').last);
+    await tester.pumpAndSettle();
+    expect(sent.last['type'], 'user/uninstall-package');
+    expect(find.text('DeepSeek'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('Marketplace host refresh retries a failed catalog read', (
     tester,
