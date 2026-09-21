@@ -8,7 +8,6 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:ui' show FontFeature;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
