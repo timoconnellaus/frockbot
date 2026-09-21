@@ -1155,16 +1155,11 @@ export async function connectOllama(
     [provider.locator('input[aria-label="API key"]'), options.apiKey],
   ]);
   await press(action(provider, "connect-0"));
-  // The compact row folds the provider title, the account count and the
-  // Connected pill into one heading, so the wait is on that heading's name
-  // rather than on a labelled descendant the merge no longer draws.
+  // The compact row speaks the Connected pill either as its own node or
+  // folded into the provider heading. `spokenText` reads both.
   await expect(async () => {
     await press(sem(page, "connections-refresh"));
-    await expect(
-      provider.getByRole("heading", { name: /\bConnected\b/u }),
-    ).toBeVisible({
-      timeout: 10_000,
-    });
+    expect(await spokenText(provider)).toMatch(/\bConnected\b/u);
   }).toPass({ timeout: 90_000 });
   await closeOverlay(page);
 }
