@@ -1,8 +1,6 @@
 /// One dark base, every platform.
 ///
-/// A screenshot audit measured #1F1E24 behind both installed apps — the phone
-/// and the desktop — which is what this theme has always said. The rule this
-/// pins is that the number is the theme's and not the host's: nothing may
+/// The dark window is the theme's number, not the host's: nothing may
 /// branch the main background on the platform the app happens to be running
 /// on, so the appearance a person prefers on their phone is the appearance
 /// they get everywhere.
@@ -15,8 +13,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 void main() {
-  test('the dark window is #1F1E24, and it is the theme that says so', () {
-    expect(FrockTheme.window, const Color(0xff1f1e24));
+  test('the dark window is #121214, and it is the theme that says so', () {
+    expect(FrockTheme.window, const Color(0xff121214));
     for (final platform in TargetPlatform.values) {
       debugDefaultTargetPlatformOverride = platform;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);

@@ -76,14 +76,14 @@
     --paper: #fff;
     --muted: #6d6974;
     --line: #e7e0d9;
-    --product-window: #1f1e24;
-    --product-thread: #1f1e24;
-    --product-sidebar: #1a191e;
-    --product-raised: #2c2a33;
+    --product-window: #121214;
+    --product-thread: #121214;
+    --product-sidebar: #0c0c0e;
+    --product-raised: #1e1e22;
     --product-text: #f6f2ee;
     --product-muted: #a8a3a6;
     --product-subtle: #8d8896;
-    --product-border: #3a3742;
+    --product-border: #2c2c32;
     --product-border-strong: #6c6874;
     --container: 1280px;
   }

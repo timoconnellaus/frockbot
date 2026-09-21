@@ -80,11 +80,11 @@ describe("ThemeDocument decoding", () => {
         ...INK_DOCUMENT_V1.tokens,
         surfaces: {
           ...INK_DOCUMENT_V1.tokens.surfaces,
-          accent: "#D03F64",
+          accent: "#C44580",
         },
       },
     });
-    expect(decoded.tokens.surfaces.accent).toBe("#d03f64");
+    expect(decoded.tokens.surfaces.accent).toBe("#c44580");
   });
 });
 
@@ -110,7 +110,7 @@ describe("phases", () => {
         new Date("2026-09-18T08:30:00.000Z"),
         "UTC",
       ).surfaces.accent,
-    ).toBe("#c23359");
+    ).toBe("#c23d7b");
     expect(
       resolveThemeTokensV1(
         document,

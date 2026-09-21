@@ -61,18 +61,18 @@ ${page.script}
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
-<meta name="theme-color" content="#1f1e24">
+<meta name="theme-color" content="#121214">
 <title>${escape(page.title)}</title>
 <style nonce="${nonce}">
   :root {
-    --window: #1f1e24; --raised: #2c2a33; --border: #3a3742;
-    --text: #f4f2f6; --muted: #aaa6b1; --accent: #db4b6d; --accent-hover: #ed5c7c;
-    --glow: rgba(236, 56, 107, .22); --shadow: rgba(0, 0, 0, .45);
+    --window: #121214; --raised: #1e1e22; --border: #2c2c32;
+    --text: #f4f2f6; --muted: #aaa6b1; --accent: #c44580; --accent-hover: #d45d92;
+    --glow: rgba(196, 69, 128, .22); --shadow: rgba(0, 0, 0, .45);
   }
   @media (prefers-color-scheme: light) {
     :root {
       --window: #faf8fb; --raised: #ffffff; --border: #dfd9e3;
-      --text: #1f1e24; --muted: #625c6b; --accent: #c23359; --accent-hover: #b11f4b;
+      --text: #121214; --muted: #625c6b; --accent: #c23d7b; --accent-hover: #b11f4b;
       --glow: rgba(189, 30, 80, .14); --shadow: rgba(31, 30, 36, .12);
     }
   }

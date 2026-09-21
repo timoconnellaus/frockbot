@@ -33,15 +33,14 @@ abstract final class FrockTheme {
   static const warning = Color(0xffd9a441);
   static const warningInk = Color(0xff8a6000);
 
-  static const window = Color(0xff1f1e24);
+  static const window = Color(0xff121214);
 
   /// The ground the furniture stands on: app bar, composer, sidebar. It sits
   /// one step *below* the window, so the thread is the lit part of the screen
-  /// and the chrome falls back from it. It used to be #211F26 — two units
-  /// above the window, a step no eye could find.
-  static const surface = Color(0xff1a191e);
-  static const raised = Color(0xff2c2a33);
-  static const border = Color(0xff3a3742);
+  /// and the chrome falls back from it.
+  static const surface = Color(0xff0c0c0e);
+  static const raised = Color(0xff1e1e22);
+  static const border = Color(0xff2c2c32);
   static const muted = Color(0xffa8a3a6);
 
   /// A third rung below [muted], where a timestamp or a run's age goes. On

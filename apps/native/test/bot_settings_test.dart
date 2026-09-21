@@ -82,6 +82,7 @@ Future<void> open(
   VoidCallback? onOpenPlugins,
   VoidCallback? onOpenVoice,
   VoidCallback? onOpenLook,
+  VoidCallback? onEditAvatar,
 }) async {
   tester.view.physicalSize = const Size(390, 2200);
   tester.view.devicePixelRatio = 1;
@@ -97,6 +98,7 @@ Future<void> open(
             onOpenPlugins: onOpenPlugins,
             onOpenVoice: onOpenVoice,
             onOpenLook: onOpenLook,
+            onEditAvatar: onEditAvatar,
           ),
         ),
       ),
@@ -135,6 +137,17 @@ void main() {
     expect(find.text('Named by you'), findsNothing);
     expect(find.text('Named by this Bot'), findsNothing);
     expect(tester.takeException(), isNull);
+    state.dispose();
+  });
+
+  testWidgets('Change character is a soft pink, not the danger red', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final state = BotSettingsController(api(store, []), 'alpha');
+    await open(tester, state, onEditAvatar: () {});
+    final label = tester.widget<Text>(find.text('Change character'));
+    expect(label.style?.color, FrockTheme.accentSoft);
     state.dispose();
   });
 

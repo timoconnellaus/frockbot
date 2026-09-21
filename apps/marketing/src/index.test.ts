@@ -357,7 +357,7 @@ describe("homepage product depictions", () => {
           .map((rule) => rule.declarations),
       ) as Record<string, string>;
 
-    expect(declarations(":root")["--product-window"]).toBe("#1f1e24");
+    expect(declarations(":root")["--product-window"]).toBe("#121214");
     expect(declarations("body").background).toBe("var(--paper)");
     expect(declarations(".workspace").background).toBe("var(--product-window)");
     expect(declarations(".workspace aside").background).toBe(
