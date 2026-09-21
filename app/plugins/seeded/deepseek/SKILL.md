@@ -1,6 +1,6 @@
 ---
-name: deepseek
-description: How this Bot's DeepSeek provider plugin works, and what it needs to run.
+name: DeepSeek
+description: Use this when this Bot is answering through DeepSeek, or when a DeepSeek reply failed and you need to explain why.
 ---
 
 # DeepSeek provider

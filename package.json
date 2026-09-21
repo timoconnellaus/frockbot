@@ -36,7 +36,7 @@
     "dev:cloudflare": "bun run --filter @frockbot/cloudflare dev",
     "dev": "bun run dev:cloudflare",
     "build": "bun run build:cloudflare && bun run build:marketing && bun run build:admin-portal",
-    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/generate-frock-catalog.ts --check && bun scripts/generate-a2ui-skill.ts --check && bun scripts/check-layer-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/check-auth-package-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/generate-card-schema-documents.ts --check && bun scripts/generate-deployment-profile-schema.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/build-seeded-plugins.ts --check && bun scripts/typecheck.ts && bun x tsc --noEmit -p scripts/deployment-config/tsconfig.json",
+    "typecheck": "bun scripts/check-client-protocol.ts && bun scripts/generate-frock-catalog.ts --check && bun scripts/generate-a2ui-skill.ts --check && bun scripts/check-layer-imports.ts && bun scripts/check-computer-host-imports.ts && bun scripts/check-auth-package-imports.ts && bun scripts/generate-isolate-context-catalog.ts --check && bun scripts/generate-card-schema-documents.ts --check && bun scripts/generate-deployment-profile-schema.ts --check && bun scripts/build-applets-assets.ts --check && bun scripts/build-seeded-plugins.ts --check && bun scripts/check-managed-skills.ts && bun scripts/typecheck.ts && bun x tsc --noEmit -p scripts/deployment-config/tsconfig.json",
     "lint:layer-imports": "bun scripts/check-layer-imports.ts",
     "lint:computer-host-imports": "bun scripts/check-computer-host-imports.ts",
     "lint:auth-package-imports": "bun scripts/check-auth-package-imports.ts",

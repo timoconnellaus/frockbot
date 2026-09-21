@@ -106,7 +106,7 @@ describe("the managed Skill source", () => {
       "managed/add-connector/SKILL.md",
       "managed/export-bot-template/SKILL.md",
       "managed/import-bot-template/SKILL.md",
-      "managed/learn-from-demonstration/SKILL.md",
+      "managed/write-skill/SKILL.md",
     ]);
     expect(system).not.toContain(APPLETS_REF);
     // Withheld is not refused: nothing about the document was wrong.

@@ -14,6 +14,7 @@ import {
   validateAgainstJsonSchemaV1,
   type A2uiComponentV1,
 } from "@frockbot/core/contracts";
+import { existsSync, readdirSync } from "node:fs";
 import { bindCardApprovalsV1 } from "@frockbot/app/shell/cards";
 import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "../catalog.ts";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./artifacts.generated.ts";
@@ -451,16 +452,29 @@ describe("the seeded email Plugin", () => {
     expect(artifact.size).toBe(
       new TextEncoder().encode(artifact.module).byteLength,
     );
-    // The gate `bun run typecheck` runs: the sources digest to what the build
-    // recorded, so an edited Plugin that was not rebuilt fails there.
+    // Same files `--check` hashes: SKILL.md plus references/, with a missing
+    // skill.md as empty rather than a throw. Importing the build script here
+    // would pull it into @frockbot/app's tsc graph.
+    const directory = new URL("./email/", import.meta.url);
+    const files = ["plugin.json", "plugin.ts", "SKILL.md", "skill.md"];
+    const referencesDirectory = new URL("references/", directory);
+    if (existsSync(referencesDirectory)) {
+      files.push(
+        ...readdirSync(referencesDirectory)
+          .filter((name) => name.endsWith(".md"))
+          .sort()
+          .map((name) => `references/${name}`),
+      );
+    }
     const sources = await Promise.all(
-      ["plugin.json", "plugin.ts", "skill.md"].map((file) =>
-        Bun.file(new URL(`./email/${file}`, import.meta.url)).text(),
-      ),
+      files.map(async (file) => {
+        const source = Bun.file(new URL(file, directory));
+        return (await source.exists()) ? source.text() : "";
+      }),
     );
     const sourceDigest = await crypto.subtle.digest(
       "SHA-256",
-      new TextEncoder().encode(sources.join(" ")),
+      new TextEncoder().encode(sources.join("\0")),
     );
     expect(
       [...new Uint8Array(sourceDigest)]

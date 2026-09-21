@@ -67,7 +67,7 @@ describe("the managed Skill source", () => {
       "add-connector",
       "export-bot-template",
       "import-bot-template",
-      "learn-from-demonstration",
+      "write-skill",
       "applets",
       "plugins",
       "a2ui",
