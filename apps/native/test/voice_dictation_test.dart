@@ -379,7 +379,6 @@ void main() {
     });
   });
 
-
   // The tidy-up the server runs once a capture is finished. Everything here
   // is about the same question asked from different directions: can the
   // tidied text ever cost the person words they already have?
@@ -402,45 +401,48 @@ void main() {
       return harness;
     }
 
-    test('replaces the capture\'s own span and leaves the rest alone', () async {
-      final harness = Harness();
-      harness.drafts.setDraft('bot-a', 'typed first');
-      await harness.controller.start('bot-a');
-      await settle();
-      harness.say('ready');
-      harness.say('segment', {'text': 'um so check the Friday flights'});
-      await settle();
-      expect(harness.drafts.draftFor('bot-a'), 'typed first');
+    test(
+      'replaces the capture\'s own span and leaves the rest alone',
+      () async {
+        final harness = Harness();
+        harness.drafts.setDraft('bot-a', 'typed first');
+        await harness.controller.start('bot-a');
+        await settle();
+        harness.say('ready');
+        harness.say('segment', {'text': 'um so check the Friday flights'});
+        await settle();
+        expect(harness.drafts.draftFor('bot-a'), 'typed first');
 
-      // A `cleaning` that arrives while the person is still speaking is not a
-      // capture that has finished, and is ignored.
-      harness.say('cleaning');
-      await settle();
-      expect(harness.controller.state, DictationState.capturing);
-      expect(harness.drafts.draftFor('bot-a'), 'typed first');
+        // A `cleaning` that arrives while the person is still speaking is not a
+        // capture that has finished, and is ignored.
+        harness.say('cleaning');
+        await settle();
+        expect(harness.controller.state, DictationState.capturing);
+        expect(harness.drafts.draftFor('bot-a'), 'typed first');
 
-      unawaited(harness.controller.stop());
-      await settle();
-      harness.say('cleaning');
-      await settle();
-      expect(harness.controller.state, DictationState.cleaning);
-      expect(harness.controller.active, isFalse);
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'typed first um so check the Friday flights',
-      );
+        unawaited(harness.controller.stop());
+        await settle();
+        harness.say('cleaning');
+        await settle();
+        expect(harness.controller.state, DictationState.cleaning);
+        expect(harness.controller.active, isFalse);
+        expect(
+          harness.drafts.draftFor('bot-a'),
+          'typed first um so check the Friday flights',
+        );
 
-      harness.say('cleaned', {'text': 'Check the Friday flights.'});
-      harness.say('final');
-      await settle();
+        harness.say('cleaned', {'text': 'Check the Friday flights.'});
+        harness.say('final');
+        await settle();
 
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'typed first Check the Friday flights.',
-      );
-      expect(harness.controller.cleaned, isTrue);
-      harness.controller.dispose();
-    });
+        expect(
+          harness.drafts.draftFor('bot-a'),
+          'typed first Check the Friday flights.',
+        );
+        expect(harness.controller.cleaned, isTrue);
+        harness.controller.dispose();
+      },
+    );
 
     test('the raw transcript comes back on revert', () async {
       final harness = Harness();
@@ -567,60 +569,152 @@ void main() {
 
     // A tidy-up belongs to the Bot the capture started on, exactly as every
     // segment does.
-    test('the tidied text lands in the composer it was dictated into', () async {
-      final harness = Harness();
-      await harness.controller.start('bot-a');
-      await settle();
-      harness.say('ready');
-      harness.say('segment', {'text': 'um so check the Friday flights'});
-      await settle();
-      unawaited(harness.controller.stop());
-      await settle();
-      harness.drafts.setDraft('bot-b', 'typed into B');
-      harness.say('cleaning');
-      harness.say('cleaned', {'text': 'Check the Friday flights.'});
-      harness.say('final');
-      await settle();
+    test(
+      'the tidied text lands in the composer it was dictated into',
+      () async {
+        final harness = Harness();
+        await harness.controller.start('bot-a');
+        await settle();
+        harness.say('ready');
+        harness.say('segment', {'text': 'um so check the Friday flights'});
+        await settle();
+        unawaited(harness.controller.stop());
+        await settle();
+        harness.drafts.setDraft('bot-b', 'typed into B');
+        harness.say('cleaning');
+        harness.say('cleaned', {'text': 'Check the Friday flights.'});
+        harness.say('final');
+        await settle();
 
-      expect(harness.drafts.draftFor('bot-a'), 'Check the Friday flights.');
-      expect(harness.drafts.draftFor('bot-b'), 'typed into B');
-      harness.controller.dispose();
-    });
+        expect(harness.drafts.draftFor('bot-a'), 'Check the Friday flights.');
+        expect(harness.drafts.draftFor('bot-b'), 'typed into B');
+        harness.controller.dispose();
+      },
+    );
 
     // A server that says it is tidying and then goes quiet must not leave the
     // microphone button looking busy for the rest of the session.
-    test('a tidy-up that never answers ends the capture on what arrived', () async {
-      final harness = Harness(
-        finalTimeout: const Duration(milliseconds: 20),
-        cleanupTimeout: const Duration(milliseconds: 40),
-      );
-      await harness.controller.start('bot-a');
-      await settle();
-      harness.say('ready');
-      harness.say('segment', {'text': 'um so check the Friday flights'});
-      await settle();
-      unawaited(harness.controller.stop());
-      await settle();
-      harness.say('cleaning');
-      await settle();
-      expect(harness.controller.state, DictationState.cleaning);
-      expect(harness.controller.active, isFalse);
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'um so check the Friday flights',
-      );
+    test(
+      'a tidy-up that never answers ends the capture on what arrived',
+      () async {
+        final harness = Harness(
+          finalTimeout: const Duration(milliseconds: 20),
+          cleanupTimeout: const Duration(milliseconds: 40),
+        );
+        await harness.controller.start('bot-a');
+        await settle();
+        harness.say('ready');
+        harness.say('segment', {'text': 'um so check the Friday flights'});
+        await settle();
+        unawaited(harness.controller.stop());
+        await settle();
+        harness.say('cleaning');
+        await settle();
+        expect(harness.controller.state, DictationState.cleaning);
+        expect(harness.controller.active, isFalse);
+        expect(
+          harness.drafts.draftFor('bot-a'),
+          'um so check the Friday flights',
+        );
 
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      await settle();
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        await settle();
 
-      expect(harness.controller.state, DictationState.done);
-      expect(harness.controller.error, isNull);
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'um so check the Friday flights',
-      );
-      harness.controller.dispose();
-    });
+        expect(harness.controller.state, DictationState.done);
+        expect(harness.controller.error, isNull);
+        expect(
+          harness.drafts.draftFor('bot-a'),
+          'um so check the Friday flights',
+        );
+        harness.controller.dispose();
+      },
+    );
+
+    // Cleaning has already given the microphone back. A leftover `final` from
+    // Groq must not stop whoever opened the shared device next — Talk, or
+    // another dictation.
+    test(
+      'a leftover tidy-up does not stop a later owner of the microphone',
+      () async {
+        final harness = Harness();
+        await harness.controller.start('bot-a');
+        await settle();
+        harness.say('ready');
+        harness.say('segment', {'text': 'first take'});
+        await settle();
+        unawaited(harness.controller.stop());
+        await settle();
+        harness.say('cleaning');
+        await settle();
+        expect(harness.controller.state, DictationState.cleaning);
+        expect(harness.controller.active, isFalse);
+        expect(harness.capture.active, isFalse);
+
+        await harness.capture.start(
+          sampleRate: voiceDictationSampleRateV1,
+          frame: voiceDictationFrame,
+        );
+        expect(harness.capture.active, isTrue);
+        final stops = harness.capture.stops;
+
+        harness.say('cleaned', {'text': 'First take.'});
+        harness.say('final');
+        await settle();
+
+        expect(harness.controller.state, DictationState.done);
+        expect(harness.capture.active, isTrue);
+        expect(harness.capture.stops, stops);
+        expect(harness.drafts.draftFor('bot-a'), 'First take.');
+        harness.controller.dispose();
+      },
+    );
+
+    // Pressing the mic again during a tidy-up used to let the leftover
+    // `final` finish the new capture: increment generation, stop the
+    // device, and release the microphone the new start had just taken.
+    test(
+      'starting during a tidy-up is not finished by the leftover session',
+      () async {
+        var releases = 0;
+        late FakeVoiceSocket socket;
+        socket = FakeVoiceSocket();
+        final capture = FakeVoiceCapture();
+        final drafts = ComposerDraftStore();
+        final controller = DictationController(
+          openSocket: () async => socket,
+          capture: capture,
+          onDraft: drafts.setDraft,
+          readDraft: drafts.draftFor,
+          onFinished: () async {
+            releases++;
+          },
+        );
+        await controller.start('bot-a');
+        await settle();
+        socket.deliver(frame('ready'));
+        socket.deliver(frame('segment', {'text': 'first take'}));
+        await settle();
+        unawaited(controller.stop());
+        await settle();
+        socket.deliver(frame('cleaning'));
+        await settle();
+        expect(controller.state, DictationState.cleaning);
+        expect(releases, 1);
+
+        final leftover = socket;
+        socket = FakeVoiceSocket();
+        leftover.deliver(frame('final'));
+        await controller.start('bot-a');
+        await settle();
+
+        expect(controller.state, DictationState.capturing);
+        expect(controller.active, isTrue);
+        expect(capture.active, isTrue);
+        expect(releases, 1);
+        expect(drafts.draftFor('bot-a'), 'first take');
+        controller.dispose();
+      },
+    );
 
     // A new capture is a new span. Nothing from the last one may be reverted
     // into it.
@@ -685,28 +779,25 @@ void main() {
       harness.controller.dispose();
     });
 
-    test(
-      'an edit inside the landed transcript refuses the tidy-up',
-      () async {
-        final harness = Harness();
-        await harness.controller.start('bot-a');
-        await settle();
-        harness.say('ready');
-        unawaited(harness.controller.stop());
-        await settle();
-        harness.say('segment', {'text': 'recognised wrongly'});
-        await settle();
+    test('an edit inside the landed transcript refuses the tidy-up', () async {
+      final harness = Harness();
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('segment', {'text': 'recognised wrongly'});
+      await settle();
 
-        // The person corrects the transcription itself. Its span is gone, so
-        // swapping in the tidy-up would lose their correction.
-        harness.drafts.setDraft('bot-a', 'recognised rightly');
-        harness.say('cleaned', {'text': 'Recognised wrongly.'});
-        harness.say('final');
-        await settle();
-        expect(harness.drafts.draftFor('bot-a'), 'recognised rightly');
-        harness.controller.dispose();
-      },
-    );
+      // The person corrects the transcription itself. Its span is gone, so
+      // swapping in the tidy-up would lose their correction.
+      harness.drafts.setDraft('bot-a', 'recognised rightly');
+      harness.say('cleaned', {'text': 'Recognised wrongly.'});
+      harness.say('final');
+      await settle();
+      expect(harness.drafts.draftFor('bot-a'), 'recognised rightly');
+      harness.controller.dispose();
+    });
   });
 
   group('the range itself', () {

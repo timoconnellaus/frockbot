@@ -185,7 +185,9 @@ class DictationController extends ChangeNotifier {
 
   /// How long this capture has been running. Its own notifier so the pill's
   /// `00:05` can tick without rebuilding the shell.
-  final ValueNotifier<Duration> elapsed = ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> elapsed = ValueNotifier<Duration>(
+    Duration.zero,
+  );
 
   final List<String> _segments = [];
   String _delta = '';
@@ -257,7 +259,12 @@ class DictationController extends ChangeNotifier {
   /// the handshake to paint the pill is the delay this exists to remove.
   Future<void> start(Object context) async {
     if (active) return;
-    if (_state == DictationState.cleaning) await _teardown();
+    if (_state == DictationState.cleaning) {
+      // Invalidate leftover tidy-up callbacks before this capture owns the
+      // microphone. Their finish still runs, but it must not stop us.
+      _generation++;
+      await _teardown();
+    }
     final generation = ++_generation;
     _context = context;
     // Everything already in this Bot's composer stays in front of the words
@@ -327,9 +334,18 @@ class DictationController extends ChangeNotifier {
       }
       _socket = socket;
       _inbound = socket.messages.listen(
-        _onMessage,
-        onError: (Object _) => unawaited(_finish('Voice stopped. Try again.')),
-        onDone: () => unawaited(_finish(null)),
+        (message) {
+          if (generation != _generation) return;
+          _onMessage(message);
+        },
+        onError: (Object _) {
+          if (generation != _generation) return;
+          unawaited(_finish('Voice stopped. Try again.'));
+        },
+        onDone: () {
+          if (generation != _generation) return;
+          unawaited(_finish(null));
+        },
       );
       socket.sendText(encodeDictationStartV1());
       // Capturing is the microphone's state, not the socket's. Flipping it
@@ -431,7 +447,11 @@ class DictationController extends ChangeNotifier {
     if (_state == DictationState.stopping) {
       _set(DictationState.cleaning);
       _finalTimer?.cancel();
-      _finalTimer = Timer(cleanupTimeout, () => unawaited(_finish(null)));
+      final generation = _generation;
+      _finalTimer = Timer(cleanupTimeout, () {
+        if (generation != _generation) return;
+        unawaited(_finish(null));
+      });
     }
     _completeStop();
     unawaited(_release());
@@ -460,7 +480,12 @@ class DictationController extends ChangeNotifier {
   /// span fences the range and refuses the write, and a draft that has been
   /// sent no longer contains the span, so nothing is restored over it.
   void _applyCleaned(String text) {
-    if (_disposed || _range.fenced) return;
+    if (_disposed ||
+        _range.fenced ||
+        (_state != DictationState.stopping &&
+            _state != DictationState.cleaning)) {
+      return;
+    }
     final tidied = text.trim();
     if (tidied.isEmpty) return;
     final raw = this.text;
@@ -521,7 +546,11 @@ class DictationController extends ChangeNotifier {
     // is held, and the commit goes out in order the moment the socket is
     // there — which is what `_connect` does with `_stopRequested`.
     _finalTimer?.cancel();
-    _finalTimer = Timer(finalTimeout, () => unawaited(_finish(null)));
+    final generation = _generation;
+    _finalTimer = Timer(finalTimeout, () {
+      if (generation != _generation) return;
+      unawaited(_finish(null));
+    });
     if (_socket != null) _commit();
     await _finished?.future;
   }
@@ -574,9 +603,10 @@ class DictationController extends ChangeNotifier {
 
   Future<void> _finish(String? failure) async {
     if (_state == DictationState.done || _state == DictationState.error) return;
-    _generation++;
+    final generation = ++_generation;
     _error = failure;
     await _teardown();
+    if (generation != _generation || _disposed) return;
     _publish();
     _set(failure == null ? DictationState.done : DictationState.error);
     await _release();
@@ -585,6 +615,11 @@ class DictationController extends ChangeNotifier {
   }
 
   Future<void> _teardown() async {
+    // Cleaning already stopped the microphone at land. Stopping it again
+    // would take the device from whoever started capturing since then —
+    // Talk, or another dictation. Snapshot that now: this method yields,
+    // and a later start resets [_released] before we resume.
+    final stopCapture = _state != DictationState.cleaning && !_released;
     _finalTimer?.cancel();
     _finalTimer = null;
     _elapsedTimer?.cancel();
@@ -596,7 +631,7 @@ class DictationController extends ChangeNotifier {
     final socket = _socket;
     _socket = null;
     await socket?.close();
-    await capture.stop();
+    if (stopCapture) await capture.stop();
     _setLevel(0);
     _opening.clear();
     _openingBytes = 0;
