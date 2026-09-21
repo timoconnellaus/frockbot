@@ -103,6 +103,16 @@ function requiredTokensFor(slug: string): readonly string[] {
         ...PLUGIN_AUTHORING_TOOL_NAMES_V1,
         ...BOT_ISOLATE_HOOK_EVENTS_V1.map((event) => `\`${event}\``),
         ...PLUGIN_GRANTS_V1.map((grant) => `\`${grant}\``),
+        "plugin/<pluginId>/<slug>",
+        "modelProviders",
+        "export const services",
+        "ctx.model",
+        "ctx.memory",
+        "ctx.workspace",
+        "ctx.schedule",
+        "modelTransport",
+        "idempotent",
+        "managed/a2ui",
       ];
     case "a2ui":
       return ["send_to_user", "skill_load"];
