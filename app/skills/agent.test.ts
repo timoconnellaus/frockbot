@@ -110,8 +110,8 @@ describe("the Skill catalog", () => {
         { path: "managed/applets/SKILL.md" },
         { path: "managed/export-bot-template/SKILL.md" },
         { path: "managed/import-bot-template/SKILL.md" },
-        { path: "managed/learn-from-demonstration/SKILL.md" },
         { path: "managed/plugins/SKILL.md" },
+        { path: "managed/write-skill/SKILL.md" },
       ],
     });
     expect(
@@ -140,6 +140,16 @@ describe("the Skill catalog", () => {
         text: "# Forms",
         writer: BOT_WRITER,
       },
+      {
+        root: OWN_ROOT,
+        path: "skills/plain/SKILL.md",
+        text: skillMarkdown(
+          "plain",
+          "Use this when keeping it short.",
+          "Body.",
+        ),
+        writer: BOT_WRITER,
+      },
     ]);
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(OWNER, workspace);
@@ -149,8 +159,16 @@ describe("the Skill catalog", () => {
     const injected = session.events.find(
       (event) => event.type === "skill/injected",
     );
+    const first =
+      injected?.type === "skill/injected" ? injected.skills[0] : undefined;
+    expect(first?.path).toBe("skills/plain/SKILL.md");
+    expect(first?.references).toBeUndefined();
     expect(
-      injected?.type === "skill/injected" ? injected.skills[0] : undefined,
+      injected?.type === "skill/injected"
+        ? injected.skills.find(
+            (skill) => skill.path === "skills/standup/SKILL.md",
+          )
+        : undefined,
     ).toMatchObject({
       path: "skills/standup/SKILL.md",
       references: [
@@ -160,14 +178,16 @@ describe("the Skill catalog", () => {
         },
       ],
     });
-    // A Skill with nothing beside it records nothing, as it records no `by`.
     expect(
       injected?.type === "skill/injected"
-        ? injected.skills.find(
-            (skill) => skill.path === "managed/add-connector/SKILL.md",
-          )?.references
+        ? injected.skills
+            .find((skill) => skill.path === "managed/add-connector/SKILL.md")
+            ?.references?.map((reference) => reference.path)
         : "absent",
-    ).toBeUndefined();
+    ).toEqual([
+      "managed/add-connector/references/connectors.md",
+      "managed/add-connector/references/credentials.md",
+    ]);
     await dispose();
   });
 

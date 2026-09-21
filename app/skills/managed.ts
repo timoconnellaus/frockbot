@@ -1,28 +1,23 @@
 // The managed Skills: first-party recipes compiled into this Package.
 //
-// PARITY. GrokBot ships four read-only skills under
-// `managed-skills/skills/<slug>/SKILL.md` — `add-connector`,
-// `export-bot-template`, `import-bot-template`, `learn-from-demonstration` —
-// which `update_state` cannot edit. The four slugs and the shape of what each
-// one is for are mirrored here; every body is written for FrockBot's own
-// tools, because a recipe that names another product's tools is not a recipe.
+// They are authored as directories — one `SKILL.md` and the Markdown under
+// `references/` — and copied into generated modules by
+// `scripts/build-applets-assets.ts`. A Worker has no filesystem, so the
+// bytes travel in the bundle. That is the whole design: "the kernel treats
+// every Workspace file as data. Only Skills under the Bot's own instruction
+// root, written under the Bot's own authority or its User's, are loaded as
+// instructions" stays exactly true, because a managed Skill is not a
+// Workspace file at all. It is a Package contributing prompt content, which
+// the Composition already pins: the Turn's `CompositionPinV1.artifactSetHash`
+// covers the artifact these bytes live in.
 //
-// WHERE THEY LIVE, AND WHY IT IS NOT A ROOT. These are string constants in
-// this module, so they are bytes of the `plugin-skills` artifact and nothing
-// else. That is the whole design: "the kernel treats every Workspace file as
-// data. Only Skills under the Bot's own instruction root, written under the
-// Bot's own authority or its User's, are loaded as instructions" stays exactly
-// true, because a managed Skill is not a Workspace file at all. It is a
-// Package contributing prompt content — which the constitution already
-// permits, and which the Composition already pins: the Turn's
-// `CompositionPinV1.artifactSetHash` covers the artifact these bytes live in,
-// so the reconstructed prompt is exact without any second store to consult.
-//
-// READ-ONLY follows from the same fact. There is no path from `skill_write` to
-// an artifact, so `scope: "managed"` is refused rather than routed anywhere.
+// READ-ONLY follows from the same fact. There is no path from `skill_write`
+// to an artifact, so `scope: "managed"` is refused rather than routed
+// anywhere.
 import { SKILL_FILE_NAME } from "./skill-md.js";
 import type { LoadedSkillV1, SkillRefusalV1 } from "./catalog.js";
 import { loadArtifactSkillsV1 } from "./artifact.js";
+import { MANAGED_RECIPE_SKILLS_V1 } from "./managed-recipes.generated.js";
 import {
   APPLETS_SKILL_DOCUMENT_V1,
   APPLETS_SKILL_REFERENCES_V1,
@@ -44,7 +39,7 @@ import {
 // `a2ui` is not among them: it is offered to every Bot, so nothing withholds it.
 export { APPLETS_SKILL_SLUG_V1, PLUGINS_SKILL_SLUG_V1 };
 
-/** The directory prefix a managed Skill's synthetic path carries. */
+/** The directory prefix a managed Skill is listed and loadable under. */
 export const MANAGED_SKILL_PATH_PREFIX = "managed";
 
 /** Who a managed Skill is attributed to in the rendered catalog. */
@@ -62,174 +57,22 @@ export interface ManagedSkillDocumentV1 {
   references?: readonly { path: string; text: string }[];
 }
 
-const ADD_CONNECTOR = `---
-name: Add connector
-description: Use this when the User wants to connect an app, MCP server, or model provider that this Bot cannot already reach.
----
-# Add a connector
-
-You cannot install a Package or create a Connection yourself: both are your
-User's acts, in their own settings. What you can do is find the right entry and
-tell them precisely what to do.
-
-1. Name the gap. Say which tool you looked for and did not find, so the User
-   knows what installing this changes about what you can do.
-2. Look in Settings → Connectors for a connector that covers it. A connector
-   that is already set up shows in your prompt as the Package it contributes;
-   one that is not will not be there at all.
-3. Report to the User with \`send_to_user\`: the entry's display name, what it
-   would let you do, and the single sentence "Install it and switch it on
-   under Settings → Plugins."
-4. If the entry needs an API key or an OAuth sign-in, say so before they start,
-   and say what the key is for. Never ask the User to paste a secret into the
-   conversation: a Connection's credentials belong in the Connection, never in
-   a Turn's transcript, and never in your Memory.
-5. Stop there and wait. Do not retry the missing tool in a loop; the install
-   becomes visible to you on a later Turn, not this one.
-
-If the User asks you to do it for them, say plainly that you cannot, and why:
-installing a Package widens what you are allowed to do, and self-modification
-never widens your own authority.
-
-Every reply is a \`send_to_user\` call: use disposition:"continue" while you
-still have more to say or do, and disposition:"finish" on the send that ends your
-reply.
-`;
-
-const EXPORT_BOT_TEMPLATE = `---
-name: Export bot template
-description: Use this when the User wants to reuse this Bot's setup for another Bot, or to keep a record of how it is configured.
----
-# Export a bot template
-
-A template is a written description of a Bot's setup, not a file format and not
-a copy of anything secret.
-
-1. Gather what actually defines this Bot: its name and description, the
-   enabled Packages its behaviour depends on, its Package-scoped settings,
-   and the Skills under its own instruction root.
-2. Read each Skill you intend to include with \`skill_load\` before you describe
-   it. Describing a Skill from its catalog line alone is describing a name.
-3. Write the template as Markdown, in this order: Identity, Packages,
-   Settings, Skills, Notes. Under Skills, give each Skill's slug,
-   name, description, and full body — that is what makes the template
-   importable.
-4. Exclude every credential. Connection ids, API keys, OAuth tokens, and
-   account identifiers are the User's, not the template's. Name the *kind* of
-   Connection each Package needs and stop there.
-5. Hand the template to the User with \`send_to_user\`. If they want it kept,
-   write it into your own Memory with \`memory_write\`, not into a Skill: a
-   template is a record, and a Skill is a recipe.
-
-Say explicitly which parts of the setup a template cannot carry — Connections
-and any grant the User made — so nobody expects an import to reproduce them.
-
-Every reply is a \`send_to_user\` call: use disposition:"continue" while you
-still have more to say or do, and disposition:"finish" on the send that ends your
-reply.
-`;
-
-const IMPORT_BOT_TEMPLATE = `---
-name: Import bot template
-description: Use this when the User gives you a bot template and wants a Bot set up from it.
----
-# Import a bot template
-
-1. Read the template through once before you change anything, and say back what
-   it will produce: a Bot's name, its Skills, and what it will still be missing.
-2. Decide where it lands. If the template is for a new Bot, use \`bot_create\` to
-   add one to your User's flock; it receives the User's enabled Packages and
-   follows the User's account-level model, falling back to the platform model,
-   exactly as one created in the sidebar does.
-   If it is for you, use \`bot_update\` for the identity fields and continue.
-3. Recreate the Skills you can. For each Skill in the template, call
-   \`skill_write\` with its name, description, body, and slug. They land under
-   your own instruction root and become visible on your next Turn, not this
-   one, so do not try to run one immediately after writing it.
-4. Stop at every grant. Packages, Connections, and model choices are your
-   User's to make. List each one the template needs and
-   ask for it with \`send_to_user\`; do not attempt a workaround that reaches
-   the same capability by another route.
-5. Report what was created, what was skipped, and what the User still has to
-   do. A half-imported template that reads as finished is worse than one that
-   names its gaps.
-
-If the template names a Skill for another Bot, you cannot write it there. Say
-so rather than writing it to yourself under a changed name.
-
-Every reply is a \`send_to_user\` call: use disposition:"continue" while you
-still have more to say or do, and disposition:"finish" on the send that ends your
-reply.
-`;
-
-const LEARN_FROM_DEMONSTRATION = `---
-name: Learn from demonstration
-description: Use this when the User has walked you through a task and wants you to be able to repeat it.
----
-# Turn a demonstration into a Skill
-
-The demonstration is whatever the User just showed you: a transcript, a series
-of steps they narrated, or a run you performed together. Your job is to turn it
-into a recipe you can follow later without them.
-
-1. Recover the actual sequence. Read back over this conversation, and use
-   \`memory_search\` for anything the User told you earlier that the steps
-   depend on. Do not invent a step you did not see.
-2. Separate the recipe from the instance. Names, dates, ids, and amounts from
-   the demonstration are examples, not the Skill. Replace each one with what it
-   was an example *of*.
-3. Check it against what you can actually do. A step that needs a tool you do
-   not have is a step the Skill must ask the User for, not one to write as
-   though it will work.
-4. Write it with \`skill_write\`: a short name, a description that starts "Use
-   this when …" so your future self can tell from the catalog line alone
-   whether it applies, and a numbered body. Keep the body under a page.
-5. Confirm with the User: give the slug, the description, and the steps, and
-   ask whether anything is wrong. A Skill is an instruction you wrote for
-   yourself, so a wrong one is a durable mistake.
-
-The Skill is visible to you on your next Turn, not this one. Do not claim to
-have run it in the Turn that wrote it — mentioning a Skill is not running it.
-
-Every reply is a \`send_to_user\` call: use disposition:"continue" while you
-still have more to say or do, and disposition:"finish" on the send that ends your
-reply.
-`;
-
 /**
  * The bundled documents, in slug order. Ordering is fixed here rather than
  * sorted later so the catalog a Turn assembles is the same on every host.
  */
 export const MANAGED_SKILL_DOCUMENTS_V1: readonly ManagedSkillDocumentV1[] = [
-  { slug: "add-connector", text: ADD_CONNECTOR },
-  { slug: "export-bot-template", text: EXPORT_BOT_TEMPLATE },
-  { slug: "import-bot-template", text: IMPORT_BOT_TEMPLATE },
-  { slug: "learn-from-demonstration", text: LEARN_FROM_DEMONSTRATION },
-  // The Applets SDK reference. It is authored in
-  // `applets/skills/applets/`, beside the Package it
-  // documents, and copied here by `scripts/build-applets-assets.ts`: the
-  // Applets Package has no in-process code to carry it, and the managed set is
-  // the mechanism a first-party Skill already ships through. The generator
-  // reads that whole directory, so a reference added beside the `SKILL.md`
-  // arrives here with it and neither one is edited by hand.
+  ...MANAGED_RECIPE_SKILLS_V1,
   {
     slug: APPLETS_SKILL_SLUG_V1,
     text: APPLETS_SKILL_DOCUMENT_V1,
     references: APPLETS_SKILL_REFERENCES_V1,
   },
-  // The Plugin SDK reference (ADR 0026), authored in
-  // `app/plugins/skills/plugins/` and copied here the same way. Withheld
-  // with the `plugin_*` tools when the account's authoring switch is off.
   {
     slug: PLUGINS_SKILL_SLUG_V1,
     text: PLUGINS_SKILL_DOCUMENT_V1,
     references: PLUGINS_SKILL_REFERENCES_V1,
   },
-  // The Cards catalog (ADR 0030), authored in `app/cards/skills/a2ui/`. Its
-  // references are the catalogs the client draws, turned into tables by
-  // `scripts/generate-a2ui-skill.ts`, so what a Bot is taught and what the
-  // renderer accepts cannot drift apart. Offered to every Bot: a card is a
-  // send, not an authoring surface, and needs no switch.
   {
     slug: A2UI_SKILL_SLUG_V1,
     text: A2UI_SKILL_DOCUMENT_V1,

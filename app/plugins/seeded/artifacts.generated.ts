@@ -33,7 +33,7 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 1144,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "8f3c1bcfad7365e04319e87c03db4d55a7bbb4ec599434a35238ef34c912617d",
+      "abc073ddf3f2e1a8e0a1dab73a31677712fe454d5f0100bed0e700fd1a593a58",
     descriptor: {
       id: "agents",
       displayName: "Agent cards",
@@ -74,7 +74,7 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 1925,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "edad243151698bd1e1d7fe45bed82118fc662bf4ae5cfd375165f69215371468",
+      "9acbd2265d740110706b2b403f19cddf04722ba3a55dc98cddc84728cd7e13f3",
     descriptor: {
       id: "approvals",
       displayName: "Approval cards",
@@ -115,7 +115,7 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 2130,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "f957c5809d90a9d0bd2d9d1e58499522fd4010bb3a9c6cf55843f3b5a8509d5c",
+      "557f79d6fcfc39a0c97cd634e4a46c69025fd68534c305cd8820b50da2149654",
     descriptor: {
       id: "attachments",
       displayName: "Attachment cards",
@@ -156,7 +156,7 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 1612,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "f128e1fcc6a451ef8aaa3e16a868a9b8d325ef9d08eff13a8f044bbf7bcbaf4a",
+      "d714173c3b2cbbb4df86be003fa1af6f8e40d3e8b1e3926d6d74bd4952a1f92b",
     descriptor: {
       id: "credentials",
       displayName: "Credential cards",
@@ -196,7 +196,7 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 10751,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "b8b985b419de24b5cde18cf65b7bbe91cd52408ce139e0071da1c481926cf70b",
+      "d7cf9781654ee34dd0ad20f7f378b553ff6d767712b2494c9021d85224b290ed",
     descriptor: {
       id: "deepseek",
       displayName: "DeepSeek",
@@ -208,7 +208,7 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
       skills: [
         {
           slug: "deepseek",
-          text: "---\nname: deepseek\ndescription: How this Bot's DeepSeek provider plugin works, and what it needs to run.\n---\n\n# DeepSeek provider\n\nThis plugin serves the **DeepSeek** model provider. It is the model protocol:\nit turns the kernel's normalized request into DeepSeek's chat-completions\nwire and DeepSeek's stream back into normalized events. It has no tools and\nno hooks — selecting a DeepSeek model is the only thing that runs it.\n\n## What it needs\n\n- A **DeepSeek Connection**: an API key, held by the deployment.\n- A Bot whose model is a DeepSeek model. Selecting that model is what runs\n  this plugin; the plugin page's switch does not change it.\n\n## What it can reach\n\nNothing by itself. The key never reaches this plugin: every model request it\nis asked for becomes one upstream call, made by the host to the single\ndestination and route this deployment allows — `/chat/completions` — with the\nkey attached server-side and the response streamed back. The plugin composes a\nrequest body and names nothing else: it neither picks the destination nor\nwrites the path.\n\n## When a reply fails\n\nA refused key or an unknown model is reported to the kernel as a permanent\nprovider failure: it is not retried. A failed upstream (HTTP 5xx) is not a\nrefusal — the request reached the provider, which may have accepted and\nbilled it — so it is reported as an uncertain outcome: the host records an\nestimate and settles the reply rather than sending the request again. A rate\nlimit (HTTP 429) is refused as transient, but one request id is one upstream\ncall, so the retry the kernel may plan for it is never sent either. If the\nplugin itself fails, the reply fails with it — a model call is never silently\nskipped.\n",
+          text: "---\nname: DeepSeek\ndescription: Use this when this Bot is answering through DeepSeek, or when a DeepSeek reply failed and you need to explain why.\n---\n\n# DeepSeek provider\n\nThis plugin serves the **DeepSeek** model provider. It is the model protocol:\nit turns the kernel's normalized request into DeepSeek's chat-completions\nwire and DeepSeek's stream back into normalized events. It has no tools and\nno hooks — selecting a DeepSeek model is the only thing that runs it.\n\n## What it needs\n\n- A **DeepSeek Connection**: an API key, held by the deployment.\n- A Bot whose model is a DeepSeek model. Selecting that model is what runs\n  this plugin; the plugin page's switch does not change it.\n\n## What it can reach\n\nNothing by itself. The key never reaches this plugin: every model request it\nis asked for becomes one upstream call, made by the host to the single\ndestination and route this deployment allows — `/chat/completions` — with the\nkey attached server-side and the response streamed back. The plugin composes a\nrequest body and names nothing else: it neither picks the destination nor\nwrites the path.\n\n## When a reply fails\n\nA refused key or an unknown model is reported to the kernel as a permanent\nprovider failure: it is not retried. A failed upstream (HTTP 5xx) is not a\nrefusal — the request reached the provider, which may have accepted and\nbilled it — so it is reported as an uncertain outcome: the host records an\nestimate and settles the reply rather than sending the request again. A rate\nlimit (HTTP 429) is refused as transient, but one request id is one upstream\ncall, so the retry the kernel may plan for it is never sent either. If the\nplugin itself fails, the reply fails with it — a model call is never silently\nskipped.\n",
         },
       ],
       modelProviders: [{ id: "deepseek", protocolVersion: 1 }],
@@ -225,7 +225,7 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 8143,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "d98ba5328da2915fff2403a7fc82b62c4f282c6e36254e8f5c18d34734f22e54",
+      "c39cab2084ce24078f56a33fb005dfdd46cc54fab13c0c3658baae0ad2f9b499",
     descriptor: {
       id: "email",
       displayName: "Email",
@@ -262,7 +262,17 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
       skills: [
         {
           slug: "email",
-          text: '---\nname: Draft and send email\ndescription: Use this whenever the User asks you to email someone, reply to an email, or send something by mail. It is the procedure for the draft card, the approval it asks for, and the tool that actually sends.\n---\n\n# Draft and send email\n\nYou do not send email. You draft it, show the person the draft, and they\ndecide. The Plugin sends it afterwards, through this deployment\'s own sender,\nattributed to this Bot.\n\n## The loop\n\n1. **Draw the draft.** Call `email_draft` with the values:\n\n   ```json\n   {\n     "data": {\n       "to": ["nick@example.com"],\n       "cc": [],\n       "subject": "Re: Following up",\n       "inReplyTo": "<message-id you are answering>",\n       "body": "The whole message, as you would send it."\n     }\n   }\n   ```\n\n   It answers with the card\'s `surfaceId`. Keep it: every later call about\n   this email takes it. The card asks the person to Send or Discard, so the\n   call ends your Turn — say what you drafted and why in the same Turn, before\n   you draw it.\n\n2. **Wait.** Their decision arrives as durable input on a later Turn, the way\n   every approval does. The line names the decision _and_ its id:\n   `[Approval] The decision on "card-approval-…" is approved.` Nothing is sent\n   in the meantime.\n\n3. **On approved**, call `email_send` with that `surfaceId` and the\n   `approvalId` from that line. The kernel checks the decision itself, so a\n   wrong or missing id sends nothing. It sends and tells you it did — and if\n   it names addresses it did not reach, tell the person; never send again.\n   Then call `email_draft` again with the same `surfaceId` and the same\n   values: the card settles into a receipt — "Sent to nick@… — Re: Following\n   up" — where the controls were.\n\n4. **On denied**, call `email_discard` with that `surfaceId`, then draw the\n   card once more the same way. It settles into a discarded receipt.\n\n## Rules\n\n- One card per email, and one email per card. A card that already holds a\n  draft is redrawn as it stands: to change what you are sending, call\n  `email_draft` with **no** `surfaceId` and draw a fresh card, because the\n  decision already asked for covers the draft as the person read it.\n- `to` and `cc` are plain addresses. `inReplyTo` is the `Message-Id` of the\n  email you are answering, when you are answering one, and nothing otherwise.\n- `body` is plain text. What you write is what is sent; there is no template\n  and nothing is added to it.\n- Never call `email_send` for a card the person has not approved. The kernel\n  refuses an Approval that is undecided, denied, expired or already spent, and\n  it refuses one that was given on a different card or for different values,\n  so it answers with an error and the person sees nothing.\n- One decision sends one message. A second `email_send` under the same\n  `approvalId` is refused; nothing is ever sent twice.\n- A send that fails answers with its own reason, and the reason says which\n  kind of failure it is: the draft was refused (an address that is not an\n  address, a decision that does not cover this message), or this deployment\n  has no sender bound at all. Read it, tell the person plainly what it says,\n  and do not retry it in a loop.\n',
+          text: '---\nname: Draft and send email\ndescription: Use this whenever the User asks you to email someone, reply to an email, or send something by mail. It is the procedure for the draft card, the approval it asks for, and the tool that actually sends.\n---\n\n# Draft and send email\n\nYou do not send email. You draft it, show the person the draft, and they\ndecide. The Plugin sends it afterwards, through this deployment\'s own sender,\nattributed to this Bot.\n\nCall `email_draft` to draw the card, wait for the decision on a later Turn,\nthen `email_send` or `email_discard`, and redraw the same card so it settles\ninto a receipt.\n\n## References\n\nLoad one with `skill_load` — `{"path": "plugin/email/email", "reference": "loop.md"}`.\n\n- `loop.md` — draft, wait, send or discard, settle the card.\n- `rules.md` — one card per email, what each field is, and what the kernel\n  refuses.\n\nEvery reply is a `send_to_user` call: use disposition:"continue" while you\nstill have more to say or do, and disposition:"finish" on the send that ends\nyour reply.\n',
+          references: [
+            {
+              path: "loop.md",
+              text: '# The loop\n\n1. **Draw the draft.** Call `email_draft` with the values:\n\n   ```json\n   {\n     "data": {\n       "to": ["nick@example.com"],\n       "cc": [],\n       "subject": "Re: Following up",\n       "inReplyTo": "<message-id you are answering>",\n       "body": "The whole message, as you would send it."\n     }\n   }\n   ```\n\n   It answers with the card\'s `surfaceId`. Keep it: every later call about\n   this email takes it. The card asks the person to Send or Discard, so the\n   call ends your Turn — say what you drafted and why in the same Turn, before\n   you draw it.\n\n2. **Wait.** Their decision arrives as durable input on a later Turn, the way\n   every approval does. The line names the decision _and_ its id:\n   `[Approval] The decision on "card-approval-…" is approved.` Nothing is sent\n   in the meantime.\n\n3. **On approved**, call `email_send` with that `surfaceId` and the\n   `approvalId` from that line. The kernel checks the decision itself, so a\n   wrong or missing id sends nothing. It sends and tells you it did — and if\n   it names addresses it did not reach, tell the person; never send again.\n   Then call `email_draft` again with the same `surfaceId` and the same\n   values: the card settles into a receipt — "Sent to nick@… — Re: Following\n   up" — where the controls were.\n\n4. **On denied**, call `email_discard` with that `surfaceId`, then draw the\n   card once more the same way. It settles into a discarded receipt.\n',
+            },
+            {
+              path: "rules.md",
+              text: "# Rules\n\n- One card per email, and one email per card. A card that already holds a\n  draft is redrawn as it stands: to change what you are sending, call\n  `email_draft` with **no** `surfaceId` and draw a fresh card, because the\n  decision already asked for covers the draft as the person read it.\n- `to` and `cc` are plain addresses. `inReplyTo` is the `Message-Id` of the\n  email you are answering, when you are answering one, and nothing otherwise.\n- `body` is plain text. What you write is what is sent; there is no template\n  and nothing is added to it.\n- Never call `email_send` for a card the person has not approved. The kernel\n  refuses an Approval that is undecided, denied, expired or already spent, and\n  it refuses one that was given on a different card or for different values,\n  so it answers with an error and the person sees nothing.\n- One decision sends one message. A second `email_send` under the same\n  `approvalId` is refused; nothing is ever sent twice.\n- A send that fails answers with its own reason, and the reason says which\n  kind of failure it is: the draft was refused (an address that is not an\n  address, a decision that does not cover this message), or this deployment\n  has no sender bound at all. Read it, tell the person plainly what it says,\n  and do not retry it in a loop.\n",
+            },
+          ],
         },
       ],
       cards: [
@@ -308,7 +318,7 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     size: 2651,
     bundlerVersion: "applet-build/plugin@1",
     sourceHash:
-      "14bcddabf08e5307b48f7d509fe5b0c9f89a1647cdd285e28f048379a6137b69",
+      "1b83e7cd78a93283958f8c79fa0c399729d8072e3ef5fdd80c73a2296f0db7e1",
     descriptor: {
       id: "questions",
       displayName: "Question cards",

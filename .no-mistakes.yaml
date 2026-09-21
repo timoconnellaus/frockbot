@@ -20,3 +20,6 @@ test:
     - Dart under apps/native: `flutter analyze --no-pub` and `flutter test --no-pub` there
     - Browser client or integration seams: the relevant `bun run validate:<category>`
     Skip anything slow that the diff cannot affect.
+    A diff that touches `SKILL.md`, `app/skills/`, `app/plugins/skills/`,
+    `applets/skills/`, or `app/plugins/seeded/` must keep
+    `bun scripts/check-managed-skills.ts` green: it is part of `typecheck`.
