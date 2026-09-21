@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "marketplace-installed",
+    title: "Installed in the Marketplace",
+    summary:
+      "Configure or remove added models and connectors from Installed. Models and Connectors are checkboxes under search.",
+    kind: "improvement",
+  },
+  {
     id: "chat-type",
     title: "Easier reading in chat",
     summary: "Messages use Inter at 14, with more air between list items.",

@@ -16,8 +16,8 @@ import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'document.dart';
 
-/// Which offers the Marketplace list shows.
-enum MarketplaceKindFilter { all, models, connectors }
+/// Which half of the Marketplace is showing.
+enum MarketplaceSection { catalog, installed }
 
 /// Connectors: the accounts and services a User authorizes once for every Bot
 /// they own — a model provider's key, a hosted grant, a Package's own account.
@@ -58,8 +58,12 @@ class ConnectionsPage extends StatefulWidget {
   /// Marketplace search, matched against name and description.
   final String query;
 
-  /// Marketplace type filter. Ignored when [catalog] is off.
-  final MarketplaceKindFilter filter;
+  /// Marketplace kind checkboxes. Ignored when [catalog] is off.
+  final bool showModels;
+  final bool showConnectors;
+
+  /// Installed half of the Marketplace: added models and connected apps.
+  final bool installed;
 
   const ConnectionsPage({
     super.key,
@@ -75,7 +79,9 @@ class ConnectionsPage extends StatefulWidget {
     this.chrome = true,
     this.catalog = false,
     this.query = '',
-    this.filter = MarketplaceKindFilter.all,
+    this.showModels = true,
+    this.showConnectors = true,
+    this.installed = false,
   });
 
   /// What the connector half is called wherever it is drawn.
@@ -289,12 +295,12 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         return false;
       }
       if (widget.catalog) {
-        if (widget.filter == MarketplaceKindFilter.models &&
-            provider['kind'] != 'model') {
+        if (provider['kind'] == 'model'
+            ? !widget.showModels
+            : !widget.showConnectors) {
           return false;
         }
-        if (widget.filter == MarketplaceKindFilter.connectors &&
-            provider['kind'] != 'connector') {
+        if (widget.installed && !_isInstalled(provider)) {
           return false;
         }
       } else if (provider['kind'] != kind) {
@@ -311,8 +317,17 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     }).toList();
   }
 
+  bool _isInstalled(Map<String, Object?> provider) {
+    final connected = (provider['connected'] as num?)?.toInt() ?? 0;
+    if (provider['kind'] == 'model') {
+      return provider['mayConnect'] == true || connected > 0;
+    }
+    return connected > 0;
+  }
+
   bool _needsAdd(Map<String, Object?> provider) =>
       widget.catalog &&
+      !widget.installed &&
       provider['kind'] == 'model' &&
       (provider['connected'] as int? ?? 0) == 0 &&
       provider['mayConnect'] != true;
@@ -333,6 +348,60 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           'commandId': _commandId(),
           'expectedRevision': frame!.revision,
           'type': 'user/choose-model-provider',
+          'packageId': packageId,
+        },
+      );
+      widget.onFeaturesChanged?.call();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          notice =
+              'That didn’t go through. Check your connection and try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => pendingRow = null);
+      await load();
+    }
+  }
+
+  Future<void> _removeProvider(Map<String, Object?> provider) async {
+    final packageId = provider['packageId'] as String;
+    final name = provider['displayName'] as String;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove $name?'),
+        content: const Text(
+          'Bots using this model go back to Frock AI. You can add it again from the catalog.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final row = _rowKey(provider);
+    if (pendingRow != null) return;
+    setState(() {
+      pendingRow = row;
+      notice = null;
+    });
+    try {
+      await widget.api.request(
+        '/api/settings',
+        body: {
+          'schemaVersion': 1,
+          'commandId': _commandId(),
+          'expectedRevision': frame!.revision,
+          'type': 'user/uninstall-package',
           'packageId': packageId,
         },
       );
@@ -391,7 +460,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       final rows = providers;
       body = RefreshIndicator(
         onRefresh: load,
-        child: widget.catalog
+        child: widget.catalog && !widget.installed
             ? _catalogScroll(theme, frame, rows, banner)
             : _installedScroll(theme, frame, rows, banner),
       );
@@ -480,6 +549,12 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       send: (command) => _send(command, _rowKey(provider)),
       commandId: _commandId,
       onAdd: _needsAdd(provider) ? () => _addProvider(provider) : null,
+      onRemove:
+          widget.installed &&
+              provider['kind'] == 'model' &&
+              _isInstalled(provider)
+          ? () => _removeProvider(provider)
+          : null,
     );
   }
 
@@ -510,7 +585,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                 spacing: gap,
                 runSpacing: gap,
                 children: [
-                  if (!widget.models && widget.packageId == null)
+                  if (!widget.installed &&
+                      !widget.models &&
+                      widget.packageId == null)
                     SizedBox(
                       width: width,
                       child: _MacMessagesRow(page: widget),
@@ -530,7 +607,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Text(
-                widget.models
+                widget.installed
+                    ? 'Nothing installed yet. Add a model or connect an app in Catalog.'
+                    : widget.models
                     ? 'No model providers are turned on. Add one in the Marketplace.'
                     : 'Nothing to connect yet.',
                 style: theme.textTheme.bodyMedium,
@@ -548,7 +627,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     String? banner,
   ) {
     final showMac =
-        widget.filter != MarketplaceKindFilter.models &&
+        widget.showConnectors &&
+        !widget.installed &&
         widget.packageId == null &&
         widget.query.trim().isEmpty;
     return LayoutBuilder(
@@ -599,9 +679,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                         : constraints.crossAxisExtent;
                     return SliverPadding(
                       padding: EdgeInsets.symmetric(
-                        horizontal:
-                            ((constraints.crossAxisExtent - width) / 2)
-                                .clamp(0, double.infinity),
+                        horizontal: ((constraints.crossAxisExtent - width) / 2)
+                            .clamp(0, double.infinity),
                       ),
                       sliver: columns == 1
                           ? SliverList.builder(
@@ -815,11 +894,7 @@ class _IconTile extends StatelessWidget {
   final String? asset;
   final String? label;
   final IconData icon;
-  const _IconTile({
-    this.asset,
-    this.label,
-    this.icon = Icons.link_rounded,
-  });
+  const _IconTile({this.asset, this.label, this.icon = Icons.link_rounded});
 
   String get _letter {
     final source = (label ?? '').trim();
@@ -994,6 +1069,7 @@ class _ProviderRow extends StatefulWidget {
   final Future<void> Function(Map<String, Object?> command) send;
   final String Function() commandId;
   final VoidCallback? onAdd;
+  final VoidCallback? onRemove;
   const _ProviderRow({
     required this.index,
     required this.provider,
@@ -1004,6 +1080,7 @@ class _ProviderRow extends StatefulWidget {
     required this.send,
     required this.commandId,
     this.onAdd,
+    this.onRemove,
   });
 
   @override
@@ -1088,7 +1165,10 @@ class _ProviderRowState extends State<_ProviderRow> {
 
   /// Whether the row opens on a tap to show its accounts and the way to add
   /// another; a keyed provider with nothing yet opens straight to its form.
-  bool get opens => hasAccounts || (mayConnect && authorization == 'api-key');
+  bool get opens =>
+      hasAccounts ||
+      (mayConnect && authorization == 'api-key') ||
+      widget.onRemove != null;
 
   Widget? _trailing(BuildContext context) {
     if (hasAccounts) {
@@ -1118,14 +1198,34 @@ class _ProviderRowState extends State<_ProviderRow> {
         ),
       );
     }
-    if (!mayConnect) return null;
+    if (!mayConnect && widget.onRemove == null) return null;
+    if (!mayConnect) {
+      return Icon(
+        open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+        size: 20,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      );
+    }
     // A press on a Connect while another row's command is settling does
     // nothing; the page's send refuses it, and this pill stays as it is.
-    return _Pill(
-      label: 'Connect',
-      primary: true,
-      busy: widget.busy && authorization != 'api-key',
-      onPressed: _begin,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _Pill(
+          label: 'Connect',
+          primary: true,
+          busy: widget.busy && authorization != 'api-key',
+          onPressed: _begin,
+        ),
+        if (widget.onRemove != null) ...[
+          const SizedBox(width: 6),
+          Icon(
+            open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+            size: 20,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ],
+      ],
     );
   }
 
@@ -1224,6 +1324,23 @@ class _ProviderRowState extends State<_ProviderRow> {
             'Nothing connected yet.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        if (widget.onRemove != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: identified(
+                ConnectorIds.action('remove-${provider['packageId']}'),
+                TextButton(
+                  onPressed: widget.busy ? null : widget.onRemove,
+                  style: TextButton.styleFrom(
+                    foregroundColor: theme.colorScheme.error,
+                  ),
+                  child: const Text('Remove'),
+                ),
+              ),
             ),
           ),
       ],
@@ -1565,8 +1682,9 @@ class MarketplaceDialog extends StatelessWidget {
 
 /// The account Marketplace: one searchable catalog of models and connectors.
 ///
-/// Add a model here first; then connect a key and choose it in Models. Filter
-/// is a button, not a second page.
+/// Add a model here first; then connect a key and choose it in Models.
+/// Installed is the same list, limited to what is already added, for
+/// configure and remove. Kind checkboxes sit under the search box.
 class MarketplacePage extends StatefulWidget {
   final NativeApi api;
   final LocalStore store;
@@ -1574,7 +1692,8 @@ class MarketplacePage extends StatefulWidget {
   final Future<bool> Function(Uri)? openBrowser;
   final VoidCallback? onFeaturesChanged;
   final VoidCallback? onClose;
-  final MarketplaceKindFilter initialFilter;
+  final bool initialShowModels;
+  final bool initialShowConnectors;
 
   const MarketplacePage({
     super.key,
@@ -1584,7 +1703,8 @@ class MarketplacePage extends StatefulWidget {
     this.openBrowser,
     this.onFeaturesChanged,
     this.onClose,
-    this.initialFilter = MarketplaceKindFilter.all,
+    this.initialShowModels = true,
+    this.initialShowConnectors = true,
   });
 
   @override
@@ -1593,7 +1713,9 @@ class MarketplacePage extends StatefulWidget {
 
 class _MarketplacePageState extends State<MarketplacePage> {
   final connectorsKey = GlobalKey<_ConnectionsPageState>();
-  late MarketplaceKindFilter filter = widget.initialFilter;
+  late bool showModels = widget.initialShowModels;
+  late bool showConnectors = widget.initialShowConnectors;
+  MarketplaceSection section = MarketplaceSection.catalog;
   String query = '';
   bool refreshing = false;
 
@@ -1606,12 +1728,6 @@ class _MarketplacePageState extends State<MarketplacePage> {
       if (mounted) setState(() => refreshing = false);
     }
   }
-
-  String get _filterLabel => switch (filter) {
-    MarketplaceKindFilter.all => 'All',
-    MarketplaceKindFilter.models => 'Models',
-    MarketplaceKindFilter.connectors => 'Connectors',
-  };
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -1639,73 +1755,70 @@ class _MarketplacePageState extends State<MarketplacePage> {
         ),
       ],
       bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(64),
+        preferredSize: const Size.fromHeight(160),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 8, 12),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: identified(
-                  ConnectorIds.marketplaceSearch,
-                  SteadyCaret(
-                    child: TextField(
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
-                        hintText: 'Find a model or connector',
-                      ),
-                      onChanged: (value) => setState(() => query = value),
+              identified(
+                ConnectorIds.marketplaceSearch,
+                SteadyCaret(
+                  child: TextField(
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Find a model or connector',
                     ),
+                    onChanged: (value) => setState(() => query = value),
                   ),
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(height: 4),
               identified(
                 ConnectorIds.marketplaceFilter,
-                PopupMenuButton<MarketplaceKindFilter>(
-                  tooltip: 'Filter marketplace',
-                  initialValue: filter,
-                  onSelected: (value) => setState(() => filter = value),
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: MarketplaceKindFilter.all,
-                      child: identified(
-                        ConnectorIds.marketplaceFilterAll,
-                        Text(
-                          filter == MarketplaceKindFilter.all
-                              ? 'All · selected'
-                              : 'All',
-                        ),
-                      ),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    _KindCheck(
+                      id: ConnectorIds.marketplaceFilterModels,
+                      label: 'Models',
+                      value: showModels,
+                      onChanged: (value) => setState(() => showModels = value),
                     ),
-                    PopupMenuItem(
-                      value: MarketplaceKindFilter.models,
-                      child: identified(
-                        ConnectorIds.marketplaceFilterModels,
-                        Text(
-                          filter == MarketplaceKindFilter.models
-                              ? 'Models · selected'
-                              : 'Models',
-                        ),
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: MarketplaceKindFilter.connectors,
-                      child: identified(
-                        ConnectorIds.marketplaceFilterConnectors,
-                        Text(
-                          filter == MarketplaceKindFilter.connectors
-                              ? 'Connectors · selected'
-                              : 'Connectors',
-                        ),
-                      ),
+                    _KindCheck(
+                      id: ConnectorIds.marketplaceFilterConnectors,
+                      label: 'Connectors',
+                      value: showConnectors,
+                      onChanged: (value) =>
+                          setState(() => showConnectors = value),
                     ),
                   ],
-                  icon: Badge(
-                    isLabelVisible: filter != MarketplaceKindFilter.all,
-                    label: Text(_filterLabel),
-                    child: const Icon(Icons.filter_list_rounded),
-                  ),
                 ),
+              ),
+              const SizedBox(height: 8),
+              SegmentedButton<MarketplaceSection>(
+                segments: [
+                  ButtonSegment(
+                    value: MarketplaceSection.catalog,
+                    label: identified(
+                      ConnectorIds.marketplaceCatalog,
+                      const Text('Catalog'),
+                    ),
+                    tooltip: 'Browse models and connectors',
+                  ),
+                  ButtonSegment(
+                    value: MarketplaceSection.installed,
+                    label: identified(
+                      ConnectorIds.marketplaceInstalled,
+                      const Text('Installed'),
+                    ),
+                    tooltip: 'Configure or remove what you have added',
+                  ),
+                ],
+                selected: {section},
+                onSelectionChanged: (value) =>
+                    setState(() => section = value.single),
+                showSelectedIcon: false,
               ),
             ],
           ),
@@ -1723,7 +1836,47 @@ class _MarketplacePageState extends State<MarketplacePage> {
       chrome: false,
       catalog: true,
       query: query,
-      filter: filter,
+      showModels: showModels,
+      showConnectors: showConnectors,
+      installed: section == MarketplaceSection.installed,
     ),
   );
+}
+
+/// One Marketplace kind checkbox, label included in the tap target.
+class _KindCheck extends StatelessWidget {
+  final String id;
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  const _KindCheck({
+    required this.id,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return identified(
+      id,
+      InkWell(
+        onTap: () => onChanged(!value),
+        borderRadius: BorderRadius.circular(8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Checkbox(
+              value: value,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onChanged: (next) => onChanged(next == true),
+            ),
+            Text(label, style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(width: 4),
+          ],
+        ),
+      ),
+    );
+  }
 }
