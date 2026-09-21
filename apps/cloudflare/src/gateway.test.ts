@@ -2233,6 +2233,34 @@ describe("Cloudflare user application gateway", () => {
     expect(icon.headers.get("content-type")).toBe("image/png");
   });
 
+  test("serves What’s New stills without an authenticated identity", async () => {
+    const { gateway } = createTestGateway();
+    const picture = await gateway(
+      new Request("https://frockbot.test/whats-new/whats-new.webp"),
+    );
+    expect(picture.status).toBe(200);
+    expect(picture.headers.get("content-type")).toBe("image/webp");
+    expect(new Uint8Array(await picture.arrayBuffer()).subarray(0, 4)).toEqual(
+      Uint8Array.from([0x52, 0x49, 0x46, 0x46]),
+    );
+  });
+
+  test("the What’s New feed is the signed-in list, not a public page", async () => {
+    const { gateway } = createTestGateway();
+    expect(
+      (await gateway(new Request("https://frockbot.test/api/whats-new")))
+        .status,
+    ).toBe(401);
+    const feed = await gateway(request("/api/whats-new", "alice"));
+    expect(feed.status).toBe(200);
+    const body = (await feed.json()) as {
+      schemaVersion: number;
+      entries: { id: string }[];
+    };
+    expect(body.schemaVersion).toBe(1);
+    expect(body.entries[0]?.id).toBe("whats-new");
+  });
+
   test("ignores development identity headers unless explicitly enabled", async () => {
     const { gateway } = createTestGateway(
       undefined,

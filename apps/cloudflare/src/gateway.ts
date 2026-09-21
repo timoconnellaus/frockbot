@@ -48,6 +48,7 @@ import {
   VOICE_DICTATION_PATH_V1,
   type VoiceCapabilitiesV1,
 } from "@frockbot/app/voice/shared";
+import { whatsNewFeedV1, whatsNewImageNameV1 } from "@frockbot/app/whats-new";
 import {
   voiceAssistantEdgeTimingV1,
   type VoiceTimingV1,
@@ -63,14 +64,22 @@ import {
 
 const PUBLIC_APPLICATION_USER_ID = "anonymous";
 /**
- * What an unauthenticated GET may reach: the document, and the site icon.
+ * What an unauthenticated GET may reach: the document, the site icon, and
+ * What’s New stills. The stills are product copy, not a secret, and Flutter
+ * loads them with a plain GET that carries no cookie on the web.
  *
  * The client's own payload is not here. It is the Worker's static assets,
  * content-addressed under `/_flutter/<buildHash>/` and answered by the asset
  * router before this Worker runs, so nothing about it is per-account and no
  * request for it arrives at this function.
  */
-const PUBLIC_ASSET_PATHS = new Set(["/", "/favicon.ico"]);
+export function isPublicAssetPathV1(pathname: string): boolean {
+  return (
+    pathname === "/" ||
+    pathname === "/favicon.ico" ||
+    whatsNewImageNameV1(pathname) !== undefined
+  );
+}
 const PACKAGE_UI_PATH = /^\/packages\/([0-9a-f]{64})\.html$/;
 /*
  * The artifact host is a host in the same zone, so the zone injected its
@@ -691,7 +700,7 @@ export function createGateway(
         ? "better-auth"
         : "anonymous";
     const isPublicAsset =
-      request.method === "GET" && PUBLIC_ASSET_PATHS.has(url.pathname);
+      request.method === "GET" && isPublicAssetPathV1(url.pathname);
     if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
     if (!userId) return jsonError(401, "authentication required");
     const isAdmin =
@@ -741,6 +750,12 @@ export function createGateway(
     timing?.mark("edge-auth-ready");
     if (request.method === "GET" && url.pathname === "/api/identity") {
       return Response.json({ schemaVersion: 1, userId, isAdmin });
+    }
+    if (url.pathname === "/api/whats-new") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      return Response.json(whatsNewFeedV1(), {
+        headers: { "cache-control": "no-store" },
+      });
     }
 
     if (url.pathname === "/api/push/device") {

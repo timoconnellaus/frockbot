@@ -360,9 +360,10 @@ Worker runs, so it needs no route, no bucket and no seeding step, and the same
 `wrangler dev` that runs the Worker locally serves it. `html_handling` and
 `not_found_handling` are both `"none"`: the document is rendered per account, so
 an asset directory that answered `/` or invented an index would answer for it.
-`PUBLIC_ASSET_PATHS` (`apps/cloudflare/src/gateway.ts:52`) is `/` and
-`/favicon.ico` only — no request for the client's own bytes ever reaches the
-gateway.
+`isPublicAssetPathV1` (`apps/cloudflare/src/gateway.ts`) admits `/`,
+`/favicon.ico`, and What’s New stills at `/whats-new/<file>.webp` — product
+copy, loaded by a plain GET. No request for the client's own bytes ever
+reaches the gateway.
 
 The document is `appHtml()` (`apps/cloudflare/src/user-application.ts:117`).
 `build-artifact.ts` defines `__FROCKBOT_FLUTTER_BUILD__` from `flutter-web.json`
@@ -525,6 +526,14 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   the recent runs the Bot page lists.
 - `AuditPage` — `lib/audit/page.dart`: every effect a Bot performed, filtered
   by kind, with an audited effect's Turn opening on the Work view
+- `WhatsNewPage` — `lib/whats_new/page.dart`: the curated list of what
+  production shipped, from `GET /api/whats-new`. Reached from What’s New on
+  the account sheet, with an unread mark, and opened once after a native
+  client restarts into a newer build. Dates are the first production tag that
+  contained the entry, not the pull request. A still is optional, one WebP
+  served at `/whats-new/<file>`, same origin. A pull request that touches
+  `app/whats-new/**` posts a comment with those stills from the branch head,
+  and `PREVIEW.md` links the same pictures so they can be reviewed there.
 - `SearchOverlay` — `lib/search/overlay.dart` over `lib/search/controller.dart`:
   the backend index across every Bot, debounced, with each of its four states
   named

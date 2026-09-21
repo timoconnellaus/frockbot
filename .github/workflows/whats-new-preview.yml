@@ -1,0 +1,41 @@
+name: What’s New preview
+
+# When a pull request adds or changes a What’s New still, post it on the
+# conversation so the picture can be reviewed without opening Files changed.
+
+on:
+  pull_request:
+    paths:
+      - app/whats-new/**
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: whats-new-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: Preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Comment the stills this pull request is shipping
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: bun app/whats-new/pr-preview.ts
