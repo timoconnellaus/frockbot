@@ -705,7 +705,7 @@ class _ComposerState extends State<Composer> {
     return Padding(
       padding: const EdgeInsets.only(left: 4, right: 8),
       child: SizedBox(
-        width: 48,
+        width: MediaQuery.textScalerOf(context).scale(48),
         child: listenable == null
             ? clock(Duration.zero)
             : ValueListenableBuilder<Duration>(

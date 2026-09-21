@@ -1057,14 +1057,14 @@ rather than opening a new one. Raw audio is never stored anywhere.
 
 ## Credentials
 
-| Name                            | Where             | Required | What it enables                                                                                                                             |
-| ------------------------------- | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPENAI_API_KEY`                | Worker secret     | yes      | Composer dictation. Absent: dictation reports that voice is unavailable.                                                                    |
-| `GEMINI_API_KEY`                | Worker secret     | yes      | The continuous voice session: one Gemini Live socket per call, ears, words and voice together. Absent: starting a session is refused.       |
-| `VOICE_ASSISTANT_MODEL`         | Worker var        | optional | Pins the gateway model the end-of-call memory update is asked; the platform's Auto route when unset. The call has no chat model.            |
-| `VOICE_DICTATION_CLEANUP_MODEL` | Worker var        | optional | The model that tidies a dictated transcript. Unset takes the default route; no `AI` binding means no tidying and the raw transcript stands. |
-| `VOICE_DICTATION_UPSTREAM_URL`  | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                  |
-| `VOICE_ASSISTANT_UPSTREAM_URL`  | test harness only | —        | Points the voice session at a local fake; never set in production.                                                                          |
+| Name                            | Where             | Required | What it enables                                                                                                                                    |
+| ------------------------------- | ----------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`                | Worker secret     | yes      | Composer dictation. Absent: dictation reports that voice is unavailable.                                                                           |
+| `GEMINI_API_KEY`                | Worker secret     | yes      | The continuous voice session: one Gemini Live socket per call, ears, words and voice together. Absent: starting a session is refused.              |
+| `VOICE_ASSISTANT_MODEL`         | Worker var        | optional | Pins the gateway model the end-of-call memory update is asked; the platform's Auto route when unset. The call has no chat model.                   |
+| `VOICE_DICTATION_CLEANUP_MODEL` | Worker var        | optional | The model that tidies a dictated transcript. Unset is `groq/llama-3.1-8b-instant`; no `AI` binding means no tidying and the raw transcript stands. |
+| `VOICE_DICTATION_UPSTREAM_URL`  | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                         |
+| `VOICE_ASSISTANT_UPSTREAM_URL`  | test harness only | —        | Points the voice session at a local fake; never set in production.                                                                                 |
 
 Declared in `apps/cloudflare/src/production-secrets.ts`, carried by the release
 workflow, listed in `.dev.vars.example`. The release gate refuses to find
