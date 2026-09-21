@@ -493,14 +493,10 @@ words are marked as quoted data rather than instructions.
 If the session that made the call has been replaced since — a wake, a
 hand-over — there is no function call left to answer, and the result goes in as
 a turn of the conversation instead, saying in its own words that it is a Bot's
-answer quoted as data. With no live session at all the answer waits and the
-attempt is booked again. There is no queue of answers across calls: a call
-that ends takes its open requests with it, and an answer that arrives after a
-hang-up is never read out — the Bot's reply stays in the Bot's own
-conversation, where the person can read it. A socket that drops without
+answer quoted as data. A later live call is told the same way. With no live
+session at all the Bot writes the answer into chat. A socket that drops without
 `end_call` keeps the call inside the rejoin window, and an answer arriving
-then waits for the same device to come back to the same conversation; the
-alarm that ends an abandoned call cancels it.
+then waits for the same device to come back to the same conversation.
 
 ### Sleep and wake (cost control)
 
@@ -580,9 +576,8 @@ same way, but does **not** end the call: the call record survives the 60 s
 rejoin window so a client back from a network change continues the same
 conversation, and an alarm ends it if nobody comes back (see "Session
 memory"). A Bot Turn the assistant already admitted keeps running; its answer
-is told on this call if the same device rejoins it in time, and cancelled with
-the call otherwise — never carried to the next call. `end_call` cancels the
-call's open requests at once.
+is told on this call if the same device rejoins it in time, on a later call
+if one is already up, and written into chat if nobody is listening.
 
 The client closes with a code and a reason that name the path that ended the
 call, because the server's log is the only record of it: `1000` with
@@ -617,9 +612,8 @@ function call, by name and id, never its arguments), `tool-cancelled`,
 `interrupted` (with `source`: `model` when the session's own detector heard
 someone, `client` when the phone's energy gate did), `call-switched` (with the
 Bot and voice the session reopened as), `answer-told` (a subagent result went
-back, under its own call id or as a turn), `answer-dropped` (a result arrived
-for a call that is over, or the day's turns were spent; it stays in the Bot's
-conversation), `usage` (the session's own token counts at a turn's end),
+back, under its own call id, as a turn, or as a chat message after hang-up),
+`usage` (the session's own token counts at a turn's end),
 `refused` (with the code and sentence the client was sent), `call-ended` (with
 the call's total audio chunks, bytes and turns), `call-memory` and `closed`
 (the client's code and reason). Every line carries the connection id, and —
@@ -753,8 +747,8 @@ lease, because it waits for `onStart` before returning a stub),
   as `sha256` over `userId`, `callId`, `turnId`, `botId` and `text` joined by
   NUL (so a retried tool call admits the same Bot Turn once), and state
   `admitted | settled | spoken | cancelled | expired` — `spoken` is told to
-  the assistant, with the id of the event turn that told it; `cancelled` is a
-  request whose call ended first.
+  the assistant or written into chat; `cancelled` is an explicit stop, not a
+  hang-up.
 
 A `subagent` call uses the Bot's `runVoice` door and the existing agent lane.
 The command records the call, voice Turn and request IDs before dispatch;
@@ -781,25 +775,18 @@ lost dispatch or wake. A callback schedules its next check without deduping
 onto its own executing schedule row, which the scheduler will delete. A
 lookup that finds no admitted run resends the same recorded intent under the
 same ID, with bounded retries and an explicit failure when exhausted.
-`onStart` recreates pending checks from the ledger; a request whose call is no
-longer the live one is cancelled on waking.
+`onStart` recreates pending checks from the ledger. Ending a call does not
+cancel accepted work: an unspoken answer is told to the next live session, or
+written into the Bot's thread if nobody is listening.
 
-A settled answer goes back to the live session as that function call's own
+A settled answer goes back to a live session as that function call's own
 late response (`announceDelegation`), scheduled `WHEN_IDLE` so the model says
 it at the next pause and decides for itself whether it is worth saying. The
 delegation is marked `spoken` the moment it is handed over — told once,
-whatever is then said. Nothing is composed ahead of time, cached, or
-acknowledged by the phone; there is no event turn and no announce floor,
-because the model already has one of its own. With no live session the answer
-waits and the attempt is booked again; with a different call, or a day of
-turns that is spent, it is dropped — `cancelled` in the ledger, on record in
-the Bot's own conversation.
-
-Conversation context is the session's own: it remembers the call it is having,
-and a resumption handle carries that across a pause. The ledger's `turn:`
-records are read for two things only — the `<where-we-were>` handover when a
-session has to be reopened fresh, and the end-of-call memory update. Nothing
-from a previous call reaches a new one that way.
+whatever is then said. A later call that is already up is told the same way.
+With no live session the Bot writes the answer into chat as an ordinary
+message on the request's own run. A new call is told silently about work
+that is still running (`<running-tasks>`), and does not announce it.
 The User Memory profile and the last 30 days of its log are read at call start
 through `MemoryStore` over the User Durable Object's generation ledger (so
 retractions and shards resolve as they do for Bots), and Project memory is
@@ -1187,8 +1174,8 @@ matters.
 **A Bot answering a voice request.** The Turn is admitted with a `voice`
 origin and gets `reply_to_request`, which is the one answer the call is owed:
 it goes back to the voice object, mints no message and wakes no device. If the
-call has ended by then the request was cancelled with it, and the reply is
-simply where every such reply is, in the Bot's own conversation. It is
+call has ended by then the voice object writes that reply into chat as an
+ordinary message on the request's own run. It is
 an `agent` Turn, the same kind a Bot-to-Bot question runs as, and which tools
 an `agent` Turn admits is the kernel's rule, in `docs/architecture.md` §4
 (tool exposure). Before that admission existed a Bot on a call was refused its

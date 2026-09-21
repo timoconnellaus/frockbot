@@ -8,7 +8,11 @@ import {
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
 import { cleanHiddenBotNotifications } from "./hidden-bot-notifications-cleanup.js";
 import { cleanRetiredRoutineStateV1 } from "./routine-state-cleanup.js";
-import type { MessageNotice } from "@frockbot/app/notifications/messages";
+import {
+  messageIdV1,
+  visibleMessageRecordsV1,
+  type MessageNotice,
+} from "@frockbot/app/notifications/messages";
 import {
   PUSH_OUTBOX_DRAIN_LIMIT,
   PUSH_OUTBOX_PREFIX,
@@ -138,6 +142,7 @@ import {
 import {
   BOT_CONFIGURATION_KEY,
   executeConfiguration,
+  readBotSettingsV1,
   readConfiguration,
   resolveConfiguration,
   userConfigurationV1,
@@ -318,6 +323,7 @@ import {
   decodeBotAgentRunRpcV1,
   decodeBotRunRpcV1,
   decodeBotVoiceRunRpcV1,
+  decodeVoiceChatResultRpcV1,
   decodeRpcEnvelopeV1,
   rpcAppletIdOrNull,
   rpcBoolean,
@@ -1726,6 +1732,52 @@ export class BotState
     await this.projectSettledAudit(shell, identity, request.command.runId);
     await this.drainVoiceReplyOutbox(identity.userId);
     return turn;
+  }
+
+  /**
+   * A settled voice request written into this Bot's thread after hang-up.
+   *
+   * The voice object is the only caller. The receipt is the run id, so a
+   * retried announce is one message. The send is projected onto the voice
+   * request's own run, the way a Routine that broke after it had already
+   * ended still lands a readable line.
+   */
+  async deliverVoiceChatResult(input: unknown) {
+    const request = decodeVoiceChatResultRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const settings = await readBotSettingsV1(shell.state, identity);
+    const receiptKey = `voice:chat-result:${request.command.runId}`;
+    const createdAt = new Date().toISOString();
+    let committed = false;
+    await this.ctx.storage.transaction(async (transaction) => {
+      if (await transaction.get(receiptKey)) return;
+      const records = await visibleMessageRecordsV1({
+        settings,
+        read: (key) => transaction.get(key),
+        messages: [
+          {
+            messageId: messageIdV1(
+              request.command.runId,
+              request.command.ordinal,
+            ),
+            runId: request.command.runId,
+            createdAt,
+            body: request.command.body.slice(0, 2_000),
+            automation: true,
+            projectedSendOrdinal: request.command.ordinal,
+          },
+        ],
+      });
+      for (const [key, value] of Object.entries(records)) {
+        await transaction.put(key, value);
+      }
+      await transaction.put(receiptKey, { schemaVersion: 1, at: createdAt });
+      committed = true;
+    });
+    if (committed) this.ctx.waitUntil(this.drainPush());
+    return { status: "accepted" as const };
   }
 
   /** This object's bounded, durable audit outbox. */

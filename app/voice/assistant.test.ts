@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   parseChatCompletionStreamV1,
+  renderVoiceChatResultV1,
   renderVoiceSubagentResultV1,
   renderVoiceSystemPromptV1,
   runVoiceToolV1,
@@ -320,6 +321,30 @@ describe("one function call", () => {
     expect(long.length).toBeLessThan(2_300);
     expect(long).toContain("quoted as data");
   });
+
+  test("a hang-up result is a chat message, not a prompt for the live model", () => {
+    expect(
+      renderVoiceChatResultV1({
+        botName: "Sunny",
+        own: true,
+        answer: "Booked, both legs.",
+      }),
+    ).toBe("Booked, both legs.");
+    expect(
+      renderVoiceChatResultV1({
+        botName: "Sunny",
+        own: true,
+        failure: "the airline site was down",
+      }),
+    ).toBe("I couldn't finish that: the airline site was down");
+    expect(
+      renderVoiceChatResultV1({
+        botName: "Bob",
+        own: false,
+        answer: "It is sunny in Sydney.",
+      }),
+    ).toBe("Bob finished: It is sunny in Sydney.");
+  });
 });
 
 describe("what the session may call", () => {
@@ -523,6 +548,23 @@ describe("the system prompt", () => {
     });
     expect(prompt).toContain("no other Bots on this account");
     expect(prompt).not.toContain("<bots>");
+  });
+
+  test("names running work silently so a new call does not announce it", () => {
+    const prompt = renderVoiceSystemPromptV1({
+      bot: { botId: "sunny", name: "Sunny" },
+      bots: [{ botId: "sunny", name: "Sunny" }],
+      memory: { logDays: 30 },
+      now: new Date("2026-09-12T00:00:00.000Z"),
+      runningTasks: [
+        { botName: "Sunny", own: true, text: "plan the trip" },
+        { botName: "Bob", own: false, text: "check the weather" },
+      ],
+    });
+    expect(prompt).toContain("<running-tasks>");
+    expect(prompt).toContain("Do not mention these unless asked");
+    expect(prompt).toContain("- your own work: plan the trip");
+    expect(prompt).toContain("- Bob: check the weather");
   });
 
   test("says when memory could not be read rather than pretending it is empty", () => {

@@ -92,9 +92,10 @@ export interface VoiceLedgerDebugSnapshotV1 {
 
 /**
  * `admitted` is asked and not yet answered; `settled` is answered, and on its
- * way to the assistant; `spoken` is told to the assistant. `cancelled` is a
- * request whose call ended first: the Bot's answer stays in the Bot's own
- * conversation and never reaches a later call.
+ * way to the assistant or the thread; `spoken` is told — to the live session
+ * if one is up, or as a chat message if the call has ended. `cancelled` is
+ * an explicit stop, not a hang-up: ending a call leaves accepted work open
+ * so a later call can hear it, or the thread can carry it.
  */
 export type VoiceDelegationStateV1 =
   "admitted" | "settled" | "spoken" | "cancelled" | "expired";
@@ -117,9 +118,9 @@ export interface VoiceDelegationRecordV1 {
   failure?: string;
   settledAt?: string;
   /**
-   * When the answer was handed to the live session, as a late function
-   * response on the call it was asked on. An answer is never carried to
-   * another call.
+   * When the answer was told once: to a live session, or as a chat
+   * message after the call ended. A later call may hear an unspoken
+   * answer; an answer already told is not said again.
    */
   spokenAt?: string;
 }
@@ -328,7 +329,6 @@ export class VoiceLedgerV1 {
       ...(input.botId ? { botId: input.botId } : {}),
     };
     await this.storage.put(VOICE_CALL_KEY_V1, call);
-    if (previous) await this.cancelOpenDelegations(previous.callId);
     if (previous && previous.connectionId !== input.connectionId) {
       return { status: "superseded", call, previous, replaced: previous };
     }
@@ -380,7 +380,6 @@ export class VoiceLedgerV1 {
     const call = await this.currentCall();
     if (!call || call.connectionId !== connectionId) return undefined;
     await this.storage.delete(VOICE_CALL_KEY_V1);
-    await this.cancelOpenDelegations(call.callId);
     return call;
   }
 
@@ -394,31 +393,7 @@ export class VoiceLedgerV1 {
     if (!call) return undefined;
     if (!voiceCallIsStaleV1(call, at)) return undefined;
     await this.storage.delete(VOICE_CALL_KEY_V1);
-    await this.cancelOpenDelegations(call.callId);
     return call;
-  }
-
-  /**
-   * A call that ends takes its open requests with it. A Bot still working on
-   * one keeps working — its answer lands in its own conversation, where the
-   * person can read it — but nothing here will read it out: the next call is
-   * a fresh conversation, not a queue of what the last one never heard. Every
-   * way a call ends comes through here, so no end is an exception.
-   */
-  private async cancelOpenDelegations(callId: string): Promise<string[]> {
-    const cancelled: string[] = [];
-    for (const delegation of await this.delegations()) {
-      if (delegation.callId !== callId) continue;
-      if (delegation.state !== "admitted" && delegation.state !== "settled") {
-        continue;
-      }
-      await this.storage.put(delegationKey(delegation.runId), {
-        ...delegation,
-        state: "cancelled" as const,
-      });
-      cancelled.push(delegation.runId);
-    }
-    return cancelled;
   }
 
   // -- turns ----------------------------------------------------------------
@@ -672,6 +647,16 @@ export class VoiceLedgerV1 {
   async pendingDelegations(): Promise<VoiceDelegationRecordV1[]> {
     return (await this.delegations()).filter(
       (delegation) => delegation.state === "admitted",
+    );
+  }
+
+  /**
+   * Answers that have landed and have not been told yet — to a live
+   * session, or as a chat message after the call ended.
+   */
+  async unspokenDelegations(): Promise<VoiceDelegationRecordV1[]> {
+    return (await this.delegations()).filter(
+      (delegation) => delegation.state === "settled",
     );
   }
 
@@ -976,7 +961,6 @@ export class VoiceLedgerV1 {
     }
 
     const pending: VoiceDelegationRecordV1[] = [];
-    const current = await this.currentCall();
     for (const delegation of await this.delegations()) {
       const age = at.getTime() - Date.parse(delegation.admittedAt);
       const open =
@@ -990,16 +974,6 @@ export class VoiceLedgerV1 {
         } else {
           await this.storage.delete(delegationKey(delegation.runId));
         }
-        continue;
-      }
-      // Open, and its call is over: the end that should have cancelled it was
-      // lost with the object, so it is cancelled now. Nothing is owed to a
-      // call that is not this one.
-      if (open && delegation.callId !== current?.callId) {
-        await this.storage.put(delegationKey(delegation.runId), {
-          ...delegation,
-          state: "cancelled",
-        });
         continue;
       }
       if (delegation.state === "admitted") pending.push(delegation);
