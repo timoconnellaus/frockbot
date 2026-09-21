@@ -1,7 +1,9 @@
 /// Compact call chrome in the conversation header: you, the wave, the Bot.
 ///
 /// The thread and the composer stay. This row is the only extra furniture a
-/// live call adds. Sizes at the top are the tweak knobs.
+/// live call adds. Every in-call state uses the same cluster: connecting,
+/// listening, talking, the Bot speaking, thinking, paused, muted, sleeping,
+/// failed. The word under the strip changes; the box does not.
 library;
 
 import 'package:flutter/material.dart';
@@ -21,6 +23,23 @@ const double voiceCallBotSize = 48;
 
 /// Same strip dictation uses: 4px bars, 2px gap, 26px tall.
 const double voiceCallWaveHeight = 26;
+
+/// Cap on the dictation strip. Same in every in-call state so the cluster
+/// does not grow when the word under it changes, or when the header is wide.
+const double voiceCallWaveWidth = 96;
+
+/// Floor when the header is too narrow for the cap (a 320-wide phone
+/// with Back and Computer). Still enough bars to read as a strip.
+const double voiceCallWaveMinWidth = 32;
+
+/// Everything besides the strip: user, gaps, Bot, hang-up.
+const double voiceCallFixedWidth =
+    voiceCallUserSize + 10 + 10 + voiceCallBotSize + 6 + voiceCallHangUpSize;
+
+/// The cluster at its designed width. Connecting through hang-up all use
+/// this box. The header may squeeze the strip below [voiceCallWaveWidth]
+/// on a narrow phone; it never grows past this.
+const double voiceCallClusterWidth = voiceCallFixedWidth + voiceCallWaveWidth;
 
 const double voiceCallChromeHeight = 52;
 const double voiceCallHangUpSize = 36;
@@ -124,92 +143,109 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
       VoiceIds.callChrome,
       SizedBox(
         height: voiceCallChromeHeight,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            identified(
-              VoiceIds.callUser,
-              _UserDot(
-                initials: widget.userInitials,
-                imageUrl: widget.userImageUrl,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  identified(
-                    VoiceIds.callWave,
-                    SizedBox(
-                      height: voiceCallWaveHeight,
-                      width: double.infinity,
-                      child: DictationWaveform(
-                        level: _mic,
-                        capturing:
-                            widget.session.active && !widget.session.paused,
-                      ),
-                    ),
-                  ),
-                  identified(
-                    VoiceIds.callState,
-                    Semantics(
-                      liveRegion: true,
-                      child: Text(
-                        word,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          fontSize: 12,
-                          height: 1.2,
-                          fontWeight: FontWeight.w500,
-                          color: _shown.state == VoiceModeState.failed
-                              ? theme.colorScheme.error
-                              : theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            identified(
-              VoiceIds.callBot,
-              CharacterAvatar(
-                size: voiceCallBotSize,
-                characterId: widget.characterId,
-                primary: widget.primary,
-                cropToInk: true,
-                motion: CharacterMotion.quiet,
-                activity: _shown.speaking
-                    ? CharacterActivity.thinking
-                    : CharacterActivity.idle,
-                semanticsLabel: '${widget.botName} on the call',
-              ),
-            ),
-            const SizedBox(width: 6),
-            identified(
-              VoiceIds.hangUp,
-              Tooltip(
-                message: 'End the call',
-                child: IconButton(
-                  onPressed: widget.onEnd,
-                  tooltip: 'End the call',
-                  icon: const Icon(Icons.call_end_rounded),
-                  iconSize: 18,
-                  style: IconButton.styleFrom(
-                    foregroundColor: theme.colorScheme.primary,
-                    minimumSize: const Size.square(voiceCallHangUpSize),
-                    maximumSize: const Size.square(voiceCallHangUpSize),
-                    fixedSize: const Size.square(voiceCallHangUpSize),
-                    padding: EdgeInsets.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final cap = constraints.maxWidth;
+            final waveWidth = !cap.isFinite
+                ? voiceCallWaveWidth
+                : (cap - voiceCallFixedWidth).clamp(
+                    voiceCallWaveMinWidth,
+                    voiceCallWaveWidth,
+                  );
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                identified(
+                  VoiceIds.callUser,
+                  _UserDot(
+                    initials: widget.userInitials,
+                    imageUrl: widget.userImageUrl,
                   ),
                 ),
-              ),
-            ),
-          ],
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: waveWidth,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      identified(
+                        VoiceIds.callWave,
+                        SizedBox(
+                          height: voiceCallWaveHeight,
+                          width: waveWidth,
+                          child: DictationWaveform(
+                            level: _mic,
+                            capturing:
+                                widget.session.active && !widget.session.paused,
+                          ),
+                        ),
+                      ),
+                      identified(
+                        VoiceIds.callState,
+                        Semantics(
+                          liveRegion: true,
+                          child: SizedBox(
+                            width: waveWidth,
+                            child: Text(
+                              word,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontSize: 12,
+                                height: 1.2,
+                                fontWeight: FontWeight.w500,
+                                color: _shown.state == VoiceModeState.failed
+                                    ? theme.colorScheme.error
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                identified(
+                  VoiceIds.callBot,
+                  CharacterAvatar(
+                    size: voiceCallBotSize,
+                    characterId: widget.characterId,
+                    primary: widget.primary,
+                    cropToInk: true,
+                    motion: CharacterMotion.quiet,
+                    activity: _shown.speaking
+                        ? CharacterActivity.thinking
+                        : CharacterActivity.idle,
+                    semanticsLabel: '${widget.botName} on the call',
+                  ),
+                ),
+                const SizedBox(width: 6),
+                identified(
+                  VoiceIds.hangUp,
+                  Tooltip(
+                    message: 'End the call',
+                    child: IconButton(
+                      onPressed: widget.onEnd,
+                      tooltip: 'End the call',
+                      icon: const Icon(Icons.call_end_rounded),
+                      iconSize: 18,
+                      style: IconButton.styleFrom(
+                        foregroundColor: theme.colorScheme.primary,
+                        minimumSize: const Size.square(voiceCallHangUpSize),
+                        maximumSize: const Size.square(voiceCallHangUpSize),
+                        fixedSize: const Size.square(voiceCallHangUpSize),
+                        padding: EdgeInsets.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );

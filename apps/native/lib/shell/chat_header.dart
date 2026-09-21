@@ -74,6 +74,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
 
   /// Compact call pair (you, the wave, the Bot) while this Bot is on a
   /// call. Takes the companion's slot so the thread stays underneath.
+  /// Sized to its own cluster, never stretched across the header.
   final Widget? voiceChrome;
 
   const ChatHeader({

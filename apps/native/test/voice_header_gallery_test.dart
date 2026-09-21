@@ -53,15 +53,20 @@ Widget _row(String label, AssistantSessionController session) {
             ),
           ),
         ),
-        Expanded(child: _chrome(session)),
+        _chrome(session),
       ],
     ),
   );
 }
 
+Size _chromeSize(WidgetTester tester, {required int index}) {
+  final chrome = byIdentifier(VoiceIds.callChrome);
+  return tester.getSize(chrome.at(index));
+}
+
 void main() {
   testWidgets('header chrome states write a labeled gallery', (tester) async {
-    tester.view.physicalSize = const Size(720, 640);
+    tester.view.physicalSize = const Size(720, 820);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
@@ -93,6 +98,16 @@ void main() {
       jsonEncode({'type': 'error', 'message': 'upstream', 'code': 'upstream'}),
     );
 
+    final thinkSocket = FakeVoiceSocket();
+    final thinking = await live(tester, thinkSocket);
+    thinkSocket.deliver(jsonEncode({'type': 'status', 'status': 'thinking'}));
+    await tester.pump();
+
+    final muteSocket = FakeVoiceSocket();
+    final muted = await live(tester, muteSocket);
+    muted.setMuted(true);
+    await tester.pump();
+
     final boundary = GlobalKey();
     final theme = FrockTheme.theme(Brightness.dark);
     await tester.pumpWidget(
@@ -121,7 +136,9 @@ void main() {
                   _row('Listening', listening),
                   _row('You talking', talking),
                   _row('Bot speaking', botSpeaking),
+                  _row('Thinking', thinking),
                   _row('Paused', paused),
+                  _row('Muted', muted),
                   _row('Failed', failed),
                 ],
               ),
@@ -135,8 +152,15 @@ void main() {
 
     expect(find.text('Connecting'), findsWidgets);
     expect(find.text('Listening'), findsWidgets);
+    expect(find.text('Thinking'), findsWidgets);
     expect(find.text('Paused'), findsWidgets);
+    expect(find.text('Muted'), findsWidgets);
     expect(find.text('Failed'), findsWidgets);
+
+    final widths = [
+      for (var i = 0; i < 8; i++) _chromeSize(tester, index: i).width,
+    ];
+    expect(widths.toSet(), {voiceCallClusterWidth});
     await capture(tester, boundary, '00-states');
     connecting.dispose();
   });
@@ -158,6 +182,8 @@ void main() {
     expect(find.text('Remind me about the flight on Friday.'), findsOneWidget);
     expect(find.byType(Composer), findsOneWidget);
     expect(_voiceIconColor(tester), isNot(idle));
+    final connectingSize = tester.getSize(byIdentifier(VoiceIds.callChrome));
+    expect(connectingSize.width, voiceCallClusterWidth);
     await capture(tester, harness.boundary, '11-desktop-connecting');
 
     harness.callSocket.deliver(
@@ -174,16 +200,28 @@ void main() {
       tester.element(find.byKey(const ValueKey('composer-voice'))),
     );
     expect(_voiceIconColor(tester), theme.colorScheme.primary);
+    expect(
+      tester.getSize(byIdentifier(VoiceIds.callChrome)),
+      connectingSize,
+    );
     await capture(tester, harness.boundary, '07-desktop-listening');
 
     harness.callCapture.emit(AudioFrame(Uint8List(0), 0.8, 40));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 360));
+    expect(
+      tester.getSize(byIdentifier(VoiceIds.callChrome)),
+      connectingSize,
+    );
     await capture(tester, harness.boundary, '13-desktop-talking');
 
     harness.call.pause();
     await tester.pump();
     expect(find.text('Paused'), findsOneWidget);
+    expect(
+      tester.getSize(byIdentifier(VoiceIds.callChrome)),
+      connectingSize,
+    );
     await capture(tester, harness.boundary, '14-desktop-paused');
     await harness.dispose(tester);
   });
@@ -228,6 +266,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Connecting'), findsOneWidget);
     expect(find.byTooltip('Your Bots'), findsOneWidget);
+    final phoneConnecting = tester.getSize(byIdentifier(VoiceIds.callChrome));
+    expect(phoneConnecting.width, voiceCallClusterWidth);
+    expect(phoneConnecting.height, voiceCallChromeHeight);
     await capture(tester, harness.boundary, '15-phone-connecting');
 
     harness.callSocket.deliver(
@@ -241,6 +282,10 @@ void main() {
     expect(find.byType(Composer), findsOneWidget);
     expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
     expect(find.byTooltip('Your Bots'), findsOneWidget);
+    expect(
+      tester.getSize(byIdentifier(VoiceIds.callChrome)),
+      phoneConnecting,
+    );
     await capture(tester, harness.boundary, '09-phone-listening');
     await harness.dispose(tester);
   });
