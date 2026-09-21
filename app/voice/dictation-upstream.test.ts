@@ -193,6 +193,19 @@ describe("the shared voice frames", () => {
     expect(
       decodeVoiceAssistantClientMessageV1({
         schemaVersion: 1,
+        type: "voice/sleep",
+      }),
+    ).toEqual({ schemaVersion: 1, type: "voice/sleep" });
+    expect(
+      decodeVoiceAssistantClientMessageV1({
+        schemaVersion: 1,
+        type: "voice/sleep",
+        paused: true,
+      }),
+    ).toEqual({ schemaVersion: 1, type: "voice/sleep", paused: true });
+    expect(
+      decodeVoiceAssistantClientMessageV1({
+        schemaVersion: 1,
         type: "voice/mute",
         muted: true,
       }),

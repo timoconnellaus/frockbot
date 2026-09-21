@@ -347,6 +347,13 @@ interface LiveCall {
    */
   resumptionHandle?: string;
   muted: boolean;
+  /**
+   * The person paused. Distinct from a quiet-room sleep: a finished task
+   * must not unhibernate a call they put to sleep on purpose.
+   */
+  paused: boolean;
+  /** One in-flight reopen, so two finished tasks do not open two sessions. */
+  waking?: Promise<void>;
   /** The day's audio allowance ran out; the session stays shut. */
   exhausted: boolean;
   quotaSaid: boolean;
@@ -513,6 +520,12 @@ class GeminiSessionV1 {
     // Google sends binary JSON; Worker sockets otherwise deliver it as Blobs.
     socket.binaryType = "arraybuffer";
     this.socket = socket;
+    let openedAck: () => void = () => undefined;
+    let openedFail: (error: Error) => void = () => undefined;
+    const opened = new Promise<void>((resolve, reject) => {
+      openedAck = () => resolve();
+      openedFail = (error) => reject(error);
+    });
     socket.addEventListener("message", (event: MessageEvent) => {
       const raw =
         typeof event.data === "string"
@@ -524,6 +537,7 @@ class GeminiSessionV1 {
           this.state = "awake";
           this.options.timing?.("upstream-setup-ack");
           this.drain();
+          openedAck();
         }
         const event = decoded;
         this.chain = this.chain
@@ -535,16 +549,32 @@ class GeminiSessionV1 {
       this.state = "asleep";
       this.socket = undefined;
       if (!this.closedByUs) {
+        openedFail(
+          new Error(event.reason || "the voice service connection closed"),
+        );
         this.options.onClosed(event.code, event.reason ?? "");
+      } else {
+        openedAck();
       }
     });
     socket.addEventListener("error", () => {
-      if (this.closedByUs) return;
+      if (this.closedByUs) {
+        openedAck();
+        return;
+      }
       this.state = "asleep";
+      openedFail(new Error("the voice service connection failed"));
       this.options.onClosed(1006, "the voice service connection failed");
     });
     this.send(this.options.setup);
     this.options.timing?.("upstream-setup-sent");
+    if (this.closedByUs) {
+      openedAck();
+      return;
+    }
+    // Unspoken answers flush after this; they need a session that can take
+    // a tool response, not one that has only been asked to start.
+    await opened;
   }
 
   send(frame: Record<string, unknown>): void {
@@ -1417,9 +1447,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     if (!call) return;
     switch (custom.type) {
       case "voice/sleep":
+        call.paused = custom.paused === true;
         await this.sleepSession(connection, call);
         break;
       case "voice/wake":
+        call.paused = false;
         if (!call.muted && !call.exhausted) {
           await this.wakeSession(connection, call);
         }
@@ -1647,6 +1679,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         this.timingSink(connection),
       ),
       muted: false,
+      paused: false,
       exhausted: false,
       quotaSaid: false,
       status: "idle",
@@ -1913,7 +1946,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    * Closes the session and keeps the handle (ADR 0031, decision 3).
    *
    * Nothing listens and nothing is billed in between. A subagent already
-   * admitted finishes as any Turn would, and its answer waits for the wake.
+   * admitted finishes as any Turn would; when it settles, the object wakes
+   * this session unless the person paused or muted.
    */
   private async sleepSession(
     connection: Connection,
@@ -1938,10 +1972,19 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     connection: Connection,
     call: LiveCall,
   ): Promise<void> {
+    if (call.session?.isOpen()) return;
+    if (call.waking) {
+      await call.waking;
+      return;
+    }
     if (call.session) return;
-    await this.openSession(connection, call, {
+    const opening = this.openSession(connection, call, {
       ...(call.resumptionHandle ? { handle: call.resumptionHandle } : {}),
     });
+    call.waking = opening.finally(() => {
+      call.waking = undefined;
+    });
+    await call.waking;
   }
 
   /**
@@ -3009,9 +3052,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    *
    * A live session — the call that asked, or a later one — gets it as that
    * function call's late response, or as a turn when the function call is
-   * gone. A call that is still on record but has no socket waits inside the
-   * rejoin window. With no live call the Bot writes the answer into chat.
-   * Public because the scheduler calls it by name.
+   * gone. A quiet-room sleep is still a live call: the object wakes Gemini
+   * and then tells it, so a finished task unhibernates. Pause and mute wait
+   * for the person. A call that is still on record but has no socket waits
+   * inside the rejoin window. With no live call the Bot writes the answer
+   * into chat. Public because the scheduler calls it by name.
    */
   async announceDelegation(payload: AnnounceDelegationPayload): Promise<void> {
     const { runId } = payload;
@@ -3023,47 +3068,16 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       if (!delegation || delegation.state !== "settled") return;
       const current = await ledger.currentCall();
       const live = this.liveCall();
-      if (live?.call.session?.isOpen()) {
-        const { connection, call } = live;
-        if (!(await ledger.markDelegationSpoken(runId, this.now()))) return;
-        const own = delegation.botId === call.botId;
-        const told = renderVoiceSubagentResultV1({
-          botName: delegation.botName,
-          own,
-          ...(delegation.answer ? { answer: delegation.answer } : {}),
-          ...(delegation.failure ? { failure: delegation.failure } : {}),
-        });
-        const asked = call.subagentCalls.get(runId);
-        call.subagentCalls.delete(runId);
-        if (asked) {
-          call.session?.send(
-            encodeGeminiToolResponseV1([
-              {
-                id: asked.id,
-                name: asked.name,
-                response: { result: told },
-                scheduling: "WHEN_IDLE",
-              },
-            ]),
-          );
-        } else {
-          call.session?.send(encodeGeminiTextTurnV1(told));
-        }
-        this.trace(connection, "answer-told", {
-          run: runId,
-          ...(asked ? { call: asked.id } : { asTurn: true }),
-        });
-        this.timing(connection, "delegation-answered", {
-          run: runId,
-          asTurn: !asked,
-        });
-        this.sendDelegationState(
-          delegation.botId,
-          delegation.botName,
-          runId,
-          "finished",
-        );
-        return;
+      if (live && (await this.tellLiveSession(live, delegation))) return;
+      if (
+        live &&
+        !live.call.muted &&
+        !live.call.exhausted &&
+        !live.call.paused &&
+        !live.call.session?.isOpen()
+      ) {
+        await this.wakeSession(live.connection, live.call);
+        if (await this.tellLiveSession(live, delegation)) return;
       }
       if (current) {
         await this.scheduleAnnounce(runId);
@@ -3085,6 +3099,62 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     } finally {
       this.#announcing.delete(runId);
     }
+  }
+
+  /**
+   * Hands a settled answer to an open Live session, once. False when there
+   * is no session to tell, or another writer already marked it spoken.
+   */
+  private async tellLiveSession(
+    live: { connection: Connection; call: LiveCall },
+    delegation: VoiceDelegationRecordV1,
+  ): Promise<boolean> {
+    const { connection, call } = live;
+    const session = call.session;
+    if (!session?.isOpen()) return false;
+    if (
+      !(await this.ledger().markDelegationSpoken(delegation.runId, this.now()))
+    ) {
+      return false;
+    }
+    const own = delegation.botId === call.botId;
+    const told = renderVoiceSubagentResultV1({
+      botName: delegation.botName,
+      own,
+      ...(delegation.answer ? { answer: delegation.answer } : {}),
+      ...(delegation.failure ? { failure: delegation.failure } : {}),
+    });
+    const asked = call.subagentCalls.get(delegation.runId);
+    call.subagentCalls.delete(delegation.runId);
+    if (asked) {
+      session.send(
+        encodeGeminiToolResponseV1([
+          {
+            id: asked.id,
+            name: asked.name,
+            response: { result: told },
+            scheduling: "WHEN_IDLE",
+          },
+        ]),
+      );
+    } else {
+      session.send(encodeGeminiTextTurnV1(told));
+    }
+    this.trace(connection, "answer-told", {
+      run: delegation.runId,
+      ...(asked ? { call: asked.id } : { asTurn: true }),
+    });
+    this.timing(connection, "delegation-answered", {
+      run: delegation.runId,
+      asTurn: !asked,
+    });
+    this.sendDelegationState(
+      delegation.botId,
+      delegation.botName,
+      delegation.runId,
+      "finished",
+    );
+    return true;
   }
 
   /**

@@ -3,8 +3,10 @@
 ///
 /// This implements `docs/voice.md` "Assistant protocol (v1)" and holds no
 /// policy of its own beyond the one the document gives the client: an idle
-/// upstream bills for silence, so put it to sleep after twenty continuous
-/// seconds of quiet and wake it on the next onset.
+/// upstream bills for silence, so put it to sleep after two minutes of quiet
+/// and wake it on the next onset. A finished task can wake it too — the
+/// server reopens Gemini and this client follows `voice/state` unless the
+/// person paused.
 ///
 /// An awake upstream gets a frame every 40 ms — speech, pauses and the
 /// silence after a sentence alike. A capture with effective echo cancellation
@@ -720,6 +722,13 @@ class AssistantSessionController extends ChangeNotifier {
         // produced it are this client's and are not overwritten by it.
         diagnostics?.markOnce('upstream.${upstream.name}');
         _upstream = upstream;
+        // A finished task unhibernates from the server. Follow that unless
+        // the person paused — Pause waits for Resume, not for Gemini.
+        if (!_paused &&
+            (upstream == VoiceUpstreamStateV1.starting ||
+                upstream == VoiceUpstreamStateV1.awake)) {
+          _asleep = false;
+        }
         _notify();
       case AssistantDelegationV1(
         :final botId,
@@ -1067,7 +1076,7 @@ class AssistantSessionController extends ChangeNotifier {
     _upstream = VoiceUpstreamStateV1.asleep;
     _gate.reset();
     unawaited(player.interrupt());
-    _socket?.sendText(encodeVoiceSleepV1());
+    _socket?.sendText(encodeVoiceSleepV1(paused: true));
     _notify();
   }
 

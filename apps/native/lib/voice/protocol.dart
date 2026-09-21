@@ -230,8 +230,11 @@ String encodeAssistantEndCallV1() => jsonEncode({'type': 'end_call'});
 
 String encodeAssistantInterruptV1() => jsonEncode({'type': 'interrupt'});
 
-String encodeVoiceSleepV1() =>
-    jsonEncode({'schemaVersion': 1, 'type': 'voice/sleep'});
+String encodeVoiceSleepV1({bool paused = false}) => jsonEncode({
+  'schemaVersion': 1,
+  'type': 'voice/sleep',
+  if (paused) 'paused': true,
+});
 
 String encodeVoiceWakeV1() =>
     jsonEncode({'schemaVersion': 1, 'type': 'voice/wake'});

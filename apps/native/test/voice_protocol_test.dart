@@ -19,10 +19,7 @@ void main() {
       expect(formatDictationElapsedV1(Duration.zero), '00:00');
       expect(formatDictationElapsedV1(const Duration(seconds: 5)), '00:05');
       expect(formatDictationElapsedV1(const Duration(seconds: 65)), '01:05');
-      expect(
-        formatDictationElapsedV1(const Duration(minutes: 100)),
-        '99:59',
-      );
+      expect(formatDictationElapsedV1(const Duration(minutes: 100)), '99:59');
     });
 
     test('dictation start declares the one rate the server accepts', () {
@@ -52,6 +49,11 @@ void main() {
       expect(decoded(encodeVoiceSleepV1()), {
         'schemaVersion': 1,
         'type': 'voice/sleep',
+      });
+      expect(decoded(encodeVoiceSleepV1(paused: true)), {
+        'schemaVersion': 1,
+        'type': 'voice/sleep',
+        'paused': true,
       });
       expect(decoded(encodeVoiceWakeV1()), {
         'schemaVersion': 1,
