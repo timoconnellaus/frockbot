@@ -92,7 +92,7 @@
         "accent": "#c44580",
         "onAccent": "#ffffff"
       },
-      "type": "manrope",
+      "type": "inter",
       "bubbles": {
         "bot": "raised",
         "me": "tint"
@@ -270,7 +270,7 @@
           "accent": "#c44580",
           "onAccent": "#ffffff"
         },
-        "type": "manrope",
+        "type": "inter",
         "bubbles": {
           "bot": "raised",
           "me": "tint"

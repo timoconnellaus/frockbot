@@ -4,27 +4,38 @@ import { projectWhatsNewEntryV1, whatsNewFeedV1 } from "./feed.ts";
 import { whatsNewMediaBytesV1 } from "./media.ts";
 
 describe("What’s New feed", () => {
-  test("the first shipped entry is What’s New itself", () => {
+  test("newest first, and What’s New stays in the list", () => {
     const feed = whatsNewFeedV1();
     expect(feed.schemaVersion).toBe(1);
     expect(feed.entries[0]).toMatchObject({
+      id: "chat-type",
+      title: "Easier reading in chat",
+      kind: "improvement",
+      image: {
+        src: "/whats-new/chat-type.webp",
+        alt: "A Bot message in Inter, with air between list items.",
+      },
+    });
+    const shipped = feed.entries.find((entry) => entry.id === "whats-new");
+    expect(shipped).toMatchObject({
       id: "whats-new",
       title: "What’s New in the app",
       kind: "feature",
-      image: {
-        src: "/whats-new/whats-new.webp",
-        alt: "The What’s New page, with this feature as its first entry.",
-      },
+      summary: "What landed in each release.",
     });
     expect(feed.entries[0]?.publishedAt).toBeUndefined();
-    expect(feed.entries[0]?.summary).toBe("What landed in each release.");
   });
 
   test("a known production day is attached without inventing one", () => {
     const dated = whatsNewFeedV1((id) =>
       id === "whats-new" ? "2026-09-21" : undefined,
     );
-    expect(dated.entries[0]?.publishedAt).toBe("2026-09-21");
+    expect(
+      dated.entries.find((entry) => entry.id === "whats-new")?.publishedAt,
+    ).toBe("2026-09-21");
+    expect(
+      dated.entries.find((entry) => entry.id === "chat-type")?.publishedAt,
+    ).toBeUndefined();
   });
 
   test("every declared image is on disk", () => {

@@ -225,12 +225,12 @@ void main() {
       final surfaces = Map<String, Object?>.from(tokens['surfaces']! as Map);
       expect(surfaces['accent'], '#9c1a44');
       await tester.ensureVisible(byIdentifier(LookIds.typeface));
-      await tester.tap(find.bySemanticsLabel('Typeface: Inter'));
+      await tester.tap(find.bySemanticsLabel('Typeface: Manrope'));
       await tester.pumpAndSettle();
       final typed = Map<String, Object?>.from(
         commands.last['document']! as Map,
       );
-      expect((typed['tokens']! as Map)['type'], 'inter');
+      expect((typed['tokens']! as Map)['type'], 'manrope');
       state.dispose();
     },
   );

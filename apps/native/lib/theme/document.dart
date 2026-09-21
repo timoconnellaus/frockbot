@@ -155,7 +155,7 @@ const inkTokens = ThemeTokens(
     accent: Color(0xffc44580),
     onAccent: Color(0xffffffff),
   ),
-  type: ThemeTypeface.manrope,
+  type: ThemeTypeface.inter,
   botBubble: BotBubble.raised,
   meBubble: MeBubble.tint,
 );
@@ -171,7 +171,7 @@ const paperTokens = ThemeTokens(
     accent: Color(0xffc23d7b),
     onAccent: Color(0xffffffff),
   ),
-  type: ThemeTypeface.manrope,
+  type: ThemeTypeface.inter,
   botBubble: BotBubble.raised,
   meBubble: MeBubble.accent,
 );
@@ -187,7 +187,7 @@ const studioTokens = ThemeTokens(
     accent: Color(0xffc23d7b),
     onAccent: Color(0xffffffff),
   ),
-  type: ThemeTypeface.manrope,
+  type: ThemeTypeface.inter,
   botBubble: BotBubble.plain,
   meBubble: MeBubble.accent,
 );

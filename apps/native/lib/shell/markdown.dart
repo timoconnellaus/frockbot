@@ -55,9 +55,16 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
     final base = widget.style ?? FrockTheme.message(theme);
     final blocks = parseMarkdownBlocks(widget.text);
     final children = <Widget>[];
+    MarkdownBlockKind? previous;
     for (final block in blocks) {
-      if (children.isNotEmpty) children.add(const SizedBox(height: 8));
+      if (children.isNotEmpty) {
+        final listRun =
+            previous == MarkdownBlockKind.listItem &&
+            block.kind == MarkdownBlockKind.listItem;
+        children.add(SizedBox(height: listRun ? 12 : 10));
+      }
       children.add(_block(context, block, base));
+      previous = block.kind;
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -70,16 +77,12 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
     final theme = Theme.of(context);
     switch (block.kind) {
       case MarkdownBlockKind.heading:
-        final sizes = [1.5, 1.28, 1.12, 1.0];
-        return Text.rich(
-          _inline(block.text, base),
-          style: base.copyWith(
-            fontSize: base.fontSize! * sizes[(block.level - 1).clamp(0, 3)],
-            fontWeight: FontWeight.w600,
-            height: 1.25,
-            color: block.level >= 4 ? theme.colorScheme.onSurfaceVariant : null,
-          ),
+        final heading = base.copyWith(
+          fontWeight: FontWeight.w600,
+          height: 1.4,
+          color: block.level >= 4 ? theme.colorScheme.onSurfaceVariant : null,
         );
+        return Text.rich(_inline(block.text, heading), style: heading);
       case MarkdownBlockKind.code:
         return Container(
           width: double.infinity,

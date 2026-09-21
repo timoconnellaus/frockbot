@@ -23,6 +23,16 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "chat-type",
+    title: "Easier reading in chat",
+    summary: "Messages use Inter at 14, with more air between list items.",
+    kind: "improvement",
+    image: {
+      file: "chat-type.webp",
+      alt: "A Bot message in Inter, with air between list items.",
+    },
+  },
+  {
     id: "whats-new",
     title: "What’s New in the app",
     summary: "What landed in each release.",

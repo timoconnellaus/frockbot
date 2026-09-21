@@ -364,8 +364,8 @@ class _BotLookPageState extends State<BotLookPage> {
                     label: 'Typeface',
                     selected: tokens.type.name,
                     options: const [
-                      (slug: 'manrope', label: 'Manrope'),
                       (slug: 'inter', label: 'Inter'),
+                      (slug: 'manrope', label: 'Manrope'),
                     ],
                     onChosen: (slug) => _setTokens(
                       tokens.copyWith(
