@@ -138,9 +138,12 @@ abstract final class VoiceIds {
 
   /// The fixed voice control at the far right of the composer (ADR 0029).
   /// Unlike the morphing action beside it, it is always this one thing.
-  /// Voice mode, which replaces the thread while the call is with this Bot
-  /// (ADR 0031).
   static const mode = 'voice-mode';
+  static const callChrome = 'voice-call-chrome';
+  static const callUser = 'voice-call-user';
+  static const callBot = 'voice-call-bot';
+  static const callWave = 'voice-call-wave';
+  static const callState = 'voice-call-state';
   static const stage = 'voice-stage';
   static const state = 'voice-state';
   static const activity = 'voice-activity';

@@ -20,7 +20,6 @@ import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/settings/bot_settings.dart';
 import 'package:frockbot_native/settings/voice_settings.dart';
 import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/shell/desktop_layout.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/voice/appearance.dart';
@@ -127,7 +126,7 @@ String delegation(
 });
 
 void main() {
-  testWidgets('the call replaces the thread and the composer', (tester) async {
+  testWidgets('the call keeps the thread and the composer', (tester) async {
     final harness = VoiceShellHarness();
     await harness.mount(tester, width: 1280, brightness: Brightness.dark);
     expect(find.byType(Composer), findsOneWidget);
@@ -135,20 +134,17 @@ void main() {
     harness.showCall(botId: 'voice-bot');
     await tester.pump();
 
-    expect(find.byType(VoiceMode), findsOneWidget);
-    // Not overlaid: the thread's composer is not in the tree at all, and
-    // neither is the dock the background call would wear.
-    expect(find.byType(Composer), findsNothing);
+    expect(find.byType(VoiceMode), findsNothing);
+    expect(find.byType(Composer), findsOneWidget);
     expect(find.byType(VoiceFooter), findsNothing);
-    // The header keeps the name and the mark that says why the thread is gone.
+    expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
     expect(find.text('Rosemary'), findsWidgets);
-    expect(byIdentifier(VoiceIds.headerPill), findsOneWidget);
     expect(find.byTooltip('Your Bots'), findsNothing);
     await harness.dispose(tester);
   });
 
   testWidgets(
-    'on a Mac the full-window call header sits past the traffic lights',
+    'on a Mac a call keeps the sidebar and the overlay chrome',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       try {
@@ -158,19 +154,12 @@ void main() {
         harness.showCall(botId: 'voice-bot');
         await tester.pump();
 
-        expect(tester.getSize(byIdentifier(ShellIds.sidebar)).width, 0);
-        final name = find.descendant(
-          of: find.byType(AppBar),
-          matching: find.text('Rosemary'),
-        );
         expect(
-          tester.getTopLeft(name).dx,
-          greaterThanOrEqualTo(desktopTrafficLightLeading),
+          tester.getSize(byIdentifier(ShellIds.sidebar)).width,
+          greaterThan(0),
         );
-        expect(
-          tester.getTopLeft(byIdentifier(VoiceIds.headerPill)).dx,
-          greaterThan(desktopTrafficLightLeading),
-        );
+        expect(find.byType(AppBar), findsNothing);
+        expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
         await harness.dispose(tester);
       } finally {
         debugDefaultTargetPlatformOverride = null;
@@ -206,9 +195,10 @@ void main() {
     await harness.call.start();
     harness.showCall(botId: 'voice-bot');
     await tester.pump();
-    expect(find.byType(VoiceMode), findsOneWidget);
+    expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
+    expect(find.byType(Composer), findsOneWidget);
 
-    // End the call from voice mode: the thread is back at once, and the
+    // End the call from the header: the thread was already there, and the
     // composer's voice control is held until the call has finished closing
     // rather than inviting a press the shell would refuse.
     await tester.tap(byIdentifier(VoiceIds.hangUp));
@@ -793,7 +783,8 @@ void main() {
       );
       await tester.pump();
       await tester.pump();
-      expect(find.text('Speaking'), findsOneWidget);
+      expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
+      expect(find.byType(Composer), findsOneWidget);
       await capture(tester, harness.boundary, 'voice-${size.$3}-speaking');
 
       harness.callSocket.deliver(
@@ -802,7 +793,7 @@ void main() {
       harness.callSocket.deliver(delegation('scout', 'Scout', 'answering'));
       await tester.pump();
       await tester.pump();
-      expect(find.text('Working'), findsOneWidget);
+      expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
       await capture(tester, harness.boundary, 'voice-${size.$3}-working');
 
       harness.call.pause();

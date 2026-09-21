@@ -72,12 +72,14 @@ class ChatPane extends StatefulWidget {
   final VoidCallback? onDiscardDictation;
 
   /// Starts a voice call with this Bot, or moves the open one to it
-  /// (ADR 0029). It never ends one: while the call is with this Bot, voice
-  /// mode is drawn where the composer was and there is no composer at all.
+  /// (ADR 0029). It never ends one: hang-up lives in the header chrome.
   final VoidCallback? onVoice;
 
   /// Whether a call is still closing, which holds [onVoice]'s control.
   final bool voiceClosing;
+
+  /// Whether this Bot is the one on the call: the voice control wears primary.
+  final bool voiceActive;
   final DictationState dictationState;
 
   /// Whether a tidied transcript is in the draft and can be put back. Asked
@@ -121,6 +123,7 @@ class ChatPane extends StatefulWidget {
     this.onDiscardDictation,
     this.onVoice,
     this.voiceClosing = false,
+    this.voiceActive = false,
     this.dictationState = DictationState.idle,
     this.canRevertDictation,
     this.onRevertDictation,
@@ -510,6 +513,7 @@ class _ChatPaneState extends State<ChatPane> {
     onDiscardDictation: widget.onDiscardDictation,
     onVoice: widget.onVoice,
     voiceClosing: widget.voiceClosing,
+    voiceActive: widget.voiceActive,
     dictationState: widget.dictationState,
     canRevertDictation: widget.canRevertDictation,
     onRevertDictation: widget.onRevertDictation,
@@ -550,12 +554,14 @@ class ConversationView extends StatefulWidget {
   final VoidCallback? onDiscardDictation;
 
   /// Starts a voice call with this Bot, or moves the open one to it
-  /// (ADR 0029). It never ends one: while the call is with this Bot, voice
-  /// mode is drawn where the composer was and there is no composer at all.
+  /// (ADR 0029). It never ends one: hang-up lives in the header chrome.
   final VoidCallback? onVoice;
 
   /// Whether a call is still closing, which holds [onVoice]'s control.
   final bool voiceClosing;
+
+  /// Whether this Bot is the one on the call: the voice control wears primary.
+  final bool voiceActive;
   final DictationState dictationState;
 
   /// Whether a tidied transcript is in the draft and can be put back. Asked
@@ -595,6 +601,7 @@ class ConversationView extends StatefulWidget {
     this.onDiscardDictation,
     this.onVoice,
     this.voiceClosing = false,
+    this.voiceActive = false,
     this.dictationState = DictationState.idle,
     this.canRevertDictation,
     this.onRevertDictation,
@@ -699,6 +706,7 @@ class _ConversationViewState extends State<ConversationView> {
           onDictate: widget.onDictate,
           onVoice: widget.onVoice,
           voiceClosing: widget.voiceClosing,
+          voiceActive: widget.voiceActive,
           onStopDictation: widget.onStopDictation,
           onDiscardDictation: widget.onDiscardDictation,
           dictationState: widget.dictationState,
