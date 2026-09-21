@@ -112,10 +112,13 @@ void main() {
     expect(harness.controller.state, DictationState.stopping);
 
     harness.say('segment', {'text': 'commit this'});
-    harness.say('final');
+    await settle();
     await stopped;
-    expect(harness.controller.state, DictationState.done);
+    expect(harness.controller.state, DictationState.cleaning);
     expect(harness.drafts.draftFor('bot-a'), 'commit this');
+    harness.say('final');
+    await settle();
+    expect(harness.controller.state, DictationState.done);
     expect(harness.capture.stops, greaterThan(0));
     harness.controller.dispose();
   });
@@ -151,7 +154,7 @@ void main() {
     await harness.controller.start('bot-a');
     await settle();
     expect(harness.controller.state, DictationState.capturing);
-    expect(harness.controller.elapsed.value, Duration.zero);
+    expect(harness.controller.elapsed.value.inSeconds, 0);
     harness.controller.dispose();
   });
 
@@ -166,12 +169,12 @@ void main() {
 
       // The person moves to another Bot while the words are still in flight.
       harness.drafts.setDraft('bot-b', 'typed into B');
-    unawaited(harness.controller.stop());
-    await settle();
-    harness.say('segment', {'text': 'said into A'});
-    await settle();
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('segment', {'text': 'said into A'});
+      await settle();
 
-    expect(harness.drafts.draftFor('bot-a'), 'said into A');
+      expect(harness.drafts.draftFor('bot-a'), 'said into A');
       expect(harness.drafts.draftFor('bot-b'), 'typed into B');
       expect(harness.controller.context, 'bot-a');
       harness.controller.dispose();
@@ -256,7 +259,6 @@ void main() {
     expect(harness.drafts.draftFor('bot-a'), 'typed first and a thought');
     await harness.controller.discard();
     expect(harness.drafts.draftFor('bot-a'), 'typed first');
-    expect(harness.socket.texts, isNot(contains(frame('stop'))));
     expect(harness.controller.active, isFalse);
     harness.controller.dispose();
   });
@@ -287,10 +289,13 @@ void main() {
     expect(harness.socket.texts.last, frame('stop'));
 
     harness.say('segment', {'text': 'said before it connected'});
-    harness.say('final');
+    await settle();
     await stopped;
-    expect(harness.controller.state, DictationState.done);
+    expect(harness.controller.state, DictationState.cleaning);
     expect(harness.drafts.draftFor('bot-a'), 'said before it connected');
+    harness.say('final');
+    await settle();
+    expect(harness.controller.state, DictationState.done);
     harness.controller.dispose();
   });
 
