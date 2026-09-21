@@ -520,6 +520,12 @@ class GeminiSessionV1 {
     // Google sends binary JSON; Worker sockets otherwise deliver it as Blobs.
     socket.binaryType = "arraybuffer";
     this.socket = socket;
+    let openedAck: () => void = () => undefined;
+    let openedFail: (error: Error) => void = () => undefined;
+    const opened = new Promise<void>((resolve, reject) => {
+      openedAck = () => resolve();
+      openedFail = (error) => reject(error);
+    });
     socket.addEventListener("message", (event: MessageEvent) => {
       const raw =
         typeof event.data === "string"
@@ -531,6 +537,7 @@ class GeminiSessionV1 {
           this.state = "awake";
           this.options.timing?.("upstream-setup-ack");
           this.drain();
+          openedAck();
         }
         const event = decoded;
         this.chain = this.chain
@@ -542,16 +549,32 @@ class GeminiSessionV1 {
       this.state = "asleep";
       this.socket = undefined;
       if (!this.closedByUs) {
+        openedFail(
+          new Error(event.reason || "the voice service connection closed"),
+        );
         this.options.onClosed(event.code, event.reason ?? "");
+      } else {
+        openedAck();
       }
     });
     socket.addEventListener("error", () => {
-      if (this.closedByUs) return;
+      if (this.closedByUs) {
+        openedAck();
+        return;
+      }
       this.state = "asleep";
+      openedFail(new Error("the voice service connection failed"));
       this.options.onClosed(1006, "the voice service connection failed");
     });
     this.send(this.options.setup);
     this.options.timing?.("upstream-setup-sent");
+    if (this.closedByUs) {
+      openedAck();
+      return;
+    }
+    // Unspoken answers flush after this; they need a session that can take
+    // a tool response, not one that has only been asked to start.
+    await opened;
   }
 
   send(frame: Record<string, unknown>): void {
