@@ -32,7 +32,9 @@ the Bot's Computer screen.
 - The Bot page card stays the idle photograph. It does not grow into the
   pane, and drawing it still wakes nothing.
 - The host, the slot, `computer_browser`, and the viewer credential model
-  do not change in this slice.
+  do not change in this slice. The Bot can open the pane: implicitly by
+  driving the browser, and explicitly with `computer_show`. It cannot
+  take control.
 
 User-facing name stays **Computer**. The pane is the Computer; the picture
 in it happens to be the browser.
@@ -103,7 +105,7 @@ asking to watch.
 | Gesture | Viewer |
 | --- | --- |
 | Bot page card, idle or mid-Turn | Snapshot. No `connect`. |
-| Open the pane (header, card, search, auto-open) | `ComputerController.open()` — mint or attach a viewer. |
+| Open the pane (header, card, search, auto-open, `computer_show`) | `ComputerController.open()` — mint or attach a viewer. |
 | Pane on screen, streamable phase | Live frame. `computerStreamsV1` with `onScreen: true` and `expanded: true`. |
 | Close the pane, or collapse the column | `closeViewer`. Do not pay for an invisible stream. |
 | Turn settles while the pane is open | Keep the pane. Stream for `computerLivePreviewGraceV1` (15s), then the last capture. Do not auto-close. |
@@ -129,7 +131,51 @@ for any Computer work, because `expanded` is already true.
 Projection reads still never renew a paid viewer. Recovery stays on
 `connect` with a durable effect key.
 
-## 5. Chrome
+## 5. Who opens it
+
+Yes. The Bot can open the pane. It cannot take control, it cannot force
+the phone's full window, and it cannot fight a close.
+
+There are two Bot paths. Both are "please show the screen." Neither is a
+`send_to_user` bubble — the stream is not a message — and neither mints
+the viewer. The client still calls `open()` when the pane is actually on
+screen, so a show with nobody watching spends nothing.
+
+**Implicit.** A running `computer_browser` call is the show gesture. The
+client opens the pane the way §4 already says. The Bot does not need a
+second tool to browse in public.
+
+**Explicit.** `computer_show` — same idea as `applet_focus`. The Bot
+records a Session show intent on the Computer projection (`turnId`,
+`requestedAt`). Use it when the User should look *now* and there may not
+be a click yet: a login, a captcha, a payment, "this is the page I
+mean." The tool does not know the window: it records the ask. The
+client opens the pane only at `shellComputerInlineWidth` and above; on
+a phone the User still taps Computer.
+
+The Bot never calls `takeControl`. Take control stays a confirmed User
+gesture on the User-wide `desktop-gui` lease. A login hand-off is
+`send_to_user` text ("please sign in") plus `computer_show`, then the
+person presses Take control.
+
+**Dismiss is per Turn.** Closing the pane writes which Turn was
+dismissed (`paneDismissedTurnId`) and `closeViewer`. Auto-open and
+`computer_show` no-op for that Turn. The next Turn may show again. A
+refresh cannot resurrect a dismissed Turn: the dismiss is on the
+Computer record, not only in the client.
+
+**What the Bot must not do.**
+
+- Take control, or send input as the User.
+- `connect` / mint a viewer as a side effect of the tool. No client, no
+  heartbeat, no billed watch.
+- Open the full-window viewer. The width gate in §3 still decides
+  destination; below `shellComputerInlineWidth` a show is a layout
+  no-op. The User taps Computer.
+- Steal Settings, a run, or an exchange. Same yield rule as auto-open.
+- Close the pane. Watching is the User's.
+
+## 6. Chrome
 
 One row, then the frame.
 
@@ -154,7 +200,7 @@ View-only until Take control, as today. Tapping the frame while
 view-only does not send input; it can reveal the Take control control
 the way the full window already does.
 
-## 6. Doors
+## 7. Doors
 
 On a desk wide enough for the pane, the conversation chrome grows the
 Computer control it already shows on a phone. The cooler blue
@@ -170,7 +216,7 @@ keeps `ComputerIds.viewer`. Specs that mean "the desktop filled the
 window" stay on the viewer; specs that mean "I can see the Bot's page
 beside the thread" select the pane.
 
-## 7. What this is not
+## 8. What this is not
 
 - **Not a Canvas.** Do not reuse `AppletCanvas`, the applet open path,
   or the applet viewer token.
@@ -186,9 +232,11 @@ beside the thread" select the pane.
 - **Not a CDP screencast.** App code must not name the desktop stack
   (`novnc`, `x11vnc`, …). The import gate stays.
 
-## 8. Implementation
+## 9. Implementation
 
-Ordinary Flutter in the native client. No protocol change.
+Ordinary Flutter in the native client. The host and the VNC path do not
+change. `computer_show` is a Bot tool and two fields on the Computer
+record, not a new viewer protocol.
 
 | Piece | Where |
 | --- | --- |
@@ -197,6 +245,7 @@ Ordinary Flutter in the native client. No protocol change.
 | Shell mode | `apps/native/lib/shell/app_shell.dart` — `computerPaneOpen`; header `onComputer` at the inline width; auto-open on `botComputerBrowserRunningV1`; yield to run / exchange / pushed panel pages; closeViewer on close, collapse, and Bot switch |
 | Card door | `apps/native/lib/computer/card.dart`, `bot_page.dart` — Open follows the width gate |
 | Running mark | `apps/native/lib/computer/client.dart` — `botComputerBrowserRunningV1` next to `botComputerRunningV1` |
+| Show intent | `computer/agent.ts` — `computer_show`; Computer record `paneRequestedTurnId` / `paneDismissedTurnId`; projection fields the pane reads. Client command that close uses to write the dismiss. No viewer mint |
 | Semantics | `apps/native/lib/shell/semantics.dart` — `ComputerIds.pane` |
 | Card `onScreen` | `ComputerCard` should take `PanelVisibility.of(context)` rather than hardcoding `true`, so an offstage Bot page does not keep a frame live |
 
@@ -207,6 +256,9 @@ width. New cases:
 - at 1400, Computer opens the pane and does not push `ComputerViewerPage`;
 - at 980, Computer still opens the full window;
 - auto-open on `computer_browser`, not on `computer_exec`;
+- `computer_show` opens the pane at 1400 and is a layout no-op at 980;
+- `computer_show` does not mint a viewer and does not take control;
+- a User close of that Turn ignores a later `computer_show` in the same Turn;
 - auto-open does not steal Settings or a run;
 - closing or collapsing the pane issues `closeViewer`;
 - Take control in the pane uses the same confirmation;
@@ -218,7 +270,7 @@ When it ships, [`architecture.md` §6](architecture.md#6-clients) replaces
 the surface beside the conversation that frames the Bot's screen. Closed
 until opened; on a phone the full-window viewer is the same destination.
 
-## 9. Later
+## 10. Later
 
 A portrait slot — `capabilities.desktop` as something like 390×844, one
 window and one clip — is the way the pane becomes a phone-shaped
