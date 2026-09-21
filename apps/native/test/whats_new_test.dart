@@ -10,6 +10,38 @@ import 'package:frockbot_native/whats_new/page.dart';
 import 'navigation_test.dart' show DirectoryApi, identifiedBy;
 import 'widget_test.dart' show MemoryStore;
 
+class _WhatsNewApi extends DirectoryApi {
+  _WhatsNewApi(super.store);
+
+  @override
+  Future<Object?> request(
+    String path, {
+    Object? body,
+    int limit = 512000,
+    bool authenticated = true,
+  }) async {
+    if (path == '/api/whats-new') {
+      return {
+        'schemaVersion': 1,
+        'entries': [
+          {
+            'id': 'whats-new',
+            'title': 'What’s New in the app',
+            'summary': 'What landed in each release.',
+            'kind': 'feature',
+          },
+        ],
+      };
+    }
+    return super.request(
+      path,
+      body: body,
+      limit: limit,
+      authenticated: authenticated,
+    );
+  }
+}
+
 final Uint8List _fallbackStill = Uint8List.fromList(<int>[
   0x89,
   0x50,
@@ -250,5 +282,27 @@ void main() {
     await tester.tap(find.byType(InkWell));
     await tester.pumpAndSettle();
     expect(find.byType(Dialog), findsOneWidget);
+  });
+
+  testWidgets('an empty prefetch still loads the feed', (tester) async {
+    final store = MemoryStore();
+    tester.view.physicalSize = const Size(400, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: WhatsNewPage(
+          api: _WhatsNewApi(store),
+          origin: 'https://tests.invalid',
+          feed: const WhatsNewFeed(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(identifiedBy('whats-new-entry-whats-new'), findsOneWidget);
+    expect(find.text('What’s New in the app'), findsOneWidget);
   });
 }

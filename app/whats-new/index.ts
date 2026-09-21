@@ -10,6 +10,9 @@ export {
   earliestProductionTagDateV1,
   isProductionReleaseTagV1,
   utcCalendarDayV1,
+  whatsNewEntryIdsInSourceV1,
+  whatsNewPublishedAtByIdV1,
+  whatsNewPublishedAtV1,
 } from "./dates.js";
 export {
   projectWhatsNewEntryV1,

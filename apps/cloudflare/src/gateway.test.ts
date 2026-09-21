@@ -36,6 +36,7 @@ import type {
 } from "@frockbot/app/admin/shared";
 import { createFlockBackendContribution } from "@frockbot/app/flock/backend";
 import { foundationBaseRuntimePackagesV1 } from "@frockbot/app/runtime";
+import { whatsNewPublishedAtV1 } from "@frockbot/app/whats-new";
 import {
   bootstrapCompositionGeneration,
   createShellCompositionHost,
@@ -2255,10 +2256,13 @@ describe("Cloudflare user application gateway", () => {
     expect(feed.status).toBe(200);
     const body = (await feed.json()) as {
       schemaVersion: number;
-      entries: { id: string }[];
+      entries: { id: string; publishedAt?: string }[];
     };
     expect(body.schemaVersion).toBe(1);
     expect(body.entries[0]?.id).toBe("whats-new");
+    expect(body.entries[0]?.publishedAt).toBe(
+      whatsNewPublishedAtV1("whats-new"),
+    );
   });
 
   test("ignores development identity headers unless explicitly enabled", async () => {

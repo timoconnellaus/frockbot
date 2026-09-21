@@ -47,10 +47,11 @@ class _WhatsNewPageState extends State<WhatsNewPage> {
   @override
   void initState() {
     super.initState();
-    feed = widget.feed;
-    if (feed != null) {
+    final prefetched = widget.feed;
+    feed = prefetched;
+    if (prefetched != null && prefetched.entries.isNotEmpty) {
       busy = false;
-      _markSeen(feed!);
+      _markSeen(prefetched);
     } else {
       unawaitedLoad();
     }
