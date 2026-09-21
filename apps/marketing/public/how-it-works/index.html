@@ -212,13 +212,14 @@
             <nav aria-label="On this page">
               <a href="#native-apps"><span>01</span>Native apps</a
               ><a href="#persistent-bot"><span>02</span>A persistent Bot</a
-              ><a href="#plugins"><span>03</span>The plugin architecture</a
-              ><a href="#interfaces"><span>04</span>Slots & interfaces</a
-              ><a href="#capabilities"><span>05</span>Platform capabilities</a
-              ><a href="#continuity"><span>06</span>Memory, Skills & routines</a
-              ><a href="#computer"><span>07</span>The Bot’s Computer</a
-              ><a href="#voice-and-models"><span>08</span>Voice & models</a
-              ><a href="#open-source"><span>09</span>Open source</a>
+              ><a href="#supervision"><span>03</span>Turn supervision</a
+              ><a href="#plugins"><span>04</span>The plugin architecture</a
+              ><a href="#interfaces"><span>05</span>Slots & interfaces</a
+              ><a href="#capabilities"><span>06</span>Platform capabilities</a
+              ><a href="#continuity"><span>07</span>Memory, Skills & routines</a
+              ><a href="#computer"><span>08</span>The Bot’s Computer</a
+              ><a href="#voice-and-models"><span>09</span>Voice & models</a
+              ><a href="#open-source"><span>10</span>Open source</a>
             </nav>
           </details>
         </aside>
@@ -339,6 +340,8 @@
               A <strong>Turn</strong> is one run of a Bot, started by a message,
               a schedule or a webhook. It can involve several model requests and
               tool calls before it finishes or needs your input.
+              <a href="#supervision">Jev</a> reviews the Turn before the first
+              model call, and each complete proposal before text or tools leave.
             </p>
             <figure
               class="inside-figure turn-figure"
@@ -353,26 +356,34 @@
                   <span>02</span><strong>Acknowledge</strong>
                   <p>Tell the client its input is accepted.</p>
                 </li>
+                <li class="turn-jev">
+                  <span>03</span><strong>Assess the Turn</strong>
+                  <p>Jev judges the work before the first model call.</p>
+                </li>
                 <li>
-                  <span>03</span><strong>Prepare a request</strong>
+                  <span>04</span><strong>Prepare a request</strong>
                   <p>Prompt, tool-exposure and request hooks run.</p>
                 </li>
                 <li>
-                  <span>04</span><strong>Model step</strong>
+                  <span>05</span><strong>Model step</strong>
                   <p>The model responds or asks for a tool.</p>
                 </li>
-                <li>
-                  <span>05 · repeat</span><strong>Tool step</strong>
-                  <p>Pre- and post-execute hooks wrap the tool.</p>
+                <li class="turn-jev">
+                  <span>06</span><strong>Review the proposal</strong>
+                  <p>Jev decides which text and calls may proceed.</p>
                 </li>
                 <li>
-                  <span>06</span><strong>Settle</strong>
+                  <span>07 · repeat</span><strong>Tool step</strong>
+                  <p>Pre- and post-execute hooks wrap the allowed tools.</p>
+                </li>
+                <li>
+                  <span>08</span><strong>Settle</strong>
                   <p>Notify stopping, save the result and update clients.</p>
                 </li>
               </ol>
               <p class="turn-repeat">
-                <span aria-hidden="true">↻</span> Model and tool steps can
-                repeat, with progress recorded between them.
+                <span aria-hidden="true">↻</span> Model, review and tool steps
+                can repeat, with progress recorded between them.
               </p>
               <div class="recovery-note">
                 <span aria-hidden="true">↳</span>
@@ -407,10 +418,112 @@
           </section>
           <section
             class="inside-section"
+            id="supervision"
+            aria-labelledby="supervision-title"
+          >
+            <p class="section-label">03 / A supervisor on every Turn</p>
+            <h2 id="supervision-title">
+              The Bot talks.<br /><em>Jev decides.</em>
+            </h2>
+            <p class="section-lede">
+              A fast conversational model stays the Bot’s voice, with a
+              supervisor on the work behind it.
+            </p>
+            <p>
+              The hosted product does not pick a reasoning level as it goes. The
+              Bot speaks at one fixed setting.
+              <strong>Jev</strong> reviews each Turn — whether the work is on
+              track, which calls that change something are allowed, and when a
+              specialist should take a slower pass.
+            </p>
+            <p>
+              Jev is not a plugin. It is built into the hosted service and
+              cannot be switched off. Another deployment can supply a different
+              supervisor without changing the agent loop.
+            </p>
+            <figure
+              class="inside-figure supervision-figure"
+              aria-labelledby="supervision-caption"
+            >
+              <div class="supervision-judgments">
+                <article>
+                  <span class="diagram-label">Start of Turn</span
+                  ><strong>Assess the work</strong>
+                  <p>
+                    One Jev request after the Turn is admitted, before the
+                    conversational model speaks.
+                  </p>
+                </article>
+                <article>
+                  <span class="diagram-label">Each proposal</span
+                  ><strong>Review before release</strong>
+                  <p>
+                    One Jev request after a complete response, before text is
+                    shown or a tool runs.
+                  </p>
+                </article>
+              </div>
+              <figcaption id="supervision-caption">
+                Two judgments. The Bot keeps authorship; Jev supplies the
+                decision.
+              </figcaption>
+            </figure>
+            <h3 id="mutating-calls">What enforces first</h3>
+            <p>
+              The first behaviour that will enforce is approval of mutating tool
+              calls. A call that changes something outside the conversation is
+              allowed only when review finds your authorisation and a clear
+              match to what you asked for. A rejected call comes back as an
+              ordinary tool result, with a reason the model can see. A read does
+              not need a judgment.
+            </p>
+            <p>
+              The Bot asks for missing permission in ordinary conversation —
+              text or voice — rather than through a new approval card.
+            </p>
+            <div class="recovery-note">
+              <span aria-hidden="true">↳</span>
+              <p>
+                <strong
+                  >The adapter is in production. The loop is not wired
+                  yet.</strong
+                >
+                Shipping Jev does not start supervising Turns. Bots still reply.
+                Enforcement begins when review sits between a proposal and a
+                tool.
+              </p>
+            </div>
+            <details class="inside-detail">
+              <summary>
+                A little deeper: specialists, policy and later work
+              </summary>
+              <p>
+                Policies are durable. Per-Bot rules outrank account-wide ones;
+                both outrank overridable platform defaults. Locked platform
+                policy always wins. The Bot may propose a policy change through
+                a tool, and that change is reviewed like any other mutation.
+              </p>
+              <p>
+                Later, Jev can route slower specialist work — planning,
+                research, coding, criticism — and require a Mentor when repeated
+                bad proposals pile up. The fast model keeps authorship after
+                that advice. If supervision is unavailable, the target design
+                stops agent execution rather than running unsupervised;
+                conversation history and settings can still be read.
+              </p>
+              <p>
+                Plugins may later receive a metered judgment binding for their
+                own questions. That binding cannot approve the plugin’s own
+                effects or bypass Turn supervision.
+              </p>
+            </details>
+          </section>
+          <section
+            class="inside-section"
             id="plugins"
             aria-labelledby="plugins-title"
           >
-            <p class="section-label">03 / Dress your Bot</p>
+            <p class="section-label">04 / Dress your Bot</p>
             <h2 id="plugins-title">
               Change what it does<br /><em>and how it does it.</em>
             </h2>
@@ -652,7 +765,7 @@
             aria-labelledby="interfaces-title"
           >
             <p class="section-label">
-              04 / The interface is part of the plugin
+              05 / The interface is part of the plugin
             </p>
             <h2 id="interfaces-title">
               Give it a place.<br /><em>Let it take shape.</em>
@@ -777,7 +890,7 @@
             id="capabilities"
             aria-labelledby="capabilities-title"
           >
-            <p class="section-label">05 / A much wider canvas</p>
+            <p class="section-label">06 / A much wider canvas</p>
             <h2 id="capabilities-title">
               An event on your phone,<br /><em>an action on your desktop.</em>
             </h2>
@@ -2471,7 +2584,7 @@
             id="continuity"
             aria-labelledby="continuity-title"
           >
-            <p class="section-label">06 / More than a message history</p>
+            <p class="section-label">07 / More than a message history</p>
             <h2 id="continuity-title">
               A little continuity<br /><em>goes a long way.</em>
             </h2>
@@ -2528,7 +2641,7 @@
             id="computer"
             aria-labelledby="computer-title"
           >
-            <p class="section-label">07 / Somewhere to do the work</p>
+            <p class="section-label">08 / Somewhere to do the work</p>
             <h2 id="computer-title">Your Bot has<br /><em>a Computer.</em></h2>
             <p class="section-lede">
               A remote browser, filesystem and terminal, with a desktop you can
@@ -2586,7 +2699,7 @@
             id="voice-and-models"
             aria-labelledby="voice-title"
           >
-            <p class="section-label">08 / Talk naturally. Choose the engine.</p>
+            <p class="section-label">09 / Talk naturally. Choose the engine.</p>
             <h2 id="voice-title">Live voice,<br /><em>durable work.</em></h2>
             <p class="section-lede">
               The interaction can be immediate while the work remains
@@ -2619,6 +2732,11 @@
               Gateway are configured.
             </p>
             <p>
+              The conversational model stays on one reasoning level. Specialist
+              routing belongs to <a href="#supervision">Jev</a>, not to an
+              automatic effort picker.
+            </p>
+            <p>
               <a
                 href="https://github.com/timoconnellaus/frockbot/blob/main/docs/model-providers.md"
                 >See the provider catalogue and authentication options ↗</a
@@ -2630,7 +2748,7 @@
             id="open-source"
             aria-labelledby="source-title"
           >
-            <p class="section-label">09 / Yours to shape</p>
+            <p class="section-label">10 / Yours to shape</p>
             <h2 id="source-title">
               Read it, change it,<br /><em>run it yourself.</em>
             </h2>

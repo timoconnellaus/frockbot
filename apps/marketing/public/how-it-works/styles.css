@@ -436,7 +436,7 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 18px;
 }
 .turn-flow li {
@@ -456,6 +456,9 @@
 .turn-flow p {
   font-size: 0.8rem;
   color: #615b65;
+}
+.turn-flow li.turn-jev {
+  border-top-color: var(--pink-dark);
 }
 .turn-repeat {
   margin-top: 20px;
@@ -873,6 +876,31 @@
   display: block;
   margin-top: 10px;
 }
+.supervision-judgments {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.supervision-judgments article {
+  padding: 24px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+}
+.supervision-judgments .diagram-label {
+  color: var(--pink-dark);
+}
+.supervision-judgments strong {
+  font-size: 1.2rem;
+}
+.supervision-judgments p {
+  font-size: 0.85rem;
+  line-height: 1.8;
+  color: #615b65;
+  margin: 0;
+}
 .continuity-cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1074,6 +1102,10 @@
   .inside-section {
     padding-block: 60px;
   }
+  .turn-flow,
+  .supervision-judgments {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 @media (max-width: 560px) {
   .inside-page .container {
@@ -1159,6 +1191,9 @@
   .turn-flow {
     grid-template-columns: 1fr 1fr;
     gap: 24px;
+  }
+  .supervision-judgments {
+    grid-template-columns: 1fr;
   }
   .runtime-top {
     grid-template-columns: 1fr;
