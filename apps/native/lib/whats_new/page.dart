@@ -3,6 +3,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
@@ -11,18 +12,28 @@ import '../shell/semantics.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'feed.dart';
+import 'mark.dart';
 
 class WhatsNewPage extends StatefulWidget {
   final NativeApi api;
   final String origin;
   final WhatsNewFeed? feed;
+
+  /// Last seen id when the page opened, so this visit still shows what was new.
+  final String? seenId;
   final Future<void> Function(String id)? onSeen;
+
+  /// Tests substitute a local still so the card does not hit the network.
+  @visibleForTesting
+  final ImageProvider Function(WhatsNewImage image)? stillFor;
   const WhatsNewPage({
     super.key,
     required this.api,
     required this.origin,
     this.feed,
+    this.seenId,
     this.onSeen,
+    this.stillFor,
   });
 
   @override
@@ -32,6 +43,7 @@ class WhatsNewPage extends StatefulWidget {
 class _WhatsNewPageState extends State<WhatsNewPage> {
   WhatsNewFeed? feed;
   bool busy = true;
+  late final String? seenWhenOpened = widget.seenId;
 
   @override
   void initState() {
@@ -66,9 +78,7 @@ class _WhatsNewPageState extends State<WhatsNewPage> {
   Widget build(BuildContext context) {
     final entries = feed?.entries ?? const <WhatsNewEntry>[];
     return Scaffold(
-      appBar: DesktopHeader(
-        child: AppBar(title: const Text('What’s New')),
-      ),
+      appBar: DesktopHeader(child: AppBar(title: const Text('What’s New'))),
       body: identified(
         WhatsNewIds.page,
         busy
@@ -94,6 +104,10 @@ class _WhatsNewPageState extends State<WhatsNewPage> {
                 itemBuilder: (context, index) => _WhatsNewCard(
                   entry: entries[index],
                   origin: widget.origin,
+                  unread:
+                      feed?.isUnread(entries[index].id, seenWhenOpened) ??
+                      false,
+                  stillFor: widget.stillFor,
                 ),
               ),
       ),
@@ -104,7 +118,14 @@ class _WhatsNewPageState extends State<WhatsNewPage> {
 class _WhatsNewCard extends StatelessWidget {
   final WhatsNewEntry entry;
   final String origin;
-  const _WhatsNewCard({required this.entry, required this.origin});
+  final bool unread;
+  final ImageProvider Function(WhatsNewImage image)? stillFor;
+  const _WhatsNewCard({
+    required this.entry,
+    required this.origin,
+    required this.unread,
+    this.stillFor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -119,11 +140,19 @@ class _WhatsNewCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                entry.when.toUpperCase(),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+              Row(
+                children: [
+                  if (unread) ...[
+                    const WhatsNewUnreadMark(),
+                    const SizedBox(width: 8),
+                  ],
+                  Text(
+                    entry.when.toUpperCase(),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 6),
               Text(
@@ -143,7 +172,11 @@ class _WhatsNewCard extends StatelessWidget {
               ),
               if (image != null) ...[
                 const SizedBox(height: 14),
-                _WhatsNewStill(origin: origin, image: image),
+                _WhatsNewStill(
+                  origin: origin,
+                  image: image,
+                  still: stillFor?.call(image),
+                ),
               ],
             ],
           ),
@@ -156,7 +189,8 @@ class _WhatsNewCard extends StatelessWidget {
 class _WhatsNewStill extends StatelessWidget {
   final String origin;
   final WhatsNewImage image;
-  const _WhatsNewStill({required this.origin, required this.image});
+  final ImageProvider? still;
+  const _WhatsNewStill({required this.origin, required this.image, this.still});
 
   Widget _still(BuildContext context) {
     final theme = Theme.of(context);
@@ -164,8 +198,8 @@ class _WhatsNewStill extends StatelessWidget {
       borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
       child: AspectRatio(
         aspectRatio: 16 / 9,
-        child: Image.network(
-          whatsNewImageUrlV1(origin, image.src),
+        child: Image(
+          image: still ?? NetworkImage(whatsNewImageUrlV1(origin, image.src)),
           fit: BoxFit.cover,
           semanticLabel: image.alt,
           errorBuilder: (context, error, stack) => ColoredBox(

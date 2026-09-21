@@ -56,6 +56,7 @@ import '../theme/rows.dart';
 import '../update/app_version.dart';
 import '../view/sample_page.dart';
 import '../whats_new/feed.dart';
+import '../whats_new/mark.dart';
 import '../whats_new/page.dart';
 import '../voice/assistant.dart';
 import '../voice/capabilities.dart';
@@ -706,6 +707,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         api: widget.api,
         origin: hostedOrigin,
         feed: whatsNew,
+        seenId: whatsNewSeenId,
         onSeen: (id) async {
           await widget.store.write(whatsNewSeenKeyV1, id);
           if (mounted) setState(() => whatsNewSeenId = id);
@@ -3073,10 +3075,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         identified(
                           SettingsIds.profileWhatsNew,
                           FrockRow(
-                            icon: Icons.auto_awesome_outlined,
+                            icon: Icons.campaign_outlined,
                             title: 'What’s New',
                             trailing: whatsNew.unseenCount(whatsNewSeenId) > 0
-                                ? const _WhatsNewBadge()
+                                ? const WhatsNewUnreadMark()
                                 : null,
                             onTap: _openWhatsNew,
                           ),
@@ -3350,23 +3352,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     voiceProbe.dispose();
     super.dispose();
   }
-}
-
-class _WhatsNewBadge extends StatelessWidget {
-  const _WhatsNewBadge();
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    label: 'Unread',
-    child: Container(
-      width: 8,
-      height: 8,
-      decoration: const BoxDecoration(
-        color: FrockTheme.accent,
-        shape: BoxShape.circle,
-      ),
-    ),
-  );
 }
 
 /// The exchange chat as a page: the controller lives as long as the page.

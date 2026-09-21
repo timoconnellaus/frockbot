@@ -105,6 +105,7 @@ Widget identified(String identifier, Widget child) =>
 /// What’s New: the profile row and the page it opens.
 abstract final class WhatsNewIds {
   static const page = 'whats-new-page';
+  static const unread = 'whats-new-unread';
   static String entry(String id) => 'whats-new-entry-$id';
 }
 

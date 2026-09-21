@@ -84,6 +84,16 @@ class WhatsNewFeed {
     }
     return count;
   }
+
+  /// Newer than the last seen id. The list is newest-first.
+  bool isUnread(String id, String? seenId) {
+    if (seenId == null) return true;
+    final seenAt = entries.indexWhere((entry) => entry.id == seenId);
+    final at = entries.indexWhere((entry) => entry.id == id);
+    if (at < 0) return false;
+    if (seenAt < 0) return true;
+    return at < seenAt;
+  }
 }
 
 WhatsNewEntry? _entry(Map<Object?, Object?> row) {
