@@ -745,6 +745,39 @@ describe("what the model asks the object to do", () => {
     // session was another Bot.
     expect(setups[1]!.handle).toBeUndefined();
   });
+
+  test("end_call waits for the spoken turn to end, then hangs up", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-end-call-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+
+    await stub.probeHears("that's all, goodbye");
+    await stub.probeCalls("end_call", {}, "call_end");
+    await eventually(
+      async () =>
+        (await stub.probeUpstreamFrames()).some(
+          (frame) => frame.kind === "tool-response",
+        ),
+      (seen) => seen,
+      "the hang-up answered",
+    );
+    await stub.probeSpeaks();
+    await settle(50);
+    expect(await stub.probeUpstreamCount()).toBe(1);
+
+    await stub.probeEndsTurn();
+    await opened.waitFor(status("idle"), "idle after the goodbye");
+    const closed = await opened.closed;
+    expect(closed.code).toBe(1000);
+    expect(closed.reason).toBe("end_call");
+  });
 });
 
 describe("pausing and coming back", () => {

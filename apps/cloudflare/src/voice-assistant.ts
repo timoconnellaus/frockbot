@@ -390,6 +390,11 @@ interface LiveCall {
    */
   pendingSwitch?: { botId: string; name: string };
   /**
+   * The model called `end_call`. Same wait as a hand-over: hang-up is after
+   * this turn, so a goodbye is not cut off.
+   */
+  pendingEnd?: boolean;
+  /**
    * Hand-offs admitted in the model's current turn, so the burst cap bites on
    * a model that calls `subagent` in a loop and not on a long conversation
    * that hands off now and then. Reset when the turn ends; the day's own cap
@@ -2294,7 +2299,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    * interrupted turn may send neither, so whichever arrives first settles the
    * turn and the second finds nothing to do. A hand-over waiting on this turn
    * happens here, which is what ADR 0031 means by honouring `switch_bot`
-   * after the spoken turn ends.
+   * after the spoken turn ends. `end_call` waits the same way.
    */
   private async finishTurn(
     connection: Connection,
@@ -2335,6 +2340,16 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       if (spokenText) {
         this.sendRaw(connection, { type: "transcript_end", text: spokenText });
       }
+    }
+    if (call.pendingEnd) {
+      call.pendingEnd = false;
+      await this.endCall(connection);
+      try {
+        connection.close(1000, "end_call");
+      } catch {
+        // The client already closed.
+      }
+      return;
     }
     this.setStatus(connection, call, "listening");
     if (call.pendingSwitch) await this.applySwitch(connection, call);
@@ -2415,6 +2430,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       if (outcome.switchedTo) {
         // Durable now, spoken later: the session moves when this turn ends.
         call.pendingSwitch = outcome.switchedTo;
+      }
+      if (outcome.endCall) {
+        call.pendingEnd = true;
       }
       if (call.cancelledCalls.delete(request.id)) continue;
       call.session?.send(
