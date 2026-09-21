@@ -14,9 +14,9 @@ import {
   validateAgainstJsonSchemaV1,
   type A2uiComponentV1,
 } from "@frockbot/core/contracts";
+import { existsSync, readdirSync } from "node:fs";
 import { bindCardApprovalsV1 } from "@frockbot/app/shell/cards";
 import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "../catalog.ts";
-import { seededPluginSourceHashV1 } from "../../../scripts/build-seeded-plugins.ts";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./artifacts.generated.ts";
 
 /**
@@ -452,9 +452,35 @@ describe("the seeded email Plugin", () => {
     expect(artifact.size).toBe(
       new TextEncoder().encode(artifact.module).byteLength,
     );
-    // Same digest `--check` uses: SKILL.md plus references/, not the old
-    // single skill.md file this Plugin no longer ships.
-    expect(await seededPluginSourceHashV1("email")).toBe(artifact.sourceHash);
+    // Same files `--check` hashes: SKILL.md plus references/, with a missing
+    // skill.md as empty rather than a throw. Importing the build script here
+    // would pull it into @frockbot/app's tsc graph.
+    const directory = new URL("./email/", import.meta.url);
+    const files = ["plugin.json", "plugin.ts", "SKILL.md", "skill.md"];
+    const referencesDirectory = new URL("references/", directory);
+    if (existsSync(referencesDirectory)) {
+      files.push(
+        ...readdirSync(referencesDirectory)
+          .filter((name) => name.endsWith(".md"))
+          .sort()
+          .map((name) => `references/${name}`),
+      );
+    }
+    const sources = await Promise.all(
+      files.map(async (file) => {
+        const source = Bun.file(new URL(file, directory));
+        return (await source.exists()) ? source.text() : "";
+      }),
+    );
+    const sourceDigest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(sources.join("\0")),
+    );
+    expect(
+      [...new Uint8Array(sourceDigest)]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join(""),
+    ).toBe(artifact.sourceHash);
   });
 
   // The card tool validates the Bot's values against this schema before the
