@@ -16,6 +16,7 @@ import {
 } from "@frockbot/core/contracts";
 import { bindCardApprovalsV1 } from "@frockbot/app/shell/cards";
 import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "../catalog.ts";
+import { seededPluginSourceHashV1 } from "../../../scripts/build-seeded-plugins.ts";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./artifacts.generated.ts";
 
 /**
@@ -451,22 +452,9 @@ describe("the seeded email Plugin", () => {
     expect(artifact.size).toBe(
       new TextEncoder().encode(artifact.module).byteLength,
     );
-    // The gate `bun run typecheck` runs: the sources digest to what the build
-    // recorded, so an edited Plugin that was not rebuilt fails there.
-    const sources = await Promise.all(
-      ["plugin.json", "plugin.ts", "skill.md"].map((file) =>
-        Bun.file(new URL(`./email/${file}`, import.meta.url)).text(),
-      ),
-    );
-    const sourceDigest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(sources.join(" ")),
-    );
-    expect(
-      [...new Uint8Array(sourceDigest)]
-        .map((byte) => byte.toString(16).padStart(2, "0"))
-        .join(""),
-    ).toBe(artifact.sourceHash);
+    // Same digest `--check` uses: SKILL.md plus references/, not the old
+    // single skill.md file this Plugin no longer ships.
+    expect(await seededPluginSourceHashV1("email")).toBe(artifact.sourceHash);
   });
 
   // The card tool validates the Bot's values against this schema before the

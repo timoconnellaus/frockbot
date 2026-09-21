@@ -175,7 +175,7 @@ async function buildSeededPlugin(pluginId: string): Promise<BuiltSeededPlugin> {
     module: outcome.module,
     contentHash,
     size: new TextEncoder().encode(outcome.module).byteLength,
-    sourceHash: await sourceHashV1(pluginId),
+    sourceHash: await seededPluginSourceHashV1(pluginId),
   };
 }
 
@@ -239,7 +239,9 @@ async function artifactsModule(): Promise<string> {
  * catches the mistake it exists to catch — a Plugin edited and not rebuilt —
  * and leaves the artifact itself to the build.
  */
-async function sourceHashV1(pluginId: string): Promise<string> {
+export async function seededPluginSourceHashV1(
+  pluginId: string,
+): Promise<string> {
   const directory = at(`${SEEDED_DIRECTORY}${pluginId}/`);
   const files = ["plugin.json", "plugin.ts", "SKILL.md", "skill.md"];
   const referencesDirectory = new URL("references/", directory);
@@ -275,7 +277,8 @@ if (import.meta.main) {
         await Promise.all(
           SEEDED_PLUGIN_ARTIFACTS_V1.map(
             async (artifact) =>
-              (await sourceHashV1(artifact.pluginId)) === artifact.sourceHash,
+              (await seededPluginSourceHashV1(artifact.pluginId)) ===
+              artifact.sourceHash,
           ),
         )
       ).includes(false);
