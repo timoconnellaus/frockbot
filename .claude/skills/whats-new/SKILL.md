@@ -74,11 +74,11 @@ needed. Present tense. The same words the UI uses (Bot, What’s New).
 Do not explain how to find it, how it works, or what to tap. The page
 already says What’s New.
 
-| Use | Do not use |
-| --- | --- |
-| Search across every Bot | New: powerful global search |
-| Find a conversation, a file, or a person. | You can now open Search from the sidebar to look across Bots. |
-| What landed in each release. | This update adds an in-app changelog. Tap What’s New under Account. |
+| Use                                       | Do not use                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------- |
+| Search across every Bot                   | New: powerful global search                                         |
+| Find a conversation, a file, or a person. | You can now open Search from the sidebar to look across Bots.       |
+| What landed in each release.              | This update adds an in-app changelog. Tap What’s New under Account. |
 
 Leave out marketing adjectives, “you can now”, “we’ve added”, emoji,
 ticket numbers, and PR numbers. `kind` is metadata, not copy.
