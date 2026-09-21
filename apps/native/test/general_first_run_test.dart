@@ -453,13 +453,11 @@ void main() {
       harness.api.close();
     }
 
-    /// A phone still names the Bot in the overlay. A desk opens that page
-    /// from the panel, so the conversation being up is the composer.
+    /// The overlay names the Bot at every width. A desk also keeps the
+    /// composer in the conversation column; a phone is a page of its own.
     void expectConversation(String name, Size size) {
-      if (size.width <= shellSinglePaneWidth) {
-        expect(find.widgetWithText(ChatHeader, name), findsOneWidget);
-      } else {
-        expect(find.widgetWithText(ChatHeader, name), findsNothing);
+      expect(find.widgetWithText(ChatHeader, name), findsOneWidget);
+      if (size.width > shellSinglePaneWidth) {
         expect(identifiedBy(ShellIds.composer), findsOneWidget);
       }
     }
