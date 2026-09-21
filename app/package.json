@@ -258,7 +258,8 @@
     "./web/agent": "./web/agent.ts",
     "./web/contract": "./web/contract.ts",
     "./web/definition": "./web/definition.ts",
-    "./web/ssrf": "./web/ssrf.ts"
+    "./web/ssrf": "./web/ssrf.ts",
+    "./whats-new": "./whats-new/index.ts"
   },
   "scripts": {
     "test": "bun test .",

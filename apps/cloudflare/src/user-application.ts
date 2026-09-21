@@ -58,6 +58,7 @@ import {
   TURN_TOO_LONG_MESSAGE_V1,
   turnBodyIsOversizedV1,
 } from "./request-body.js";
+import { whatsNewImageResponseV1 } from "@frockbot/app/whats-new";
 
 declare const __FROCKBOT_FLUTTER_BUILD__: string;
 declare const __FROCKBOT_CLIENT_ICON__: string;
@@ -467,6 +468,12 @@ function createUserApplicationRoute() {
         appletUiArtifactOriginV1(url),
         url,
       );
+    }
+    if (request.method === "GET") {
+      const picture = whatsNewImageResponseV1(url.pathname);
+      if (picture) {
+        return withSecurityHeaders(picture, appletUiArtifactOriginV1(url), url);
+      }
     }
     if (request.method === "GET" && url.pathname === "/app-manifest") {
       return Response.json({

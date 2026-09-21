@@ -267,6 +267,9 @@ void main() {
       tester.getTopLeft(version).dy,
       greaterThan(tester.getBottomLeft(signOut).dy),
     );
+    expect(identifiedBy(SettingsIds.profileWhatsNew), findsOneWidget);
+    expect(find.text('What’s New'), findsOneWidget);
+    expect(find.byIcon(Icons.campaign_outlined), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
     links.dispose();

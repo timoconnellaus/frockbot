@@ -14,7 +14,9 @@ reinstalling by hand.
 
 - **One control, one press.** The update affordance is small and in the
   app's own chrome — beside the profile button on desktop, the ready header on
-  a phone. It never blocks the app.
+  a phone. It never blocks the app. After a native restart into a newer
+  build, What’s New opens once if there is something unread; the list itself
+  lives on the account sheet.
 - **Observable states.** `available → downloading (percent) → preparing →
 restarting`, with `retry` from any failure and `restart to update` when an
   update is already staged. A platform that cannot report a state does not

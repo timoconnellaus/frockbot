@@ -9,6 +9,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
@@ -54,6 +55,9 @@ import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
 import '../update/app_version.dart';
 import '../view/sample_page.dart';
+import '../whats_new/feed.dart';
+import '../whats_new/mark.dart';
+import '../whats_new/page.dart';
 import '../voice/assistant.dart';
 import '../voice/capabilities.dart';
 import '../voice/capture.dart';
@@ -305,6 +309,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// no surface mentions it.
   AccountCredit? credit;
 
+  WhatsNewFeed whatsNew = const WhatsNewFeed();
+  String? whatsNewSeenId;
+
   @override
   void initState() {
     super.initState();
@@ -343,6 +350,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(lifecycle.restore());
     unawaited(load());
     unawaited(_loadAppearance());
+    unawaited(_readWhatsNew());
     _startPolling();
     unawaited(push.start());
   }
@@ -665,6 +673,48 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _say(String message) =>
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
+
+  Future<void> _readWhatsNew() async {
+    final feed = await readWhatsNewFeedV1(widget.api);
+    final seen = await widget.store.read(whatsNewSeenKeyV1);
+    final previous = await widget.store.read(whatsNewLaunchedVersionKeyV1);
+    final current = (await widget.version()).label;
+    if (!mounted) return;
+    setState(() {
+      whatsNew = feed;
+      whatsNewSeenId = seen;
+    });
+    final unseen = feed.unseenCount(seen);
+    final open = shouldOpenWhatsNewAfterLaunchV1(
+      web: kIsWeb,
+      previousVersion: previous,
+      currentVersion: current,
+      unseen: unseen,
+    );
+    if (current.isNotEmpty) {
+      await widget.store.write(whatsNewLaunchedVersionKeyV1, current);
+    }
+    if (open && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openWhatsNew();
+      });
+    }
+  }
+
+  void _openWhatsNew() {
+    _push(
+      WhatsNewPage(
+        api: widget.api,
+        origin: hostedOrigin,
+        feed: whatsNew,
+        seenId: whatsNewSeenId,
+        onSeen: (id) async {
+          await widget.store.write(whatsNewSeenKeyV1, id);
+          if (mounted) setState(() => whatsNewSeenId = id);
+        },
+      ),
+    );
+  }
 
   /// The balance, read beside the identity and again whenever Billing may
   /// have changed it: a resume, a return from the Billing page. A read that
@@ -3032,6 +3082,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onTap: () => unawaited(_openBilling()),
                           ),
                         ),
+                      _profileGroup(null, [
+                        identified(
+                          SettingsIds.profileWhatsNew,
+                          FrockRow(
+                            icon: Icons.campaign_outlined,
+                            title: 'What’s New',
+                            trailing: whatsNew.unseenCount(whatsNewSeenId) > 0
+                                ? const WhatsNewUnreadMark()
+                                : null,
+                            onTap: _openWhatsNew,
+                          ),
+                        ),
+                      ]),
                       _profileGroup('Account', [
                         _profileRow(
                           SettingsIds.profileSettings,

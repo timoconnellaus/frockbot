@@ -257,6 +257,16 @@ describe("user application security headers", () => {
     expect(icon.headers.get("content-type")).toBe("image/png");
     expect(icon.headers.get("x-content-type-options")).toBe("nosniff");
   });
+
+  test("serves What’s New stills as public same-origin WebP", async () => {
+    const picture = await createUserApplication()(
+      new Request("https://app.example/whats-new/whats-new.webp"),
+      securityEnv,
+    );
+    expect(picture.status).toBe(200);
+    expect(picture.headers.get("content-type")).toBe("image/webp");
+    expect(picture.headers.get("x-content-type-options")).toBe("nosniff");
+  });
 });
 
 describe("user application Bot seam", () => {

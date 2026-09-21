@@ -102,6 +102,13 @@ abstract final class BotActionIds {
 Widget identified(String identifier, Widget child) =>
     Semantics(identifier: identifier, child: child);
 
+/// What’s New: the profile row and the page it opens.
+abstract final class WhatsNewIds {
+  static const page = 'whats-new-page';
+  static const unread = 'whats-new-unread';
+  static String entry(String id) => 'whats-new-entry-$id';
+}
+
 /// General's first-run suggestions, which only ever fill the composer.
 abstract final class StarterIds {
   static const list = 'starter-suggestions';
@@ -203,6 +210,7 @@ abstract final class SettingsIds {
   static const profileManageBots = 'profile-manage-bots';
   static const profileSignOut = 'profile-sign-out';
   static const profileVersion = 'profile-version';
+  static const profileWhatsNew = 'profile-whats-new';
 
   /// What the account can still spend, at the top of the Profile page.
   static const profileCredit = 'profile-credit';
