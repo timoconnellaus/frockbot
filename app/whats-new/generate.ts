@@ -32,7 +32,7 @@ export function writeWhatsNewGeneratedFilesV1(): void {
         `${file} is ${bytes.byteLength} bytes; What’s New stills stay under ${WHATS_NEW_MEDIA_MAX_BYTES_V1}`,
       );
     }
-    return `  ${JSON.stringify(file)}:\n    ${JSON.stringify(bytes.toString("base64"))},`;
+    return `  ${JSON.stringify(file)}:\n    ${JSON.stringify(Buffer.from(bytes).toString("base64"))},`;
   });
   writeFileSync(
     generatedPath,
