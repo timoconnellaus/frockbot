@@ -182,6 +182,7 @@ import {
   type VoiceDictationCleanupV1,
 } from "./voice-dictation.js";
 import { createFrockAiGatewayHostV1 } from "./frock-ai.js";
+import { createHostedDictationCleanupJudgeV1 } from "@frockbot/app/supervision";
 import { VOICE_DICTATION_CLEANUP_MODEL_V1 } from "@frockbot/app/voice/dictation-cleanup";
 import { voiceDictationConfiguredV1 } from "@frockbot/app/voice/dictation-upstream";
 import { voiceAssistantEdgeTimingOfV1 } from "@frockbot/app/voice/diagnostics";
@@ -353,7 +354,10 @@ interface Env {
   ALLOWED_CLIENT_ORIGINS?: string;
   /** Authorizes `/api/debug/*`. Absent disables the surface entirely. */
   DEBUG_TOKEN?: string;
-  /** The hosted TurnSupervisor credential. Absent, the chooser is unavailable. */
+  /**
+   * The hosted Jev credential: Turn supervision, the routine-event rejector,
+   * and dictation tidy review. Absent, those choosers are unavailable.
+   */
   JEV_API_KEY?: string;
 }
 
@@ -1988,6 +1992,9 @@ function voiceGatewayDependencies(env: Env): VoiceGatewayDependencies {
       return openVoiceDictationRelayV1(request, {
         env,
         cleanup: voiceDictationCleanup(env, userId),
+        cleanupJudge: createHostedDictationCleanupJudgeV1({
+          JEV_API_KEY: env.JEV_API_KEY,
+        }),
         lease: {
           acquire: async () => {
             const answer = await call({ action: "acquire" });

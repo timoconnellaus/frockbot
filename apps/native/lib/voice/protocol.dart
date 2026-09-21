@@ -40,8 +40,9 @@ const voiceDictationFinalTimeoutV1 = Duration(seconds: 6);
 
 /// How long to wait once the raw transcript has landed and the server is
 /// tidying it. The field is already editable; this only bounds the leftover
-/// socket so a quiet server cannot hold it open.
-const voiceDictationCleanupTimeoutV1 = Duration(seconds: 6);
+/// socket so a quiet server cannot hold it open. Longer than the server's
+/// own tidy bound so Groq plus Jev can finish and send `final` first.
+const voiceDictationCleanupTimeoutV1 = Duration(seconds: 14);
 
 /// How long a capture has been running, as `mm:ss`.
 ///

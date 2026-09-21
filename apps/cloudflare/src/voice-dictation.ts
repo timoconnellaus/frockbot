@@ -29,14 +29,16 @@
 //   pressing the microphone and speaking at once loses nothing.
 //
 //   Tidying. Once every segment is in, and before `final`, the capture's own
-//   words are offered to a model to have the fillers and false starts taken
-//   out. The client has already landed the raw segment by then. It happens
-//   here rather than on the client because the model is reached with a
+//   words are offered to Groq to have the fillers and false starts taken
+//   out, then to Jev to decide whether the tidy still says what they said.
+//   The client has already landed the raw segment by then. It happens
+//   here rather than on the client because both models are reached with a
 //   server-side credential, and it happens after the capture rather than
 //   during it because text that rewrites itself under the cursor is worse
 //   than text that is untidy. Every way this can go wrong — no model, no
-//   allowance, a refusal, a timeout, an answer a guard rejects — ends in
-//   the same place: `final`, with the raw transcript standing.
+//   allowance, a timeout, a cheap refusal, a Jev `unfaithful` or a Jev
+//   miss — ends in the same place: `final`, with the raw transcript standing.
+import type { DictationCleanupJudgeV1 } from "@frockbot/app/supervision";
 import {
   voiceDictationCleanupBodyV1,
   voiceDictationCleanupResultV1,
@@ -101,6 +103,11 @@ export interface VoiceDictationRelayOptions {
   lease?: VoiceDictationLeaseV1;
   /** Absent in a deployment with no model gateway; the raw transcript stands. */
   cleanup?: VoiceDictationCleanupV1;
+  /**
+   * Jev's rejector for a Groq tidy. Absent or unavailable keeps the raw
+   * transcript — a missing review is not an accept.
+   */
+  cleanupJudge?: DictationCleanupJudgeV1;
   cleanupTimeoutMs?: number;
   /** Opens the upstream socket; the default is a `fetch` upgrade. */
   connectUpstream?: (
@@ -377,9 +384,10 @@ function runRelay(
    *
    * Every path through this ends on `final`. A deployment with no gateway, an
    * account out of allowance, a transcript too short or too long to be worth
-   * a call, a model that fails or takes too long, an answer a guard refuses —
-   * all of them leave the raw transcript exactly where it already is, which
-   * is in the person's draft. Nothing here can lose text.
+   * a call, a model that fails or takes too long, a cheap refusal, Jev
+   * refusing or Jev missing — all of them leave the raw transcript exactly
+   * where it already is, which is in the person's draft. Nothing here can
+   * lose text.
    */
   const tidyThenFinish = async () => {
     const done = () => finish({ schemaVersion: 1, type: "final" });
@@ -394,33 +402,51 @@ function runRelay(
     const timer = after(cleanupTimeoutMs, () =>
       deadline.abort(new Error("the tidy-up took too long")),
     );
-    let answer: string | undefined;
     try {
-      answer = await cleanup.run(
+      const answer = await cleanup.run(
         voiceDictationCleanupBodyV1(transcript),
         deadline.signal,
       );
+      // The person closed the composer, sent, or navigated away while we
+      // asked. Their draft is not ours to touch any more.
+      if (closed) return;
+      if (answer !== undefined) {
+        const result = voiceDictationCleanupResultV1(transcript, answer);
+        if (result.status === "kept") {
+          // Named rather than silent: "cleanup is off" and "cleanup keeps
+          // eating people's negations" look identical without this line.
+          console.log("voice dictation cleanup kept the raw transcript", {
+            reason: result.reason,
+          });
+        } else {
+          const judge = options.cleanupJudge;
+          const verdict = judge
+            ? await judge.review(
+                { raw: transcript, tidied: result.text },
+                deadline.signal,
+              )
+            : "unavailable";
+          if (closed) return;
+          if (verdict === "faithful") {
+            send(client, {
+              schemaVersion: 1,
+              type: "cleaned",
+              text: result.text,
+            });
+          } else {
+            console.log("voice dictation cleanup kept the raw transcript", {
+              reason: verdict,
+            });
+          }
+        }
+      }
     } catch (error) {
       console.error("voice dictation cleanup failed", error);
     } finally {
       clearTimeout(timer);
       timers.delete(timer);
     }
-    // The person closed the composer, sent, or navigated away while we asked.
-    // Their draft is not ours to touch any more.
     if (closed) return;
-    if (answer !== undefined) {
-      const result = voiceDictationCleanupResultV1(transcript, answer);
-      if (result.status === "cleaned") {
-        send(client, { schemaVersion: 1, type: "cleaned", text: result.text });
-      } else {
-        // Named rather than silent: "cleanup is off" and "cleanup keeps
-        // eating people's negations" look identical without this line.
-        console.log("voice dictation cleanup kept the raw transcript", {
-          reason: result.reason,
-        });
-      }
-    }
     done();
   };
 

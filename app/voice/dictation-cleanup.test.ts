@@ -77,117 +77,41 @@ describe("what we ask the model for", () => {
   });
 });
 
-describe("accepting a tidied transcript", () => {
-  test("resolves a self-correction to the final wording", () => {
-    const raw = "Check Thursday, sorry, Friday's flights. Don't book anything.";
-    const result = voiceDictationCleanupResultV1(
-      raw,
-      "Check Friday's flights. Don't book anything.",
-    );
-    expect(result).toEqual({
-      status: "cleaned",
-      text: "Check Friday's flights. Don't book anything.",
+describe("the cheap checks before Jev", () => {
+  test("a changed tidy is a candidate, even when the meaning moved", () => {
+    // Meaning is Jev's. These would have been local refusals; they must not
+    // be, or a missing Jev key looks like "the word list caught it".
+    expect(
+      voiceDictationCleanupResultV1(
+        "Check Friday's flights. Don't book anything.",
+        "Check Friday's flights and book them.",
+      ),
+    ).toEqual({
+      status: "candidate",
+      text: "Check Friday's flights and book them.",
+    });
+    expect(
+      voiceDictationCleanupResultV1(
+        "Maybe we should change the model. Find out if it's worth it.",
+        "Change the model. Find out if it's worth it.",
+      ),
+    ).toEqual({
+      status: "candidate",
+      text: "Change the model. Find out if it's worth it.",
     });
   });
 
-  test("drops fillers and repetitions", () => {
+  test("a tidy that only dropped fillers is a candidate", () => {
     const raw =
       "So um I I think we should we should look at the the pricing page again";
     const result = voiceDictationCleanupResultV1(
       raw,
       "So I think we should look at the pricing page again.",
     );
-    expect(result.status).toBe("cleaned");
-  });
-
-  test("keeps a list the model paragraphed", () => {
-    const raw =
-      "three things first the flights second the hotel and third the car";
-    const result = voiceDictationCleanupResultV1(
-      raw,
-      "Three things:\n\n- the flights\n- the hotel\n- the car",
-    );
-    expect(result.status).toBe("cleaned");
-  });
-});
-
-// Each of these is a way the tidy-up could put words in somebody's mouth. The
-// raw transcript is kept every time: untidy text that says what they said
-// beats tidy text that does not.
-describe("refusing a tidied transcript", () => {
-  test("keeps the raw text when a negation went missing", () => {
-    const result = voiceDictationCleanupResultV1(
-      "Check Friday's flights. Don't book anything.",
-      "Check Friday's flights and book them.",
-    );
-    expect(result).toEqual({ status: "kept", reason: "lost-negation" });
-  });
-
-  // The example that matters most: thinking aloud must not become an order.
-  test("keeps the raw text when an exploratory remark became an instruction", () => {
-    const result = voiceDictationCleanupResultV1(
-      "Maybe we should change the model. Find out if it's worth it.",
-      "Change the model. Find out if it's worth it.",
-    );
-    expect(result).toEqual({ status: "kept", reason: "lost-uncertainty" });
-  });
-
-  test("keeps the raw text when the model summarised", () => {
-    const raw =
-      "So the thing about Tuesday is that the venue needs confirming and the " +
-      "caterer has not come back to us and I would like to know about parking";
-    const result = voiceDictationCleanupResultV1(raw, "Sort out Tuesday.");
-    expect(result).toEqual({ status: "kept", reason: "shrank" });
-  });
-
-  // Dictating a question into the composer is ordinary; having it come back
-  // answered is the tidy-up overstepping in the most confusing way possible.
-  test("keeps the raw text when the model answered the question", () => {
-    const result = voiceDictationCleanupResultV1(
-      "What time does the Friday flight to Melbourne get in?",
-      "The Friday flight to Melbourne arrives at 4:35pm.",
-    );
-    expect(result).toEqual({ status: "kept", reason: "answered-question" });
-  });
-
-  test("keeps the raw text when the model added information", () => {
-    const result = voiceDictationCleanupResultV1(
-      "Check the Friday flights.",
-      "Check the Friday flights to Melbourne, which leave hourly from gate 12.",
-    );
-    expect(result).toEqual({ status: "kept", reason: "grew" });
-  });
-
-  // The slack has to be small at the short end too: a dictated sentence is
-  // where a destination and a time nobody said fit most easily.
-  test("keeps the raw text when a short transcript gained a detail", () => {
-    const result = voiceDictationCleanupResultV1(
-      "Check the Friday flights",
-      "Check the Friday flights to Melbourne at 4:35pm.",
-    );
-    expect(result).toEqual({ status: "kept", reason: "grew" });
-  });
-
-  test("still tidies a question that stays a question", () => {
-    const result = voiceDictationCleanupResultV1(
-      "um what time does the uh the Friday flight get in?",
-      "What time does the Friday flight get in?",
-    );
-    expect(result.status).toBe("cleaned");
-  });
-
-  test("keeps the raw text when the model talked to us", () => {
-    const raw = "um check the Friday flights for me would you";
-    for (const answer of [
-      "Here is the tidied text: Check the Friday flights.",
-      "Sure, I can help with that.",
-      "I'm sorry, I can't help with that.",
-    ]) {
-      expect(voiceDictationCleanupResultV1(raw, answer)).toEqual({
-        status: "kept",
-        reason: "meta",
-      });
-    }
+    expect(result).toEqual({
+      status: "candidate",
+      text: "So I think we should look at the pricing page again.",
+    });
   });
 
   test("keeps the raw text when nothing came back", () => {
@@ -205,48 +129,5 @@ describe("refusing a tidied transcript", () => {
     expect(
       voiceDictationCleanupResultV1("Check the flights.", "Check the flights."),
     ).toEqual({ status: "kept", reason: "unchanged" });
-  });
-
-  // One correction may legitimately drop one negation while others remain;
-  // refusing that would refuse most real self-corrections.
-  test("allows a correction that drops one negation but not the rest", () => {
-    const result = voiceDictationCleanupResultV1(
-      "Don't, I mean, do not call them, and no emails either.",
-      "Do not call them, and no emails either.",
-    );
-    expect(result.status).toBe("cleaned");
-  });
-});
-
-describe("an answer the model wrapped instead of handing back", () => {
-  const raw = "um so check the Friday flights before the weekend";
-
-  test("keeps the raw text when the answer came in a code fence", () => {
-    expect(
-      voiceDictationCleanupResultV1(
-        raw,
-        "```\nCheck the Friday flights before the weekend.\n```",
-      ),
-    ).toEqual({ status: "kept", reason: "meta" });
-  });
-
-  test("keeps the raw text when the answer came in quotation marks", () => {
-    expect(
-      voiceDictationCleanupResultV1(
-        raw,
-        '"Check the Friday flights before the weekend."',
-      ),
-    ).toEqual({ status: "kept", reason: "meta" });
-  });
-
-  // Quoting is only a formatting mistake when the person did not quote
-  // anything themselves.
-  test("accepts quotation marks that are part of what was said", () => {
-    const quoted = '"Book it," she said, um, "before Friday, please."';
-    const result = voiceDictationCleanupResultV1(
-      quoted,
-      '"Book it," she said, "before Friday, please."',
-    );
-    expect(result.status).toBe("cleaned");
   });
 });

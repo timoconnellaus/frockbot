@@ -6,33 +6,27 @@
 // they stop — never while they speak, because text that rewrites itself under
 // the cursor is worse than text that is untidy.
 //
-// Everything here is a pure function over text. The relay above it owns the
-// socket and the model call; this file owns what we ask for and, more
-// importantly, what we refuse to accept back. That split is the point: the
-// guards are the safety property, and a guard you cannot run without a model
-// is a guard nobody runs.
+// Everything here is a pure function over text. The relay owns the socket
+// and the Groq call. This file owns what we ask for and the cheap checks
+// that skip a Jev call: empty in, empty out, unchanged. Meaning — did the
+// tidy still say what the person said — is Jev's, in
+// `app/evals/dictation-cleanup.ts`. A check you cannot run without a model
+// belongs there, not here.
 //
 // The bias is always toward keeping the raw transcript. A tidy-up that drops
 // a "don't" or turns "maybe we should" into "do it" is not a small error —
 // it is the person's message saying something they did not say, in a field
-// they are about to send from. Every check below resolves ties that way.
+// they are about to send from. Jev is the rejector for that; this file only
+// decides whether there is anything to ask it.
 
-/** What one cleanup attempt decided. */
+/** What the cheap checks decided before Jev sees the pair. */
 export type VoiceDictationCleanupResultV1 =
-  | { status: "cleaned"; text: string }
+  | { status: "candidate"; text: string }
   | { status: "kept"; reason: VoiceDictationCleanupRefusalV1 };
 
-/** Why a cleaned transcript was refused, for the log line and the tests. */
+/** Why a cleaned transcript was refused without spending Jev. */
 export type VoiceDictationCleanupRefusalV1 =
-  | "empty-input"
-  | "empty-output"
-  | "unchanged"
-  | "grew"
-  | "shrank"
-  | "meta"
-  | "lost-negation"
-  | "lost-uncertainty"
-  | "answered-question";
+  "empty-input" | "empty-output" | "unchanged";
 
 /**
  * The cleanup instruction.
@@ -81,91 +75,6 @@ export const VOICE_DICTATION_CLEANUP_MIN_CHARS_V1 = 24;
 /** The longest transcript we will send. Beyond this the raw text stands. */
 export const VOICE_DICTATION_CLEANUP_MAX_CHARS_V1 = 12_000;
 
-/**
- * Words whose disappearance changes what the person said.
- *
- * These are checked as whole words, in both directions of the comparison: if
- * the raw transcript carried one and the tidied text carries none, the tidy
- * is refused whatever else it got right.
- */
-const NEGATIONS_V1 = [
-  "not",
-  "no",
-  "never",
-  "none",
-  "nothing",
-  "nobody",
-  "nor",
-  "cannot",
-  "can't",
-  "don't",
-  "doesn't",
-  "didn't",
-  "won't",
-  "wouldn't",
-  "shouldn't",
-  "couldn't",
-  "isn't",
-  "aren't",
-  "wasn't",
-  "weren't",
-  "haven't",
-  "hasn't",
-  "hadn't",
-  "without",
-];
-
-/**
- * Words that mark something as unsettled.
- *
- * Losing one of these is the failure mode that matters most here: it turns
- * thinking aloud into an order. "Maybe we should change the model" and "change
- * the model" are different messages to send to something that acts.
- */
-const UNCERTAINTIES_V1 = [
-  "maybe",
-  "might",
-  "perhaps",
-  "possibly",
-  "probably",
-  "think",
-  "guess",
-  "unsure",
-  "unclear",
-  "roughly",
-  "approximately",
-  "somewhat",
-  "seems",
-  "seemed",
-  "could",
-  "may",
-  "wondering",
-  "wonder",
-  "suppose",
-  "ish",
-];
-
-/** Openings a model uses when it is talking to us instead of tidying. */
-const META_PREFIXES_V1 = [
-  "here is",
-  "here's",
-  "sure,",
-  "sure!",
-  "certainly",
-  "of course",
-  "i'm sorry",
-  "i am sorry",
-  "sorry,",
-  "i cannot",
-  "i can't",
-  "as an ai",
-  "the tidied",
-  "the cleaned",
-  "tidied text:",
-  "cleaned text:",
-  "transcript:",
-];
-
 /** Whether a transcript is worth spending a model call on. */
 export function voiceDictationCleanupWorthwhileV1(raw: string): boolean {
   const trimmed = raw.trim();
@@ -211,7 +120,7 @@ export function voiceDictationCleanupBodyV1(
  * Nobody dictates "</transcript>" by accident, which is exactly why it is
  * worth removing — the person who types it into a microphone is trying to.
  *
- * Only the prompt is altered. Every guard downstream compares the model's
+ * Only the prompt is altered. Every check downstream compares the model's
  * answer against the untouched transcript, so this can never be the reason
  * text changes in the draft.
  */
@@ -229,12 +138,13 @@ export function cleanupMaxTokensV1(raw: string): number {
 }
 
 /**
- * What to do with what the model said.
+ * The cheap checks that skip Jev.
  *
- * Returns the tidied text only when every check passes. The refusals are
- * named rather than boolean so the relay can log which guard fired, which is
- * the difference between "cleanup is off" and "cleanup keeps eating people's
- * negations".
+ * Empty and unchanged have nothing to review. Everything else is a candidate:
+ * Jev decides whether the candidate still says what the person said. The
+ * refusals are named rather than boolean so the relay can log which check
+ * fired, which is the difference between "cleanup is off" and "cleanup keeps
+ * eating people's negations".
  */
 export function voiceDictationCleanupResultV1(
   raw: string,
@@ -247,89 +157,5 @@ export function voiceDictationCleanupResultV1(
   if (!text) return { status: "kept", reason: "empty-output" };
   if (text === source) return { status: "kept", reason: "unchanged" };
 
-  const lower = text.toLowerCase();
-  if (META_PREFIXES_V1.some((prefix) => lower.startsWith(prefix))) {
-    return { status: "kept", reason: "meta" };
-  }
-  if (wrappedV1(text, source)) return { status: "kept", reason: "meta" };
-
-  // Tidying removes; it does not add. A little growth is legitimate —
-  // punctuation, capitalisation and the newlines of a list — so the bound is
-  // generous, but prose that arrives longer than it left was written, not
-  // tidied. The slack scales with the transcript rather than being a flat
-  // allowance: a constant that is reasonable for a paragraph is most of the
-  // budget for a single dictated sentence, and a sentence is exactly where an
-  // invented destination or time would fit inside it.
-  if (text.length > source.length * 1.15 + Math.min(32, source.length * 0.25)) {
-    return { status: "kept", reason: "grew" };
-  }
-  // The floor catches summarising. A transcript that really was mostly "um"
-  // can legitimately halve, so this is set low enough to be rare and is the
-  // reason the refusal is logged: if it fires often, the prompt is wrong.
-  if (text.length < source.length * 0.35) {
-    return { status: "kept", reason: "shrank" };
-  }
-
-  // A transcript that asked something and came back not asking it has been
-  // answered rather than tidied. Only a transcript that *had* a question mark
-  // is judged this way: speech-to-text often omits one, and adding it is
-  // punctuation, which is allowed.
-  if (source.includes("?") && !text.includes("?")) {
-    return { status: "kept", reason: "answered-question" };
-  }
-
-  if (dropsAllV1(source, text, NEGATIONS_V1)) {
-    return { status: "kept", reason: "lost-negation" };
-  }
-  if (dropsAllV1(source, text, UNCERTAINTIES_V1)) {
-    return { status: "kept", reason: "lost-uncertainty" };
-  }
-
-  return { status: "cleaned", text };
-}
-
-/**
- * Whether every word of [words] present in [source] is gone from [text].
- *
- * One survivor is enough to pass: a self-correction may legitimately drop one
- * "not" while another remains, and refusing that would refuse most real
- * corrections. What this catches is the whole category going missing, which
- * is what an over-eager tidy does.
- */
-function dropsAllV1(
-  source: string,
-  text: string,
-  words: readonly string[],
-): boolean {
-  const before = words.filter((word) => hasWordV1(source, word));
-  if (before.length === 0) return false;
-  return !before.some((word) => hasWordV1(text, word));
-}
-
-/** Whole-word search that survives punctuation and apostrophes. */
-function hasWordV1(haystack: string, word: string): boolean {
-  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:^|[^\\p{L}'])${escaped}(?:[^\\p{L}']|$)`, "iu").test(
-    haystack,
-  );
-}
-
-/**
- * Whether the model fenced or quoted its answer instead of handing back the
- * tidied text.
- *
- * Both are the same mistake as a preamble: the model is formatting a reply to
- * us rather than tidying, which is what `meta` already names. Nothing is
- * unwrapped, because unwrapping would rehabilitate a malformed answer and
- * change the model's text before any guard compared it with the source — the
- * one thing this file otherwise never does.
- *
- * A pair of quotation marks only counts when the transcript itself carries
- * none. That refuses a tidied line the person genuinely said in quotes, which
- * is the right way round: they keep their own words.
- */
-function wrappedV1(text: string, source: string): boolean {
-  if (text.startsWith("```")) return true;
-  const quoted = /^"([\s\S]*)"$/.exec(text);
-  return quoted !== null && !quoted[1]!.includes('"') && !source.includes('"');
+  return { status: "candidate", text };
 }

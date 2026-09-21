@@ -220,26 +220,26 @@ transcript, or resolve ambiguity by guessing. The transcript is fenced between
 the transcript itself so it cannot close the fence from inside.
 
 What is accepted back matters more than what is asked for, because the prompt
-is a request and the guards are the property. A tidied transcript is refused —
-and the raw text stands — when it is empty, unchanged, meaningfully longer
-(added information) or shorter (summarised), begins like a model talking to
-us, arrives inside a code fence or a pair of quotation marks the transcript
-does not itself carry, had a question that is no longer a question, or dropped
-every negation or every uncertainty the raw text carried. Nothing is
-unwrapped or rewritten on the way in: every branch either accepts the model's
-text as it stands or keeps the person's own. The refusal is named in the log line,
-so "tidying is off" and "tidying keeps eating people's negations" do not look
-the same in production.
+is a request and the review is the property. Cheap checks refuse an empty or
+unchanged answer without spending Jev. Everything else is a candidate:
+Jev's one Choice (`app/evals/dictation-cleanup.ts`) answers `faithful` or
+`unfaithful` on `{ raw, tidied }`. Only `faithful` replaces the draft. When
+unsure, when Jev is missing, when the call fails or times out — `unfaithful`
+or `unavailable` — the raw text stands. Nothing is unwrapped or rewritten on
+the way in: every branch either accepts the model's text as it stands or
+keeps the person's own. The refusal is named in the log line, so "cleanup is
+off" and "Jev refused a dropped negation" do not look the same in production.
 
 Every way this can fail ends on `final` with the raw transcript in the draft:
 no gateway configured, no allowance left, a transcript under 24 or over 12,000
-characters, a model that throws, a model that does not answer within 4 s, or
-an answer a guard refuses. A capture the five-minute cap ended is not tidied
-at all. The spend is one model call per capture, booked against the account's
-own voice object before the model is asked (400 per UTC day, never refunded,
-and deliberately not part of the cap that decides whether a voice call may go
-on). `VOICE_DICTATION_CLEANUP_MODEL` pins the model; unset is
-`groq/llama-3.1-8b-instant`.
+characters, a model that throws, Groq or Jev that does not answer within 12 s,
+a cheap refusal, or a Jev verdict that is not `faithful`. A capture the
+five-minute cap ended is not tidied at all. The spend is one Groq call per
+capture, booked against the account's own voice object before Groq is asked
+(400 per UTC day, never refunded, and deliberately not part of the cap that
+decides whether a voice call may go on), plus one Jev call when the cheap
+checks pass. `VOICE_DICTATION_CLEANUP_MODEL` pins Groq; unset is
+`groq/llama-3.1-8b-instant`. The review uses the deployment's `JEV_API_KEY`.
 
 On the client, `cleaned` is applied through the same `DictationDraftRange`
 that every segment goes through, which is what makes it safe rather than
@@ -256,9 +256,10 @@ empties the composer — while typing around the span keeps it, because the
 range re-anchors and the revert would still land. A button that reverts
 nothing is its own defect.
 
-Not yet run against a real model: the guards are tested against hand-written
-answers, so which of them fire in production, and how often, is unknown. That
-is what the named refusal log line is for.
+The cheap checks are tested against hand-written answers. Jev's Choice is
+labeled in `app/evals/dictation-cleanup.fixtures.ts` and run with
+`bun run eval:dictation-cleanup`. Which refusals fire in production, and how
+often, is what the named log line is for.
 
 Bounds: after 5 minutes the server ends the capture the way a `stop` does —
 the commit, then the segment, so the draft keeps everything captured — and
@@ -1039,8 +1040,9 @@ nothing. What is counted per account, durably, per UTC day:
   because output costs about 3.6x input;
 - dictation seconds, booked in 60 s windows and refunded on release (bounded
   at 120 min/day);
-- dictation tidy-ups, one model call per capture, booked before the model is
-  asked and never refunded (bounded at 400/day);
+- dictation tidy-ups, one Groq call per capture, booked before Groq is
+  asked and never refunded (bounded at 400/day); Jev reviews a candidate
+  tidy and is bounded by that same cap;
 - model turns (bounded at 600/day), and Bot delegations (bounded at 8 per
   burst, 200/day).
 
@@ -1063,6 +1065,7 @@ rather than opening a new one. Raw audio is never stored anywhere.
 | `GEMINI_API_KEY`                | Worker secret     | yes      | The continuous voice session: one Gemini Live socket per call, ears, words and voice together. Absent: starting a session is refused.              |
 | `VOICE_ASSISTANT_MODEL`         | Worker var        | optional | Pins the gateway model the end-of-call memory update is asked; the platform's Auto route when unset. The call has no chat model.                   |
 | `VOICE_DICTATION_CLEANUP_MODEL` | Worker var        | optional | The model that tidies a dictated transcript. Unset is `groq/llama-3.1-8b-instant`; no `AI` binding means no tidying and the raw transcript stands. |
+| `JEV_API_KEY`                   | Worker secret     | optional | Reviews a Groq tidy before it replaces the draft. Absent or a failed call keeps the raw transcript.                                                |
 | `VOICE_DICTATION_UPSTREAM_URL`  | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                         |
 | `VOICE_ASSISTANT_UPSTREAM_URL`  | test harness only | —        | Points the voice session at a local fake; never set in production.                                                                                 |
 
@@ -1349,10 +1352,10 @@ read-out, workerd scenarios for the targeted call, a durable hand-over and a
 borrowed voice, and Flutter tests for voice mode collapsing the desk sidebar
 and taking the system back gesture. They also predate the tidy-up after a
 capture described under "Tidying the capture", which adds bun tests for the
-guards (run with no model at all), workerd scenarios for the frame order and
-for each way the tidy-up can fail leaving the raw transcript, Flutter tests
-for the span replacement, the revert and a late result after Send, and
-composer widget tests for the offer. The
+cheap checks and the Jev Choice (run with no live model), workerd scenarios
+for the frame order and for each way the tidy-up can fail leaving the raw
+transcript, Flutter tests for the span replacement, the revert and a late
+result after Send, and composer widget tests for the offer. The
 numbers below are therefore understated, and they now also predate the Gemini
 Live session itself; the next run of the suites should replace them wholesale
 rather than add to them.

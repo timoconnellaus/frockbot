@@ -49,7 +49,8 @@ the list stands as it was.
    then closes with the capture's transcript in the draft (bounded at 6 s).
    The draft stays editable; nothing is sent until you press Send. There is
    no upstream turn detection, so Stop is the only thing that transcribes.
-   Fillers are swapped out in place a moment later (Groq, bounded at 4 s).
+   Fillers are swapped out in place a moment later (Groq, then Jev, bounded
+   at 12 s).
 3. Dictate a sentence with an "um", a false start and a self-correction
    ("Check Thursday — sorry, Friday's flights"), then Stop. Expect: the raw
    words appear first, are replaced once by the tidied span, and "Use what I

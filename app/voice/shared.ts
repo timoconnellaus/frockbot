@@ -51,10 +51,11 @@ export const VOICE_DICTATION_RESERVE_SECONDS_V1 = 60;
 export const VOICE_DICTATION_DAILY_SECONDS_V1 = 120 * 60;
 /**
  * How long the tidy-up after a capture may take before the raw transcript
- * stands. The draft is already on screen by then — Groq is supposed to be a
- * blink — so a slow answer loses its turn rather than the person's patience.
+ * stands. The draft is already on screen by then — Groq is a blink, Jev is
+ * the review — so a slow answer loses its turn rather than the person's
+ * patience. The bound has to cover both calls.
  */
-export const VOICE_DICTATION_CLEANUP_TIMEOUT_MS_V1 = 4_000;
+export const VOICE_DICTATION_CLEANUP_TIMEOUT_MS_V1 = 12_000;
 /**
  * Tidy-ups one account may spend per UTC day. At most one runs per capture,
  * so this is a second bound rather than the only one — it is what stops a
