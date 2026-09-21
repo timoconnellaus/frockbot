@@ -66,8 +66,8 @@ export const VOICE_DICTATION_DAILY_CLEANUPS_V1 = 400;
 export const VOICE_DICTATION_OPENING_BUFFER_BYTES_V1 =
   30 * VOICE_DICTATION_SAMPLE_RATE_V1 * 2;
 
-/** Quiet this long, with the reply done, and the client sleeps the session. */
-export const VOICE_ASSISTANT_SLEEP_AFTER_MS_V1 = 20_000;
+/** Quiet this long, with the reply done, and the client hibernates Gemini. */
+export const VOICE_ASSISTANT_SLEEP_AFTER_MS_V1 = 120_000;
 /** Audio replayed ahead of a wake so the first syllable reaches the model. */
 export const VOICE_ASSISTANT_PREROLL_MS_V1 = 500;
 /** The server's own guard: no audio this long while awake and it sleeps. */

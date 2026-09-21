@@ -4,8 +4,8 @@
 /// every 40 ms — the server's transcriber decides where a turn ends and it
 /// needs the half second of silence after the words to decide it — silence in
 /// place of the microphone while the reply plays on a capture that cannot
-/// cancel its own playback, and the only thing that stops the audio is twenty
-/// continuous seconds of quiet, or the person muting.
+/// cancel its own playback, and the only thing that stops the audio is two
+/// minutes of quiet, or the person muting.
 library;
 
 import 'dart:async';
@@ -422,11 +422,11 @@ void main() {
     harness.controller.dispose();
   });
 
-  test('twenty seconds of quiet while listening sleeps the upstream', () async {
+  test('two minutes of quiet while listening sleeps the upstream', () async {
     final harness = Harness();
     await harness.live();
     await harness.feed(_speech, 400);
-    await harness.feed(_quiet, 21000);
+    await harness.feed(_quiet, 121000);
 
     expect(harness.texts, contains(encodeVoiceSleepV1()));
     expect(
@@ -446,7 +446,7 @@ void main() {
   test('the next onset wakes it, pre-roll first and then live', () async {
     final harness = Harness();
     await harness.live();
-    await harness.feed(_quiet, 21000);
+    await harness.feed(_quiet, 121000);
     expect(harness.controller.asleep, isTrue);
     final beforeWake = harness.audioCount;
     final wakeIndex = harness.socket.sent.length;
