@@ -63,25 +63,56 @@ until then the row says “New”.
 
 ## Copy
 
-The title names the thing. The summary is what landed, one or two sentences.
+Write like the rest of the app, not like a changelog and not like a launch
+post. The empty state is the voice: “When something ships that is worth a
+look, it lands here.”
 
-Do not explain how to find it, how it works, or what to tap. The page already
-says What’s New.
+The title names the thing, sentence case, no version and no “New:”. The
+summary is what landed — one short sentence, two if a second fact is
+needed. Present tense. The same words the UI uses (Bot, What’s New).
+
+Do not explain how to find it, how it works, or what to tap. The page
+already says What’s New.
+
+| Use | Do not use |
+| --- | --- |
+| Search across every Bot | New: powerful global search |
+| Find a conversation, a file, or a person. | You can now open Search from the sidebar to look across Bots. |
+| What landed in each release. | This update adds an in-app changelog. Tap What’s New under Account. |
+
+Leave out marketing adjectives, “you can now”, “we’ve added”, emoji,
+ticket numbers, and PR numbers. `kind` is metadata, not copy.
+
+## When to use a still
+
+Use one when the change has a surface you can point at — a page, a card,
+a control, a result. The picture is what you would show someone to say
+what shipped, and the PR reviews it there.
+
+Skip the picture when there is nothing to see: copy, a crash, a speed-up,
+or a fix that does not change a surface. Do not decorate. An icon, a
+gradient, or a screenshot of chrome around the feature is not a still.
 
 ## The still
 
-A feature with a surface to show gets a picture, so the PR can review it.
-A copy-only fix may skip one.
+The card draws it at 16:9 with `BoxFit.cover`, and a tap opens the same
+frame larger. Compose for that frame.
 
-The picture is the feature, not chrome around it.
-
-- No page header — the app already has What’s New at the top.
-- No profile sheet, Account group, or Personal details.
-- No how-to inset showing where the row lives.
+- 16:9, at least 1200×675. Keep the subject in the middle — cover crops
+  the edges.
+- Real product UI, product type (Inter on the default theme). Type must
+  stay sharp at card width and when enlarged. If the words go mushy, the
+  still is not done.
+- WebP, under 200 KiB, same-origin only — not a Flutter asset, not a CDN.
+  Small is fine; unreadable is not.
+- No What’s New page header, no profile sheet, no Account group, no
+  Personal details, no how-to inset, no status bar, no window chrome.
 - Alt text says what the picture shows.
+- Default dark theme unless the feature only exists on paper.
 
-Capture from the real UI or a browser render with the product font. Flutter
-widget-test screenshots use Ahem — they are not the still.
+Capture from the real UI or a browser render with the product font.
+Flutter widget-test screenshots use Ahem — they are not the still. Do not
+photograph a monitor. Do not invent UI.
 
 The pull request is the review. `PREVIEW.md` links the still. A PR that
 touches `app/whats-new/**` posts (or updates) a sticky comment with the
@@ -93,3 +124,4 @@ stills from the branch head. Put the picture in the PR body too.
 - Do not bake stills into Flutter assets (that forces a full Android APK).
 - Do not point `src` at an external host. CSP is same-origin.
 - Do not hand-edit `PREVIEW.md` or `media.generated.ts`.
+- Do not ship a still whose type is soft, or UI that is not in the product.
