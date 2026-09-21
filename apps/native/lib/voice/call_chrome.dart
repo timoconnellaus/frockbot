@@ -32,6 +32,8 @@ const double voiceCallWaveWidth = 96;
 /// with Back and Computer). Still enough bars to read as a strip.
 const double voiceCallWaveMinWidth = 32;
 
+const double voiceCallHangUpSize = 36;
+
 /// Everything besides the strip: user, gaps, Bot, hang-up.
 const double voiceCallFixedWidth =
     voiceCallUserSize + 10 + 10 + voiceCallBotSize + 6 + voiceCallHangUpSize;
@@ -42,7 +44,6 @@ const double voiceCallFixedWidth =
 const double voiceCallClusterWidth = voiceCallFixedWidth + voiceCallWaveWidth;
 
 const double voiceCallChromeHeight = 52;
-const double voiceCallHangUpSize = 36;
 
 /// Initials from a display name or a user id: first letter of the first
 /// two tokens, the way [FrockAvatarView] does it.
@@ -210,35 +211,44 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
                 const SizedBox(width: 10),
                 identified(
                   VoiceIds.callBot,
-                  CharacterAvatar(
-                    size: voiceCallBotSize,
-                    characterId: widget.characterId,
-                    primary: widget.primary,
-                    cropToInk: true,
-                    motion: CharacterMotion.quiet,
-                    activity: _shown.speaking
-                        ? CharacterActivity.thinking
-                        : CharacterActivity.idle,
-                    semanticsLabel: '${widget.botName} on the call',
+                  SizedBox.square(
+                    dimension: voiceCallBotSize,
+                    child: Center(
+                      child: CharacterAvatar(
+                        size: voiceCallBotSize,
+                        characterId: widget.characterId,
+                        primary: widget.primary,
+                        cropToInk: true,
+                        motion: CharacterMotion.quiet,
+                        activity: _shown.speaking
+                            ? CharacterActivity.thinking
+                            : CharacterActivity.idle,
+                        semanticsLabel: '${widget.botName} on the call',
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 6),
                 identified(
                   VoiceIds.hangUp,
-                  Tooltip(
-                    message: 'End the call',
-                    child: IconButton(
-                      onPressed: widget.onEnd,
-                      tooltip: 'End the call',
-                      icon: const Icon(Icons.call_end_rounded),
-                      iconSize: 18,
-                      style: IconButton.styleFrom(
-                        foregroundColor: theme.colorScheme.primary,
-                        minimumSize: const Size.square(voiceCallHangUpSize),
-                        maximumSize: const Size.square(voiceCallHangUpSize),
-                        fixedSize: const Size.square(voiceCallHangUpSize),
-                        padding: EdgeInsets.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  SizedBox.square(
+                    dimension: voiceCallHangUpSize,
+                    child: Tooltip(
+                      message: 'End the call',
+                      child: IconButton(
+                        onPressed: widget.onEnd,
+                        tooltip: 'End the call',
+                        icon: const Icon(Icons.call_end_rounded),
+                        iconSize: 18,
+                        style: IconButton.styleFrom(
+                          foregroundColor: theme.colorScheme.primary,
+                          visualDensity: VisualDensity.standard,
+                          minimumSize: const Size.square(voiceCallHangUpSize),
+                          maximumSize: const Size.square(voiceCallHangUpSize),
+                          fixedSize: const Size.square(voiceCallHangUpSize),
+                          padding: EdgeInsets.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                       ),
                     ),
                   ),
