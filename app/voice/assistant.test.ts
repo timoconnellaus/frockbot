@@ -273,6 +273,15 @@ describe("one function call", () => {
     expect(refused.result).toContain("no Bot called nobody");
   });
 
+  test("end_call hangs up after the spoken turn, not as a host call", async () => {
+    const h = host();
+    const outcome = await runVoiceToolV1(h, call("end_call"), context);
+    expect(outcome.endCall).toBe(true);
+    expect(outcome.result).toContain("Hanging up");
+    expect(h.asked).toEqual([]);
+    expect(h.switched).toEqual([]);
+  });
+
   test("a result the model reads back is bounded", () => {
     const long = voiceToolResponseV1({ result: "x".repeat(20_000) });
     expect((long.result as string).length).toBeLessThanOrEqual(
@@ -368,6 +377,7 @@ describe("what the session may call", () => {
     }
     expect(offered).toContain("list_bots");
     expect(offered).toContain("remember");
+    expect(offered).toContain("end_call");
   });
 
   // ADR 0031: asking another Bot to do something stays on the line; only
@@ -386,6 +396,19 @@ describe("what the session may call", () => {
       "Hand off anything that will take more than a moment, then carry on talking.",
     );
   });
+
+  test("end_call is the same name as the hang-up frame, and not a Bot tool", () => {
+    const declaration = VOICE_FUNCTION_DECLARATIONS_V1.find(
+      (entry) => entry.name === "end_call",
+    )!;
+    expect(declaration.description).toContain("person said they are done");
+    expect(declaration.parameters).toEqual({ type: "OBJECT", properties: {} });
+    expect(
+      VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1.some(
+        (entry) => entry.name === "end_call",
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("the system prompt", () => {
@@ -401,6 +424,7 @@ describe("the system prompt", () => {
     expect(prompt).toContain("Australia/Sydney");
     expect(prompt).toContain("2026-09-13");
     expect(prompt).toContain("09:35:42");
+    expect(prompt).toContain("`end_call`");
   });
 
   test.each([

@@ -284,6 +284,7 @@ export function renderVoiceSystemPromptV1(
   }
   lines.push(
     "- If you did not understand, say so briefly instead of guessing.",
+    "- `end_call` is only when the person is done talking: goodbye, that's all, hang up, end the call. Say a brief goodbye and call it. Not for a pause, a mute, or a finished task.",
   );
   lines.push(...voiceMemoryRulesV1(input.session));
   lines.push(`The current instant is ${input.now.toISOString()} (UTC).`);
@@ -504,6 +505,13 @@ export const VOICE_FUNCTION_DECLARATIONS_V1: readonly GeminiFunctionDeclarationV
       behavior: "NON_BLOCKING",
     },
     {
+      name: "end_call",
+      description:
+        "End the call, because the person said they are done. Say goodbye first. Not for a pause, a mute, or a finished task.",
+      parameters: { type: "OBJECT", properties: {} },
+      behavior: "NON_BLOCKING",
+    },
+    {
       name: "remember",
       description:
         "Keep something from this conversation for the next ones. Use when the person asks you to remember something, tells you how they want these conversations to go, or leaves a question open. Never for a password, key or token.",
@@ -674,6 +682,11 @@ export interface VoiceToolOutcomeV1 {
    * torn down and reopened as this Bot once the model's current turn ends.
    */
   switchedTo?: { botId: string; name: string };
+  /**
+   * The person said they are done. The call hangs up once the model's
+   * current turn ends, so a goodbye said before or after the tool is heard.
+   */
+  endCall?: boolean;
 }
 
 /**
@@ -763,6 +776,13 @@ export async function runVoiceToolV1(
             : {}),
         };
       }
+      case "end_call":
+        // Same wait as switch_bot: the goodbye is this turn's, and hang-up
+        // is the object's once the turn ends.
+        return {
+          result: "Hanging up after you finish speaking.",
+          endCall: true,
+        };
       case "remember": {
         const kind = stringArgument(args, "kind");
         const replaces =

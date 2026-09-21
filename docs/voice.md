@@ -68,7 +68,10 @@ move it too, without saying anything, by pressing voice on another Bot: a
 `voice/target` frame on a live call is a hand-over, and that one moves the
 session at once because nothing is mid-sentence. A subagent the previous Bot
 still owes is left open on purpose — it belongs to the call, not the target —
-and its result is still told when it lands.
+and its result is still told when it lands. `end_call` is the same wait as a
+hand-over: the model says goodbye, the tool runs, and the call hangs up once
+that turn ends. It is the same name as the client's hang-up frame, and it is
+offered even on a call with no Bot.
 
 What is no longer two layers is the deciding. The model keeps talking while
 the object runs a function call, because every declaration is
@@ -580,7 +583,10 @@ rather than unmuting them.
 
 ### End
 
-`{type:"end_call"}` then close. The server closes the Live session, settles
+`{type:"end_call"}` then close. The model can also call `end_call` as a
+Live function when the person says they are done; hang-up waits for that
+spoken turn, then the object does the same as the client's frame and closes
+the socket so the surface says the call ended. The server closes the Live session, settles
 its meters, and answers `status: idle`. Closing the
 socket without `end_call` closes the Live session and settles its meters the
 same way, but does **not** end the call: the call record survives the 60 s
