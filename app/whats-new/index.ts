@@ -28,7 +28,6 @@ export {
   whatsNewMediaBytesV1,
   whatsNewMediaFileV1,
 } from "./media.js";
-export {
-  WHATS_NEW_PREVIEW_PATH_V1,
-  whatsNewPreviewMarkdownV1,
-} from "./preview.js";
+// Preview lives in preview.ts for generate and review. Do not re-export it
+// here: `new URL(..., import.meta.url)` throws in workerd and takes the
+// Worker down at boot.

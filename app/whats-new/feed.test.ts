@@ -4,6 +4,11 @@ import { projectWhatsNewEntryV1, whatsNewFeedV1 } from "./feed.ts";
 import { whatsNewMediaBytesV1 } from "./media.ts";
 
 describe("What’s New feed", () => {
+  test("the Worker barrel does not load the review-surface file URL", async () => {
+    const barrel = await import("./index.ts");
+    expect("WHATS_NEW_PREVIEW_PATH_V1" in barrel).toBe(false);
+  });
+
   test("the first shipped entry is What’s New itself", () => {
     const feed = whatsNewFeedV1();
     expect(feed.schemaVersion).toBe(1);
