@@ -57,7 +57,10 @@ void main() {
       await harness.mount(tester, width: width, brightness: Brightness.dark);
       final companion = find.bySemanticsLabel('Bot is ready');
       expect(companion, findsOneWidget);
-      expect(tester.getTopLeft(companion).dy, chatHeaderChromeTop);
+      expect(
+        tester.getTopLeft(companion).dy,
+        chatHeaderChromeTop - chatHeaderCompanionLift,
+      );
       expect(tester.getSize(companion).height, chatCompanionSize);
       final field = find.byKey(const ValueKey('composer'));
       expect(

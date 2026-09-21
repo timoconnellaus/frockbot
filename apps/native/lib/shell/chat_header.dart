@@ -20,9 +20,16 @@ const chatCompanionSize = 88.0;
 /// How far the thread fade reaches down from the top of the conversation.
 const chatHeaderFadeHeight = 168.0;
 
-/// Shared inset from the top of the conversation for the companion and the
-/// chrome pills, so characters of different ink heights still line up.
+/// Shared inset from the top of the conversation. The companion sits a
+/// little above it and the name plus panel switch a little below, so the
+/// title lines up with the drawing's visual mass rather than its top edge.
 const chatHeaderChromeTop = 20.0;
+
+/// How far the companion sits above [chatHeaderChromeTop].
+const chatHeaderCompanionLift = 8.0;
+
+/// How far the name and chrome pills sit below [chatHeaderChromeTop].
+const chatHeaderChromeDrop = 8.0;
 
 /// Inset from the conversation's left and right for the companion and pills.
 const chatHeaderChromeSide = 16.0;
@@ -68,7 +75,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   /// other door leads out of a call that has no way out but ending it.
   final bool voiceMode;
 
-  /// The Bot's companion, laid in the overlay at the same top inset as the
+  /// The Bot's companion, laid in the overlay a little above the name and
   /// pills. Null while [voiceChrome] is up, and in chrome-only tests.
   final Widget? companion;
 
@@ -160,16 +167,18 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (onBack != null) ...[
-                  identified(
-                    ShellIds.sidebarToggle,
-                    _ChromePill(
-                      tooltip: 'Your Bots',
-                      onPressed: onBack,
-                      size: _glyphTarget,
-                      child: Icon(
-                        Icons.arrow_back_rounded,
-                        size: chatIconSize,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  _droppedChrome(
+                    identified(
+                      ShellIds.sidebarToggle,
+                      _ChromePill(
+                        tooltip: 'Your Bots',
+                        onPressed: onBack,
+                        size: _glyphTarget,
+                        child: Icon(
+                          Icons.arrow_back_rounded,
+                          size: chatIconSize,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ),
@@ -177,43 +186,54 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                 ],
                 if (voiceChrome != null)
                   Expanded(
-                    child: Align(
-                      alignment: Alignment.topLeft,
-                      child: voiceChrome!,
+                    child: _droppedChrome(
+                      Align(
+                        alignment: Alignment.topLeft,
+                        child: voiceChrome!,
+                      ),
                     ),
                   )
                 else ...[
                   if (companion != null) ...[
-                    IgnorePointer(child: companion!),
+                    Transform.translate(
+                      offset: const Offset(0, -chatHeaderCompanionLift),
+                      child: IgnorePointer(child: companion!),
+                    ),
                     const SizedBox(width: 10),
                   ],
                   Expanded(
-                    child: Align(
-                      alignment: Alignment.topLeft,
-                      child: _overlayName(context),
+                    child: _droppedChrome(
+                      Align(
+                        alignment: Alignment.topLeft,
+                        child: _overlayName(context),
+                      ),
                     ),
                   ),
                 ],
                 if (onComputer != null) ...[
                   const SizedBox(width: 8),
-                  identified(
-                    ShellIds.computerDestination,
-                    _glyphPill(
-                      'Computer',
-                      ChatIconKind.computer,
-                      onComputer,
-                      color: computerRunning ? computerRunningColor : null,
+                  _droppedChrome(
+                    identified(
+                      ShellIds.computerDestination,
+                      _glyphPill(
+                        'Computer',
+                        ChatIconKind.computer,
+                        onComputer,
+                        color: computerRunning ? computerRunningColor : null,
+                      ),
                     ),
                   ),
                 ],
                 if (onTogglePanel != null) ...[
                   const SizedBox(width: 8),
-                  identified(
-                    ShellIds.rightPanelToggle,
-                    _glyphButton(
-                      panelShown ? 'Hide the panel' : 'Show the panel',
-                      ChatIconKind.panel,
-                      onTogglePanel,
+                  _droppedChrome(
+                    identified(
+                      ShellIds.rightPanelToggle,
+                      _glyphButton(
+                        panelShown ? 'Hide the panel' : 'Show the panel',
+                        ChatIconKind.panel,
+                        onTogglePanel,
+                      ),
                     ),
                   ),
                 ],
@@ -224,6 +244,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       ],
     );
   }
+
+  Widget _droppedChrome(Widget child) => Padding(
+    padding: const EdgeInsets.only(top: chatHeaderChromeDrop),
+    child: child,
+  );
 
   /// The Bot's name sits immediately to the right of the companion. On a
   /// phone it is still the frosted door into the Bot's page. At a desk the

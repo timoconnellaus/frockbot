@@ -263,7 +263,10 @@ void main() {
         findsNothing,
       );
       final runningBubble = tester.getRect(bubble);
-      expect(tester.getTopLeft(indicator).dy, chatHeaderChromeTop);
+      expect(
+        tester.getTopLeft(indicator).dy,
+        chatHeaderChromeTop - chatHeaderCompanionLift,
+      );
       expect(tester.getBottomLeft(indicator).dy, lessThan(runningBubble.top));
 
       transport.observed = {

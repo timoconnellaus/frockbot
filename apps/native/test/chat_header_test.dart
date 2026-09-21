@@ -220,7 +220,10 @@ void main() {
         chatHeaderFadeHeight,
       );
       final companion = find.bySemanticsLabel('Bot is ready');
-      expect(tester.getTopLeft(companion).dy, chatHeaderChromeTop);
+      expect(
+        tester.getTopLeft(companion).dy,
+        chatHeaderChromeTop - chatHeaderCompanionLift,
+      );
       expect(tester.getTopLeft(companion).dx, chatHeaderChromeSide);
       expect(tester.getSize(companion).height, chatCompanionSize);
       expect(find.byTooltip('Open Pixel'), findsNothing);
@@ -231,7 +234,7 @@ void main() {
       );
       expect(
         tester.getTopLeft(find.text('Pixel')).dy,
-        closeTo(chatHeaderChromeTop + 12, 0.5),
+        closeTo(chatHeaderChromeTop + chatHeaderChromeDrop + 12, 0.5),
       );
       expect(find.byTooltip('Computer'), findsNothing);
       expect(
@@ -240,7 +243,7 @@ void main() {
       );
       expect(
         tester.getTopLeft(find.byTooltip('Show the panel')).dy,
-        chatHeaderChromeTop,
+        chatHeaderChromeTop + chatHeaderChromeDrop,
       );
       expect(find.byType(AppBar), findsNothing);
     },
@@ -319,7 +322,7 @@ void main() {
         expect(opened, ['Bots', 'Bot', 'Computer']);
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,
-          chatHeaderChromeTop,
+          chatHeaderChromeTop + chatHeaderChromeDrop,
         );
         expect(
           tester
@@ -327,7 +330,7 @@ void main() {
                 find.byTooltip('Open My very long research assistant'),
               )
               .dy,
-          chatHeaderChromeTop,
+          chatHeaderChromeTop + chatHeaderChromeDrop,
         );
       },
     );
@@ -382,7 +385,13 @@ void main() {
     );
     expect(
       tester.getTopLeft(name).dy,
-      lessThan(tester.getTopLeft(companion).dy + 24),
+      closeTo(
+        tester.getTopLeft(companion).dy +
+            chatHeaderCompanionLift +
+            chatHeaderChromeDrop +
+            12,
+        0.5,
+      ),
     );
     expect(
       tester.getTopRight(name).dx,
@@ -422,7 +431,10 @@ void main() {
       tester.getTopLeft(name).dx,
       closeTo(tester.getTopRight(companion).dx + 10, 0.5),
     );
-    expect(tester.getTopLeft(name).dy, chatHeaderChromeTop);
+    expect(
+      tester.getTopLeft(name).dy,
+      chatHeaderChromeTop + chatHeaderChromeDrop,
+    );
     expect(
       tester.getTopLeft(find.byTooltip('Computer')).dx,
       greaterThan(tester.getTopRight(name).dx),
@@ -480,11 +492,11 @@ void main() {
         await tester.pump();
         expect(
           tester.getTopLeft(find.byTooltip('Show the panel')).dy,
-          chatHeaderChromeTop,
+          chatHeaderChromeTop + chatHeaderChromeDrop,
         );
         expect(
           tester.getTopLeft(find.byTooltip('Show the panel')).dy,
-          lessThan(desktopTitleBarBand),
+          lessThan(chatHeaderChromeTop + desktopTitleBarBand),
         );
       } finally {
         debugDefaultTargetPlatformOverride = null;
@@ -510,7 +522,7 @@ void main() {
         await tester.pump();
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,
-          chatHeaderChromeTop + desktopTitleBarBand,
+          chatHeaderChromeTop + chatHeaderChromeDrop + desktopTitleBarBand,
         );
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dx,
