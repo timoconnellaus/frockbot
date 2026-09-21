@@ -432,6 +432,43 @@ export function decodeBotVoiceRunRpcV1(
   };
 }
 
+export interface DecodedVoiceChatResultRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+  command: {
+    runId: string;
+    body: string;
+    ordinal: number;
+  };
+}
+
+/**
+ * A settled voice request written into the Bot's thread after hang-up.
+ * Internal-only: the voice object is the only caller.
+ */
+export function decodeVoiceChatResultRpcV1(
+  input: unknown,
+): DecodedVoiceChatResultRpcV1 {
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    botId: rpcBotId,
+    command: rpcObject({
+      runId: rpcString(128),
+      body: rpcString(4_000),
+      ordinal: rpcInteger({ minimum: 0, maximum: 64 }),
+    }),
+  });
+  const command = request.command as DecodedVoiceChatResultRpcV1["command"];
+  command.runId = decodeRunIdV1(command.runId);
+  return {
+    schemaVersion: 1,
+    userId: request.userId as string,
+    botId: request.botId as string,
+    command,
+  };
+}
+
 /** Internal-only agent admission; the HTTP Turn decoder cannot name it. */
 export function decodeBotAgentRunRpcV1(
   input: unknown,

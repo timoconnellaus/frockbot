@@ -287,7 +287,7 @@ describe("voice ledger delegations", () => {
     expect((await l.readDelegation(runId))?.state).toBe("spoken");
   });
 
-  test("a call that ends takes its open requests with it, and a late answer changes nothing", async () => {
+  test("a call that ends leaves its open requests for a later call or the thread", async () => {
     const { ledger: l } = ledger();
     const admitted = await turn(l);
     const asked = async (text: string) => {
@@ -304,19 +304,20 @@ describe("voice ledger delegations", () => {
     const waiting = await asked("one");
     const answered = await asked("two");
     await l.settleDelegation(answered, { answer: "two is done" }, later(50));
-    // Hanging up: the one still being worked on and the one answered but not
-    // yet told are both over. The Bot's answers stay in the Bot's thread.
     expect((await l.endCall("c1"))?.callId).toBe("call-1");
-    expect((await l.readDelegation(waiting))?.state).toBe("cancelled");
-    expect((await l.readDelegation(answered))?.state).toBe("cancelled");
-    expect(await l.pendingDelegations()).toEqual([]);
-    // The Bot finishing afterwards settles nothing.
+    expect((await l.readDelegation(waiting))?.state).toBe("admitted");
+    expect((await l.readDelegation(answered))?.state).toBe("settled");
+    expect((await l.pendingDelegations()).map((d) => d.runId)).toEqual([
+      waiting,
+    ]);
+    expect((await l.unspokenDelegations()).map((d) => d.runId)).toEqual([
+      answered,
+    ]);
     await l.settleDelegation(waiting, { answer: "one is done" }, later(5_000));
     expect(await l.readDelegation(waiting)).toMatchObject({
-      state: "cancelled",
+      state: "settled",
+      answer: "one is done",
     });
-    expect((await l.readDelegation(waiting))?.answer).toBeUndefined();
-    // And a new call starts with nothing owed to it.
     const next = await l.beginCall({
       callId: "call-2",
       deviceKey: "phone",
@@ -324,12 +325,12 @@ describe("voice ledger delegations", () => {
       at: later(10 * 60_000),
     });
     expect(next.status).toBe("admitted");
-    expect(await l.pendingDelegations()).toEqual([]);
-    expect(await l.dropDelegation(waiting)).toBeUndefined();
-    expect((await l.readDelegation(waiting))?.state).toBe("cancelled");
+    expect((await l.unspokenDelegations()).map((d) => d.runId).sort()).toEqual(
+      [answered, waiting].sort(),
+    );
   });
 
-  test("another device taking the call, or the call going stale, cancels its requests too", async () => {
+  test("another device taking the call, or the call going stale, leaves its requests open", async () => {
     const { ledger: l } = ledger();
     const admitted = await turn(l);
     const first = await l.admitDelegation({
@@ -348,9 +349,8 @@ describe("voice ledger delegations", () => {
     });
     expect(taken.status).toBe("superseded");
     expect((await l.readDelegation(first.delegation.runId))?.state).toBe(
-      "cancelled",
+      "admitted",
     );
-    // A request made on the new call is untouched by the old call's end.
     const turn2 = await l.admitTurn({
       connectionId: "c2",
       transcript: "ask again",
@@ -369,10 +369,12 @@ describe("voice ledger delegations", () => {
     expect((await l.readDelegation(second.delegation.runId))?.state).toBe(
       "admitted",
     );
-    // The socket died and nobody came back: the stale end cancels it.
     expect((await l.endStaleCall(later(60 * 60_000)))?.callId).toBe("call-2");
     expect((await l.readDelegation(second.delegation.runId))?.state).toBe(
-      "cancelled",
+      "admitted",
+    );
+    expect((await l.readDelegation(first.delegation.runId))?.state).toBe(
+      "admitted",
     );
   });
 
@@ -480,9 +482,7 @@ describe("voice ledger recovery", () => {
     );
   });
 
-  test("a request whose call is gone is cancelled on waking, not asked again", async () => {
-    // The end that should have cancelled it was lost with the object: the
-    // record is open and names a call that is not the live one.
+  test("a request whose call is gone stays open so it can be told later", async () => {
     const { ledger: l, storage } = ledger();
     await liveCall(l);
     for (const [runId, state] of [
@@ -503,13 +503,18 @@ describe("voice ledger recovery", () => {
       });
     }
     const recovered = await l.recover(later(1_000));
-    expect(recovered.pending).toEqual([]);
+    expect(recovered.pending.map((d) => d.runId)).toEqual([
+      "voice-orphan-open",
+    ]);
     expect((await l.readDelegation("voice-orphan-open"))?.state).toBe(
-      "cancelled",
+      "admitted",
     );
     expect((await l.readDelegation("voice-orphan-answered"))?.state).toBe(
-      "cancelled",
+      "settled",
     );
+    expect((await l.unspokenDelegations()).map((d) => d.runId)).toEqual([
+      "voice-orphan-answered",
+    ]);
   });
 
   test("the two audio meters accumulate per UTC day and roll over", async () => {

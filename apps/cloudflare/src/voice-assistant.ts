@@ -22,6 +22,7 @@ import {
 } from "agents";
 import {
   parseChatCompletionStreamV1,
+  renderVoiceChatResultV1,
   renderVoiceSubagentResultV1,
   renderVoiceSystemPromptV1,
   runVoiceToolV1,
@@ -883,6 +884,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         true,
       );
     }
+    for (const delegation of await this.ledger().unspokenDelegations()) {
+      await this.announceDelegation({ runId: delegation.runId });
+    }
     for (const job of await memory.pendingJobs()) {
       await this.scheduleMemoryFinalization(job.callId);
     }
@@ -1694,6 +1698,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     const handover = options.handover
       ? await this.callHistory(call.callId)
       : [];
+    const runningTasks = (await this.ledger().pendingDelegations()).map(
+      (delegation) => ({
+        botName: delegation.botName,
+        own: delegation.botId === call.botId,
+        text: delegation.text,
+      }),
+    );
     const instruction = renderVoiceSystemPromptV1({
       ...context,
       session: await timed(
@@ -1703,6 +1714,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       ),
       now: this.now(),
       ...(handover.length > 0 ? { handover } : {}),
+      ...(runningTasks.length > 0 ? { runningTasks } : {}),
     });
     // The system message this call actually sent, kept for the end-of-call
     // request's prefix. In memory only: a storage write per call for a cache
@@ -1752,6 +1764,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         "The voice service could not be reached. Try again in a moment.",
       );
       return;
+    }
+    for (const delegation of await this.ledger().unspokenDelegations()) {
+      await this.announceDelegation({ runId: delegation.runId });
     }
     this.armIdleSleep(connection, call);
   }
@@ -2961,26 +2976,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   /**
-   * A settled answer, handed to the assistant on the call it was asked on.
+   * A settled answer, handed back to whoever is listening.
    *
-   * Unless something is still being said — then it waits and this runs again
-   * once the call is quiet, so an answer never talks over a reply. With no
-   * live call, or a different one, the answer is dropped: the call that
-   * asked is over, and the next call is a fresh conversation. The Bot's
-   * answer is still in the Bot's own conversation for the person to read.
+   * A live session — the call that asked, or a later one — gets it as that
+   * function call's late response, or as a turn when the function call is
+   * gone. A call that is still on record but has no socket waits inside the
+   * rejoin window. With no live call the Bot writes the answer into chat.
    * Public because the scheduler calls it by name.
-   */
-
-  /**
-   * A settled answer, handed back to the session it was asked from.
-   *
-   * It goes as that function call's own late response, scheduled `WHEN_IDLE`,
-   * so the model says it at the next pause and decides for itself whether it
-   * is worth saying at all. With no live session — the call is paused, the
-   * device is away — the answer waits and this runs again; with a different
-   * call it is dropped, because the call that asked is over and the answer is
-   * still in the Bot's own conversation. Public because the scheduler calls
-   * it by name.
    */
   async announceDelegation(payload: AnnounceDelegationPayload): Promise<void> {
     const { runId } = payload;
@@ -2991,68 +2993,60 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       const delegation = await ledger.readDelegation(runId);
       if (!delegation || delegation.state !== "settled") return;
       const current = await ledger.currentCall();
-      if (!current || current.callId !== delegation.callId) {
-        // The call that asked is over — or was never ended cleanly and a
-        // newer one has taken its place. Either way this answer has no call.
-        await ledger.dropDelegation(runId);
-        const other = this.liveCall();
-        if (other) {
-          this.trace(other.connection, "answer-dropped", {
-            run: runId,
-            reason: "another-call",
-          });
+      const live = this.liveCall();
+      if (live?.call.session?.isOpen()) {
+        const { connection, call } = live;
+        if (!(await ledger.markDelegationSpoken(runId, this.now()))) return;
+        const own = delegation.botId === call.botId;
+        const told = renderVoiceSubagentResultV1({
+          botName: delegation.botName,
+          own,
+          ...(delegation.answer ? { answer: delegation.answer } : {}),
+          ...(delegation.failure ? { failure: delegation.failure } : {}),
+        });
+        const asked = call.subagentCalls.get(runId);
+        call.subagentCalls.delete(runId);
+        if (asked) {
+          call.session?.send(
+            encodeGeminiToolResponseV1([
+              {
+                id: asked.id,
+                name: asked.name,
+                response: { result: told },
+                scheduling: "WHEN_IDLE",
+              },
+            ]),
+          );
+        } else {
+          call.session?.send(encodeGeminiTextTurnV1(told));
         }
+        this.trace(connection, "answer-told", {
+          run: runId,
+          ...(asked ? { call: asked.id } : { asTurn: true }),
+        });
+        this.timing(connection, "delegation-answered", {
+          run: runId,
+          asTurn: !asked,
+        });
+        this.sendDelegationState(
+          delegation.botId,
+          delegation.botName,
+          runId,
+          "finished",
+        );
         return;
       }
-      const live = this.liveCall();
-      if (
-        !live ||
-        live.call.callId !== delegation.callId ||
-        !live.call.session?.isOpen()
-      ) {
-        // The call is on record but nothing is listening: paused, or a socket
-        // away inside the rejoin window. The answer waits; if nobody comes
-        // back the abandoned-call alarm cancels it with the call.
+      if (current) {
         await this.scheduleAnnounce(runId);
         return;
       }
-      const { connection, call } = live;
-      if (!(await ledger.markDelegationSpoken(runId, this.now()))) return;
-      const own = delegation.botId === call.botId;
-      const told = renderVoiceSubagentResultV1({
-        botName: delegation.botName,
-        own,
-        ...(delegation.answer ? { answer: delegation.answer } : {}),
-        ...(delegation.failure ? { failure: delegation.failure } : {}),
-      });
-      const asked = call.subagentCalls.get(runId);
-      call.subagentCalls.delete(runId);
-      if (asked) {
-        call.session?.send(
-          encodeGeminiToolResponseV1([
-            {
-              id: asked.id,
-              name: asked.name,
-              response: { result: told },
-              scheduling: "WHEN_IDLE",
-            },
-          ]),
-        );
-      } else {
-        // The session that made the call has been replaced — a wake, a
-        // hand-over — so there is no function call left to answer. The result
-        // goes in as a turn instead; it says in its own words that it is a
-        // Bot's answer quoted as data.
-        call.session?.send(encodeGeminiTextTurnV1(told));
+      try {
+        await this.deliverDelegationToChat(delegation);
+      } catch {
+        await this.scheduleAnnounce(runId);
+        return;
       }
-      this.trace(connection, "answer-told", {
-        run: runId,
-        ...(asked ? { call: asked.id } : { asTurn: true }),
-      });
-      this.timing(connection, "delegation-answered", {
-        run: runId,
-        asTurn: !asked,
-      });
+      if (!(await ledger.markDelegationSpoken(runId, this.now()))) return;
       this.sendDelegationState(
         delegation.botId,
         delegation.botName,
@@ -3062,6 +3056,35 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     } finally {
       this.#announcing.delete(runId);
     }
+  }
+
+  /**
+   * The hang-up path: the Bot writes the settled answer into its thread so
+   * the person can read it after the call.
+   */
+  private async deliverDelegationToChat(
+    delegation: VoiceDelegationRecordV1,
+  ): Promise<void> {
+    const door = this.botDoor(this.name, delegation.botId);
+    const lookup = await door.lookupRun({
+      schemaVersion: 1,
+      runId: delegation.runId,
+    });
+    const ordinal =
+      lookup.state === "not-admitted"
+        ? 0
+        : lookup.run.events.filter((event) => event.type === "send/to-user")
+            .length;
+    await door.deliverVoiceChatResult({
+      runId: delegation.runId,
+      body: renderVoiceChatResultV1({
+        botName: delegation.botName,
+        own: true,
+        ...(delegation.answer ? { answer: delegation.answer } : {}),
+        ...(delegation.failure ? { failure: delegation.failure } : {}),
+      }),
+      ordinal,
+    });
   }
 
   /**
@@ -3190,6 +3213,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       listRuns(input: unknown): Promise<unknown>;
       stopRun(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<unknown>;
+      deliverVoiceChatResult(input: unknown): Promise<unknown>;
     };
     return {
       readConfiguration: async () =>
@@ -3208,6 +3232,17 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           requestId: string;
         };
       }) => rpc.runVoice({ schemaVersion: 1, userId, botId, command }),
+      deliverVoiceChatResult: (command: {
+        runId: string;
+        body: string;
+        ordinal: number;
+      }) =>
+        rpc.deliverVoiceChatResult({
+          schemaVersion: 1,
+          userId,
+          botId,
+          command,
+        }),
       lookupRun: async (query: { schemaVersion: 1; runId: string }) =>
         rpcJsonSnapshotV1(
           await rpc.lookupRun({ schemaVersion: 1, userId, botId, query }),

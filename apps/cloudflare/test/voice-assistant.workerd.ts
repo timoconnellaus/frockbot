@@ -986,7 +986,7 @@ describe("handing work to the Bot", () => {
     next.socket.close();
   });
 
-  test("hanging up cancels the request, and the answer stays with the Bot", async () => {
+  test("hanging up leaves the request open, and the answer is written into chat", async () => {
     const suffix = crypto.randomUUID();
     const identity = {
       userId: `voice-hangup-${suffix}`,
@@ -994,14 +994,15 @@ describe("handing work to the Bot", () => {
     };
     await provisionBot(identity);
     const stub = assistant(identity.userId);
-    // The Bot never hears about it, so the request stays open until the call
-    // ends under it.
-    await stub.probeDropDispatches(1_000);
     const opened = await open(identity.userId);
     await startCall(opened, identity.botId);
     await opened.waitFor(state("awake"), "awake");
     await stub.probeHears("plan my week");
-    await stub.probeCalls("subagent", { message: "plan my week" }, "call_sub");
+    await stub.probeCalls(
+      "subagent",
+      { message: "please plan my week" },
+      "call_sub",
+    );
     await eventually(
       () => delegations(stub),
       (rows) => rows.length === 1,
@@ -1009,12 +1010,42 @@ describe("handing work to the Bot", () => {
     );
     opened.socket.send(JSON.stringify({ type: "end_call" }));
     await opened.waitFor(status("idle"), "idle");
-    const cancelled = await eventually(
-      async () => (await delegations(stub))[0]!,
-      (record) => record.state === "cancelled",
-      "the request cancelled with the call",
+    expect((await delegations(stub))[0]!.state).not.toBe("cancelled");
+    const told = await eventually(
+      () => delegations(stub),
+      (rows) => rows[0]!.state === "spoken",
+      "the answer written into chat",
+      60_000,
     );
-    expect(cancelled.state).toBe("cancelled");
+    expect(told[0]!.state).toBe("spoken");
+    const bot = env.BOT_STATES.getByName(
+      `${identity.userId}:${identity.botId}`,
+    );
+    const botRpc = bot as unknown as {
+      listRuns(input: unknown): Promise<{
+        runs: Array<{
+          events: Array<{ type: string; payload?: { text?: string } }>;
+        }>;
+      }>;
+    };
+    const listed = await eventually(
+      () =>
+        botRpc.listRuns({
+          schemaVersion: 1,
+          ...identity,
+          query: { schemaVersion: 1 },
+        }),
+      (page) =>
+        page.runs.some((run) =>
+          run.events.some((event) => event.type === "send/to-user"),
+        ),
+      "the chat message on the voice request",
+      30_000,
+    );
+    const send = listed.runs
+      .flatMap((run) => run.events)
+      .find((event) => event.type === "send/to-user");
+    expect(send?.payload?.text).toBeTruthy();
   });
 });
 

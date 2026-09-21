@@ -297,8 +297,13 @@ export async function listRuns(
       // marker written beside its message is that fact as one keyed read. A
       // Routine that fires every minute and says nothing is the ordinary case,
       // and hydrating each silent journal to discard it was the scan's cost.
+      const admission = header?.run.admission;
+      const voiceOrigin =
+        admission !== undefined &&
+        "origin" in admission &&
+        (admission as { origin?: { kind?: string } }).origin?.kind === "voice";
       const marker =
-        header?.run.admission?.turnType === "automation"
+        header?.run.admission?.turnType === "automation" || voiceOrigin
           ? await state.ctx.storage.get<unknown>(
               sentAutomationRunKeyV1(candidate.runId),
             )
