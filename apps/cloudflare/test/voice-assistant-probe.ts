@@ -344,6 +344,14 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     return true;
   }
 
+  /** A hypothesis while they are still speaking. */
+  async probeHearsInterim(text: string): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.hearsInterim(text);
+    return true;
+  }
+
   /** One whole spoken turn: audio, its transcript, and both boundaries. */
   async probeSays(text: string, audioBytes?: number): Promise<boolean> {
     const fake = this.#fake();

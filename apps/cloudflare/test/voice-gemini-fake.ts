@@ -167,6 +167,11 @@ export class GeminiFakeV1 {
     this.send({ serverContent: { inputTranscription: { text } } });
   }
 
+  /** A hypothesis while they are still speaking. */
+  hearsInterim(text: string): void {
+    this.send({ serverContent: { interimInputTranscription: { text } } });
+  }
+
   /**
    * One spoken turn: audio, its transcription, and both boundaries in the
    * order the real server sends them.

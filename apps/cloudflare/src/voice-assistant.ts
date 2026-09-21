@@ -2010,10 +2010,17 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           text: event.text,
         });
         return;
+      case "input-transcript-interim":
+        // Hypothesis while the person is still speaking. Not the ledger.
+        this.sendRaw(connection, {
+          type: "transcript_interim",
+          text: event.text,
+        });
+        return;
       case "input-transcript":
-        // What the person said, as the session heard it. It often arrives
-        // after the model has started answering, which is why the turn's
-        // transcript is written again when the turn settles.
+        // The authoritative SMART final. It often arrives after the model
+        // has started answering, which is why the turn's transcript is
+        // written again when the turn settles.
         call.transcript =
           `${call.transcript}${call.transcript ? " " : ""}${event.text}`.trim();
         this.sendRaw(connection, {
