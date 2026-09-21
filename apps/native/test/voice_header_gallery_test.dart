@@ -53,7 +53,7 @@ Widget _row(String label, AssistantSessionController session) {
             ),
           ),
         ),
-        _chrome(session),
+        Expanded(child: _chrome(session)),
       ],
     ),
   );
@@ -76,6 +76,8 @@ void main() {
     (talking.capture as FakeVoiceCapture).emit(
       AudioFrame(Uint8List(0), 0.8, 40),
     );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 360));
 
     final botSocket = FakeVoiceSocket();
     final botSpeaking = await live(tester, botSocket);

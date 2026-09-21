@@ -19,9 +19,8 @@ const double voiceCallUserSize = 40;
 /// thread still has a sky.
 const double voiceCallBotSize = 48;
 
-/// Five pills, user voice only, in the Bot's primary.
-const double voiceCallWaveWidth = 88;
-const double voiceCallWaveHeight = 28;
+/// Same strip dictation uses: 4px bars, 2px gap, 26px tall.
+const double voiceCallWaveHeight = 26;
 
 const double voiceCallChromeHeight = 52;
 const double voiceCallHangUpSize = 36;
@@ -79,6 +78,7 @@ class VoiceCallChrome extends StatefulWidget {
 
 class _VoiceCallChromeState extends State<VoiceCallChrome> {
   late _Shown _shown = _read();
+  late final _MicLevel _mic = _MicLevel(widget.session);
 
   _Shown _read() => (
     state: voiceModeStateOf(widget.session),
@@ -104,6 +104,7 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
     if (old.session != widget.session) {
       old.session.removeListener(_changed);
       widget.session.addListener(_changed);
+      _mic.attach(widget.session);
       _shown = _read();
     }
   }
@@ -111,6 +112,7 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
   @override
   void dispose() {
     widget.session.removeListener(_changed);
+    _mic.dispose();
     super.dispose();
   }
 
@@ -123,7 +125,6 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
       SizedBox(
         height: voiceCallChromeHeight,
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             identified(
@@ -134,8 +135,7 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
               ),
             ),
             const SizedBox(width: 10),
-            SizedBox(
-              width: voiceCallWaveWidth,
+            Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -143,15 +143,11 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
                     VoiceIds.callWave,
                     SizedBox(
                       height: voiceCallWaveHeight,
-                      width: voiceCallWaveWidth,
-                      child: VoiceWaveform(
-                        source: widget.session,
-                        microphone: () =>
-                            widget.session.muted ? 0 : widget.session.micLevel,
-                        // User-only: the Bot's mouth is the face, not the wave.
-                        playback: () => 0,
-                        mode: () => widget.session.meterMode,
-                        enabled: widget.session.active,
+                      width: double.infinity,
+                      child: DictationWaveform(
+                        level: _mic,
+                        capturing:
+                            widget.session.active && !widget.session.paused,
                       ),
                     ),
                   ),
@@ -266,3 +262,32 @@ class _UserDot extends StatelessWidget {
 }
 
 typedef _Shown = ({VoiceModeState state, VoiceMeterMode mode, bool speaking});
+
+/// The session's microphone as a [ValueListenable], which is what the
+/// dictation strip reads. Level is zero when the call is muted or down.
+class _MicLevel extends ValueNotifier<double> {
+  _MicLevel(this._session) : super(_read(_session)) {
+    _session.addListener(_sync);
+  }
+
+  AssistantSessionController _session;
+
+  static double _read(AssistantSessionController session) =>
+      session.muted || !session.active ? 0 : session.micLevel;
+
+  void attach(AssistantSessionController session) {
+    if (identical(_session, session)) return;
+    _session.removeListener(_sync);
+    _session = session;
+    _session.addListener(_sync);
+    _sync();
+  }
+
+  void _sync() => value = _read(_session);
+
+  @override
+  void dispose() {
+    _session.removeListener(_sync);
+    super.dispose();
+  }
+}
