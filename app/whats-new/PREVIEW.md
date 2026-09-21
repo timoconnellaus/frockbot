@@ -2,6 +2,14 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Easier reading in chat
+
+improvement
+
+Messages use Inter at 14, with more air between list items.
+
+![A Bot message in Inter, with air between list items.](media/chat-type.webp)
+
 ## What’s New in the app
 
 feature

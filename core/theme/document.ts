@@ -99,7 +99,7 @@ export const INK_TOKENS_V1: ThemeTokensV1 = {
     accent: "#c44580",
     onAccent: "#ffffff",
   },
-  type: "manrope",
+  type: "inter",
   bubbles: { bot: "raised", me: "tint" },
 };
 
@@ -114,7 +114,7 @@ export const PAPER_TOKENS_V1: ThemeTokensV1 = {
     accent: "#c23d7b",
     onAccent: "#ffffff",
   },
-  type: "manrope",
+  type: "inter",
   bubbles: { bot: "raised", me: "accent" },
 };
 
@@ -130,7 +130,7 @@ export const STUDIO_TOKENS_V1: ThemeTokensV1 = {
     accent: "#c23d7b",
     onAccent: "#ffffff",
   },
-  type: "manrope",
+  type: "inter",
   bubbles: { bot: "plain", me: "accent" },
 };
 

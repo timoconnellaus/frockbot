@@ -2267,7 +2267,8 @@ describe("Cloudflare user application gateway", () => {
       entries: { id: string }[];
     };
     expect(body.schemaVersion).toBe(1);
-    expect(body.entries[0]?.id).toBe("whats-new");
+    expect(body.entries.length).toBeGreaterThan(0);
+    expect(body.entries.map((entry) => entry.id)).toContain("whats-new");
   });
 
   test("ignores development identity headers unless explicitly enabled", async () => {
