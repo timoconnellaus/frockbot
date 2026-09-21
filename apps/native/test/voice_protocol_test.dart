@@ -304,7 +304,7 @@ void main() {
     expect(voiceDictationFinalTimeoutV1, const Duration(seconds: 6));
     expect(voiceDictationCleanupTimeoutV1, const Duration(seconds: 14));
     expect(voiceDictationConnectTimeoutV1, const Duration(seconds: 10));
-    expect(voiceAssistantSleepAfterV1, const Duration(seconds: 20));
+    expect(voiceAssistantSleepAfterV1, const Duration(seconds: 120));
     expect(voiceAssistantPreRollV1, const Duration(milliseconds: 500));
     expect(voiceAssistantStartTimeoutV1, const Duration(seconds: 15));
     expect(voiceAssistantConnectTimeoutV1, const Duration(seconds: 10));

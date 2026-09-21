@@ -516,10 +516,11 @@ subagent admitted.
   answering, AEC surfaces keep sending the cleaned microphone so Gemini owns
   barge-in; surfaces without AEC preserve cadence with silent frames until
   playback drains. Turn boundaries are the session's to find.
-- When `status` is `listening` and the gate has been closed for **20 s**
+- When `status` is `listening` and the gate has been closed for **2 min**
   continuously, the client stops sending frames and sends
-  `{type:"voice/sleep",schemaVersion:1}`. The object closes the Live socket and
-  keeps its newest resumption handle. Capture continues locally.
+  `{type:"voice/sleep",schemaVersion:1}`. The object closes the Live socket
+  (Gemini is gone, no billing) and keeps its newest resumption handle. Capture
+  continues locally.
 - On the next onset the client sends `{type:"voice/wake",schemaVersion:1}`,
   then the last **500 ms** of audio from its pre-roll ring, then live frames.
   The pre-roll obeys the same rule as any other frame: on a capture without
@@ -1482,7 +1483,7 @@ speech guard (audio passed through untouched, a sentence answered with no
 audio throwing after the host is told, an aborted request staying quiet, a
 provider without streaming left without it), the browser speech gate and
 session (continuous streaming through pauses, sleep
-after 20 s quiet in `listening`, wake with pre-roll in order, mute, barge-in
+after 2 min quiet in `listening`, wake with pre-roll in order, mute, barge-in
 only on the stricter detector while speaking, refusal ends the call), the
 dictation controller (opening audio in order after `ready`, microphone and
 socket in parallel, live captions held until the committed segment, stop

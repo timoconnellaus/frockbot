@@ -63,7 +63,7 @@ const voiceAssistantOpeningBufferBytesV1 =
     10 * voiceAssistantInputSampleRateV1 * 2;
 
 /// Quiet this long while listening and the client sleeps the upstream.
-const voiceAssistantSleepAfterV1 = Duration(seconds: 20);
+const voiceAssistantSleepAfterV1 = Duration(seconds: 120);
 
 /// Audio replayed ahead of a wake so the first syllable reaches the model.
 const voiceAssistantPreRollV1 = Duration(milliseconds: 500);
