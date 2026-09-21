@@ -550,6 +550,12 @@ subagent admitted.
   already admitted is the Bot's work, not this socket's, so it carries on, and
   what finishes meanwhile is counted on the Resume control rather than
   unhibernating Gemini.
+- **Leaving the app** is Pause for the background: `hidden` and `paused`
+  send the same `voice/sleep` with `paused: true`, release the microphone,
+  and keep the client socket. Coming back wakes it. A Pause the person
+  already started stays paused. `detached` still hangs up — the view is
+  gone. A socket the OS kills without `end_call` is the 60 s rejoin window,
+  as it always was.
 - Server reports `{type:"voice/state",schemaVersion:1,upstream:"awake"|"asleep"|"starting",muted:boolean}`.
 
 Between `voice/sleep` and `voice/wake` the client sends no audio. While
@@ -591,7 +597,7 @@ accordion is the spoken dialogue, not those Turns.
 
 The client closes with a code and a reason that name the path that ended the
 call, because the server's log is the only record of it: `1000` with
-`end-button` or `lifecycle:<state>` when the person or the app ended it, `1000`
+`end-button` or `lifecycle:detached` when the person or the view ended it, `1000`
 `server-closed` when the server's end of the socket finished first (mostly
 inert — the peer has already closed, so the frame rarely reaches it), `4001`
 with the failure sentence when the client failed on its own, `4002` `disposed`
@@ -1109,9 +1115,11 @@ already ended, is ignored rather than stopping the current call's speaker, and
 a disposed session issues no further speaker commands while its teardown
 finishes. Android declares `RECORD_AUDIO` and
 `MODIFY_AUDIO_SETTINGS`; macOS carries the microphone usage description and
-entitlement. `AppShell`'s lifecycle observer ends capture and playback when
-the app leaves the foreground; navigation inside the app leaves the footer
-alone.
+entitlement. `AppShell`'s lifecycle observer sleeps a live call when the
+app leaves the screen — Gemini closes, the microphone is released, the
+socket stays — and resumes it on return; `detached` still hangs up, and
+navigation inside the app leaves the call alone. Dictation still stops
+when the app is away.
 
 **A call that is up and deaf.** A working microphone picks up a room; one
 that is open and delivering nothing but zeros — what the macOS voice

@@ -478,6 +478,71 @@ void main() {
     harness.controller.dispose();
   });
 
+  test(
+    'leaving the screen pauses, stops the microphone, and keeps the socket',
+    () async {
+      final harness = Harness();
+      await harness.live();
+      expect(harness.capture.starts, 1);
+      await harness.controller.leaveForeground();
+      expect(harness.texts, contains(encodeVoiceSleepV1(paused: true)));
+      expect(harness.controller.paused, isTrue);
+      expect(harness.controller.asleep, isTrue);
+      expect(harness.controller.active, isTrue);
+      expect(harness.controller.phase, VoiceSessionPhase.live);
+      expect(harness.socket.closed, isFalse);
+      expect(harness.capture.stops, 1);
+      expect(harness.capture.active, isFalse);
+
+      harness.socket.deliver(
+        jsonEncode({
+          'type': 'voice/state',
+          'schemaVersion': 1,
+          'upstream': 'starting',
+          'muted': false,
+        }),
+      );
+      await settle();
+      expect(
+        harness.controller.paused,
+        isTrue,
+        reason: 'away is Pause until return',
+      );
+      expect(harness.controller.asleep, isTrue);
+
+      await harness.controller.enterForeground();
+      await settle();
+      expect(harness.controller.paused, isFalse);
+      expect(harness.texts, contains(encodeVoiceWakeV1()));
+      expect(harness.capture.starts, 2);
+      expect(harness.capture.active, isTrue);
+      expect(harness.socket.closed, isFalse);
+      harness.controller.dispose();
+    },
+  );
+
+  test(
+    'a Pause the person started stays paused after a round trip away',
+    () async {
+      final harness = Harness();
+      await harness.live();
+      harness.controller.pause();
+      await harness.controller.leaveForeground();
+      expect(harness.capture.stops, 1);
+      expect(harness.socket.closed, isFalse);
+
+      await harness.controller.enterForeground();
+      await settle();
+      expect(harness.controller.paused, isTrue);
+      expect(
+        harness.texts.where((text) => text == encodeVoiceWakeV1()),
+        isEmpty,
+      );
+      expect(harness.capture.starts, 2);
+      harness.controller.dispose();
+    },
+  );
+
   test('the next onset wakes it, pre-roll first and then live', () async {
     final harness = Harness();
     await harness.live();

@@ -224,6 +224,13 @@ class AssistantSessionController extends ChangeNotifier {
   /// for nothing but Resume.
   bool _paused = false;
 
+  /// The app is off screen. Distinct from [_paused]: a Pause the person
+  /// started stays paused when they come back, and a sleep this flag caused
+  /// resumes on its own. Capture is closed for the whole of it so the
+  /// microphone is not held in the background.
+  bool _away = false;
+  bool _pausedForAway = false;
+
   /// How long a notice about the last reply stays on the call's surface.
   static const noticeDuration = Duration(seconds: 4);
 
@@ -340,6 +347,8 @@ class AssistantSessionController extends ChangeNotifier {
     _microphoneHeld = false;
     _asleep = false;
     _paused = false;
+    _away = false;
+    _pausedForAway = false;
     _started = false;
     _welcomed = false;
     _barged = false;
@@ -903,8 +912,8 @@ class AssistantSessionController extends ChangeNotifier {
   /// Ends the call. A Bot Turn already delegated keeps running; that work is
   /// durable in the Bot and is not this socket's to cancel.
   ///
-  /// [reason] names the path that ended it — the End button, the app leaving
-  /// the foreground — and travels in the socket's close frame, where the
+  /// [reason] names the path that ended it — the End button, the view
+  /// detaching — and travels in the socket's close frame, where the
   /// server logs it.
   Future<void> end({required String reason}) async {
     if (_phase == VoiceSessionPhase.idle || _phase == VoiceSessionPhase.ended) {
@@ -1003,6 +1012,8 @@ class AssistantSessionController extends ChangeNotifier {
     _started = false;
     _welcomed = false;
     _paused = false;
+    _away = false;
+    _pausedForAway = false;
   }
 
   /// A recorder, a speaker or a socket that fails to close — or to carry the
@@ -1098,6 +1109,50 @@ class AssistantSessionController extends ChangeNotifier {
       );
     }
     _socket?.sendText(encodeVoiceWakeV1());
+    _notify();
+  }
+
+  /// The app left the screen. Gemini sleeps the way Pause does, so a
+  /// finished task does not speak into an empty room, and the microphone
+  /// is released. The socket stays; [enterForeground] is coming back.
+  ///
+  /// A Pause the person already started is left alone. Mute has already
+  /// closed the device. `detached` hangs up from the shell instead.
+  Future<void> leaveForeground() async {
+    if (!active || _away || _phase == VoiceSessionPhase.ending) return;
+    _away = true;
+    if (!_paused && !muted) {
+      pause();
+      _pausedForAway = true;
+    } else {
+      unawaited(player.interrupt());
+    }
+    await _closeCapture();
+    _notify();
+  }
+
+  /// The app is on screen again. The microphone comes back unless it is
+  /// muted, and a sleep this controller started for the background
+  /// resumes. A Pause the person started still waits for Resume.
+  Future<void> enterForeground() async {
+    if (!_away) return;
+    _away = false;
+    if (!active || _phase == VoiceSessionPhase.ending || _disposed) {
+      _pausedForAway = false;
+      return;
+    }
+    final generation = _generation;
+    if (!muted) {
+      final opened = await _openCapture(generation);
+      if (_away || generation != _generation || _disposed) {
+        if (opened) await _closeCapture();
+        return;
+      }
+    }
+    if (_pausedForAway) {
+      _pausedForAway = false;
+      resume();
+    }
     _notify();
   }
 

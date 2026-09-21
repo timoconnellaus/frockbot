@@ -474,13 +474,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _activityTimer = null;
     if (appIsAwayV1(state)) {
       widget.sessions.pause();
-      // Voice is foreground-only by decision. Leaving the app ends capture,
-      // playback and the call; in-app navigation does not.
-      unawaited(_endVoice(reason: 'lifecycle:${state.name}'));
       unawaited(_stopDictation());
+      // A live call sleeps rather than hanging up: Gemini closes, the
+      // microphone is released, the socket stays. Coming back resumes.
+      // `detached` still ends it — the view is gone. A call that is still
+      // connecting hangs up too, so a permission prompt left behind does
+      // not open a capture the person is no longer looking at.
+      final session = voiceSession;
+      if (session != null &&
+          footerOpen &&
+          voiceLifecycleActionV1(state) == VoiceLifecycleActionV1.sleep &&
+          session.phase == VoiceSessionPhase.live) {
+        unawaited(session.leaveForeground());
+      } else {
+        unawaited(_endVoice(reason: 'lifecycle:${state.name}'));
+      }
       return;
     }
     widget.sessions.resume();
+    unawaited(voiceSession?.enterForeground());
     _refresh();
     _startPolling();
   }
@@ -595,7 +607,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   /// Ends capture, playback and the call, and takes the footer away. It
-  /// navigates nowhere.
+  /// navigates nowhere. Leaving the app does not go through here: a live
+  /// call sleeps instead, and only `detached` (or a call still connecting)
+  /// hangs up.
   Future<void> _endVoice({required String reason}) async {
     final session = voiceSession;
     if (session == null || !footerOpen) return;
