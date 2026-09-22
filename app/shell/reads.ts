@@ -91,8 +91,8 @@ export async function appendAnnouncement(
  *
  * The record's `status` is not the test and never was. `resolveRunWorking`
  * holds the rule — running, inside the Turn deadline, and a Turn the log has
- * not already closed — and settles the record when it finds one that only
- * claims to be running, which is why this read is also the repair.
+ * not already closed — and only reports it. A stale record is settled by the
+ * alarm's repair index, not by somebody opening the sidebar.
  */
 export async function runWorkingV1(
   state: ShellBotStateV1,
@@ -178,7 +178,6 @@ export async function listRuns(
   input: unknown = { schemaVersion: 1 },
 ): Promise<ClientRunListV1> {
   const query = decodeClientRunListQueryV1(input);
-  await state.authority.recoverActiveRun();
   // Only the Bot’s continuous chat belongs in the transcript. Routine and
   // child sessions remain in the durable log and their own projections.
   const conversationId = await state.authority.readConversationSessionId();

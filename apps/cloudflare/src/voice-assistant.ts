@@ -71,6 +71,14 @@ import {
   type VoiceLedgerStorageV1,
 } from "@frockbot/app/voice/ledger";
 import {
+  beginVoiceActivationV1,
+  dueVoiceWorkV1,
+  sealVoiceCallV1,
+  VoiceMaintenanceSchedulerV1,
+  VOICE_MAINTENANCE_BATCH_V1,
+  voiceDeliveryBackoffSecondsV1,
+} from "@frockbot/app/voice/recovery";
+import {
   renderVoiceBotStatusV1,
   VOICE_HISTORY_DEFAULT_LIMIT_V1,
   VOICE_HISTORY_MAX_LIMIT_V1,
@@ -858,6 +866,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   // -- ledger ---------------------------------------------------------------
 
   protected ledger(): VoiceLedgerV1 {
+    return new VoiceLedgerV1(this.voiceStorage(), this.name);
+  }
+
+  private voiceStorage(): VoiceLedgerStorageV1 {
     const storage = this.ctx.storage;
     const surface: VoiceLedgerStorageV1 = {
       get: <T>(key: string) => storage.get<T>(key),
@@ -870,8 +882,23 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         reverse?: boolean;
         limit?: number;
       }) => storage.list<T>(options),
+      transaction: <T>(run: (tx: VoiceLedgerStorageV1) => Promise<T>) =>
+        storage.transaction(async (tx) =>
+          run({
+            get: <V>(key: string) => tx.get<V>(key),
+            put: <V>(key: string, value: V) => tx.put<V>(key, value),
+            delete: (key: string) => tx.delete(key),
+            list: <V>(options: {
+              prefix: string;
+              start?: string;
+              end?: string;
+              reverse?: boolean;
+              limit?: number;
+            }) => tx.list<V>(options),
+          }),
+        ),
     };
-    return new VoiceLedgerV1(surface, this.name);
+    return surface;
   }
 
   /**
@@ -902,22 +929,24 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
 
   async onStart(): Promise<void> {
     const now = this.now();
-    const memory = this.memory();
-    // A model request that was in flight when this object went away has an
-    // unknown outcome and no idempotency key at the gateway. It is never
-    // re-issued: it is recorded as failed, and the turns it was reading stay
-    // in the ledger for the next call's finalization to read.
-    for (const callId of await memory.failUncertainJobs(now)) {
-      this.traceMemory("memory-uncertain", { call: callId }, "warn");
+    // Indexed active paid work only. A full history scan is not startup.
+    const activation = crypto.randomUUID();
+    const fenced = await beginVoiceActivationV1(
+      this.voiceStorage(),
+      activation,
+    );
+    for (const id of fenced.fenced) {
+      this.traceMemory("memory-uncertain", { call: id }, "warn");
+      await this.memory().abandonChunk(
+        id,
+        "the previous activation ended before the outcome was known",
+        now,
+      );
     }
-    // A call whose socket died, or that was live when the object was evicted.
-    // Inside the rejoin window it is left alone and given an alarm, because a
-    // client that comes straight back continues it; past the window it ends
-    // here and its turns go to memory. Either way there is a scheduled path
-    // to finishing: nothing waits for a future request to notice it.
     const current = await this.ledger().currentCall();
     if (current) {
       if (voiceCallIsStaleV1(current, now)) {
+        await this.sealCall(current, now);
         await this.beginMemoryFinalization(current);
         await this.deliverCallTranscript(current);
         await this.ledger().endStaleCall(now);
@@ -925,24 +954,106 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         await this.scheduleCallAbandon(current);
       }
     }
-    const protectedCalls = new Set(
-      (await memory.unsummarisedJobs()).map((job) => job.callId),
-    );
-    if (current) protectedCalls.add(current.callId);
-    const recovered = await this.ledger().recover(now, protectedCalls);
-    for (const delegation of recovered.pending) {
-      await this.scheduleDelegationCheck(
-        delegation.runId,
-        delegation.attempts,
-        true,
+    await this.armMaintenance();
+  }
+
+  private maintenanceScheduler(): VoiceMaintenanceSchedulerV1 {
+    return new VoiceMaintenanceSchedulerV1(async (delaySeconds, token) => {
+      await this.schedule(
+        delaySeconds,
+        "drainVoiceMaintenance",
+        { token },
+        { idempotent: false },
       );
-    }
-    for (const delegation of await this.ledger().unspokenDelegations()) {
-      await this.announceDelegation({ runId: delegation.runId });
-    }
-    for (const job of await memory.pendingJobs()) {
-      await this.scheduleMemoryFinalization(job.callId);
-    }
+    });
+  }
+
+  /** Books the drain before any new obligation is visible to it. */
+  private async armMaintenance(): Promise<void> {
+    const due = await dueVoiceWorkV1(
+      this.voiceStorage(),
+      this.now().getTime(),
+      1,
+    );
+    if (due.length === 0) return;
+    await this.maintenanceScheduler().commit(async () => undefined);
+  }
+
+  /**
+   * One bounded maintenance pass. The successor is armed before the drain
+   * claims work, and an empty queue ends the chain.
+   */
+  async drainVoiceMaintenance(): Promise<void> {
+    const storage = this.voiceStorage();
+    const now = this.now().getTime();
+    await this.maintenanceScheduler().onCallback({
+      pending: async () => (await dueVoiceWorkV1(storage, now, 1)).length > 0,
+      drain: async () => {
+        const batch = await dueVoiceWorkV1(
+          storage,
+          now,
+          VOICE_MAINTENANCE_BATCH_V1,
+        );
+        const external = batch.find(
+          (work) => work.kind === "transcript" || work.kind === "delegation",
+        );
+        for (const work of batch) {
+          if (work !== external && work.kind !== "memory") continue;
+          if (work.kind === "memory") {
+            await this.scheduleMemoryFinalization(work.callId, false);
+          }
+        }
+        if (external?.kind === "transcript") {
+          const sealed = await storage.get<{
+            callId: string;
+            botId?: string;
+            startedAt: string;
+            endedAt: string;
+            turnSequence: number;
+          }>(`voice:call:sealed:${external.callId}`);
+          if (sealed?.botId) {
+            try {
+              await this.deliverCallTranscript({
+                schemaVersion: 1,
+                callId: sealed.callId,
+                deviceKey: "",
+                connectionId: "",
+                startedAt: sealed.startedAt,
+                lastSeenAt: sealed.endedAt,
+                turnSequence: sealed.turnSequence,
+                botId: sealed.botId,
+              });
+            } catch (error) {
+              const attempts = external.attempts + 1;
+              await storage.put(`work:transcript:${external.id}`, {
+                ...external,
+                attempts,
+                nextAt: now + voiceDeliveryBackoffSecondsV1(attempts) * 1000,
+                lastError:
+                  error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        } else if (external?.kind === "delegation") {
+          await this.scheduleDelegationCheck(
+            external.id,
+            external.attempts,
+            false,
+          );
+        }
+      },
+    });
+  }
+
+  private async sealCall(call: VoiceCallRecordV1, at: Date): Promise<void> {
+    await sealVoiceCallV1(this.voiceStorage(), {
+      callId: call.callId,
+      ...(call.botId ? { botId: call.botId } : {}),
+      startedAt: call.startedAt,
+      endedAt: at.toISOString(),
+      turnSequence: call.turnSequence,
+      now: at.getTime(),
+    });
   }
 
   // -- session memory -------------------------------------------------------
@@ -1092,6 +1203,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     this.traceMemory("call-abandoned", { call: call.callId });
+    await this.sealCall(call, this.now());
+    await this.armMaintenance();
     await this.beginMemoryFinalization(call);
     await this.deliverCallTranscript(call);
     await this.ledger().endStaleCall(this.now());
@@ -2048,6 +2161,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     // so the job is written while that is still in hand.
     const call = await this.ledger().currentCall();
     if (call && call.connectionId === connection.id) {
+      await this.sealCall(call, this.now());
+      await this.armMaintenance();
       await this.beginMemoryFinalization(call);
     }
     await this.releaseCallResources(connection.id);

@@ -20,6 +20,29 @@ export const PENDING_RUN_KEY = "pending-run";
 export const PENDING_AGENT_RUN_PREFIX = "pending-agent-run:";
 /** A Bot cannot accumulate an unbounded cross-Bot inbox. */
 export const MAX_PENDING_AGENT_RUNS_V1 = 32;
+/**
+ * Due repair of a running record that is no longer the active Turn.
+ * The due time is padded so a prefix list is chronological.
+ */
+export const REPAIR_DUE_PREFIX = "repair-due:";
+export const REPAIR_RUN_PREFIX = "repair-run:";
+/** Committed visible-status publication the alarm drains without starting a Turn. */
+export const PUBLICATION_PENDING_PREFIX = "publication-pending:";
+export const PUBLICATION_CURSOR_KEY = "publication-cursor";
+/** Local maintenance drained in one alarm pass. */
+export const MAINTENANCE_BATCH_V1 = 8;
+
+export function repairDueKey(dueAt: number, runId: string): string {
+  return `${REPAIR_DUE_PREFIX}${String(dueAt).padStart(16, "0")}:${runId}`;
+}
+
+export function repairRunKey(runId: string): string {
+  return `${REPAIR_RUN_PREFIX}${runId}`;
+}
+
+export function publicationPendingKey(cursor: number): string {
+  return `${PUBLICATION_PENDING_PREFIX}${String(cursor).padStart(16, "0")}`;
+}
 
 /** Whether one durable key changes the run state projected to a client. */
 export function isRunStateStorageKeyV1(key: string): boolean {

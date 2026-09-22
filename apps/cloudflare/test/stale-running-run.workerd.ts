@@ -18,6 +18,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
+import { repairDueKey, repairRunKey } from "@frockbot/core/durable";
 import { provisionBot } from "./provision-bot.ts";
 
 interface StaleRunRpc {
@@ -42,7 +43,7 @@ function rpc(name: string): StaleRunRpc {
 }
 
 describe("a Bot left holding a run marked running", () => {
-  test("wears no ring, is repaired by the read, and admits its next Turn", async () => {
+  test("wears no ring, is repaired by the alarm, and admits its next Turn", async () => {
     const suffix = crypto.randomUUID();
     const identity = {
       schemaVersion: 1 as const,
@@ -87,10 +88,24 @@ describe("a Bot left holding a run marked running", () => {
 
     const read = await rpc(name).readUnread(identity);
     expect(read.working ?? false).toBe(false);
+    const beforeRepair = await rpc(name).listRuns({
+      ...identity,
+      query: { schemaVersion: 1 },
+    });
+    expect(beforeRepair.runs.find((run) => run.runId === "run-1")?.status).toBe(
+      "running",
+    );
 
-    // The read settled it rather than merely declining to draw a ring, so
-    // every other reader — the transcript's own running-Turn ring included —
-    // sees a terminal record without having to reach the same conclusion.
+    // The repair is the alarm's indexed obligation, not the sidebar read.
+    await runInDurableObject(stub, async (instance, state) => {
+      const due = Date.now() - 1_000;
+      await state.storage.put({
+        [repairRunKey("run-1")]: due,
+        [repairDueKey(due, "run-1")]: "run-1",
+      });
+      await (instance as { alarm(): Promise<void> }).alarm();
+    });
+
     const runs = await rpc(name).listRuns({
       ...identity,
       query: { schemaVersion: 1 },

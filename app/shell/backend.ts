@@ -46,6 +46,7 @@ import type {
   ClientTurnV1,
 } from "./run-protocol.js";
 import {
+  admitRun,
   alarm,
   executeTurn,
   fenceRunAdmission,
@@ -115,6 +116,11 @@ export class ShellBotBackendContribution {
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
     return run(this.state, command);
+  }
+
+  /** Durable receipt. Does not wait for the previous Turn's inference. */
+  async admit(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
+    return admitRun(this.state, command);
   }
 
   async alarm(): Promise<void> {

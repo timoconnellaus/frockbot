@@ -93,6 +93,21 @@ export async function admitTurnV1(
 }
 
 /**
+ * Durable admission only. The receipt is not the Turn's answer; the driver
+ * and the alarm finish the run.
+ */
+export async function admitTurnCommandV1(
+  state: ShellBotStateV1,
+  command: OwnedBotTurnCommand,
+): Promise<import("@frockbot/core/durable").RunAdmissionReceiptV1> {
+  await syncCompositionFromUser(state, {
+    userId: command.userId,
+    botId: command.botId,
+  });
+  return state.authority.admit(command);
+}
+
+/**
  * The narrow store activation drives. Reads come from the mirror the
  * admission already pinned; a commit or a failure is recorded on the User,
  * where the generation lives, and the mirror is refreshed so the next

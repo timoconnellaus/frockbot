@@ -202,9 +202,23 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await expect(contribution.listRuns({ schemaVersion: 1 })).rejects.toThrow(
-      "stored run has invalid fields",
-    );
+    await expect(contribution.listRuns({ schemaVersion: 1 })).resolves.toEqual({
+      schemaVersion: 1,
+      runs: [
+        expect.objectContaining({
+          runId: "run-malformed",
+          status: "failed",
+          outcome: {
+            type: "failed",
+            message: "This Turn's record could not be read.",
+          },
+        }),
+      ],
+      page: { truncated: false },
+    });
+    await expect(
+      contribution.state.authority.recoverActiveRun(),
+    ).rejects.toThrow("stored run has invalid fields");
     expect(await storage.get<string>("active-run")).toBe("run-malformed");
   });
 
@@ -222,6 +236,8 @@ describe("Bot recovery", () => {
       runs: [],
       page: { truncated: false },
     });
+    expect(storage.alarmAt).toBeUndefined();
+    await contribution.state.authority.recoverActiveRun();
 
     expect(await storage.get<string>("active-run")).toBe("run-missing");
     expect(typeof storage.alarmAt).toBe("number");
@@ -270,9 +286,9 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await expect(contribution.listRuns({ schemaVersion: 1 })).rejects.toThrow(
-      `run "${run.runId}" has invalid failure`,
-    );
+    await expect(
+      contribution.state.authority.recoverActiveRun(),
+    ).rejects.toThrow(`run "${run.runId}" has invalid failure`);
     expect(await storage.get<string>("active-run")).toBe(run.runId);
     expect(await storage.get<StoredRun>(`run:${run.runId}`)).toEqual(run);
   });
@@ -414,6 +430,7 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
+    await recovered.state.authority.recoverActiveRun();
     await expect(recovered.listRuns()).resolves.toEqual({
       schemaVersion: 1,
       runs: [
@@ -516,7 +533,7 @@ describe("Bot recovery", () => {
 
     expect(planBotRunRecovery(run, events)).toEqual({ kind: "resume" });
 
-    await recovered.listRuns();
+    await recovered.state.authority.recoverActiveRun();
 
     const settled = storage.values.get("run:run-lost-marker") as StoredRun;
     expect(settled.status).toBe("failed");
@@ -552,7 +569,7 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await recovered.listRuns();
+    await recovered.state.authority.recoverActiveRun();
 
     const [notification, ...rest] = await recovered.listNotifications();
     expect(rest).toEqual([]);
@@ -607,7 +624,7 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await recovered.listRuns();
+    await recovered.state.authority.recoverActiveRun();
 
     expect((storage.values.get(`run:${run.runId}`) as StoredRun).status).toBe(
       "failed",

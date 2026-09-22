@@ -6,6 +6,7 @@
 import {
   decodeSessionEvent,
   emptyCommittedContextV1,
+  TURN_DEADLINE_MS_V1,
   validateToolOccurrenceJournal,
   type CommittedContextV1,
   type NormalizedModelRequest,
@@ -13,10 +14,7 @@ import {
   type SessionEvent,
 } from "@frockbot/core/contracts";
 import type { CompositionGenerationV1 } from "./composition/generation.js";
-import {
-  DurableCompositionStore,
-  decodeCompositionPinV1,
-} from "./composition-store.js";
+import { DurableCompositionStore } from "./composition-store.js";
 import { DurableCompositionFailureLog } from "./composition-failures.js";
 import {
   boundedRunFailureV1,
@@ -50,7 +48,11 @@ import {
   planBotRunRecovery,
 } from "./run-recovery.js";
 import { readSessionCursorV1 } from "./working-context.js";
-import { runLivenessV1, STALE_RUNNING_RUN_FAILURE_V1 } from "./run-liveness.js";
+import {
+  runLivenessV1,
+  STALE_RUNNING_RUN_FAILURE_V1,
+  STALE_RUNNING_RUN_GRACE_MS_V1,
+} from "./run-liveness.js";
 
 /** Liveness only asks whether a `turn/end` already closed the opened Turn. */
 const SESSION_TURN_END_TYPES = new Set<string>(["turn/end"]);
@@ -65,7 +67,7 @@ import {
 import { botConversationBaseSessionIdV1 } from "./conversations.js";
 import {
   ACTIVE_RUN_KEY,
-  COMPOSITION_CURRENT_KEY,
+  MAINTENANCE_BATCH_V1,
   MAX_PENDING_AGENT_RUNS_V1,
   PENDING_AGENT_RUN_PREFIX,
   PENDING_RUN_KEY,
@@ -73,12 +75,18 @@ import {
   LATEST_EVENTS_KEY,
   MAX_RUN_ADMISSION_FENCES,
   NOTIFICATION_PREFIX,
+  PUBLICATION_CURSOR_KEY,
+  PUBLICATION_PENDING_PREFIX,
   RECOVERY_ALARM_DELAY_MS,
+  REPAIR_DUE_PREFIX,
   RUN_ADMISSION_FENCE_INDEX_KEY,
   RUN_ADMISSION_FENCE_PREFIX,
   RUN_INDEX_PREFIX,
   RUN_PREFIX,
   pendingAgentRunKey,
+  publicationPendingKey,
+  repairDueKey,
+  repairRunKey,
   runIndexKey,
   storedRunAdmissionFences,
 } from "./storage-keys.js";
@@ -223,6 +231,14 @@ export interface BotDurableAuthorityHooks<Snapshot> {
   /** Settle Package deadlines when the alarm fires idle. */
   settleScheduledWork(): Promise<void>;
   /**
+   * Deliver one bounded batch of committed publication outside a storage
+   * transaction. Absent means there is no subscriber; the attempt still
+   * completes so an idle object is not kept awake.
+   */
+  deliverPublication?(
+    pending: readonly Record<string, unknown>[],
+  ): Promise<void>;
+  /**
    * Advisory interrupt of the exact Turn named, after the durable intent that
    * justifies it is already written. The reason is an opaque bounded string
    * the kernel records and never reads; a Package that holds no resident Agent
@@ -243,9 +259,6 @@ export interface BotDurableAuthorityHooks<Snapshot> {
 
 /** What a `turn/end` records when a later user message took a Turn's place. */
 export const SUPERSEDED_TURN_REASON_V1 = "superseded by a new user message";
-
-/** How many times a queued Turn retries the object before giving up. */
-const MAX_QUEUED_RUN_START_ATTEMPTS = 8;
 
 /**
  * The Composition generation a run that was never admitted names. Admission is
@@ -289,6 +302,21 @@ export interface BotDurableAuthorityOptions<Snapshot> {
   state: DurableObjectState;
   codec: StoredRunCodecV1<Snapshot>;
   hooks: BotDurableAuthorityHooks<Snapshot>;
+  /**
+   * When false, admission does not start the in-memory driver. The durable
+   * alarm is still armed. Tests use this to model eviction in the gap between
+   * the commit and the kick.
+   */
+  kickDriver?: boolean;
+}
+
+/** What admission returns once the command is durable. Not a completed Turn. */
+export interface RunAdmissionReceiptV1 {
+  schemaVersion: 1;
+  runId: string;
+  commandFingerprint: string;
+  disposition: "admitted" | "queued" | "settled";
+  completion?: BotTurnCompletion;
 }
 
 export class BotDurableAuthority<Snapshot> {
@@ -324,11 +352,22 @@ export class BotDurableAuthority<Snapshot> {
    * leaves them alone, so a queued Turn is promoted by exactly one path.
    */
   private readonly queuedWaiters = new Set<string>();
+  /** The in-memory driver. The alarm is the wakeup if this never runs. */
+  private driver: Promise<void> = Promise.resolve();
+  private driving = false;
+  private kickAgain = false;
+  private readonly kickDriverEnabled: boolean;
+  private resolveSettlement: (() => void) | undefined;
+  private settlement: Promise<void> = Promise.resolve();
+  /** Commands admitted in this isolate, so a fresh run keeps the caller's shape. */
+  private readonly admittedCommands = new Map<string, OwnedBotTurnCommand>();
+  private driverError: unknown;
 
   constructor(options: BotDurableAuthorityOptions<Snapshot>) {
     this.ctx = options.state;
     this.codec = options.codec;
     this.hooks = options.hooks;
+    this.kickDriverEnabled = options.kickDriver !== false;
     this.composition = new DurableCompositionStore({
       state: options.state,
       bootstrap: () => options.hooks.bootstrapComposition(),
@@ -338,90 +377,162 @@ export class BotDurableAuthority<Snapshot> {
     });
   }
 
+  /**
+   * Admits the command and waits until that run is terminal.
+   *
+   * Completion-waiting callers — a Routine firing, a Bot asking another Bot —
+   * use this. A person submitting a message uses {@link admit}, which returns
+   * the receipt without waiting for the previous Turn's inference.
+   */
   async run(input: OwnedBotTurnCommand): Promise<BotTurnCompletion> {
-    const command = input;
-    await this.assertMatchingRunCommand(command);
-    // Recovering whatever this object was left holding must never decide the
-    // fate of a new command. `recoverActiveRun` executes the *previous* Turn
-    // inline and rethrows, so a recovery that failed — an uncertain effect, a
-    // mount failure, a provider that was down — threw before the new message
-    // was ever admitted, and the person's message was simply lost. The old
-    // Turn is durable either way and the alarm retries it; admission now
-    // refuses or supersedes on its own terms.
-    await this.recoverActiveRun().catch(() => undefined);
-    const replay = await this.settledReplayResult(command);
-    if (replay) return replay;
-    const admission = await this.acceptRun(command);
-    if (admission.kind === "queued") {
-      // Durably admitted, waiting for the object. The interrupt is advisory
-      // and always follows the intent that is already written.
-      if (admission.interrupt) {
-        this.hooks.interruptTurn?.(
-          admission.interrupt.runId,
-          SUPERSEDED_TURN_REASON_V1,
-        );
-      }
-      return this.runQueuedRun(command);
-    }
-    return this.executeAcceptedRun(
-      command,
-      admission.seed,
-      admission.settings,
-      admission.compositionGenerationId,
-    );
+    const admitted = await this.admit(input);
+    if (admitted.completion) return admitted.completion;
+    return this.waitForRun(input.runId);
   }
 
   /**
-   * Drives one durably queued Turn to its own terminal state.
+   * Durably admits one command and kicks the single driver.
    *
-   * The Turn ahead of it settles first — it is either finishing on its own or
-   * has just been fenced by the supersede intent — and only then does this one
-   * become the active run. Eviction anywhere in here is safe: the queued run is
-   * durable, and the recovery alarm promotes it exactly as this does.
+   * The receipt is the acknowledgement. Execution of the previous Turn is not
+   * on this path: the driver reconciles it, and the alarm does if the kick
+   * never runs.
    */
-  private async runQueuedRun(
-    command: OwnedBotTurnCommand,
-  ): Promise<BotTurnCompletion> {
-    this.queuedWaiters.add(command.runId);
+  async admit(input: OwnedBotTurnCommand): Promise<RunAdmissionReceiptV1> {
+    const command = input;
+    await this.assertMatchingRunCommand(command);
+    const replay = await this.settledReplayResult(command);
+    const fingerprint = botTurnCommandFingerprintV1(command);
+    if (replay) {
+      return {
+        schemaVersion: 1,
+        runId: command.runId,
+        commandFingerprint: fingerprint,
+        disposition: "settled",
+        completion: replay,
+      };
+    }
+    const admission = await this.acceptRun(command);
+    this.admittedCommands.set(command.runId, command);
+    if (admission.kind === "queued" && admission.interrupt) {
+      this.hooks.interruptTurn?.(
+        admission.interrupt.runId,
+        SUPERSEDED_TURN_REASON_V1,
+      );
+    }
+    this.kickDriver();
+    return {
+      schemaVersion: 1,
+      runId: command.runId,
+      commandFingerprint: fingerprint,
+      disposition: admission.kind === "queued" ? "queued" : "admitted",
+    };
+  }
+
+  /** The in-memory driver, so a host can keep it alive after the receipt. */
+  whenDriverSettled(): Promise<void> {
+    return this.driver;
+  }
+
+  /**
+   * Starts the single driver unless one is already running.
+   *
+   * The kick is an optimization. Admission has already armed the alarm, so a
+   * crash before this runs still continues the recorded work.
+   */
+  private kickDriver(): void {
+    if (!this.kickDriverEnabled) return;
+    if (this.driving) {
+      this.kickAgain = true;
+      return;
+    }
+    this.driving = true;
+    const work = this.driveLoop().finally(() => {
+      this.driving = false;
+      if (this.kickAgain) {
+        this.kickAgain = false;
+        this.kickDriver();
+      }
+    });
+    this.driver = work;
+  }
+
+  private async driveLoop(): Promise<void> {
+    this.driverError = undefined;
     try {
-      for (
-        let attempt = 0;
-        attempt < MAX_QUEUED_RUN_START_ATTEMPTS;
-        attempt++
-      ) {
-        await this.settleExecutingActivity();
-        const settled = await this.terminalRunResult(command.runId);
-        if (settled) return settled;
-        const promoted = await this.promoteQueuedRun(command.runId);
-        if (promoted === "blocked") {
-          // Another Turn holds the object. Recovery drives it to its own
-          // durable terminal or resumable state, and this one tries again —
-          // including when that recovery fails, which is the other Turn's
-          // problem and not this one's.
-          await this.recoverActiveRun().catch(() => undefined);
+      for (let pass = 0; pass < MAINTENANCE_BATCH_V1; pass += 1) {
+        this.kickAgain = false;
+        if (this.executingRunId) {
+          await this.settleExecutingActivity();
           continue;
         }
-        if (promoted === "not-queued") {
-          const terminal = await this.terminalRunResult(command.runId);
-          if (terminal) return terminal;
-          const current = await this.readRun(command.runId);
-          throw new Error(
-            `run "${command.runId}" left the queue with status ${
-              current?.status ?? "missing"
-            }`,
-          );
-        }
-        return this.executeAcceptedRun(
-          command,
-          promoted.seed,
-          promoted.settings,
-          promoted.compositionGenerationId,
-        );
+        await this.recoverActiveRun();
+        if (!this.kickAgain && !(await this.hasOwedRun())) return;
       }
-      throw new Error(`run "${command.runId}" could not start`);
+    } catch (error) {
+      this.driverError = error;
+      console.error(
+        `Bot run driver failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     } finally {
-      this.queuedWaiters.delete(command.runId);
+      this.notifySettlement();
     }
+  }
+
+  private async hasOwedRun(): Promise<boolean> {
+    const [active, pending, agents] = await Promise.all([
+      this.ctx.storage.get<string>(ACTIVE_RUN_KEY),
+      this.ctx.storage.get<string>(PENDING_RUN_KEY),
+      this.ctx.storage.list<string>({
+        prefix: PENDING_AGENT_RUN_PREFIX,
+        limit: 1,
+      }),
+    ]);
+    return Boolean(active || pending || agents.size > 0);
+  }
+
+  private armSettlement(): Promise<void> {
+    if (!this.resolveSettlement) {
+      this.settlement = new Promise((resolve) => {
+        this.resolveSettlement = () => {
+          this.resolveSettlement = undefined;
+          resolve();
+        };
+      });
+    }
+    return this.settlement;
+  }
+
+  private notifySettlement(): void {
+    this.resolveSettlement?.();
+  }
+
+  /** Waits until the named run is terminal. The driver performs the work. */
+  private async waitForRun(runId: string): Promise<BotTurnCompletion> {
+    for (let guard = 0; guard < 64; guard += 1) {
+      const pending = this.armSettlement();
+      const settled = await this.settledRunResult(runId);
+      if (settled) return settled;
+      if (!this.driving) {
+        if (this.driverError) {
+          const error = this.driverError;
+          this.driverError = undefined;
+          throw error;
+        }
+        this.kickDriver();
+      }
+      await pending;
+    }
+    throw new Error(`run "${runId}" did not settle`);
+  }
+
+  private async settledRunResult(
+    runId: string,
+  ): Promise<BotTurnCompletion | undefined> {
+    const discarded = await this.settledTerminalRunResult(runId);
+    if (discarded) return discarded;
+    return this.terminalRunResult(runId);
   }
 
   /** Waits out whatever this object is currently running, failures included. */
@@ -487,17 +598,13 @@ export class BotDurableAuthority<Snapshot> {
       if (await transaction.get<string>(ACTIVE_RUN_KEY)) {
         return "blocked" as const;
       }
-      // The Turn starts from the projection cursor. Repairing a buried open
-      // Turn by rereading and renumbering the archive is not this admission.
+      // The Turn starts from the projection cursor, so it sees conversation
+      // that finished while it waited. The Composition, settings and catalogs
+      // it was admitted under stay pinned; a later commit does not retarget a
+      // Turn that was already accepted. Current revocations are enforced when
+      // the effect is used, not by swapping the pin here.
       const seeded = await readSessionCursorV1(transaction, run.sessionId);
-      // The pointer is materialized at admission, so it is there; a Bot whose
-      // record somehow is not keeps the generation it was admitted under
-      // rather than failing a Turn it is owed.
-      const pointer = await transaction.get<unknown>(COMPOSITION_CURRENT_KEY);
-      const compositionGenerationId =
-        pointer === undefined
-          ? run.compositionGenerationId
-          : decodeCompositionPinV1(pointer).generationId;
+      const compositionGenerationId = run.compositionGenerationId;
       const promoted = this.codec.require({
         ...run,
         phase: "admitted",
@@ -733,7 +840,8 @@ export class BotDurableAuthority<Snapshot> {
         context: seed.context,
         journal: run.events,
         configurationSnapshot: settings,
-        compositionGenerationId: run.compositionGenerationId,
+        compositionGenerationId:
+          run.mountedCompositionGenerationId ?? run.compositionGenerationId,
         persistSessionEvents: (_sessionId, events) =>
           this.persistRunEvents(run.runId, events),
         resume: true,
@@ -948,12 +1056,19 @@ export class BotDurableAuthority<Snapshot> {
       if (!run || run.status !== "running") {
         throw new Error(`run "${runId}" is not resumable`);
       }
-      if (run.compositionGenerationId === compositionGenerationId) return;
+      if (
+        run.compositionGenerationId === compositionGenerationId ||
+        run.mountedCompositionGenerationId === compositionGenerationId
+      ) {
+        return;
+      }
+      // The pin taken at admission stays the requested generation. Fallback
+      // is a separate fact so recovery can mount what actually ran.
       await transaction.put(
         key,
         storedRunRecordV2({
           ...run,
-          compositionGenerationId,
+          mountedCompositionGenerationId: compositionGenerationId,
         } satisfies StoredRunV1<Snapshot>),
       );
     });
@@ -973,6 +1088,10 @@ export class BotDurableAuthority<Snapshot> {
   }
 
   async alarm(): Promise<void> {
+    // Publication does not start a Turn. It has to move while a long Turn is
+    // still executing, or a committed visible update waits out the inference.
+    await this.drainPublication();
+    await this.drainDueRepairs();
     if (this.executingRunId || this.hooks.scheduledWorkInFlight()) {
       await this.ctx.storage.transaction(async (transaction) => {
         await this.hooks.deferScheduledWork(transaction);
@@ -1277,9 +1396,9 @@ export class BotDurableAuthority<Snapshot> {
     const sessionEvents = await new SessionEventLog(
       this.ctx.storage,
     ).readInlineEventsOfTypes(run.sessionId, SESSION_TURN_END_TYPES);
-    if (runLivenessV1({ run, sessionEvents }).working) return true;
-    await this.settleStaleRun(runId);
-    return false;
+    // A read reports the committed record. Settling a stale Turn is the
+    // alarm's repair index, not a side effect of drawing the activity ring.
+    return runLivenessV1({ run, sessionEvents }).working;
   }
 
   /**
@@ -1314,6 +1433,79 @@ export class BotDurableAuthority<Snapshot> {
       );
       await this.refreshRecoveryAlarm(transaction);
     });
+  }
+
+  private async clearRunRepair(
+    transaction: DurableObjectTransaction,
+    runId: string,
+  ): Promise<void> {
+    const due = await transaction.get<number>(repairRunKey(runId));
+    await transaction.delete(repairRunKey(runId));
+    if (typeof due === "number" && Number.isFinite(due)) {
+      await transaction.delete(repairDueKey(due, runId));
+    }
+  }
+
+  /**
+   * Delivers a bounded batch of committed publication, then drops those
+   * obligations. External delivery stays outside the storage transaction.
+   * Returns whether further publication is still pending.
+   */
+  private async drainPublication(): Promise<boolean> {
+    const pending = await this.ctx.storage.list<Record<string, unknown>>({
+      prefix: PUBLICATION_PENDING_PREFIX,
+      limit: MAINTENANCE_BATCH_V1,
+    });
+    if (pending.size === 0) return false;
+    const keys = [...pending.keys()];
+    try {
+      await this.hooks.deliverPublication?.([...pending.values()]);
+    } catch (error) {
+      console.error(
+        `Bot publication drain failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return true;
+    }
+    await this.ctx.storage.delete(keys);
+    const more = await this.ctx.storage.list({
+      prefix: PUBLICATION_PENDING_PREFIX,
+      limit: 1,
+    });
+    return more.size > 0;
+  }
+
+  /**
+   * Settles running records whose repair deadline has passed and that are not
+   * the active Turn. The active Turn belongs to recovery, which still has to
+   * reconcile it before any later Turn runs.
+   */
+  private async drainDueRepairs(): Promise<void> {
+    const now = Date.now();
+    const due = await this.ctx.storage.list<string>({
+      prefix: REPAIR_DUE_PREFIX,
+      limit: MAINTENANCE_BATCH_V1,
+    });
+    const active = await this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
+    for (const [key, runId] of due) {
+      const dueAt = Number(
+        key.slice(REPAIR_DUE_PREFIX.length, REPAIR_DUE_PREFIX.length + 16),
+      );
+      if (!Number.isFinite(dueAt) || dueAt > now) break;
+      if (runId === this.executingRunId || runId === active) continue;
+      const before = await this.readRunHeader(runId);
+      if (!before || before.status !== "running") {
+        await this.ctx.storage.delete([key, repairRunKey(runId)]);
+        continue;
+      }
+      await this.settleStaleRun(runId);
+      const after = await this.readRunHeader(runId);
+      if (!after || after.status !== "running") {
+        await this.ctx.storage.delete([key, repairRunKey(runId)]);
+        this.notifySettlement();
+      }
+    }
   }
 
   /** Reverse-ordered admission index page: `[cursor, runId]` entries. */
@@ -1400,6 +1592,26 @@ export class BotDurableAuthority<Snapshot> {
       // recovery alarm even with nothing running.
       deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
     }
+    const [repair, publication] = await Promise.all([
+      transaction.list<string>({ prefix: REPAIR_DUE_PREFIX, limit: 1 }),
+      transaction.list<unknown>({
+        prefix: PUBLICATION_PENDING_PREFIX,
+        limit: 1,
+      }),
+    ]);
+    const repairKey = repair.keys().next().value as string | undefined;
+    if (repairKey) {
+      const due = Number(
+        repairKey.slice(
+          REPAIR_DUE_PREFIX.length,
+          REPAIR_DUE_PREFIX.length + 16,
+        ),
+      );
+      if (Number.isFinite(due)) deadlines.push(due);
+    }
+    // Committed publication is owed even while a Turn is executing. A past
+    // or current cursor is due immediately; the drain bounds each pass.
+    if (publication.size > 0) deadlines.push(Date.now());
     if (deadlines.length === 0) await transaction.deleteAlarm();
     else await transaction.setAlarm(Math.min(...deadlines));
   }
@@ -1565,6 +1777,12 @@ export class BotDurableAuthority<Snapshot> {
         settings,
       );
       const pin = await this.composition.pin(transaction);
+      const repairAt =
+        Date.parse(command.acceptedAt) +
+        TURN_DEADLINE_MS_V1 +
+        STALE_RUNNING_RUN_GRACE_MS_V1;
+      const publicationCursor =
+        ((await transaction.get<number>(PUBLICATION_CURSOR_KEY)) ?? 0) + 1;
       const admittedRun = this.codec.require({
         runId: command.runId,
         commandFingerprint: botTurnCommandFingerprintV1(command),
@@ -1624,6 +1842,16 @@ export class BotDurableAuthority<Snapshot> {
           userId: command.userId,
           botId: command.botId,
         },
+        [PUBLICATION_CURSOR_KEY]: publicationCursor,
+        [publicationPendingKey(publicationCursor)]: {
+          schemaVersion: 1,
+          cursor: publicationCursor,
+          runId: command.runId,
+          phase: queued ? "queued" : "admitted",
+          status: "running",
+        },
+        [repairRunKey(command.runId)]: repairAt,
+        [repairDueKey(repairAt, command.runId)]: command.runId,
       });
       const interrupted = supersede ? await supersede(command.runId) : false;
       await this.refreshRecoveryAlarm(transaction);
@@ -1674,7 +1902,9 @@ export class BotDurableAuthority<Snapshot> {
     if (lane !== "user" || !command.supersedes) {
       throw new BotTurnRefusedError("busy", "bot already has an active run");
     }
-    const active = await this.readRunFrom(transaction, activeRunId);
+    const active = this.codec.optional(
+      await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
+    );
     if (!active)
       throw new BotTurnRefusedError("busy", "bot already has an active run");
     if (active.status !== "running") {
@@ -1683,11 +1913,8 @@ export class BotDurableAuthority<Snapshot> {
     const pendingRunId = await transaction.get<string>(PENDING_RUN_KEY);
     // A Turn that has not dispatched a model request has no durable work to
     // lose, so it is left to finish and the new message queues behind it.
-    // GrokBot draws the same line, and for the same reason: nothing may be
-    // stranded before its first durable checkpoint.
-    const dispatched = active.events.some(
-      (event) => event.type === "model/request",
-    );
+    // The header is enough: admission does not hydrate the journal to decide.
+    const dispatched = active.hasModelIntent === true;
     return async (supersededBy: string) => {
       if (pendingRunId && pendingRunId !== supersededBy) {
         await this.supersedeQueuedRun(transaction, pendingRunId, supersededBy);
@@ -1730,6 +1957,7 @@ export class BotDurableAuthority<Snapshot> {
       supersededBy,
     } satisfies StoredRunV1<Snapshot>);
     await transaction.put(key, structuredClone(storedRunRecordV2(superseded)));
+    await this.clearRunRepair(transaction, runId);
   }
 
   private async persistRunEvents(
@@ -1751,12 +1979,16 @@ export class BotDurableAuthority<Snapshot> {
       // so that a batch which does not continue the log is still refused for
       // that reason rather than by the run record's own range check.
       await eventLog.append(run.sessionId, durableEvents, { runId });
+      const hasModelIntent =
+        run.hasModelIntent === true ||
+        durableEvents.some((event) => event.type === "model/request");
       const next = this.codec.require({
         ...run,
         ...storedRunEventFieldsV2(run.previousEventCount, [
           ...run.events,
           ...durableEvents,
         ]),
+        ...(hasModelIntent ? { hasModelIntent: true as const } : {}),
       } satisfies StoredRunV1<Snapshot>);
       const records = await this.hooks.eventRecords?.({
         run: next,
@@ -1845,7 +2077,9 @@ export class BotDurableAuthority<Snapshot> {
         this.supersededPackageRecords(),
       );
       await this.refreshRecoveryAlarm(transaction);
+      await this.clearRunRepair(transaction, runId);
     });
+    this.notifySettlement();
   }
 
   /**
@@ -1881,7 +2115,9 @@ export class BotDurableAuthority<Snapshot> {
         this.failedRunRecords(),
       );
       await this.refreshRecoveryAlarm(transaction);
+      await this.clearRunRepair(transaction, runId);
     });
+    this.notifySettlement();
   }
 
   /**
@@ -1915,7 +2151,8 @@ export class BotDurableAuthority<Snapshot> {
     const run = await this.readRun(pendingRunId);
     if (!run) throw new Error(`run "${pendingRunId}" was not accepted`);
     await this.executeAcceptedRun(
-      this.recoveredCommand(durableIdentity, run),
+      this.admittedCommands.get(pendingRunId) ??
+        this.recoveredCommand(durableIdentity, run),
       promoted.seed,
       promoted.settings,
       promoted.compositionGenerationId,
@@ -1957,6 +2194,7 @@ export class BotDurableAuthority<Snapshot> {
       if (!current || current === this.executingRunId) return undefined;
       const run = await this.readRunFrom(transaction, activeRunId);
       if (!run || run.status !== "running") {
+        if (run) await this.clearRunRepair(transaction, run.runId);
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
@@ -1985,6 +2223,7 @@ export class BotDurableAuthority<Snapshot> {
           DISCARDED_RUN_RECOVERY_FAILURE_V1,
           this.supersededPackageRecords(),
         );
+        await this.clearRunRepair(transaction, run.runId);
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
@@ -2009,6 +2248,7 @@ export class BotDurableAuthority<Snapshot> {
           this.terminalPackageRecords(run.configurationSnapshot),
           this.supersededPackageRecords(),
         );
+        await this.clearRunRepair(transaction, run.runId);
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
@@ -2024,6 +2264,7 @@ export class BotDurableAuthority<Snapshot> {
           this.supersededPackageRecords(),
           this.failedRunRecords(),
         );
+        await this.clearRunRepair(transaction, run.runId);
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
@@ -2068,7 +2309,10 @@ export class BotDurableAuthority<Snapshot> {
         settings,
       };
     });
-    if (!recovery) return;
+    if (!recovery) {
+      this.notifySettlement();
+      return;
+    }
     if (!durableIdentity) throw new Error("Bot identity is unavailable");
     if (recovery.kind === "resume") {
       await this.executeResumedRun(
@@ -2079,7 +2323,7 @@ export class BotDurableAuthority<Snapshot> {
       return;
     }
     await this.executeAcceptedRun(
-      {
+      this.admittedCommands.get(recovery.run.runId) ?? {
         userId: durableIdentity.userId,
         botId: durableIdentity.botId,
         runId: recovery.run.runId,
@@ -2101,7 +2345,8 @@ export class BotDurableAuthority<Snapshot> {
       },
       recovery.seed,
       recovery.settings,
-      recovery.run.compositionGenerationId,
+      recovery.run.mountedCompositionGenerationId ??
+        recovery.run.compositionGenerationId,
     );
   }
 }

@@ -486,6 +486,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   readComputerPresence(): Promise<unknown>;
   executeComputerPresenceCommand(command: ComputerCommandV1): Promise<unknown>;
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
+  admitRun(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
   readFocusedApplet(input: unknown): Promise<unknown>;
@@ -598,6 +599,22 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     getCompositionGeneration: (request) =>
       rpc.getCompositionGeneration(request),
     revertComposition: (request) => rpc.revertComposition(request),
+    admitRun: (command) =>
+      rpc.admitRun({
+        schemaVersion: 1,
+        userId: command.userId,
+        botId: command.botId,
+        command: {
+          runId: command.runId,
+          sessionId: command.sessionId,
+          acceptedAt: command.acceptedAt,
+          text: command.text,
+          ...(command.retryOf ? { retryOf: command.retryOf } : {}),
+          ...(command.skills ? { skills: command.skills } : {}),
+          ...(command.lane ? { lane: command.lane } : {}),
+          ...(command.supersedes ? { supersedes: command.supersedes } : {}),
+        },
+      }),
     run: (command) =>
       rpc.run({
         schemaVersion: 1,
@@ -1066,11 +1083,12 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       ),
     });
     const command = request.command as BotTurnCommand;
+    // The HTTP send is an admission. The answer is the run lookup, not this body.
     return botStateStub(
       this.env,
       this.ctx.props.userId,
       request.botId as string,
-    ).run({
+    ).admitRun({
       ...command,
       userId: this.ctx.props.userId,
       botId: request.botId as string,
