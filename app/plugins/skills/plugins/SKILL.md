@@ -1,6 +1,6 @@
 ---
 name: Build a Plugin
-description: Use this whenever you are creating or changing a Plugin — code of your own that adds tools to this Bot, wraps steps of your own loop, keeps its own data, ships Skills or cards, serves a model provider this deployment opened, and reaches the network the User allowed. It is the reference for the Plugin SDK, the two files, every export and grant, the authoring tools, and the approval that makes a Plugin live.
+description: Use this whenever you are creating or changing a Plugin — code of your own that adds tools to this Bot, wraps steps of your own loop, keeps its own data, ships Skills or cards, draws a page beside the conversation and a door on this Bot, serves a model provider this deployment opened, and reaches the network the User allowed. It is the reference for the Plugin SDK, the two files, every export and grant, the authoring tools, and the approval that makes a Plugin live.
 ---
 
 # Build a Plugin
@@ -8,15 +8,16 @@ description: Use this whenever you are creating or changing a Plugin — code of
 A Plugin is your own code, running inside the kernel beside you. It can offer
 you tools, wrap your loop, keep a key-value store for this Bot, ship Skills
 the catalog lists as `plugin/<pluginId>/<slug>`, draw cards, expose a
-settings section, receive webhooks, share typed services with other Plugins,
+settings section, fill the page beside the conversation, put a door on this
+Bot, receive webhooks, share typed services with other Plugins,
 and — when this deployment's catalog opens the claim — serve a model
 provider. You write it in TypeScript with the `plugin_*` tools, check it,
 publish it, and the User approves it in the conversation. Nothing you
 publish runs until they do.
 
 Two files are yours: `plugin.ts` (the module) and `plugin.json` (the
-descriptor). Nothing else. Skills, cards, settings and providers live in
-those two files, not as extra paths.
+descriptor). Nothing else. Skills, cards, settings, panels and providers
+live in those two files, not as extra paths.
 
 ## The loop
 
@@ -51,8 +52,8 @@ approval needed — narrowing what you can do is always yours to decide.
 `plugin_settings` reads or writes the values a Plugin's `settingsSchema`
 declares, for this Bot. Never a secret.
 
-A Plugin with no tools is valid: hooks, a provider, a trigger or a card can
-be the whole surface. A card's Bot-facing tool is `<pluginId>_<cardId>`;
+A Plugin with no tools is valid: hooks, a provider, a trigger, a card or a
+conversation panel can be the whole surface. A card's Bot-facing tool is `<pluginId>_<cardId>`;
 declaring that name yourself is refused. For the components a card may draw,
 load `managed/a2ui` with `skill_load`.
 

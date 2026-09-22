@@ -69,6 +69,7 @@ export const hooks: PluginHooks = {
   - `services` — values other Plugins that consume the same name receive.
     See `services.md`.
   - `triggers` — inbound deliveries. See `triggers.md`.
-  - `views` — `settings.sections` on this Plugin's card. See `sections.md`.
+  - `views` — a `settings.sections` block, a `conversation.panel`, or a
+    `bot.nav` door. See `sections.md` and `panels.md`.
   - `cards` — `render` plus `actions`. See `cards.md`.
   - `modelProviders` — one `stream` per provider id. See `providers.md`.
