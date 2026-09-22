@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:frockbot_native/shell/transcript.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_native/theme/states.dart';
 
 /// How the thread reads, one line per row, in the order it is drawn.
 List<String> thread(List<TranscriptLine> lines) => [
@@ -302,6 +303,99 @@ void main() {
     }
     expect(find.textContaining('Tall row 0 stays put'), findsOneWidget);
   });
+
+  testWidgets(
+    'an empty thread shows the greeting and never an Earlier messages button',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: TranscriptView(
+              lines: const [],
+              loading: false,
+              hasEarlier: true,
+              onRefresh: ({older = false}) async {},
+              onOpenRun: (_) {},
+              storageKey: 'empty-test',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('What would you like to work on?'), findsOneWidget);
+      expect(find.text('Earlier messages'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a loading empty thread shows the spinner and never an Earlier messages button',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: TranscriptView(
+              lines: const [],
+              loading: true,
+              hasEarlier: true,
+              onRefresh: ({older = false}) async {},
+              onOpenRun: (_) {},
+              storageKey: 'loading-empty-test',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(FrockLoading), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Loading your conversation'),
+        findsOneWidget,
+      );
+      expect(find.text('Earlier messages'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a thread that already fits does not fetch older pages from the first frame',
+    (tester) async {
+      var olderPages = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: TranscriptView(
+                lines: [
+                  line(
+                    runId: 'run-short',
+                    role: LineRole.assistant,
+                    text: 'Fits on one screen',
+                    at: '2026-09-05T12:19:00.000Z',
+                  ),
+                ],
+                loading: false,
+                hasEarlier: true,
+                onRefresh: ({older = false}) async {
+                  if (older) olderPages++;
+                },
+                onOpenRun: (_) {},
+                storageKey: 'fits-test',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Fits on one screen'), findsOneWidget);
+      expect(find.text('Earlier messages'), findsOneWidget);
+      expect(olderPages, 0);
+      await tester.fling(find.byType(Scrollable), const Offset(0, 400), 2000);
+      await tester.pumpAndSettle();
+      expect(olderPages, 0);
+    },
+  );
 
   group('the bubbles a thread is drawn in', () {
     /// The fill of the bubble whose content is announced as [speaker].
