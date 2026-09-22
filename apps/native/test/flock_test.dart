@@ -290,7 +290,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Delete Alpha?'), findsOneWidget);
     expect(
-      find.textContaining('removes its conversation and Applets'),
+      find.textContaining('removes its conversation and cannot be undone'),
       findsOneWidget,
     );
     await tester.tap(find.text('Cancel'));

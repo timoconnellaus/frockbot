@@ -417,7 +417,7 @@ class _BotRecoveryDetailState extends State<BotRecoveryDetail> {
                             ),
                             const SizedBox(height: 8),
                             const Text(
-                              'Permanently remove its conversation and Applets. This cannot be undone.',
+                              'Permanently remove its conversation. This cannot be undone.',
                             ),
                             const SizedBox(height: 12),
                             OutlinedButton.icon(
