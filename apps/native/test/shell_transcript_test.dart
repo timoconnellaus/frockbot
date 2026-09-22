@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:frockbot_native/shell/transcript.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_native/theme/states.dart';
 
 /// How the thread reads, one line per row, in the order it is drawn.
 List<String> thread(List<TranscriptLine> lines) => [
@@ -73,6 +74,18 @@ TranscriptLine line({
   status: status,
   pending: pending,
 );
+
+/// Whether [finder] overlaps the thread viewport. A row the cache has built
+/// but not scrolled into view is still in the tree.
+bool _onScreen(WidgetTester tester, Finder finder) {
+  if (finder.evaluate().isEmpty) return false;
+  final viewport = find.descendant(
+    of: find.byType(ListView),
+    matching: find.byType(Viewport),
+  );
+  if (viewport.evaluate().isEmpty) return false;
+  return tester.getRect(finder.first).overlaps(tester.getRect(viewport.first));
+}
 
 void main() {
   testWidgets(
@@ -185,6 +198,204 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'a reverse thread reaches earlier messages without laying out every row',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 360);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var olderPages = 0;
+      final lines = [
+        for (var index = 0; index < 16; index++)
+          TranscriptLine(
+            id: 'line-$index',
+            runId: 'run-$index',
+            role: LineRole.assistant,
+            text: index < 8
+                ? List.filled(50, 'Earlier$index').join(' ')
+                : 'Latest $index',
+            at: '2026-09-05T12:${index.toString().padLeft(2, '0')}:00.000Z',
+            status: LineStatus.completed,
+          ),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: TranscriptView(
+              lines: lines,
+              loading: false,
+              hasEarlier: true,
+              onRefresh: ({older = false}) async {
+                if (older) olderPages++;
+              },
+              onOpenRun: (_) {},
+              storageKey: 'extent-test',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(_onScreen(tester, find.text('Latest 15')), isTrue);
+      expect(_onScreen(tester, find.textContaining('Earlier0')), isFalse);
+      expect(olderPages, 0);
+
+      final position = tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position;
+      for (var attempt = 0; attempt < 24; attempt++) {
+        if (_onScreen(tester, find.text('Earlier messages')) &&
+            _onScreen(tester, find.textContaining('Earlier0'))) {
+          break;
+        }
+        position.jumpTo(position.maxScrollExtent);
+        await tester.pump();
+      }
+      expect(_onScreen(tester, find.text('Earlier messages')), isTrue);
+      expect(_onScreen(tester, find.textContaining('Earlier0')), isTrue);
+      expect(olderPages, greaterThan(0));
+    },
+  );
+
+  testWidgets('a long thread builds the oldest row when jumped to the end', (
+    tester,
+  ) async {
+    final lines = [
+      for (var index = 0; index < 80; index++)
+        TranscriptLine(
+          id: 'tall-$index',
+          runId: 'tall-$index',
+          role: LineRole.assistant,
+          text: List.filled(40, 'Tall row $index stays put').join('\n'),
+          at: '2026-09-05T${(index ~/ 60).toString().padLeft(2, '0')}:${(index % 60).toString().padLeft(2, '0')}:00.000Z',
+          status: LineStatus.completed,
+        ),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: TranscriptView(
+            lines: lines,
+            loading: false,
+            hasEarlier: false,
+            onRefresh: ({older = false}) async {},
+            onOpenRun: (_) {},
+            storageKey: 'tall-test',
+          ),
+        ),
+      ),
+    );
+    expect(find.textContaining('Tall row 79 stays put'), findsOneWidget);
+    expect(find.textContaining('Tall row 0 stays put'), findsNothing);
+
+    final position = tester
+        .state<ScrollableState>(find.byType(Scrollable))
+        .position;
+    for (var attempt = 0; attempt < 24; attempt++) {
+      if (find.textContaining('Tall row 0 stays put').evaluate().isNotEmpty) {
+        break;
+      }
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump();
+    }
+    expect(find.textContaining('Tall row 0 stays put'), findsOneWidget);
+  });
+
+  testWidgets(
+    'an empty thread shows the greeting and never an Earlier messages button',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: TranscriptView(
+              lines: const [],
+              loading: false,
+              hasEarlier: true,
+              onRefresh: ({older = false}) async {},
+              onOpenRun: (_) {},
+              storageKey: 'empty-test',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('What would you like to work on?'), findsOneWidget);
+      expect(find.text('Earlier messages'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a loading empty thread shows the spinner and never an Earlier messages button',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: TranscriptView(
+              lines: const [],
+              loading: true,
+              hasEarlier: true,
+              onRefresh: ({older = false}) async {},
+              onOpenRun: (_) {},
+              storageKey: 'loading-empty-test',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(FrockLoading), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Loading your conversation'),
+        findsOneWidget,
+      );
+      expect(find.text('Earlier messages'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a thread that already fits does not fetch older pages from the first frame',
+    (tester) async {
+      var olderPages = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: TranscriptView(
+                lines: [
+                  line(
+                    runId: 'run-short',
+                    role: LineRole.assistant,
+                    text: 'Fits on one screen',
+                    at: '2026-09-05T12:19:00.000Z',
+                  ),
+                ],
+                loading: false,
+                hasEarlier: true,
+                onRefresh: ({older = false}) async {
+                  if (older) olderPages++;
+                },
+                onOpenRun: (_) {},
+                storageKey: 'fits-test',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Fits on one screen'), findsOneWidget);
+      expect(find.text('Earlier messages'), findsOneWidget);
+      expect(olderPages, 0);
+      await tester.fling(find.byType(Scrollable), const Offset(0, 400), 2000);
+      await tester.pumpAndSettle();
+      expect(olderPages, 0);
+    },
+  );
 
   group('the bubbles a thread is drawn in', () {
     /// The fill of the bubble whose content is announced as [speaker].

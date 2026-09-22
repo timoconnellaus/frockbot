@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Earlier messages stay in reach
+
+fix
+
+A long conversation scrolls back to them, and the scrollbar holds its place.
+
 ## Installed in the Marketplace
 
 improvement
