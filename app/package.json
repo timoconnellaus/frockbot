@@ -259,6 +259,7 @@
     "./voice/memory": "./voice/memory.ts",
     "./voice/openai-realtime": "./voice/openai-realtime.ts",
     "./voice/recovery": "./voice/recovery.ts",
+    "./voice/session-memory": "./voice/session-memory.ts",
     "./voice/shared": "./voice/shared.ts",
     "./web": "./web/index.ts",
     "./web/agent": "./web/agent.ts",
