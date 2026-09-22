@@ -137,7 +137,7 @@ async function runTurn(
   await handle.agent.whenIdle();
   if (options.quiesceMs !== undefined) await Bun.sleep(options.quiesceMs);
 
-  return { events: [...handle.agent.session.events], requests };
+  return { events: [...handle.agent.session.activeRunJournal], requests };
 }
 
 /** The batch's own settled result — what the model reads back. */

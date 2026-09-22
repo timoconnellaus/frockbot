@@ -46,7 +46,7 @@ function journalEntryV1(
   runtime: LoopRuntime,
   occurrenceId: string,
 ): ToolOccurrenceJournalEntry | undefined {
-  return validateToolOccurrenceJournal(runtime.session.events).get(
+  return validateToolOccurrenceJournal(runtime.session.activeRunJournal).get(
     occurrenceId,
   );
 }
@@ -391,7 +391,7 @@ async function runBatchV1(
     const first = Math.min(...failures.keys());
     throw failures.get(first);
   }
-  const journal = validateToolOccurrenceJournal(runtime.session.events);
+  const journal = validateToolOccurrenceJournal(runtime.session.activeRunJournal);
   const results: BatchCallReportV1[] = decoded.map((sub, index) => {
     const settled = journal.get(
       batchToolOccurrenceId(occurrence.occurrenceId, index),

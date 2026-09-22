@@ -9,6 +9,7 @@ import {
   type BotDurableAuthorityHooks,
 } from "./authority.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
+import { SessionEventLog } from "./session-event-log.ts";
 import { createStoredRunCodecV1, type StoredRunV1 } from "./run-records.ts";
 
 const SQLITE_VALUE_LIMIT_BYTES = 2 * 1024 * 1024;
@@ -95,7 +96,7 @@ function legacyEvents(): SessionEvent[] {
     { type: "step/end", turn: 1, step: 1, outcome: "completed" },
     { type: "turn/end", turn: 1, outcome: "completed" },
   ]);
-  return [...session.events];
+  return [...session.activeRunJournal];
 }
 
 function legacyRun(events: SessionEvent[]): StoredRunV1<undefined> {
@@ -124,7 +125,7 @@ function createAuthority(
     bootstrapComposition: () => bootstrap(),
     admittedSnapshot: () => Promise.resolve(undefined),
     executeTurn: async (input) => {
-      let seq = input.previousEvents.length;
+      let seq = input.cursor.nextSeq;
       const events: SessionEvent[] = [];
       const persist = async (
         batch: Array<Omit<SessionEvent, "seq" | "timestamp">>,
@@ -211,6 +212,9 @@ describe("a long Turn on a legacy near-limit Session", () => {
     // already wrote. Every write made by the code under test is size-checked.
     storage.values.set("latest-events", structuredClone(previous));
     storage.values.set("run:legacy-run", structuredClone(legacyRun(previous)));
+    // The legacy blob is the whole archive. Migrating it is an explicit
+    // cleanup, not something admission does by reading it on startup.
+    await new SessionEventLog(storage).migrate(SESSION_ID);
 
     const completion = await createAuthority(storage).run({
       userId: "user-1",

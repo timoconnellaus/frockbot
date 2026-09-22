@@ -61,7 +61,7 @@ function journal(): SessionEvent[] {
       text: "hello",
     },
   ]);
-  return [...session.events];
+  return [...session.activeRunJournal];
 }
 
 function storedRun(

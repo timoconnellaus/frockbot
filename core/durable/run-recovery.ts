@@ -12,7 +12,7 @@ import type { StoredRunCodecV1, StoredRunV1 } from "./run-records.js";
 export type BotRunRecoveryPlan =
   | { kind: "complete"; responseText: string }
   | { kind: "fail"; failure: string }
-  | { kind: "restart"; previous: SessionEvent[] }
+  | { kind: "restart" }
   | { kind: "resume" };
 
 export type ModelRequestJournalState =
@@ -133,10 +133,7 @@ export function planBotRunRecovery<Snapshot>(
         new Error("assistant tool occurrences have no durable model request"),
       );
     }
-    return {
-      kind: "restart",
-      previous: [...latest.slice(0, run.previousEventCount)],
-    };
+    return { kind: "restart" };
   }
   return { kind: "resume" };
 }
@@ -237,7 +234,7 @@ export function repairedSessionLogV1(
     try {
       const session = new Session(sessionId, repaired);
       session.reconcileInterrupted();
-      repaired = [...session.events];
+      repaired = [...session.activeRunJournal];
     } catch {
       return false;
     }

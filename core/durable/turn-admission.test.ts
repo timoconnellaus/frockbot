@@ -423,7 +423,7 @@ function createAuthority(storage: MemoryStorage): TurnProbe {
       const events: SessionEvent[] = [
         {
           type: "turn/admission",
-          seq: input.previousEvents.length,
+          seq: input.cursor.nextSeq,
           timestamp: "2026-08-31T01:00:01.000Z",
           turn: 1,
           turnType: input.command.turnType ?? "chat",

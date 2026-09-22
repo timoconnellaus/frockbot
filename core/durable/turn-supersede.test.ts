@@ -162,7 +162,7 @@ function createAuthority(
       }
       const turn = observed.length;
       const handle = handleFor(runId);
-      let seq = input.previousEvents.length;
+      let seq = input.cursor.nextSeq;
       const appended: SessionEvent[] = [];
       const persist = async (
         ...events: Omit<SessionEvent, "seq" | "timestamp">[]
@@ -383,13 +383,17 @@ describe("a user message supersedes the running Turn", () => {
       (input) => input.command.runId === "run-2",
     );
     if (!replacementInput) throw new Error("the replacement Turn never ran");
-    const kinds = replacementInput.previousEvents.map((event) => event.type);
+    expect(replacementInput.journal).toEqual([]);
+    const archived = await new SessionEventLog(storage).read(
+      replacementInput.command.sessionId,
+    );
+    const kinds = archived.map((event) => event.type);
     expect(kinds).toContain("assistant/message");
     expect(kinds).toContain("turn/end");
-    // And it starts *after* them: `previousEventCount` is recomputed when the
-    // queued Turn is promoted, not when it was admitted.
+    // The replacement starts after the durable prefix. Promotion recomputes
+    // that boundary from the cursor, not from an in-memory copy of the log.
     expect(storedRun(storage, "run-2").previousEventCount).toBe(
-      replacementInput.previousEvents.length,
+      replacementInput.cursor.nextSeq,
     );
   });
 
@@ -795,11 +799,13 @@ describe("eviction between the two Turns", () => {
 });
 
 describe("a durable log left inside a Turn", () => {
-  test("is repaired at admission instead of refusing every later Turn", async () => {
+  test("a later Turn starts after an open Turn without renumbering it", async () => {
     const storage = new MemoryStorage();
-    // Exactly what a Turn that threw between `turn/start` and `turn/end`
-    // leaves behind: an open Turn, and no run to close it.
-    storage.values.set("latest-events", [
+    const log = new SessionEventLog(storage);
+    // An open Turn with no run left to close it. The next Turn's journal does
+    // not include it, so admission does not rewrite the archive to insert a
+    // `turn/end` and give everything after a new sequence number.
+    await log.rewrite("user-1:primary", [
       {
         type: "session/created",
         createdAt: "2026-09-03T00:00:00.000Z",
@@ -820,26 +826,20 @@ describe("a durable log left inside a Turn", () => {
     probe.handle("run-1").finish();
     await run;
 
-    const events = await new SessionEventLog(storage).read("user-1:primary");
-    // The orphaned Turn is closed, so the new one starts.
-    expect(events[2]).toMatchObject({
-      type: "turn/end",
-      turn: 1,
-      outcome: "interrupted",
-    });
+    const events = await log.read("user-1:primary");
+    expect(events[1]).toMatchObject({ type: "turn/start", turn: 1, seq: 1 });
+    expect(events.at(-1)).toMatchObject({ type: "turn/end" });
     expect(storedRun(storage, "run-1").status).toBe("completed");
   });
 
-  test("is repaired even once refused Turns have been logged behind it", async () => {
+  test("a later Turn starts when an older Turn was left open behind it", async () => {
     const storage = new MemoryStorage();
-    // What production actually holds on a Bot wedged before the repair
-    // existed. The Agent loop journals `turn/start` durably and only then
-    // assembles the request that discovers turn 1 is still open, so every
-    // refused message left a *complete* Turn of its own behind the abandoned
-    // one — and the log stopped ending inside a Turn. The trailing-open test
-    // then said there was nothing to repair, so admission repaired nothing and
-    // the next message failed exactly the same way, forever.
-    storage.values.set("latest-events", [
+    const log = new SessionEventLog(storage);
+    // A refused message journaled its own closed Turn behind the abandoned
+    // one. Closing that abandoned Turn would mean inserting events and
+    // renumbering the suffix. The next Turn's journal is only its own run,
+    // so it does not revalidate the archive and the original sequences stay.
+    await log.rewrite("user-1:primary", [
       {
         type: "session/created",
         createdAt: "2026-09-03T00:00:00.000Z",
@@ -874,41 +874,12 @@ describe("a durable log left inside a Turn", () => {
     probe.handle("run-1").finish();
     await run;
 
-    const events = await new SessionEventLog(storage).read("user-1:primary");
-    // Turn 1 is closed where it was abandoned, not after the Turns that
-    // followed it, and the log is resequenced around the insertion.
-    expect(
-      events
-        .slice(0, 5)
-        .map((event) =>
-          event.type === "turn/start" || event.type === "turn/end"
-            ? `${event.type}:${event.turn}`
-            : event.type,
-        ),
-    ).toEqual([
-      "session/created",
-      "turn/start:1",
-      "turn/end:1",
-      "turn/start:2",
-      "turn/end:2",
-    ]);
-    expect(events[2]).toMatchObject({
-      type: "turn/end",
-      turn: 1,
-      outcome: "interrupted",
-    });
-    expect(events.map((event) => event.seq)).toEqual(
-      events.map((_event, index) => index),
-    );
-    // The repaired history is one the invariant accepts, which is what the
-    // refused Turns were failing on. (The stub Agent below numbers its own
-    // Turn rather than reading `nextTurn`, so only the repaired prefix is the
-    // subject here.)
-    expect(() =>
-      validateToolOccurrenceJournal(events.slice(0, 5)),
-    ).not.toThrow();
+    const events = await log.read("user-1:primary");
+    expect(events[1]).toMatchObject({ type: "turn/start", turn: 1, seq: 1 });
+    expect(events[2]).toMatchObject({ type: "turn/start", turn: 2, seq: 2 });
+    expect(events[3]).toMatchObject({ type: "turn/end", turn: 2, seq: 3 });
     expect(storedRun(storage, "run-1").status).toBe("completed");
-    expect(storedRun(storage, "run-1").previousEventCount).toBe(5);
+    expect(storedRun(storage, "run-1").previousEventCount).toBe(4);
   });
 });
 

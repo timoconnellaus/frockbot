@@ -67,7 +67,7 @@ function interruptedJournal(): SessionEvent[] {
       },
     },
   ]);
-  return [...session.events];
+  return [...session.activeRunJournal];
 }
 
 function storedRun(
@@ -115,7 +115,7 @@ async function settled(
 function admitNextTurn(latest: SessionEvent[]): void {
   const session = new Session(SESSION_ID, latest);
   session.append({ type: "turn/start", turn: 2 });
-  validateToolOccurrenceJournal(session.events);
+  validateToolOccurrenceJournal(session.activeRunJournal);
 }
 
 describe("settling a Turn interrupted mid-answer", () => {
@@ -177,7 +177,7 @@ describe("settling a Turn interrupted mid-answer", () => {
       { type: "step/end", turn: 1, step: 1, outcome: "cancelled" },
       { type: "turn/end", turn: 1, outcome: "cancelled" },
     ]);
-    const events = [...session.events];
+    const events = [...session.activeRunJournal];
     await storage.put({
       [KEYS.activeRun]: "run-1",
       [KEYS.run]: storedRun(events, {

@@ -95,7 +95,7 @@ describe("a Turn that runs out of wall clock", () => {
     // The model request is left in the log with no answer — it carries its
     // own key, so it could be sent again — and the deadline settles the Turn
     // regardless, because a run the clock stopped will never resume.
-    const journal = handle.agent.session.events;
+    const journal = handle.agent.session.activeRunJournal;
     expect(journal.some((event) => event.type === "model/request")).toBe(true);
     expect(journal.some((event) => event.type === "assistant/message")).toBe(
       false,
@@ -151,7 +151,7 @@ describe("a Turn that runs out of wall clock", () => {
     handle.agent.send("Call the tool that never answers.");
     await handle.agent.whenIdle();
 
-    const journal = handle.agent.session.events;
+    const journal = handle.agent.session.activeRunJournal;
     const result = journal.findLast((event) => event.type === "tool/result");
     if (result?.type !== "tool/result") {
       throw new Error("the tool call was left open");
@@ -200,7 +200,7 @@ describe("a Turn that runs out of wall clock", () => {
     handle.agent.send("Stall before the model.");
     await handle.agent.whenIdle();
 
-    const end = handle.agent.session.events.findLast(
+    const end = handle.agent.session.activeRunJournal.findLast(
       (event) => event.type === "turn/end",
     );
     if (end?.type !== "turn/end") throw new Error("the Turn never ended");
@@ -238,19 +238,19 @@ describe("a model request the provider says never started", () => {
     await handle.agent.whenIdle();
 
     expect(attempts).toBe(2);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
     // Two dispatches of one key, so the log shows both sends and the retry
     // that connected them.
-    const sends = handle.agent.session.events.filter(
+    const sends = handle.agent.session.activeRunJournal.filter(
       (event) => event.type === "model/request",
     );
     expect(sends).toHaveLength(2);
     expect(new Set(sends.map((event) => event.request.requestId)).size).toBe(1);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/retry",
       ),
     ).toHaveLength(1);
@@ -278,7 +278,7 @@ describe("a model request the provider says never started", () => {
     await handle.agent.whenIdle();
 
     expect(attempts).toBe(2);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "model-error",
       reason: "invalid api key",
@@ -310,7 +310,7 @@ describe("a model request the provider says never started", () => {
 
     expect(dispatched).toHaveLength(2);
     expect(dispatched[0]).toBe(dispatched[1]);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "model-error",
     });
@@ -361,7 +361,7 @@ describe("classified model retry policy", () => {
     expect(attempts).toBe(2);
     expect(sleeps).toEqual([500]);
     expect(
-      handle.agent.session.events.find((event) => event.type === "model/retry"),
+      handle.agent.session.activeRunJournal.find((event) => event.type === "model/retry"),
     ).toMatchObject({
       attempt: 2,
       classification: "transient",
@@ -395,7 +395,7 @@ describe("classified model retry policy", () => {
 
     expect(attempts).toBe(1);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/retry",
       ),
     ).toHaveLength(0);

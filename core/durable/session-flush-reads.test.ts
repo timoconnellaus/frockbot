@@ -36,6 +36,23 @@ class ReadRecordingStorage extends MemoryStorage {
     if (this.recording) this.reads.push(key);
     return super.get<T>(key);
   }
+
+  override list<T>(options: {
+    prefix?: string;
+    start?: string;
+    end?: string;
+    reverse?: boolean;
+    limit?: number;
+  }): Promise<Map<string, T>> {
+    if (
+      this.recording &&
+      options.limit === undefined &&
+      (options.prefix ?? "").startsWith("session-events:")
+    ) {
+      throw new Error("unbounded archive read");
+    }
+    return super.list(options);
+  }
 }
 
 function bootstrap(): Promise<CompositionGenerationV1> {
@@ -109,7 +126,7 @@ function turnOf(
   recorder?: ReadRecordingStorage,
 ): BotDurableAuthorityHooks<undefined>["executeTurn"] {
   return async (input) => {
-    let seq = input.previousEvents.length;
+    let seq = input.cursor.nextSeq;
     const events: SessionEvent[] = [];
     for (const batch of batches) {
       const stamped = batch.map(

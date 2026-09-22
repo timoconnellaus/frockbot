@@ -11,6 +11,12 @@ import {
   SESSION_EVENT_PAYLOAD_PREFIX,
 } from "./storage-keys.js";
 import { sha256HexTextV1 } from "../crypto.js";
+import {
+  projectSessionAppendV1,
+  projectSessionReplaceV1,
+  projectSessionTruncateV1,
+  type WorkingContextAppendMetaV1,
+} from "./working-context.js";
 
 /** Maximum serialized size of one Session page value. */
 export const SESSION_EVENT_PAGE_BYTES_V1 = 256 * 1024;
@@ -27,7 +33,17 @@ export interface SessionEventLogStorage {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string | Record<string, unknown>, value?: unknown): Promise<void>;
   delete(key: string): Promise<boolean>;
-  list<T>(options: { prefix: string }): Promise<Map<string, T>>;
+  /**
+   * `limit` bounds the page. A projection walk always passes one; listing a
+   * prefix with no limit is an archive scan.
+   */
+  list<T>(options: {
+    prefix: string;
+    start?: string;
+    end?: string;
+    reverse?: boolean;
+    limit?: number;
+  }): Promise<Map<string, T>>;
 }
 
 interface SessionEventLogIndexV1 {
@@ -609,9 +625,22 @@ export class SessionEventLog {
     return events;
   }
 
+  async eventCount(sessionId: string): Promise<number> {
+    const index = requireIndex(
+      await this.storage.get<SessionEventLogIndexV1>(
+        sessionEventLogIndexKeyV1(sessionId),
+      ),
+      sessionId,
+    );
+    if (index) return index.eventCount;
+    const legacy = await this.storage.get<unknown[]>(LATEST_EVENTS_KEY);
+    return Array.isArray(legacy) ? legacy.length : 0;
+  }
+
   async append(
     sessionId: string,
     events: readonly SessionEvent[],
+    meta?: WorkingContextAppendMetaV1,
   ): Promise<void> {
     if (events.length === 0) return;
     let index = requireIndex(
@@ -643,6 +672,9 @@ export class SessionEventLog {
       decoded.map((event) => this.storedEvent(sessionId, event)),
     );
     await this.appendStored(sessionId, index, entries);
+    // Same transaction as the authoritative append: a thrown projection
+    // rejection rolls the events back with it.
+    await projectSessionAppendV1(this.storage, sessionId, decoded, meta);
   }
 
   async rewrite(
@@ -674,6 +706,7 @@ export class SessionEventLog {
     }
     await this.rebaseRunRanges(sessionId, previous, decoded);
     await this.storage.delete(LATEST_EVENTS_KEY);
+    await projectSessionReplaceV1(this.storage, sessionId, decoded);
   }
 
   private async storedEvent(
@@ -854,6 +887,82 @@ export class SessionEventLog {
       await this.storage.delete(sessionEventLogPageKey(sessionId, page));
     }
     await this.storage.delete(sessionEventLogIndexKeyV1(sessionId));
+  }
+
+  /**
+   * Drops a trailing suffix without hydrating earlier payloads.
+   *
+   * A restart discards the run it is about to begin again. The pages at and
+   * after `startSeq` are the suffix; earlier pages stay where they are, and
+   * their sequence numbers do not move.
+   */
+  async truncateSuffix(sessionId: string, startSeq: number): Promise<void> {
+    if (!Number.isSafeInteger(startSeq) || startSeq < 0) {
+      throw new Error("Session event truncate boundary is invalid");
+    }
+    const index = requireIndex(
+      await this.storage.get<SessionEventLogIndexV1>(
+        sessionEventLogIndexKeyV1(sessionId),
+      ),
+      sessionId,
+    );
+    if (!index || startSeq >= index.eventCount) return;
+    let pageCount = index.pageCount;
+    for (let page = index.pageCount - 1; page >= 0; page -= 1) {
+      const stored = requirePage(
+        await this.storage.get<StoredSessionEventPageV1>(
+          sessionEventLogPageKey(sessionId, page),
+        ),
+        sessionId,
+        page,
+      );
+      if (stored.startSeq >= startSeq) {
+        await this.deletePagePayloads(sessionId, stored);
+        await this.storage.delete(sessionEventLogPageKey(sessionId, page));
+        pageCount = page;
+        continue;
+      }
+      const kept = stored.entries.filter(
+        (entry) => storedEventSeq(entry) < startSeq,
+      );
+      if (kept.length !== stored.entries.length) {
+        for (const entry of stored.entries) {
+          if (storedEventSeq(entry) < startSeq || entry.storage !== "cut") {
+            continue;
+          }
+          for (let chunk = 0; chunk < entry.payload.chunks; chunk += 1) {
+            await this.storage.delete(
+              sessionEventPayloadKey(sessionId, entry.projection.seq, chunk),
+            );
+          }
+        }
+        await this.storage.put(sessionEventLogPageKey(sessionId, page), {
+          ...stored,
+          entries: kept,
+        });
+      }
+      break;
+    }
+    await this.storage.put(sessionEventLogIndexKeyV1(sessionId), {
+      ...index,
+      eventCount: startSeq,
+      pageCount,
+    });
+    await projectSessionTruncateV1(this.storage, sessionId, startSeq);
+  }
+
+  private async deletePagePayloads(
+    sessionId: string,
+    stored: StoredSessionEventPageV1,
+  ): Promise<void> {
+    for (const entry of stored.entries) {
+      if (entry.storage !== "cut") continue;
+      for (let chunk = 0; chunk < entry.payload.chunks; chunk += 1) {
+        await this.storage.delete(
+          sessionEventPayloadKey(sessionId, entry.projection.seq, chunk),
+        );
+      }
+    }
   }
 
   /**

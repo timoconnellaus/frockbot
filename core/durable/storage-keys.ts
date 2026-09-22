@@ -36,6 +36,60 @@ export const SESSION_EVENT_LOG_PREFIX = "session-events:";
 export const SESSION_EVENT_LOG_INDEX_PREFIX = `${SESSION_EVENT_LOG_PREFIX}index:`;
 export const SESSION_EVENT_LOG_PAGE_PREFIX = `${SESSION_EVENT_LOG_PREFIX}page:`;
 export const SESSION_EVENT_PAYLOAD_PREFIX = `${SESSION_EVENT_LOG_PREFIX}payload:`;
+/** Working-context projection. Derived; the event log stays authoritative. */
+export const WORKING_CONTEXT_PREFIX = "context:";
+export const WORKING_CONTEXT_HEAD_PREFIX = `${WORKING_CONTEXT_PREFIX}head:`;
+export const WORKING_CONTEXT_TURN_PREFIX = `${WORKING_CONTEXT_PREFIX}turn:`;
+export const WORKING_CONTEXT_PAGE_PREFIX = `${WORKING_CONTEXT_PREFIX}page:`;
+export const WORKING_CONTEXT_CHUNK_PREFIX = `${WORKING_CONTEXT_PREFIX}chunk:`;
+export const WORKING_CONTEXT_VOICE_PREFIX = `${WORKING_CONTEXT_PREFIX}voice:`;
+
+function contextSessionPart(sessionId: string): string {
+  return encodeURIComponent(sessionId);
+}
+
+export function workingContextHeadKeyV1(sessionId: string): string {
+  return `${WORKING_CONTEXT_HEAD_PREFIX}${contextSessionPart(sessionId)}`;
+}
+
+export function workingContextTurnPrefixV1(sessionId: string): string {
+  return `${WORKING_CONTEXT_TURN_PREFIX}${contextSessionPart(sessionId)}:`;
+}
+
+export function workingContextTurnKeyV1(
+  sessionId: string,
+  turn: number,
+): string {
+  return `${workingContextTurnPrefixV1(sessionId)}${String(turn).padStart(10, "0")}`;
+}
+
+export function workingContextPagePrefixV1(
+  sessionId: string,
+  turn: number,
+): string {
+  return `${WORKING_CONTEXT_PAGE_PREFIX}${contextSessionPart(sessionId)}:${String(turn).padStart(10, "0")}:`;
+}
+
+export function workingContextPageKeyV1(
+  sessionId: string,
+  turn: number,
+  page: number,
+): string {
+  return `${workingContextPagePrefixV1(sessionId, turn)}${String(page).padStart(6, "0")}`;
+}
+
+export function workingContextChunkKeyV1(
+  sessionId: string,
+  turn: number,
+  messageIndex: number,
+  chunk: number,
+): string {
+  return `${WORKING_CONTEXT_CHUNK_PREFIX}${contextSessionPart(sessionId)}:${String(turn).padStart(10, "0")}:${String(messageIndex).padStart(6, "0")}:${String(chunk).padStart(6, "0")}`;
+}
+
+export function workingContextVoiceKeyV1(sessionId: string): string {
+  return `${WORKING_CONTEXT_VOICE_PREFIX}${contextSessionPart(sessionId)}`;
+}
 export const IDENTITY_KEY = "identity";
 export const NOTIFICATION_PREFIX = "notification:";
 // The Composition keys below are the User Durable Object's records (ADR 0026)

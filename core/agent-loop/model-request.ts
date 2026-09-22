@@ -122,7 +122,7 @@ export async function requestModelV1(
   pending?: NormalizedModelRequest,
 ): Promise<ModelResponse> {
   const { services, session, options } = runtime;
-  validateSettledToolOccurrenceJournal(session.events);
+  validateSettledToolOccurrenceJournal(session.activeRunJournal);
   const assembly = await services.systemPrompt.assemble({
     sessionId: session.id,
     provider: options.provider,

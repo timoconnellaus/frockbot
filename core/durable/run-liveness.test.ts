@@ -318,7 +318,7 @@ describe("the read that repairs what it finds", () => {
       { type: "turn/start", turn: 9 },
       { type: "step/start", turn: 9, step: 1 },
     ]);
-    const log = [...conversation.events];
+    const log = [...conversation.activeRunJournal];
     await new SessionEventLog(storage).rewrite("user-1:primary", log);
     const stored = run({
       acceptedAt: new Date().toISOString(),
