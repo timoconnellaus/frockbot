@@ -151,12 +151,65 @@ export function openMemorySchemaV1(sql: MemorySqlV1): void {
       ON memory_index_intent (state, next_attempt_at)`,
   );
   sql.exec(
+    `CREATE TABLE IF NOT EXISTS memory_source_retention (
+      scope_key TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      source_revision TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      locator TEXT NOT NULL,
+      captured_text TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      obligation_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      PRIMARY KEY (scope_key, source_id, source_revision))`,
+  );
+  sql.exec(
+    `CREATE INDEX IF NOT EXISTS memory_source_retention_obligation
+      ON memory_source_retention (obligation_id)`,
+  );
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS memory_outbox (
+      id TEXT PRIMARY KEY,
+      destination_scope_key TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      state TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      acked_at TEXT)`,
+  );
+  sql.exec(
+    `CREATE INDEX IF NOT EXISTS memory_outbox_due
+      ON memory_outbox (state, created_at)`,
+  );
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS memory_job_result (
+      job_id TEXT PRIMARY KEY,
+      body TEXT NOT NULL)`,
+  );
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS memory_vector_ledger (
+      vector_id TEXT PRIMARY KEY,
+      scope_key TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      item_generation INTEGER NOT NULL,
+      operation TEXT NOT NULL,
+      policy_id TEXT NOT NULL,
+      mutation_id TEXT,
+      state TEXT NOT NULL,
+      next_attempt_at INTEGER NOT NULL)`,
+  );
+  sql.exec(
+    `CREATE INDEX IF NOT EXISTS memory_vector_ledger_item
+      ON memory_vector_ledger (scope_key, item_id, item_generation)`,
+  );
+  sql.exec(
     `CREATE VIRTUAL TABLE IF NOT EXISTS memory_item_fts USING fts5(
       text,
       scope_key UNINDEXED,
       id UNINDEXED,
       tokenize='unicode61')`,
   );
+  ensureColumnV1(sql, "memory_job", "principal", "TEXT");
+  ensureColumnV1(sql, "memory_index_intent", "claim_token", "TEXT");
   const existing = sql
     .exec<{ value: string }>(
       "SELECT value FROM memory_meta WHERE key = 'schema-version'",
@@ -177,4 +230,17 @@ export function memorySchemaVersionV1(sql: MemorySqlV1): string | undefined {
     )
     .toArray();
   return rows[0]?.value;
+}
+
+function ensureColumnV1(
+  sql: MemorySqlV1,
+  table: string,
+  column: string,
+  definition: string,
+): void {
+  const rows = sql
+    .exec<{ name: string }>(`PRAGMA table_info(${table})`)
+    .toArray();
+  if (rows.some((row) => row.name === column)) return;
+  sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }

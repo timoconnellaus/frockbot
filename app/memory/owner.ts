@@ -4,9 +4,12 @@
 import { MemoryEngineV1 } from "./engine.js";
 import {
   authorizeMemoryScopeV1,
-  type MemoryAuthorityV1,
+  type MemoryAdmitOutboxRequestV1,
+  type MemoryAdmitOutboxResultV1,
   type MemoryBrowseRequestV1,
   type MemoryBrowseResultV1,
+  type MemoryCaptureExtractionRequestV1,
+  type MemoryCaptureResultV1,
   type MemoryExpandRequestV1,
   type MemoryExpandResultV1,
   type MemoryForgetRequestV1,
@@ -62,12 +65,22 @@ export class MemoryRecordsV1 {
     this.#remote = options.remote;
   }
 
+  ensureWakeup(): void {
+    this.engine.ensureWakeup();
+  }
+
   nextWakeupAt(): number | undefined {
     return this.engine.nextWakeupAt();
   }
 
-  ensureWakeup(): void {
-    this.engine.ensureWakeup();
+  captureExtraction(
+    request: MemoryCaptureExtractionRequestV1,
+  ): MemoryCaptureResultV1 {
+    return this.engine.captureExtraction(request);
+  }
+
+  admitOutbox(request: MemoryAdmitOutboxRequestV1): MemoryAdmitOutboxResultV1 {
+    return this.engine.admitOutbox(request);
   }
 
   async write(request: MemoryWriteRequestV1): Promise<MemoryWriteResultV1> {
@@ -150,6 +163,14 @@ export class MemoryRecordsV1 {
       status,
       omissions: mergedOmissions,
       membershipRevision: request.authority.membershipRevision,
+      semanticCoverage:
+        localResult?.semanticCoverage === "partial" ||
+        remoteResult?.semanticCoverage === "partial"
+          ? "partial"
+          : localResult?.semanticCoverage === "unconfirmed" ||
+              remoteResult?.semanticCoverage === "unconfirmed"
+            ? "unconfirmed"
+            : (localResult?.semanticCoverage ?? remoteResult?.semanticCoverage),
     };
   }
 

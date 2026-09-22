@@ -17,25 +17,47 @@ import {
   authorizeMemoryScopeV1,
   createdByPrincipalV1,
   decodeMemoryScopeKeyV1,
+  isMemoryProfileSubjectV1,
   memoryCanonicalKeyV1,
+  memoryItemVectorIdV1,
+  memoryJobBackoffMsV1,
   memoryScopeKeyV1,
+  memoryTokenEstimateV1,
   MEMORY_BROWSE_SECTIONS_V1,
+  MEMORY_CORE_POLICY_VERSION_V1,
+  MEMORY_CORE_TOKEN_BUDGET_V1,
+  MEMORY_DRAIN_LOCAL_LIMIT_V1,
+  MEMORY_EMBEDDING_POLICY_ID_V1,
+  MEMORY_JOB_CONTINUATION_MS_V1,
   MEMORY_JOB_WAKEUP_MS_V1,
   MEMORY_MAX_BROWSE_PAGE_V1,
+  MEMORY_MAX_CAPTURE_CHARS_V1,
   MEMORY_MAX_EXPAND_REFS_V1,
+  MEMORY_MAX_JOB_ATTEMPTS_V1,
   MEMORY_MAX_LEAF_MANIFEST_V1,
   MEMORY_MAX_SOURCE_EXCERPT_V1,
   MEMORY_MAX_SOURCES_V1,
   MEMORY_MAX_TEXT_CHARS_V1,
+  MEMORY_PENDING_INDEX_PAGE_V1,
   MEMORY_RECALL_PAGE_V1,
+  MEMORY_TOPIC_POLICY_VERSION_V1,
+  type MemoryAbandonObligationRequestV1,
+  type MemoryAbandonResultV1,
+  type MemoryAdmitOutboxRequestV1,
+  type MemoryAdmitOutboxResultV1,
+  type MemoryAuthorityV1,
   type MemoryBrowseRequestV1,
   type MemoryBrowseResultV1,
   type MemoryBrowseSectionV1,
+  type MemoryCaptureExtractionRequestV1,
+  type MemoryCaptureResultV1,
   type MemoryCompletenessV1,
+  type MemoryConsolidatedObservationV1,
   type MemoryEngineScopeKindV1,
   type MemoryEvidenceV1,
   type MemoryExpandRequestV1,
   type MemoryExpandResultV1,
+  type MemoryExtractedProposalV1,
   type MemoryForgetReceiptV1,
   type MemoryForgetRequestV1,
   type MemoryForgetResultV1,
@@ -43,14 +65,20 @@ import {
   type MemoryItemKindV1,
   type MemoryItemRecordV1,
   type MemoryItemStatusV1,
+  type MemoryJobKindV1,
+  type MemoryJobPrincipalV1,
+  type MemoryJobStateV1,
   type MemoryLeafManifestV1,
   type MemoryEngineOmissionV1,
   type MemoryOperationsV1,
+  type MemoryOutboxPayloadV1,
   type MemoryPreparedCoreRequestV1,
   type MemoryPreparedCoreResultV1,
   type MemoryRecallRequestV1,
   type MemoryRecallResultV1,
+  type MemoryRelationV1,
   type MemoryScopeRefV1,
+  type MemorySemanticCoverageV1,
   type MemorySourceInputV1,
   type MemorySourceKindV1,
   type MemorySourceLocatorV1,
@@ -76,6 +104,100 @@ type ItemRow = {
   created_by: string;
   confidence: number | null;
 };
+
+type JobRow = {
+  id: string;
+  kind: string;
+  scope_key: string;
+  source_ref: string | null;
+  input_generation: number;
+  state: string;
+  attempt: number;
+  next_attempt_at: number;
+  claim_token: string | null;
+  effect_ref: string | null;
+  principal: string | null;
+};
+
+type IndexIntentRow = {
+  scope_key: string;
+  item_id: string;
+  item_generation: number;
+  operation: string;
+  vector_id: string;
+  state: string;
+  mutation_id: string | null;
+  claim_token: string | null;
+  next_attempt_at: number;
+};
+
+type RetentionRow = {
+  scope_key: string;
+  source_id: string;
+  source_revision: string;
+  kind: string;
+  locator: string;
+  captured_text: string;
+  captured_at: string;
+  obligation_id: string;
+  state: string;
+};
+
+export interface MemoryClaimedJobV1 {
+  id: string;
+  kind: MemoryJobKindV1;
+  scopeKey: string;
+  scope: MemoryScopeRefV1;
+  sourceRef?: string;
+  inputGeneration: number;
+  attempt: number;
+  claimToken: string;
+  effectRef?: string;
+  principal?: MemoryJobPrincipalV1;
+  authority: MemoryAuthorityV1;
+}
+
+export interface MemoryClaimedIndexIntentV1 {
+  scopeKey: string;
+  itemId: string;
+  itemGeneration: number;
+  operation: "upsert" | "delete";
+  vectorId: string;
+  claimToken: string;
+  text?: string;
+}
+
+export type MemoryClaimedBatchV1 =
+  | { kind: "local"; jobs: MemoryClaimedJobV1[] }
+  | { kind: "external"; jobs: MemoryClaimedJobV1[] }
+  | { kind: "index"; intent: MemoryClaimedIndexIntentV1 }
+  | { kind: "idle"; jobs: [] };
+
+export interface MemoryJobInspectV1 {
+  id: string;
+  kind: MemoryJobKindV1;
+  scopeKey: string;
+  sourceRef?: string;
+  inputGeneration: number;
+  state: MemoryJobStateV1;
+  attempt: number;
+  nextAttemptAt: number;
+  claimToken?: string;
+  effectRef?: string;
+  principal?: MemoryJobPrincipalV1;
+}
+
+export interface MemoryIndexIntentInspectV1 {
+  scopeKey: string;
+  itemId: string;
+  itemGeneration: number;
+  operation: "upsert" | "delete";
+  vectorId: string;
+  state: string;
+  mutationId?: string;
+  claimToken?: string;
+  nextAttemptAt: number;
+}
 
 export interface MemoryEngineOptionsV1 {
   storage: MemorySqlStorageV1;
@@ -127,7 +249,7 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     const intent = this.#sql
       .exec<{ next_attempt_at: number }>(
         `SELECT next_attempt_at FROM memory_index_intent
-         WHERE state = 'pending'
+         WHERE state IN ('pending', 'claimed')
          ORDER BY next_attempt_at ASC LIMIT 1`,
       )
       .toArray()[0];
@@ -200,9 +322,9 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     const createdBy =
       request.createdBy ?? createdByPrincipalV1(request.authority);
     const itemId = itemIdForOperationV1(request.operationKey);
+    this.open();
     try {
       const result = this.#storage.transactionSync(() => {
-        this.open();
         this.step("open");
         const existingReceipt = this.receipt(scopeKey, request.operationKey);
         if (existingReceipt) {
@@ -252,6 +374,14 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
           )
           .toArray()[0];
         const suppressedOverride = Number(suppressed?.n ?? 0) > 0;
+        const origin = request.origin ?? "explicit";
+        if (suppressedOverride && origin !== "explicit") {
+          return {
+            status: "refused",
+            reason:
+              "forgotten evidence cannot be reintroduced by extraction or consolidation",
+          } satisfies MemoryWriteResultV1;
+        }
         if (suppressedOverride) {
           this.#sql.exec(
             `DELETE FROM memory_suppression WHERE scope_key = ? AND exact_key = ?`,
@@ -265,7 +395,7 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
             scope_key, id, generation, kind, status, canonical_key, text,
             subject_key, predicate_key, occurred_at, recorded_at, valid_from,
             valid_to, created_by, confidence)
-           VALUES (?, ?, 1, ?, 'active', ?, ?, ?, NULL, ?, ?, ?, NULL, ?, NULL)`,
+           VALUES (?, ?, 1, ?, 'active', ?, ?, ?, NULL, ?, ?, ?, NULL, ?, ?)`,
           scopeKey,
           itemId,
           kind,
@@ -276,13 +406,22 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
           recordedAt,
           recordedAt,
           createdBy,
+          request.confidence ?? null,
         );
         this.upsertFts(scopeKey, itemId, text);
         this.step("fts");
         this.writeSources(scopeKey, itemId, sources);
         this.step("sources");
         if (kind === "observation") {
-          this.writeObservationLeaves(scopeKey, itemId, sources);
+          this.writeObservationLeaves(
+            scopeKey,
+            itemId,
+            request.leafItems ??
+              sources.map((source) => ({ itemId: source.sourceId })),
+          );
+        }
+        if (request.relations) {
+          this.writeRelations(scopeKey, itemId, request.relations);
         }
         if (request.replaces) {
           this.#sql.exec(
@@ -318,6 +457,24 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
         }
         this.bumpGeneration(scopeKey);
         this.queueIndexIntent(scopeKey, itemId, "upsert", now);
+        this.queueJob({
+          id: `core-rebuild:${scopeKey}`,
+          kind: "core-rebuild",
+          scopeKey,
+          sourceRef: itemId,
+          inputGeneration: this.scopeGeneration(scopeKey),
+          now,
+        });
+        if (request.subjectKey) {
+          this.queueJob({
+            id: `topic-rebuild:${scopeKey}:${request.subjectKey}`,
+            kind: "topic-rebuild",
+            scopeKey,
+            sourceRef: request.subjectKey,
+            inputGeneration: this.scopeGeneration(scopeKey),
+            now,
+          });
+        }
         this.step("jobs");
         const receipt: MemoryWriteReceiptV1 = {
           operationKey: request.operationKey,
@@ -355,9 +512,9 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     }
     const scopeKey = memoryScopeKeyV1(request.scope);
     const now = this.#now();
+    this.open();
     try {
       const result = this.#storage.transactionSync(() => {
-        this.open();
         const existingReceipt = this.receipt(scopeKey, request.operationKey);
         if (existingReceipt) {
           return JSON.parse(existingReceipt) as MemoryForgetResultV1;
@@ -419,12 +576,31 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
           Number(target.generation),
         );
         this.queueJob({
+          id: `view-repair:${scopeKey}`,
           kind: "view-repair",
           scopeKey,
           sourceRef: target.id,
           inputGeneration: this.scopeGeneration(scopeKey),
           now,
         });
+        this.queueJob({
+          id: `core-rebuild:${scopeKey}`,
+          kind: "core-rebuild",
+          scopeKey,
+          sourceRef: target.id,
+          inputGeneration: this.scopeGeneration(scopeKey),
+          now,
+        });
+        if (target.subject_key) {
+          this.queueJob({
+            id: `topic-rebuild:${scopeKey}:${target.subject_key}`,
+            kind: "topic-rebuild",
+            scopeKey,
+            sourceRef: target.subject_key,
+            inputGeneration: this.scopeGeneration(scopeKey),
+            now,
+          });
+        }
         this.bumpGeneration(scopeKey);
         this.step("jobs");
         const receipt: MemoryForgetReceiptV1 = {
@@ -552,12 +728,31 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
         hit.item.canonicalKey,
       );
     });
+    let coverage: MemorySemanticCoverageV1 = "none";
+    try {
+      coverage = this.semanticCoverageFor(
+        authorized.map((scope) => memoryScopeKeyV1(scope)),
+      );
+    } catch {
+      coverage = "none";
+    }
+    if (coverage === "partial") {
+      omissions.push({
+        reason:
+          "semantic index coverage is partial; exact and lexical recall already see committed items",
+      });
+    } else if (coverage === "unconfirmed") {
+      omissions.push({
+        reason:
+          "Vectorize mutations are unconfirmed; exact and lexical recall already see committed items",
+      });
+    }
     const page = filtered.slice(0, budget);
     const status: MemoryCompletenessV1 = channelFailed
       ? "unavailable"
       : page.length === 0
         ? "empty"
-        : filtered.length > budget
+        : filtered.length > budget || coverage === "partial"
           ? "partial"
           : "complete";
     return {
@@ -568,6 +763,7 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
         : {}),
       omissions,
       membershipRevision: request.authority.membershipRevision,
+      semanticCoverage: coverage,
     };
   }
 
@@ -734,39 +930,9 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     this.open();
     const scopeKey = memoryScopeKeyV1(request.scope);
     const epoch = this.invalidationEpoch(scopeKey);
-    const projection = request.topic
-      ? this.#sql
-          .exec<{
-            generation: number;
-            policy_version: number;
-            checked_invalidation_epoch: number;
-            body: string;
-            manifest: string;
-          }>(
-            `SELECT generation, policy_version, checked_invalidation_epoch, body, manifest
-             FROM memory_projection
-             WHERE scope_key = ? AND name = ?`,
-            scopeKey,
-            `topic:${request.topic}`,
-          )
-          .toArray()[0]
-      : undefined;
-    if (projection) {
-      if (Number(projection.checked_invalidation_epoch) !== epoch) {
-        const manifest = decodeManifestV1(projection.manifest);
-        if (!this.manifestValid(scopeKey, manifest)) {
-          return {
-            sections: [],
-            status: "unavailable",
-            omissions: [
-              {
-                reason: "that topic page is no longer valid",
-                scope: request.scope,
-              },
-            ],
-          };
-        }
-      }
+    if (request.topic) {
+      const stored = this.readTopicProjection(scopeKey, request.topic, epoch);
+      if (stored) return stored;
     }
     const budget = Math.min(
       request.budget ?? MEMORY_MAX_BROWSE_PAGE_V1,
@@ -927,6 +1093,828 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
             ? "partial"
             : "complete",
     };
+  }
+
+  captureExtraction(
+    request: MemoryCaptureExtractionRequestV1,
+  ): MemoryCaptureResultV1 {
+    const destination = request.destinationScope ?? request.scope;
+    const owned = this.refuseOwned(request.scope);
+    if (owned) return { status: "refused", reason: owned };
+    const authorized = authorizeMemoryScopeV1(request.authority, request.scope);
+    if (authorized) return { status: "refused", reason: authorized };
+    const destOwned = this.refuseOwned(destination);
+    const destAuthorized = authorizeMemoryScopeV1(
+      request.authority,
+      destination,
+    );
+    if (destAuthorized) return { status: "refused", reason: destAuthorized };
+    const captured = request.source.capturedText.trim();
+    if (!captured || captured.length > MEMORY_MAX_CAPTURE_CHARS_V1) {
+      return {
+        status: "refused",
+        reason: `captured source must be between 1 and ${MEMORY_MAX_CAPTURE_CHARS_V1} characters`,
+      };
+    }
+    const secret = refuseMemorySecretV1(captured);
+    if (secret) return { status: "refused", reason: secret.reason };
+    if (request.source.safeExcerpt) {
+      const excerptSecret = refuseMemorySecretV1(request.source.safeExcerpt);
+      if (excerptSecret) {
+        return { status: "refused", reason: excerptSecret.reason };
+      }
+    }
+    const destinationKey = memoryScopeKeyV1(destination);
+    const sourceKey = memoryScopeKeyV1(request.scope);
+    const now = this.#now();
+    const obligationId = extractionObligationIdV1(
+      destinationKey,
+      request.source.sourceId,
+      request.source.sourceRevision,
+    );
+    try {
+      const result = this.#storage.transactionSync(() => {
+        this.open();
+        if (!destOwned) {
+          return this.captureLocalExtraction({
+            scopeKey: destinationKey,
+            obligationId,
+            request,
+            captured,
+            now,
+          });
+        }
+        const existing = this.#sql
+          .exec<{ state: string }>(
+            `SELECT state FROM memory_outbox WHERE id = ?`,
+            obligationId,
+          )
+          .toArray()[0];
+        if (existing) {
+          return {
+            status: "ok",
+            obligationId,
+            duplicate: true,
+            queued: "outbox",
+          } satisfies MemoryCaptureResultV1;
+        }
+        this.ensureScope(sourceKey);
+        this.retainSource({
+          scopeKey: sourceKey,
+          obligationId,
+          source: request.source,
+          captured,
+          now,
+        });
+        const payload: MemoryOutboxPayloadV1 = {
+          destinationScope: destination,
+          principal: request.principal,
+          authority: request.authority,
+          source: { ...request.source, capturedText: captured },
+        };
+        this.#sql.exec(
+          `INSERT INTO memory_outbox (
+            id, destination_scope_key, payload, state, created_at, acked_at)
+           VALUES (?, ?, ?, 'pending', ?, NULL)`,
+          obligationId,
+          destinationKey,
+          JSON.stringify(payload),
+          now.toISOString(),
+        );
+        this.queueJob({
+          id: `outbox-deliver:${obligationId}`,
+          kind: "outbox-deliver",
+          scopeKey: sourceKey,
+          sourceRef: obligationId,
+          inputGeneration: this.scopeGeneration(sourceKey),
+          now,
+          principal: request.principal,
+        });
+        return {
+          status: "ok",
+          obligationId,
+          duplicate: false,
+          queued: "outbox",
+        } satisfies MemoryCaptureResultV1;
+      });
+      this.armAfterCommit();
+      return result;
+    } catch (error) {
+      return {
+        status: "unavailable",
+        reason:
+          error instanceof Error ? error.message : "Memory capture failed",
+      };
+    }
+  }
+
+  admitOutbox(request: MemoryAdmitOutboxRequestV1): MemoryAdmitOutboxResultV1 {
+    const owned = this.refuseOwned(request.payload.destinationScope);
+    if (owned) return { status: "refused", reason: owned };
+    const authorized = authorizeMemoryScopeV1(
+      request.payload.authority,
+      request.payload.destinationScope,
+    );
+    if (authorized) return { status: "refused", reason: authorized };
+    const now = this.#now();
+    try {
+      const result = this.#storage.transactionSync(() => {
+        this.open();
+        const captured = this.captureLocalExtraction({
+          scopeKey: memoryScopeKeyV1(request.payload.destinationScope),
+          obligationId: request.outboxId,
+          request: {
+            authority: request.payload.authority,
+            scope: request.payload.destinationScope,
+            principal: request.payload.principal,
+            source: request.payload.source,
+          },
+          captured: request.payload.source.capturedText,
+          now,
+        });
+        if (captured.status !== "ok") {
+          return {
+            status: captured.status,
+            reason: captured.reason,
+          } satisfies MemoryAdmitOutboxResultV1;
+        }
+        return {
+          status: "ok",
+          obligationId: captured.obligationId,
+          duplicate: captured.duplicate,
+        } satisfies MemoryAdmitOutboxResultV1;
+      });
+      this.armAfterCommit();
+      return result;
+    } catch (error) {
+      return {
+        status: "unavailable",
+        reason:
+          error instanceof Error ? error.message : "Memory outbox admit failed",
+      };
+    }
+  }
+
+  acknowledgeOutbox(outboxId: string): boolean {
+    this.open();
+    const now = this.#now();
+    const result = this.#storage.transactionSync(() => {
+      const row = this.#sql
+        .exec<{ state: string; payload: string }>(
+          `SELECT state, payload FROM memory_outbox WHERE id = ?`,
+          outboxId,
+        )
+        .toArray()[0];
+      if (!row) return false;
+      this.#sql.exec(
+        `UPDATE memory_outbox SET state = 'acked', acked_at = ? WHERE id = ?`,
+        now.toISOString(),
+        outboxId,
+      );
+      this.#sql.exec(
+        `UPDATE memory_job SET state = 'done', claim_token = NULL
+         WHERE id = ?`,
+        `outbox-deliver:${outboxId}`,
+      );
+      this.releaseRetention(outboxId);
+      return true;
+    });
+    this.armAfterCommit();
+    return result;
+  }
+
+  abandonObligation(
+    request: MemoryAbandonObligationRequestV1,
+  ): MemoryAbandonResultV1 {
+    const reason = authorizeMemoryScopeV1(request.authority, {
+      kind: "user",
+      userId: request.authority.userId,
+    });
+    if (reason && request.authority.actor !== "user") {
+      return {
+        status: "refused",
+        reason: "only the authenticated User can abandon a Memory obligation",
+      };
+    }
+    this.open();
+    const result = this.#storage.transactionSync(() => {
+      const job = this.job(request.obligationId);
+      if (!job) return { status: "ok", abandoned: false } as const;
+      this.#sql.exec(
+        `UPDATE memory_job SET state = 'failed', claim_token = NULL WHERE id = ?`,
+        request.obligationId,
+      );
+      this.#sql.exec(
+        `UPDATE memory_source_retention SET state = 'released'
+         WHERE obligation_id = ?`,
+        request.obligationId,
+      );
+      this.#sql.exec(
+        `UPDATE memory_outbox SET state = 'acked', acked_at = ?
+         WHERE id = ?`,
+        this.#now().toISOString(),
+        request.obligationId,
+      );
+      return { status: "ok", abandoned: true } as const;
+    });
+    this.armAfterCommit();
+    return result;
+  }
+
+  claimDueWork(now = this.#now()): MemoryClaimedBatchV1 {
+    this.open();
+    return this.#storage.transactionSync(() => {
+      const local = this.dueJobs(
+        ["view-repair", "core-rebuild", "topic-rebuild"],
+        now,
+        MEMORY_DRAIN_LOCAL_LIMIT_V1,
+      );
+      if (local.length > 0) {
+        return {
+          kind: "local",
+          jobs: local.map((job) => this.claimJobRow(job, now, "local")),
+        };
+      }
+      const external = this.dueJobs(
+        ["extract", "consolidate", "outbox-deliver"],
+        now,
+        1,
+      );
+      if (external[0]) {
+        return {
+          kind: "external",
+          jobs: [this.claimJobRow(external[0], now, "external")],
+        };
+      }
+      const intent = this.dueIndexIntent(now);
+      if (intent) {
+        return { kind: "index", intent: this.claimIndexIntent(intent, now) };
+      }
+      return { kind: "idle", jobs: [] };
+    });
+  }
+
+  completeClaimedJob(
+    claim: MemoryClaimedJobV1,
+    state: Extract<MemoryJobStateV1, "done" | "blocked" | "failed">,
+    options: { releaseRetention?: boolean; reason?: string } = {},
+  ): boolean {
+    this.open();
+    const now = this.#now();
+    const ok = this.#storage.transactionSync(() => {
+      const row = this.job(claim.id);
+      if (!row || row.claim_token !== claim.claimToken) return false;
+      this.#sql.exec(
+        `UPDATE memory_job
+         SET state = ?, claim_token = NULL, next_attempt_at = ?
+         WHERE id = ?`,
+        state,
+        now.getTime(),
+        claim.id,
+      );
+      if (options.reason) {
+        this.#sql.exec(
+          `INSERT INTO memory_job_result (job_id, body)
+           VALUES (?, ?)
+           ON CONFLICT (job_id) DO UPDATE SET body = excluded.body`,
+          claim.id,
+          JSON.stringify({ reason: options.reason, state }),
+        );
+      }
+      if (options.releaseRetention && claim.sourceRef) {
+        this.releaseRetention(claim.sourceRef);
+      }
+      return true;
+    });
+    this.armAfterCommit();
+    return ok;
+  }
+
+  retryClaimedJob(claim: MemoryClaimedJobV1, terminal: boolean): boolean {
+    this.open();
+    const now = this.#now();
+    const ok = this.#storage.transactionSync(() => {
+      const row = this.job(claim.id);
+      if (!row || row.claim_token !== claim.claimToken) return false;
+      if (terminal || Number(row.attempt) >= MEMORY_MAX_JOB_ATTEMPTS_V1) {
+        this.#sql.exec(
+          `UPDATE memory_job SET state = 'failed', claim_token = NULL
+           WHERE id = ?`,
+          claim.id,
+        );
+        return true;
+      }
+      this.#sql.exec(
+        `UPDATE memory_job
+         SET state = 'pending', claim_token = NULL, next_attempt_at = ?
+         WHERE id = ?`,
+        now.getTime() + memoryJobBackoffMsV1(Number(row.attempt)),
+        claim.id,
+      );
+      return true;
+    });
+    this.armAfterCommit();
+    return ok;
+  }
+
+  markJobDispatched(claim: MemoryClaimedJobV1, effectRef: string): boolean {
+    this.open();
+    return this.#storage.transactionSync(() => {
+      const row = this.job(claim.id);
+      if (!row || row.claim_token !== claim.claimToken) return false;
+      if (row.effect_ref) return false;
+      this.#sql.exec(
+        `UPDATE memory_job SET effect_ref = ? WHERE id = ?`,
+        effectRef,
+        claim.id,
+      );
+      return true;
+    });
+  }
+
+  storeJobResult(claim: MemoryClaimedJobV1, body: unknown): boolean {
+    this.open();
+    return this.#storage.transactionSync(() => {
+      const row = this.job(claim.id);
+      if (!row || row.claim_token !== claim.claimToken) return false;
+      this.#sql.exec(
+        `INSERT INTO memory_job_result (job_id, body)
+         VALUES (?, ?)
+         ON CONFLICT (job_id) DO UPDATE SET body = excluded.body`,
+        claim.id,
+        JSON.stringify(body),
+      );
+      this.#sql.exec(
+        `UPDATE memory_job SET effect_ref = ? WHERE id = ?`,
+        `result:${claim.id}`,
+        claim.id,
+      );
+      return true;
+    });
+  }
+
+  jobResult<T>(jobId: string): T | undefined {
+    this.open();
+    const row = this.#sql
+      .exec<{ body: string }>(
+        `SELECT body FROM memory_job_result WHERE job_id = ?`,
+        jobId,
+      )
+      .toArray()[0];
+    if (!row) return undefined;
+    try {
+      return JSON.parse(row.body) as T;
+    } catch {
+      return undefined;
+    }
+  }
+
+  applyExtractedProposals(
+    claim: MemoryClaimedJobV1,
+    proposals: readonly MemoryExtractedProposalV1[],
+  ): { written: number; skipped: number } {
+    const source = this.retainedSource(claim.sourceRef ?? claim.id);
+    let written = 0;
+    let skipped = 0;
+    for (const proposal of proposals) {
+      const outcome = this.write({
+        authority: claim.authority,
+        scope: claim.scope,
+        content: proposal.text,
+        operationKey: `extract:${claim.id}:${memoryCanonicalKeyV1(proposal.text)}`,
+        kind: proposal.kind,
+        origin: "extraction",
+        createdBy: createdByPrincipalV1(claim.authority),
+        ...(proposal.subjectKey ? { subjectKey: proposal.subjectKey } : {}),
+        ...(proposal.occurredAt ? { occurredAt: proposal.occurredAt } : {}),
+        ...(proposal.confidence !== undefined
+          ? { confidence: proposal.confidence }
+          : {}),
+        ...(source
+          ? {
+              sources: [
+                {
+                  sourceId: source.source_id,
+                  sourceRevision: source.source_revision,
+                  kind: source.kind as MemorySourceKindV1,
+                  locator: decodeLocatorV1(
+                    source.locator,
+                    source.source_revision,
+                  ),
+                  ...(source.captured_text
+                    ? {
+                        safeExcerpt: source.captured_text.slice(
+                          0,
+                          MEMORY_MAX_SOURCE_EXCERPT_V1,
+                        ),
+                      }
+                    : {}),
+                },
+              ],
+            }
+          : {}),
+      });
+      if (outcome.status === "ok" && !outcome.receipt.duplicate) written += 1;
+      else skipped += 1;
+    }
+    const subjects = [
+      ...new Set(
+        proposals.flatMap((proposal) =>
+          proposal.subjectKey ? [proposal.subjectKey] : [],
+        ),
+      ),
+    ];
+    const now = this.#now();
+    this.#storage.transactionSync(() => {
+      const row = this.job(claim.id);
+      if (!row || row.claim_token !== claim.claimToken) return;
+      for (const subjectKey of subjects) {
+        this.queueJob({
+          id: `consolidate:${claim.scopeKey}:${subjectKey}`,
+          kind: "consolidate",
+          scopeKey: claim.scopeKey,
+          sourceRef: subjectKey,
+          inputGeneration: this.scopeGeneration(claim.scopeKey),
+          now,
+          principal: claim.principal,
+        });
+      }
+    });
+    this.armAfterCommit();
+    return { written, skipped };
+  }
+
+  applyConsolidatedObservation(
+    claim: MemoryClaimedJobV1,
+    observation: MemoryConsolidatedObservationV1,
+  ): MemoryWriteResultV1 {
+    const leaves = observation.leafItemIds
+      .map((itemId) => this.item(claim.scopeKey, itemId))
+      .filter((row): row is ItemRow => Boolean(row));
+    if (leaves.some((leaf) => leaf.status !== "active")) {
+      return {
+        status: "refused",
+        reason: "consolidation leaves are no longer active",
+      };
+    }
+    if (leaves.length > MEMORY_MAX_LEAF_MANIFEST_V1) {
+      return {
+        status: "refused",
+        reason: `an observation may depend on at most ${MEMORY_MAX_LEAF_MANIFEST_V1} leaves; split it`,
+      };
+    }
+    return this.write({
+      authority: claim.authority,
+      scope: claim.scope,
+      content: observation.text,
+      operationKey: `consolidate:${claim.id}:${memoryCanonicalKeyV1(observation.text)}`,
+      kind: "observation",
+      origin: "consolidation",
+      subjectKey: observation.subjectKey,
+      createdBy: createdByPrincipalV1(claim.authority),
+      ...(observation.confidence !== undefined
+        ? { confidence: observation.confidence }
+        : {}),
+      leafItems: observation.leafItemIds.map((itemId) => ({ itemId })),
+      relations: observation.relations,
+    });
+  }
+
+  runLocalJob(claim: MemoryClaimedJobV1): boolean {
+    if (claim.kind === "core-rebuild") {
+      this.rebuildCore(claim.scopeKey);
+      return this.completeClaimedJob(claim, "done");
+    }
+    if (claim.kind === "topic-rebuild") {
+      this.rebuildTopic(claim.scopeKey, claim.sourceRef);
+      return this.completeClaimedJob(claim, "done");
+    }
+    if (claim.kind === "view-repair") {
+      this.rebuildCore(claim.scopeKey);
+      this.rebuildAllTopics(claim.scopeKey);
+      return this.completeClaimedJob(claim, "done");
+    }
+    return false;
+  }
+
+  rebuildCore(scopeKey: string): void {
+    this.open();
+    const now = this.#now();
+    this.#storage.transactionSync(() => {
+      const epoch = this.invalidationEpoch(scopeKey);
+      const selected = this.selectCoreItems(scopeKey);
+      const manifest = selected.map((item) => ({
+        itemId: item.id,
+        generation: Number(item.generation),
+      }));
+      const body = selected.map((item) => item.text).join("\n");
+      this.putProjection({
+        scopeKey,
+        name: "core",
+        policyVersion: MEMORY_CORE_POLICY_VERSION_V1,
+        epoch,
+        body,
+        manifest,
+        now,
+      });
+    });
+  }
+
+  rebuildTopic(scopeKey: string, subjectKey?: string): void {
+    this.open();
+    const now = this.#now();
+    this.#storage.transactionSync(() => {
+      const subjects = subjectKey
+        ? [subjectKey]
+        : this.#sql
+            .exec<{ subject_key: string }>(
+              `SELECT DISTINCT subject_key FROM memory_item
+               WHERE scope_key = ? AND status = 'active' AND subject_key IS NOT NULL
+               ORDER BY subject_key ASC`,
+              scopeKey,
+            )
+            .toArray()
+            .map((row) => row.subject_key);
+      for (const subject of subjects) {
+        this.writeTopicProjection(scopeKey, subject, now);
+      }
+    });
+  }
+
+  rebuildAllTopics(scopeKey: string): void {
+    this.rebuildTopic(scopeKey);
+  }
+
+  completeIndexIntent(
+    claim: MemoryClaimedIndexIntentV1,
+    mutationId: string | undefined,
+    state: "unconfirmed" | "failed",
+  ): boolean {
+    this.open();
+    const now = this.#now();
+    const ok = this.#storage.transactionSync(() => {
+      const row = this.indexIntent(
+        claim.scopeKey,
+        claim.itemId,
+        claim.itemGeneration,
+        claim.operation,
+      );
+      if (!row || row.claim_token !== claim.claimToken) return false;
+      this.#sql.exec(
+        `UPDATE memory_index_intent
+         SET state = ?, mutation_id = ?, claim_token = NULL, next_attempt_at = ?
+         WHERE scope_key = ? AND item_id = ? AND item_generation = ? AND operation = ?`,
+        state,
+        mutationId ?? null,
+        now.getTime(),
+        claim.scopeKey,
+        claim.itemId,
+        claim.itemGeneration,
+        claim.operation,
+      );
+      this.#sql.exec(
+        `INSERT INTO memory_vector_ledger (
+          vector_id, scope_key, item_id, item_generation, operation, policy_id,
+          mutation_id, state, next_attempt_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (vector_id) DO UPDATE SET
+           mutation_id = excluded.mutation_id,
+           state = excluded.state,
+           next_attempt_at = excluded.next_attempt_at`,
+        claim.vectorId,
+        claim.scopeKey,
+        claim.itemId,
+        claim.itemGeneration,
+        claim.operation,
+        MEMORY_EMBEDDING_POLICY_ID_V1,
+        mutationId ?? null,
+        state,
+        now.getTime(),
+      );
+      return true;
+    });
+    this.armAfterCommit();
+    return ok;
+  }
+
+  retryIndexIntent(claim: MemoryClaimedIndexIntentV1): boolean {
+    this.open();
+    const now = this.#now();
+    const ok = this.#storage.transactionSync(() => {
+      const row = this.indexIntent(
+        claim.scopeKey,
+        claim.itemId,
+        claim.itemGeneration,
+        claim.operation,
+      );
+      if (!row || row.claim_token !== claim.claimToken) return false;
+      this.#sql.exec(
+        `UPDATE memory_index_intent
+         SET state = 'pending', claim_token = NULL, next_attempt_at = ?
+         WHERE scope_key = ? AND item_id = ? AND item_generation = ? AND operation = ?`,
+        now.getTime() + memoryJobBackoffMsV1(1),
+        claim.scopeKey,
+        claim.itemId,
+        claim.itemGeneration,
+        claim.operation,
+      );
+      return true;
+    });
+    this.armAfterCommit();
+    return ok;
+  }
+
+  activeItemText(scopeKey: string, itemId: string): string | undefined {
+    const row = this.item(scopeKey, itemId);
+    if (!row || row.status !== "active") return undefined;
+    return row.text;
+  }
+
+  subjectItems(scopeKey: string, subjectKey: string): MemoryItemRecordV1[] {
+    this.open();
+    return this.#sql
+      .exec<ItemRow>(
+        `SELECT * FROM memory_item
+         WHERE scope_key = ? AND status = 'active' AND subject_key = ?
+         ORDER BY id ASC`,
+        scopeKey,
+        subjectKey,
+      )
+      .toArray()
+      .map((row) => this.recordOf(row));
+  }
+
+  retainedCapturedText(obligationId: string): string | undefined {
+    return this.retainedSource(obligationId)?.captured_text;
+  }
+
+  pendingIndexCandidates(
+    scopeKey: string,
+    limit = MEMORY_PENDING_INDEX_PAGE_V1,
+  ): MemoryItemRecordV1[] {
+    this.open();
+    const rows = this.#sql
+      .exec<{ item_id: string }>(
+        `SELECT item_id FROM memory_index_intent
+         WHERE scope_key = ?
+           AND operation = 'upsert'
+           AND state IN ('pending', 'claimed', 'unconfirmed')
+         ORDER BY item_id ASC
+         LIMIT ?`,
+        scopeKey,
+        limit + 1,
+      )
+      .toArray();
+    return rows.slice(0, limit).flatMap((row) => {
+      const item = this.item(scopeKey, row.item_id);
+      return item && item.status === "active" ? [this.recordOf(item)] : [];
+    });
+  }
+
+  semanticCoverage(scopeKey: string): MemorySemanticCoverageV1 {
+    return this.semanticCoverageFor([scopeKey]);
+  }
+
+  inspectJobs(): MemoryJobInspectV1[] {
+    this.open();
+    return this.#sql
+      .exec<{
+        id: string;
+        kind: string;
+        scope_key: string;
+        source_ref: string | null;
+        input_generation: number;
+        state: string;
+        attempt: number;
+        next_attempt_at: number;
+        claim_token: string | null;
+        effect_ref: string | null;
+        principal: string | null;
+      }>(
+        `SELECT id, kind, scope_key, source_ref, input_generation, state,
+                attempt, next_attempt_at, claim_token, effect_ref, principal
+         FROM memory_job ORDER BY id ASC`,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        kind: row.kind as MemoryJobKindV1,
+        scopeKey: row.scope_key,
+        sourceRef: row.source_ref ?? undefined,
+        inputGeneration: Number(row.input_generation),
+        state: row.state as MemoryJobStateV1,
+        attempt: Number(row.attempt),
+        nextAttemptAt: Number(row.next_attempt_at),
+        claimToken: row.claim_token ?? undefined,
+        effectRef: row.effect_ref ?? undefined,
+        principal: decodePrincipalV1(row.principal),
+      }));
+  }
+
+  inspectIndexIntents(): MemoryIndexIntentInspectV1[] {
+    this.open();
+    return this.#sql
+      .exec<{
+        scope_key: string;
+        item_id: string;
+        item_generation: number;
+        operation: string;
+        vector_id: string;
+        state: string;
+        mutation_id: string | null;
+        claim_token: string | null;
+        next_attempt_at: number;
+      }>(
+        `SELECT scope_key, item_id, item_generation, operation, vector_id, state,
+                mutation_id, claim_token, next_attempt_at
+         FROM memory_index_intent ORDER BY item_id ASC, operation ASC`,
+      )
+      .toArray()
+      .map((row) => ({
+        scopeKey: row.scope_key,
+        itemId: row.item_id,
+        itemGeneration: Number(row.item_generation),
+        operation: row.operation as "upsert" | "delete",
+        vectorId: row.vector_id,
+        state: row.state,
+        mutationId: row.mutation_id ?? undefined,
+        claimToken: row.claim_token ?? undefined,
+        nextAttemptAt: Number(row.next_attempt_at),
+      }));
+  }
+
+  inspectRetention(): Array<{
+    obligationId: string;
+    state: string;
+    sourceId: string;
+  }> {
+    this.open();
+    return this.#sql
+      .exec<{
+        obligation_id: string;
+        state: string;
+        source_id: string;
+      }>(`SELECT obligation_id, state, source_id FROM memory_source_retention`)
+      .toArray()
+      .map((row) => ({
+        obligationId: row.obligation_id,
+        state: row.state,
+        sourceId: row.source_id,
+      }));
+  }
+
+  inspectOutbox(): Array<{ id: string; state: string }> {
+    this.open();
+    return this.#sql
+      .exec<{ id: string; state: string }>(
+        `SELECT id, state FROM memory_outbox ORDER BY id ASC`,
+      )
+      .toArray();
+  }
+
+  outboxPayload(outboxId: string): MemoryOutboxPayloadV1 | undefined {
+    this.open();
+    const row = this.#sql
+      .exec<{ payload: string }>(
+        `SELECT payload FROM memory_outbox WHERE id = ?`,
+        outboxId,
+      )
+      .toArray()[0];
+    if (!row) return undefined;
+    try {
+      return JSON.parse(row.payload) as MemoryOutboxPayloadV1;
+    } catch {
+      return undefined;
+    }
+  }
+
+  inspectProjections(): Array<{
+    scopeKey: string;
+    name: string;
+    body: string;
+    manifest: MemoryLeafManifestV1[];
+    epoch: number;
+  }> {
+    this.open();
+    return this.#sql
+      .exec<{
+        scope_key: string;
+        name: string;
+        body: string;
+        manifest: string;
+        checked_invalidation_epoch: number;
+      }>(
+        `SELECT scope_key, name, body, manifest, checked_invalidation_epoch
+         FROM memory_projection ORDER BY name ASC`,
+      )
+      .toArray()
+      .map((row) => ({
+        scopeKey: row.scope_key,
+        name: row.name,
+        body: row.body,
+        manifest: decodeManifestV1(row.manifest),
+        epoch: Number(row.checked_invalidation_epoch),
+      }));
   }
 
   private arm(at: number): void {
@@ -1105,13 +2093,13 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
   private writeObservationLeaves(
     scopeKey: string,
     derivedId: string,
-    sources: readonly MemorySourceInputV1[],
+    leaves: ReadonlyArray<{ itemId: string }>,
   ): void {
-    const leaves = [...new Set(sources.map((source) => source.sourceId))].slice(
+    const ids = [...new Set(leaves.map((leaf) => leaf.itemId))].slice(
       0,
       MEMORY_MAX_LEAF_MANIFEST_V1,
     );
-    for (const leafItemId of leaves) {
+    for (const leafItemId of ids) {
       const leaf = this.item(scopeKey, leafItemId);
       this.#sql.exec(
         `INSERT INTO memory_derivation (
@@ -1122,6 +2110,24 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
         derivedId,
         leafItemId,
         Number(leaf?.generation ?? 1),
+      );
+    }
+  }
+
+  private writeRelations(
+    scopeKey: string,
+    fromId: string,
+    relations: ReadonlyArray<{ relation: MemoryRelationV1; toId: string }>,
+  ): void {
+    for (const relation of relations) {
+      this.#sql.exec(
+        `INSERT INTO memory_relation (scope_key, from_id, relation, to_id)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT DO NOTHING`,
+        scopeKey,
+        fromId,
+        relation.relation,
+        relation.toId,
       );
     }
   }
@@ -1149,14 +2155,41 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     now: Date,
     generation = 1,
   ): void {
-    const vectorId = `${scopeKey}:${itemId}:${generation}:${operation}`;
+    const vectorId = memoryItemVectorIdV1({
+      scopeKey,
+      itemId,
+      generation,
+      operation,
+    });
+    if (operation === "upsert") {
+      this.#sql.exec(
+        `UPDATE memory_index_intent
+         SET state = 'coalesced', next_attempt_at = ?
+         WHERE scope_key = ? AND item_id = ? AND operation = 'upsert'
+           AND item_generation < ? AND state IN ('pending', 'claimed')`,
+        now.getTime(),
+        scopeKey,
+        itemId,
+        generation,
+      );
+    }
     this.#sql.exec(
       `INSERT INTO memory_index_intent (
         scope_key, item_id, item_generation, operation, vector_id, state,
-        mutation_id, next_attempt_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', NULL, ?)
+        mutation_id, next_attempt_at, claim_token)
+       VALUES (?, ?, ?, ?, ?, 'pending', NULL, ?, NULL)
        ON CONFLICT (scope_key, item_id, item_generation, operation)
-       DO UPDATE SET state = 'pending', next_attempt_at = excluded.next_attempt_at`,
+       DO UPDATE SET
+         state = CASE
+           WHEN memory_index_intent.state IN ('pending', 'claimed', 'failed')
+           THEN 'pending'
+           ELSE memory_index_intent.state
+         END,
+         next_attempt_at = CASE
+           WHEN memory_index_intent.state IN ('pending', 'claimed', 'failed')
+           THEN excluded.next_attempt_at
+           ELSE memory_index_intent.next_attempt_at
+         END`,
       scopeKey,
       itemId,
       generation,
@@ -1167,29 +2200,476 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
   }
 
   private queueJob(input: {
+    id?: string;
     kind: string;
     scopeKey: string;
     sourceRef: string;
     inputGeneration: number;
     now: Date;
+    principal?: MemoryJobPrincipalV1;
   }): void {
-    const id = `${input.kind}:${input.scopeKey}:${input.sourceRef}`;
+    const id = input.id ?? `${input.kind}:${input.scopeKey}:${input.sourceRef}`;
     this.#sql.exec(
       `INSERT INTO memory_job (
         id, kind, scope_key, source_ref, input_generation, state, attempt,
-        next_attempt_at, claim_token, effect_ref)
-       VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, NULL, NULL)
+        next_attempt_at, claim_token, effect_ref, principal)
+       VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, NULL, NULL, ?)
        ON CONFLICT (id) DO UPDATE SET
-         state = 'pending',
-         next_attempt_at = excluded.next_attempt_at,
-         input_generation = excluded.input_generation`,
+         state = CASE
+           WHEN memory_job.state IN ('pending', 'failed') THEN 'pending'
+           ELSE memory_job.state
+         END,
+         next_attempt_at = CASE
+           WHEN memory_job.state IN ('pending', 'failed')
+           THEN excluded.next_attempt_at
+           ELSE memory_job.next_attempt_at
+         END,
+         input_generation = CASE
+           WHEN memory_job.state IN ('pending', 'failed')
+           THEN excluded.input_generation
+           ELSE memory_job.input_generation
+         END,
+         principal = COALESCE(memory_job.principal, excluded.principal)`,
       id,
       input.kind,
       input.scopeKey,
       input.sourceRef,
       input.inputGeneration,
       input.now.getTime() + MEMORY_JOB_WAKEUP_MS_V1,
+      input.principal ? JSON.stringify(input.principal) : null,
     );
+  }
+
+  private captureLocalExtraction(input: {
+    scopeKey: string;
+    obligationId: string;
+    request: MemoryCaptureExtractionRequestV1;
+    captured: string;
+    now: Date;
+  }): MemoryCaptureResultV1 {
+    this.ensureScope(input.scopeKey);
+    const existing = this.job(input.obligationId);
+    this.retainSource({
+      scopeKey: input.scopeKey,
+      obligationId: input.obligationId,
+      source: input.request.source,
+      captured: input.captured,
+      now: input.now,
+    });
+    if (existing && existing.state !== "failed") {
+      return {
+        status: "ok",
+        obligationId: input.obligationId,
+        duplicate: true,
+        queued: "extract",
+      };
+    }
+    this.queueJob({
+      id: input.obligationId,
+      kind: "extract",
+      scopeKey: input.scopeKey,
+      sourceRef: input.obligationId,
+      inputGeneration: this.scopeGeneration(input.scopeKey),
+      now: input.now,
+      principal: input.request.principal,
+    });
+    return {
+      status: "ok",
+      obligationId: input.obligationId,
+      duplicate: false,
+      queued: "extract",
+    };
+  }
+
+  private retainSource(input: {
+    scopeKey: string;
+    obligationId: string;
+    source: MemorySourceInputV1 & { capturedText?: string };
+    captured: string;
+    now: Date;
+  }): void {
+    this.#sql.exec(
+      `INSERT INTO memory_source_retention (
+        scope_key, source_id, source_revision, kind, locator, captured_text,
+        captured_at, obligation_id, state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'retained')
+       ON CONFLICT (scope_key, source_id, source_revision) DO UPDATE SET
+         captured_text = excluded.captured_text,
+         captured_at = excluded.captured_at,
+         obligation_id = excluded.obligation_id,
+         state = CASE
+           WHEN memory_source_retention.state = 'released'
+           THEN memory_source_retention.state
+           ELSE 'retained'
+         END`,
+      input.scopeKey,
+      input.source.sourceId,
+      input.source.sourceRevision,
+      input.source.kind,
+      JSON.stringify(input.source.locator),
+      input.captured,
+      input.now.toISOString(),
+      input.obligationId,
+    );
+  }
+
+  private releaseRetention(obligationId: string): void {
+    this.#sql.exec(
+      `UPDATE memory_source_retention SET state = 'released'
+       WHERE obligation_id = ?`,
+      obligationId,
+    );
+  }
+
+  private retainedSource(obligationId: string): RetentionRow | undefined {
+    this.open();
+    return this.#sql
+      .exec<RetentionRow>(
+        `SELECT * FROM memory_source_retention WHERE obligation_id = ? LIMIT 1`,
+        obligationId,
+      )
+      .toArray()[0];
+  }
+
+  private job(id: string): JobRow | undefined {
+    return this.#sql
+      .exec<JobRow>(`SELECT * FROM memory_job WHERE id = ?`, id)
+      .toArray()[0];
+  }
+
+  private dueJobs(
+    kinds: readonly string[],
+    now: Date,
+    limit: number,
+  ): JobRow[] {
+    if (kinds.length === 0) return [];
+    const placeholders = kinds.map(() => "?").join(", ");
+    return this.#sql
+      .exec<JobRow>(
+        `SELECT * FROM memory_job
+         WHERE state IN ('pending', 'claimed')
+           AND kind IN (${placeholders})
+           AND next_attempt_at <= ?
+         ORDER BY next_attempt_at ASC, id ASC
+         LIMIT ?`,
+        ...kinds,
+        now.getTime(),
+        limit,
+      )
+      .toArray();
+  }
+
+  private claimJobRow(
+    row: JobRow,
+    now: Date,
+    lane: "local" | "external",
+  ): MemoryClaimedJobV1 {
+    const claimToken = `${row.id}:${now.getTime()}:${Number(row.attempt) + 1}`;
+    const nextAt =
+      now.getTime() +
+      (lane === "local"
+        ? MEMORY_JOB_CONTINUATION_MS_V1
+        : memoryJobBackoffMsV1(Number(row.attempt) + 1));
+    this.#sql.exec(
+      `UPDATE memory_job
+       SET state = 'claimed', claim_token = ?, attempt = attempt + 1,
+           next_attempt_at = ?
+       WHERE id = ?`,
+      claimToken,
+      nextAt,
+      row.id,
+    );
+    const principal = decodePrincipalV1(row.principal);
+    const scope = decodeMemoryScopeKeyV1(row.scope_key);
+    return {
+      id: row.id,
+      kind: row.kind as MemoryJobKindV1,
+      scopeKey: row.scope_key,
+      scope,
+      ...(row.source_ref ? { sourceRef: row.source_ref } : {}),
+      inputGeneration: Number(row.input_generation),
+      attempt: Number(row.attempt) + 1,
+      claimToken,
+      ...(row.effect_ref ? { effectRef: row.effect_ref } : {}),
+      ...(principal ? { principal } : {}),
+      authority: authorityFromPrincipalV1(principal, scope),
+    };
+  }
+
+  private dueIndexIntent(now: Date): IndexIntentRow | undefined {
+    return this.#sql
+      .exec<IndexIntentRow>(
+        `SELECT * FROM memory_index_intent
+         WHERE state IN ('pending', 'claimed') AND next_attempt_at <= ?
+         ORDER BY next_attempt_at ASC, item_id ASC
+         LIMIT 1`,
+        now.getTime(),
+      )
+      .toArray()[0];
+  }
+
+  private claimIndexIntent(
+    row: IndexIntentRow,
+    now: Date,
+  ): MemoryClaimedIndexIntentV1 {
+    const claimToken = `${row.vector_id}:${now.getTime()}`;
+    this.#sql.exec(
+      `UPDATE memory_index_intent
+       SET state = 'claimed', claim_token = ?, next_attempt_at = ?
+       WHERE scope_key = ? AND item_id = ? AND item_generation = ? AND operation = ?`,
+      claimToken,
+      now.getTime() + memoryJobBackoffMsV1(1),
+      row.scope_key,
+      row.item_id,
+      row.item_generation,
+      row.operation,
+    );
+    const item = this.item(row.scope_key, row.item_id);
+    return {
+      scopeKey: row.scope_key,
+      itemId: row.item_id,
+      itemGeneration: Number(row.item_generation),
+      operation: row.operation as "upsert" | "delete",
+      vectorId: row.vector_id,
+      claimToken,
+      ...(item && row.operation === "upsert" ? { text: item.text } : {}),
+    };
+  }
+
+  private indexIntent(
+    scopeKey: string,
+    itemId: string,
+    generation: number,
+    operation: string,
+  ): IndexIntentRow | undefined {
+    return this.#sql
+      .exec<IndexIntentRow>(
+        `SELECT * FROM memory_index_intent
+         WHERE scope_key = ? AND item_id = ? AND item_generation = ? AND operation = ?`,
+        scopeKey,
+        itemId,
+        generation,
+        operation,
+      )
+      .toArray()[0];
+  }
+
+  private readTopicProjection(
+    scopeKey: string,
+    topic: string,
+    epoch: number,
+  ): MemoryBrowseResultV1 | undefined {
+    const projection = this.#sql
+      .exec<{
+        generation: number;
+        policy_version: number;
+        checked_invalidation_epoch: number;
+        body: string;
+        manifest: string;
+      }>(
+        `SELECT generation, policy_version, checked_invalidation_epoch, body, manifest
+         FROM memory_projection
+         WHERE scope_key = ? AND name = ?`,
+        scopeKey,
+        `topic:${topic}`,
+      )
+      .toArray()[0];
+    if (!projection) return undefined;
+    const manifest = decodeManifestV1(projection.manifest);
+    if (
+      Number(projection.checked_invalidation_epoch) !== epoch &&
+      !this.manifestValid(scopeKey, manifest)
+    ) {
+      return {
+        sections: [],
+        status: "unavailable",
+        omissions: [
+          {
+            reason: "that topic page is no longer valid",
+            scope: decodeMemoryScopeKeyV1(scopeKey),
+          },
+        ],
+      };
+    }
+    try {
+      const parsed = JSON.parse(projection.body) as {
+        markdown?: string;
+        sections?: MemoryBrowseSectionV1[];
+      };
+      if (parsed.sections && parsed.sections.length > 0) {
+        return {
+          sections: parsed.sections.slice(0, MEMORY_BROWSE_SECTIONS_V1),
+          status: "complete",
+          omissions: [],
+        };
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  private selectCoreItems(scopeKey: string): ItemRow[] {
+    const rows = this.#sql
+      .exec<ItemRow>(
+        `SELECT * FROM memory_item
+         WHERE scope_key = ? AND status = 'active'
+         ORDER BY id ASC`,
+        scopeKey,
+      )
+      .toArray();
+    const profile: ItemRow[] = [];
+    const observations: ItemRow[] = [];
+    const rest: ItemRow[] = [];
+    for (const row of rows) {
+      if (isMemoryProfileSubjectV1(row.subject_key ?? undefined)) {
+        profile.push(row);
+      } else if (row.kind === "observation") {
+        observations.push(row);
+      } else {
+        rest.push(row);
+      }
+    }
+    const ordered = [...profile, ...observations, ...rest];
+    const selected: ItemRow[] = [];
+    let used = 0;
+    for (const item of ordered) {
+      const cost = memoryTokenEstimateV1(item.text);
+      if (selected.length > 0 && used + cost > MEMORY_CORE_TOKEN_BUDGET_V1) {
+        break;
+      }
+      selected.push(item);
+      used += cost;
+    }
+    return selected;
+  }
+
+  private writeTopicProjection(
+    scopeKey: string,
+    subject: string,
+    now: Date,
+  ): void {
+    const items = this.#sql
+      .exec<ItemRow>(
+        `SELECT * FROM memory_item
+         WHERE scope_key = ? AND status = 'active' AND subject_key = ?
+         ORDER BY recorded_at ASC, id ASC`,
+        scopeKey,
+        subject,
+      )
+      .toArray();
+    const records = items.map((row) => this.recordOf(row));
+    const groups = [records];
+    const sections: MemoryBrowseSectionV1[] = groups
+      .slice(0, MEMORY_BROWSE_SECTIONS_V1)
+      .map((sectionItems) => {
+        const manifest: MemoryLeafManifestV1[] = sectionItems
+          .slice(0, MEMORY_MAX_LEAF_MANIFEST_V1)
+          .map((item) => ({ itemId: item.id, generation: item.generation }));
+        return {
+          sectionId: subject,
+          generation: this.invalidationEpoch(scopeKey),
+          title: subject,
+          summary: sectionItems
+            .slice(0, 3)
+            .map((item) => item.text)
+            .join(" "),
+          items: sectionItems,
+          manifest,
+        };
+      });
+    const markdown = [
+      `# ${subject}`,
+      ...records.map((item) => `- ${item.text}`),
+    ].join("\n");
+    this.putProjection({
+      scopeKey,
+      name: `topic:${subject}`,
+      policyVersion: MEMORY_TOPIC_POLICY_VERSION_V1,
+      epoch: this.invalidationEpoch(scopeKey),
+      body: JSON.stringify({ markdown, sections }),
+      manifest: sections.flatMap((section) => section.manifest),
+      now,
+    });
+  }
+
+  private putProjection(input: {
+    scopeKey: string;
+    name: string;
+    policyVersion: number;
+    epoch: number;
+    body: string;
+    manifest: MemoryLeafManifestV1[];
+    now: Date;
+  }): void {
+    const existing = this.#sql
+      .exec<{ body: string; generation: number }>(
+        `SELECT body, generation FROM memory_projection
+         WHERE scope_key = ? AND name = ?`,
+        input.scopeKey,
+        input.name,
+      )
+      .toArray()[0];
+    const generation =
+      existing && existing.body === input.body
+        ? Number(existing.generation)
+        : Number(existing?.generation ?? 0) + 1;
+    this.#sql.exec(
+      `INSERT INTO memory_projection (
+        scope_key, name, generation, policy_version, checked_invalidation_epoch,
+        body, manifest)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (scope_key, name) DO UPDATE SET
+         generation = excluded.generation,
+         policy_version = excluded.policy_version,
+         checked_invalidation_epoch = excluded.checked_invalidation_epoch,
+         body = excluded.body,
+         manifest = excluded.manifest`,
+      input.scopeKey,
+      input.name,
+      generation,
+      input.policyVersion,
+      input.epoch,
+      input.body,
+      JSON.stringify(input.manifest),
+    );
+    void input.now;
+  }
+
+  private semanticCoverageFor(
+    scopeKeys: readonly string[],
+  ): MemorySemanticCoverageV1 {
+    if (scopeKeys.length === 0) return "none";
+    const placeholders = scopeKeys.map(() => "?").join(", ");
+    const pending = this.#sql
+      .exec<{ n: number }>(
+        `SELECT count(*) AS n FROM memory_index_intent
+         WHERE scope_key IN (${placeholders})
+           AND state IN ('pending', 'claimed')
+           AND operation = 'upsert'`,
+        ...scopeKeys,
+      )
+      .toArray()[0];
+    const unconfirmed = this.#sql
+      .exec<{ n: number }>(
+        `SELECT count(*) AS n FROM memory_index_intent
+         WHERE scope_key IN (${placeholders})
+           AND state = 'unconfirmed'`,
+        ...scopeKeys,
+      )
+      .toArray()[0];
+    const pendingCount = Number(pending?.n ?? 0);
+    const unconfirmedCount = Number(unconfirmed?.n ?? 0);
+    if (pendingCount > MEMORY_PENDING_INDEX_PAGE_V1) return "partial";
+    if (pendingCount > 0 || unconfirmedCount > 0) return "unconfirmed";
+    const any = this.#sql
+      .exec<{ n: number }>(
+        `SELECT count(*) AS n FROM memory_index_intent
+         WHERE scope_key IN (${placeholders})`,
+        ...scopeKeys,
+      )
+      .toArray()[0];
+    return Number(any?.n ?? 0) === 0 ? "none" : "complete";
   }
 
   private isSuppressed(scopeKey: string, exactKey: string): boolean {
@@ -1254,6 +2734,56 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
         : { confidence: Number(row.confidence) }),
       scope: decodeMemoryScopeKeyV1(row.scope_key),
     };
+  }
+}
+
+function extractionObligationIdV1(
+  scopeKey: string,
+  sourceId: string,
+  sourceRevision: string,
+): string {
+  return `extract:${scopeKey}:${sourceId}@${sourceRevision}`;
+}
+
+function decodePrincipalV1(
+  raw: string | null | undefined,
+): MemoryJobPrincipalV1 | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as MemoryJobPrincipalV1;
+    if (
+      typeof parsed.userId === "string" &&
+      typeof parsed.botId === "string" &&
+      (parsed.actor === "bot" || parsed.actor === "user")
+    ) {
+      return parsed;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function authorityFromPrincipalV1(
+  principal: MemoryJobPrincipalV1 | undefined,
+  scope: MemoryScopeRefV1,
+): MemoryAuthorityV1 {
+  const userId = principal?.userId ?? scope.userId;
+  const botId = principal?.botId ?? scope.botId ?? "bot";
+  return {
+    userId,
+    botId,
+    actor: principal?.actor ?? "bot",
+    joinedGroupChatIds: scope.groupChatId ? [scope.groupChatId] : [],
+    membershipRevision: "1",
+  };
+}
+
+function decodeLocatorV1(raw: string, revision: string): MemorySourceLocatorV1 {
+  try {
+    return JSON.parse(raw) as MemorySourceLocatorV1;
+  } catch {
+    return { kind: "explicit", revision };
   }
 }
 

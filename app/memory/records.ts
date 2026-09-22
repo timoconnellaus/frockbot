@@ -32,6 +32,38 @@ export const MEMORY_RECALL_PAGE_V1 = 20;
 export const MEMORY_MAX_EXPAND_REFS_V1 = 16;
 export const MEMORY_MAX_BROWSE_PAGE_V1 = 32;
 export const MEMORY_JOB_WAKEUP_MS_V1 = 1_000;
+export const MEMORY_DRAIN_LOCAL_LIMIT_V1 = 8;
+export const MEMORY_DRAIN_EXTERNAL_LIMIT_V1 = 1;
+export const MEMORY_JOB_CONTINUATION_MS_V1 = 2_000;
+export const MEMORY_JOB_BACKOFF_CAP_MS_V1 = 300_000;
+export const MEMORY_MAX_JOB_ATTEMPTS_V1 = 8;
+export const MEMORY_CORE_TOKEN_BUDGET_V1 = 1_024;
+export const MEMORY_CORE_POLICY_VERSION_V1 = 1;
+export const MEMORY_TOPIC_POLICY_VERSION_V1 = 1;
+export const MEMORY_PENDING_INDEX_PAGE_V1 = 20;
+export const MEMORY_MAX_CAPTURE_CHARS_V1 = 8_000;
+export const MEMORY_EMBEDDING_POLICY_ID_V1 = "bge-base-en-v1.5:768";
+export const MEMORY_PROFILE_SUBJECTS_V1 = [
+  "profile",
+  "preference",
+  "preferences",
+] as const;
+
+export type MemoryJobKindV1 =
+  | "extract"
+  | "consolidate"
+  | "view-repair"
+  | "core-rebuild"
+  | "topic-rebuild"
+  | "outbox-deliver";
+
+export type MemoryJobStateV1 =
+  "pending" | "claimed" | "done" | "blocked" | "failed";
+
+export type MemoryWriteOriginV1 = "explicit" | "extraction" | "consolidation";
+
+export type MemorySemanticCoverageV1 =
+  "none" | "unconfirmed" | "partial" | "complete";
 
 export type MemorySourceKindV1 = "chat" | "voice" | "explicit";
 
@@ -180,6 +212,7 @@ export interface MemoryRecallResultV1 {
   cursor?: string;
   omissions: MemoryEngineOmissionV1[];
   membershipRevision: string;
+  semanticCoverage?: MemorySemanticCoverageV1;
 }
 
 export interface MemoryExpandResultV1 {
@@ -214,6 +247,105 @@ export interface MemoryWriteRequestV1 {
   subjectKey?: string;
   occurredAt?: string;
   createdBy?: string;
+  confidence?: number;
+  origin?: MemoryWriteOriginV1;
+  leafItems?: ReadonlyArray<{ itemId: string }>;
+  relations?: ReadonlyArray<{ relation: MemoryRelationV1; toId: string }>;
+}
+
+export interface MemoryJobPrincipalV1 {
+  userId: string;
+  botId: string;
+  actor: "bot" | "user";
+  turnId?: string;
+  sessionId?: string;
+  runId?: string;
+}
+
+export interface MemoryExtractedProposalV1 {
+  text: string;
+  kind: "fact" | "experience";
+  subjectKey?: string;
+  occurredAt?: string;
+  confidence?: number;
+}
+
+export interface MemoryConsolidatedObservationV1 {
+  text: string;
+  subjectKey: string;
+  leafItemIds: readonly string[];
+  relations: ReadonlyArray<{ relation: MemoryRelationV1; toId: string }>;
+  confidence?: number;
+}
+
+export interface MemoryCaptureExtractionRequestV1 {
+  authority: MemoryAuthorityV1;
+  scope: MemoryScopeRefV1;
+  principal: MemoryJobPrincipalV1;
+  source: MemorySourceInputV1 & { capturedText: string };
+  destinationScope?: MemoryScopeRefV1;
+}
+
+export type MemoryCaptureResultV1 =
+  | {
+      status: "ok";
+      obligationId: string;
+      duplicate: boolean;
+      queued: "extract" | "outbox";
+    }
+  | { status: "refused"; reason: string }
+  | { status: "unavailable"; reason: string };
+
+export interface MemoryAdmitOutboxRequestV1 {
+  outboxId: string;
+  payload: MemoryOutboxPayloadV1;
+}
+
+export interface MemoryOutboxPayloadV1 {
+  destinationScope: MemoryScopeRefV1;
+  principal: MemoryJobPrincipalV1;
+  authority: MemoryAuthorityV1;
+  source: MemorySourceInputV1 & { capturedText: string };
+}
+
+export type MemoryAdmitOutboxResultV1 =
+  | { status: "ok"; obligationId: string; duplicate: boolean }
+  | { status: "refused"; reason: string }
+  | { status: "unavailable"; reason: string };
+
+export interface MemoryAbandonObligationRequestV1 {
+  authority: MemoryAuthorityV1;
+  obligationId: string;
+}
+
+export type MemoryAbandonResultV1 =
+  { status: "ok"; abandoned: boolean } | { status: "refused"; reason: string };
+
+export function memoryJobBackoffMsV1(attempt: number): number {
+  const seconds = 2 ** Math.max(1, attempt);
+  return Math.min(MEMORY_JOB_BACKOFF_CAP_MS_V1, seconds * 1_000);
+}
+
+export function memoryTokenEstimateV1(text: string): number {
+  return new TextEncoder().encode(text).length + 16;
+}
+
+export function memoryItemVectorIdV1(input: {
+  scopeKey: string;
+  itemId: string;
+  generation: number;
+  operation: "upsert" | "delete";
+  policyId?: string;
+}): string {
+  const policy = input.policyId ?? MEMORY_EMBEDDING_POLICY_ID_V1;
+  return `${input.scopeKey}:${input.itemId}:${input.generation}:${policy}:${input.operation}`;
+}
+
+export function isMemoryProfileSubjectV1(
+  subjectKey: string | undefined,
+): boolean {
+  if (!subjectKey) return false;
+  return (MEMORY_PROFILE_SUBJECTS_V1 as readonly string[]).includes(subjectKey);
 }
 
 export interface MemoryForgetRequestV1 {
