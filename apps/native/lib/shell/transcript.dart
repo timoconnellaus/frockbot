@@ -102,6 +102,11 @@ class TranscriptView extends StatefulWidget {
 class _TranscriptViewState extends State<TranscriptView> {
   static const workingPadding = EdgeInsets.fromLTRB(16, 6, 16, 6);
 
+  /// Floor for a row that has not been measured yet. The newest bubbles are
+  /// shorter than this; using them as the guess is what made the far end
+  /// unreachable.
+  static const _heightFloor = 200.0;
+
   final GlobalKey focusKey = GlobalKey();
 
   /// One key per line, so the newest message can be measured against the
@@ -110,10 +115,46 @@ class _TranscriptViewState extends State<TranscriptView> {
   /// would rebuild the row it left, and a live Applet card with it.
   final Map<String, GlobalKey> probes = {};
   final ScrollController scroll = ScrollController();
+
+  /// Measured main-axis height of each slot. Mutated from layout; never a
+  /// reason to rebuild. An unknown row is estimated from the tallest entry,
+  /// so the short newest bubbles cannot shrink the scrollbar.
+  final Map<String, double> _rowHeights = {};
+
+  /// One older-page fetch per fling. Cleared when that fetch finishes, not on
+  /// every scroll frame.
+  bool _loadingOlder = false;
+
+  List<_ThreadSlot> _slots = const [];
+  String? _focusLineId;
+
   @override
   void initState() {
     super.initState();
-    scroll.addListener(_scheduleReportRead);
+    scroll.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    _scheduleReportRead();
+    _loadOlderIfNearEnd();
+  }
+
+  /// Fetch the next page once the reader is close to the far end.
+  ///
+  /// The first frame of a reverse list sits on the newest reply. An
+  /// underestimate there still reports a small `pixels`, and treating that as
+  /// the far end would pull history while they are reading the latest line.
+  /// A thread that already fits has nothing further to fetch.
+  void _loadOlderIfNearEnd() {
+    if (_loadingOlder || !hasEarlier || !scroll.hasClients) return;
+    final position = scroll.position;
+    if (!position.hasContentDimensions) return;
+    if (position.maxScrollExtent <= 0 || position.pixels <= 8) return;
+    if (position.maxScrollExtent - position.pixels > 480) return;
+    _loadingOlder = true;
+    onRefresh(older: true).whenComplete(() {
+      _loadingOlder = false;
+    });
   }
 
   /// The lines the cached newest-send id was derived from. `_reportRead` runs
@@ -231,6 +272,64 @@ class _TranscriptViewState extends State<TranscriptView> {
   void Function(String url)? get onOpenLink => widget.onOpenLink;
   String get storageKey => widget.storageKey;
 
+  /// Whether [_row] would draw [line]. Deciding that here keeps the slot list
+  /// from building every bubble just to count the children.
+  bool _draws(TranscriptLine line, SupersedeDrainState drain) {
+    if (line.exchange != null || line.voiceCall != null) return true;
+    if (line.role == LineRole.system || line.role == LineRole.user) {
+      return true;
+    }
+    if (line.status == LineStatus.streaming && line.empty) {
+      // Same branches as [_row]: a Stop the person asked for, or a pending
+      // line that still has a drain sentence. Anything else is the companion,
+      // not a row.
+      final label = line.stopRequested
+          ? 'Stopping…'
+          : line.pending
+          ? supersedeDrainLabel(drain) ?? 'Waiting…'
+          : null;
+      return label != null;
+    }
+    if (line.notice != null || line.text.isNotEmpty) return true;
+    for (final send in line.sends) {
+      if (!sendDrawnAsCardV1(send)) return true;
+    }
+    return false;
+  }
+
+  void _revealFocus(int index, int attempt) {
+    if (!mounted) return;
+    final current = focusKey.currentContext;
+    if (current != null) {
+      Scrollable.ensureVisible(current, alignment: 0.4);
+      return;
+    }
+    // Outside the cache the element does not exist yet. Jump toward its
+    // estimated offset so the next frame can build it and bring it into view.
+    if (attempt >= 6 ||
+        !scroll.hasClients ||
+        index < 0 ||
+        index >= _slots.length) {
+      return;
+    }
+    final position = scroll.position;
+    if (!position.hasContentDimensions) return;
+    var guess = _heightFloor;
+    for (final height in _rowHeights.values) {
+      if (height > guess) guess = height;
+    }
+    var offset = 0.0;
+    for (var i = 0; i < index; i++) {
+      offset += _rowHeights[_slots[i].id] ?? guess;
+    }
+    final target = offset.clamp(0.0, position.maxScrollExtent);
+    if ((position.pixels - target).abs() <= 1) return;
+    position.jumpTo(target);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _revealFocus(index, attempt + 1),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     WidgetsBinding.instance.addPostFrameCallback((_) => _reportRead());
@@ -242,118 +341,75 @@ class _TranscriptViewState extends State<TranscriptView> {
     _newestSendId(ordered);
     final drain = supersedeDrainState(ordered, now);
     final target = widget.focusRunId;
-    var marked = false;
-    final rows = <Widget>[];
-    // The probes outlive one build only for the lines still drawn; a thread
-    // that pages in and out must not accumulate keys for rows that are gone.
-    final drawn = <String>{};
-    for (final line in ordered) {
-      final content = _row(context, line, drain);
-      if (content == null) continue;
-      // The key belongs on the list child itself. A row that carries one can
-      // be found again after the thread grows, so a live Applet card kept
-      // alive off-screen moves with its line instead of being rebuilt against
-      // whichever line has taken over its index.
-      final row = GestureDetector(
-        key: ValueKey('row:${line.id}'),
-        onLongPress:
-            widget.onMessageActions == null || line.role == LineRole.system
-            ? null
-            : () => widget.onMessageActions!(line),
-        onSecondaryTapUp:
-            widget.onMessageActions == null || line.role == LineRole.system
-            ? null
-            : (details) => widget.onMessageActions!(
-                line,
-                position: details.globalPosition,
-              ),
-        child: KeyedSubtree(
-          key: probes.putIfAbsent(line.id, GlobalKey.new),
-          child: content,
-        ),
-      );
-      drawn.add(line.id);
+    // Oldest match: a Turn is a user line and then its reply, and the mark
+    // belongs on the first of those, which is where the Turn starts.
+    String? focusLineId;
+    if (target != null) {
+      for (final line in ordered) {
+        if (!_draws(line, drain)) continue;
+        if (line.runId == target || line.id == '$target:user') {
+          focusLineId = line.id;
+          break;
+        }
+      }
+    }
+    _focusLineId = focusLineId;
+    // reverse: true lays index 0 at the visual bottom, so the slot list is
+    // newest first.
+    final slots = <_ThreadSlot>[];
+    if (widget.bottomSpace != null) {
+      slots.add(const _ThreadSlot('bottom', _SlotKind.bottom));
+    }
+    if (pendingText != null) {
+      slots.add(const _ThreadSlot('row:pending', _SlotKind.pending));
+    }
+    var anyLine = false;
+    for (final line in ordered.reversed) {
+      if (!_draws(line, drain)) continue;
+      anyLine = true;
+      slots.add(_ThreadSlot('row:${line.id}', _SlotKind.line, line));
       if (line.id == widget.unreadFromMessageId ||
           (line.failureMessageId != null &&
               line.failureMessageId == widget.unreadFromMessageId)) {
-        rows.add(
-          Padding(
-            key: ValueKey('unread:${line.id}'),
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Divider(
-                    color: Theme.of(context).colorScheme.primary
-                        .withValues(alpha: 0.45),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Text(
-                    'Unread from here',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      letterSpacing: 0.3,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Divider(
-                    color: Theme.of(context).colorScheme.primary
-                        .withValues(alpha: 0.45),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
+        // After the line in this newest-first list, so it sits visually above.
+        slots.add(_ThreadSlot('unread:${line.id}', _SlotKind.unread, line));
       }
-      if (target != null &&
-          !marked &&
-          (line.runId == target || line.id == '$target:user')) {
-        marked = true;
-        rows.add(
-          Container(
-            key: focusKey,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary
-                  .withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: row,
-          ),
-        );
-        continue;
-      }
-      rows.add(row);
     }
+    // The probes outlive one build only for the lines still drawn; a thread
+    // that pages in and out must not accumulate keys for rows that are gone.
+    final drawn = <String>{
+      for (final slot in slots)
+        if (slot.kind == _SlotKind.line) slot.line!.id,
+    };
     probes.removeWhere((id, _) => !drawn.contains(id));
-    if (marked && focused != target) {
-      focused = target;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final box = focusKey.currentContext;
-        if (box != null) Scrollable.ensureVisible(box, alignment: 0.4);
-      });
-    }
-    if (pendingText != null) {
-      rows.add(
-        _Bubble(
-          key: const ValueKey('row:pending'),
-          id: 'pending',
-          mine: true,
-          pending: true,
-          child: Text(pendingText!),
-        ),
-      );
-    }
-    if (rows.isEmpty) {
+    if (!anyLine && pendingText == null) {
+      _slots = const [];
+      _rowHeights.clear();
       return loading
           ? const FrockLoading(label: 'Loading your conversation')
           : _EmptyThread(
               background: widget.background,
               starters: widget.starters,
             );
+    }
+    if (hasEarlier) {
+      slots.add(const _ThreadSlot('row:earlier', _SlotKind.earlier));
+    }
+    final live = {for (final slot in slots) slot.id};
+    _rowHeights.removeWhere((id, _) => !live.contains(id));
+    _slots = slots;
+    final indexById = <String, int>{
+      for (var index = 0; index < slots.length; index++) slots[index].id: index,
+    };
+    final focusIndex = focusLineId == null
+        ? null
+        : indexById['row:$focusLineId'];
+    if (focusLineId != null && focused != target) {
+      focused = target;
+      final index = focusIndex!;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _revealFocus(index, 0),
+      );
     }
     return identified(
       ShellIds.transcript,
@@ -363,7 +419,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       SelectionArea(
         child: RefreshIndicator(
           onRefresh: onRefresh,
-          child: ListView(
+          child: ListView.custom(
             controller: scroll,
             // The thread starts at the latest row. Earlier pages extend the
             // far end, so prepending history keeps the viewport where it was.
@@ -377,36 +433,122 @@ class _TranscriptViewState extends State<TranscriptView> {
             physics: const AlwaysScrollableScrollPhysics(),
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             key: PageStorageKey(storageKey),
-            children: [
-              if (hasEarlier)
-                KeyedSubtree(
-                  key: const ValueKey('row:earlier'),
-                  child: identified(
-                    ShellIds.transcriptEarlier,
-                    Center(
-                      child: TextButton(
-                        onPressed: loading
-                            ? null
-                            : () => onRefresh(older: true),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Theme.of(context)
-                              .colorScheme
-                              .onSurfaceVariant,
-                          textStyle: Theme.of(context).textTheme.labelMedium,
-                          minimumSize: const Size(0, 32),
-                        ),
-                        child: const Text('Earlier messages'),
-                      ),
-                    ),
-                  ),
-                ),
-              ...rows,
-              if (widget.bottomSpace != null) widget.bottomSpace!,
-            ].reversed.toList(),
+            // Enough to measure tall older rows before a fling arrives.
+            // `double.infinity` gives the semantics a non-finite rect.
+            scrollCacheExtent: const ScrollCacheExtent.pixels(8000),
+            childrenDelegate: _TranscriptDelegate(
+              slots: slots,
+              heights: _rowHeights,
+              findChildIndexCallback: (key) =>
+                  key is ValueKey<String> ? indexById[key.value] : null,
+              builder: (context, index) {
+                if (index < 0 || index >= slots.length) return null;
+                final slot = slots[index];
+                return _MeasuredSlot(
+                  key: ValueKey(slot.id),
+                  id: slot.id,
+                  heights: _rowHeights,
+                  child: _slotChild(context, slot, drain),
+                );
+              },
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Widget _slotChild(
+    BuildContext context,
+    _ThreadSlot slot,
+    SupersedeDrainState drain,
+  ) {
+    switch (slot.kind) {
+      case _SlotKind.bottom:
+        return widget.bottomSpace!;
+      case _SlotKind.pending:
+        return _Bubble(
+          id: 'pending',
+          mine: true,
+          pending: true,
+          child: Text(pendingText!),
+        );
+      case _SlotKind.earlier:
+        return identified(
+          ShellIds.transcriptEarlier,
+          Center(
+            child: TextButton(
+              onPressed: loading ? null : () => onRefresh(older: true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                textStyle: Theme.of(context).textTheme.labelMedium,
+                minimumSize: const Size(0, 32),
+              ),
+              child: const Text('Earlier messages'),
+            ),
+          ),
+        );
+      case _SlotKind.unread:
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Divider(
+                  color: Theme.of(context).colorScheme.primary
+                      .withValues(alpha: 0.45),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text(
+                  'Unread from here',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Divider(
+                  color: Theme.of(context).colorScheme.primary
+                      .withValues(alpha: 0.45),
+                ),
+              ),
+            ],
+          ),
+        );
+      case _SlotKind.line:
+        final line = slot.line!;
+        final row = GestureDetector(
+          key: ValueKey('row:${line.id}'),
+          onLongPress:
+              widget.onMessageActions == null || line.role == LineRole.system
+              ? null
+              : () => widget.onMessageActions!(line),
+          onSecondaryTapUp:
+              widget.onMessageActions == null || line.role == LineRole.system
+              ? null
+              : (details) => widget.onMessageActions!(
+                  line,
+                  position: details.globalPosition,
+                ),
+          child: KeyedSubtree(
+            key: probes.putIfAbsent(line.id, GlobalKey.new),
+            child: _row(context, line, drain)!,
+          ),
+        );
+        if (line.id != _focusLineId) return row;
+        return Container(
+          key: focusKey,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary
+                .withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: row,
+        );
+    }
   }
 
   /// One line, or nothing where the line has nothing to say — a running Turn
@@ -508,6 +650,111 @@ class _TranscriptViewState extends State<TranscriptView> {
   }
 }
 
+enum _SlotKind { bottom, pending, line, unread, earlier }
+
+class _ThreadSlot {
+  final String id;
+  final _SlotKind kind;
+  final TranscriptLine? line;
+  const _ThreadSlot(this.id, this.kind, [this.line]);
+}
+
+/// Estimates the rows the sliver has not built from the height cache.
+///
+/// [itemExtentBuilder] is the wrong tool: it forces the child's extent
+/// instead of measuring it. The guess for an unknown row is the tallest
+/// height measured so far, never the average of the short newest bubbles.
+class _TranscriptDelegate extends SliverChildBuilderDelegate {
+  _TranscriptDelegate({
+    required this._slots,
+    required this._heights,
+    required NullableIndexedWidgetBuilder builder,
+    required ChildIndexGetter findChildIndexCallback,
+  }) : super(
+         builder,
+         findChildIndexCallback: findChildIndexCallback,
+         childCount: _slots.length,
+       );
+
+  final List<_ThreadSlot> _slots;
+  final Map<String, double> _heights;
+
+  @override
+  double? estimateMaxScrollOffset(
+    int firstIndex,
+    int lastIndex,
+    double leadingScrollOffset,
+    double trailingScrollOffset,
+  ) {
+    assert(firstIndex <= lastIndex);
+    assert(leadingScrollOffset.isFinite && trailingScrollOffset.isFinite);
+    var guess = _TranscriptViewState._heightFloor;
+    for (final height in _heights.values) {
+      if (height > guess) guess = height;
+    }
+    var total = trailingScrollOffset;
+    for (var index = lastIndex + 1; index < _slots.length; index++) {
+      total += _heights[_slots[index].id] ?? guess;
+    }
+    return total;
+  }
+}
+
+/// Records its child's main-axis height. Layout must not call setState; the
+/// map is read by the next estimate.
+class _MeasuredSlot extends SingleChildRenderObjectWidget {
+  final String id;
+  final Map<String, double> heights;
+  const _MeasuredSlot({
+    super.key,
+    required this.id,
+    required this.heights,
+    required super.child,
+  });
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderMeasuredSlot(id: id, heights: heights);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderMeasuredSlot renderObject,
+  ) {
+    renderObject
+      ..id = id
+      ..heights = heights;
+  }
+}
+
+class _RenderMeasuredSlot extends RenderProxyBox {
+  _RenderMeasuredSlot({required this._id, required this._heights});
+
+  String _id;
+  Map<String, double> _heights;
+
+  String get id => _id;
+  set id(String value) {
+    if (_id == value) return;
+    _id = value;
+    markNeedsLayout();
+  }
+
+  set heights(Map<String, double> value) {
+    if (identical(_heights, value)) return;
+    _heights = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final measured = size.height;
+    if (!measured.isFinite) return;
+    if (_heights[_id] != measured) _heights[_id] = measured;
+  }
+}
+
 class _Bubble extends StatelessWidget {
   final String id;
   final bool mine;
@@ -516,7 +763,6 @@ class _Bubble extends StatelessWidget {
   final String? background;
   final Widget child;
   const _Bubble({
-    super.key,
     required this.id,
     required this.mine,
     required this.child,

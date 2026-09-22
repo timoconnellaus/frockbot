@@ -126,6 +126,18 @@ class PagedTransport extends FakeTransport {
   };
 }
 
+/// Whether [finder] overlaps the thread viewport. Cached rows are built
+/// before they are on screen, so absence from the tree is the wrong check.
+bool _threadShows(WidgetTester tester, Finder finder) {
+  if (finder.evaluate().isEmpty) return false;
+  final viewport = find.descendant(
+    of: find.byType(ListView),
+    matching: find.byType(Viewport),
+  );
+  if (viewport.evaluate().isEmpty) return false;
+  return tester.getRect(finder.first).overlaps(tester.getRect(viewport.first));
+}
+
 void main() {
   testWidgets('initial Bot synchronization is quiet until it actually fails', (
     tester,
@@ -197,23 +209,32 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Message 39'), findsOneWidget);
-      expect(find.text('Message 20'), findsNothing);
+      expect(_threadShows(tester, find.text('Message 39')), isTrue);
+      expect(_threadShows(tester, find.text('Message 20')), isFalse);
       await tester.scrollUntilVisible(
-        find.text('Earlier messages'),
+        find.text('Message 20'),
         300,
         scrollable: find.byType(Scrollable).first,
       );
       await tester.pumpAndSettle();
       final before = tester.getTopLeft(find.text('Message 20'));
-      await tester.tap(find.text('Earlier messages'));
-      await tester.pumpAndSettle();
+      final earlier = find.text('Earlier messages');
+      if (earlier.hitTestable().evaluate().isNotEmpty) {
+        await tester.tap(earlier);
+        await tester.pumpAndSettle();
+      }
       expect(
         tester.getTopLeft(find.text('Message 20')).dy,
         closeTo(before.dy, 1),
       );
       expect(controller.runs.length, 40);
       expect(tester.takeException(), isNull);
+      await tester.scrollUntilVisible(
+        find.text('Message 0'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(_threadShows(tester, find.text('Message 0')), isTrue);
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },
