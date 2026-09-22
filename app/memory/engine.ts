@@ -6,6 +6,20 @@
 // already on the job row, so a crash between them still has a durable
 // wakeup: the next owner access reads the due index and re-arms.
 
+import {
+  fuseMemoryRecallV1,
+  memoryRecallCacheKeyV1,
+  memoryTextOverlapsV1,
+  selectHydrationIdsV1,
+  type FusionMemoryItemV1,
+  type MemoryChannelCandidatesV1,
+  type MemoryNeighborV1,
+} from "./hybrid.js";
+import {
+  MEMORY_POLICY_V1,
+  clipMemoryQueryV1,
+  suballocateMemoryScopesV1,
+} from "./policy.js";
 import { refuseMemorySecretV1 } from "./secrets.js";
 import { openMemorySchemaV1 } from "./schema.js";
 import {
@@ -74,9 +88,11 @@ import {
   type MemoryOutboxPayloadV1,
   type MemoryPreparedCoreRequestV1,
   type MemoryPreparedCoreResultV1,
+  type MemoryRecallChannelStatusV1,
   type MemoryRecallRequestV1,
   type MemoryRecallResultV1,
   type MemoryRelationV1,
+  type MemorySemanticRankV1,
   type MemoryScopeRefV1,
   type MemorySemanticCoverageV1,
   type MemorySourceInputV1,
@@ -218,6 +234,7 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
   #ownedKinds?: readonly MemoryEngineScopeKindV1[];
   #onStep?: (step: string) => void;
   #opened = false;
+  #recallCache = new Map<string, MemoryRecallResultV1>();
 
   constructor(options: MemoryEngineOptionsV1) {
     this.#storage = options.storage;
@@ -651,7 +668,13 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
       };
     }
     this.open();
-    const query = request.query.trim();
+    const clipped = clipMemoryQueryV1(request.query);
+    if (clipped.clipped) {
+      omissions.push({
+        reason: `the query was clipped to ${MEMORY_POLICY_V1.maxQueryBytes} bytes`,
+      });
+    }
+    const query = clipped.query;
     if (!query) {
       return {
         hits: [],
@@ -660,78 +683,102 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
         membershipRevision: request.authority.membershipRevision,
       };
     }
+    const focusKey = request.focusScope
+      ? memoryScopeKeyV1(request.focusScope)
+      : undefined;
+    const page = suballocateMemoryScopesV1(authorized, {
+      limit: MEMORY_POLICY_V1.maxScopesPerRequest,
+      key: (scope) => memoryScopeKeyV1(scope),
+      ...(focusKey ? { explicitKey: focusKey } : {}),
+    });
+    for (const scope of page.omitted) {
+      omissions.push({
+        reason:
+          "this scope was outside the recall page; name it to search it directly",
+        scope,
+      });
+    }
+    const epochs = page.selected.map((scope) => {
+      const scopeKey = memoryScopeKeyV1(scope);
+      return `${scopeKey}:${this.scopeGeneration(scopeKey)}:${this.invalidationEpoch(scopeKey)}`;
+    });
+    const cacheKey = memoryRecallCacheKeyV1({
+      query,
+      scopeKeys: page.selected.map((scope) => memoryScopeKeyV1(scope)),
+      membershipRevision: request.authority.membershipRevision,
+      epochs,
+      embeddingPolicy: MEMORY_EMBEDDING_POLICY_ID_V1,
+      filters: JSON.stringify({
+        filters: request.filters ?? {},
+        semantic: (request.semanticRanks ?? []).map(
+          (rank) => `${rank.scopeKey}:${rank.itemId}:${rank.rank}`,
+        ),
+        semanticStatus: request.semanticStatus ?? "",
+      }),
+    });
+    const cached = this.#recallCache.get(cacheKey);
+    if (
+      cached &&
+      cached.hits.every((hit) =>
+        this.itemStillActive(hit.item.scope, hit.item.id, hit.item.generation),
+      )
+    ) {
+      return cached;
+    }
     const budget = Math.min(
       request.budget ?? MEMORY_RECALL_PAGE_V1,
-      MEMORY_RECALL_PAGE_V1,
+      MEMORY_POLICY_V1.candidatesPerChannel,
     );
-    const match = memoryMatchExpressionV1(query);
-    const exact = memoryCanonicalKeyV1(query);
-    const hits: MemoryHitV1[] = [];
-    let channelFailed = false;
-    for (const scope of authorized) {
-      const scopeKey = memoryScopeKeyV1(scope);
-      try {
-        const byId = this.item(scopeKey, query);
-        if (byId && byId.status === "active") {
-          hits.push(this.hitOf(byId, 1));
-        }
-        const byKey = this.activeByKey(scopeKey, exact);
-        if (byKey && (!byId || byKey.id !== byId.id)) {
-          hits.push(this.hitOf(byKey, 1));
-        }
-        if (match) {
-          const rows = this.#sql
-            .exec<{ id: string }>(
-              `SELECT memory_item_fts.id AS id FROM memory_item_fts
-               JOIN memory_item
-                 ON memory_item.scope_key = memory_item_fts.scope_key
-                AND memory_item.id = memory_item_fts.id
-               WHERE memory_item_fts MATCH ?
-                 AND memory_item_fts.scope_key = ?
-                 AND memory_item.status = 'active'
-               LIMIT ?`,
-              match,
-              scopeKey,
-              budget,
-            )
-            .toArray();
-          for (const row of rows) {
-            if (hits.some((hit) => hit.item.id === row.id)) continue;
-            const item = this.item(scopeKey, row.id);
-            if (item && item.status === "active")
-              hits.push(this.hitOf(item, 0.5));
-          }
-        }
-      } catch (error) {
-        channelFailed = true;
-        omissions.push({
-          scope,
-          reason:
-            error instanceof Error
-              ? error.message
-              : "lexical recall failed for this scope",
-        });
-      }
-    }
-    const filtered = hits.filter((hit) => {
-      if (request.filters?.kind && hit.item.kind !== request.filters.kind) {
-        return false;
+    const channels = this.recallChannels(page.selected, query, request, budget);
+    for (const omission of channels.omissions) omissions.push(omission);
+    const hydratedIds = selectHydrationIdsV1(
+      channels.channels,
+      MEMORY_POLICY_V1.hydratedCandidates,
+    );
+    const items = new Map<string, FusionMemoryItemV1>();
+    for (const hit of hydratedIds) {
+      const row = this.item(hit.scopeKey, hit.itemId);
+      if (!row || row.status !== "active") continue;
+      if (this.isSuppressed(hit.scopeKey, row.canonical_key)) continue;
+      const record = this.recordOf(row);
+      if (request.filters?.kind && record.kind !== request.filters.kind) {
+        continue;
       }
       if (
         request.filters?.subjectKey &&
-        hit.item.subjectKey !== request.filters.subjectKey
+        record.subjectKey !== request.filters.subjectKey
       ) {
-        return false;
+        continue;
       }
-      return !this.isSuppressed(
-        memoryScopeKeyV1(hit.item.scope),
-        hit.item.canonicalKey,
-      );
+      items.set(`${hit.scopeKey}\u0000${hit.itemId}`, this.fusionItem(row));
+    }
+    const seedIds = new Set(
+      [...items.values()].map((item) => item.itemId),
+    );
+    const neighbors = this.recallNeighbors(page.selected, seedIds);
+    const fused = fuseMemoryRecallV1({
+      channels: channels.channels,
+      items,
+      neighbors,
+      hydrateNeighbor: (scopeKey, itemId) => {
+        const row = this.item(scopeKey, itemId);
+        if (!row || row.status !== "active") return undefined;
+        if (this.isSuppressed(scopeKey, row.canonical_key)) return undefined;
+        return this.fusionItem(row);
+      },
+      tokenBudget: Math.min(
+        request.tokenBudget ?? MEMORY_POLICY_V1.activeRecallTokens,
+        MEMORY_POLICY_V1.activeRecallTokens,
+      ),
+    });
+    const hits = fused.items.slice(0, budget).flatMap((item, index) => {
+      const row = this.item(item.scopeKey, item.itemId);
+      return row ? [this.hitOf(row, fused.items.length - index)] : [];
     });
     let coverage: MemorySemanticCoverageV1 = "none";
     try {
       coverage = this.semanticCoverageFor(
-        authorized.map((scope) => memoryScopeKeyV1(scope)),
+        page.selected.map((scope) => memoryScopeKeyV1(scope)),
       );
     } catch {
       coverage = "none";
@@ -747,24 +794,56 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
           "Vectorize mutations are unconfirmed; exact and lexical recall already see committed items",
       });
     }
-    const page = filtered.slice(0, budget);
-    const status: MemoryCompletenessV1 = channelFailed
-      ? "unavailable"
-      : page.length === 0
+    if (fused.omitted > 0) {
+      omissions.push({
+        reason: `${fused.omitted} memory item(s) were outside the token budget`,
+      });
+    }
+    const ftsFailed = channels.channels.some(
+      (channel) => channel.channel === "fts" && channel.status === "unavailable",
+    );
+    const semanticStatus = channels.channels.find(
+      (channel) => channel.channel === "semantic",
+    )?.status;
+    const status: MemoryCompletenessV1 = ftsFailed
+      ? hits.length === 0
+        ? "unavailable"
+        : "partial"
+      : hits.length === 0
         ? "empty"
-        : filtered.length > budget || coverage === "partial"
+        : page.omitted.length > 0 ||
+            fused.omitted > 0 ||
+            coverage === "partial" ||
+            semanticStatus === "partial" ||
+            semanticStatus === "unavailable"
           ? "partial"
           : "complete";
-    return {
-      hits: page,
+    const result: MemoryRecallResultV1 = {
+      hits,
       status,
-      ...(filtered.length > budget
-        ? { cursor: page[page.length - 1]?.item.id }
-        : {}),
+      ...(fused.items.length > budget
+        ? { cursor: hits[hits.length - 1]?.item.id }
+        : page.omitted.length > 0
+          ? { cursor: memoryScopeKeyV1(page.omitted[0]!) }
+          : {}),
       omissions,
       membershipRevision: request.authority.membershipRevision,
       semanticCoverage: coverage,
+      channels: {
+        fts: channels.channels.find((channel) => channel.channel === "fts")!
+          .status,
+        semantic: semanticStatus ?? "skipped",
+        time: channels.channels.find((channel) => channel.channel === "time")!
+          .status,
+      },
+      tokensEstimated: fused.tokensEstimated,
     };
+    if (this.#recallCache.size > 32) {
+      const oldest = this.#recallCache.keys().next().value;
+      if (oldest) this.#recallCache.delete(oldest);
+    }
+    this.#recallCache.set(cacheKey, result);
+    return result;
   }
 
   expand(request: MemoryExpandRequestV1): MemoryExpandResultV1 {
@@ -1775,6 +1854,39 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     return this.semanticCoverageFor([scopeKey]);
   }
 
+  /** Current invalidation fence for one scope. Callers recheck cached blocks. */
+  scopeEpoch(scopeKey: string): number {
+    this.open();
+    return this.invalidationEpoch(scopeKey);
+  }
+
+  /** True when that generation is still the active item. */
+  itemStillActive(
+    scope: MemoryScopeRefV1,
+    itemId: string,
+    generation: number,
+  ): boolean {
+    return this.itemVisibility(scope, itemId, generation) === "active";
+  }
+
+  /**
+   * `absent` means this owner does not store the row. Callers must not treat
+   * that as withdrawn: the item may live on the other owner.
+   */
+  itemVisibility(
+    scope: MemoryScopeRefV1,
+    itemId: string,
+    generation: number,
+  ): "active" | "inactive" | "absent" {
+    this.open();
+    const row = this.item(memoryScopeKeyV1(scope), itemId);
+    if (!row) return "absent";
+    if (row.status !== "active" || Number(row.generation) !== generation) {
+      return "inactive";
+    }
+    return "active";
+  }
+
   inspectJobs(): MemoryJobInspectV1[] {
     this.open();
     return this.#sql
@@ -1979,6 +2091,221 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
       )
       .toArray()[0];
     return Number(row?.generation ?? 0);
+  }
+
+  private recallChannels(
+    scopes: readonly MemoryScopeRefV1[],
+    query: string,
+    request: MemoryRecallRequestV1,
+    budget: number,
+  ): {
+    channels: MemoryChannelCandidatesV1[];
+    omissions: MemoryEngineOmissionV1[];
+  } {
+    const omissions: MemoryEngineOmissionV1[] = [];
+    const fts: MemoryChannelCandidatesV1["ranked"] = [];
+    let ftsFailed = false;
+    const match = memoryMatchExpressionV1(query);
+    const exact = memoryCanonicalKeyV1(query);
+    const channelLimit = Math.min(budget, MEMORY_POLICY_V1.candidatesPerChannel);
+    for (const scope of scopes) {
+      if (fts.length >= channelLimit) break;
+      const scopeKey = memoryScopeKeyV1(scope);
+      try {
+        const ids: string[] = [];
+        const byId = this.item(scopeKey, query);
+        if (byId?.status === "active") ids.push(byId.id);
+        const byKey = this.activeByKey(scopeKey, exact);
+        if (byKey && !ids.includes(byKey.id)) ids.push(byKey.id);
+        if (match) {
+          const rows = this.#sql
+            .exec<{ id: string }>(
+              `SELECT memory_item_fts.id AS id FROM memory_item_fts
+               JOIN memory_item
+                 ON memory_item.scope_key = memory_item_fts.scope_key
+                AND memory_item.id = memory_item_fts.id
+               WHERE memory_item_fts MATCH ?
+                 AND memory_item_fts.scope_key = ?
+                 AND memory_item.status = 'active'
+               LIMIT ?`,
+              match,
+              scopeKey,
+              channelLimit,
+            )
+            .toArray();
+          for (const row of rows) {
+            if (!ids.includes(row.id)) ids.push(row.id);
+          }
+        }
+        for (const pending of this.pendingIndexCandidates(
+          scopeKey,
+          MEMORY_PENDING_INDEX_PAGE_V1,
+        )) {
+          if (ids.includes(pending.id)) continue;
+          if (!memoryTextOverlapsV1(pending.text, query)) continue;
+          ids.push(pending.id);
+        }
+        for (const id of ids) {
+          if (fts.length >= channelLimit) break;
+          fts.push({ scopeKey, itemId: id, rank: fts.length + 1 });
+        }
+      } catch (error) {
+        ftsFailed = true;
+        omissions.push({
+          scope,
+          reason:
+            error instanceof Error
+              ? error.message
+              : "lexical recall failed for this scope",
+        });
+      }
+    }
+    const time: MemoryChannelCandidatesV1["ranked"] = [];
+    const from = request.filters?.occurredFrom;
+    const to = request.filters?.occurredTo;
+    let timeStatus: MemoryRecallChannelStatusV1 = "skipped";
+    if (from || to) {
+      timeStatus = "complete";
+      for (const scope of scopes) {
+        if (time.length >= channelLimit) break;
+        const scopeKey = memoryScopeKeyV1(scope);
+        try {
+          const rows = this.#sql
+            .exec<{ id: string }>(
+              `SELECT id FROM memory_item
+               WHERE scope_key = ?
+                 AND status = 'active'
+                 AND occurred_at IS NOT NULL
+                 ${from ? "AND occurred_at >= ?" : ""}
+                 ${to ? "AND occurred_at <= ?" : ""}
+               ORDER BY id ASC
+               LIMIT ?`,
+              scopeKey,
+              ...(from ? [from] : []),
+              ...(to ? [to] : []),
+              channelLimit - time.length,
+            )
+            .toArray();
+          for (const row of rows) {
+            time.push({
+              scopeKey,
+              itemId: row.id,
+              rank: time.length + 1,
+            });
+          }
+        } catch (error) {
+          timeStatus = time.length > 0 ? "partial" : "unavailable";
+          omissions.push({
+            scope,
+            reason:
+              error instanceof Error
+                ? error.message
+                : "time recall failed for this scope",
+          });
+        }
+      }
+    }
+    const allowed = new Set(scopes.map((scope) => memoryScopeKeyV1(scope)));
+    const semantic = (request.semanticRanks ?? [])
+      .filter((rank) => allowed.has(rank.scopeKey))
+      .slice(0, channelLimit)
+      .map(
+        (rank, index): MemorySemanticRankV1 => ({
+          scopeKey: rank.scopeKey,
+          itemId: rank.itemId,
+          rank: index + 1,
+        }),
+      );
+    const semanticStatus: MemoryRecallChannelStatusV1 =
+      request.semanticStatus ??
+      (request.semanticRanks ? "complete" : "skipped");
+    return {
+      channels: [
+        {
+          channel: "fts",
+          status: ftsFailed ? (fts.length > 0 ? "partial" : "unavailable") : "complete",
+          ranked: fts,
+        },
+        { channel: "semantic", status: semanticStatus, ranked: semantic },
+        { channel: "time", status: timeStatus, ranked: time },
+      ],
+      omissions,
+    };
+  }
+
+  private fusionItem(row: ItemRow): FusionMemoryItemV1 {
+    const leaves =
+      row.kind === "observation"
+        ? this.#sql
+            .exec<{ leaf_item_id: string }>(
+              `SELECT leaf_item_id FROM memory_derivation
+               WHERE scope_key = ? AND derived_id = ?`,
+              row.scope_key,
+              row.id,
+            )
+            .toArray()
+            .map((leaf) => ({ itemId: leaf.leaf_item_id }))
+        : [];
+    const outgoing = this.#sql
+      .exec<{ to_id: string }>(
+        `SELECT to_id FROM memory_relation
+         WHERE scope_key = ? AND from_id = ? AND relation = 'contradicts'`,
+        row.scope_key,
+        row.id,
+      )
+      .toArray();
+    const incoming = this.#sql
+      .exec<{ from_id: string }>(
+        `SELECT from_id FROM memory_relation
+         WHERE scope_key = ? AND to_id = ? AND relation = 'contradicts'`,
+        row.scope_key,
+        row.id,
+      )
+      .toArray();
+    return {
+      scopeKey: row.scope_key,
+      itemId: row.id,
+      kind: row.kind as FusionMemoryItemV1["kind"],
+      text: row.text,
+      leaves,
+      contradicts: [
+        ...outgoing.map((entry) => entry.to_id),
+        ...incoming.map((entry) => entry.from_id),
+      ],
+    };
+  }
+
+  private recallNeighbors(
+    scopes: readonly MemoryScopeRefV1[],
+    seedIds: ReadonlySet<string>,
+  ): MemoryNeighborV1[] {
+    const neighbors: MemoryNeighborV1[] = [];
+    for (const scope of scopes) {
+      const scopeKey = memoryScopeKeyV1(scope);
+      for (const seed of seedIds) {
+        if (neighbors.length >= MEMORY_POLICY_V1.graphExpansionRecords) {
+          return neighbors;
+        }
+        const rows = this.#sql
+          .exec<{ to_id: string; relation: string }>(
+            `SELECT to_id, relation FROM memory_relation
+             WHERE scope_key = ? AND from_id = ?
+             LIMIT ?`,
+            scopeKey,
+            seed,
+            MEMORY_POLICY_V1.graphExpansionRecords,
+          )
+          .toArray();
+        for (const row of rows) {
+          neighbors.push({
+            scopeKey,
+            itemId: row.to_id,
+            relation: row.relation,
+          });
+        }
+      }
+    }
+    return neighbors.slice(0, MEMORY_POLICY_V1.graphExpansionRecords);
   }
 
   private invalidationEpoch(scopeKey: string): number {
