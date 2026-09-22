@@ -147,7 +147,9 @@ def inspect_apk(apk):
     cert = run([build_tool("apksigner"), "verify", "--print-certs", apk])
     signers = re.findall(r"Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]+)", cert)
     if [s.lower() for s in signers] != [SIGNER]:
-        raise RuntimeError("APK signer differs from the existing phone install.")
+        found = ", ".join(s.lower() for s in signers) or "(none)"
+        raise RuntimeError(f"APK signer differs from the existing phone install "
+                           f"(got {found}, expected {SIGNER}).")
     return {"package": PACKAGE, "versionCode": int(match[2]), "versionName": match[3],
             "signerSha256": SIGNER}
 
@@ -461,6 +463,10 @@ def release(floor=0, build_number=None):
         write_atomic(pending, json.dumps(intent, indent=2) + "\n")
     env = {**os.environ, VERSION_FLOOR_ENV: str(floor), RELEASE_IDENTITY_ENV: "true"}
     subprocess.run(args, cwd=NATIVE, env=env, check=True)
+    # Shorebird's release build may leave the APK under a key the phone does not
+    # trust. Re-sign with the existing install's keystore before publishing, the
+    # same way `export-apk` does for a downloaded release.
+    sign_apk(APK_OUTPUT, keystore_path())
     inspect_release(APK_OUTPUT, der)
     metadata = inspect_apk(APK_OUTPUT)
     if metadata["versionCode"] != version or metadata["versionName"] != build_name():

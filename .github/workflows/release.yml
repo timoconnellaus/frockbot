@@ -480,13 +480,19 @@ jobs:
 
   android-apk:
     name: Fetch Android APK
-    # The sideload on the GitHub release when this tag patched, or left the
-    # client unchanged: the newest active Shorebird release, re-signed with
-    # the phone's key. A tag that just cut a full release already uploaded
-    # that APK from `patch-android`, and this job stays out of its way. A
-    # self-hoster still builds their own: this APK has the hosted origin baked in.
+    # The sideload on the GitHub release when this tag patched, left the client
+    # unchanged, or cut a full Shorebird release that then failed before the
+    # APK artifact was uploaded: the newest active Shorebird release, re-signed
+    # with the phone's key. A tag that already uploaded a fresh APK from
+    # `patch-android` leaves this job alone. A self-hoster still builds their
+    # own: this APK has the hosted origin baked in.
     needs: [verify, patch-android]
-    if: needs.patch-android.result == 'success' && needs.patch-android.outputs.apk != 'fresh'
+    if: >-
+      always()
+      && needs.verify.result == 'success'
+      && needs.patch-android.outputs.apk != 'fresh'
+      && (needs.patch-android.result == 'success'
+          || needs.patch-android.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
